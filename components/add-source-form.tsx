@@ -18,6 +18,15 @@ function isLocalPlaylist(type: string) {
   return type === "local_playlist";
 }
 
+function isUrlBasedSource(type: string) {
+  return (
+    type === "web_url" ||
+    type === "stream_url" ||
+    type === "playlist_url" ||
+    type === "browser_target"
+  );
+}
+
 export function AddSourceForm() {
   const router = useRouter();
   const { t } = useTranslations();
@@ -32,6 +41,7 @@ export function AddSourceForm() {
     const name = formData.get("name") as string;
     const type = formData.get("type") as string;
     const target = (formData.get("target") as string)?.trim();
+    const browserPreference = (formData.get("browserPreference") as string) || "default";
     const capabilitiesStr = (formData.get("capabilities") as string)?.trim();
     const capabilities = capabilitiesStr
       ? capabilitiesStr.split(",").map((s) => s.trim()).filter(Boolean)
@@ -52,6 +62,9 @@ export function AddSourceForm() {
           target,
           branchId: "bldn-001",
           isLive: false,
+          ...(isUrlBasedSource(type)
+            ? { browserPreference }
+            : {}),
           ...(capabilities?.length ? { capabilities } : {}),
           ...(formData.get("artworkUrl") ? { artworkUrl: (formData.get("artworkUrl") as string).trim() || undefined } : {}),
         }),
@@ -130,6 +143,24 @@ export function AddSourceForm() {
           </p>
         )}
       </div>
+      {isUrlBasedSource(selectedType) && (
+        <div>
+          <label htmlFor="browserPreference" className="block text-xs font-medium text-slate-400">
+            {t.browserPreference ?? "Browser Preference"}
+          </label>
+          <select
+            id="browserPreference"
+            name="browserPreference"
+            defaultValue="default"
+            className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm text-slate-50 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500/30"
+          >
+            <option value="default">{t.browserDefault ?? "Default browser"}</option>
+            <option value="chrome">{t.browserChrome ?? "Chrome"}</option>
+            <option value="edge">{t.browserEdge ?? "Edge"}</option>
+            <option value="firefox">{t.browserFirefox ?? "Firefox"}</option>
+          </select>
+        </div>
+      )}
       <div>
         <label htmlFor="artworkUrl" className="block text-xs font-medium text-slate-400">
           {t.artworkUrlOptional}

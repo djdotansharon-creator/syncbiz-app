@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
 
-const categoryKeys = ["dashboard", "sources", "schedules", "devices", "logs"] as const;
+const categoryKeys = ["dashboard", "player", "sources", "schedules", "devices", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
   href: key === "dashboard" ? "/dashboard" : `/${key}`,
   labelKey: key,
@@ -66,8 +66,17 @@ function IconLogs() {
     </svg>
   );
 }
+function IconPlayer() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <polygon points="10 8 17 12 10 16 10 8" />
+    </svg>
+  );
+}
 const categoryIcons: Record<(typeof categoryKeys)[number], () => JSX.Element> = {
   dashboard: IconDashboard,
+  player: IconPlayer,
   sources: IconSources,
   schedules: IconSchedules,
   devices: IconDevices,
@@ -79,6 +88,7 @@ const pillActive = "border-sky-500/40 bg-sky-500/15 text-sky-200 shadow-[0_0_24p
 
 const navKeys = [
   "dashboard",
+  "player",
   "devices",
   "sources",
   "schedules",

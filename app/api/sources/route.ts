@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
     capabilities: data.capabilities,
     artworkUrl: data.artworkUrl,
     fallbackUriOrPath: data.fallbackUriOrPath,
+    browserPreference: data.browserPreference,
     tags: data.tags ?? [],
     isLive: data.isLive ?? false,
   });

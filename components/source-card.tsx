@@ -60,30 +60,24 @@ export function SourceCard({ source }: SourceCardProps) {
     setLastMessage(null);
     try {
       playSource(source);
-      // Local playlist: call play-local directly (accepts target path)
-      if (source.type === "local_playlist") {
-        const target = (source.target ?? source.uriOrPath ?? "").trim();
-        if (!target) {
-          setLastMessage("Failed: No target path");
-          return;
-        }
-        const res = await fetch("/api/commands/play-local", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target }),
-        });
-        if (res.ok) {
-          setLastMessage("Local playback command sent");
-        } else {
-          const data = await res.json().catch(() => ({}));
-          setLastMessage(data?.error ? `Failed: ${data.error}` : "Playback failed.");
-        }
+      const target = (source.target ?? source.uriOrPath ?? "").trim();
+      if (!target) {
+        setLastMessage("Failed: No target path");
+        return;
+      }
+      const res = await fetch("/api/commands/play-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target,
+          browserPreference: source.browserPreference ?? "default",
+        }),
+      });
+      if (res.ok) {
+        setLastMessage("Local playback command sent");
       } else {
-        await fetch("/api/play-now", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sourceId: source.id }),
-        });
+        const data = await res.json().catch(() => ({}));
+        setLastMessage(data?.error ? `Failed: ${data.error}` : "Playback failed.");
       }
     } finally {
       setPlaying(false);

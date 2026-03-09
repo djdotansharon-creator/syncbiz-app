@@ -23,6 +23,8 @@ export type SourceType =
   | "app_target"
   | "tts";
 
+export type BrowserPreference = "default" | "chrome" | "edge" | "firefox";
+
 /** Display labels for source types (e.g. in UI). */
 export const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
   web_url: "Web URL",
@@ -95,6 +97,8 @@ export type Source = {
   /** Legacy; maps to target for compatibility */
   uriOrPath?: string;
   fallbackUriOrPath?: string;
+  /** Optional browser selection for URL targets. Ignored for local playlists/files. */
+  browserPreference?: BrowserPreference;
   tags?: string[];
   isLive: boolean;
 };

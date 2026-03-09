@@ -86,6 +86,7 @@ export function useTranslations() {
 
 export const labels: Record<string, { en: string; he: string }> = {
   dashboard: { en: "Dashboard", he: "לוח בקרה" },
+  player: { en: "Player", he: "נגן" },
   devices: { en: "Devices", he: "מכשירים" },
   sources: { en: "Sources", he: "מקורות" },
   schedules: { en: "Schedules", he: "לוח זמנים" },

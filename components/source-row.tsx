@@ -20,22 +20,17 @@ export function SourceRow({ source }: SourceRowProps) {
     setLastMessage(null);
     try {
       playSource(source);
-      if (source.type === "local_playlist") {
-        const target = (source.target ?? source.uriOrPath ?? "").trim();
-        if (target) {
-          const res = await fetch("/api/commands/play-local", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ target }),
-          });
-          setLastMessage(res.ok ? "Local playback command sent" : `Failed: ${(await res.json().catch(() => ({}))).error ?? "Unknown error"}`);
-        }
-      } else {
-        await fetch("/api/play-now", {
+      const target = (source.target ?? source.uriOrPath ?? "").trim();
+      if (target) {
+        const res = await fetch("/api/commands/play-local", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sourceId: source.id }),
+          body: JSON.stringify({
+            target,
+            browserPreference: source.browserPreference ?? "default",
+          }),
         });
+        setLastMessage(res.ok ? "Local playback command sent" : `Failed: ${(await res.json().catch(() => ({}))).error ?? "Unknown error"}`);
       }
       router.refresh();
     } finally {

@@ -10,7 +10,7 @@ import { usePlayback } from "@/lib/playback-context";
  * Stop: POST /api/commands/stop-local → taskkill /IM winamp.exe /F
  */
 export function Player() {
-  const { currentSource, status } = usePlayback();
+  const { currentSource, status, setLastMessage } = usePlayback();
   const lastPlayTargetRef = useRef<string | null>(null);
   const prevStatusRef = useRef<string | null>(null);
 
@@ -28,9 +28,23 @@ export function Player() {
     fetch("/api/commands/play-local", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target }),
-    }).catch(() => {});
-  }, [currentSource, status]);
+      body: JSON.stringify({
+        target,
+        browserPreference: currentSource.browserPreference ?? "default",
+      }),
+    })
+      .then(async (res) => {
+        if (res.ok) {
+          setLastMessage("Local playback command sent");
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        setLastMessage(data?.error ? `Failed: ${data.error}` : "Playback failed.");
+      })
+      .catch((err) => {
+        setLastMessage(`Failed: ${err instanceof Error ? err.message : "Network error"}`);
+      });
+  }, [currentSource, status, setLastMessage]);
 
   // When transitioning to "stopped", send stop-local (taskkill winamp)
   useEffect(() => {
@@ -39,9 +53,20 @@ export function Player() {
 
     if (prev !== "stopped" && status === "stopped") {
       lastPlayTargetRef.current = null;
-      fetch("/api/commands/stop-local", { method: "POST" }).catch(() => {});
+      fetch("/api/commands/stop-local", { method: "POST" })
+        .then(async (res) => {
+          if (res.ok) {
+            setLastMessage("Local stop command sent");
+            return;
+          }
+          const data = await res.json().catch(() => ({}));
+          setLastMessage(data?.error ? `Failed: ${data.error}` : "Stop failed.");
+        })
+        .catch((err) => {
+          setLastMessage(`Failed: ${err instanceof Error ? err.message : "Network error"}`);
+        });
     }
-  }, [status]);
+  }, [status, setLastMessage]);
 
   // Clear play target when source is cleared
   useEffect(() => {
