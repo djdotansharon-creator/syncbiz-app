@@ -1,0 +1,89 @@
+/**
+ * Safe YouTube IFrame API helpers.
+ * The YT.Player constructor returns immediately; the real player API is only
+ * available in onReady via evt.target. Never use the constructor's return value.
+ */
+
+const DEV = process.env.NODE_ENV === "development";
+
+export interface YTPlayerAPI {
+  playVideo: () => void;
+  pauseVideo: () => void;
+  stopVideo: () => void;
+  setVolume: (vol: number) => void;
+  getPlayerState: () => number;
+  getCurrentTime: () => number;
+  getDuration: () => number;
+  seekTo: (seconds: number, allowSeekAhead: boolean) => void;
+}
+
+function hasMethod(obj: unknown, method: string): obj is YTPlayerAPI {
+  return obj != null && typeof obj === "object" && typeof (obj as Record<string, unknown>)[method] === "function";
+}
+
+/** Check if ref holds a ready YouTube player with methods. */
+export function isYtPlayerReady(player: unknown): player is YTPlayerAPI {
+  return hasMethod(player, "getPlayerState") && hasMethod(player, "playVideo");
+}
+
+/** Safely call a YT player method. Returns false if not ready. */
+export function safeYtCall<T>(
+  player: unknown,
+  method: keyof YTPlayerAPI,
+  ...args: unknown[]
+): T | undefined {
+  if (!hasMethod(player, method)) {
+    if (DEV) console.warn("[YT] Ignored unsupported action:", method, "- player not ready");
+    return undefined;
+  }
+  try {
+    const fn = (player as unknown as Record<string, (...a: unknown[]) => T>)[method];
+    return fn.apply(player, args);
+  } catch (e) {
+    if (DEV) console.warn("[YT] Player method error:", method, e);
+    return undefined;
+  }
+}
+
+/** Safe getPlayerState - returns -1 if not ready. */
+export function safeGetPlayerState(player: unknown): number {
+  const state = safeYtCall<number>(player, "getPlayerState");
+  return typeof state === "number" ? state : -1;
+}
+
+/** Safe setVolume - no-op if not ready. */
+export function safeSetVolume(player: unknown, vol: number): void {
+  safeYtCall(player, "setVolume", vol);
+}
+
+/** Safe playVideo. */
+export function safePlayVideo(player: unknown): void {
+  safeYtCall(player, "playVideo");
+}
+
+/** Safe pauseVideo. */
+export function safePauseVideo(player: unknown): void {
+  safeYtCall(player, "pauseVideo");
+}
+
+/** Safe stopVideo. */
+export function safeStopVideo(player: unknown): void {
+  safeYtCall(player, "stopVideo");
+}
+
+/** Safe seekTo. */
+export function safeSeekTo(player: unknown, sec: number, allowSeekAhead: boolean): void {
+  safeYtCall(player, "seekTo", sec, allowSeekAhead);
+}
+
+/** Safe getCurrentTime. */
+export function safeGetCurrentTime(player: unknown): number {
+  const t = safeYtCall<number>(player, "getCurrentTime");
+  return typeof t === "number" ? t : 0;
+}
+
+/** Safe getDuration. */
+export function safeGetDuration(player: unknown): number {
+  const d = safeYtCall<number>(player, "getDuration");
+  return typeof d === "number" ? d : 0;
+}

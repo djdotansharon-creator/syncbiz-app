@@ -10,7 +10,6 @@ export async function POST(req: NextRequest) {
   const data = (await req.json()) as Partial<Schedule>;
 
   if (
-    !data.name ||
     !data.branchId ||
     !data.sourceId ||
     !data.daysOfWeek ||
@@ -19,7 +18,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "name, branchId, sourceId, daysOfWeek, and startTimeLocal are required for creating a schedule",
+          "branchId, sourceId, daysOfWeek, and startTimeLocal are required for creating a schedule",
       },
       { status: 400 },
     );
@@ -29,11 +28,11 @@ export async function POST(req: NextRequest) {
 
   const schedule = db.addSchedule({
     name: data.name,
-    branchId: data.branchId,
+    branchId: data.branchId!,
     deviceId: data.deviceId,
-    sourceId: data.sourceId,
-    daysOfWeek: data.daysOfWeek,
-    startTimeLocal: data.startTimeLocal,
+    sourceId: data.sourceId!,
+    daysOfWeek: data.daysOfWeek!,
+    startTimeLocal: data.startTimeLocal!,
     endTimeLocal,
     enabled: data.enabled ?? true,
     priority: data.priority ?? 1,

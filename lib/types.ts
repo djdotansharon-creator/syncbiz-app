@@ -25,6 +25,12 @@ export type SourceType =
 
 export type BrowserPreference = "default" | "chrome" | "edge" | "firefox";
 
+/** Provider hint for player mode selection. */
+export type SourceProvider = "youtube" | "soundcloud" | "external";
+
+/** How to play: embedded in SyncBiz Player Page or launch externally. */
+export type PlayerMode = "embedded" | "external";
+
 /** Display labels for source types (e.g. in UI). */
 export const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
   web_url: "Web URL",
@@ -99,6 +105,10 @@ export type Source = {
   fallbackUriOrPath?: string;
   /** Optional browser selection for URL targets. Ignored for local playlists/files. */
   browserPreference?: BrowserPreference;
+  /** Provider hint: youtube | soundcloud | external. Derived from target if not set. */
+  provider?: SourceProvider;
+  /** Player mode: embedded (in /player) or external (launch via command). */
+  playerMode?: PlayerMode;
   tags?: string[];
   isLive: boolean;
 };
@@ -106,6 +116,7 @@ export type Source = {
 export type Schedule = {
   id: string;
   accountId: string;
+  name?: string;
   branchId: string;
   deviceId?: string;
   sourceId: string;

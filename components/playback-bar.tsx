@@ -1,6 +1,6 @@
 "use client";
 
-import { usePlayback } from "@/lib/playback-context";
+import { usePlaybackOptional } from "@/lib/playback-provider";
 import { useTranslations } from "@/lib/locale-context";
 
 const secondaryBtn =
@@ -53,7 +53,25 @@ function IconVolume() {
 }
 
 export function PlaybackBar() {
+  const playback = usePlaybackOptional();
+  const { t } = useTranslations();
+
+  if (!playback) {
+    return (
+      <footer
+        className="fixed bottom-0 left-0 right-0 z-40 flex justify-center px-4 py-4"
+        role="region"
+        aria-label="Playback controls"
+      >
+        <div className="rounded-2xl border border-slate-700/60 bg-slate-900/80 px-6 py-4 text-sm text-slate-500">
+          {t.noSourceSelected}
+        </div>
+      </footer>
+    );
+  }
+
   const {
+    currentTrack,
     currentSource,
     status,
     volume,
@@ -64,11 +82,11 @@ export function PlaybackBar() {
     prev,
     next,
     lastMessage,
-  } = usePlayback();
-  const { t } = useTranslations();
+    queue,
+  } = playback;
 
   const hasSource = !!currentSource;
-  const canPrevNext = hasSource;
+  const hasPrevNext = hasSource && (queue.length > 1 || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1));
 
   const statusSubtext = lastMessage
     ? t.commandSent
@@ -79,7 +97,7 @@ export function PlaybackBar() {
           ? t.paused
           : t.stopped
       : t.noSourceSelected;
-  const titleText = hasSource ? currentSource!.name : lastMessage || t.stopped;
+  const titleText = hasSource ? (currentTrack?.title ?? currentSource?.title ?? "") : lastMessage || t.stopped;
 
   return (
     <footer
@@ -103,7 +121,7 @@ export function PlaybackBar() {
           <button
             type="button"
             onClick={prev}
-            disabled={!canPrevNext}
+            disabled={!hasPrevNext}
             className={`h-12 w-12 ${secondaryBtn}`}
             aria-label="Previous"
           >
@@ -139,7 +157,7 @@ export function PlaybackBar() {
           <button
             type="button"
             onClick={next}
-            disabled={!canPrevNext}
+            disabled={!hasPrevNext}
             className={`h-12 w-12 ${secondaryBtn}`}
             aria-label="Next"
           >

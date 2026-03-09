@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { getApiBase } from "@/lib/api-base";
 import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
 import type { Device, Schedule, Source } from "@/lib/types";
 import { ScheduleCard } from "@/components/schedule-card";
+import { ActionButtonNewSchedule } from "@/components/ui/action-buttons";
 
 async function getData() {
   const base = getApiBase();
@@ -38,12 +38,9 @@ export default async function SchedulesPage() {
           <span className="rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-xs text-slate-400">
             {schedules.length} {t.blocks}
           </span>
-          <Link
-            href="/schedules/new"
-            className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 shadow-lg shadow-sky-500/20 transition hover:bg-sky-400"
-          >
+          <ActionButtonNewSchedule href="/schedules/new">
             {t.newSchedule}
-          </Link>
+          </ActionButtonNewSchedule>
         </div>
       </div>
 
@@ -54,12 +51,9 @@ export default async function SchedulesPage() {
             <p className="mt-1 text-sm text-slate-500">
               {t.createBlockDescription}
             </p>
-            <Link
-              href="/schedules/new"
-              className="mt-4 inline-block rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400"
-            >
+            <ActionButtonNewSchedule href="/schedules/new" className="mt-4 inline-block">
               {t.createFirstSchedule}
-            </Link>
+            </ActionButtonNewSchedule>
           </div>
         ) : (
           schedules.map((schedule) => {

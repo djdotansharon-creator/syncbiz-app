@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -7,7 +8,7 @@ import type { ReactNode } from "react";
 import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
 
-const categoryKeys = ["dashboard", "player", "sources", "schedules", "devices", "logs"] as const;
+const categoryKeys = ["dashboard", "sources", "radio", "favorites", "schedules", "devices", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
   href: key === "dashboard" ? "/dashboard" : `/${key}`,
   labelKey: key,
@@ -66,18 +67,46 @@ function IconLogs() {
     </svg>
   );
 }
-function IconPlayer() {
+function IconPlaylists() {
   return (
     <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="9" />
-      <polygon points="10 8 17 12 10 16 10 8" />
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
     </svg>
   );
 }
-const categoryIcons: Record<(typeof categoryKeys)[number], () => JSX.Element> = {
+function IconLibrary() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      <line x1="8" y1="7" x2="16" y2="7" />
+      <line x1="8" y1="11" x2="16" y2="11" />
+    </svg>
+  );
+}
+function IconRadio() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
+      <path d="M4 14h16" />
+      <circle cx="12" cy="18" r="2" />
+    </svg>
+  );
+}
+function IconFavorites() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+    </svg>
+  );
+}
+const categoryIcons: Record<(typeof categoryKeys)[number], () => React.ReactElement> = {
   dashboard: IconDashboard,
-  player: IconPlayer,
   sources: IconSources,
+  radio: IconRadio,
+  favorites: IconFavorites,
   schedules: IconSchedules,
   devices: IconDevices,
   logs: IconLogs,
@@ -88,11 +117,11 @@ const pillActive = "border-sky-500/40 bg-sky-500/15 text-sky-200 shadow-[0_0_24p
 
 const navKeys = [
   "dashboard",
-  "player",
-  "devices",
   "sources",
+  "radio",
+  "favorites",
   "schedules",
-  "announcements",
+  "devices",
   "logs",
   "settings",
   "architecture",
@@ -100,7 +129,7 @@ const navKeys = [
 
 const navItems = navKeys.map((key) => ({
   href: key === "dashboard" ? "/dashboard" : `/${key}`,
-  labelKey: key,
+  labelKey: key === "sources" ? "library" : key,
 }));
 
 function getCurrentSectionLabel(pathname: string, locale: Locale): string {
@@ -250,7 +279,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
         </header>
 
-        <main className="flex-1 px-4 pb-28 py-5 sm:px-6">
+        <main className="flex-1 px-4 pb-4 py-5 sm:px-6">
           <div className="mx-auto max-w-5xl">{children}</div>
         </main>
       </div>

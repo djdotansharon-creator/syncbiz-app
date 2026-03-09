@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { PlaybackControls } from "@/components/playback-controls";
-import { usePlayback } from "@/lib/playback-context";
+import { usePlayback } from "@/lib/playback-provider";
+import { supportsEmbedded } from "@/lib/player-utils";
 import type { Device, Source } from "@/lib/types";
 
 type DevicePlaybackCardProps = {
@@ -17,22 +18,25 @@ export function DevicePlaybackCard({ device, source }: DevicePlaybackCardProps) 
   const [volume, setVolume] = useState(device.volume ?? 50);
 
   async function handlePlay() {
-    if (source) {
-      const target = (source.target ?? source.uriOrPath ?? "").trim();
-      if (target) {
-        setLastMessage(null);
-        const res = await fetch("/api/commands/play-local", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            target,
-            browserPreference: source.browserPreference ?? "default",
-          }),
-        });
-        setLastMessage(res.ok ? "Local playback command sent" : `Failed: ${(await res.json().catch(() => ({}))).error ?? "Unknown error"}`);
-      }
-      router.refresh();
+    if (!source) return;
+    if (supportsEmbedded(source)) {
+      router.push(`/player?sourceId=${source.id}`);
+      return;
     }
+    const target = (source.target ?? source.uriOrPath ?? "").trim();
+    if (target) {
+      setLastMessage(null);
+      const res = await fetch("/api/commands/play-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target,
+          browserPreference: source.browserPreference ?? "default",
+        }),
+      });
+      setLastMessage(res.ok ? "Local playback command sent" : `Failed: ${(await res.json().catch(() => ({}))).error ?? "Unknown error"}`);
+    }
+    router.refresh();
   }
 
   return (

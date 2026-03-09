@@ -1,0 +1,41 @@
+import type { Playlist, PlaylistType } from "./playlist-types";
+
+/** Map playlist type to embedded player support (opens in /player page). */
+export function isEmbeddedPlaylist(type: PlaylistType): boolean {
+  return type === "youtube" || type === "soundcloud" || type === "stream-url";
+}
+
+/** Playlist types that can render embedded iframe in-card (YouTube, SoundCloud only). */
+export function canEmbedInCard(type: PlaylistType): boolean {
+  return type === "youtube" || type === "soundcloud";
+}
+
+/** Get Spotify track/playlist ID from URL (for display). */
+export function getSpotifyId(url: string): string | null {
+  const m = url.match(/spotify\.com\/(?:track|playlist|album)\/([a-zA-Z0-9]+)/i);
+  return m ? m[1] : null;
+}
+
+/** Get YouTube video ID from URL. */
+export function getYouTubeVideoId(url: string): string | null {
+  const u = url.trim();
+  const m = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\s?/]+)/i);
+  return m ? m[1] : null;
+}
+
+/** Build YouTube thumbnail URL. */
+export function getYouTubeThumbnail(url: string): string | null {
+  const vid = getYouTubeVideoId(url);
+  return vid ? `https://img.youtube.com/vi/${vid}/hqdefault.jpg` : null;
+}
+
+/** Infer playlist type from URL or path. */
+export function inferPlaylistType(url: string): PlaylistType {
+  const u = url.toLowerCase().trim();
+  if (u.includes("youtube.com") || u.includes("youtu.be")) return "youtube";
+  if (u.includes("soundcloud.com")) return "soundcloud";
+  if (u.includes("spotify.com") || u.includes("open.spotify.com")) return "spotify";
+  if (u.match(/\.(m3u8?|pls)(\?|$)/i)) return "winamp";
+  if (u.startsWith("http://") || u.startsWith("https://")) return "stream-url";
+  return "local";
+}

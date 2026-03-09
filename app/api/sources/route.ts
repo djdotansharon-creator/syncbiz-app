@@ -29,6 +29,8 @@ export async function POST(req: NextRequest) {
     artworkUrl: data.artworkUrl,
     fallbackUriOrPath: data.fallbackUriOrPath,
     browserPreference: data.browserPreference,
+    provider: data.provider,
+    playerMode: data.playerMode,
     tags: data.tags ?? [],
     isLive: data.isLive ?? false,
   });

@@ -104,11 +104,24 @@ export const db = {
       ...input,
       target,
       uriOrPath: target,
+      provider: input.provider,
+      playerMode: input.playerMode,
       id: `src-${String(sources.length + 1).padStart(3, "0")}`,
       accountId: demoAccount.id,
     };
     sources = [source, ...sources];
     return source;
+  },
+  deleteSource(id: string): boolean {
+    const before = sources.length;
+    sources = sources.filter((s) => s.id !== id);
+    return sources.length < before;
+  },
+  updateSource(id: string, data: Partial<Source>): Source | null {
+    const idx = sources.findIndex((s) => s.id === id);
+    if (idx < 0) return null;
+    sources[idx] = { ...sources[idx], ...data };
+    return sources[idx];
   },
   addSchedule(input: Omit<Schedule, "id" | "accountId">): Schedule {
     const schedule: Schedule = {

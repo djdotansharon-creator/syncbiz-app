@@ -25,27 +25,118 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* Playback volume range – premium green thumb */
+/* ─── Neon design tokens ─── */
+:root {
+  --neon-green: #1ed760;
+  --neon-green-glow: rgba(30, 215, 96, 0.6);
+  --neon-blue: #1e90ff;
+  --neon-blue-glow: rgba(30, 144, 255, 0.5);
+  --neon-red: #ff4c4c;
+  --neon-red-glow: rgba(255, 76, 76, 0.5);
+}
+
+/* Volume & progress – neon green thumb */
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
+  background: transparent;
 }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: #1ed760;
+  background: var(--neon-green);
   cursor: pointer;
-  box-shadow: 0 0 0 1px rgba(30, 215, 96, 0.4);
+  box-shadow: 0 0 0 2px rgba(30, 215, 96, 0.3),
+              0 0 12px var(--neon-green-glow),
+              0 0 24px rgba(30, 215, 96, 0.2);
+  transition: box-shadow 0.2s ease;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 2px rgba(30, 215, 96, 0.5),
+              0 0 16px var(--neon-green-glow),
+              0 0 32px rgba(30, 215, 96, 0.3);
 }
 input[type="range"]::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: #1ed760;
+  background: var(--neon-green);
   cursor: pointer;
   border: none;
-  box-shadow: 0 0 0 1px rgba(30, 215, 96, 0.4);
+  box-shadow: 0 0 0 2px rgba(30, 215, 96, 0.3),
+              0 0 12px var(--neon-green-glow);
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(30, 41, 59, 0.8);
+}
+input[type="range"]::-moz-range-track {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(30, 41, 59, 0.8);
+}
+
+/* Player volume slider – knob centered, neon track, smooth drag */
+.player-volume-slider {
+  display: block;
+  width: 100%;
+  height: 20px;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.player-volume-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(30, 41, 59, 0.9);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+  margin-top: 7px;
+}
+.player-volume-slider::-webkit-slider-thumb {
+  margin-top: -7px;
+}
+.player-volume-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(30, 41, 59, 0.9);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.player-volume-slider::-moz-range-thumb {
+  height: 18px;
+  width: 18px;
+}
+
+/* Active playing state – neon animated glow */
+@keyframes playing-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(29, 185, 84, 0.6),
+                0 0 16px rgba(29, 185, 84, 0.4),
+                0 0 32px rgba(29, 185, 84, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(46, 213, 115, 0.7),
+                0 0 24px rgba(29, 185, 84, 0.5),
+                0 0 48px rgba(29, 185, 84, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+}
+
+@keyframes playing-border {
+  0%, 100% {
+    border-color: rgba(29, 185, 84, 0.6);
+  }
+  50% {
+    border-color: rgba(46, 213, 115, 0.85);
+  }
+}
+
+.playing-active {
+  border-width: 2px;
+  border-style: solid;
+  animation: playing-glow 2.5s ease-in-out infinite, playing-border 2.5s ease-in-out infinite;
 }

@@ -1,11 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { PlayNowButton } from "@/components/playback-controls";
+import { ActionButtonPlayNow, ActionButtonDelete } from "@/components/ui/action-buttons";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { useTranslations } from "@/lib/locale-context";
-import { usePlayback } from "@/lib/playback-context";
+import { usePlayback } from "@/lib/playback-provider";
+import { supportsEmbedded } from "@/lib/player-utils";
 import type { Device, Schedule, Source } from "@/lib/types";
 
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
@@ -32,18 +33,22 @@ type ScheduleCardProps = {
 export function ScheduleCard({ schedule, device, source }: ScheduleCardProps) {
   const router = useRouter();
   const { t } = useTranslations();
-  const { playSource, setLastMessage } = usePlayback();
+  const { playSourceFromDb, setLastMessage } = usePlayback();
   const [deleting, setDeleting] = useState(false);
   const [playing, setPlaying] = useState(false);
 
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
   async function handleDelete() {
-    if (!confirm(t.deleteScheduleConfirm)) return;
     setDeleting(true);
     try {
       const res = await fetch(`/api/schedules/${schedule.id}`, {
         method: "DELETE",
       });
-      if (res.ok) router.refresh();
+      if (res.ok) {
+        router.refresh();
+        setDeleteOpen(false);
+      }
     } finally {
       setDeleting(false);
     }
@@ -51,10 +56,14 @@ export function ScheduleCard({ schedule, device, source }: ScheduleCardProps) {
 
   async function handlePlayNow() {
     if (!source) return;
+    if (supportsEmbedded(source)) {
+      router.push(`/player?sourceId=${source.id}`);
+      return;
+    }
     setPlaying(true);
     setLastMessage(null);
     try {
-      playSource(source);
+      playSourceFromDb(source);
       const target = (source.target ?? source.uriOrPath ?? "").trim();
       if (!target) {
         setLastMessage("Failed: No target path");
@@ -119,23 +128,28 @@ export function ScheduleCard({ schedule, device, source }: ScheduleCardProps) {
             />
             {schedule.enabled ? t.enabled : t.disabled}
           </span>
-          <PlayNowButton
+          <ActionButtonPlayNow
             onClick={handlePlayNow}
             disabled={playing}
             loading={playing}
             label={t.playNow}
             loadingLabel={t.sending}
           />
-          <button
-            type="button"
-            onClick={handleDelete}
+          <ActionButtonDelete
+            onClick={() => setDeleteOpen(true)}
             disabled={deleting}
-            className="text-xs font-medium text-slate-400 hover:text-rose-400 disabled:opacity-50"
-          >
-            {deleting ? t.deleting : t.delete}
-          </button>
+            title={t.delete}
+            aria-label={t.delete}
+          />
         </div>
       </div>
+      <DeleteConfirmModal
+        isOpen={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={handleDelete}
+        loading={deleting}
+        message={t.deleteScheduleConfirm}
+      />
     </div>
   );
 }

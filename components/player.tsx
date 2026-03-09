@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { usePlayback } from "@/lib/playback-context";
+import { usePlaybackOptional } from "@/lib/playback-provider";
 
 /**
  * Controller-only player: sends play/stop commands to the backend.
@@ -10,7 +10,10 @@ import { usePlayback } from "@/lib/playback-context";
  * Stop: POST /api/commands/stop-local → taskkill /IM winamp.exe /F
  */
 export function Player() {
-  const { currentSource, status, setLastMessage } = usePlayback();
+  const playback = usePlaybackOptional();
+  if (!playback) return null;
+
+  const { currentSource, status, setLastMessage } = playback;
   const lastPlayTargetRef = useRef<string | null>(null);
   const prevStatusRef = useRef<string | null>(null);
 
@@ -18,19 +21,26 @@ export function Player() {
   useEffect(() => {
     if (!currentSource || status !== "playing") return;
 
-    const target = (currentSource.target ?? currentSource.uriOrPath ?? "").trim();
+    const target = (
+      currentSource.source?.target ??
+      currentSource.source?.uriOrPath ??
+      currentSource.url ??
+      ""
+    ).trim();
     if (!target) return;
 
     // Only send play once per target when entering playing state
     if (lastPlayTargetRef.current === target) return;
     lastPlayTargetRef.current = target;
 
+    const browserPreference = currentSource.source?.browserPreference ?? "default";
+
     fetch("/api/commands/play-local", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         target,
-        browserPreference: currentSource.browserPreference ?? "default",
+        browserPreference,
       }),
     })
       .then(async (res) => {

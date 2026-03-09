@@ -43,13 +43,15 @@ export async function runLocalPlaylist(
 ): Promise<PlayLocalResult> {
   const path = (targetPath ?? "").trim();
   if (!path) {
-    return Promise.resolve({ success: false, error: "Target path is required" });
+    return Promise.resolve({ success: false, error: "Target path is required", command: "", fallbackUsed: false });
   }
 
   if (platform() !== "win32") {
     return Promise.resolve({
       success: false,
       error: "Local playback is only supported on Windows",
+      command: "",
+      fallbackUsed: false,
     });
   }
 

@@ -1,0 +1,25 @@
+{
+  "name": "Morning Chill",
+  "genre": "Lofi",
+  "cover": "https://example.com/covers/morning-chill.jpg",
+  "tracks": [
+    {
+      "title": "In-Store Lofi Stream",
+      "type": "local",
+      "url": "D:\\APP Project\\Playlists\\lofi.m3u",
+      "cover": "https://example.com/covers/lofi-stream.jpg"
+    },
+    {
+      "title": "Friendly Fire - I Love Techno SC",
+      "type": "soundcloud",
+      "url": "https://soundcloud.com/housemusic/friendly-fire-i-love-techno",
+      "cover": "https://example.com/covers/friendly-fire.jpg"
+    },
+    {
+      "title": "Black Coffee Mix",
+      "type": "youtube",
+      "url": "https://www.youtube.com/watch?v=SGqg_ZzThDU",
+      "cover": "https://img.youtube.com/vi/SGqg_ZzThDU/hqdefault.jpg"
+    }
+  ]
+}

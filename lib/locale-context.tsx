@@ -94,6 +94,10 @@ export const labels: Record<string, { en: string; he: string }> = {
   logs: { en: "Logs", he: "לוגים" },
   settings: { en: "Settings", he: "הגדרות" },
   architecture: { en: "Architecture", he: "ארכיטקטורה" },
+  playlists: { en: "Playlists", he: "פלייליסטים" },
+  library: { en: "Library", he: "ספרייה" },
+  favorites: { en: "Favorites", he: "מועדפים" },
+  radio: { en: "Radio", he: "רדיו" },
   headerSubtitle: {
     en: "Schedule playback and send commands to endpoint devices",
     he: "תזמן השמעה ושלוח פקודות למכשירי קצה",
@@ -103,5 +107,5 @@ export const labels: Record<string, { en: string; he: string }> = {
 export function useLabel(key: keyof typeof labels): string {
   const { locale } = useLocale();
   const pair = labels[key];
-  return pair ? pair[locale] : (pair?.en ?? String(key));
+  return pair ? pair[locale] : String(key);
 }

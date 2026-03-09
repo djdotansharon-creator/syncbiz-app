@@ -182,6 +182,30 @@ export const sources: Omit<Source, "accountId">[] = [
     capabilities: ["play", "stop", "resume"],
     isLive: false,
   },
+  {
+    id: "src-youtube-demo",
+    name: "Lofi Beats Radio",
+    type: "stream_url",
+    target: "https://www.youtube.com/watch?v=jfKfPfyJRdk",
+    branchId: "bldn-001",
+    description: "Embedded YouTube stream for ambient playback.",
+    capabilities: ["play", "pause", "stop", "volume"],
+    isLive: true,
+    provider: "youtube",
+    playerMode: "embedded",
+  },
+  {
+    id: "src-soundcloud-demo",
+    name: "SoundCloud Track",
+    type: "stream_url",
+    target: "https://soundcloud.com/lofigeek/lofi-chill-mix",
+    branchId: "bldn-001",
+    description: "Embedded SoundCloud track.",
+    capabilities: ["play", "pause", "stop", "volume", "seek"],
+    isLive: false,
+    provider: "soundcloud",
+    playerMode: "embedded",
+  },
 ];
 
 export const schedules: Omit<Schedule, "accountId">[] = [

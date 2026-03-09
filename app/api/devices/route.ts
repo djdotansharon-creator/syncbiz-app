@@ -28,9 +28,9 @@ export async function POST(req: NextRequest) {
     agentVersion: data.agentVersion ?? "1.0.0",
     currentSourceId: data.currentSourceId,
     volume: data.volume ?? 50,
-    platform: data.platform,
-    health: data.health,
-    capabilities: data.capabilities,
+    platform: data.platform ?? "windows",
+    health: data.health ?? "ok",
+    capabilities: data.capabilities ?? ["supportsPlay", "supportsStop", "supportsVolume", "supportsResume"],
   });
 
   return NextResponse.json(device, { status: 201 });
