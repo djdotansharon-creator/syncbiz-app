@@ -155,6 +155,7 @@ export function AudioPlayer() {
   const titleContainerRef = useRef<HTMLDivElement>(null);
   const volumeRef = useRef(volume);
   const statusRef = useRef(status);
+  const volumeBeforeMuteRef = useRef(80);
   volumeRef.current = volume;
   statusRef.current = status;
 
@@ -669,12 +670,51 @@ export function AudioPlayer() {
                 </svg>
               </NeonControlButton>
               <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
-              <div className="flex min-w-[70px] shrink-0 items-center gap-1.5 rounded-lg border border-[#1ed760]/30 bg-slate-900/80 px-2 py-1 sm:min-w-[90px] sm:gap-2 sm:px-2.5 md:min-w-[120px]">
-                <svg className="h-4 w-4 shrink-0 text-[#1ed760]/90 sm:h-5 sm:w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" />
-                </svg>
-                <input type="range" min={0} max={100} value={volume} onChange={(e) => setVolume(Number(e.target.value))} className="player-volume-slider h-2 w-full sm:h-2.5" aria-label="Volume" />
-                <span className="w-6 shrink-0 text-end text-xs font-bold tabular-nums text-[#1ed760] sm:w-7">{volume}</span>
+              <div className="flex min-w-[70px] shrink-0 items-center gap-1.5 rounded-lg border border-cyan-500/50 bg-slate-900/80 px-2 py-1 sm:min-w-[90px] sm:gap-2 sm:px-2.5 md:min-w-[120px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (volume > 0) {
+                      volumeBeforeMuteRef.current = volume;
+                      setVolume(0);
+                    } else {
+                      setVolume(volumeBeforeMuteRef.current);
+                    }
+                  }}
+                  className="flex shrink-0 items-center justify-center text-cyan-500 hover:text-cyan-400 transition-colors"
+                  aria-label={volume === 0 ? "Unmute" : "Mute"}
+                  title={volume === 0 ? "Unmute" : "Mute"}
+                >
+                  {volume === 0 ? (
+                    <svg className="h-4 w-4 sm:h-5 sm:w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                      <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+                    </svg>
+                  ) : (
+                    <svg className="h-4 w-4 sm:h-5 sm:w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" />
+                    </svg>
+                  )}
+                </button>
+                <div className="relative flex flex-1 min-w-0 items-center py-2">
+                  {/* Track background – 3px */}
+                  <div className="absolute inset-x-0 top-1/2 h-[3px] w-full -translate-y-1/2 rounded-full bg-slate-700/80" aria-hidden />
+                  {/* Fill – 3px, solid strong blue */}
+                  <div
+                    className="absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-cyan-500 transition-all duration-100"
+                    style={{ width: `${volume}%` }}
+                    aria-hidden
+                  />
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={volume}
+                    onChange={(e) => setVolume(Number(e.target.value))}
+                    className="player-volume-slider relative z-10 h-[3px] w-full cursor-pointer"
+                    aria-label="Volume"
+                  />
+                </div>
+                <span className="w-6 shrink-0 text-end text-xs font-bold tabular-nums text-cyan-500 sm:w-7" style={{ color: "#06b6d4" }}>{volume}</span>
               </div>
               <NeonControlButton size="2xs" variant="white" className="!rounded-lg" onClick={() => setShareOpen(true)} disabled={!currentSource} aria-label={t.share} title={t.share}>
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
