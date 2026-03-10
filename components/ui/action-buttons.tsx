@@ -255,34 +255,36 @@ export function ActionButtonNewSchedule({
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * EDIT – Icon-only, elegant dark glass
+ * variant="subtle" = Tesla-style: softer border, less glow, neutral
  * ───────────────────────────────────────────────────────────────────────────── */
 export function ActionButtonEdit({
   href,
   size = "md",
+  variant = "default",
   "aria-label": ariaLabel = "Edit playlist",
   title = "Edit playlist",
   className = "",
 }: {
   href: string;
   size?: Size;
+  variant?: "default" | "subtle";
   "aria-label"?: string;
   title?: string;
   className?: string;
 }) {
   const iconSize = size === "xs" ? "h-4 w-4" : "h-5 w-5";
   const btnSize = size === "xs" ? "h-9 w-9 rounded-xl" : "h-11 w-11 rounded-xl";
+  const style =
+    variant === "subtle"
+      ? "border border-slate-700/80 bg-slate-900/70 text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]"
+      : "border border-slate-600/80 bg-gradient-to-b from-slate-800/90 to-slate-900/90 text-slate-300 shadow-[0_2px_6px_rgba(0,0,0,0.25)] hover:border-slate-500 hover:from-slate-700 hover:to-slate-800 hover:text-slate-100 hover:shadow-[0_0_0_1px_rgba(148,163,184,0.3),0_4px_14px_rgba(0,0,0,0.35)]";
   return (
     <Link
       href={href}
       aria-label={ariaLabel}
       title={title}
       className={`${baseStyles} ${btnSize}
-        border border-slate-600/80
-        bg-gradient-to-b from-slate-800/90 to-slate-900/90
-        text-slate-300
-        shadow-[0_2px_6px_rgba(0,0,0,0.25)]
-        hover:border-slate-500 hover:from-slate-700 hover:to-slate-800
-        hover:text-slate-100 hover:shadow-[0_0_0_1px_rgba(148,163,184,0.3),0_4px_14px_rgba(0,0,0,0.35)]
+        ${style}
         focus:ring-slate-400/40 focus:ring-2
         ${className}`}
     >

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource } from "@/lib/playback-provider";
 import { useTranslations } from "@/lib/locale-context";
 import { ShareModal } from "@/components/share-modal";
+import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { getYouTubeVideoId } from "@/lib/playlist-utils";
 import { getSoundCloudEmbedUrl, isSoundCloudUrl } from "@/lib/player-utils";
 import {
@@ -12,17 +13,33 @@ import {
   safeGetPlayerState,
   safeGetCurrentTime,
   safeGetDuration,
+  safeGetVideoLoadedFraction,
   safeSetVolume,
   safePlayVideo,
   safePauseVideo,
   safeStopVideo,
+  safeDestroyYtPlayer,
+  safeSeekTo,
   type YTPlayerAPI,
 } from "@/lib/yt-player-utils";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
+import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import type { SCWidget } from "@/types/yt-sc";
 
 function isHlsUrl(url: string | null): boolean {
   return !!url && (url.includes(".m3u8") || url.includes("m3u8?"));
+}
+
+/** Format seconds as M:SS or H:MM:SS */
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "--:--";
+  const s = Math.floor(seconds);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  const mm = h > 0 ? m % 60 : m;
+  const ss = s % 60;
+  if (h > 0) return `${h}:${mm.toString().padStart(2, "0")}:${ss.toString().padStart(2, "0")}`;
+  return `${mm}:${ss.toString().padStart(2, "0")}`;
 }
 
 function getEmbedType(url: string): "youtube" | "soundcloud" | null {
@@ -82,19 +99,6 @@ function SourceIcon({ type, origin, size = "md" }: { type: TrackSource; origin?:
   );
 }
 
-function getShareUrl(source: NonNullable<ReturnType<typeof usePlayback>["currentSource"]>): { shareUrl: string; shareUrlWeb?: string } {
-  if (source.origin === "radio" && source.radio) {
-    return {
-      shareUrl: `syncbiz://radio/${source.radio.id}`,
-      shareUrlWeb: typeof window !== "undefined" ? `${window.location.origin}/radio?station=${encodeURIComponent(source.radio.id)}` : undefined,
-    };
-  }
-  const base = typeof window !== "undefined" ? window.location.origin : "";
-  return {
-    shareUrl: `${base}/sources?playlist=${encodeURIComponent(source.id)}`,
-  };
-}
-
 export function AudioPlayer() {
   const { t } = useTranslations();
   const [shareOpen, setShareOpen] = useState(false);
@@ -137,6 +141,24 @@ export function AudioPlayer() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const hlsRef = useRef<import("hls.js").default | null>(null);
 
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [bufferedPercent, setBufferedPercent] = useState(0);
+  const [isHoveringTimeline, setIsHoveringTimeline] = useState(false);
+  const [hoverPercent, setHoverPercent] = useState(0);
+  const [titleOverflows, setTitleOverflows] = useState(false);
+  const [autoMix, setAutoMix] = useState(false);
+  const isSeekingRef = useRef(false);
+  const isDraggingRef = useRef(false);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const titleMeasureRef = useRef<HTMLSpanElement>(null);
+  const titleContainerRef = useRef<HTMLDivElement>(null);
+  const volumeRef = useRef(volume);
+  const statusRef = useRef(status);
+  volumeRef.current = volume;
+  statusRef.current = status;
+
+  /** Load YouTube player – deps exclude volume/status so volume changes never recreate the player */
   const loadYouTube = useCallback(() => {
     if (!vid || !ytContainerRef.current) return;
     const oldPlayer = ytPlayerRef.current;
@@ -156,8 +178,8 @@ export function AudioPlayer() {
             const target = evt.target;
             if (!isYtPlayerReady(target)) return;
             ytPlayerRef.current = target;
-            safeSetVolume(target, volume);
-            if (status === "playing") safePlayVideo(target);
+            safeSetVolume(target, volumeRef.current);
+            if (statusRef.current === "playing") safePlayVideo(target);
           },
         },
       });
@@ -171,18 +193,20 @@ export function AudioPlayer() {
     const first = document.getElementsByTagName("script")[0];
     first?.parentNode?.insertBefore(tag, first);
     window.onYouTubeIframeAPIReady = () => loadYT();
-  }, [vid, volume, status]);
+  }, [vid]);
 
+  /** Load SoundCloud widget – deps exclude volume/status so volume changes never recreate the player */
   const loadSoundCloud = useCallback(() => {
     if (!scEmbedUrl || !scIframeRef.current) return;
     const loadSC = () => {
       if (!scIframeRef.current || !window.SC) return;
       const widget = window.SC.Widget(scIframeRef.current);
       scWidgetRef.current = widget;
-      widget.setVolume(volume);
+      widget.setVolume(volumeRef.current);
       widget.bind("ready", () => {
-        if (status === "playing") widget.play();
+        if (statusRef.current === "playing") widget.play();
       });
+      widget.bind("finish", () => next());
     };
     if (window.SC) {
       loadSC();
@@ -192,12 +216,18 @@ export function AudioPlayer() {
     tag.src = "https://w.soundcloud.com/player/api.js";
     tag.onload = loadSC;
     document.body.appendChild(tag);
-  }, [scEmbedUrl, volume, status]);
+  }, [scEmbedUrl, next]);
 
   useEffect(() => {
     if (isYouTube) loadYouTube();
     else if (isSoundCloud) loadSoundCloud();
   }, [isYouTube, isSoundCloud, loadYouTube, loadSoundCloud]);
+
+  useEffect(() => {
+    setPosition(0);
+    setDuration(0);
+    setBufferedPercent(0);
+  }, [currentPlayUrl]);
 
   // HTML5 audio for stream-url (radio, m3u, etc.)
   useEffect(() => {
@@ -220,6 +250,7 @@ export function AudioPlayer() {
   const stopAllEmbedded = useCallback(() => {
     if (ytPlayerRef.current && isYtPlayerReady(ytPlayerRef.current)) {
       safeStopVideo(ytPlayerRef.current);
+      safeDestroyYtPlayer(ytPlayerRef.current);
       ytPlayerRef.current = null;
     }
     if (scWidgetRef.current) {
@@ -253,7 +284,9 @@ export function AudioPlayer() {
     return unregister;
   }, [registerStopAllPlayers, stopAllEmbedded]);
 
+  /** Stop/destroy previous embed when switching source – runs after commit to avoid removeChild during reconciliation */
   useEffect(() => {
+    if (!isYouTube && !isSoundCloud) return;
     return () => {
       stopAllEmbedded();
     };
@@ -354,6 +387,40 @@ export function AudioPlayer() {
   }, [status, isYouTube, next]);
 
   useEffect(() => {
+    if (!currentSource || isSeekingRef.current) return;
+    const poll = () => {
+      if (isSeekingRef.current) return;
+      if (isYouTube) {
+        const p = ytPlayerRef.current;
+        if (isYtPlayerReady(p)) {
+          setPosition(safeGetCurrentTime(p));
+          setDuration(safeGetDuration(p));
+          const frac = safeGetVideoLoadedFraction(p);
+          setBufferedPercent(frac * 100);
+        }
+      } else if (isSoundCloud && scWidgetRef.current) {
+        scWidgetRef.current.getPosition((pos) => setPosition(pos / 1000));
+        scWidgetRef.current.getDuration((dur) => setDuration(dur / 1000));
+      } else if (isStreamUrl && audioRef.current) {
+        const a = audioRef.current;
+        const t = a.currentTime;
+        const d = a.duration;
+        setPosition(t);
+        if (Number.isFinite(d) && d > 0) {
+          setDuration(d);
+          if (a.buffered.length > 0) {
+            const end = a.buffered.end(a.buffered.length - 1);
+            setBufferedPercent((end / d) * 100);
+          }
+        }
+      }
+    };
+    poll();
+    const id = setInterval(poll, 500);
+    return () => clearInterval(id);
+  }, [currentSource, isYouTube, isSoundCloud, isStreamUrl]);
+
+  useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !isStreamUrl) return;
     const onEnded = () => next();
@@ -364,141 +431,361 @@ export function AudioPlayer() {
   const hasPrevNext = (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1);
   const thumbnailCover = currentTrack?.cover ?? currentSource?.cover ?? null;
 
+  const canSeek =
+    currentSource &&
+    ((isYouTube && isYtPlayerReady(ytPlayerRef.current)) ||
+      (isSoundCloud && !!scWidgetRef.current) ||
+      (isStreamUrl && Number.isFinite(duration) && duration > 0));
+
+  const seekTo = useCallback(
+    (seconds: number) => {
+      const sec = Math.max(0, seconds);
+      if (isYouTube) {
+        const p = ytPlayerRef.current;
+        if (isYtPlayerReady(p)) {
+          safeSeekTo(p, sec, true);
+          setPosition(sec);
+        }
+      } else if (isSoundCloud && scWidgetRef.current) {
+        scWidgetRef.current.seekTo(sec * 1000);
+        setPosition(sec);
+      } else if (isStreamUrl && audioRef.current) {
+        audioRef.current.currentTime = sec;
+        setPosition(sec);
+      }
+    },
+    [isYouTube, isSoundCloud, isStreamUrl]
+  );
+
+  const handleSeekChange = useCallback(
+    (percent: number) => {
+      if (!canSeek || duration <= 0) return;
+      const sec = (percent / 100) * duration;
+      seekTo(sec);
+    },
+    [canSeek, duration, seekTo]
+  );
+
+  const getPercentFromClientX = useCallback((clientX: number): number => {
+    const el = timelineRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    const x = clientX - rect.left;
+    return Math.max(0, Math.min(100, (x / rect.width) * 100));
+  }, []);
+
+  const handleTimelineMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      const percent = getPercentFromClientX(e.clientX);
+      setHoverPercent(percent);
+      if (isDraggingRef.current && canSeek && duration > 0) {
+        handleSeekChange(percent);
+      }
+    },
+    [canSeek, duration, handleSeekChange, getPercentFromClientX]
+  );
+
+  const handleTimelineMouseEnter = useCallback(() => {
+    setIsHoveringTimeline(true);
+  }, []);
+
+  const handleTimelineMouseLeave = useCallback(() => {
+    setIsHoveringTimeline(false);
+    setHoverPercent(0);
+  }, []);
+
+  const handleSeekStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      if (!canSeek || duration <= 0) return;
+      isDraggingRef.current = true;
+      isSeekingRef.current = true;
+      const percent = getPercentFromClientX(e.clientX);
+      handleSeekChange(percent);
+    },
+    [canSeek, duration, handleSeekChange, getPercentFromClientX]
+  );
+
+  const handleSeekEnd = useCallback(() => {
+    isDraggingRef.current = false;
+    isSeekingRef.current = false;
+  }, []);
+
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (!canSeek || duration <= 0) return;
+      const touch = e.touches[0];
+      if (touch) {
+        isDraggingRef.current = true;
+        isSeekingRef.current = true;
+        const percent = getPercentFromClientX(touch.clientX);
+        handleSeekChange(percent);
+      }
+    },
+    [canSeek, duration, handleSeekChange, getPercentFromClientX]
+  );
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      if (!canSeek || duration <= 0) return;
+      const percent = getPercentFromClientX(e.clientX);
+      handleSeekChange(percent);
+    };
+    const onUp = () => handleSeekEnd();
+    const onTouchMove = (e: TouchEvent) => {
+      if (!isDraggingRef.current) return;
+      if (!canSeek || duration <= 0) return;
+      const touch = e.touches[0];
+      if (touch) {
+        const percent = getPercentFromClientX(touch.clientX);
+        handleSeekChange(percent);
+      }
+    };
+    const onTouchEnd = () => handleSeekEnd();
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("touchend", onTouchEnd);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [canSeek, duration, handleSeekChange, getPercentFromClientX, handleSeekEnd]);
+
+  const progressPercent = duration > 0 ? Math.min(100, (position / duration) * 100) : 0;
+  const hoverTime = duration > 0 ? (hoverPercent / 100) * duration : 0;
+
+  useEffect(() => {
+    const measure = titleMeasureRef.current;
+    const container = titleContainerRef.current;
+    if (!measure || !container) return;
+    const check = () => setTitleOverflows(measure.scrollWidth > container.clientWidth);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [currentTrack?.title]);
+
   return (
     <header
       className="sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/98 px-4 py-3 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.08)] backdrop-blur-md"
       role="region"
       aria-label="Player controller"
     >
-      <div className="mx-auto flex max-w-6xl flex-nowrap items-center gap-3 overflow-x-auto py-2 sm:gap-6 md:overflow-visible">
-        {/* Thumbnail – playlist image, YouTube thumbnail, radio logo, or subtle empty state */}
-        <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl bg-slate-800 ring-1 ring-slate-700/60 shadow-[0_0_16px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.12)]">
-          {thumbnailCover ? (
-            <img src={thumbnailCover} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
-          )}
-        </div>
-
-        {/* Track title + source icon (right-aligned, large) */}
-        <div className="flex min-w-0 flex-1 shrink items-center gap-4">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-base font-semibold text-slate-100">
-              {currentTrack?.title ?? "No track selected"}
-            </p>
-            <span
-              className={`mt-0.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-                status === "playing"
-                  ? "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30"
-                  : status === "paused"
-                    ? "bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30"
-                    : "bg-slate-800 text-slate-500"
-              }`}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${status === "playing" ? "bg-emerald-400 animate-pulse" : status === "paused" ? "bg-amber-400" : "bg-slate-500"}`} />
-              {status}
-            </span>
+      <div className="mx-auto max-w-6xl flex justify-center">
+        {/* Player unit centered: [ Artwork ] [5px] [ Source ] [5px] [ Control ] */}
+        <div className="flex items-center gap-[25px]">
+          {/* LEFT: [ ARTWORK ] [ SOURCE ] – top of YouTube icon aligns with top of artwork */}
+          <div className="flex shrink-0 items-start gap-[25px]">
+            <div className="h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-slate-800 ring-1 ring-slate-700/60 sm:h-28 sm:w-28">
+              {thumbnailCover ? (
+                <HydrationSafeImage src={thumbnailCover} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
+              )}
+            </div>
+            <div className="flex flex-col items-center justify-center gap-[15px] w-9 sm:w-10 shrink-0">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-800/80 ring-1 ring-slate-700/60 sm:h-10 sm:w-10" title={currentSource?.origin === "radio" ? "Radio" : currentTrack?.type ?? "Local"}>
+                <SourceIcon type={currentTrack?.type ?? "local"} origin={currentSource?.origin} size="lg" />
+              </div>
+              <div className="flex flex-col items-center gap-[15px]">
+              <span
+                className={`inline-flex w-full items-center justify-center gap-0.5 rounded-full px-1 py-px text-[7px] font-semibold uppercase tracking-wider ${
+                  status === "playing"
+                    ? "bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/40 shadow-[0_0_6px_rgba(16,185,129,0.2)]"
+                    : status === "paused"
+                      ? "bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/40 shadow-[0_0_6px_rgba(245,158,11,0.2)]"
+                      : "bg-slate-800/80 text-slate-500 ring-1 ring-slate-600/30"
+                }`}
+              >
+                <span className={`h-1 w-1 shrink-0 rounded-full ${status === "playing" ? "bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.8)] playing-led-pulse" : status === "paused" ? "bg-amber-400 shadow-[0_0_4px_rgba(251,191,36,0.8)]" : "bg-slate-500"}`} />
+                {status}
+              </span>
+              <span className="inline-flex w-full items-center justify-center gap-0.5 rounded-full bg-sky-500/15 px-1 py-px text-[7px] font-semibold uppercase tracking-wider text-sky-400 ring-1 ring-sky-500/40 shadow-[0_0_6px_rgba(14,165,233,0.2)]">
+                <span className="h-1 w-1 shrink-0 rounded-full bg-sky-400 shadow-[0_0_4px_rgba(56,189,248,0.8)]" />
+                Live
+              </span>
+              </div>
+            </div>
           </div>
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-800/80 ring-1 ring-slate-700/60 shadow-[0_0_12px_rgba(30,215,96,0.1)]" title={currentSource?.origin === "radio" ? "Radio" : currentTrack?.type ?? "Local"}>
-            <SourceIcon type={currentTrack?.type ?? "local"} origin={currentSource?.origin} size="lg" />
-          </div>
-        </div>
 
-        {/* Transport – Shuffle | Random | Repeat (small, secondary) | Prev | Stop | Play | Next | Share | Volume */}
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          <div className="flex items-center gap-1 rounded-lg border border-cyan-400/25 bg-slate-900/50 px-1 py-0.5 shadow-[0_0_8px_rgba(34,211,238,0.08)]">
-            <NeonControlButton size="xs" variant="cyan" onClick={toggleShuffle} active={shuffle} aria-label="Shuffle" title="Shuffle">
-              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
-              </svg>
-            </NeonControlButton>
-            <NeonControlButton size="xs" variant="cyan" onClick={toggleShuffle} active={shuffle} aria-label="Random" title="Random">
-              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
-            </NeonControlButton>
-            <NeonControlButton size="xs" variant="cyan" onClick={toggleRepeat} active={repeat} aria-label="Repeat" title="Repeat">
-              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17 1l4 4-4 4" />
-                <path d="M3 11V9a4 4 0 0 1 4-4h14" />
-                <path d="M7 23l-4-4 4-4" />
-                <path d="M21 13v2a4 4 0 0 1-4 4H3" />
-              </svg>
-            </NeonControlButton>
-          </div>
-          <div className="h-6 w-px bg-slate-700/80" aria-hidden />
-          <NeonControlButton size="lg" onClick={prev} disabled={!hasPrevNext} aria-label="Previous" title="Previous">
-            <svg className="h-7 w-7" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-            </svg>
-          </NeonControlButton>
-          <NeonControlButton size="lg" onClick={stop} disabled={!currentSource} aria-label="Stop" title="Stop">
-            <svg className="h-7 w-7" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 6h12v12H6z" />
-            </svg>
-          </NeonControlButton>
-          {status === "playing" ? (
-            <NeonControlButton size="lg" onClick={pause} active aria-label="Pause" title="Pause">
-              <svg className="h-7 w-7" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-              </svg>
-            </NeonControlButton>
-          ) : (
-            <NeonControlButton
-              size="lg"
-              onClick={() => (status === "paused" && currentSource ? play() : currentSource ? playSource(currentSource) : undefined)}
-              disabled={!currentSource}
-              aria-label="Play"
-              title="Play"
-            >
-              <svg className="h-7 w-7 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7L8 5z" />
-              </svg>
-            </NeonControlButton>
-          )}
-          <NeonControlButton size="lg" onClick={next} disabled={!hasPrevNext} aria-label="Next" title="Next">
-            <svg className="h-7 w-7 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
-            </svg>
-          </NeonControlButton>
-          <div className="h-8 w-px bg-slate-700/80" aria-hidden />
-          <NeonControlButton size="lg" onClick={() => setShareOpen(true)} disabled={!currentSource} aria-label={t.share} title={t.share}>
-            <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="18" cy="5" r="3" />
-              <circle cx="6" cy="12" r="3" />
-              <circle cx="18" cy="19" r="3" />
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-            </svg>
-          </NeonControlButton>
-        </div>
+          {/* Control row | Track title | Timeline – unified width */}
+          <div className="flex min-w-0 flex-col gap-2.5 w-full max-w-2xl">
+            {/* Control row: full width, Prev at left edge, Volume at right edge */}
+            <div className="flex flex-nowrap items-center w-full gap-2 sm:gap-3">
+              <NeonControlButton size="md" onClick={prev} disabled={!hasPrevNext} aria-label="Previous" title="Previous">
+                <svg className="h-5 w-5 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                </svg>
+              </NeonControlButton>
+              <NeonControlButton size="md" onClick={stop} disabled={!currentSource} aria-label="Stop" title="Stop">
+                <svg className="h-5 w-5 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 6h12v12H6z" />
+                </svg>
+              </NeonControlButton>
+              <NeonControlButton
+                size="xl"
+                onClick={
+                  status === "playing"
+                    ? pause
+                    : () => {
+                        if (status === "paused" && currentSource) play();
+                        else if (currentSource) playSource(currentSource);
+                      }
+                }
+                disabled={!currentSource}
+                active={status === "playing"}
+                aria-label={status === "playing" ? "Pause" : "Play"}
+                title={status === "playing" ? "Pause" : "Play"}
+                className="!h-12 !min-w-[110px] !w-auto !px-6 !rounded-2xl"
+              >
+                <span className="relative flex h-8 w-8 items-center justify-center sm:h-9 sm:w-9" aria-hidden>
+                  <svg className={`absolute ${status === "playing" ? "opacity-100" : "pointer-events-none opacity-0"}`} viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                  </svg>
+                  <svg className={`absolute ml-0.5 sm:ml-1 ${status === "playing" ? "pointer-events-none opacity-0" : "opacity-100"}`} viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7L8 5z" />
+                  </svg>
+                </span>
+              </NeonControlButton>
+              <NeonControlButton size="md" onClick={next} disabled={!hasPrevNext} aria-label="Next" title="Next">
+                <svg className="h-5 w-5 ml-0.5 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
+                </svg>
+              </NeonControlButton>
+              <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
+              <NeonControlButton size="2xs" variant="cyan" className="!rounded-lg" onClick={() => setAutoMix((a) => !a)} active={autoMix} aria-label="AutoMix" title="AutoMix">
+                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 12h6l4-8v16l-4-8H2" />
+                  <path d="M22 12h-6l-4 8V4l4 8h6" />
+                </svg>
+              </NeonControlButton>
+              <NeonControlButton size="2xs" variant="cyan" className="!rounded-lg" onClick={toggleShuffle} active={shuffle} aria-label="Random" title="Random">
+                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+                </svg>
+              </NeonControlButton>
+              <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
+              <div className="flex min-w-[70px] shrink-0 items-center gap-1.5 rounded-lg border border-[#1ed760]/30 bg-slate-900/80 px-2 py-1 sm:min-w-[90px] sm:gap-2 sm:px-2.5 md:min-w-[120px]">
+                <svg className="h-4 w-4 shrink-0 text-[#1ed760]/90 sm:h-5 sm:w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" />
+                </svg>
+                <input type="range" min={0} max={100} value={volume} onChange={(e) => setVolume(Number(e.target.value))} className="player-volume-slider h-2 w-full sm:h-2.5" aria-label="Volume" />
+                <span className="w-6 shrink-0 text-end text-xs font-bold tabular-nums text-[#1ed760] sm:w-7">{volume}</span>
+              </div>
+              <NeonControlButton size="2xs" variant="white" className="!rounded-lg" onClick={() => setShareOpen(true)} disabled={!currentSource} aria-label={t.share} title={t.share}>
+                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="18" cy="5" r="3" />
+                  <circle cx="6" cy="12" r="3" />
+                  <circle cx="18" cy="19" r="3" />
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                </svg>
+              </NeonControlButton>
+            </div>
 
-        {/* Volume – centered vertically, prominent neon knob */}
-        <div className="flex min-w-[120px] shrink-0 items-center justify-center gap-3 rounded-2xl border-2 border-[#1ed760]/30 bg-slate-900/80 px-4 py-2 shadow-[0_0_20px_rgba(30,215,96,0.12),inset_0_1px_0_rgba(255,255,255,0.05)] sm:min-w-[160px]">
-          <svg className="h-6 w-6 shrink-0 text-[#1ed760]/90" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" />
-          </svg>
-          <div className="flex flex-1 items-center">
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={volume}
-              onChange={(e) => setVolume(Number(e.target.value))}
-              className="player-volume-slider h-2.5 w-full"
-              aria-label="Volume"
+            {/* ROW 2: Track title – same width as control row and timeline */}
+            <div className="flex w-full">
+              <div
+                ref={titleContainerRef}
+                className="relative flex min-w-0 w-full items-center justify-center overflow-hidden rounded-lg border border-sky-500/25 bg-sky-500/8 px-3 py-1.5 shadow-[0_0_12px_rgba(56,189,248,0.06),inset_0_1px_0_rgba(255,255,255,0.02)]"
+              >
+                <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
+                  {currentTrack?.title ?? "No track selected"}
+                </span>
+                {titleOverflows ? (
+                  <div className="w-full overflow-hidden">
+                    <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
+                      <span className="text-xs font-medium text-sky-100/95 sm:text-sm">{currentTrack?.title ?? "No track selected"}</span>
+                      <span className="text-xs font-medium text-sky-100/95 sm:text-sm">{currentTrack?.title ?? "No track selected"}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="min-w-0 flex-1 truncate text-center text-xs font-medium text-sky-100/95 sm:text-sm" title={currentTrack?.title ?? undefined}>
+                    {currentTrack?.title ?? "No track selected"}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* ROW 3: Timeline – [current time] [progress bar] [total duration] – right boundary reference */}
+            <div className="flex w-full items-center gap-3">
+              <span className="w-10 shrink-0 text-right text-xs font-semibold tabular-nums text-slate-400 sm:w-12" aria-live="polite">
+                {formatTime(position)}
+              </span>
+            <div
+              ref={timelineRef}
+              role="slider"
+              aria-label="Track progress"
+              aria-valuemin={0}
+              aria-valuemax={duration}
+              aria-valuenow={position}
+              aria-disabled={!canSeek}
+              tabIndex={canSeek ? 0 : undefined}
+              className={`relative flex flex-1 min-w-0 select-none py-1.5 ${canSeek ? "cursor-pointer" : "cursor-default opacity-80"}`}
+            onMouseMove={handleTimelineMouseMove}
+            onMouseEnter={handleTimelineMouseEnter}
+            onMouseLeave={handleTimelineMouseLeave}
+            onMouseDown={handleSeekStart}
+            onTouchStart={handleTouchStart}
+          >
+            {/* Track background */}
+            <div className="absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-slate-700/80" />
+            {/* Buffered layer */}
+            {bufferedPercent > 0 && (
+              <div
+                className="absolute left-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-slate-500/60 transition-all duration-150"
+                style={{ width: `${Math.min(bufferedPercent, 100)}%` }}
+              />
+            )}
+            {/* Played layer */}
+            <div
+              className="absolute left-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-[#1ed760] shadow-[0_0_6px_rgba(30,215,96,0.4)] transition-all duration-100"
+              style={{ width: `${progressPercent}%` }}
             />
+            {/* Draggable thumb – clamped so it stays visible */}
+            <div
+              className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#1ed760] shadow-[0_0_0_2px_rgba(30,215,96,0.3),0_0_8px_var(--neon-green-glow)] transition-all duration-100 hover:scale-110"
+              style={{ left: `${Math.max(0, Math.min(100, progressPercent))}%` }}
+            />
+            {/* Hover time preview tooltip – centered above hover position */}
+            {isHoveringTimeline && duration > 0 && (
+              <div
+                className="pointer-events-none absolute bottom-full z-10 mb-1 rounded-full bg-slate-800 px-2 py-1 text-xs font-semibold tabular-nums text-slate-200 shadow-lg ring-1 ring-slate-600/80"
+                style={{ left: `${hoverPercent}%`, transform: "translate(-50%, -100%)" }}
+              >
+                {formatTime(hoverTime)}
+              </div>
+            )}
           </div>
-          <span className="w-9 shrink-0 text-end text-sm font-bold tabular-nums text-[#1ed760]">{volume}</span>
+              <span className="w-10 shrink-0 text-left text-xs font-semibold tabular-nums text-slate-400 sm:w-12" aria-live="polite">
+                {formatTime(duration)}
+              </span>
+            </div>
+          </div>
+
         </div>
       </div>
 
-      {/* Off-screen embeds for YouTube/SoundCloud – volume control via APIs */}
+      {/* Off-screen embeds for YouTube/SoundCloud – always mount both to avoid React removeChild conflict */}
       {isEmbedded && (
         <div className="pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0" aria-hidden>
-          {isYouTube && <div ref={ytContainerRef} className="h-full w-full" />}
-          {isSoundCloud && <iframe ref={scIframeRef} src={scEmbedUrl!} title="SoundCloud" className="h-[166px] w-full border-0" allow="autoplay" />}
+          {/* Wrapper div prevents YT API DOM manipulation from conflicting with React unmount */}
+          <div style={{ display: isYouTube ? "block" : "none" }} className="h-full w-full">
+            <div ref={ytContainerRef} className="h-full w-full" />
+          </div>
+          <div style={{ display: isSoundCloud ? "block" : "none" }} className="h-full w-full">
+            <iframe
+              ref={scIframeRef}
+              src={isSoundCloud && scEmbedUrl ? scEmbedUrl : "about:blank"}
+              title="SoundCloud"
+              className="h-[166px] w-full border-0"
+              allow="autoplay"
+            />
+          </div>
         </div>
       )}
       {/* HTML5 audio for stream URLs (radio, m3u, etc.) – always mounted so ref stays valid */}
@@ -506,9 +793,9 @@ export function AudioPlayer() {
 
       {shareOpen && currentSource && (
         <ShareModal
-          title={currentSource.title}
-          shareUrl={getShareUrl(currentSource).shareUrl}
-          shareUrlWeb={getShareUrl(currentSource).shareUrlWeb}
+          item={unifiedSourceToShareable(currentSource)}
+          fallbackPlaylistId={currentSource.origin === "playlist" ? currentSource.id : undefined}
+          fallbackRadioId={currentSource.origin === "radio" && currentSource.radio ? currentSource.radio.id : undefined}
           onClose={() => setShareOpen(false)}
         />
       )}

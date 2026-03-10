@@ -2,6 +2,7 @@
 
 import type { Playlist } from "@/lib/playlist-types";
 import { ShareModal } from "@/components/share-modal";
+import { playlistToShareable } from "@/lib/share-utils";
 
 type Props = {
   playlist: Playlist;
@@ -9,10 +10,12 @@ type Props = {
 };
 
 export function SharePlaylistModal({ playlist, onClose }: Props) {
-  const shareUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/sources?playlist=${encodeURIComponent(playlist.id)}`
-      : "";
-
-  return <ShareModal title={playlist.name} shareUrl={shareUrl} onClose={onClose} />;
+  const item = playlistToShareable(playlist);
+  return (
+    <ShareModal
+      item={item}
+      fallbackPlaylistId={playlist.id}
+      onClose={onClose}
+    />
+  );
 }

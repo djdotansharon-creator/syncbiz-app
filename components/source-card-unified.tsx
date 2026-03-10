@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { ShareModal } from "@/components/share-modal";
+import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
+import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { ActionButtonEdit } from "@/components/ui/action-buttons";
 import { isValidStreamUrl } from "@/lib/url-validation";
 import type { UnifiedSource } from "@/lib/source-types";
@@ -71,10 +73,14 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
-  const { playSource, prev, next, stop, pause, currentSource, queue } = usePlayback();
-  const active = currentSource?.id === source.id;
-  const hasPrevNext = queue.length > 1 || (source.playlist && (source.playlist.tracks?.length ?? 0) > 1);
+  const { playSource, stop, pause, currentSource } = usePlayback();
+  const active = mounted && currentSource?.id === source.id;
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   const hasInvalidUrl = source.origin === "radio" && source.radio && !isValidStreamUrl(source.radio.url);
 
   async function handleDelete() {
@@ -115,14 +121,7 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
     >
       <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-900">
         {source.cover ? (
-          <img
-            src={source.cover}
-            alt=""
-            className="h-full w-full object-cover"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = "none";
-            }}
-          />
+          <HydrationSafeImage src={source.cover} alt="" className="h-full w-full object-cover" />
         ) : null}
         {hasInvalidUrl && (
           <div
@@ -167,13 +166,6 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
         </div>
         {source.genre && <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500">{source.genre}</p>}
         <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5" role="group" aria-label="Source controls">
-          {hasPrevNext && (
-            <NeonControlButton onClick={prev} size="sm" title="Previous" aria-label="Previous">
-              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-              </svg>
-            </NeonControlButton>
-          )}
           {active && (
             <>
               <NeonControlButton onClick={stop} size="sm" title="Stop" aria-label="Stop">
@@ -200,18 +192,11 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
               </svg>
             </NeonControlButton>
           )}
-          {hasPrevNext && (
-            <NeonControlButton onClick={next} size="sm" title="Next" aria-label="Next">
-              <svg className="h-3.5 w-3.5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
-              </svg>
-            </NeonControlButton>
-          )}
           {source.origin === "playlist" && source.playlist && (
-            <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} title="Edit playlist" aria-label="Edit playlist" />
+            <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="subtle" size="xs" title="Edit playlist" aria-label="Edit playlist" />
           )}
           {source.origin === "radio" && source.radio && (
-            <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} title="Edit station" aria-label="Edit station" />
+            <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="subtle" size="xs" title="Edit station" aria-label="Edit station" />
           )}
           <NeonControlButton size="sm" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share}>
             <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -234,19 +219,9 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
       <DeleteConfirmModal isOpen={deleteOpen} onClose={() => setDeleteOpen(false)} onConfirm={handleDelete} loading={deleting} message={t.deleteSourceConfirm} />
       {shareOpen && (
         <ShareModal
-          title={source.title}
-          shareUrl={
-            source.origin === "radio" && source.radio
-              ? `syncbiz://radio/${source.radio.id}`
-              : typeof window !== "undefined"
-                ? `${window.location.origin}/sources?playlist=${encodeURIComponent(source.id)}`
-                : ""
-          }
-          shareUrlWeb={
-            source.origin === "radio" && source.radio && typeof window !== "undefined"
-              ? `${window.location.origin}/radio?station=${encodeURIComponent(source.radio.id)}`
-              : undefined
-          }
+          item={unifiedSourceToShareable(source)}
+          fallbackPlaylistId={source.origin === "playlist" ? source.id : undefined}
+          fallbackRadioId={source.origin === "radio" && source.radio ? source.radio.id : undefined}
           onClose={() => setShareOpen(false)}
         />
       )}

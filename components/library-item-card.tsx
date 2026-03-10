@@ -90,14 +90,13 @@ export function LibraryItemCard({ item, index }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
-  const { playItem, isActive, prev, next, stop, pause, items } = useLibraryPlayback();
+  const { playItem, isActive, stop, pause } = useLibraryPlayback();
 
   const active = isActive(item);
   const cover = getLibraryItemCover(item);
   const name = getLibraryItemName(item);
   const genre = isPlaylist(item) ? item.data.genre : null;
   const iconType = getIconType(item);
-  const hasPrevNext = items.length > 1;
 
   async function handleDelete() {
     setDeleting(true);
@@ -137,15 +136,6 @@ export function LibraryItemCard({ item, index }: Props) {
         <h3 className="truncate font-semibold text-slate-100">{name}</h3>
         {genre && <p className="text-xs font-medium uppercase tracking-wider text-slate-500">{genre}</p>}
         <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-          {hasPrevNext && (
-            <button
-              onClick={prev}
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800"
-              title="Previous"
-            >
-              ⏮
-            </button>
-          )}
           {active && (
             <>
               <button
@@ -180,20 +170,11 @@ export function LibraryItemCard({ item, index }: Props) {
               <span className="text-lg">▶</span>
             </button>
           )}
-          {hasPrevNext && (
-            <button
-              onClick={next}
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800"
-              title="Next"
-            >
-              ⏭
-            </button>
-          )}
           {isPlaylist(item) && (
             <>
               <Link
                 href={`/playlists/${item.data.id}/edit`}
-                className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-300"
+                className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-900/70 text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]"
                 title="Edit"
               >
                 ✎
@@ -210,7 +191,7 @@ export function LibraryItemCard({ item, index }: Props) {
           {item.kind === "source" && (
             <Link
               href={`/sources/${item.data.id}/edit`}
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-300"
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-900/70 text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]"
               title="Edit"
             >
               ✎

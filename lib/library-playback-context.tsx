@@ -201,9 +201,9 @@ export function LibraryPlaybackProvider({
       }
     } else {
       const idx = items.findIndex((i) => i === currentItem);
-      if (idx < 0 || idx >= items.length - 1) return;
-      const nextItem = items[idx + 1];
-      playItem(nextItem);
+      const nextIdx = idx < 0 ? 0 : idx >= items.length - 1 ? 0 : idx + 1;
+      const nextItem = items[nextIdx];
+      if (nextItem) playItem(nextItem);
     }
   }, [currentItem, currentTrackIndex, items, playItem, stopPrevious]);
 

@@ -90,20 +90,20 @@ input[type="range"]::-moz-range-track {
   cursor: pointer;
 }
 .player-volume-slider::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(30, 41, 59, 0.9);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
-  margin-top: 7px;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(51, 65, 85, 0.95);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(71, 85, 105, 0.4);
+  margin-top: 6px;
 }
 .player-volume-slider::-webkit-slider-thumb {
-  margin-top: -7px;
+  margin-top: -5px;
 }
 .player-volume-slider::-moz-range-track {
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(30, 41, 59, 0.9);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(51, 65, 85, 0.95);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(71, 85, 105, 0.4);
 }
 .player-volume-slider::-moz-range-thumb {
   height: 18px;
@@ -139,4 +139,22 @@ input[type="range"]::-moz-range-track {
   border-width: 2px;
   border-style: solid;
   animation: playing-glow 2.5s ease-in-out infinite, playing-border 2.5s ease-in-out infinite;
+}
+
+/* PLAYING LED – subtle pulsing glow */
+@keyframes led-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(52, 211, 153, 0.8); }
+  50% { opacity: 0.85; box-shadow: 0 0 10px rgba(52, 211, 153, 0.6); }
+}
+.playing-led-pulse {
+  animation: led-pulse 1.5s ease-in-out infinite;
+}
+
+/* Track title marquee – subtle scroll when text overflows */
+@keyframes track-title-marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.track-title-marquee {
+  animation: track-title-marquee 12s linear infinite;
 }

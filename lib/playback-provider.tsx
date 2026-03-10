@@ -339,16 +339,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      if (s.queue.length > 1) {
+      if (s.queue.length >= 1 && atLastTrack) {
         const nextQueueIdx = s.shuffle
-          ? getShuffledIndex(s.queue.length, s.queueIndex)
-          : atLastInQueue && s.repeat
+          ? getShuffledIndex(s.queue.length, atLastInQueue ? -1 : s.queueIndex)
+          : atLastInQueue
             ? 0
-            : s.queueIndex < s.queue.length - 1
-              ? s.queueIndex + 1
-              : -1;
-        if (nextQueueIdx >= 0) {
-          const nextSource = s.queue[nextQueueIdx];
+            : s.queueIndex + 1;
+        const nextSource = s.queue[nextQueueIdx % s.queue.length];
+        if (nextSource) {
           stopAllBeforePlay();
           playSource(nextSource);
         }

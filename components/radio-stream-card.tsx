@@ -6,6 +6,7 @@ import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { ShareModal } from "@/components/share-modal";
+import { radioToShareable } from "@/lib/share-utils";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { radioToUnified } from "@/lib/radio-utils";
 import { isValidStreamUrl } from "@/lib/url-validation";
@@ -161,13 +162,8 @@ export function RadioStreamCard({ station, onRemove, onEdit }: Props) {
       <DeleteConfirmModal isOpen={deleteOpen} onClose={() => setDeleteOpen(false)} onConfirm={handleDelete} loading={deleting} message={t.deleteSourceConfirm} />
       {shareOpen && (
         <ShareModal
-          title={station.name}
-          shareUrl={
-            typeof window !== "undefined"
-              ? `syncbiz://radio/${station.id}`
-              : ""
-          }
-          shareUrlWeb={`${typeof window !== "undefined" ? window.location.origin : ""}/radio?station=${encodeURIComponent(station.id)}`}
+          item={radioToShareable(station)}
+          fallbackRadioId={station.id}
           onClose={() => setShareOpen(false)}
         />
       )}

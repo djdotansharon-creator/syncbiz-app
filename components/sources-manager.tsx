@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { ShareModal } from "@/components/share-modal";
+import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { useTranslations } from "@/lib/locale-context";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
+import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { ActionButtonEdit } from "@/components/ui/action-buttons";
 import { SourcesPlaybackProvider, useSourcesPlayback } from "@/lib/sources-playback-context";
 import { usePlayback } from "@/lib/playback-provider";
@@ -57,14 +59,27 @@ function useFavoritesState() {
 
 function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; pageSubtitle?: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useTranslations();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [genreFilter, setGenreFilter] = useState("");
-  const [shuffle, setShuffle] = useState(false);
   const { favoriteIds, toggleFavorite } = useFavoritesState();
+  const playlistAutoLoaded = useRef(false);
 
-  const { sources, setSources } = useSourcesPlayback();
+  const { sources, setSources, playSource } = useSourcesPlayback();
   const { setQueue } = usePlayback();
+
+  useEffect(() => {
+    const playlistId = searchParams.get("playlist");
+    if (!playlistId || sources.length === 0 || playlistAutoLoaded.current) return;
+    const source = sources.find(
+      (s) => s.id === playlistId || (s.playlist && s.playlist.id === playlistId)
+    );
+    if (source) {
+      playlistAutoLoaded.current = true;
+      playSource(source);
+    }
+  }, [searchParams, sources, playSource]);
 
   const nonFavoriteSources = useMemo(
     () => sources.filter((s) => !favoriteIds.includes(s.id)),
@@ -80,7 +95,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     return nonFavoriteSources.filter((s) => s.genre?.toLowerCase() === genreFilter.toLowerCase());
   }, [nonFavoriteSources, genreFilter]);
 
-  const displaySources = shuffle ? [...filtered].sort(() => Math.random() - 0.5) : filtered;
+  const displaySources = filtered;
 
   useEffect(() => {
     setQueue(displaySources);
@@ -164,15 +179,6 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
               ))}
             </select>
           )}
-          <label className="flex items-center gap-2 text-sm text-slate-400">
-            <input
-              type="checkbox"
-              checked={shuffle}
-              onChange={(e) => setShuffle(e.target.checked)}
-              className="rounded border-slate-700"
-            />
-            {t.shuffle}
-          </label>
         </div>
       </div>
 
@@ -235,10 +241,14 @@ function SourceRow({
   onDragStart?: (e: React.DragEvent) => void;
 }) {
   const { t } = useTranslations();
-  const { playSource, prev, next, stop, pause, currentSource, queue } = usePlayback();
+  const { playSource, stop, pause, currentSource } = usePlayback();
   const [shareOpen, setShareOpen] = useState(false);
-  const active = currentSource?.id === source.id;
-  const hasPrevNext = queue.length > 1 || (source.playlist && (source.playlist.tracks?.length ?? 0) > 1);
+  const [mounted, setMounted] = useState(false);
+  const active = mounted && currentSource?.id === source.id;
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   return (
     <div
@@ -250,7 +260,7 @@ function SourceRow({
     >
       <div className="relative h-14 w-14 overflow-hidden rounded-lg bg-slate-800">
         {source.cover ? (
-          <img src={source.cover} alt="" className="h-full w-full object-cover" />
+          <HydrationSafeImage src={source.cover} alt="" className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-slate-500">
             <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -285,28 +295,11 @@ function SourceRow({
       <div className="flex flex-nowrap items-center gap-2" role="group" aria-label="Source controls">
         {shareOpen && (
           <ShareModal
-            title={source.title}
-            shareUrl={
-              source.origin === "radio" && source.radio
-                ? `syncbiz://radio/${source.radio.id}`
-                : typeof window !== "undefined"
-                  ? `${window.location.origin}/sources?playlist=${encodeURIComponent(source.id)}`
-                  : ""
-            }
-            shareUrlWeb={
-              source.origin === "radio" && source.radio && typeof window !== "undefined"
-                ? `${window.location.origin}/radio?station=${encodeURIComponent(source.radio.id)}`
-                : undefined
-            }
+            item={unifiedSourceToShareable(source)}
+            fallbackPlaylistId={source.origin === "playlist" ? source.id : undefined}
+            fallbackRadioId={source.origin === "radio" && source.radio ? source.radio.id : undefined}
             onClose={() => setShareOpen(false)}
           />
-        )}
-        {hasPrevNext && (
-          <NeonControlButton size="sm" onClick={prev} title="Previous" aria-label="Previous">
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-            </svg>
-          </NeonControlButton>
         )}
         {active && (
           <>
@@ -334,15 +327,11 @@ function SourceRow({
             </svg>
           </NeonControlButton>
         )}
-        {hasPrevNext && (
-          <NeonControlButton size="sm" onClick={next} title="Next" aria-label="Next">
-            <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
-            </svg>
-          </NeonControlButton>
+        {source.origin === "playlist" && source.playlist && (
+          <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="subtle" size="xs" title="Edit" aria-label="Edit" />
         )}
         {source.origin === "radio" && source.radio && (
-          <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} size="xs" title="Edit" aria-label="Edit" />
+          <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="subtle" size="xs" title="Edit" aria-label="Edit" />
         )}
         <ShareButton source={source} onShareOpen={() => setShareOpen(true)} />
         <SourceRowDeleteButton source={source} onRemove={onRemove} />

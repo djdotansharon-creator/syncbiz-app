@@ -167,11 +167,18 @@ export function SourcesPlaybackProvider({
 
   const next = useCallback(() => {
     if (!currentSource) return;
+    if (currentSource.playlist) {
+      const tracks = getPlaylistTracks(currentSource.playlist);
+      if (tracks.length > 1 && currentTrackIndex < tracks.length - 1) {
+        playSource(currentSource, currentTrackIndex + 1);
+        return;
+      }
+    }
     const idx = sources.findIndex((s) => s === currentSource);
-    if (idx < 0 || idx >= sources.length - 1) return;
-    const nextItem = sources[idx + 1];
-    playSource(nextItem);
-  }, [currentSource, sources, playSource]);
+    const nextIdx = idx < 0 ? 0 : idx >= sources.length - 1 ? 0 : idx + 1;
+    const nextItem = sources[nextIdx];
+    if (nextItem) playSource(nextItem);
+  }, [currentSource, currentTrackIndex, sources, playSource]);
 
   const setVolume = useCallback((v: number) => {
     setVolumeState(Math.max(0, Math.min(100, v)));

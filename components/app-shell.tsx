@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 
 import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
+import { AudioPlayer } from "@/components/audio-player";
 
 const categoryKeys = ["dashboard", "sources", "radio", "favorites", "schedules", "devices", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
@@ -278,6 +279,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             })}
           </nav>
         </header>
+
+        <AudioPlayer />
 
         <main className="flex-1 px-4 pb-4 py-5 sm:px-6">
           <div className="mx-auto max-w-5xl">{children}</div>

@@ -126,6 +126,7 @@ export function SyncBizPlayerUnified() {
         setLoading(false);
         if (status === "playing") widget.play();
       });
+      widget.bind("finish", () => next());
     };
     if (window.SC) {
       loadSC();
@@ -135,7 +136,7 @@ export function SyncBizPlayerUnified() {
     tag.src = "https://w.soundcloud.com/player/api.js";
     tag.onload = loadSC;
     document.body.appendChild(tag);
-  }, [scEmbedUrl, volume, status]);
+  }, [scEmbedUrl, volume, status, next]);
 
   useEffect(() => {
     if (isYouTube) loadYouTube();

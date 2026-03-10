@@ -34,6 +34,7 @@ type Props = {
   status: "playing" | "paused" | "stopped" | "idle";
   volume: number;
   onStatusChange?: (status: "playing" | "paused" | "stopped") => void;
+  onTrackEnd?: () => void;
   onVolumeChange?: (v: number) => void;
   onPositionChange?: (position: number, duration: number) => void;
   onSeek?: (sec: number) => void;
@@ -44,6 +45,7 @@ export function EmbeddedPlayer({
   status,
   volume,
   onStatusChange,
+  onTrackEnd,
   onVolumeChange,
   onPositionChange,
   onSeek,
@@ -113,6 +115,10 @@ export function EmbeddedPlayer({
         setLoading(false);
         if (status === "playing") widget.play();
       });
+      widget.bind("finish", () => {
+        onTrackEnd?.();
+        if (!onTrackEnd) onStatusChange?.("stopped");
+      });
     };
     if (window.SC) {
       loadSC();
@@ -122,7 +128,7 @@ export function EmbeddedPlayer({
     tag.src = "https://w.soundcloud.com/player/api.js";
     tag.onload = loadSC;
     document.body.appendChild(tag);
-  }, [scEmbedUrl, volume, status]);
+  }, [scEmbedUrl, volume, status, onTrackEnd, onStatusChange]);
 
   useEffect(() => {
     if (isYouTube) loadYouTube();
@@ -156,7 +162,8 @@ export function EmbeddedPlayer({
       if (isYtPlayerReady(p) && isYouTube) {
         const state = safeGetPlayerState(p);
         if (state === window.YT!.PlayerState.ENDED) {
-          onStatusChange?.("stopped");
+          onTrackEnd?.();
+          if (!onTrackEnd) onStatusChange?.("stopped");
         } else {
           const pos = safeGetCurrentTime(p);
           const dur = safeGetDuration(p);
@@ -178,7 +185,7 @@ export function EmbeddedPlayer({
     };
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
-  }, [status, isYouTube, isSoundCloud, duration, onStatusChange, onPositionChange]);
+  }, [status, isYouTube, isSoundCloud, duration, onStatusChange, onTrackEnd, onPositionChange]);
 
   useEffect(() => {
     const p = ytPlayerRef.current;

@@ -10,10 +10,12 @@ export interface YTPlayerAPI {
   playVideo: () => void;
   pauseVideo: () => void;
   stopVideo: () => void;
+  destroy?: () => void;
   setVolume: (vol: number) => void;
   getPlayerState: () => number;
   getCurrentTime: () => number;
   getDuration: () => number;
+  getVideoLoadedFraction?: () => number;
   seekTo: (seconds: number, allowSeekAhead: boolean) => void;
 }
 
@@ -71,6 +73,17 @@ export function safeStopVideo(player: unknown): void {
   safeYtCall(player, "stopVideo");
 }
 
+/** Safe destroy – removes iframe from DOM to avoid React removeChild conflict. Call before unmounting. */
+export function safeDestroyYtPlayer(player: unknown): void {
+  try {
+    if (player != null && typeof (player as Record<string, unknown>).destroy === "function") {
+      (player as { destroy: () => void }).destroy();
+    }
+  } catch {
+    /* destroy can throw; ignore */
+  }
+}
+
 /** Safe seekTo. */
 export function safeSeekTo(player: unknown, sec: number, allowSeekAhead: boolean): void {
   safeYtCall(player, "seekTo", sec, allowSeekAhead);
@@ -86,4 +99,10 @@ export function safeGetCurrentTime(player: unknown): number {
 export function safeGetDuration(player: unknown): number {
   const d = safeYtCall<number>(player, "getDuration");
   return typeof d === "number" ? d : 0;
+}
+
+/** Safe getVideoLoadedFraction (0–1). Returns 0 if not available. */
+export function safeGetVideoLoadedFraction(player: unknown): number {
+  const f = safeYtCall<number>(player, "getVideoLoadedFraction");
+  return typeof f === "number" && f >= 0 && f <= 1 ? f : 0;
 }

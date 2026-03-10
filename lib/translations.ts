@@ -188,8 +188,11 @@ const TRANSLATIONS = {
     favoritesPageSubtitle: "Your favorite playlists and sources. Add from Library.",
     noFavoritesYet: "No favorites yet. Drag items here.",
     copyLink: "Copy link",
+    originalSourceUrl: "Original source URL",
+    originalSourceNotFoundFallback: "Original source not found — using internal fallback link",
     downloadJson: "Download JSON",
     copied: "Copied!",
+    linkCopiedToClipboard: "Link copied to clipboard",
     close: "Close",
 
     radioPageTitle: "Radio Streams",
@@ -391,8 +394,11 @@ const TRANSLATIONS = {
     favoritesPageSubtitle: "הפלייליסטים והמקורות המועדפים שלך. הוסף מספרייה.",
     noFavoritesYet: "אין מועדפים. גרור פריטים לכאן.",
     copyLink: "העתק קישור",
+    originalSourceUrl: "כתובת מקור מקורית",
+    originalSourceNotFoundFallback: "מקור מקורי לא נמצא — משתמש בקישור גיבוי פנימי",
     downloadJson: "הורד JSON",
     copied: "הועתק!",
+    linkCopiedToClipboard: "הקישור הועתק ללוח",
     close: "סגור",
 
     radioPageTitle: "תחנות רדיו",

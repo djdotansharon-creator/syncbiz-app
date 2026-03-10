@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { ShareModal } from "@/components/share-modal";
+import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { useTranslations } from "@/lib/locale-context";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { ActionButtonEdit } from "@/components/ui/action-buttons";
@@ -163,10 +164,9 @@ function FavoritesSourceRow({
   onToggleFavorite: () => void;
 }) {
   const { t } = useTranslations();
-  const { playSource, prev, next, stop, pause, currentSource, queue } = usePlayback();
+  const { playSource, stop, pause, currentSource } = usePlayback();
   const [shareOpen, setShareOpen] = useState(false);
   const active = currentSource?.id === source.id;
-  const hasPrevNext = queue.length > 1 || (source.playlist && (source.playlist.tracks?.length ?? 0) > 1);
 
   return (
     <div
@@ -205,28 +205,11 @@ function FavoritesSourceRow({
       <div className="flex flex-nowrap items-center gap-2">
         {shareOpen && (
           <ShareModal
-            title={source.title}
-            shareUrl={
-              source.origin === "radio" && source.radio
-                ? `syncbiz://radio/${source.radio.id}`
-                : typeof window !== "undefined"
-                  ? `${window.location.origin}/sources?playlist=${encodeURIComponent(source.id)}`
-                  : ""
-            }
-            shareUrlWeb={
-              source.origin === "radio" && source.radio && typeof window !== "undefined"
-                ? `${window.location.origin}/radio?station=${encodeURIComponent(source.radio.id)}`
-                : undefined
-            }
+            item={unifiedSourceToShareable(source)}
+            fallbackPlaylistId={source.origin === "playlist" ? source.id : undefined}
+            fallbackRadioId={source.origin === "radio" && source.radio ? source.radio.id : undefined}
             onClose={() => setShareOpen(false)}
           />
-        )}
-        {hasPrevNext && (
-          <NeonControlButton size="sm" onClick={prev} title="Previous" aria-label="Previous">
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-            </svg>
-          </NeonControlButton>
         )}
         {active ? (
           <>
@@ -253,18 +236,11 @@ function FavoritesSourceRow({
             </svg>
           </NeonControlButton>
         )}
-        {hasPrevNext && (
-          <NeonControlButton size="sm" onClick={next} title="Next" aria-label="Next">
-            <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
-            </svg>
-          </NeonControlButton>
-        )}
         {source.origin === "playlist" && source.playlist && (
-          <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} size="xs" title="Edit" aria-label="Edit" />
+          <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="subtle" size="xs" title="Edit" aria-label="Edit" />
         )}
         {source.origin === "radio" && source.radio && (
-          <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} size="xs" title="Edit" aria-label="Edit" />
+          <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="subtle" size="xs" title="Edit" aria-label="Edit" />
         )}
         <NeonControlButton size="sm" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share}>
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

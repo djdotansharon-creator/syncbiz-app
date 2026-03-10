@@ -312,9 +312,13 @@ export function LibraryInputArea({ onAdd }: Props) {
     (rec as { start: () => void }).start();
   }, []);
 
-  const voiceSupported =
-    typeof window !== "undefined" &&
-    (!!(window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition || !!(window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  useEffect(() => {
+    setVoiceSupported(
+      !!(window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition ||
+      !!(window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition
+    );
+  }, []);
 
   const handleAddAllYoutube = useCallback(
     async () => {

@@ -197,12 +197,11 @@ function PlaylistRow({
   const router = useRouter();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const { playlists, status, volume, isActive, play, pause, stop, prev, next, setVolume } = usePlaylistPlayer();
+  const { status, volume, isActive, play, pause, stop, setVolume } = usePlaylistPlayer();
 
   const active = isActive(index);
   const embedded = playlist.type === "youtube" || playlist.type === "soundcloud";
   const localOrStream = !embedded;
-  const hasPrevNext = playlists.length > 1;
 
   useEffect(() => {
     if (!active || !localOrStream || status !== "playing") return;
@@ -265,15 +264,6 @@ function PlaylistRow({
       </div>
 
       <div className="flex items-center justify-center gap-2">
-        {hasPrevNext && (
-          <button
-            onClick={prev}
-            className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/60 text-slate-400 hover:bg-slate-700/80"
-            title="Previous"
-          >
-            ⏮
-          </button>
-        )}
         {active && (
           <>
             <button
@@ -308,15 +298,6 @@ function PlaylistRow({
             ▶
           </button>
         )}
-        {hasPrevNext && (
-          <button
-            onClick={next}
-            className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/60 text-slate-400 hover:bg-slate-700/80"
-            title="Next"
-          >
-            ⏭
-          </button>
-        )}
       </div>
 
       <div className="flex items-center gap-2">
@@ -336,7 +317,7 @@ function PlaylistRow({
         )}
         <Link
           href={`/playlists/${playlist.id}/edit`}
-          className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/40 text-slate-400 hover:bg-slate-700/60 hover:text-slate-200"
+          className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-900/70 text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]"
           title="Edit"
         >
           ✎

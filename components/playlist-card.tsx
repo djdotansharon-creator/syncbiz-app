@@ -10,8 +10,6 @@ import {
   ActionButtonPlay,
   ActionButtonStop,
   ActionButtonPause,
-  ActionButtonPrev,
-  ActionButtonNext,
   ActionButtonEdit,
 } from "@/components/ui/action-buttons";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
@@ -44,14 +42,12 @@ export function PlaylistCard({ playlist, index, onShare }: Props) {
   const [deleting, setDeleting] = useState(false);
 
   const {
-    playlists,
     status,
     volume,
     isActive,
     play,
     pause,
     stop,
-    prev,
     next,
     setVolume,
   } = usePlaylistPlayer();
@@ -97,7 +93,6 @@ export function PlaylistCard({ playlist, index, onShare }: Props) {
   }
 
   const showTransport = active && (embedded || localOrStream);
-  const hasPrevNext = playlists.length > 1;
 
   return (
     <article
@@ -139,17 +134,15 @@ export function PlaylistCard({ playlist, index, onShare }: Props) {
             playlist={playlist}
             status={status === "playing" ? "playing" : status === "paused" ? "paused" : "stopped"}
             volume={volume}
+            onTrackEnd={next}
             onVolumeChange={setVolume}
           />
         </div>
       )}
 
-      {/* Centered playback controls - Tesla-style */}
+      {/* Centered playback controls */}
       <div className="flex flex-col items-center gap-3 px-4 pb-4">
         <div className="flex items-center justify-center gap-2">
-          {hasPrevNext && (
-            <ActionButtonPrev onClick={prev} size="sm" title="Previous playlist" aria-label="Previous playlist" />
-          )}
           {showTransport && (
             <>
               <ActionButtonStop
@@ -166,9 +159,6 @@ export function PlaylistCard({ playlist, index, onShare }: Props) {
           )}
           {!showTransport && (
             <ActionButtonPlay onClick={() => play(index)} size="lg" title="Play" aria-label="Play" />
-          )}
-          {hasPrevNext && (
-            <ActionButtonNext onClick={next} size="sm" title="Next playlist" aria-label="Next playlist" />
           )}
         </div>
 
@@ -192,6 +182,8 @@ export function PlaylistCard({ playlist, index, onShare }: Props) {
         <div className="flex items-center justify-center gap-2">
           <ActionButtonEdit
             href={`/playlists/${playlist.id}/edit`}
+            variant="subtle"
+            size="xs"
             title={t.editPlaylist}
             aria-label={t.editPlaylist}
           />

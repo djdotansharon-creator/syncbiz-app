@@ -155,11 +155,10 @@ function ShuffleToggle() {
 function LibraryItemRow({ item, index }: { item: LibraryItem; index: number }) {
   const router = useRouter();
   const [shareOpen, setShareOpen] = useState(false);
-  const { playItem, isActive, prev, next, stop, pause, items } = useLibraryPlayback();
+  const { playItem, isActive, stop, pause } = useLibraryPlayback();
   const active = isActive(item);
   const cover = getLibraryItemCover(item);
   const name = getLibraryItemName(item);
-  const hasPrevNext = items.length > 1;
 
   const iconType = getIconType(item);
   const genre = isPlaylist(item) ? item.data.genre : null;
@@ -185,11 +184,6 @@ function LibraryItemRow({ item, index }: { item: LibraryItem; index: number }) {
         {genre && <p className="text-xs text-slate-500">{genre}</p>}
       </div>
       <div className="flex items-center gap-2">
-        {hasPrevNext && (
-          <button onClick={prev} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800" title="Previous">
-            ⏮
-          </button>
-        )}
         {active && (
           <>
             <button onClick={stop} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800" title="Stop">
@@ -208,14 +202,9 @@ function LibraryItemRow({ item, index }: { item: LibraryItem; index: number }) {
             ▶
           </button>
         )}
-        {hasPrevNext && (
-          <button onClick={next} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800" title="Next">
-            ⏭
-          </button>
-        )}
         {isPlaylist(item) ? (
           <>
-            <Link href={`/playlists/${item.data.id}/edit`} className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:bg-slate-800">
+            <Link href={`/playlists/${item.data.id}/edit`} className="rounded-lg border border-slate-700/80 bg-slate-900/70 px-2 py-1 text-xs text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]">
               Edit
             </Link>
             <button onClick={() => setShareOpen(true)} className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:bg-slate-800">
@@ -226,7 +215,7 @@ function LibraryItemRow({ item, index }: { item: LibraryItem; index: number }) {
             )}
           </>
         ) : (
-          <Link href={`/sources/${item.data.id}/edit`} className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:bg-slate-800">
+          <Link href={`/sources/${item.data.id}/edit`} className="rounded-lg border border-slate-700/80 bg-slate-900/70 px-2 py-1 text-xs text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]">
             Edit
           </Link>
         )}
