@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { inferPlaylistType, getYouTubeThumbnail } from "@/lib/playlist-utils";
+import { inferGenre } from "@/lib/infer-genre";
+import { resolveYouTubeMetadata } from "@/lib/youtube-metadata-resolver";
 
 type MetadataResult = {
   title: string;
   genre: string;
   cover: string | null;
   type: string;
+  viewCount?: number;
+  durationSeconds?: number;
 };
 
 export async function GET(req: NextRequest) {
@@ -48,6 +52,13 @@ export async function GET(req: NextRequest) {
       const vid = u.match(/(?:v=|\/)([^&\s?/]+)/)?.[1];
       result.title = vid ? `YouTube ${vid}` : "YouTube video";
     }
+    if (type === "youtube") {
+      const meta = await resolveYouTubeMetadata(u);
+      if (meta) {
+        result.viewCount = meta.viewCount;
+        result.durationSeconds = meta.durationSeconds;
+      }
+    }
   }
 
   // Winamp M3U: try to read first track if it's a local path we can access
@@ -60,6 +71,10 @@ export async function GET(req: NextRequest) {
 
   if (!result.title) {
     result.title = type === "stream-url" ? "Stream" : "Untitled";
+  }
+
+  if (result.title && result.genre === "Mixed") {
+    result.genre = inferGenre(result.title);
   }
 
   return NextResponse.json(result);

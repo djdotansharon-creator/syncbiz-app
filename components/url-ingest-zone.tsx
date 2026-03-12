@@ -14,7 +14,17 @@ type ParseResult = {
   genre: string;
   type: string;
   isRadio: boolean;
+  viewCount?: number;
+  artist?: string;
+  song?: string;
 };
+
+async function searchYouTube(q: string): Promise<{ title: string; url: string; cover: string | null; type?: string; viewCount?: number }[]> {
+  if (!q.trim() || q.length < 2) return [];
+  const res = await fetch(`/api/sources/search?q=${encodeURIComponent(q)}`);
+  const data = await res.json();
+  return data.results || [];
+}
 
 async function parseUrl(url: string): Promise<ParseResult | null> {
   const res = await fetch("/api/sources/parse-url", {
@@ -57,8 +67,49 @@ export function UrlIngestZone({ onAdd }: Props) {
           parsed.isRadio ||
           type === "winamp" ||
           trimmed.match(/\.(m3u8?|pls|aac|mp3)(\?|$)/i);
+        const isShazam = parsed.type === "shazam";
 
-        if (isRadio) {
+        if (isShazam) {
+          const searchQuery =
+            parsed.artist && parsed.song
+              ? `${parsed.artist} ${parsed.song}`
+              : parsed.title;
+          const ytResults = await searchYouTube(searchQuery);
+          const first = ytResults.find((r) => r.type === "youtube") ?? ytResults[0];
+          if (!first) {
+            setError("Could not find song on YouTube");
+            return;
+          }
+          const res = await fetch("/api/playlists", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: parsed.title,
+              url: first.url,
+              genre: parsed.genre || "Mixed",
+              type: "youtube",
+              thumbnail: first.cover || parsed.cover || "",
+              viewCount: first.viewCount,
+            }),
+          });
+          if (res.ok) {
+            const created = (await res.json()) as Playlist;
+            onAdd({
+              id: `pl-${created.id}`,
+              title: created.name,
+              genre: created.genre || "Mixed",
+              cover: created.thumbnail || null,
+              type: "youtube",
+              url: created.url,
+              origin: "playlist",
+              playlist: created,
+            });
+            setInputValue("");
+            router.refresh();
+          } else {
+            setError("Failed to add");
+          }
+        } else if (isRadio) {
           const res = await fetch("/api/radio", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -96,6 +147,7 @@ export function UrlIngestZone({ onAdd }: Props) {
               genre: parsed.genre,
               type: parsed.type,
               thumbnail: parsed.cover || "",
+              viewCount: parsed.viewCount,
             }),
           });
           if (res.ok) {

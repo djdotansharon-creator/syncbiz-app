@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource } from "@/lib/playback-provider";
+import { getPlaylistTracks } from "@/lib/playlist-types";
 import { useTranslations } from "@/lib/locale-context";
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
@@ -105,6 +106,10 @@ export function AudioPlayer() {
   const {
     currentTrack,
     currentSource,
+    currentTrackIndex,
+    currentPlaylist,
+    queue,
+    queueIndex,
     status,
     volume,
     shuffle,
@@ -122,7 +127,6 @@ export function AudioPlayer() {
     registerStopAllPlayers,
     currentPlayUrl,
     isEmbedded,
-    queue,
   } = usePlayback();
 
   const ytContainerRef = useRef<HTMLDivElement>(null);
@@ -727,31 +731,54 @@ export function AudioPlayer() {
               </NeonControlButton>
             </div>
 
-            {/* ROW 2: Track title – same width as control row and timeline */}
-            <div className="flex w-full">
-              <div
-                ref={titleContainerRef}
-                className="relative flex min-w-0 w-full items-center justify-center overflow-hidden rounded-lg border border-sky-500/25 bg-sky-500/8 px-3 py-1.5 shadow-[0_0_12px_rgba(56,189,248,0.06),inset_0_1px_0_rgba(255,255,255,0.02)]"
-              >
-                <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
-                  {currentTrack?.title ?? "No track selected"}
-                </span>
-                {titleOverflows ? (
-                  <div className="w-full overflow-hidden">
-                    <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
-                      <span className="text-xs font-medium text-sky-100/95 sm:text-sm">{currentTrack?.title ?? "No track selected"}</span>
-                      <span className="text-xs font-medium text-sky-100/95 sm:text-sm">{currentTrack?.title ?? "No track selected"}</span>
+            {/* ROW 2: Track title + Next – CDJ-style frame */}
+            {(() => {
+              let tracks: { name: string }[] = [];
+              try {
+                tracks = currentPlaylist ? getPlaylistTracks(currentPlaylist) : [];
+              } catch {
+                tracks = [];
+              }
+              const hasMoreTracks = tracks.length > 1 && currentTrackIndex < tracks.length - 1;
+              const nextTrackName = hasMoreTracks ? tracks[currentTrackIndex + 1]?.name : null;
+              const safeQueue = Array.isArray(queue) ? queue : [];
+              const nextSource = queueIndex >= 0 && queueIndex < safeQueue.length - 1 ? safeQueue[queueIndex + 1] : null;
+              const nextLabel = nextTrackName ?? nextSource?.title ?? null;
+              return (
+                <div className="flex w-full">
+                  <div className="relative flex min-w-0 w-full flex-col gap-1.5 rounded-lg border border-sky-500/25 bg-sky-500/8 p-1.5 shadow-[0_0_12px_rgba(56,189,248,0.06),inset_0_1px_0_rgba(255,255,255,0.02)]">
+                    <div
+                      ref={titleContainerRef}
+                      className="relative flex min-w-0 overflow-hidden rounded border border-sky-500/20 bg-sky-500/5 px-2.5 py-1"
+                    >
+                      <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
+                        {currentTrack?.title ?? "No track selected"}
+                      </span>
+                      {titleOverflows ? (
+                        <div className="w-full overflow-hidden">
+                          <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
+                            <span className="text-xs font-medium text-sky-100/95 sm:text-sm">{currentTrack?.title ?? "No track selected"}</span>
+                            <span className="text-xs font-medium text-sky-100/95 sm:text-sm">{currentTrack?.title ?? "No track selected"}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="min-w-0 flex-1 truncate text-center text-xs font-medium text-sky-100/95 sm:text-sm" title={currentTrack?.title ?? undefined}>
+                          {currentTrack?.title ?? "No track selected"}
+                        </p>
+                      )}
                     </div>
+                    {nextLabel && (
+                      <div className="flex items-center justify-center gap-1.5 text-xs">
+                        <span className="shrink-0 font-medium uppercase tracking-wider text-slate-500">{t?.next ?? "Next"}:</span>
+                        <span className="min-w-0 truncate font-medium text-sky-400/90" title={nextLabel}>{nextLabel}</span>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <p className="min-w-0 flex-1 truncate text-center text-xs font-medium text-sky-100/95 sm:text-sm" title={currentTrack?.title ?? undefined}>
-                    {currentTrack?.title ?? "No track selected"}
-                  </p>
-                )}
-              </div>
-            </div>
+                </div>
+              );
+            })()}
 
-            {/* ROW 3: Timeline – [current time] [progress bar] [total duration] – right boundary reference */}
+            {/* ROW 3: Timeline – [current time] [progress bar] [total duration] */}
             <div className="flex w-full items-center gap-3">
               <span className="w-10 shrink-0 text-right text-xs font-semibold tabular-nums text-slate-400 sm:w-12" aria-live="polite">
                 {formatTime(position)}

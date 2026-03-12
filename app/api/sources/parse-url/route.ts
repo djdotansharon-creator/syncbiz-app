@@ -5,7 +5,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { inferPlaylistType, getYouTubeThumbnail } from "@/lib/playlist-utils";
+import { inferPlaylistType, getYouTubeThumbnail, getYouTubeVideoId, isShazamUrl, extractShazamSongFromPath } from "@/lib/playlist-utils";
+import { inferGenre } from "@/lib/infer-genre";
+import { resolveYouTubeMetadata } from "@/lib/youtube-metadata-resolver";
 
 const DEFAULT_GENRE = "Mixed";
 const LIVE_RADIO_GENRE = "Live Radio";
@@ -94,6 +96,7 @@ export async function POST(req: NextRequest) {
 
     const type = inferPlaylistType(raw);
     const isRadio = isStreamOrRadioUrl(raw) || type === "winamp";
+    const isShazam = isShazamUrl(raw);
 
     const result: {
       title: string;
@@ -101,15 +104,45 @@ export async function POST(req: NextRequest) {
       genre: string;
       type: string;
       isRadio: boolean;
+      viewCount?: number;
+      durationSeconds?: number;
+      artist?: string;
+      song?: string;
     } = {
       title: "",
       cover: null,
       genre: isRadio ? LIVE_RADIO_GENRE : DEFAULT_GENRE,
-      type,
+      type: isShazam ? "shazam" : type,
       isRadio,
     };
 
-    if (type === "youtube" || type === "soundcloud" || type === "spotify") {
+    if (isShazam) {
+      const songFromPath = extractShazamSongFromPath(raw);
+      result.title = songFromPath || "Shazam track";
+      try {
+        const res = await fetch(raw, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (res.ok) {
+          const html = await res.text();
+          const ogTitle = parseOgTitle(html);
+          const ogImage = parseOgImage(html);
+          if (ogTitle) {
+            result.title = ogTitle;
+            const dash = ogTitle.indexOf(" - ");
+            if (dash > 0) {
+              result.artist = ogTitle.slice(0, dash).trim();
+              result.song = ogTitle.slice(dash + 3).trim();
+            }
+          }
+          if (ogImage) result.cover = resolveUrl(ogImage, raw);
+        }
+      } catch {
+        /* Shazam may block fetch; use path-extracted song */
+      }
+      if (!result.song && songFromPath) result.song = songFromPath;
+    } else if (type === "youtube" || type === "soundcloud" || type === "spotify") {
       try {
         const res = await fetch(
           `https://noembed.com/embed?url=${encodeURIComponent(raw)}`,
@@ -132,6 +165,15 @@ export async function POST(req: NextRequest) {
       }
       if (type === "soundcloud" && !result.title) result.title = "SoundCloud track";
       if (type === "spotify" && !result.title) result.title = "Spotify";
+
+      // Fetch view count and duration for YouTube URLs (via central resolver – cached, deduped)
+      if (type === "youtube") {
+        const meta = await resolveYouTubeMetadata(raw);
+        if (meta) {
+          result.viewCount = meta.viewCount;
+          result.durationSeconds = meta.durationSeconds;
+        }
+      }
     }
 
     if (isRadio || (type === "stream-url" && !result.title)) {
@@ -170,6 +212,10 @@ export async function POST(req: NextRequest) {
 
     if (!result.title) {
       result.title = extractDomain(raw) || "Untitled";
+    }
+
+    if (result.title && result.genre === DEFAULT_GENRE && !isRadio) {
+      result.genre = inferGenre(result.title);
     }
 
     return NextResponse.json(result);

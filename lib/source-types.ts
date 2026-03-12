@@ -33,6 +33,8 @@ export type UnifiedSource = {
   url: string;
   /** Origin: from playlist store, db source, or radio */
   origin: "playlist" | "source" | "radio";
+  /** View count (YouTube) – from stored data or fetched when displaying */
+  viewCount?: number;
   /** Raw data for playback logic */
   playlist?: Playlist;
   source?: Source;

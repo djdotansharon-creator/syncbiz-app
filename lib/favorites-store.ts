@@ -17,12 +17,21 @@ export function getFavorites(): string[] {
   }
 }
 
+export const FAVORITES_CHANGED_EVENT = "syncbiz-favorites-changed";
+
+function notifyFavoritesChanged() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(FAVORITES_CHANGED_EVENT));
+  }
+}
+
 export function addFavorite(id: string): void {
   const ids = getFavorites();
   if (ids.includes(id)) return;
   ids.push(id);
   if (typeof window !== "undefined") {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+    notifyFavoritesChanged();
   }
 }
 
@@ -30,6 +39,7 @@ export function removeFavorite(id: string): void {
   const ids = getFavorites().filter((x) => x !== id);
   if (typeof window !== "undefined") {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+    notifyFavoritesChanged();
   }
 }
 
@@ -44,12 +54,14 @@ export function toggleFavorite(id: string): boolean {
     ids.splice(idx, 1);
     if (typeof window !== "undefined") {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+      notifyFavoritesChanged();
     }
     return false;
   }
   ids.push(id);
   if (typeof window !== "undefined") {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+    notifyFavoritesChanged();
   }
   return true;
 }

@@ -1,16 +1,19 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "@/lib/locale-context";
+import { useLocale, useTranslations } from "@/lib/locale-context";
+import { labels } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { radioToUnified } from "@/lib/radio-utils";
-import { RadioStreamCard } from "@/components/radio-stream-card";
-import { AddRadioForm } from "@/components/add-radio-form";
+import { RadioSearchBar } from "@/components/radio-search-bar";
+import { RadioIcon } from "@/components/ui/radio-icon";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
+import { ActionButtonShare, ActionButtonEdit } from "@/components/ui/action-buttons";
+import { ShareModal } from "@/components/share-modal";
+import { radioToShareable } from "@/lib/share-utils";
 import type { RadioStream } from "@/lib/source-types";
-
-type ViewMode = "grid" | "list";
 
 type Props = {
   initialStations: RadioStream[];
@@ -18,10 +21,8 @@ type Props = {
 
 export function RadioStreamsManager({ initialStations }: Props) {
   const router = useRouter();
+  const { locale } = useLocale();
   const { t } = useTranslations();
-  const [viewMode, setViewMode] = useState<ViewMode>("grid");
-  const [genreFilter, setGenreFilter] = useState("");
-  const [showAddForm, setShowAddForm] = useState(false);
   const [stations, setStations] = useState<RadioStream[]>(initialStations);
 
   // Sync when parent refetches (e.g. after adding a station)
@@ -29,18 +30,7 @@ export function RadioStreamsManager({ initialStations }: Props) {
     setStations(initialStations);
   }, [initialStations]);
 
-  const genres = useMemo(
-    () => [...new Set(stations.map((s) => s.genre).filter(Boolean))].sort(),
-    [stations],
-  );
-
-  const filtered = useMemo(() => {
-    if (!genreFilter) return stations;
-    return stations.filter((s) => s.genre?.toLowerCase() === genreFilter.toLowerCase());
-  }, [stations, genreFilter]);
-
   const handleAdd = () => {
-    setShowAddForm(false);
     router.refresh();
   };
 
@@ -49,88 +39,46 @@ export function RadioStreamsManager({ initialStations }: Props) {
     router.refresh();
   };
 
-  const handleEdit = (id: string) => {
-    router.push(`/radio/${id}/edit`);
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex rounded-xl border border-slate-800 bg-slate-900/60 p-0.5" role="tablist">
-            <button
-              type="button"
-              onClick={() => setViewMode("grid")}
-              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                viewMode === "grid" ? "bg-slate-700 text-slate-100" : "text-slate-500 hover:text-slate-300"
-              }`}
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="7" height="7" rx="1" />
-                <rect x="14" y="3" width="7" height="7" rx="1" />
-                <rect x="3" y="14" width="7" height="7" rx="1" />
-                <rect x="14" y="14" width="7" height="7" rx="1" />
-              </svg>
-              {t.gridView}
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("list")}
-              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                viewMode === "list" ? "bg-slate-700 text-slate-100" : "text-slate-500 hover:text-slate-300"
-              }`}
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="8" y1="6" x2="21" y2="6" />
-                <line x1="8" y1="12" x2="21" y2="12" />
-                <line x1="8" y1="18" x2="21" y2="18" />
-                <line x1="3" y1="6" x2="3.01" y2="6" />
-                <line x1="3" y1="12" x2="3.01" y2="12" />
-                <line x1="3" y1="18" x2="3.01" y2="18" />
-              </svg>
-              {t.listView}
-            </button>
-          </div>
-          {genres.length > 0 && (
-            <select
-              value={genreFilter}
-              onChange={(e) => setGenreFilter(e.target.value)}
-              className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200"
-            >
-              <option value="">{t.allGenres}</option>
-              {genres.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          )}
-          <button
-            type="button"
-            onClick={() => setShowAddForm((v) => !v)}
-            className="rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+          <Link
+            href="/sources"
+            className="flex h-9 items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-3 text-sm font-medium text-slate-200 transition hover:border-slate-700 hover:bg-slate-800/80 hover:text-slate-100"
           >
-            {showAddForm ? t.hide : t.addSource}
-          </button>
+            {t.library}
+          </Link>
+          <Link
+            href="/favorites"
+            className="flex h-9 items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-3 text-sm font-medium text-slate-200 transition hover:border-slate-700 hover:bg-slate-800/80 hover:text-slate-100"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+            </svg>
+            {t.favorites}
+          </Link>
+          <Link
+            href="/radio"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 text-xs font-semibold uppercase tracking-wider text-sky-300"
+            aria-current="page"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+            {labels.radio?.[locale] ?? "Radio"}
+          </Link>
         </div>
       </div>
 
-      {showAddForm && <AddRadioForm onAdd={handleAdd} />}
+      <RadioSearchBar onAdd={handleAdd} />
 
-      {filtered.length === 0 ? (
+      {stations.length === 0 ? (
         <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 py-16 text-center text-sm text-slate-500">
           {t.radioNoStations}
         </div>
-      ) : viewMode === "grid" ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((station) => (
-            <RadioStreamCard key={station.id} station={station} onRemove={handleRemove} onEdit={handleEdit} />
-          ))}
-        </div>
       ) : (
         <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 divide-y divide-slate-800/60 overflow-hidden">
-          {filtered.map((station) => (
-            <RadioStreamRow key={station.id} station={station} onRemove={handleRemove} onEdit={handleEdit} />
+          {stations.map((station) => (
+            <RadioStreamRow key={station.id} station={station} onRemove={handleRemove} />
           ))}
         </div>
       )}
@@ -138,8 +86,10 @@ export function RadioStreamsManager({ initialStations }: Props) {
   );
 }
 
-function RadioStreamRow({ station, onRemove, onEdit }: { station: RadioStream; onRemove: (id: string) => void; onEdit: (id: string) => void }) {
+function RadioStreamRow({ station, onRemove }: { station: RadioStream; onRemove: (id: string) => void }) {
   const { playSource, stop, pause, currentSource } = usePlayback();
+  const { t } = useTranslations();
+  const [shareOpen, setShareOpen] = useState(false);
   const unified = radioToUnified(station);
   const active = currentSource?.id === station.id;
   const DEFAULT_IMAGE = "/radio-default.svg";
@@ -147,18 +97,37 @@ function RadioStreamRow({ station, onRemove, onEdit }: { station: RadioStream; o
 
   return (
     <div
-      className={`grid grid-cols-[auto,1fr,auto] gap-4 items-center rounded-xl px-4 py-3 transition-all hover:bg-slate-900/40 ${
+      className={`flex items-center gap-4 rounded-xl px-4 py-3 transition-all hover:bg-slate-900/40 ${
         active ? "playing-active bg-slate-900/60" : ""
       }`}
     >
-      <div className="relative h-14 w-14 overflow-hidden rounded-lg bg-slate-800">
-        <img src={cover} alt="" className="h-full w-full object-cover" onError={(e) => (e.currentTarget.src = DEFAULT_IMAGE)} />
+      {/* Image left */}
+      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+        {cover ? (
+          <img src={cover} alt="" className="h-full w-full object-cover" onError={(e) => (e.currentTarget.src = DEFAULT_IMAGE)} />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-rose-400/70">
+            <RadioIcon className="h-7 w-7" />
+          </div>
+        )}
+        <span
+          className={`absolute top-1 right-1 rounded px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-white ${
+            active ? "bg-red-500 animate-pulse shadow-[0_0_6px_rgba(239,68,68,0.8)]" : "bg-rose-500/90"
+          }`}
+        >
+          {t.live ?? "LIVE"}
+        </span>
       </div>
+      {/* Details opposite image */}
       <div className="min-w-0 flex-1 flex items-center gap-3">
         <span className="truncate font-medium text-slate-100">{station.name}</span>
         {station.genre && <span className="text-xs text-slate-500">{station.genre}</span>}
+        <RadioIcon className="h-5 w-5 shrink-0 text-rose-400/80" />
       </div>
-      <div className="flex flex-nowrap items-center gap-2" role="group" aria-label="Radio controls">
+      {/* Spacer to center controls */}
+      <div className="flex-1 min-w-0" />
+      {/* Controls centered */}
+      <div className="flex flex-nowrap items-center gap-2 shrink-0" role="group" aria-label="Radio controls">
         {active && (
           <>
             <NeonControlButton size="sm" onClick={stop} title="Stop" aria-label="Stop">
@@ -185,13 +154,17 @@ function RadioStreamRow({ station, onRemove, onEdit }: { station: RadioStream; o
             </svg>
           </NeonControlButton>
         )}
-        <NeonControlButton size="sm" onClick={() => onEdit(station.id)} title="Edit" aria-label="Edit">
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-          </svg>
-        </NeonControlButton>
+        <ActionButtonShare variant="player" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share} />
+        <ActionButtonEdit href={`/radio/${station.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
       </div>
+      <div className="flex-1 min-w-0" />
+      {shareOpen && (
+        <ShareModal
+          item={radioToShareable(station)}
+          fallbackRadioId={station.id}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
     </div>
   );
 }

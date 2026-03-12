@@ -190,7 +190,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const idx = Math.min(trackIndex, Math.max(0, tracks.length - 1));
       const track = tracks[idx] ?? null;
       const url = track?.url ?? source.url;
-      const embedded = playlist && track ? canEmbedInCard(track.type) : source.type === "youtube" || source.type === "soundcloud";
+      const isRadioOrStream =
+        source.origin === "radio" ||
+        (source.type === "stream-url" && url?.startsWith("http"));
+      const embedded =
+        isRadioOrStream ||
+        (playlist && track ? canEmbedInCard(track.type) : source.type === "youtube" || source.type === "soundcloud");
 
       stopAllBeforePlay();
 

@@ -3,10 +3,12 @@ import { listPlaylists } from "@/lib/playlist-store";
 import { listRadioStations } from "@/lib/radio-store";
 import { radioToUnified } from "@/lib/radio-utils";
 import { db } from "@/lib/store";
+import { getDeletedSourceIds } from "@/lib/deleted-sources-store";
 import type { UnifiedSource, SourceProviderType } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
 import { getSourceArtworkUrl, detectProvider } from "@/lib/player-utils";
 import { getYouTubeThumbnail } from "@/lib/playlist-utils";
+import { inferGenre } from "@/lib/infer-genre";
 
 function playlistToUnified(p: Playlist): UnifiedSource {
   const cover = p.thumbnail || p.cover || null;
@@ -38,7 +40,7 @@ function dbSourceToUnified(s: { id: string; name: string; target: string; artwor
   return {
     id: `src-${s.id}`,
     title: s.name,
-    genre: "Mixed",
+    genre: inferGenre(s.name),
     cover,
     type,
     url: target,
@@ -49,18 +51,23 @@ function dbSourceToUnified(s: { id: string; name: string; target: string; artwor
 
 export async function GET() {
   try {
-    const [playlists, radioStations, dbSources] = await Promise.all([
+    const [playlists, radioStations, dbSources, deletedIds] = await Promise.all([
       listPlaylists(),
       listRadioStations(),
       Promise.resolve(db.getSources()),
+      getDeletedSourceIds(),
     ]);
+
+    const filteredDbSources = dbSources.filter((s) => !deletedIds.has(s.id));
 
     const items: UnifiedSource[] = [
       ...playlists.map(playlistToUnified),
       ...radioStations.map(radioToUnified),
-      ...dbSources.map(dbSourceToUnified),
+      ...filteredDbSources.map(dbSourceToUnified),
     ];
 
+    // No metadata fetch on page load. Use only what's in the store.
+    // Metadata is fetched only when: adding URL, or user clicks refresh.
     return NextResponse.json(items);
   } catch (e) {
     console.error("[api/sources/unified] GET error:", e);

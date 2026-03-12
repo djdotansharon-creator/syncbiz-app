@@ -2,13 +2,17 @@
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
-import { useTranslations } from "@/lib/locale-context";
+import { useLocale, useTranslations } from "@/lib/locale-context";
+import { labels } from "@/lib/locale-context";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
-import { ActionButtonEdit } from "@/components/ui/action-buttons";
+import { ActionButtonEdit, ActionButtonShare } from "@/components/ui/action-buttons";
+import { RadioIcon } from "@/components/ui/radio-icon";
+import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { SourcesPlaybackProvider, useSourcesPlayback } from "@/lib/sources-playback-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { SourceCard } from "@/components/source-card-unified";
@@ -60,6 +64,7 @@ function useFavoritesState() {
 function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; pageSubtitle?: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { locale } = useLocale();
   const { t } = useTranslations();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [genreFilter, setGenreFilter] = useState("");
@@ -81,19 +86,15 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     }
   }, [searchParams, sources, playSource]);
 
-  const nonFavoriteSources = useMemo(
-    () => sources.filter((s) => !favoriteIds.includes(s.id)),
-    [sources, favoriteIds]
-  );
   const genres = useMemo(
-    () => [...new Set(nonFavoriteSources.map((s) => s.genre).filter(Boolean))].sort(),
-    [nonFavoriteSources]
+    () => [...new Set(sources.map((s) => s.genre).filter(Boolean))].sort(),
+    [sources]
   );
 
   const filtered = useMemo(() => {
-    if (!genreFilter) return nonFavoriteSources;
-    return nonFavoriteSources.filter((s) => s.genre?.toLowerCase() === genreFilter.toLowerCase());
-  }, [nonFavoriteSources, genreFilter]);
+    if (!genreFilter) return sources;
+    return sources.filter((s) => s.genre?.toLowerCase() === genreFilter.toLowerCase());
+  }, [sources, genreFilter]);
 
   const displaySources = filtered;
 
@@ -119,23 +120,21 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
 
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border border-slate-700/60 bg-slate-900/50 px-4 py-4 backdrop-blur-sm shadow-[0_0_0_1px_rgba(30,215,96,0.06)]" aria-label="Library">
-        <div className="space-y-4">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight text-slate-50">{pageTitle ?? t.library}</h1>
-            <p className="mt-0.5 text-xs text-slate-400">{pageSubtitle ?? t.libraryPageSubtitle}</p>
-          </div>
-          <LibraryInputArea onAdd={handleAdd} />
-        </div>
-      </section>
+      {/* Title & subtitle – no frame, lively colors like player */}
+      <div>
+        <h1 className="text-lg font-semibold tracking-tight text-slate-100">{pageTitle ?? t.library}</h1>
+        <p className="mt-0.5 text-sm text-slate-300">{pageSubtitle ?? t.libraryPageSubtitle}</p>
+      </div>
+
+      <LibraryInputArea onAdd={handleAdd} />
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex rounded-xl border border-slate-800 bg-slate-900/60 p-0.5" role="tablist">
+          <div className="flex h-9 rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 p-0.5" role="tablist">
             <button
               type="button"
               onClick={() => setViewMode("grid")}
-              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+              className={`flex h-full items-center gap-2 rounded-lg px-3 text-sm font-medium transition ${
                 viewMode === "grid" ? "bg-slate-700 text-slate-100" : "text-slate-500 hover:text-slate-300"
               }`}
             >
@@ -150,7 +149,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
             <button
               type="button"
               onClick={() => setViewMode("list")}
-              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+              className={`flex h-full items-center gap-2 rounded-lg px-3 text-sm font-medium transition ${
                 viewMode === "list" ? "bg-slate-700 text-slate-100" : "text-slate-500 hover:text-slate-300"
               }`}
             >
@@ -169,7 +168,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
             <select
               value={genreFilter}
               onChange={(e) => setGenreFilter(e.target.value)}
-              className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-sm text-slate-200"
+              className="h-9 rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 px-3 text-sm text-slate-200"
             >
               <option value="">{t.allGenres}</option>
               {genres.map((g) => (
@@ -179,11 +178,39 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
               ))}
             </select>
           )}
+          <Link
+            href="/sources"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 text-xs font-semibold uppercase tracking-wider text-sky-300"
+            aria-current="page"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+            {t.library}
+          </Link>
+          <Link
+            href="/favorites"
+            className="flex h-9 items-center gap-2 rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 px-3 text-sm font-medium text-slate-200 transition hover:border-slate-700 hover:bg-slate-800 hover:text-slate-100"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+            </svg>
+            {t.favorites}
+          </Link>
+          <Link
+            href="/radio"
+            className="flex h-9 items-center gap-2 rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 px-3 text-sm font-medium text-slate-200 transition hover:border-slate-700 hover:bg-slate-800 hover:text-slate-100"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
+              <path d="M4 14h16" />
+              <circle cx="12" cy="18" r="2" />
+            </svg>
+            {labels.radio?.[locale] ?? "Radio"}
+          </Link>
         </div>
       </div>
 
       {displaySources.length === 0 ? (
-        <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 py-16 text-center text-sm text-slate-500">
+        <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 ring-1 ring-slate-700/60 py-16 text-center text-sm text-slate-500">
           {t.noSourcesYetDragDrop}
         </div>
       ) : viewMode === "grid" ? (
@@ -204,7 +231,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
           ))}
         </div>
       ) : (
-        <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 divide-y divide-slate-800/60 overflow-hidden">
+        <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 ring-1 ring-slate-700/60 divide-y divide-slate-800/60 overflow-hidden">
           {displaySources.map((source) => (
             <SourceRow
               key={source.id}
@@ -254,26 +281,32 @@ function SourceRow({
     <div
       draggable={draggable}
       onDragStart={onDragStart}
-      className={`grid grid-cols-[auto,1fr,auto] gap-4 items-center rounded-xl px-4 py-3 transition-all hover:bg-slate-900/40 ${
+      className={`flex items-center gap-4 rounded-xl px-4 py-3 transition-all hover:bg-slate-900/40 ${
         active ? "playing-active bg-slate-900/60" : ""
       } ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
     >
-      <div className="relative h-14 w-14 overflow-hidden rounded-lg bg-slate-800">
+      {/* Image left */}
+      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-800">
         {source.cover ? (
           <HydrationSafeImage src={source.cover} alt="" className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-slate-500">
-            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M9 18V5l12-2v13" />
-              <circle cx="6" cy="18" r="3" />
-              <circle cx="18" cy="16" r="3" />
-            </svg>
+          <div className={`flex h-full w-full items-center justify-center ${source.origin === "radio" ? "text-rose-400/70" : "text-slate-500"}`}>
+            {source.origin === "radio" ? (
+              <RadioIcon className="h-7 w-7" />
+            ) : (
+              <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M9 18V5l12-2v13" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="18" cy="16" r="3" />
+              </svg>
+            )}
           </div>
         )}
         <div className="absolute bottom-0 right-0 p-0.5">
           <SourceLogo type={source.type} origin={source.origin} size="sm" />
         </div>
       </div>
+      {/* Details opposite image */}
       <div className="min-w-0 flex-1 flex items-center gap-3">
         {onToggleFavorite && (
           <button
@@ -288,11 +321,30 @@ function SourceRow({
             </svg>
           </button>
         )}
-        <span className="truncate font-medium text-slate-100">{source.title}</span>
-        {source.genre && <span className="text-xs text-slate-500">{source.genre}</span>}
+        <div className="min-w-0 flex flex-col gap-0.5">
+          <span className="truncate font-medium text-slate-100">{source.title}</span>
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            {source.genre && <span>{source.genre}</span>}
+            {(source.viewCount ?? source.playlist?.viewCount) != null && (
+              <>
+                {source.genre && <span>•</span>}
+                <span className="tabular-nums">{formatViewCount(source.viewCount ?? source.playlist?.viewCount ?? 0)} {t.views ?? "views"}</span>
+              </>
+            )}
+            {(source.playlist?.durationSeconds ?? 0) > 0 && (
+              <>
+                <span>•</span>
+                <span className="tabular-nums">{formatDuration(source.playlist?.durationSeconds ?? 0)}</span>
+              </>
+            )}
+          </div>
+        </div>
         <SourceLogo type={source.type} origin={source.origin} size="md" />
       </div>
-      <div className="flex flex-nowrap items-center gap-2" role="group" aria-label="Source controls">
+      {/* Spacer to center controls */}
+      <div className="flex-1 min-w-0" />
+      {/* Controls centered */}
+      <div className="flex flex-nowrap items-center gap-2 shrink-0" role="group" aria-label="Source controls">
         {shareOpen && (
           <ShareModal
             item={unifiedSourceToShareable(source)}
@@ -328,14 +380,18 @@ function SourceRow({
           </NeonControlButton>
         )}
         {source.origin === "playlist" && source.playlist && (
-          <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="subtle" size="xs" title="Edit" aria-label="Edit" />
+          <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
         )}
         {source.origin === "radio" && source.radio && (
-          <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="subtle" size="xs" title="Edit" aria-label="Edit" />
+          <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
+        )}
+        {source.origin === "source" && source.source && (
+          <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
         )}
         <ShareButton source={source} onShareOpen={() => setShareOpen(true)} />
         <SourceRowDeleteButton source={source} onRemove={onRemove} />
       </div>
+      <div className="flex-1 min-w-0" />
     </div>
   );
 }
@@ -391,15 +447,7 @@ function SourceRowDeleteButton({ source, onRemove }: { source: UnifiedSource; on
 function ShareButton({ source, onShareOpen }: { source: UnifiedSource; onShareOpen: () => void }) {
   const { t } = useTranslations();
   return (
-    <NeonControlButton size="sm" onClick={onShareOpen} title={t.share} aria-label={t.share}>
-      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="18" cy="5" r="3" />
-        <circle cx="6" cy="12" r="3" />
-        <circle cx="18" cy="19" r="3" />
-        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-        <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-      </svg>
-    </NeonControlButton>
+    <ActionButtonShare variant="player" onClick={onShareOpen} title={t.share} aria-label={t.share} />
   );
 }
 

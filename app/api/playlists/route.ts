@@ -25,6 +25,8 @@ export async function POST(req: NextRequest) {
     const type = body.type ?? "stream-url";
     const genre = (body.genre ?? "").trim();
     const thumbnail = ((body.cover ?? body.thumbnail) ?? "").trim();
+    const viewCount = typeof body.viewCount === "number" && body.viewCount >= 0 ? body.viewCount : undefined;
+    const durationSeconds = typeof body.durationSeconds === "number" && body.durationSeconds >= 0 ? body.durationSeconds : undefined;
 
     if (!name || !url) {
       return NextResponse.json(
@@ -46,6 +48,8 @@ export async function POST(req: NextRequest) {
       type,
       url,
       thumbnail,
+      viewCount,
+      durationSeconds,
     });
     return NextResponse.json(playlist, { status: 201 });
   } catch (e) {

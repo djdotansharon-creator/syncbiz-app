@@ -6,9 +6,11 @@ import Link from "next/link";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
-import { useTranslations } from "@/lib/locale-context";
+import { useLocale, useTranslations } from "@/lib/locale-context";
+import { labels } from "@/lib/locale-context";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { ActionButtonEdit } from "@/components/ui/action-buttons";
+import { RadioIcon } from "@/components/ui/radio-icon";
 import { SourcesPlaybackProvider, useSourcesPlayback } from "@/lib/sources-playback-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { SourceCard } from "@/components/source-card-unified";
@@ -67,13 +69,24 @@ function FavoritesManagerInner({
   refresh: () => void;
 }) {
   const router = useRouter();
+  const { locale } = useLocale();
   const { t } = useTranslations();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [genreFilter, setGenreFilter] = useState("");
   const { setQueue } = usePlayback();
 
+  const genres = useMemo(
+    () => [...new Set(favoriteSources.map((s) => s.genre).filter(Boolean))].sort(),
+    [favoriteSources],
+  );
+  const filtered = useMemo(() => {
+    if (!genreFilter) return favoriteSources;
+    return favoriteSources.filter((s) => s.genre?.toLowerCase() === genreFilter.toLowerCase());
+  }, [favoriteSources, genreFilter]);
+
   useEffect(() => {
-    setQueue(favoriteSources);
-  }, [favoriteSources, setQueue]);
+    setQueue(filtered);
+  }, [filtered, setQueue]);
 
   const handleRemove = useCallback(
     (id: string) => {
@@ -101,31 +114,72 @@ function FavoritesManagerInner({
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex rounded-xl border border-slate-800 bg-slate-900/60 p-0.5" role="tablist">
-          <button
-            type="button"
-            onClick={() => setViewMode("grid")}
-            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-              viewMode === "grid" ? "bg-slate-700 text-slate-100" : "text-slate-500 hover:text-slate-300"
-            }`}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex h-9 rounded-xl border border-slate-800 bg-slate-900/60 p-0.5" role="tablist">
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              className={`flex h-full items-center gap-2 rounded-lg px-3 text-sm font-medium transition ${
+                viewMode === "grid" ? "bg-slate-700 text-slate-100" : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              {t.gridView}
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("list")}
+              className={`flex h-full items-center gap-2 rounded-lg px-3 text-sm font-medium transition ${
+                viewMode === "list" ? "bg-slate-700 text-slate-100" : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              {t.listView}
+            </button>
+          </div>
+          {genres.length > 0 && (
+            <select
+              value={genreFilter}
+              onChange={(e) => setGenreFilter(e.target.value)}
+              className="h-9 rounded-xl border border-slate-800 bg-slate-900/60 px-3 text-sm text-slate-200"
+            >
+              <option value="">{t.allGenres}</option>
+              {genres.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+          )}
+          <Link
+            href="/sources"
+            className="flex h-9 items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-3 text-sm font-medium text-slate-200 transition hover:border-slate-700 hover:bg-slate-800/80 hover:text-slate-100"
           >
-            {t.gridView}
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode("list")}
-            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-              viewMode === "list" ? "bg-slate-700 text-slate-100" : "text-slate-500 hover:text-slate-300"
-            }`}
+            {t.library}
+          </Link>
+          <Link
+            href="/favorites"
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 text-xs font-semibold uppercase tracking-wider text-sky-300"
+            aria-current="page"
           >
-            {t.listView}
-          </button>
+            <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+            {t.favorites}
+          </Link>
+          <Link
+            href="/radio"
+            className="flex h-9 items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-3 text-sm font-medium text-slate-200 transition hover:border-slate-700 hover:bg-slate-800/80 hover:text-slate-100"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
+              <path d="M4 14h16" />
+              <circle cx="12" cy="18" r="2" />
+            </svg>
+            {labels.radio?.[locale] ?? "Radio"}
+          </Link>
         </div>
       </div>
 
       {viewMode === "grid" ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {favoriteSources.map((source) => (
+          {filtered.map((source) => (
             <SourceCard
               key={source.id}
               source={source}
@@ -137,7 +191,7 @@ function FavoritesManagerInner({
         </div>
       ) : (
         <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 divide-y divide-slate-800/60 overflow-hidden">
-          {favoriteSources.map((source) => (
+          {filtered.map((source) => (
             <FavoritesSourceRow
               key={source.id}
               source={source}
@@ -170,23 +224,29 @@ function FavoritesSourceRow({
 
   return (
     <div
-      className={`grid grid-cols-[auto,1fr,auto] gap-4 items-center rounded-xl px-4 py-3 transition-all hover:bg-slate-900/40 ${
+      className={`flex items-center gap-4 rounded-xl px-4 py-3 transition-all hover:bg-slate-900/40 ${
         active ? "playing-active bg-slate-900/60" : ""
       }`}
     >
-      <div className="relative h-14 w-14 overflow-hidden rounded-lg bg-slate-800">
+      {/* Image left */}
+      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-800">
         {source.cover ? (
           <img src={source.cover} alt="" className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-slate-500">
-            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M9 18V5l12-2v13" />
-              <circle cx="6" cy="18" r="3" />
-              <circle cx="18" cy="16" r="3" />
-            </svg>
+          <div className={`flex h-full w-full items-center justify-center ${source.origin === "radio" ? "text-rose-400/70" : "text-slate-500"}`}>
+            {source.origin === "radio" ? (
+              <RadioIcon className="h-7 w-7" />
+            ) : (
+              <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M9 18V5l12-2v13" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="18" cy="16" r="3" />
+              </svg>
+            )}
           </div>
         )}
       </div>
+      {/* Details opposite image */}
       <div className="min-w-0 flex-1 flex items-center gap-3">
         <button
           type="button"
@@ -202,7 +262,10 @@ function FavoritesSourceRow({
         <span className="truncate font-medium text-slate-100">{source.title}</span>
         {source.genre && <span className="text-xs text-slate-500">{source.genre}</span>}
       </div>
-      <div className="flex flex-nowrap items-center gap-2">
+      {/* Spacer to center controls */}
+      <div className="flex-1 min-w-0" />
+      {/* Controls centered */}
+      <div className="flex flex-nowrap items-center gap-2 shrink-0">
         {shareOpen && (
           <ShareModal
             item={unifiedSourceToShareable(source)}
@@ -237,10 +300,13 @@ function FavoritesSourceRow({
           </NeonControlButton>
         )}
         {source.origin === "playlist" && source.playlist && (
-          <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="subtle" size="xs" title="Edit" aria-label="Edit" />
+          <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
         )}
         {source.origin === "radio" && source.radio && (
-          <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="subtle" size="xs" title="Edit" aria-label="Edit" />
+          <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
+        )}
+        {source.origin === "source" && source.source && (
+          <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
         )}
         <NeonControlButton size="sm" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share}>
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -253,6 +319,7 @@ function FavoritesSourceRow({
         </NeonControlButton>
         <FavoritesRowDeleteButton source={source} onRemove={onRemove} />
       </div>
+      <div className="flex-1 min-w-0" />
     </div>
   );
 }

@@ -124,18 +124,18 @@ input[type="range"]:not(.player-volume-slider)::-moz-range-track {
   box-shadow: none !important;
 }
 
-/* Active playing state – neon animated glow */
+/* Active playing state – neon glow (reduced blur to prevent layout jitter) */
 @keyframes playing-glow {
   0%, 100% {
     box-shadow: 0 0 0 2px rgba(29, 185, 84, 0.6),
-                0 0 16px rgba(29, 185, 84, 0.4),
-                0 0 32px rgba(29, 185, 84, 0.2),
+                0 0 12px rgba(29, 185, 84, 0.35),
+                0 0 20px rgba(29, 185, 84, 0.15),
                 inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
   50% {
-    box-shadow: 0 0 0 3px rgba(46, 213, 115, 0.7),
-                0 0 24px rgba(29, 185, 84, 0.5),
-                0 0 48px rgba(29, 185, 84, 0.25),
+    box-shadow: 0 0 0 2px rgba(46, 213, 115, 0.7),
+                0 0 16px rgba(29, 185, 84, 0.45),
+                0 0 24px rgba(29, 185, 84, 0.2),
                 inset 0 1px 0 rgba(255, 255, 255, 0.12);
   }
 }
@@ -152,6 +152,8 @@ input[type="range"]:not(.player-volume-slider)::-moz-range-track {
 .playing-active {
   border-width: 2px;
   border-style: solid;
+  transform: translateZ(0);
+  contain: layout;
   animation: playing-glow 2.5s ease-in-out infinite, playing-border 2.5s ease-in-out infinite;
 }
 
@@ -171,4 +173,13 @@ input[type="range"]:not(.player-volume-slider)::-moz-range-track {
 }
 .track-title-marquee {
   animation: track-title-marquee 12s linear infinite;
+}
+
+/* Drop zone – inviting blink when dragging link */
+@keyframes drop-zone-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.drop-zone-blink {
+  animation: drop-zone-blink 1.2s ease-in-out infinite;
 }

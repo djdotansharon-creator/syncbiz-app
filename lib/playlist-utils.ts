@@ -29,6 +29,24 @@ export function getYouTubeThumbnail(url: string): string | null {
   return vid ? `https://img.youtube.com/vi/${vid}/hqdefault.jpg` : null;
 }
 
+/** Check if URL is a Shazam song page. */
+export function isShazamUrl(url: string): boolean {
+  return /shazam\.com\/song\//i.test(url.trim());
+}
+
+/** Extract song name from Shazam URL path (e.g. /song/123/artist-song -> "artist song"). */
+export function extractShazamSongFromPath(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const match = u.pathname.match(/\/song\/\d+\/([^/]+)/);
+    if (!match) return null;
+    const slug = decodeURIComponent(match[1]);
+    return slug.replace(/-/g, " ").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Infer playlist type from URL or path. */
 export function inferPlaylistType(url: string): PlaylistType {
   const u = url.toLowerCase().trim();

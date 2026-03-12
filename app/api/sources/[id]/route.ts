@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/store";
+import { addDeletedSourceId } from "@/lib/deleted-sources-store";
 import type { Source } from "@/lib/types";
 
 export async function GET(
@@ -40,9 +41,11 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const ok = db.deleteSource(id);
-  if (!ok) {
+  const exists = db.getSources().some((s) => s.id === id);
+  if (!exists) {
     return NextResponse.json({ error: "Source not found" }, { status: 404 });
   }
+  await addDeletedSourceId(id);
+  db.deleteSource(id);
   return NextResponse.json({ ok: true });
 }

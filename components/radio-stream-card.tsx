@@ -8,8 +8,10 @@ import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { ShareModal } from "@/components/share-modal";
 import { radioToShareable } from "@/lib/share-utils";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
+import { ActionButtonEdit, ActionButtonShare } from "@/components/ui/action-buttons";
 import { radioToUnified } from "@/lib/radio-utils";
 import { isValidStreamUrl } from "@/lib/url-validation";
+import { RadioIcon } from "@/components/ui/radio-icon";
 import type { RadioStream } from "@/lib/source-types";
 
 const DEFAULT_IMAGE = "/radio-default.svg";
@@ -17,7 +19,7 @@ const DEFAULT_IMAGE = "/radio-default.svg";
 type Props = {
   station: RadioStream;
   onRemove: (id: string) => void;
-  onEdit: (id: string) => void;
+  onEdit?: (id: string) => void;
 };
 
 function RadioLogo() {
@@ -26,16 +28,12 @@ function RadioLogo() {
       className="flex h-6 w-6 items-center justify-center rounded-lg bg-black/70 shadow-[0_2px_6px_rgba(0,0,0,0.4)] ring-1 ring-black/30 text-rose-400"
       title="Radio"
     >
-      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
-        <path d="M4 14h16" />
-        <circle cx="12" cy="18" r="2" />
-      </svg>
+      <RadioIcon className="h-4 w-4" />
     </span>
   );
 }
 
-export function RadioStreamCard({ station, onRemove, onEdit }: Props) {
+export function RadioStreamCard({ station, onRemove }: Props) {
   const router = useRouter();
   const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -71,21 +69,33 @@ export function RadioStreamCard({ station, onRemove, onEdit }: Props) {
     >
       <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-900">
         {cover ? (
-          <img
-            src={cover}
-            alt=""
-            className="h-full w-full object-cover"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = DEFAULT_IMAGE;
-            }}
-          />
+          <>
+            <img
+              src={cover}
+              alt=""
+              className="h-full w-full object-cover"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = DEFAULT_IMAGE;
+              }}
+            />
+            <span
+              className={`absolute top-2 right-2 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-sm ${
+                active ? "bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" : "bg-rose-500/90"
+              }`}
+            >
+              {t.live ?? "LIVE"}
+            </span>
+          </>
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-700 to-slate-900 text-slate-500">
-            <svg className="h-10 w-10 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
-              <path d="M4 14h16" />
-              <circle cx="12" cy="18" r="2" />
-            </svg>
+          <div className="relative flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-700 to-slate-900 text-slate-500">
+            <RadioIcon className="h-10 w-10 opacity-50" />
+            <span
+              className={`absolute top-2 right-2 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-sm ${
+                active ? "bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" : "bg-rose-500/90"
+              }`}
+            >
+              {t.live ?? "LIVE"}
+            </span>
           </div>
         )}
         {hasInvalidUrl && (
@@ -135,21 +145,8 @@ export function RadioStreamCard({ station, onRemove, onEdit }: Props) {
               </svg>
             </NeonControlButton>
           )}
-          <NeonControlButton size="sm" onClick={() => onEdit(station.id)} title={t.edit} aria-label={t.edit}>
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-            </svg>
-          </NeonControlButton>
-          <NeonControlButton size="sm" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share}>
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="18" cy="5" r="3" />
-              <circle cx="6" cy="12" r="3" />
-              <circle cx="18" cy="19" r="3" />
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-            </svg>
-          </NeonControlButton>
+          <ActionButtonEdit href={`/radio/${station.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
+          <ActionButtonShare variant="player" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share} />
           <NeonControlButton variant="red" size="sm" onClick={() => setDeleteOpen(true)} title={t.deletePlaylist} aria-label={t.deletePlaylist}>
             <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />

@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -9,10 +9,11 @@ import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
 import { AudioPlayer } from "@/components/audio-player";
 
-const categoryKeys = ["dashboard", "sources", "radio", "favorites", "schedules", "devices", "logs"] as const;
+const categoryKeys = ["dashboard", "sources", "radio", "schedules", "devices", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
   href: key === "dashboard" ? "/dashboard" : `/${key}`,
-  labelKey: key,
+  labelKey: key === "sources" ? "library" : key,
+  iconKey: key,
 }));
 const pillLink =
   "rounded-xl border border-slate-700/80 bg-slate-900/90 px-3.5 py-2 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] transition-all duration-100 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950";
@@ -90,16 +91,14 @@ function IconLibrary() {
 function IconRadio() {
   return (
     <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
-      <path d="M4 14h16" />
+      <path d="M5 3l4 4" />
+      <path d="M19 3l-4 4" />
+      <path d="M12 22v-8" />
+      <path d="M5 7l4 4" />
+      <path d="M19 7l-4 4" />
+      <path d="M12 14v4" />
       <circle cx="12" cy="18" r="2" />
-    </svg>
-  );
-}
-function IconFavorites() {
-  return (
-    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+      <path d="M5 7a7 7 0 0 1 14 0" strokeOpacity="0.5" />
     </svg>
   );
 }
@@ -107,12 +106,11 @@ const categoryIcons: Record<(typeof categoryKeys)[number], () => React.ReactElem
   dashboard: IconDashboard,
   sources: IconSources,
   radio: IconRadio,
-  favorites: IconFavorites,
   schedules: IconSchedules,
   devices: IconDevices,
   logs: IconLogs,
 };
-const pillBase = "inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05),0_2px_8px_rgba(0,0,0,0.25)] transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-slate-400/40 focus:ring-offset-2 focus:ring-offset-slate-950";
+const pillBase = "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05),0_2px_8px_rgba(0,0,0,0.25)] transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-slate-400/40 focus:ring-offset-2 focus:ring-offset-slate-950";
 const pillInactive = "border-slate-700/80 bg-slate-900/70 text-slate-400 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_20px_rgba(100,116,139,0.08)]";
 const pillActive = "border-sky-500/40 bg-sky-500/15 text-sky-200 shadow-[0_0_24px_rgba(56,189,248,0.15)]";
 
@@ -133,17 +131,12 @@ const navItems = navKeys.map((key) => ({
   labelKey: key === "sources" ? "library" : key,
 }));
 
-function getCurrentSectionLabel(pathname: string, locale: Locale): string {
-  for (let i = 0; i < navItems.length; i++) {
-    const item = navItems[i];
-    if (
-      item.href === pathname ||
-      (item.href !== "/dashboard" && pathname.startsWith(item.href))
-    ) {
-      return labels[item.labelKey]?.[locale] ?? item.labelKey;
-    }
-  }
-  return labels.dashboard?.[locale] ?? "Dashboard";
+function getTimeBasedGreeting(locale: Locale, t: Record<string, string>): string {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return t.greetingMorning ?? "Good morning";
+  if (h >= 12 && h < 17) return t.greetingAfternoon ?? "Good afternoon";
+  if (h >= 17 && h < 20) return t.greetingEvening ?? "Good evening";
+  return t.greetingNight ?? "Good night";
 }
 
 function LanguageToggle() {
@@ -186,8 +179,20 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { locale } = useLocale();
   const { t } = useTranslations();
-  const sectionLabel = getCurrentSectionLabel(pathname, locale);
+  const [now, setNow] = useState(() => new Date());
+  const greeting = getTimeBasedGreeting(locale, t);
   const headerSubtitle = t.headerSubtitle ?? labels.headerSubtitle?.en ?? "Schedule playback and send commands to endpoint devices";
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  const timeStr = now.toLocaleTimeString(locale === "he" ? "he-IL" : "en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-50">
@@ -236,18 +241,41 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="flex min-h-screen flex-1 flex-col">
-        <header className="border-b border-slate-800/60 bg-slate-950/80 px-4 py-3 backdrop-blur sm:px-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-                {sectionLabel}
-              </p>
-              <p className="text-sm text-slate-400">
+        <header
+          className="sticky top-0 z-50 flex flex-col border-b border-slate-800/80 bg-slate-950/98 shadow-[0_4px_24px_rgba(0,0,0,0.4)] backdrop-blur-md"
+          role="banner"
+        >
+          {/* Row 1: Title, greeting, time */}
+          <div className="flex flex-nowrap items-center justify-between gap-3 border-b border-slate-800/60 px-4 py-3 sm:px-6">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-base font-bold tracking-tight text-slate-50">
+                {t.businessMediaScheduler ?? "Business Media Scheduler"}
+              </h1>
+              <p className="mt-0.5 text-xs text-slate-500">
                 {headerSubtitle}
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <LanguageToggle />
+            <div className="flex shrink-0 items-center gap-2">
+              <div
+                className="flex shrink-0 items-center gap-2.5 rounded-xl border border-slate-700/80 bg-slate-900/90 px-3 py-1.5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)]"
+                dir={locale === "he" ? "rtl" : "ltr"}
+              >
+                <span className="shrink-0 text-base font-semibold tabular-nums text-slate-200" suppressHydrationWarning>
+                  {timeStr}
+                </span>
+                <span className="h-4 w-px shrink-0 bg-slate-700/60" aria-hidden />
+                <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
+                  <span className="shrink-0 text-slate-500">{greeting}</span>
+                  <span className="h-3 w-px shrink-0 bg-slate-700/50" aria-hidden />
+                  <span className="truncate font-medium text-slate-100">
+                    {t.subscriberName ?? "Subscriber"}
+                  </span>
+                  <span className="h-3 w-px shrink-0 bg-slate-700/50" aria-hidden />
+                  <span className="truncate text-slate-400">
+                    {t.companyName ?? "Company"}
+                  </span>
+                </div>
+              </div>
               <span className="hidden items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/80 px-2.5 py-1 text-xs text-slate-400 sm:flex">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 {t.agentsHealthy}
@@ -257,30 +285,35 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
             </div>
           </div>
-          {/* Top category pills – media control surface style */}
-          <nav className="mt-3 flex flex-wrap justify-center gap-2 sm:justify-start" aria-label="Main">
-            {categoryItems.map((item) => {
-              const isActive =
-                item.href === "/dashboard"
-                  ? pathname === "/dashboard"
-                  : pathname.startsWith(item.href);
-              const label = labels[item.labelKey]?.[locale] ?? item.labelKey;
-              const Icon = categoryIcons[item.labelKey];
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`${pillBase} ${isActive ? pillActive : pillInactive}`}
-                >
-                  {Icon && <Icon />}
-                  {label}
-                </Link>
+          {/* Row 2: Nav pills + language */}
+          <div className="flex flex-nowrap items-center justify-between gap-2 border-b border-slate-800/50 px-3 py-1.5 sm:px-4">
+            <nav className="flex flex-wrap items-center gap-1.5" aria-label="Main">
+              {categoryItems.map((item) => {
+                const isActive =
+                  item.href === "/dashboard"
+                    ? pathname === "/dashboard"
+                    : pathname.startsWith(item.href);
+                const label = labels[item.labelKey]?.[locale] ?? item.labelKey;
+                const Icon = categoryIcons[item.iconKey];
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`${pillBase} ${isActive ? pillActive : pillInactive}`}
+                  >
+                    {Icon && <Icon />}
+                    {label}
+                  </Link>
               );
             })}
-          </nav>
+            </nav>
+            <div className="ms-auto flex shrink-0 items-center gap-2">
+              <LanguageToggle />
+            </div>
+          </div>
+          {/* Row 3: Player */}
+          <AudioPlayer />
         </header>
-
-        <AudioPlayer />
 
         <main className="flex-1 px-4 pb-4 py-5 sm:px-6">
           <div className="mx-auto max-w-5xl">{children}</div>

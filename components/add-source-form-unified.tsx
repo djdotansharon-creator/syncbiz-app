@@ -3,12 +3,14 @@
 import { useState, useCallback } from "react";
 import { useTranslations } from "@/lib/locale-context";
 import { inferPlaylistType, getYouTubeThumbnail } from "@/lib/playlist-utils";
+import { formatViewCount } from "@/lib/format-utils";
+import { inferGenre } from "@/lib/infer-genre";
 import type { UnifiedSource } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
 
-type SearchResult = { title: string; url: string; cover: string | null; type: "youtube" | "soundcloud" };
+type SearchResult = { title: string; url: string; cover: string | null; type: "youtube" | "soundcloud"; viewCount?: number; durationSeconds?: number };
 
-async function fetchMetadata(url: string): Promise<{ title: string; genre: string; cover: string | null; type: string }> {
+async function fetchMetadata(url: string): Promise<{ title: string; genre: string; cover: string | null; type: string; viewCount?: number; durationSeconds?: number }> {
   try {
     const res = await fetch(`/api/playlists/metadata?url=${encodeURIComponent(url)}`);
     if (res.ok) {
@@ -46,8 +48,10 @@ export function AddSourceForm({ onAdd }: Props) {
   const [genrePrompt, setGenrePrompt] = useState<{ title: string; url: string; cover: string; type: string } | null>(null);
 
   const createFromUrl = useCallback(
-    async (url: string, genreOverride?: string) => {
+    async (url: string, opts?: string | { genreOverride?: string; viewCount?: number }) => {
       const meta = await fetchMetadata(url);
+      const genreOverride = typeof opts === "string" ? opts : opts?.genreOverride;
+      const viewCount = typeof opts === "object" && opts != null && opts.viewCount != null ? opts.viewCount : undefined;
       const res = await fetch("/api/playlists", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -57,6 +61,7 @@ export function AddSourceForm({ onAdd }: Props) {
           genre: genreOverride ?? meta.genre ?? "Mixed",
           type: meta.type,
           thumbnail: meta.cover || "",
+          viewCount,
         }),
       });
       if (res.ok) {
@@ -94,14 +99,18 @@ export function AddSourceForm({ onAdd }: Props) {
     async (r: SearchResult) => {
       setSearching(true);
       try {
-        await createFromUrl(r.url);
+        await createFromUrl(r.url, {
+          genreOverride: inferGenre(r.title, searchQuery),
+          viewCount: r.viewCount,
+          durationSeconds: r.durationSeconds,
+        });
         setSearchQuery("");
         setSearchResults([]);
       } finally {
         setSearching(false);
       }
     },
-    [createFromUrl],
+    [createFromUrl, searchQuery],
   );
 
   const handleAddFromUrl = useCallback(
@@ -175,7 +184,18 @@ export function AddSourceForm({ onAdd }: Props) {
                 className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 px-3 py-2 text-left text-sm text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
               >
                 {r.cover && <img src={r.cover} alt="" className="h-8 w-8 rounded object-cover" />}
-                <span className="max-w-[200px] truncate">{r.title}</span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="max-w-[200px] truncate">{r.title}</span>
+                  <span className="text-[10px] text-slate-500">
+                    {(() => {
+                      const g = inferGenre(r.title, searchQuery);
+                      const parts: string[] = [];
+                      if (g && g !== "Mixed") parts.push(g);
+                      if (r.viewCount != null) parts.push(`${formatViewCount(r.viewCount)} ${t.views ?? "views"}`);
+                      return parts.join(" • ") || null;
+                    })()}
+                  </span>
+                </span>
               </button>
             ))}
           </div>

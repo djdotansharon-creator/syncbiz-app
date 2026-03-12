@@ -9,8 +9,10 @@ import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
-import { ActionButtonEdit } from "@/components/ui/action-buttons";
+import { ActionButtonEdit, ActionButtonShare } from "@/components/ui/action-buttons";
+import { RadioIcon } from "@/components/ui/radio-icon";
 import { isValidStreamUrl } from "@/lib/url-validation";
+import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import type { UnifiedSource } from "@/lib/source-types";
 
 type Props = {
@@ -30,11 +32,7 @@ function SourceLogo({ type, origin, size = "md" }: { type: UnifiedSource["type"]
   if (origin === "radio") {
     return (
       <span className={`flex ${boxClass} items-center justify-center rounded-lg bg-black/70 shadow-[0_2px_6px_rgba(0,0,0,0.4)] ring-1 ring-black/30 text-rose-400`} title="Radio">
-        <svg className={sizeClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
-          <path d="M4 14h16" />
-          <circle cx="12" cy="18" r="2" />
-        </svg>
+        <RadioIcon className={sizeClass} />
       </span>
     );
   }
@@ -121,7 +119,14 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
     >
       <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-900">
         {source.cover ? (
-          <HydrationSafeImage src={source.cover} alt="" className="h-full w-full object-cover" />
+          <>
+            <HydrationSafeImage src={source.cover} alt="" className="h-full w-full object-cover" />
+            {source.origin === "radio" && (
+              <span className="absolute top-2 right-2 rounded bg-rose-500/90 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-sm">
+                {t.live ?? "LIVE"}
+              </span>
+            )}
+          </>
         ) : null}
         {hasInvalidUrl && (
           <div
@@ -164,7 +169,26 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
             <SourceLogo type={source.type} origin={source.origin} size="md" />
           </div>
         </div>
-        {source.genre && <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500">{source.genre}</p>}
+        {(source.genre || (source.viewCount ?? source.playlist?.viewCount) != null || (source.playlist?.durationSeconds ?? 0) > 0) && (
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center justify-between gap-2">
+              {source.genre && (
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{source.genre}</p>
+              )}
+              <div className="flex items-center gap-1.5 text-xs text-slate-500 tabular-nums">
+                {(source.viewCount ?? source.playlist?.viewCount) != null && (
+                  <span>{formatViewCount(source.viewCount ?? source.playlist?.viewCount ?? 0)} {t.views ?? "views"}</span>
+                )}
+                {(source.viewCount ?? source.playlist?.viewCount) != null && (source.playlist?.durationSeconds ?? 0) > 0 && (
+                  <span className="text-slate-600">•</span>
+                )}
+                {(source.playlist?.durationSeconds ?? 0) > 0 && (
+                  <span>{formatDuration(source.playlist?.durationSeconds ?? 0)}</span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5" role="group" aria-label="Source controls">
           {active && (
             <>
@@ -193,20 +217,15 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
             </NeonControlButton>
           )}
           {source.origin === "playlist" && source.playlist && (
-            <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="subtle" size="xs" title="Edit playlist" aria-label="Edit playlist" />
+            <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title="Edit playlist" aria-label="Edit playlist" />
           )}
           {source.origin === "radio" && source.radio && (
-            <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="subtle" size="xs" title="Edit station" aria-label="Edit station" />
+            <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title="Edit station" aria-label="Edit station" />
           )}
-          <NeonControlButton size="sm" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share}>
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="18" cy="5" r="3" />
-              <circle cx="6" cy="12" r="3" />
-              <circle cx="18" cy="19" r="3" />
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-            </svg>
-          </NeonControlButton>
+          {source.origin === "source" && source.source && (
+            <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
+          )}
+          <ActionButtonShare variant="player" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share} />
           <NeonControlButton variant="red" size="sm" onClick={() => setDeleteOpen(true)} title={t.deletePlaylist} aria-label={t.deletePlaylist}>
             <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />

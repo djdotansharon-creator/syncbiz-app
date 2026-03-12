@@ -7,11 +7,13 @@ import { usePlayback } from "@/lib/playback-provider";
 import { useSourcesPlayback } from "@/lib/sources-playback-context";
 import { ActionButtonPlay, ActionButtonEdit } from "@/components/ui/action-buttons";
 import { inferPlaylistType, getYouTubeThumbnail } from "@/lib/playlist-utils";
+import { formatViewCount } from "@/lib/format-utils";
+import { inferGenre } from "@/lib/infer-genre";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import type { UnifiedSource } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
 
-type YouTubeResult = { title: string; url: string; cover: string | null; type: "youtube" | "soundcloud" };
+type YouTubeResult = { title: string; url: string; cover: string | null; type: "youtube" | "soundcloud"; viewCount?: number };
 
 function searchLocal(sources: UnifiedSource[], query: string): UnifiedSource[] {
   const q = query.trim().toLowerCase();
@@ -37,7 +39,7 @@ async function searchYouTube(q: string): Promise<YouTubeResult[]> {
 
 async function createPlaylistFromUrl(
   url: string,
-  meta?: { title: string; genre: string; cover: string | null; type: string }
+  meta?: { title: string; genre: string; cover: string | null; type: string; viewCount?: number }
 ): Promise<Playlist | null> {
   const type = meta?.type || inferPlaylistType(url);
   const cover = meta?.cover || (type === "youtube" ? getYouTubeThumbnail(url) : null);
@@ -50,6 +52,7 @@ async function createPlaylistFromUrl(
       genre: meta?.genre || "Mixed",
       type,
       thumbnail: cover || "",
+      viewCount: meta?.viewCount,
     }),
   });
   if (!res.ok) return null;
@@ -189,13 +192,14 @@ export function UniversalSearchBar({ onAddSource }: Props) {
 
   const handleAddYoutube = useCallback(
     async (r: YouTubeResult) => {
-      const meta = { title: r.title, genre: "Mixed", cover: r.cover, type: r.type };
+      const genre = inferGenre(r.title, query);
+      const meta = { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount };
       const created = await createPlaylistFromUrl(r.url, meta);
       if (created) {
         const unified: UnifiedSource = {
           id: `pl-${created.id}`,
           title: created.name,
-          genre: created.genre || "Mixed",
+          genre: created.genre || genre,
           cover: created.thumbnail || null,
           type: created.type as UnifiedSource["type"],
           url: created.url,
@@ -210,17 +214,18 @@ export function UniversalSearchBar({ onAddSource }: Props) {
         setShowResults(false);
       }
     },
-    [onAddSource, router]
+    [onAddSource, router, query]
   );
 
   const handlePlayYoutube = useCallback(
     async (r: YouTubeResult) => {
-      const created = await createPlaylistFromUrl(r.url, { title: r.title, genre: "Mixed", cover: r.cover, type: r.type });
+      const genre = inferGenre(r.title, query);
+      const created = await createPlaylistFromUrl(r.url, { title: r.title, genre, cover: r.cover, type: r.type });
       if (created) {
         const u: UnifiedSource = {
           id: `pl-${created.id}`,
           title: created.name,
-          genre: "Mixed",
+          genre: created.genre || genre,
           cover: created.thumbnail || null,
           type: "youtube",
           url: created.url,
@@ -236,7 +241,7 @@ export function UniversalSearchBar({ onAddSource }: Props) {
         setShowResults(false);
       }
     },
-    [playSource, router, onAddSource]
+    [playSource, router, onAddSource, query]
   );
 
   return (
@@ -285,8 +290,11 @@ export function UniversalSearchBar({ onAddSource }: Props) {
             title={t.voiceSearch}
             aria-label={t.voiceSearch}
           >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0V8a5 5 0 0110 0v3z" />
+            <svg className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+              <path d="M12 1a3 3 0 0 1 3 3v8a3 3 0 0 1-6 0V4a3 3 0 0 1 3-3z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
             </svg>
           </button>
         )}
@@ -354,13 +362,13 @@ export function UniversalSearchBar({ onAddSource }: Props) {
                         <div className="flex shrink-0 items-center gap-1">
                           <ActionButtonPlay onClick={() => playSource(source)} size="sm" title={t.play} aria-label={t.play} />
                           {source.origin === "playlist" && source.playlist && (
-                            <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} size="xs" title={t.edit} aria-label={t.edit} />
+                            <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
                           )}
                           {source.origin === "source" && source.source && (
-                            <ActionButtonEdit href={`/sources/${source.source.id}/edit`} size="xs" title={t.edit} aria-label={t.edit} />
+                            <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
                           )}
                           {source.origin === "radio" && source.radio && (
-                            <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} size="xs" title={t.edit} aria-label={t.edit} />
+                            <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
                           )}
                         </div>
                       </div>
@@ -388,7 +396,18 @@ export function UniversalSearchBar({ onAddSource }: Props) {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium text-slate-100">{r.title}</p>
-                          <p className="text-xs text-slate-500">YouTube</p>
+                          <p className="text-xs text-slate-500">
+                            YouTube
+                            {(() => {
+                              const g = inferGenre(r.title, query);
+                              return g && g !== "Mixed" ? <span className="ml-1.5 text-slate-400">• {g}</span> : null;
+                            })()}
+                            {r.viewCount != null && (
+                              <span className="ml-1.5 text-slate-400">
+                                • {formatViewCount(r.viewCount)} {t.views ?? "views"}
+                              </span>
+                            )}
+                          </p>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
                           <button

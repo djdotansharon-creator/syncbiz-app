@@ -21,6 +21,10 @@ export type Playlist = {
   /** Alias for thumbnail; used in JSON storage format. */
   cover?: string;
   createdAt: string;
+  /** View count (from YouTube etc.) – stored when adding from search. */
+  viewCount?: number;
+  /** Duration in seconds (from YouTube etc.) – stored when adding/refreshing. */
+  durationSeconds?: number;
   /** Optional tracks array. If present, playlist has multiple tracks. */
   tracks?: PlaylistTrack[];
   /** Order of track IDs for drag-drop reorder. */
