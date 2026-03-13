@@ -5,19 +5,28 @@ import type { Device, Schedule, Source } from "@/lib/types";
 import { ScheduleCard } from "@/components/schedule-card";
 import { ActionButtonNewSchedule } from "@/components/ui/action-buttons";
 
-async function getData() {
-  const base = getApiBase();
-  const [schedulesRes, devicesRes, sourcesRes] = await Promise.all([
-    fetch(`${base}/api/schedules`, { cache: "no-store" }),
-    fetch(`${base}/api/devices`, { cache: "no-store" }),
-    fetch(`${base}/api/sources`, { cache: "no-store" }),
-  ]);
-  const [schedules, devices, sources] = (await Promise.all([
-    schedulesRes.json(),
-    devicesRes.json(),
-    sourcesRes.json(),
-  ])) as [Schedule[], Device[], Source[]];
-  return { schedules, devices, sources };
+async function getData(): Promise<{ schedules: Schedule[]; devices: Device[]; sources: Source[] }> {
+  try {
+    const base = getApiBase();
+    const [schedulesRes, devicesRes, sourcesRes] = await Promise.all([
+      fetch(`${base}/api/schedules`, { cache: "no-store" }),
+      fetch(`${base}/api/devices`, { cache: "no-store" }),
+      fetch(`${base}/api/sources`, { cache: "no-store" }),
+    ]);
+    const [schedules, devices, sources] = (await Promise.all([
+      schedulesRes.ok ? schedulesRes.json() : [],
+      devicesRes.ok ? devicesRes.json() : [],
+      sourcesRes.ok ? sourcesRes.json() : [],
+    ])) as [Schedule[], Device[], Source[]];
+    return {
+      schedules: Array.isArray(schedules) ? schedules : [],
+      devices: Array.isArray(devices) ? devices : [],
+      sources: Array.isArray(sources) ? sources : [],
+    };
+  } catch (e) {
+    console.error("[schedules] getData error:", e);
+    return { schedules: [], devices: [], sources: [] };
+  }
 }
 
 export default async function SchedulesPage() {

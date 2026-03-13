@@ -10,20 +10,27 @@ async function getDevice(deviceId: string): Promise<{
   device: Device | null;
   source: Source | null;
 }> {
-  const base = getApiBase();
-  const [devicesRes, sourcesRes] = await Promise.all([
-    fetch(`${base}/api/devices`, { cache: "no-store" }),
-    fetch(`${base}/api/sources`, { cache: "no-store" }),
-  ]);
-  const [devices, sources] = (await Promise.all([
-    devicesRes.json(),
-    sourcesRes.json(),
-  ])) as [Device[], Source[]];
-  const device = devices.find((d) => d.id === deviceId) ?? null;
-  const source = device?.currentSourceId
-    ? sources.find((s) => s.id === device.currentSourceId) ?? null
-    : null;
-  return { device, source };
+  try {
+    const base = getApiBase();
+    const [devicesRes, sourcesRes] = await Promise.all([
+      fetch(`${base}/api/devices`, { cache: "no-store" }),
+      fetch(`${base}/api/sources`, { cache: "no-store" }),
+    ]);
+    const [devices, sources] = (await Promise.all([
+      devicesRes.ok ? devicesRes.json() : [],
+      sourcesRes.ok ? sourcesRes.json() : [],
+    ])) as [Device[], Source[]];
+    const devs = Array.isArray(devices) ? devices : [];
+    const srcs = Array.isArray(sources) ? sources : [];
+    const device = devs.find((d) => d.id === deviceId) ?? null;
+    const source = device?.currentSourceId
+      ? srcs.find((s) => s.id === device.currentSourceId) ?? null
+      : null;
+    return { device, source };
+  } catch (e) {
+    console.error("[devices/[deviceId]] getDevice error:", e);
+    return { device: null, source: null };
+  }
 }
 
 export default async function DeviceDetailPage({

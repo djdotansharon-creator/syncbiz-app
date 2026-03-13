@@ -5,17 +5,25 @@ import { getTranslations } from "@/lib/translations";
 import type { Device, Source } from "@/lib/types";
 import { ScheduleForm } from "./schedule-form";
 
-async function getData() {
-  const base = getApiBase();
-  const [devicesRes, sourcesRes] = await Promise.all([
-    fetch(`${base}/api/devices`, { cache: "no-store" }),
-    fetch(`${base}/api/sources`, { cache: "no-store" }),
-  ]);
-  const [devices, sources] = (await Promise.all([
-    devicesRes.json(),
-    sourcesRes.json(),
-  ])) as [Device[], Source[]];
-  return { devices, sources };
+async function getData(): Promise<{ devices: Device[]; sources: Source[] }> {
+  try {
+    const base = getApiBase();
+    const [devicesRes, sourcesRes] = await Promise.all([
+      fetch(`${base}/api/devices`, { cache: "no-store" }),
+      fetch(`${base}/api/sources`, { cache: "no-store" }),
+    ]);
+    const [devices, sources] = (await Promise.all([
+      devicesRes.ok ? devicesRes.json() : [],
+      sourcesRes.ok ? sourcesRes.json() : [],
+    ])) as [Device[], Source[]];
+    return {
+      devices: Array.isArray(devices) ? devices : [],
+      sources: Array.isArray(sources) ? sources : [],
+    };
+  } catch (e) {
+    console.error("[schedules/new] getData error:", e);
+    return { devices: [], sources: [] };
+  }
 }
 
 const DAYS = [

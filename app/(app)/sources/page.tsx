@@ -6,9 +6,19 @@ import { SourcesManager } from "@/components/sources-manager";
 import type { UnifiedSource } from "@/lib/source-types";
 
 async function getUnifiedSources(): Promise<UnifiedSource[]> {
-  const base = getApiBase();
-  const res = await fetch(`${base}/api/sources/unified`, { cache: "no-store" });
-  return res.json();
+  try {
+    const base = getApiBase();
+    const res = await fetch(`${base}/api/sources/unified`, { cache: "no-store" });
+    if (!res.ok) {
+      console.error("[sources] API error:", res.status, await res.text());
+      return [];
+    }
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error("[sources] getUnifiedSources error:", e);
+    return [];
+  }
 }
 
 export default async function SourcesPage() {

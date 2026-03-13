@@ -13,6 +13,7 @@ export default function EditPlaylistPage() {
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [genre, setGenre] = useState("");
@@ -47,6 +48,7 @@ export default function EditPlaylistPage() {
     e.preventDefault();
     if (!playlist) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const payload: Record<string, unknown> = { name, url, genre, thumbnail, type };
       if (tracks.length > 1) {
@@ -61,7 +63,12 @@ export default function EditPlaylistPage() {
       if (res.ok) {
         router.push("/playlists");
         router.refresh();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setSaveError((err as { error?: string }).error ?? "Failed to save playlist");
       }
+    } catch {
+      setSaveError("Failed to save playlist");
     } finally {
       setSaving(false);
     }
@@ -187,6 +194,9 @@ export default function EditPlaylistPage() {
                 ))}
             </div>
           </div>
+        )}
+        {saveError && (
+          <p className="text-sm text-rose-400">{saveError}</p>
         )}
         <div className="flex gap-3 pt-2">
           <button

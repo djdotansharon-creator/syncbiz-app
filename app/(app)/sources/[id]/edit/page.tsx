@@ -54,11 +54,14 @@ export default function EditSourcePage() {
           artworkUrl: artworkUrl || undefined,
         }),
       });
-      if (!res.ok) throw new Error("Failed to update");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error ?? "Failed to update");
+      }
       router.push("/sources");
       router.refresh();
-    } catch {
-      setError("Failed to update source");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update source");
     } finally {
       setSaving(false);
     }

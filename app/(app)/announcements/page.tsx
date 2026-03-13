@@ -2,9 +2,19 @@ import { getApiBase } from "@/lib/api-base";
 import type { Announcement } from "@/lib/types";
 
 async function getAnnouncements(): Promise<Announcement[]> {
-  const base = getApiBase();
-  const res = await fetch(`${base}/api/announcements`, { cache: "no-store" });
-  return res.json();
+  try {
+    const base = getApiBase();
+    const res = await fetch(`${base}/api/announcements`, { cache: "no-store" });
+    if (!res.ok) {
+      console.error("[announcements] API error:", res.status, await res.text());
+      return [];
+    }
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error("[announcements] getAnnouncements error:", e);
+    return [];
+  }
 }
 
 export default async function AnnouncementsPage() {

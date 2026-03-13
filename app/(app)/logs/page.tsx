@@ -3,17 +3,25 @@ import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
 import type { Device, LogEntry } from "@/lib/types";
 
-async function getData() {
-  const base = getApiBase();
-  const [logsRes, devicesRes] = await Promise.all([
-    fetch(`${base}/api/logs`, { cache: "no-store" }),
-    fetch(`${base}/api/devices`, { cache: "no-store" }),
-  ]);
-  const [logs, devices] = (await Promise.all([
-    logsRes.json(),
-    devicesRes.json(),
-  ])) as [LogEntry[], Device[]];
-  return { logs, devices };
+async function getData(): Promise<{ logs: LogEntry[]; devices: Device[] }> {
+  try {
+    const base = getApiBase();
+    const [logsRes, devicesRes] = await Promise.all([
+      fetch(`${base}/api/logs`, { cache: "no-store" }),
+      fetch(`${base}/api/devices`, { cache: "no-store" }),
+    ]);
+    const [logs, devices] = (await Promise.all([
+      logsRes.ok ? logsRes.json() : [],
+      devicesRes.ok ? devicesRes.json() : [],
+    ])) as [LogEntry[], Device[]];
+    return {
+      logs: Array.isArray(logs) ? logs : [],
+      devices: Array.isArray(devices) ? devices : [],
+    };
+  } catch (e) {
+    console.error("[logs] getData error:", e);
+    return { logs: [], devices: [] };
+  }
 }
 
 export default async function LogsPage() {

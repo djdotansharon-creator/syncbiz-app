@@ -8,12 +8,17 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  const playlist = await getPlaylist(id);
-  if (!playlist) {
-    return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
+  try {
+    const { id } = await params;
+    const playlist = await getPlaylist(id);
+    if (!playlist) {
+      return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
+    }
+    return NextResponse.json(playlist);
+  } catch (e) {
+    console.error("[api/playlists] GET error:", e);
+    return NextResponse.json({ error: "Failed to load playlist" }, { status: 500 });
   }
-  return NextResponse.json(playlist);
 }
 
 export async function PUT(
@@ -69,10 +74,15 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  const ok = await deletePlaylist(id);
-  if (!ok) {
-    return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
+  try {
+    const { id } = await params;
+    const ok = await deletePlaylist(id);
+    if (!ok) {
+      return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    console.error("[api/playlists] DELETE error:", e);
+    return NextResponse.json({ error: "Failed to delete playlist" }, { status: 500 });
   }
-  return NextResponse.json({ ok: true });
 }

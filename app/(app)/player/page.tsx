@@ -5,9 +5,19 @@ import { PlayerPage } from "@/components/player-page";
 import { PlaybackBar } from "@/components/playback-bar";
 
 async function getDevices(): Promise<Device[]> {
-  const base = getApiBase();
-  const res = await fetch(`${base}/api/devices`, { cache: "no-store" });
-  return res.json();
+  try {
+    const base = getApiBase();
+    const res = await fetch(`${base}/api/devices`, { cache: "no-store" });
+    if (!res.ok) {
+      console.error("[player] API error:", res.status, await res.text());
+      return [];
+    }
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error("[player] getDevices error:", e);
+    return [];
+  }
 }
 
 export default async function PlayerRoutePage() {

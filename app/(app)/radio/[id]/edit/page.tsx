@@ -14,6 +14,7 @@ export default function EditRadioPage() {
   const [station, setStation] = useState<RadioStream | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [genre, setGenre] = useState("Radio");
@@ -40,6 +41,7 @@ export default function EditRadioPage() {
     e.preventDefault();
     if (!station) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const res = await fetch(`/api/radio/${id}`, {
         method: "PUT",
@@ -49,7 +51,12 @@ export default function EditRadioPage() {
       if (res.ok) {
         router.push("/radio");
         router.refresh();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setSaveError((err as { error?: string }).error ?? "Failed to save station");
       }
+    } catch {
+      setSaveError("Failed to save station");
     } finally {
       setSaving(false);
     }
@@ -120,6 +127,9 @@ export default function EditRadioPage() {
             className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm text-slate-50"
           />
         </div>
+        {saveError && (
+          <p className="text-sm text-rose-400">{saveError}</p>
+        )}
         <div className="flex gap-3 pt-2">
           <button
             type="submit"

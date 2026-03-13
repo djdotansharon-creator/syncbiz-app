@@ -6,9 +6,19 @@ import { RadioStreamsManager } from "@/components/radio-streams-manager";
 import type { RadioStream } from "@/lib/source-types";
 
 async function getRadioStations(): Promise<RadioStream[]> {
-  const base = getApiBase();
-  const res = await fetch(`${base}/api/radio`, { cache: "no-store" });
-  return res.json();
+  try {
+    const base = getApiBase();
+    const res = await fetch(`${base}/api/radio`, { cache: "no-store" });
+    if (!res.ok) {
+      console.error("[radio] API error:", res.status, await res.text());
+      return [];
+    }
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error("[radio] getRadioStations error:", e);
+    return [];
+  }
 }
 
 export default async function RadioPage() {
