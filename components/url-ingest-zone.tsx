@@ -71,9 +71,9 @@ export function UrlIngestZone({ onAdd }: Props) {
 
         if (isShazam) {
           const searchQuery =
-            parsed.artist && parsed.song
+            parsed?.artist && parsed?.song
               ? `${parsed.artist} ${parsed.song}`
-              : parsed.title;
+              : parsed?.title ?? "";
           const ytResults = await searchYouTube(searchQuery);
           const first = ytResults.find((r) => r.type === "youtube") ?? ytResults[0];
           if (!first) {
@@ -84,11 +84,11 @@ export function UrlIngestZone({ onAdd }: Props) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: parsed.title,
+              name: parsed?.title ?? "Untitled",
               url: first.url,
-              genre: parsed.genre || "Mixed",
+              genre: parsed?.genre ?? "Mixed",
               type: "youtube",
-              thumbnail: first.cover || parsed.cover || "",
+              thumbnail: first.cover || (parsed?.cover ?? ""),
               viewCount: first.viewCount,
             }),
           });
@@ -114,10 +114,10 @@ export function UrlIngestZone({ onAdd }: Props) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: parsed.title,
+              name: parsed?.title ?? "Untitled",
               url: trimmed,
-              genre: parsed.genre,
-              cover: parsed.cover || null,
+              genre: parsed?.genre ?? "Mixed",
+              cover: parsed?.cover ?? null,
             }),
           });
           if (res.ok) {
@@ -142,12 +142,12 @@ export function UrlIngestZone({ onAdd }: Props) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: parsed.title,
+              name: parsed?.title ?? "Untitled",
               url: trimmed,
-              genre: parsed.genre,
-              type: parsed.type,
-              thumbnail: parsed.cover || "",
-              viewCount: parsed.viewCount,
+              genre: parsed?.genre ?? "Mixed",
+              type: parsed?.type ?? "stream-url",
+              thumbnail: parsed?.cover ?? "",
+              viewCount: parsed?.viewCount,
             }),
           });
           if (res.ok) {

@@ -253,9 +253,9 @@ export function LibraryInputArea({ onAdd }: Props) {
         }
 
         if (isShazam) {
-          const searchQuery = parsed.artist && parsed.song
+          const searchQuery = parsed?.artist && parsed?.song
             ? `${parsed.artist} ${parsed.song}`
-            : parsed.title;
+            : parsed?.title ?? "";
           const ytResults = await searchYouTube(searchQuery);
           const first = ytResults.find((r) => r.type === "youtube") ?? ytResults[0];
           if (!first) {
@@ -266,11 +266,11 @@ export function LibraryInputArea({ onAdd }: Props) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: parsed.title,
+              name: parsed?.title ?? "Untitled",
               url: first.url,
-              genre: parsed.genre || "Mixed",
+              genre: parsed?.genre ?? "Mixed",
               type: "youtube",
-              thumbnail: first.cover || parsed.cover || "",
+              thumbnail: first.cover || (parsed?.cover ?? ""),
               viewCount: first.viewCount,
             }),
           });
@@ -293,7 +293,7 @@ export function LibraryInputArea({ onAdd }: Props) {
           const res = await fetch("/api/radio", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: parsed.title, url: trimmed, genre: parsed.genre, cover: parsed.cover || null }),
+            body: JSON.stringify({ name: parsed?.title ?? "Untitled", url: trimmed, genre: parsed?.genre ?? "Mixed", cover: parsed?.cover ?? null }),
           });
           if (res.ok) {
             const station = (await res.json()) as RadioStream;
@@ -312,18 +312,18 @@ export function LibraryInputArea({ onAdd }: Props) {
           } else setUrlError("Failed to add");
         } else {
           const validTypes = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"] as const;
-          const apiType = validTypes.includes(parsed.type as (typeof validTypes)[number]) ? parsed.type : type;
+          const apiType = validTypes.includes((parsed?.type ?? type) as (typeof validTypes)[number]) ? (parsed?.type ?? type) : type;
           const res = await fetch("/api/playlists", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: parsed.title || "Untitled",
+              name: parsed?.title ?? "Untitled",
               url: trimmed,
-              genre: parsed.genre || "Mixed",
+              genre: parsed?.genre ?? "Mixed",
               type: apiType,
-              thumbnail: parsed.cover || "",
-              viewCount: parsed.viewCount,
-              durationSeconds: parsed.durationSeconds,
+              thumbnail: parsed?.cover ?? "",
+              viewCount: parsed?.viewCount,
+              durationSeconds: parsed?.durationSeconds,
             }),
           });
           if (res.ok) {
