@@ -1,81 +1,41 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { usePlayback } from "@/lib/playback-provider";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { log as mvpLog } from "@/lib/mvp-logger";
-import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
-import { NeonControlButton } from "@/components/ui/neon-control-button";
+import { SourceCard } from "@/components/source-card-unified";
+import { getFavorites, addFavorite, removeFavorite } from "@/lib/favorites-store";
 import type { UnifiedSource } from "@/lib/source-types";
 
-function PlaylistCard({
-  source,
-  onPlay,
-  isActive,
-}: {
-  source: UnifiedSource;
-  onPlay: () => void;
-  isActive: boolean;
-}) {
-  return (
-    <article
-      className="group flex flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/60 transition-all duration-200 hover:border-slate-700/80 hover:bg-slate-900/40"
-      data-source-id={source.id}
-    >
-      <div className="relative aspect-square w-full overflow-hidden rounded-t-2xl bg-slate-900">
-        {source.cover ? (
-          <HydrationSafeImage
-            src={source.cover}
-            alt=""
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-700 to-slate-900 text-slate-500">
-            <svg
-              className="h-10 w-10 opacity-60"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M9 18V5l12-2v13" />
-              <circle cx="6" cy="18" r="3" />
-              <circle cx="18" cy="16" r="3" />
-            </svg>
-          </div>
-        )}
-      </div>
-      <div className="flex flex-1 flex-col gap-3 p-4">
-        <h3 className="truncate text-base font-semibold text-slate-100">
-          {source.title}
-        </h3>
-        <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-          {source.genre}
-        </p>
-        <div className="flex justify-center">
-          <NeonControlButton
-            onClick={onPlay}
-            size="md"
-            active={isActive}
-            title="Play"
-            aria-label="Play"
-          >
-            <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M8 5v14l11-7L8 5z" />
-            </svg>
-          </NeonControlButton>
-        </div>
-      </div>
-    </article>
-  );
-}
-
 export default function LibraryPage() {
+  const router = useRouter();
   const [playlists, setPlaylists] = useState<UnifiedSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { playSource, currentSource } = usePlayback();
+  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    setFavoriteIds(getFavorites());
+  }, []);
+
+  const handleRemove = useCallback(
+    (id: string) => {
+      setPlaylists((prev) => prev.filter((s) => s.id !== id));
+      router.refresh();
+    },
+    [router]
+  );
+
+  const toggleFavorite = useCallback((id: string) => {
+    const ids = getFavorites();
+    if (ids.includes(id)) {
+      removeFavorite(id);
+    } else {
+      addFavorite(id);
+    }
+    setFavoriteIds(getFavorites());
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,11 +66,6 @@ export default function LibraryPage() {
     return () => { cancelled = true; };
   }, []);
 
-  function handlePlay(source: UnifiedSource) {
-    mvpLog("playlist_selected", { id: source.id, title: source.title });
-    playSource(source);
-  }
-
   if (loading) {
     return (
       <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-12 text-center text-slate-500">
@@ -137,16 +92,21 @@ export default function LibraryPage() {
       </div>
       {playlists.length === 0 ? (
         <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-12 text-center text-slate-500">
-          No playlists yet. Add playlists from the Playlists page.
+          No playlists yet.{" "}
+          <Link href="/sources" className="text-sky-400 hover:text-sky-300 underline">
+            Add playlists
+          </Link>{" "}
+          by pasting or dropping URLs.
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {playlists.map((source) => (
-            <PlaylistCard
+            <SourceCard
               key={source.id}
               source={source}
-              onPlay={() => handlePlay(source)}
-              isActive={currentSource?.id === source.id}
+              onRemove={handleRemove}
+              isFavorite={favoriteIds.includes(source.id)}
+              onToggleFavorite={() => toggleFavorite(source.id)}
             />
           ))}
         </div>
