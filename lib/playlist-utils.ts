@@ -23,6 +23,19 @@ export function getYouTubeVideoId(url: string): string | null {
   return m ? m[1] : null;
 }
 
+/** Get YouTube playlist ID from URL (e.g. list=RDxxx, list=PLxxx). */
+export function getYouTubePlaylistId(url: string): string | null {
+  const u = url.trim();
+  const m = u.match(/[?&]list=([^&\s]+)/i);
+  return m ? m[1] : null;
+}
+
+/** True if URL is a YouTube Mix/Radio (list=RD...) – embed will auto-advance, do NOT call next() on ENDED. */
+export function isYouTubeMixUrl(url: string): boolean {
+  const listId = getYouTubePlaylistId(url);
+  return !!listId && (listId.startsWith("RD") || url.includes("start_radio=1"));
+}
+
 /** Build YouTube thumbnail URL. */
 export function getYouTubeThumbnail(url: string): string | null {
   const vid = getYouTubeVideoId(url);

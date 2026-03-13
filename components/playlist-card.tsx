@@ -11,6 +11,7 @@ import {
   ActionButtonStop,
   ActionButtonPause,
   ActionButtonEdit,
+  ActionButtonShare,
 } from "@/components/ui/action-buttons";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";

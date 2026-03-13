@@ -4,11 +4,13 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { initDeviceId } from "./device-id";
 import type { Playlist } from "./playlist-types";
 import type { UnifiedSource, SourceProviderType } from "./source-types";
 import type { Source } from "./types";
@@ -16,6 +18,8 @@ import { getPlaylistTracks } from "./playlist-types";
 import { canEmbedInCard } from "./playlist-utils";
 import { supportsEmbedded, getSourceArtworkUrl } from "./player-utils";
 import { getYouTubeThumbnail } from "./playlist-utils";
+import { log as mvpLog } from "./mvp-logger";
+import { isValidPlaybackUrl } from "./url-validation";
 
 export type PlaybackStatus = "idle" | "playing" | "paused" | "stopped";
 
@@ -130,6 +134,28 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     queueIndex: -1,
   });
 
+  useEffect(() => {
+    initDeviceId();
+  }, []);
+
+  const prevStatusRef = useRef<PlaybackStatus>("idle");
+  const prevTrackKeyRef = useRef<string>("");
+  useEffect(() => {
+    const { status, currentSource, currentTrackIndex, currentTrack } = state;
+    const trackKey = currentSource ? `${currentSource.id}-${currentTrackIndex}` : "";
+    if (status === "playing" && prevStatusRef.current !== "playing") {
+      mvpLog("playback_started", { id: currentSource?.id, title: currentTrack?.title });
+    }
+    if (status === "paused" && prevStatusRef.current === "playing") {
+      mvpLog("playback_paused", { id: currentSource?.id, title: currentTrack?.title });
+    }
+    if (trackKey && trackKey !== prevTrackKeyRef.current && (status === "playing" || status === "paused")) {
+      mvpLog("track_changed", { id: currentSource?.id, trackIndex: currentTrackIndex, title: currentTrack?.title });
+    }
+    prevStatusRef.current = status;
+    prevTrackKeyRef.current = trackKey;
+  }, [state]);
+
   const getPlayUrl = useCallback((source: UnifiedSource, trackIdx: number): string | null => {
     if (source.playlist) {
       const tracks = getPlaylistTracks(source.playlist);
@@ -190,6 +216,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const idx = Math.min(trackIndex, Math.max(0, tracks.length - 1));
       const track = tracks[idx] ?? null;
       const url = track?.url ?? source.url;
+
+      if (playlist && tracks.length === 0) {
+        mvpLog("empty_playlist", { id: source.id, title: source.title });
+        setState((s) => ({ ...s, lastMessage: "Playlist is empty" }));
+        return;
+      }
+
+      if (url && !isValidPlaybackUrl(url)) {
+        mvpLog("invalid_url", { url, id: source.id, title: source.title });
+        setState((s) => ({ ...s, lastMessage: "Invalid playback URL" }));
+        return;
+      }
+
       const isRadioOrStream =
         source.origin === "radio" ||
         (source.type === "stream-url" && url?.startsWith("http"));
@@ -211,6 +250,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           status: "playing",
           queue,
           queueIndex: qi >= 0 ? qi : 0,
+          lastMessage: null,
         };
       });
 

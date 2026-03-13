@@ -7,7 +7,7 @@ import { getPlaylistTracks } from "@/lib/playlist-types";
 import { useTranslations } from "@/lib/locale-context";
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
-import { getYouTubeVideoId } from "@/lib/playlist-utils";
+import { getYouTubeVideoId, getYouTubePlaylistId, isYouTubeMixUrl } from "@/lib/playlist-utils";
 import { getSoundCloudEmbedUrl, isSoundCloudUrl } from "@/lib/player-utils";
 import {
   isYtPlayerReady,
@@ -25,6 +25,7 @@ import {
 } from "@/lib/yt-player-utils";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
+import { log as mvpLog } from "@/lib/mvp-logger";
 import type { SCWidget } from "@/types/yt-sc";
 
 function isHlsUrl(url: string | null): boolean {
@@ -124,6 +125,7 @@ export function AudioPlayer() {
     toggleShuffle,
     toggleRepeat,
     playSource,
+    setLastMessage,
     registerStopAllPlayers,
     currentPlayUrl,
     isEmbedded,
@@ -140,10 +142,14 @@ export function AudioPlayer() {
   const isSoundCloud = embedType === "soundcloud" && currentPlayUrl && isSoundCloudUrl(currentPlayUrl);
   const isStreamUrl = currentPlayUrl && !isYouTube && !isSoundCloud && (currentTrack?.type === "stream-url" || currentSource?.origin === "radio");
   const vid = isYouTube && currentPlayUrl ? getYouTubeVideoId(currentPlayUrl) : null;
+  const ytPlaylistId = isYouTube && currentPlayUrl ? getYouTubePlaylistId(currentPlayUrl) : null;
+  const isYouTubeMix = isYouTube && currentPlayUrl ? isYouTubeMixUrl(currentPlayUrl) : false;
   const scEmbedUrl = isSoundCloud && currentPlayUrl ? getSoundCloudEmbedUrl(currentPlayUrl) : null;
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const hlsRef = useRef<import("hls.js").default | null>(null);
+  const lastStreamUrlRef = useRef<string | null>(null);
+  const lastKnownDurationRef = useRef<number>(0);
 
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -170,13 +176,21 @@ export function AudioPlayer() {
     if (isYtPlayerReady(oldPlayer)) safeStopVideo(oldPlayer);
     ytPlayerRef.current = null;
     currentVidRef.current = vid;
+    const playerVars: Record<string, string | number> = {
+      enablejsapi: 1,
+      origin: typeof window !== "undefined" ? window.location.origin : "",
+    };
+    if (ytPlaylistId && (ytPlaylistId.startsWith("RD") || ytPlaylistId.startsWith("PL"))) {
+      playerVars.list = ytPlaylistId;
+      playerVars.listType = "playlist";
+    }
     const loadYT = () => {
       if (!window.YT?.Player || !ytContainerRef.current || currentVidRef.current !== vid) return;
       new window.YT.Player(ytContainerRef.current, {
         videoId: vid,
         width: 320,
         height: 180,
-        playerVars: { enablejsapi: 1, origin: typeof window !== "undefined" ? window.location.origin : "" },
+        playerVars,
         events: {
           onReady(evt) {
             if (currentVidRef.current !== vid) return;
@@ -198,7 +212,7 @@ export function AudioPlayer() {
     const first = document.getElementsByTagName("script")[0];
     first?.parentNode?.insertBefore(tag, first);
     window.onYouTubeIframeAPIReady = () => loadYT();
-  }, [vid]);
+  }, [vid, ytPlaylistId]);
 
   /** Load SoundCloud widget – deps exclude volume/status so volume changes never recreate the player */
   const loadSoundCloud = useCallback(() => {
@@ -234,17 +248,25 @@ export function AudioPlayer() {
     setBufferedPercent(0);
   }, [currentPlayUrl]);
 
-  // HTML5 audio for stream-url (radio, m3u, etc.)
+  const handlePlaybackError = useCallback(
+    (err: unknown, context?: string) => {
+      mvpLog("playback_error", { error: String(err), context });
+      setLastMessage("Playback failed. Please try again.");
+    },
+    [setLastMessage]
+  );
+
+  // HTML5 audio play/pause – only call play() when paused to avoid redundant calls that can cause jumps
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !isStreamUrl) return;
     if (status === "playing") {
-      audio.play().catch(() => {});
+      if (audio.paused) audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
     } else {
       audio.pause();
       if (status === "stopped") audio.currentTime = 0;
     }
-  }, [status, isStreamUrl]);
+  }, [status, isStreamUrl, handlePlaybackError]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -313,11 +335,14 @@ export function AudioPlayer() {
     }
   }, [status, isYouTube, isSoundCloud]);
 
-  // Set audio src when stream URL changes (with HLS.js for .m3u8)
+  // Set audio src when stream URL changes (with HLS.js for .m3u8).
+  // IMPORTANT: Do NOT include status in deps – re-running on status change causes src reset and playback jumps.
+  // Play/pause is handled by the separate effect below.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     if (!isStreamUrl || !currentPlayUrl) {
+      lastStreamUrlRef.current = null;
       if (hlsRef.current) {
         try {
           hlsRef.current.destroy();
@@ -331,10 +356,16 @@ export function AudioPlayer() {
       return;
     }
 
+    // Skip if URL unchanged – setting src again causes reload and playback restart
+    if (lastStreamUrlRef.current === currentPlayUrl) return;
+    lastStreamUrlRef.current = currentPlayUrl;
+
     const useHls = isHlsUrl(currentPlayUrl);
 
     if (useHls) {
+      let cancelled = false;
       import("hls.js").then(({ default: Hls }) => {
+        if (cancelled) return;
         if (Hls.isSupported()) {
           if (hlsRef.current) {
             try {
@@ -342,35 +373,58 @@ export function AudioPlayer() {
             } catch {
               /* ignore */
             }
+            hlsRef.current = null;
           }
           const hls = new Hls();
           hlsRef.current = hls;
+          hls.on(Hls.Events.ERROR, (_e, data) => {
+            if (data.fatal) {
+              mvpLog("playback_error", { error: data.type, context: "hls" });
+              setLastMessage("Stream failed to load.");
+            }
+          });
           hls.loadSource(currentPlayUrl);
           hls.attachMedia(audio);
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            if (status === "playing") audio.play().catch(() => {});
+            if (cancelled) return;
+            if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
           });
         } else if (audio.canPlayType("application/vnd.apple.mpegurl")) {
           audio.src = currentPlayUrl;
-          if (status === "playing") audio.play().catch(() => {});
+          if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
         } else {
           audio.src = currentPlayUrl;
-          if (status === "playing") audio.play().catch(() => {});
+          if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
         }
       });
-    } else {
-      if (hlsRef.current) {
-        try {
-          hlsRef.current.destroy();
-        } catch {
-          /* ignore */
-        }
-        hlsRef.current = null;
-      }
-      audio.src = currentPlayUrl;
-      if (status === "playing") audio.play().catch(() => {});
+      return () => {
+        cancelled = true;
+        if (hlsRef.current) {
+          try {
+            hlsRef.current.destroy();
+          } catch {
+            /* ignore */
+          }
+          hlsRef.current = null;
+        };
+      };
     }
-  }, [isStreamUrl, currentPlayUrl, status]);
+
+    // Non-HLS path
+    if (hlsRef.current) {
+      try {
+        hlsRef.current.destroy();
+      } catch {
+        /* ignore */
+      }
+      hlsRef.current = null;
+    }
+    const onError = () => handlePlaybackError("audio load failed", "audio.error");
+    audio.addEventListener("error", onError);
+    audio.src = currentPlayUrl;
+    if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
+    return () => audio.removeEventListener("error", onError);
+  }, [isStreamUrl, currentPlayUrl, handlePlaybackError]);
 
   useEffect(() => {
     const p = ytPlayerRef.current;
@@ -384,12 +438,15 @@ export function AudioPlayer() {
       const p = ytPlayerRef.current;
       if (isYtPlayerReady(p) && isYouTube) {
         const state = safeGetPlayerState(p);
-        if (state === window.YT!.PlayerState.ENDED) next();
+        if (state === window.YT!.PlayerState.ENDED) {
+          // YouTube Mix/Radio embeds auto-advance – calling next() would interrupt and cause jumps
+          if (!isYouTubeMix) next();
+        }
       }
     };
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
-  }, [status, isYouTube, next]);
+  }, [status, isYouTube, isYouTubeMix, next]);
 
   useEffect(() => {
     if (!currentSource || isSeekingRef.current) return;
@@ -410,6 +467,7 @@ export function AudioPlayer() {
         const a = audioRef.current;
         const t = a.currentTime;
         const d = a.duration;
+        lastKnownDurationRef.current = d;
         setPosition(t);
         if (Number.isFinite(d) && d > 0) {
           setDuration(d);
@@ -428,7 +486,12 @@ export function AudioPlayer() {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !isStreamUrl) return;
-    const onEnded = () => next();
+    const onEnded = () => {
+      // Live streams (duration Infinity/NaN) can fire ended spuriously – skip next() to avoid jumps
+      const d = lastKnownDurationRef.current;
+      if (!Number.isFinite(d) || d <= 0) return;
+      next();
+    };
     audio.addEventListener("ended", onEnded);
     return () => audio.removeEventListener("ended", onEnded);
   }, [isStreamUrl, next]);

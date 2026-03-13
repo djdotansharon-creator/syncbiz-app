@@ -224,17 +224,33 @@ export function LibraryInputArea({ onAdd }: Props) {
     async (url: string) => {
       const trimmed = url.trim();
       if (!trimmed) return;
+      if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+        setUrlError("Please enter a valid URL starting with http:// or https://");
+        return;
+      }
       setUrlIngesting(true);
       setUrlError(null);
       try {
-        const parsed = await parseUrl(trimmed);
-        if (!parsed) {
-          setUrlError("Could not parse URL");
-          return;
-        }
         const type = inferPlaylistType(trimmed);
-        const isRadio = parsed.isRadio || type === "winamp" || trimmed.match(/\.(m3u8?|pls|aac|mp3)(\?|$)/i);
-        const isShazam = parsed.type === "shazam";
+        const isRadio = type === "winamp" || !!trimmed.match(/\.(m3u8?|pls|aac|mp3)(\?|$)/i);
+        const isShazam = /shazam\.com\/song\//i.test(trimmed);
+
+        const fastPathMeta = {
+          title: type === "youtube" ? "YouTube" : type === "soundcloud" ? "SoundCloud" : type === "spotify" ? "Spotify" : isRadio ? "Radio Station" : "Untitled",
+          cover: type === "youtube" ? getYouTubeThumbnail(trimmed) : null,
+          genre: isRadio ? "Live Radio" : "Mixed",
+          type: isRadio ? "stream-url" : type,
+          isRadio,
+        };
+
+        let parsed: Awaited<ReturnType<typeof parseUrl>>;
+        const useFastPath = !isShazam && !isRadio && (type === "youtube" || type === "soundcloud" || type === "spotify");
+        if (useFastPath) {
+          parsed = fastPathMeta as Awaited<ReturnType<typeof parseUrl>>;
+        } else {
+          const fromApi = await parseUrl(trimmed);
+          parsed = fromApi ?? (fastPathMeta as Awaited<ReturnType<typeof parseUrl>>);
+        }
 
         if (isShazam) {
           const searchQuery = parsed.artist && parsed.song
@@ -295,14 +311,16 @@ export function LibraryInputArea({ onAdd }: Props) {
             router.refresh();
           } else setUrlError("Failed to add");
         } else {
+          const validTypes = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"] as const;
+          const apiType = validTypes.includes(parsed.type as (typeof validTypes)[number]) ? parsed.type : type;
           const res = await fetch("/api/playlists", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: parsed.title,
+              name: parsed.title || "Untitled",
               url: trimmed,
-              genre: parsed.genre,
-              type: parsed.type,
+              genre: parsed.genre || "Mixed",
+              type: apiType,
               thumbnail: parsed.cover || "",
               viewCount: parsed.viewCount,
               durationSeconds: parsed.durationSeconds,
@@ -372,6 +390,22 @@ export function LibraryInputArea({ onAdd }: Props) {
     const types = e.dataTransfer?.types ?? [];
     return types.includes("text/uri-list") || types.includes("text/plain") || types.includes("url");
   };
+
+  const extractUrlFromDrop = (e: React.DragEvent) => {
+    const uriList = e.dataTransfer.getData("text/uri-list");
+    const plain = e.dataTransfer.getData("text/plain");
+    const raw = (uriList || plain || "").trim();
+    const url = raw.split(/[\r\n]+/)[0]?.trim();
+    return url && (url.startsWith("http://") || url.startsWith("https://")) ? url : null;
+  };
+
+  const handleDropUrl = useCallback(
+    (url: string) => {
+      setUrlValue(url);
+      void ingestUrl(url);
+    },
+    [ingestUrl]
+  );
 
   const handleAddAllYoutube = useCallback(
     async () => {
@@ -512,14 +546,21 @@ export function LibraryInputArea({ onAdd }: Props) {
     <div ref={panelRef} className="relative">
       {/* Tesla-style drop zone – clean, minimal, inviting */}
       <div
+        onPaste={(e) => {
+          const text = e.clipboardData?.getData("text/plain")?.trim();
+          if (text && (text.startsWith("http://") || text.startsWith("https://"))) {
+            e.preventDefault();
+            setUrlValue(text);
+            void ingestUrl(text);
+          }
+        }}
         onDrop={(e) => {
           setDragOver(false);
           setHasLinkInDrag(false);
           e.preventDefault();
-          const text = e.dataTransfer.getData("text/plain") || e.dataTransfer.getData("text/uri-list");
-          if (text?.trim() && text.startsWith("http")) {
-            void ingestUrl(text.trim());
-          }
+          e.stopPropagation();
+          const url = extractUrlFromDrop(e);
+          if (url) handleDropUrl(url);
         }}
         onDragOver={(e) => {
           if (isDraggingLink(e)) {
@@ -540,7 +581,24 @@ export function LibraryInputArea({ onAdd }: Props) {
         }`}
       >
         {/* Single compact control row – Add centered */}
-        <form onSubmit={handleUrlSubmit} className="flex flex-nowrap items-center gap-3 px-4 py-3">
+        <form
+          onSubmit={handleUrlSubmit}
+          className="flex flex-nowrap items-center gap-3 px-4 py-3"
+          onDragOver={(e) => {
+            if (isDraggingLink(e)) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+            }
+          }}
+          onDrop={(e) => {
+            setDragOver(false);
+            setHasLinkInDrag(false);
+            e.preventDefault();
+            e.stopPropagation();
+            const url = extractUrlFromDrop(e);
+            if (url) handleDropUrl(url);
+          }}
+        >
           {/* URL input */}
           <div className={`relative min-w-0 flex-1 ${controlHeight}`}>
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
@@ -549,9 +607,24 @@ export function LibraryInputArea({ onAdd }: Props) {
               </svg>
             </span>
             <input
-              type="url"
+              type="text"
+              inputMode="url"
+              autoComplete="url"
               value={urlValue}
               onChange={(e) => setUrlValue(e.target.value)}
+              onDragOver={(e) => {
+                if (e.dataTransfer?.types?.includes("text/uri-list") || e.dataTransfer?.types?.includes("text/plain")) {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "copy";
+                }
+              }}
+              onDrop={(e) => {
+                setDragOver(false);
+                setHasLinkInDrag(false);
+                e.preventDefault();
+                const url = extractUrlFromDrop(e);
+                if (url) handleDropUrl(url);
+              }}
               placeholder={t.addUrlPlaceholder ?? "Add URL source…"}
               disabled={urlIngesting}
               className={`${inputBase} ${controlHeight} pl-9 pr-3`}

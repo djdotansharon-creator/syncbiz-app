@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
@@ -125,7 +125,6 @@ const navKeys = [
   "settings",
   "architecture",
 ] as const;
-
 const navItems = navKeys.map((key) => ({
   href: key === "dashboard" ? "/dashboard" : `/${key}`,
   labelKey: key === "sources" ? "library" : key,
@@ -137,6 +136,31 @@ function getTimeBasedGreeting(locale: Locale, t: Record<string, string>): string
   if (h >= 12 && h < 17) return t.greetingAfternoon ?? "Good afternoon";
   if (h >= 17 && h < 20) return t.greetingEvening ?? "Good evening";
   return t.greetingNight ?? "Good night";
+}
+
+function LogoutButton() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  async function handleLogout() {
+    setLoading(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      router.push("/login");
+      router.refresh();
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={handleLogout}
+      disabled={loading}
+      className="rounded-lg border border-slate-700/80 bg-slate-900/60 px-2.5 py-1.5 text-xs font-medium text-slate-400 transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 disabled:opacity-50"
+    >
+      {loading ? "…" : "Logout"}
+    </button>
+  );
 }
 
 function LanguageToggle() {
@@ -197,7 +221,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-50">
       <aside className="hidden w-56 flex-col border-r border-slate-800/60 bg-slate-950/95 px-4 py-5 lg:flex">
-        <Link href="/dashboard" className="flex items-center gap-2.5 px-1">
+        <Link href="/library" className="flex items-center gap-2.5 px-1">
           <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-base font-semibold text-sky-400 ring-1 ring-sky-500/30">
             SB
           </span>
@@ -304,10 +328,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                     {Icon && <Icon />}
                     {label}
                   </Link>
-              );
-            })}
+                );
+              })}
             </nav>
             <div className="ms-auto flex shrink-0 items-center gap-2">
+              <LogoutButton />
               <LanguageToggle />
             </div>
           </div>

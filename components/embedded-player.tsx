@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getYouTubeVideoId } from "@/lib/playlist-utils";
+import { getYouTubeVideoId, getYouTubePlaylistId, isYouTubeMixUrl } from "@/lib/playlist-utils";
 import { getSoundCloudEmbedUrl, isSoundCloudUrl } from "@/lib/player-utils";
 import type { Playlist } from "@/lib/playlist-types";
 import {
@@ -63,22 +63,34 @@ export function EmbeddedPlayer({
   const isSoundCloud = playlist.type === "soundcloud" && isSoundCloudUrl(playlist.url);
 
   const vid = isYouTube ? getYouTubeVideoId(playlist.url) : null;
+  const ytPlaylistId = isYouTube ? getYouTubePlaylistId(playlist.url) : null;
+  const isYouTubeMix = isYouTube ? isYouTubeMixUrl(playlist.url) : false;
   const scEmbedUrl = isSoundCloud ? getSoundCloudEmbedUrl(playlist.url) : null;
+
+  const statusRef = useRef(status);
+  const volumeRef = useRef(volume);
+  statusRef.current = status;
+  volumeRef.current = volume;
 
   const loadYouTube = useCallback(() => {
     if (!vid || !ytContainerRef.current) return;
     ytPlayerRef.current = null;
     currentVidRef.current = vid;
+    const playerVars: Record<string, string | number> = {
+      enablejsapi: 1,
+      origin: typeof window !== "undefined" ? window.location.origin : "",
+    };
+    if (ytPlaylistId && (ytPlaylistId.startsWith("RD") || ytPlaylistId.startsWith("PL"))) {
+      playerVars.list = ytPlaylistId;
+      playerVars.listType = "playlist";
+    }
     const loadYT = () => {
       if (!window.YT?.Player || !ytContainerRef.current || currentVidRef.current !== vid) return;
       new window.YT.Player(ytContainerRef.current, {
         videoId: vid,
         width: 320,
         height: 180,
-        playerVars: {
-          enablejsapi: 1,
-          origin: typeof window !== "undefined" ? window.location.origin : "",
-        },
+        playerVars,
         events: {
           onReady(evt) {
             if (currentVidRef.current !== vid) return;
@@ -86,8 +98,8 @@ export function EmbeddedPlayer({
             if (!isYtPlayerReady(target)) return;
             ytPlayerRef.current = target;
             if (process.env.NODE_ENV === "development") console.log("[YT] Player ready");
-            safeSetVolume(target, volume);
-            if (status === "playing") safePlayVideo(target);
+            safeSetVolume(target, volumeRef.current);
+            if (statusRef.current === "playing") safePlayVideo(target);
             setLoading(false);
           },
         },
@@ -102,7 +114,7 @@ export function EmbeddedPlayer({
     const first = document.getElementsByTagName("script")[0];
     first?.parentNode?.insertBefore(tag, first);
     window.onYouTubeIframeAPIReady = () => loadYT();
-  }, [vid, volume, status]);
+  }, [vid, ytPlaylistId]);
 
   const loadSoundCloud = useCallback(() => {
     if (!scEmbedUrl || !scIframeRef.current) return;
@@ -110,10 +122,10 @@ export function EmbeddedPlayer({
       if (!scIframeRef.current || !window.SC) return;
       const widget = window.SC.Widget(scIframeRef.current);
       scWidgetRef.current = widget;
-      widget.setVolume(volume);
+      widget.setVolume(volumeRef.current);
       widget.bind("ready", () => {
         setLoading(false);
-        if (status === "playing") widget.play();
+        if (statusRef.current === "playing") widget.play();
       });
       widget.bind("finish", () => {
         onTrackEnd?.();
@@ -128,7 +140,7 @@ export function EmbeddedPlayer({
     tag.src = "https://w.soundcloud.com/player/api.js";
     tag.onload = loadSC;
     document.body.appendChild(tag);
-  }, [scEmbedUrl, volume, status, onTrackEnd, onStatusChange]);
+  }, [scEmbedUrl, onTrackEnd, onStatusChange]);
 
   useEffect(() => {
     if (isYouTube) loadYouTube();
@@ -162,8 +174,10 @@ export function EmbeddedPlayer({
       if (isYtPlayerReady(p) && isYouTube) {
         const state = safeGetPlayerState(p);
         if (state === window.YT!.PlayerState.ENDED) {
-          onTrackEnd?.();
-          if (!onTrackEnd) onStatusChange?.("stopped");
+          if (!isYouTubeMix) {
+            onTrackEnd?.();
+            if (!onTrackEnd) onStatusChange?.("stopped");
+          }
         } else {
           const pos = safeGetCurrentTime(p);
           const dur = safeGetDuration(p);
@@ -185,7 +199,7 @@ export function EmbeddedPlayer({
     };
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
-  }, [status, isYouTube, isSoundCloud, duration, onStatusChange, onTrackEnd, onPositionChange]);
+  }, [status, isYouTube, isSoundCloud, isYouTubeMix, duration, onStatusChange, onTrackEnd, onPositionChange]);
 
   useEffect(() => {
     const p = ytPlayerRef.current;

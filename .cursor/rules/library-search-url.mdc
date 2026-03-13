@@ -1,0 +1,28 @@
+---
+description: Do not modify the search and URL paste/drop unit unless explicitly requested
+alwaysApply: true
+---
+
+# Library Search & URL Unit – Protected
+
+**Do NOT modify** the search and URL paste/drop functionality unless the user explicitly asks for changes in that area.
+
+## Protected scope
+
+- `components/library-input-area.tsx` – the combined search + URL paste/drop unit
+- Search box (YouTube, library search, voice search)
+- URL input, paste, and drag-and-drop
+- "Paste or Drop URL" zone and its styling
+
+## When to modify
+
+Only touch this code when the user **specifically** requests changes to:
+- The search box
+- The URL paste/drop area
+- Related behavior or styling
+
+## When NOT to modify
+
+- General feature requests
+- Bug fixes in other parts of the app
+- Refactoring or "improvements" that might affect this unit

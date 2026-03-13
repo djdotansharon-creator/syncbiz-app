@@ -48,10 +48,11 @@ export function AddSourceForm({ onAdd }: Props) {
   const [genrePrompt, setGenrePrompt] = useState<{ title: string; url: string; cover: string; type: string } | null>(null);
 
   const createFromUrl = useCallback(
-    async (url: string, opts?: string | { genreOverride?: string; viewCount?: number }) => {
+    async (url: string, opts?: string | { genreOverride?: string; viewCount?: number; durationSeconds?: number }) => {
       const meta = await fetchMetadata(url);
       const genreOverride = typeof opts === "string" ? opts : opts?.genreOverride;
       const viewCount = typeof opts === "object" && opts != null && opts.viewCount != null ? opts.viewCount : undefined;
+      const durationSeconds = typeof opts === "object" && opts != null && opts.durationSeconds != null ? opts.durationSeconds : undefined;
       const res = await fetch("/api/playlists", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -62,6 +63,7 @@ export function AddSourceForm({ onAdd }: Props) {
           type: meta.type,
           thumbnail: meta.cover || "",
           viewCount,
+          durationSeconds,
         }),
       });
       if (res.ok) {
