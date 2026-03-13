@@ -149,7 +149,7 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
           </div>
         )}
       </div>
-      <div className="flex flex-1 flex-col gap-1.5 p-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5 p-3">
         <div className="flex items-center justify-between gap-1.5">
           <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-100">{source.title}</h3>
           <div className="flex items-center gap-1">
@@ -189,7 +189,7 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
             </div>
           </div>
         )}
-        <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5" role="group" aria-label="Source controls">
+        <div className="mt-1 flex w-full min-w-0 flex-wrap items-center justify-center gap-1.5" role="group" aria-label="Source controls">
           {active && (
             <>
               <NeonControlButton onClick={stop} size="sm" title="Stop" aria-label="Stop">

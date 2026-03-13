@@ -155,8 +155,8 @@ export function PlaylistCard({ playlist, index, onShare }: Props) {
       )}
 
       {/* Centered playback controls */}
-      <div className="flex flex-col items-center gap-3 px-4 pb-4">
-        <div className="flex items-center justify-center gap-2">
+      <div className="flex min-w-0 flex-col items-center gap-3 px-4 pb-4">
+        <div className="flex flex-wrap items-center justify-center gap-2">
           {showTransport && (
             <>
               <ActionButtonStop
@@ -193,7 +193,7 @@ export function PlaylistCard({ playlist, index, onShare }: Props) {
         )}
 
         {/* Edit, Share, Delete */}
-        <div className="flex items-center justify-center gap-2">
+        <div className="flex w-full min-w-0 flex-wrap items-center justify-center gap-2">
           <ActionButtonEdit
             href={`/playlists/${playlist.id}/edit`}
             variant="player"
