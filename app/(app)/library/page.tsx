@@ -2,30 +2,28 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { log as mvpLog } from "@/lib/mvp-logger";
 import { SourceCard } from "@/components/source-card-unified";
 import { getFavorites, addFavorite, removeFavorite } from "@/lib/favorites-store";
+import { fetchUnifiedSourcesWithFallback, removePlaylistFromLocal } from "@/lib/unified-sources-client";
+import { usePlayback } from "@/lib/playback-provider";
 import type { UnifiedSource } from "@/lib/source-types";
 
 export default function LibraryPage() {
-  const router = useRouter();
   const [playlists, setPlaylists] = useState<UnifiedSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+  const { setQueue } = usePlayback();
 
   useEffect(() => {
     setFavoriteIds(getFavorites());
   }, []);
 
-  const handleRemove = useCallback(
-    (id: string) => {
-      setPlaylists((prev) => prev.filter((s) => s.id !== id));
-      router.refresh();
-    },
-    [router]
-  );
+  const handleRemove = useCallback((id: string) => {
+    setPlaylists((prev) => prev.filter((s) => s.id !== id));
+    removePlaylistFromLocal(id);
+  }, []);
 
   const toggleFavorite = useCallback((id: string) => {
     const ids = getFavorites();
@@ -43,16 +41,11 @@ export default function LibraryPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/sources/unified", { cache: "no-store" });
-        if (!res.ok) {
-          mvpLog("playlist_load_failed", { status: res.status });
-          setError("Failed to load playlists");
-          return;
-        }
-        const items = (await res.json()) as UnifiedSource[];
+        const items = await fetchUnifiedSourcesWithFallback();
         if (cancelled) return;
         const filtered = items.filter((s) => s.origin === "playlist");
         setPlaylists(filtered);
+        setQueue(filtered);
       } catch (e) {
         if (!cancelled) {
           mvpLog("playlist_load_failed", { error: String(e) });
@@ -64,7 +57,7 @@ export default function LibraryPage() {
     }
     fetchPlaylists();
     return () => { cancelled = true; };
-  }, []);
+  }, [setQueue]);
 
   if (loading) {
     return (

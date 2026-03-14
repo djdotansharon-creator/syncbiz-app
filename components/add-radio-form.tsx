@@ -4,6 +4,8 @@ import { useState, useCallback } from "react";
 import { useTranslations } from "@/lib/locale-context";
 import { isValidStreamUrl } from "@/lib/url-validation";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
+import { addRadioStationLocal } from "@/lib/radio-local-store";
+import type { RadioStream } from "@/lib/source-types";
 
 const DEFAULT_IMAGE = "/radio-default.svg";
 
@@ -62,6 +64,8 @@ export function AddRadioForm({ onAdd }: Props) {
           }),
         });
         if (res.ok) {
+          const station = (await res.json()) as RadioStream;
+          addRadioStationLocal(station);
           setUrl("");
           setName("");
           setGenre("Radio");

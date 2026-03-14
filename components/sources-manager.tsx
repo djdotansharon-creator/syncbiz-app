@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { ShareModal } from "@/components/share-modal";
@@ -18,6 +18,7 @@ import { usePlayback } from "@/lib/playback-provider";
 import { SourceCard } from "@/components/source-card-unified";
 import { LibraryInputArea } from "@/components/library-input-area";
 import { getFavorites, addFavorite as addFav, removeFavorite as removeFav } from "@/lib/favorites-store";
+import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal, removePlaylistFromLocal, removeRadioFromLocal } from "@/lib/unified-sources-client";
 import type { UnifiedSource } from "@/lib/source-types";
 
 type ViewMode = "grid" | "list";
@@ -29,8 +30,20 @@ type Props = {
 };
 
 export function SourcesManager({ initialSources, pageTitle, pageSubtitle }: Props) {
+  const [effectiveSources, setEffectiveSources] = useState<UnifiedSource[]>(initialSources);
+
+  useEffect(() => {
+    if (initialSources.length > 0) {
+      setEffectiveSources(initialSources);
+    } else {
+      fetchUnifiedSourcesWithFallback().then((items) => {
+        setEffectiveSources(items.filter((s) => s.origin !== "radio"));
+      });
+    }
+  }, [initialSources]);
+
   return (
-    <SourcesPlaybackProvider sources={initialSources}>
+    <SourcesPlaybackProvider sources={effectiveSources}>
       <SourcesManagerInner pageTitle={pageTitle} pageSubtitle={pageSubtitle} />
     </SourcesPlaybackProvider>
   );
@@ -62,7 +75,6 @@ function useFavoritesState() {
 }
 
 function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; pageSubtitle?: string }) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const { locale } = useLocale();
   const { t } = useTranslations();
@@ -105,18 +117,19 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const handleAdd = useCallback(
     (s: UnifiedSource) => {
       setSources((prev) => [...prev, s]);
-      // Don't router.refresh() – it overwrites local state with server data before
-      // the new playlist is visible (Railway ephemeral fs / multi-instance).
+      if (s.origin === "playlist" && s.playlist) savePlaylistToLocal(s.playlist);
+      if (s.origin === "radio" && s.radio) saveRadioToLocal(s.radio);
     },
     [setSources]
   );
 
   const handleRemove = useCallback(
-    (id: string) => {
+    (id: string, origin?: UnifiedSource["origin"]) => {
       setSources((prev) => prev.filter((s) => s.id !== id));
-      router.refresh();
+      if (origin === "playlist") removePlaylistFromLocal(id);
+      if (origin === "radio") removeRadioFromLocal(id);
     },
-    [setSources, router]
+    [setSources]
   );
 
   return (
@@ -397,8 +410,7 @@ function SourceRow({
   );
 }
 
-function SourceRowDeleteButton({ source, onRemove }: { source: UnifiedSource; onRemove: (id: string) => void }) {
-  const router = useRouter();
+function SourceRowDeleteButton({ source, onRemove }: { source: UnifiedSource; onRemove: (id: string, origin?: UnifiedSource["origin"]) => void }) {
   const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -407,25 +419,14 @@ function SourceRowDeleteButton({ source, onRemove }: { source: UnifiedSource; on
     setDeleting(true);
     try {
       if (source.origin === "playlist" && source.playlist) {
-        const res = await fetch(`/api/playlists/${source.playlist.id}`, { method: "DELETE" });
-        if (res.ok) {
-          onRemove(source.id);
-          router.refresh();
-        }
+        await fetch(`/api/playlists/${source.playlist.id}`, { method: "DELETE" });
       } else if (source.origin === "source" && source.source) {
-        const res = await fetch(`/api/sources/${source.source.id}`, { method: "DELETE" });
-        if (res.ok) {
-          onRemove(source.id);
-          router.refresh();
-        }
+        await fetch(`/api/sources/${source.source.id}`, { method: "DELETE" });
       } else if (source.origin === "radio" && source.radio) {
-        const res = await fetch(`/api/radio/${source.radio.id}`, { method: "DELETE" });
-        if (res.ok) {
-          onRemove(source.id);
-          router.refresh();
-        }
+        await fetch(`/api/radio/${source.radio.id}`, { method: "DELETE" });
       }
     } finally {
+      onRemove(source.id, source.origin);
       setDeleting(false);
       setDeleteOpen(false);
     }

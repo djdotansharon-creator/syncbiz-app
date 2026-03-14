@@ -20,6 +20,7 @@ import { supportsEmbedded, getSourceArtworkUrl } from "./player-utils";
 import { getYouTubeThumbnail } from "./playlist-utils";
 import { log as mvpLog } from "./mvp-logger";
 import { isValidPlaybackUrl } from "./url-validation";
+import { fetchUnifiedSourcesWithFallback } from "./unified-sources-client";
 
 export type PlaybackStatus = "idle" | "playing" | "paused" | "stopped";
 
@@ -319,17 +320,20 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (!persisted) return;
     hasRestoredRef.current = true;
     let cancelled = false;
-    fetch("/api/sources/unified", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : []))
-      .then((items: UnifiedSource[]) => {
-        if (cancelled) return;
-        const source = items.find((s) => s.id === persisted.sourceId);
-        if (source) {
-          setState((s) => ({ ...s, volume: persisted.volume }));
-          playSource(source, persisted.trackIndex);
+    fetchUnifiedSourcesWithFallback().then((items) => {
+      if (cancelled) return;
+      const source = items.find((s) => s.id === persisted.sourceId);
+      if (source) {
+        setState((s) => ({ ...s, volume: persisted.volume }));
+        playSource(source, persisted.trackIndex);
+      } else if (typeof window !== "undefined") {
+        try {
+          sessionStorage.removeItem(STORAGE_KEY);
+        } catch {
+          /* ignore */
         }
-      })
-      .catch(() => {});
+      }
+    }).catch(() => {});
     return () => { cancelled = true; };
   }, [playSource, state.currentSource]);
 
@@ -504,7 +508,22 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   );
 
   const setQueue = useCallback((sources: UnifiedSource[]) => {
-    setState((s) => ({ ...s, queue: sources }));
+    setState((s) => {
+      if (
+        s.queue.length > 0 &&
+        (s.status === "playing" || s.status === "paused") &&
+        s.currentSource &&
+        !sources.some((x) => x.id === s.currentSource!.id)
+      ) {
+        return s;
+      }
+      const qi = s.currentSource ? sources.findIndex((x) => x.id === s.currentSource!.id) : -1;
+      return {
+        ...s,
+        queue: sources,
+        queueIndex: qi >= 0 ? qi : -1,
+      };
+    });
   }, []);
 
   const value = useMemo<PlaybackContextValue>(

@@ -17,7 +17,7 @@ import type { UnifiedSource } from "@/lib/source-types";
 
 type Props = {
   source: UnifiedSource;
-  onRemove: (id: string) => void;
+  onRemove: (id: string, origin?: UnifiedSource["origin"]) => void;
   isFavorite?: boolean;
   onToggleFavorite?: () => void;
   draggable?: boolean;
@@ -66,7 +66,6 @@ function SourceLogo({ type, origin, size = "md" }: { type: UnifiedSource["type"]
 }
 
 export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, draggable, onDragStart }: Props) {
-  const router = useRouter();
   const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -85,25 +84,14 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
     setDeleting(true);
     try {
       if (source.origin === "playlist" && source.playlist) {
-        const res = await fetch(`/api/playlists/${source.playlist.id}`, { method: "DELETE" });
-        if (res.ok) {
-          onRemove(source.id);
-          router.refresh();
-        }
+        await fetch(`/api/playlists/${source.playlist.id}`, { method: "DELETE" });
       } else if (source.origin === "source" && source.source) {
-        const res = await fetch(`/api/sources/${source.source.id}`, { method: "DELETE" });
-        if (res.ok) {
-          onRemove(source.id);
-          router.refresh();
-        }
+        await fetch(`/api/sources/${source.source.id}`, { method: "DELETE" });
       } else if (source.origin === "radio" && source.radio) {
-        const res = await fetch(`/api/radio/${source.radio.id}`, { method: "DELETE" });
-        if (res.ok) {
-          onRemove(source.id);
-          router.refresh();
-        }
+        await fetch(`/api/radio/${source.radio.id}`, { method: "DELETE" });
       }
     } finally {
+      onRemove(source.id, source.origin);
       setDeleting(false);
       setDeleteOpen(false);
     }

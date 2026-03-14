@@ -6,6 +6,7 @@ import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { radioToUnified } from "@/lib/radio-utils";
 import { RadioIcon } from "@/components/ui/radio-icon";
+import { addRadioStationLocal } from "@/lib/radio-local-store";
 import type { RadioStream } from "@/lib/source-types";
 
 type RadioResult = { title: string; url: string; cover: string | null; genre: string };
@@ -81,6 +82,8 @@ export function RadioSearchBar({ onAdd }: Props) {
         }),
       });
       if (res.ok) {
+        const station = (await res.json()) as RadioStream;
+        addRadioStationLocal(station);
         router.refresh();
         onAdd();
         setQuery("");
@@ -105,6 +108,7 @@ export function RadioSearchBar({ onAdd }: Props) {
       });
       if (res.ok) {
         const station = (await res.json()) as RadioStream;
+        addRadioStationLocal(station);
         playSource(radioToUnified(station));
         router.refresh();
         onAdd();

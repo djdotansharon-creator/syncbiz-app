@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "@/lib/locale-context";
@@ -13,31 +13,41 @@ import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { ActionButtonShare, ActionButtonEdit } from "@/components/ui/action-buttons";
 import { ShareModal } from "@/components/share-modal";
 import { radioToShareable } from "@/lib/share-utils";
+import { getRadioStationsLocal, removeRadioStationLocal } from "@/lib/radio-local-store";
 import type { RadioStream } from "@/lib/source-types";
 
 type Props = {
   initialStations: RadioStream[];
 };
 
+function mergeStations(server: RadioStream[], local: RadioStream[]): RadioStream[] {
+  const byId = new Map<string, RadioStream>();
+  for (const s of server) byId.set(s.id, s);
+  for (const s of local) if (!byId.has(s.id)) byId.set(s.id, s);
+  return [...byId.values()];
+}
+
 export function RadioStreamsManager({ initialStations }: Props) {
   const router = useRouter();
   const { locale } = useLocale();
   const { t } = useTranslations();
+  const { setQueue } = usePlayback();
   const [stations, setStations] = useState<RadioStream[]>(initialStations);
 
-  // Sync when parent refetches (e.g. after adding a station)
   useEffect(() => {
-    setStations(initialStations);
-  }, [initialStations]);
+    const merged = mergeStations(initialStations, getRadioStationsLocal());
+    setStations(merged);
+    setQueue(merged.map(radioToUnified));
+  }, [initialStations, setQueue]);
 
   const handleAdd = () => {
     router.refresh();
   };
 
-  const handleRemove = (id: string) => {
+  const handleRemove = useCallback((id: string) => {
     setStations((prev) => prev.filter((s) => s.id !== id));
-    router.refresh();
-  };
+    removeRadioStationLocal(id);
+  }, []);
 
   return (
     <div className="space-y-6">
