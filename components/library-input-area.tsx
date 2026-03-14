@@ -287,7 +287,6 @@ export function LibraryInputArea({ onAdd }: Props) {
               playlist: created,
             });
             setUrlValue("");
-            router.refresh();
           } else setUrlError("Failed to add");
         } else if (isRadio) {
           const res = await fetch("/api/radio", {
@@ -308,7 +307,6 @@ export function LibraryInputArea({ onAdd }: Props) {
               radio: station,
             });
             setUrlValue("");
-            router.refresh();
           } else setUrlError("Failed to add");
         } else {
           const validTypes = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"] as const;
@@ -339,7 +337,6 @@ export function LibraryInputArea({ onAdd }: Props) {
               playlist: created,
             });
             setUrlValue("");
-            router.refresh();
           } else setUrlError("Failed to add");
         }
       } catch {
@@ -426,7 +423,6 @@ export function LibraryInputArea({ onAdd }: Props) {
           onAdd(unified);
         }
       }
-      router.refresh();
       setQuery("");
       setYoutubeResults([]);
       setRadioResults([]);
@@ -452,7 +448,6 @@ export function LibraryInputArea({ onAdd }: Props) {
           playlist: created,
         };
         onAdd(unified);
-        router.refresh();
         setQuery("");
         setYoutubeResults([]);
         setRadioResults([]);
@@ -476,7 +471,6 @@ export function LibraryInputArea({ onAdd }: Props) {
         }),
       });
       if (res.ok) {
-        router.refresh();
         setQuery("");
         setRadioResults([]);
         setYoutubeResults([]);
@@ -503,7 +497,6 @@ export function LibraryInputArea({ onAdd }: Props) {
         const station = (await res.json()) as RadioStream;
         const unified = radioToUnified(station);
         playSource(unified);
-        router.refresh();
         setQuery("");
         setRadioResults([]);
         setYoutubeResults([]);
@@ -531,7 +524,6 @@ export function LibraryInputArea({ onAdd }: Props) {
         };
         onAdd(u);
         playSource(u);
-        router.refresh();
         setQuery("");
         setYoutubeResults([]);
         setRadioResults([]);

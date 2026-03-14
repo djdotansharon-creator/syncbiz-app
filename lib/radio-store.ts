@@ -5,13 +5,12 @@
 
 import { mkdir, readdir, readFile, writeFile, unlink } from "fs/promises";
 import { join } from "path";
+import { getRadioDir } from "./data-path";
 import type { RadioStream } from "./source-types";
-
-const RADIO_DIR = join(process.cwd(), "radio");
 
 async function ensureRadioDir(): Promise<void> {
   try {
-    await mkdir(RADIO_DIR, { recursive: true });
+    await mkdir(getRadioDir(), { recursive: true });
   } catch (e) {
     console.error("[radio-store] Failed to create radio dir:", e);
     throw e;
@@ -19,7 +18,7 @@ async function ensureRadioDir(): Promise<void> {
 }
 
 function radioPath(id: string): string {
-  return join(RADIO_DIR, `${id}.json`);
+  return join(getRadioDir(), `${id}.json`);
 }
 
 function generateId(): string {
@@ -36,13 +35,14 @@ export type RadioCreateInput = {
 
 export async function listRadioStations(): Promise<RadioStream[]> {
   await ensureRadioDir();
-  const files = await readdir(RADIO_DIR);
+  const dir = getRadioDir();
+  const files = await readdir(dir);
   const jsonFiles = files.filter((f) => f.endsWith(".json"));
   const stations: RadioStream[] = [];
 
   for (const file of jsonFiles) {
     try {
-      const content = await readFile(join(RADIO_DIR, file), "utf-8");
+      const content = await readFile(join(dir, file), "utf-8");
       const data = JSON.parse(content) as RadioStream & { title?: string };
       if (data.id && (data.name || data.title) && data.url) {
         stations.push({ ...data, name: data.name || data.title || "Unknown" });

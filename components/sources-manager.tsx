@@ -105,9 +105,10 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const handleAdd = useCallback(
     (s: UnifiedSource) => {
       setSources((prev) => [...prev, s]);
-      router.refresh();
+      // Don't router.refresh() – it overwrites local state with server data before
+      // the new playlist is visible (Railway ephemeral fs / multi-instance).
     },
-    [setSources, router]
+    [setSources]
   );
 
   const handleRemove = useCallback(

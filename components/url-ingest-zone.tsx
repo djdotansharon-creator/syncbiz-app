@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "@/lib/locale-context";
 import { inferPlaylistType } from "@/lib/playlist-utils";
 import type { UnifiedSource } from "@/lib/source-types";
@@ -41,7 +40,6 @@ type Props = {
 };
 
 export function UrlIngestZone({ onAdd }: Props) {
-  const router = useRouter();
   const { t } = useTranslations();
   const [inputValue, setInputValue] = useState("");
   const [dragOver, setDragOver] = useState(false);
@@ -105,7 +103,6 @@ export function UrlIngestZone({ onAdd }: Props) {
               playlist: created,
             });
             setInputValue("");
-            router.refresh();
           } else {
             setError("Failed to add");
           }
@@ -133,7 +130,6 @@ export function UrlIngestZone({ onAdd }: Props) {
               radio: station,
             });
             setInputValue("");
-            router.refresh();
           } else {
             setError("Failed to add radio station");
           }
@@ -163,7 +159,6 @@ export function UrlIngestZone({ onAdd }: Props) {
               playlist: created,
             });
             setInputValue("");
-            router.refresh();
           } else {
             setError("Failed to add playlist");
           }
@@ -174,7 +169,7 @@ export function UrlIngestZone({ onAdd }: Props) {
         setIngesting(false);
       }
     },
-    [onAdd, router]
+    [onAdd]
   );
 
   const handleSubmit = (e: React.FormEvent) => {

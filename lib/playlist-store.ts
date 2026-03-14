@@ -7,17 +7,17 @@
 
 import { mkdir, readdir, readFile, writeFile, unlink } from "fs/promises";
 import { join } from "path";
+import { getPlaylistsDir } from "./data-path";
 import type { Playlist, PlaylistCreateInput } from "./playlist-types";
 
-const PLAYLISTS_DIR = join(process.cwd(), "playlists");
-const COVERS_DIR = join(PLAYLISTS_DIR, "covers");
-const M3U_DIR = join(PLAYLISTS_DIR, "m3u");
-
 async function ensurePlaylistsDir(): Promise<void> {
+  const dir = getPlaylistsDir();
+  const coversDir = join(dir, "covers");
+  const m3uDir = join(dir, "m3u");
   try {
-    await mkdir(PLAYLISTS_DIR, { recursive: true });
-    await mkdir(COVERS_DIR, { recursive: true });
-    await mkdir(M3U_DIR, { recursive: true });
+    await mkdir(dir, { recursive: true });
+    await mkdir(coversDir, { recursive: true });
+    await mkdir(m3uDir, { recursive: true });
   } catch (e) {
     console.error("[playlist-store] Failed to create Playlists dir:", e);
     throw e;
@@ -25,7 +25,7 @@ async function ensurePlaylistsDir(): Promise<void> {
 }
 
 function playlistPath(id: string): string {
-  return join(PLAYLISTS_DIR, `${id}.json`);
+  return join(getPlaylistsDir(), `${id}.json`);
 }
 
 function generateId(): string {
@@ -34,13 +34,14 @@ function generateId(): string {
 
 export async function listPlaylists(): Promise<Playlist[]> {
   await ensurePlaylistsDir();
-  const files = await readdir(PLAYLISTS_DIR);
+  const dir = getPlaylistsDir();
+  const files = await readdir(dir);
   const jsonFiles = files.filter((f) => f.endsWith(".json"));
   const playlists: Playlist[] = [];
 
   for (const file of jsonFiles) {
     try {
-      const content = await readFile(join(PLAYLISTS_DIR, file), "utf-8");
+      const content = await readFile(join(dir, file), "utf-8");
       const data = JSON.parse(content) as Playlist & { cover?: string };
       if (data.id && data.name) {
         if (!data.thumbnail && data.cover) data.thumbnail = data.cover;
