@@ -220,6 +220,7 @@ export function LibraryInputArea({ onAdd }: Props) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const ingestingRef = useRef(false);
   const ingestUrl = useCallback(
     async (url: string) => {
       const trimmed = url.trim();
@@ -228,6 +229,8 @@ export function LibraryInputArea({ onAdd }: Props) {
         setUrlError("Please enter a valid URL starting with http:// or https://");
         return;
       }
+      if (ingestingRef.current) return;
+      ingestingRef.current = true;
       setUrlIngesting(true);
       setUrlError(null);
       try {
@@ -342,6 +345,7 @@ export function LibraryInputArea({ onAdd }: Props) {
       } catch {
         setUrlError("Failed to add");
       } finally {
+        ingestingRef.current = false;
         setUrlIngesting(false);
       }
     },
@@ -542,6 +546,7 @@ export function LibraryInputArea({ onAdd }: Props) {
           const text = e.clipboardData?.getData("text/plain")?.trim();
           if (text && (text.startsWith("http://") || text.startsWith("https://"))) {
             e.preventDefault();
+            e.stopPropagation();
             setUrlValue(text);
             void ingestUrl(text);
           }
@@ -614,6 +619,7 @@ export function LibraryInputArea({ onAdd }: Props) {
                 setDragOver(false);
                 setHasLinkInDrag(false);
                 e.preventDefault();
+                e.stopPropagation();
                 const url = extractUrlFromDrop(e);
                 if (url) handleDropUrl(url);
               }}

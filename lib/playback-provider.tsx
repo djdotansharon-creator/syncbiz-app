@@ -119,6 +119,41 @@ type PlaybackContextValue = PlaybackState & {
 
 const PlaybackContext = createContext<PlaybackContextValue | null>(null);
 
+const STORAGE_KEY = "syncbiz-playback";
+
+function loadPersistedPlayback(): { sourceId: string; trackIndex: number; status: PlaybackStatus; volume: number } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { sourceId?: string; trackIndex?: number; status?: string; volume?: number };
+    if (parsed?.sourceId && (parsed.status === "playing" || parsed.status === "paused")) {
+      return {
+        sourceId: parsed.sourceId,
+        trackIndex: typeof parsed.trackIndex === "number" ? parsed.trackIndex : 0,
+        status: parsed.status as PlaybackStatus,
+        volume: typeof parsed.volume === "number" ? Math.max(0, Math.min(100, parsed.volume)) : 80,
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function savePersistedPlayback(sourceId: string, trackIndex: number, status: PlaybackStatus, volume: number) {
+  if (typeof window === "undefined") return;
+  try {
+    if (status === "playing" || status === "paused") {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ sourceId, trackIndex, status, volume }));
+    } else {
+      sessionStorage.removeItem(STORAGE_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<PlaybackState>({
     currentPlaylist: null,
@@ -138,6 +173,21 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     initDeviceId();
   }, []);
 
+  // Persist playback state for restore on refresh
+  useEffect(() => {
+    const { currentSource, currentTrackIndex, status, volume } = state;
+    if (currentSource && (status === "playing" || status === "paused")) {
+      savePersistedPlayback(currentSource.id, currentTrackIndex, status, volume);
+    } else if (typeof window !== "undefined") {
+      try {
+        sessionStorage.removeItem(STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [state.currentSource?.id, state.currentTrackIndex, state.status, state.volume]);
+
+  const hasRestoredRef = useRef(false);
   const prevStatusRef = useRef<PlaybackStatus>("idle");
   const prevTrackKeyRef = useRef<string>("");
   useEffect(() => {
@@ -261,6 +311,27 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     },
     [stopAllBeforePlay, playLocal],
   );
+
+  // Restore playback state from sessionStorage after refresh (e.g. Radio station)
+  useEffect(() => {
+    if (hasRestoredRef.current || state.currentSource) return;
+    const persisted = loadPersistedPlayback();
+    if (!persisted) return;
+    hasRestoredRef.current = true;
+    let cancelled = false;
+    fetch("/api/sources/unified", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((items: UnifiedSource[]) => {
+        if (cancelled) return;
+        const source = items.find((s) => s.id === persisted.sourceId);
+        if (source) {
+          setState((s) => ({ ...s, volume: persisted.volume }));
+          playSource(source, persisted.trackIndex);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [playSource, state.currentSource]);
 
   const playPlaylist = useCallback(
     (playlist: Playlist, trackIndex = 0) => {
