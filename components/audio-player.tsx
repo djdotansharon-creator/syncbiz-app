@@ -333,7 +333,7 @@ export function AudioPlayer() {
     return unregister;
   }, [registerStopAllPlayers, stopAllEmbedded]);
 
-  /** Stop/destroy previous embed when switching source – runs after commit to avoid removeChild during reconciliation */
+  /** Stop/destroy previous embed when switching source or track – ensures clean transition before loading new media */
   useEffect(() => {
     if (!isYouTube && !isSoundCloud) {
       lastScEmbedUrlRef.current = null;
@@ -343,7 +343,7 @@ export function AudioPlayer() {
       stopAllEmbedded();
       lastScEmbedUrlRef.current = null;
     };
-  }, [isYouTube, isSoundCloud, stopAllEmbedded]);
+  }, [isYouTube, isSoundCloud, stopAllEmbedded, currentPlayUrl]);
 
   useEffect(() => {
     const p = ytPlayerRef.current;

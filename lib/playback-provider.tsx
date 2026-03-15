@@ -426,8 +426,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
       if (s.queue.length > 1 && s.queueIndex > 0) {
         const prevSource = s.queue[s.queueIndex - 1];
-        stopAllBeforePlay();
-        playSource(prevSource);
+        queueMicrotask(() => playSource(prevSource));
         return s;
       }
       transportLockRef.current = false;
@@ -486,8 +485,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             transportLockRef.current = false;
             return s;
           }
-          stopAllBeforePlay();
-          playSource(nextSource);
+          queueMicrotask(() => playSource(nextSource));
         }
         return s;
       }
