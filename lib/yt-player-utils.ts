@@ -17,6 +17,10 @@ export interface YTPlayerAPI {
   getDuration: () => number;
   getVideoLoadedFraction?: () => number;
   seekTo: (seconds: number, allowSeekAhead: boolean) => void;
+  /** Playlist methods – available when list/listType are used */
+  getPlaylist?: () => string[];
+  getPlaylistIndex?: () => number;
+  getVideoData?: () => { video_id: string; title: string; author: string };
 }
 
 function hasMethod(obj: unknown, method: string): obj is YTPlayerAPI {
@@ -105,4 +109,29 @@ export function safeGetDuration(player: unknown): number {
 export function safeGetVideoLoadedFraction(player: unknown): number {
   const f = safeYtCall<number>(player, "getVideoLoadedFraction");
   return typeof f === "number" && f >= 0 && f <= 1 ? f : 0;
+}
+
+/** Safe getPlaylist – returns array of video IDs, or empty array if not a playlist. */
+export function safeGetPlaylist(player: unknown): string[] {
+  const list = safeYtCall<string[]>(player, "getPlaylist");
+  return Array.isArray(list) ? list : [];
+}
+
+/** Safe getPlaylistIndex – returns current index in playlist, or 0 if not available. */
+export function safeGetPlaylistIndex(player: unknown): number {
+  const idx = safeYtCall<number>(player, "getPlaylistIndex");
+  return typeof idx === "number" && idx >= 0 ? idx : 0;
+}
+
+/** Safe getVideoData – returns { video_id, title, author } for current video. */
+export function safeGetVideoData(player: unknown): { video_id: string; title: string; author: string } | null {
+  const data = safeYtCall<{ video_id?: string; title?: string; author?: string }>(player, "getVideoData");
+  if (data && typeof data === "object" && data.video_id) {
+    return {
+      video_id: String(data.video_id),
+      title: typeof data.title === "string" ? data.title : "YouTube",
+      author: typeof data.author === "string" ? data.author : "",
+    };
+  }
+  return null;
 }

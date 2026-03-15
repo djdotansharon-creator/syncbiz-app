@@ -36,6 +36,28 @@ export function isYouTubeMixUrl(url: string): boolean {
   return !!listId && (listId.startsWith("RD") || url.includes("start_radio=1"));
 }
 
+/** YouTube source kind: single video/track vs multi-track (playlist/radio/mix). */
+export type YouTubeSourceKind = "single" | "multi";
+
+/**
+ * Classify a YouTube URL as single-track or multi-track.
+ * Multi-track: playlist (list=PLxxx), radio (list=RDxxx), mix (start_radio=1), or similar.
+ * Single: normal video URL without list/radio params.
+ */
+export function getYouTubeSourceKind(url: string | null): YouTubeSourceKind {
+  if (!url || typeof url !== "string") return "single";
+  const u = url.trim().toLowerCase();
+  if (!u.includes("youtube.com") && !u.includes("youtu.be")) return "single";
+  if (u.includes("list=")) return "multi";
+  if (u.includes("start_radio=1")) return "multi";
+  return "single";
+}
+
+/** True if URL is a YouTube multi-track source (playlist, radio, mix). */
+export function isYouTubeMultiTrackUrl(url: string | null): boolean {
+  return getYouTubeSourceKind(url) === "multi";
+}
+
 /** Build YouTube thumbnail URL. */
 export function getYouTubeThumbnail(url: string): string | null {
   const vid = getYouTubeVideoId(url);

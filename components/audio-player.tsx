@@ -7,7 +7,7 @@ import { getPlaylistTracks } from "@/lib/playlist-types";
 import { useTranslations } from "@/lib/locale-context";
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
-import { getYouTubeVideoId, getYouTubePlaylistId, isYouTubeMixUrl } from "@/lib/playlist-utils";
+import { getYouTubeVideoId, getYouTubePlaylistId, getYouTubeThumbnail, isYouTubeMixUrl, isYouTubeMultiTrackUrl } from "@/lib/playlist-utils";
 import { getSoundCloudEmbedUrl, isSoundCloudUrl } from "@/lib/player-utils";
 import {
   isYtPlayerReady,
@@ -15,6 +15,9 @@ import {
   safeGetCurrentTime,
   safeGetDuration,
   safeGetVideoLoadedFraction,
+  safeGetPlaylist,
+  safeGetPlaylistIndex,
+  safeGetVideoData,
   safeSetVolume,
   safePlayVideo,
   safePauseVideo,
@@ -144,7 +147,19 @@ export function AudioPlayer() {
   const vid = isYouTube && currentPlayUrl ? getYouTubeVideoId(currentPlayUrl) : null;
   const ytPlaylistId = isYouTube && currentPlayUrl ? getYouTubePlaylistId(currentPlayUrl) : null;
   const isYouTubeMix = isYouTube && currentPlayUrl ? isYouTubeMixUrl(currentPlayUrl) : false;
+  const isYouTubeMultiTrack = isYouTube && currentPlayUrl ? isYouTubeMultiTrackUrl(currentPlayUrl) : false;
   const scEmbedUrl = isSoundCloud && currentPlayUrl ? getSoundCloudEmbedUrl(currentPlayUrl) : null;
+
+  /** Internal state for multi-track YouTube sources (playlist/radio/mix) – synced from YT embed */
+  type YtMultiTrackState = {
+    currentTitle: string;
+    currentThumbnail: string | null;
+    currentIndex: number;
+    total: number;
+    nextTitle: string | null;
+    nextThumbnail: string | null;
+  };
+  const [ytMultiTrackState, setYtMultiTrackState] = useState<YtMultiTrackState | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const hlsRef = useRef<import("hls.js").default | null>(null);
@@ -462,6 +477,41 @@ export function AudioPlayer() {
     endedHandledRef.current = false;
   }, [currentPlayUrl]);
 
+  /** Clear multi-track state when switching away from multi-track YT source */
+  useEffect(() => {
+    if (!isYouTubeMultiTrack) setYtMultiTrackState(null);
+  }, [isYouTubeMultiTrack]);
+
+  /** Poll YT player for multi-track state – current item, next item, index, total */
+  useEffect(() => {
+    if (!isYouTubeMultiTrack || !isYouTube) return;
+    const poll = () => {
+      const p = ytPlayerRef.current;
+      if (!isYtPlayerReady(p)) return;
+      const playlist = safeGetPlaylist(p);
+      const idx = safeGetPlaylistIndex(p);
+      const data = safeGetVideoData(p);
+      if (!data) return;
+      const total = playlist.length || 1;
+      const nextVid = playlist[idx + 1] ?? null;
+      const nextThumb = nextVid ? `https://img.youtube.com/vi/${nextVid}/hqdefault.jpg` : null;
+      setYtMultiTrackState((prev) => {
+        if (prev && prev.currentIndex === idx && prev.currentTitle === data.title) return prev;
+        return {
+          currentTitle: data.title || "YouTube",
+          currentThumbnail: data.video_id ? `https://img.youtube.com/vi/${data.video_id}/hqdefault.jpg` : null,
+          currentIndex: idx,
+          total,
+          nextTitle: nextVid ? null : null,
+          nextThumbnail: nextThumb,
+        };
+      });
+    };
+    poll();
+    const id = setInterval(poll, 800);
+    return () => clearInterval(id);
+  }, [isYouTubeMultiTrack, isYouTube]);
+
   useEffect(() => {
     if (status !== "playing" && status !== "paused") return;
     const tick = () => {
@@ -532,7 +582,7 @@ export function AudioPlayer() {
   }, [isStreamUrl]);
 
   const hasPrevNext = (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1);
-  const thumbnailCover = currentTrack?.cover ?? currentSource?.cover ?? null;
+  const thumbnailCover = ytMultiTrackState?.currentThumbnail ?? currentTrack?.cover ?? currentSource?.cover ?? null;
 
   const canSeek =
     currentSource &&
@@ -670,7 +720,7 @@ export function AudioPlayer() {
     const ro = new ResizeObserver(check);
     ro.observe(container);
     return () => ro.disconnect();
-  }, [currentTrack?.title]);
+  }, [currentTrack?.title, ytMultiTrackState?.currentTitle]);
 
   return (
     <header
@@ -836,6 +886,7 @@ export function AudioPlayer() {
 
             {/* ROW 2: Track display panel – source icon + status + title + next (unified deck display) */}
             {(() => {
+              const displayTitle = ytMultiTrackState?.currentTitle ?? currentTrack?.title ?? "No track selected";
               let tracks: { name: string }[] = [];
               try {
                 tracks = currentPlaylist ? getPlaylistTracks(currentPlaylist) : [];
@@ -846,7 +897,12 @@ export function AudioPlayer() {
               const nextTrackName = hasMoreTracks ? tracks[currentTrackIndex + 1]?.name : null;
               const safeQueue = Array.isArray(queue) ? queue : [];
               const nextSource = queueIndex >= 0 && queueIndex < safeQueue.length - 1 ? safeQueue[queueIndex + 1] : null;
-              const nextLabel = nextTrackName ?? nextSource?.title ?? null;
+              const nextLabel =
+                ytMultiTrackState?.nextTitle ??
+                (ytMultiTrackState?.nextThumbnail ? (t?.nextInPlaylist ?? "Next in playlist") : null) ??
+                nextTrackName ??
+                nextSource?.title ??
+                null;
               return (
                 <div className="flex w-full">
                   <div className="relative flex min-w-0 w-full flex-col rounded-lg border border-slate-700/60 bg-slate-900/40 py-2.5 pl-4 pr-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_1px_3px_rgba(0,0,0,0.2)] ring-1 ring-slate-700/40">
@@ -879,19 +935,19 @@ export function AudioPlayer() {
                         {/* Row 1: PLAY NOW : current track */}
                         <div ref={titleContainerRef} className="relative flex min-w-0 flex-1 items-center overflow-hidden gap-1.5">
                           <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
-                            {currentTrack?.title ?? "No track selected"}
+                            {displayTitle}
                           </span>
                           <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">{t?.playNow ?? "Play now"}:</span>
                           {titleOverflows ? (
                             <div className="min-w-0 flex-1 overflow-hidden">
                               <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
-                                <span className="text-xs font-medium text-slate-100 sm:text-sm">{currentTrack?.title ?? "No track selected"}</span>
-                                <span className="text-xs font-medium text-slate-100 sm:text-sm">{currentTrack?.title ?? "No track selected"}</span>
+                                <span className="text-xs font-medium text-slate-100 sm:text-sm">{displayTitle}</span>
+                                <span className="text-xs font-medium text-slate-100 sm:text-sm">{displayTitle}</span>
                               </div>
                             </div>
                           ) : (
-                            <p className="min-w-0 flex-1 truncate text-xs font-medium text-slate-100 sm:text-sm" title={currentTrack?.title ?? undefined}>
-                              {currentTrack?.title ?? "No track selected"}
+                            <p className="min-w-0 flex-1 truncate text-xs font-medium text-slate-100 sm:text-sm" title={displayTitle}>
+                              {displayTitle}
                             </p>
                           )}
                         </div>
