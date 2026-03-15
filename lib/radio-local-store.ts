@@ -32,7 +32,7 @@ export function setRadioStationsLocal(stations: RadioStream[]): void {
 export function addRadioStationLocal(station: RadioStream): void {
   const list = getRadioStationsLocal();
   if (list.some((s) => s.id === station.id)) return;
-  setRadioStationsLocal([...list, station]);
+  setRadioStationsLocal([station, ...list]);
 }
 
 export function removeRadioStationLocal(id: string): void {

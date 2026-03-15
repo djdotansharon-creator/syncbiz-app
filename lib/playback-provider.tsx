@@ -86,7 +86,6 @@ type PlaybackState = {
   currentPlaylist: Playlist | null;
   currentSource: UnifiedSource | null;
   currentTrackIndex: number;
-  currentTrack: PlaybackTrack | null;
   status: PlaybackStatus;
   volume: number;
   shuffle: boolean;
@@ -97,7 +96,13 @@ type PlaybackState = {
   queueIndex: number;
 };
 
+/** Derived from currentSource + currentTrackIndex – single source of truth, never stored separately */
+function deriveCurrentTrack(source: UnifiedSource | null, trackIndex: number): PlaybackTrack | null {
+  return source ? unifiedToPlaybackTrack(source, trackIndex) : null;
+}
+
 type PlaybackContextValue = PlaybackState & {
+  currentTrack: PlaybackTrack | null;
   play: () => void;
   pause: () => void;
   stop: () => void;
@@ -160,7 +165,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     currentPlaylist: null,
     currentSource: null,
     currentTrackIndex: 0,
-    currentTrack: null,
     status: "idle",
     volume: 80,
     shuffle: false,
@@ -191,8 +195,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const hasRestoredRef = useRef(false);
   const prevStatusRef = useRef<PlaybackStatus>("idle");
   const prevTrackKeyRef = useRef<string>("");
+  const currentTrack = deriveCurrentTrack(state.currentSource, state.currentTrackIndex);
   useEffect(() => {
-    const { status, currentSource, currentTrackIndex, currentTrack } = state;
+    const { status, currentSource, currentTrackIndex } = state;
     const trackKey = currentSource ? `${currentSource.id}-${currentTrackIndex}` : "";
     if (status === "playing" && prevStatusRef.current !== "playing") {
       mvpLog("playback_started", { id: currentSource?.id, title: currentTrack?.title });
@@ -234,6 +239,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     : false;
 
   const stopAllPlayersRef = useRef<(() => void) | null>(null);
+  const transportLockRef = useRef(false);
+
+  useEffect(() => {
+    transportLockRef.current = false;
+  }, [state.currentTrackIndex, state.currentSource?.id, state.queueIndex]);
 
   const registerStopAllPlayers = useCallback((fn: () => void) => {
     stopAllPlayersRef.current = fn;
@@ -297,7 +307,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           currentPlaylist: playlist,
           currentSource: source,
           currentTrackIndex: idx,
-          currentTrack: unifiedToPlaybackTrack(source, idx),
           status: "playing",
           queue,
           queueIndex: qi >= 0 ? qi : 0,
@@ -369,7 +378,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       status: "stopped" as const,
       currentSource: null,
       currentPlaylist: null,
-      currentTrack: null,
       currentTrackIndex: 0,
       queueIndex: -1,
     }));
@@ -382,28 +390,38 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     return next;
   }, []);
 
+  /**
+   * Returns the state update for a within-playlist track change.
+   * Single atomic transition – ensures currentTrackIndex + status (playback intent) update together.
+   */
+  const getAdvanceState = useCallback((s: PlaybackState, trackIndex: number): PlaybackState => ({
+    ...s,
+    currentTrackIndex: trackIndex,
+    status: "playing" as const,
+  }), []);
+
   const prev = useCallback(() => {
+    if (transportLockRef.current) return;
+    transportLockRef.current = true;
     setState((s) => {
-      if (!s.currentSource) return s;
+      if (!s.currentSource) {
+        transportLockRef.current = false;
+        return s;
+      }
       const playlist = s.currentPlaylist;
       const tracks = playlist ? getPlaylistTracks(playlist) : [];
       const trackCount = tracks.length || 1;
 
       if (trackCount > 1 && s.currentTrackIndex > 0) {
-        stopAllBeforePlay();
         const nextIdx = s.currentTrackIndex - 1;
         const track = tracks[nextIdx];
         const url = track?.url ?? s.currentSource.url;
         const embedded = track ? canEmbedInCard(track.type) : false;
         if (!embedded && url) {
+          stopAllBeforePlay();
           playLocal(url);
         }
-        return {
-          ...s,
-          currentTrackIndex: nextIdx,
-          currentTrack: unifiedToPlaybackTrack(s.currentSource, nextIdx),
-          status: "playing" as const,
-        };
+        return getAdvanceState(s, nextIdx);
       }
 
       if (s.queue.length > 1 && s.queueIndex > 0) {
@@ -412,51 +430,47 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         playSource(prevSource);
         return s;
       }
+      transportLockRef.current = false;
       return s;
     });
-  }, [stopAllBeforePlay, playLocal, playSource]);
+  }, [stopAllBeforePlay, playLocal, playSource, getAdvanceState]);
 
   const next = useCallback(() => {
+    if (transportLockRef.current) return;
+    transportLockRef.current = true;
     setState((s) => {
-      if (!s.currentSource) return s;
+      if (!s.currentSource) {
+        transportLockRef.current = false;
+        return s;
+      }
       const playlist = s.currentPlaylist;
       const tracks = playlist ? getPlaylistTracks(playlist) : [];
       const trackCount = tracks.length || 1;
 
       if (trackCount > 1 && s.currentTrackIndex < trackCount - 1) {
-        stopAllBeforePlay();
         const nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
         const track = tracks[nextIdx];
         const url = track?.url ?? s.currentSource.url;
         const embedded = track ? canEmbedInCard(track.type) : false;
         if (!embedded && url) {
+          stopAllBeforePlay();
           playLocal(url);
         }
-        return {
-          ...s,
-          currentTrackIndex: nextIdx,
-          currentTrack: unifiedToPlaybackTrack(s.currentSource, nextIdx),
-          status: "playing" as const,
-        };
+        return getAdvanceState(s, nextIdx);
       }
 
       const atLastTrack = s.currentTrackIndex >= trackCount - 1;
       const atLastInQueue = s.queueIndex >= s.queue.length - 1 || s.queue.length <= 1;
 
       if (atLastTrack && s.repeat && trackCount >= 1) {
-        stopAllBeforePlay();
         const track = tracks[0];
         const url = track?.url ?? s.currentSource.url;
         const embedded = track ? canEmbedInCard(track.type) : false;
         if (!embedded && url) {
+          stopAllBeforePlay();
           playLocal(url);
         }
-        return {
-          ...s,
-          currentTrackIndex: 0,
-          currentTrack: unifiedToPlaybackTrack(s.currentSource, 0),
-          status: "playing" as const,
-        };
+        return getAdvanceState(s, 0);
       }
 
       if (s.queue.length >= 1 && atLastTrack) {
@@ -467,14 +481,20 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             : s.queueIndex + 1;
         const nextSource = s.queue[nextQueueIdx % s.queue.length];
         if (nextSource) {
+          if (nextSource.id === s.currentSource.id && !s.repeat) {
+            stop();
+            transportLockRef.current = false;
+            return s;
+          }
           stopAllBeforePlay();
           playSource(nextSource);
         }
         return s;
       }
+      transportLockRef.current = false;
       return s;
     });
-  }, [stopAllBeforePlay, playLocal, playSource, getShuffledIndex]);
+  }, [stopAllBeforePlay, playLocal, playSource, getShuffledIndex, getAdvanceState, stop]);
 
   const setVolume = useCallback((value: number) => {
     setState((s) => ({ ...s, volume: Math.max(0, Math.min(100, value)) }));
@@ -529,6 +549,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const value = useMemo<PlaybackContextValue>(
     () => ({
       ...state,
+      currentTrack,
       play,
       pause,
       stop,
@@ -550,6 +571,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }),
     [
       state,
+      currentTrack,
       play,
       pause,
       stop,

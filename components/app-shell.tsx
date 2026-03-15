@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
 import { AudioPlayer } from "@/components/audio-player";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 
 const categoryKeys = ["dashboard", "sources", "radio", "schedules", "devices", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
@@ -140,6 +141,8 @@ function getTimeBasedGreeting(locale: Locale, t: Record<string, string>): string
 
 function LogoutButton() {
   const router = useRouter();
+  const { t } = useTranslations();
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   async function handleLogout() {
     setLoading(true);
@@ -152,14 +155,27 @@ function LogoutButton() {
     }
   }
   return (
-    <button
-      type="button"
-      onClick={handleLogout}
-      disabled={loading}
-      className="rounded-lg border border-slate-700/80 bg-slate-900/60 px-2.5 py-1.5 text-xs font-medium text-slate-400 transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 disabled:opacity-50"
-    >
-      {loading ? "…" : "Logout"}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => setConfirmOpen(true)}
+        disabled={loading}
+        className="rounded-lg border border-slate-700/80 bg-slate-900/60 px-2.5 py-1.5 text-xs font-medium text-slate-400 transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 disabled:opacity-50"
+      >
+        {loading ? "…" : "Logout"}
+      </button>
+      <DeleteConfirmModal
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={handleLogout}
+        title={t.logoutConfirmTitle}
+        message={t.logoutConfirm}
+        confirmLabel={t.confirmLogout}
+        loading={loading}
+        loadingLabel={t.loggingOut}
+        compact
+      />
+    </>
   );
 }
 
@@ -220,7 +236,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-50">
-      <aside className="hidden w-56 flex-col border-r border-slate-800/60 bg-slate-950/95 px-4 py-5 lg:flex">
+      <aside className="hidden w-56 flex-col border-r border-slate-800/60 bg-slate-950/95 px-4 py-5 lg:flex sticky top-0 self-start h-screen overflow-y-auto">
         <Link href="/library" className="flex items-center gap-2.5 px-1">
           <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-base font-semibold text-sky-400 ring-1 ring-sky-500/30">
             SB
@@ -266,11 +282,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="flex min-h-screen flex-1 flex-col">
         <header
-          className="sticky top-0 z-50 flex flex-col border-b border-slate-800/80 bg-slate-950/98 shadow-[0_4px_24px_rgba(0,0,0,0.4)] backdrop-blur-md"
+          className="sticky top-0 z-50 flex flex-col overflow-hidden border-b border-slate-800/80 bg-slate-950/98 shadow-[0_4px_24px_rgba(0,0,0,0.4)] backdrop-blur-md"
           role="banner"
         >
           {/* Row 1: Title, greeting, time */}
-          <div className="flex flex-nowrap items-center justify-between gap-3 border-b border-slate-800/60 px-4 py-3 sm:px-6">
+          <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 border-b border-slate-800/60 px-3 py-3 sm:gap-3 sm:px-6">
             <div className="min-w-0 flex-1">
               <h1 className="text-base font-bold tracking-tight text-slate-50">
                 {t.businessMediaScheduler ?? "Business Media Scheduler"}
@@ -279,9 +295,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 {headerSubtitle}
               </p>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex min-w-0 shrink items-center gap-2">
               <div
-                className="flex shrink-0 items-center gap-2.5 rounded-xl border border-slate-700/80 bg-slate-900/90 px-3 py-1.5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)]"
+                className="flex min-w-0 shrink items-center gap-1.5 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] sm:gap-2.5 sm:px-3"
                 dir={locale === "he" ? "rtl" : "ltr"}
               >
                 <span className="shrink-0 text-base font-semibold tabular-nums text-slate-200" suppressHydrationWarning>

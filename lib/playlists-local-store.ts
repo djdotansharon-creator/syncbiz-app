@@ -32,7 +32,7 @@ export function setPlaylistsLocal(playlists: Playlist[]): void {
 export function addPlaylistLocal(playlist: Playlist): void {
   const list = getPlaylistsLocal();
   if (list.some((p) => p.id === playlist.id)) return;
-  setPlaylistsLocal([...list, playlist]);
+  setPlaylistsLocal([playlist, ...list]);
 }
 
 export function removePlaylistLocal(id: string): void {

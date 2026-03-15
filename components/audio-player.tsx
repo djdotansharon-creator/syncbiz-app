@@ -166,8 +166,12 @@ export function AudioPlayer() {
   const volumeRef = useRef(volume);
   const statusRef = useRef(status);
   const volumeBeforeMuteRef = useRef(80);
+  const nextRef = useRef(next);
+  const lastScEmbedUrlRef = useRef<string | null>(null);
+  const endedHandledRef = useRef(false);
   volumeRef.current = volume;
   statusRef.current = status;
+  nextRef.current = next;
 
   /** Load YouTube player – deps exclude volume/status so volume changes never recreate the player */
   const loadYouTube = useCallback(() => {
@@ -214,18 +218,36 @@ export function AudioPlayer() {
     window.onYouTubeIframeAPIReady = () => loadYT();
   }, [vid, ytPlaylistId]);
 
-  /** Load SoundCloud widget – deps exclude volume/status so volume changes never recreate the player */
+  /** Load SoundCloud widget – deps exclude next/volume/status to avoid recreation loops and jitter */
   const loadSoundCloud = useCallback(() => {
     if (!scEmbedUrl || !scIframeRef.current) return;
+    if (lastScEmbedUrlRef.current === scEmbedUrl) return;
+    lastScEmbedUrlRef.current = scEmbedUrl;
+    const oldWidget = scWidgetRef.current;
+    if (oldWidget) {
+      try {
+        oldWidget.unbind?.("finish");
+        oldWidget.pause();
+        oldWidget.seekTo(0);
+      } catch {
+        /* ignore */
+      }
+      scWidgetRef.current = null;
+    }
     const loadSC = () => {
-      if (!scIframeRef.current || !window.SC) return;
+      if (!scIframeRef.current || !window.SC || lastScEmbedUrlRef.current !== scEmbedUrl) return;
       const widget = window.SC.Widget(scIframeRef.current);
       scWidgetRef.current = widget;
       widget.setVolume(volumeRef.current);
       widget.bind("ready", () => {
+        if (lastScEmbedUrlRef.current !== scEmbedUrl) return;
         if (statusRef.current === "playing") widget.play();
       });
-      widget.bind("finish", () => next());
+      widget.bind("finish", () => {
+        if (endedHandledRef.current) return;
+        endedHandledRef.current = true;
+        nextRef.current();
+      });
     };
     if (window.SC) {
       loadSC();
@@ -235,7 +257,7 @@ export function AudioPlayer() {
     tag.src = "https://w.soundcloud.com/player/api.js";
     tag.onload = loadSC;
     document.body.appendChild(tag);
-  }, [scEmbedUrl, next]);
+  }, [scEmbedUrl]);
 
   useEffect(() => {
     if (isYouTube) loadYouTube();
@@ -313,9 +335,13 @@ export function AudioPlayer() {
 
   /** Stop/destroy previous embed when switching source – runs after commit to avoid removeChild during reconciliation */
   useEffect(() => {
-    if (!isYouTube && !isSoundCloud) return;
+    if (!isYouTube && !isSoundCloud) {
+      lastScEmbedUrlRef.current = null;
+      return;
+    }
     return () => {
       stopAllEmbedded();
+      lastScEmbedUrlRef.current = null;
     };
   }, [isYouTube, isSoundCloud, stopAllEmbedded]);
 
@@ -433,20 +459,28 @@ export function AudioPlayer() {
   }, [volume, isYouTube, isSoundCloud]);
 
   useEffect(() => {
+    endedHandledRef.current = false;
+  }, [currentPlayUrl]);
+
+  useEffect(() => {
     if (status !== "playing" && status !== "paused") return;
     const tick = () => {
       const p = ytPlayerRef.current;
       if (isYtPlayerReady(p) && isYouTube) {
-        const state = safeGetPlayerState(p);
-        if (state === window.YT!.PlayerState.ENDED) {
-          // YouTube Mix/Radio embeds auto-advance – calling next() would interrupt and cause jumps
-          if (!isYouTubeMix) next();
+        const playerState = safeGetPlayerState(p);
+        if (playerState === window.YT!.PlayerState.ENDED) {
+          if (!isYouTubeMix && !endedHandledRef.current) {
+            endedHandledRef.current = true;
+            nextRef.current();
+          }
+        } else {
+          endedHandledRef.current = false;
         }
       }
     };
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
-  }, [status, isYouTube, isYouTubeMix, next]);
+  }, [status, isYouTube, isYouTubeMix]);
 
   useEffect(() => {
     if (!currentSource || isSeekingRef.current) return;
@@ -487,14 +521,15 @@ export function AudioPlayer() {
     const audio = audioRef.current;
     if (!audio || !isStreamUrl) return;
     const onEnded = () => {
-      // Live streams (duration Infinity/NaN) can fire ended spuriously – skip next() to avoid jumps
       const d = lastKnownDurationRef.current;
       if (!Number.isFinite(d) || d <= 0) return;
-      next();
+      if (endedHandledRef.current) return;
+      endedHandledRef.current = true;
+      nextRef.current();
     };
     audio.addEventListener("ended", onEnded);
     return () => audio.removeEventListener("ended", onEnded);
-  }, [isStreamUrl, next]);
+  }, [isStreamUrl]);
 
   const hasPrevNext = (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1);
   const thumbnailCover = currentTrack?.cover ?? currentSource?.cover ?? null;
@@ -639,54 +674,51 @@ export function AudioPlayer() {
 
   return (
     <header
-      className="sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/98 px-4 py-3 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.08)] backdrop-blur-md"
+      className="sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/98 px-3 py-3 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.08)] backdrop-blur-md overflow-hidden sm:px-4"
       role="region"
       aria-label="Player controller"
     >
-      <div className="mx-auto max-w-6xl flex justify-center">
-        {/* Player unit centered: [ Artwork ] [5px] [ Source ] [5px] [ Control ] */}
-        <div className="flex items-center gap-[25px]">
-          {/* LEFT: [ ARTWORK ] [ SOURCE ] – top of YouTube icon aligns with top of artwork */}
-          <div className="flex shrink-0 items-start gap-[25px]">
-            <div className="h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-slate-800 ring-1 ring-slate-700/60 sm:h-28 sm:w-28">
-              {thumbnailCover ? (
-                <HydrationSafeImage src={thumbnailCover} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
-              )}
-            </div>
-            <div className="flex flex-col items-center justify-center gap-[15px] w-9 sm:w-10 shrink-0">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-800/80 ring-1 ring-slate-700/60 sm:h-10 sm:w-10" title={currentSource?.origin === "radio" ? "Radio" : currentTrack?.type ?? "Local"}>
-                <SourceIcon type={currentTrack?.type ?? "local"} origin={currentSource?.origin} size="lg" />
-              </div>
-              <div className="flex flex-col items-center gap-[15px]">
-              <span
-                className={`inline-flex w-full items-center justify-center gap-0.5 rounded-full px-1 py-px text-[7px] font-semibold uppercase tracking-wider ${
-                  status === "playing"
-                    ? "bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/40 shadow-[0_0_6px_rgba(16,185,129,0.2)]"
-                    : status === "paused"
-                      ? "bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/40 shadow-[0_0_6px_rgba(245,158,11,0.2)]"
-                      : "bg-slate-800/80 text-slate-500 ring-1 ring-slate-600/30"
-                }`}
-              >
-                <span className={`h-1 w-1 shrink-0 rounded-full ${status === "playing" ? "bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.8)] playing-led-pulse" : status === "paused" ? "bg-amber-400 shadow-[0_0_4px_rgba(251,191,36,0.8)]" : "bg-slate-500"}`} />
-                {status}
-              </span>
-              <span className="inline-flex w-full items-center justify-center gap-0.5 rounded-full bg-sky-500/15 px-1 py-px text-[7px] font-semibold uppercase tracking-wider text-sky-400 ring-1 ring-sky-500/40 shadow-[0_0_6px_rgba(14,165,233,0.2)]">
-                <span className="h-1 w-1 shrink-0 rounded-full bg-sky-400 shadow-[0_0_4px_rgba(56,189,248,0.8)]" />
-                Live
-              </span>
+      <div className="mx-auto max-w-6xl flex min-w-0 justify-center">
+        {/* Player unit: [ Circular artwork ] [ Control + Track panel ] */}
+        <div className="flex min-w-0 items-center gap-3 sm:gap-5 sm:gap-6">
+          {/* LEFT: Circular artwork – static cover, playback motion on outer ring only */}
+          <div className="relative flex shrink-0 items-center justify-center">
+            {/* Outer ring – playback-active pulse when playing; ring animates, cover stays static */}
+            <div
+              className={`relative flex shrink-0 items-center justify-center rounded-full border-2 p-[6px] bg-slate-800/80 ${
+                status === "playing"
+                  ? "playing-active-ring"
+                  : "border-slate-600/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_0_1px_rgba(0,0,0,0.2),0_2px_12px_rgba(0,0,0,0.3)]"
+              }`}
+            >
+              <div className="relative h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 rounded-full overflow-hidden bg-slate-800/90 shadow-[inset_0_0_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]">
+                <div className="h-full w-full overflow-hidden rounded-full">
+                {thumbnailCover ? (
+                  <HydrationSafeImage src={thumbnailCover} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
+                )}
+                </div>
               </div>
             </div>
           </div>
 
           {/* Control row | Track title | Timeline – unified width */}
-          <div className="flex min-w-0 flex-col gap-2.5 w-full max-w-2xl">
-            {/* Control row: full width, Prev at left edge, Volume at right edge */}
-            <div className="flex flex-nowrap items-center w-full gap-2 sm:gap-3">
-              <NeonControlButton size="md" onClick={prev} disabled={!hasPrevNext} aria-label="Previous" title="Previous">
-                <svg className="h-5 w-5 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+          <div className="flex min-w-0 flex-1 flex-col gap-2.5 w-full max-w-2xl">
+            {/* Control row: full width, Prev at left edge, Volume at right edge; wraps on narrow screens */}
+            <div className="flex flex-wrap items-center w-full gap-2 gap-y-2 sm:gap-3">
+              <NeonControlButton
+                size="md"
+                onClick={() => {
+                  endedHandledRef.current = true;
+                  prev();
+                }}
+                disabled={!hasPrevNext}
+                aria-label="Previous"
+                title="Previous"
+              >
+                <svg className="h-5 w-5 scale-x-[-1] sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
                 </svg>
               </NeonControlButton>
               <NeonControlButton size="md" onClick={stop} disabled={!currentSource} aria-label="Stop" title="Stop">
@@ -708,7 +740,7 @@ export function AudioPlayer() {
                 active={status === "playing"}
                 aria-label={status === "playing" ? "Pause" : "Play"}
                 title={status === "playing" ? "Pause" : "Play"}
-                className="!h-12 !min-w-[110px] !w-auto !px-6 !rounded-2xl"
+                className="!h-11 !min-w-[90px] !w-auto !px-4 !rounded-2xl sm:!h-12 sm:!min-w-[110px] sm:!px-6"
               >
                 <span className="relative flex h-8 w-8 items-center justify-center sm:h-9 sm:w-9" aria-hidden>
                   <svg className={`absolute ${status === "playing" ? "opacity-100" : "pointer-events-none opacity-0"}`} viewBox="0 0 24 24" fill="currentColor">
@@ -719,25 +751,33 @@ export function AudioPlayer() {
                   </svg>
                 </span>
               </NeonControlButton>
-              <NeonControlButton size="md" onClick={next} disabled={!hasPrevNext} aria-label="Next" title="Next">
-                <svg className="h-5 w-5 ml-0.5 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
+              <NeonControlButton
+                size="md"
+                onClick={() => {
+                  endedHandledRef.current = true;
+                  next();
+                }}
+                disabled={!hasPrevNext}
+                aria-label="Next"
+                title="Next"
+              >
+                <svg className="h-5 w-5 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
                 </svg>
               </NeonControlButton>
               <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
               <NeonControlButton size="2xs" variant="cyan" className="!rounded-lg" onClick={() => setAutoMix((a) => !a)} active={autoMix} aria-label="AutoMix" title="AutoMix">
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M2 12h6l4-8v16l-4-8H2" />
-                  <path d="M22 12h-6l-4 8V4l4 8h6" />
+                  <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
                 </svg>
               </NeonControlButton>
               <NeonControlButton size="2xs" variant="cyan" className="!rounded-lg" onClick={toggleShuffle} active={shuffle} aria-label="Random" title="Random">
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
+                  <path d="M4 4l5 5-5 5M20 4l-5 5 5 5M20 20l-5-5 5-5M4 20l5-5-5-5" />
                 </svg>
               </NeonControlButton>
               <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
-              <div className="flex min-w-[70px] shrink-0 items-center gap-1.5 rounded-lg border border-cyan-500/50 bg-slate-900/80 px-2 py-1 sm:min-w-[90px] sm:gap-2 sm:px-2.5 md:min-w-[120px]">
+              <div className="flex min-w-[52px] shrink items-center gap-1 rounded-lg border border-cyan-500/50 bg-slate-900/80 px-1.5 py-1 sm:min-w-[70px] sm:gap-1.5 sm:px-2 md:min-w-[90px] md:gap-2 md:px-2.5 lg:min-w-[120px]">
                 <button
                   type="button"
                   onClick={() => {
@@ -781,7 +821,7 @@ export function AudioPlayer() {
                     aria-label="Volume"
                   />
                 </div>
-                <span className="w-6 shrink-0 text-end text-xs font-bold tabular-nums text-cyan-500 sm:w-7" style={{ color: "#06b6d4" }}>{volume}</span>
+                <span className="w-5 shrink-0 text-end text-[10px] font-bold tabular-nums text-cyan-500 sm:w-6 sm:text-xs" style={{ color: "#06b6d4" }}>{volume}</span>
               </div>
               <NeonControlButton size="2xs" variant="white" className="!rounded-lg" onClick={() => setShareOpen(true)} disabled={!currentSource} aria-label={t.share} title={t.share}>
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -794,7 +834,7 @@ export function AudioPlayer() {
               </NeonControlButton>
             </div>
 
-            {/* ROW 2: Track title + Next – CDJ-style frame */}
+            {/* ROW 2: Track display panel – source icon + status + title + next (unified deck display) */}
             {(() => {
               let tracks: { name: string }[] = [];
               try {
@@ -809,33 +849,83 @@ export function AudioPlayer() {
               const nextLabel = nextTrackName ?? nextSource?.title ?? null;
               return (
                 <div className="flex w-full">
-                  <div className="relative flex min-w-0 w-full flex-col gap-1.5 rounded-lg border border-sky-500/25 bg-sky-500/8 p-1.5 shadow-[0_0_12px_rgba(56,189,248,0.06),inset_0_1px_0_rgba(255,255,255,0.02)]">
-                    <div
-                      ref={titleContainerRef}
-                      className="relative flex min-w-0 overflow-hidden rounded border border-sky-500/20 bg-sky-500/5 px-2.5 py-1"
-                    >
-                      <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
-                        {currentTrack?.title ?? "No track selected"}
-                      </span>
-                      {titleOverflows ? (
-                        <div className="w-full overflow-hidden">
-                          <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
-                            <span className="text-xs font-medium text-sky-100/95 sm:text-sm">{currentTrack?.title ?? "No track selected"}</span>
-                            <span className="text-xs font-medium text-sky-100/95 sm:text-sm">{currentTrack?.title ?? "No track selected"}</span>
-                          </div>
+                  <div className="relative flex min-w-0 w-full flex-col rounded-lg border border-slate-700/60 bg-slate-900/40 py-2.5 pl-4 pr-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_1px_3px_rgba(0,0,0,0.2)] ring-1 ring-slate-700/40">
+                    {/* Main row: left = icon + status (original compact structure), center = inner display frame */}
+                    <div className="flex min-w-0 flex-1 items-stretch gap-4">
+                      <div className="flex w-9 shrink-0 flex-col items-center justify-center gap-[15px] border-r border-slate-700/50 pr-4 sm:w-10">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-800/80 ring-1 ring-slate-700/60 sm:h-10 sm:w-10" title={currentSource?.origin === "radio" ? "Radio" : currentTrack?.type ?? "Local"}>
+                          <SourceIcon type={currentTrack?.type ?? "local"} origin={currentSource?.origin} size="lg" />
                         </div>
-                      ) : (
-                        <p className="min-w-0 flex-1 truncate text-center text-xs font-medium text-sky-100/95 sm:text-sm" title={currentTrack?.title ?? undefined}>
-                          {currentTrack?.title ?? "No track selected"}
-                        </p>
-                      )}
-                    </div>
-                    {nextLabel && (
-                      <div className="flex items-center justify-center gap-1.5 text-xs">
-                        <span className="shrink-0 font-medium uppercase tracking-wider text-slate-500">{t?.next ?? "Next"}:</span>
-                        <span className="min-w-0 truncate font-medium text-sky-400/90" title={nextLabel}>{nextLabel}</span>
+                        <div className="flex flex-col items-center gap-[15px]">
+                          <span
+                            className={`inline-flex w-full items-center justify-center gap-0.5 rounded-full px-1 py-px text-[7px] font-semibold uppercase tracking-wider ${
+                              status === "playing"
+                                ? "bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/40"
+                                : status === "paused"
+                                  ? "bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/40"
+                                  : "bg-slate-800/80 text-slate-500 ring-1 ring-slate-600/30"
+                            }`}
+                          >
+                            <span className={`h-1 w-1 shrink-0 rounded-full ${status === "playing" ? "bg-emerald-400 playing-led-pulse" : status === "paused" ? "bg-amber-400" : "bg-slate-500"}`} />
+                            {status}
+                          </span>
+                          <span className="inline-flex w-full items-center justify-center gap-0.5 rounded-full bg-slate-700/50 px-1 py-px text-[7px] font-semibold uppercase tracking-wider text-slate-400 ring-1 ring-slate-600/40">
+                            <span className="h-1 w-1 shrink-0 rounded-full bg-slate-400" />
+                            Live
+                          </span>
+                        </div>
                       </div>
-                    )}
+                      <div className="relative flex min-w-0 flex-1 flex-col gap-1 rounded border border-slate-700/50 bg-slate-800/30 px-2.5 py-1.5">
+                        {/* Row 1: PLAY NOW : current track */}
+                        <div ref={titleContainerRef} className="relative flex min-w-0 flex-1 items-center overflow-hidden gap-1.5">
+                          <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
+                            {currentTrack?.title ?? "No track selected"}
+                          </span>
+                          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">{t?.playNow ?? "Play now"}:</span>
+                          {titleOverflows ? (
+                            <div className="min-w-0 flex-1 overflow-hidden">
+                              <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
+                                <span className="text-xs font-medium text-slate-100 sm:text-sm">{currentTrack?.title ?? "No track selected"}</span>
+                                <span className="text-xs font-medium text-slate-100 sm:text-sm">{currentTrack?.title ?? "No track selected"}</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="min-w-0 flex-1 truncate text-xs font-medium text-slate-100 sm:text-sm" title={currentTrack?.title ?? undefined}>
+                              {currentTrack?.title ?? "No track selected"}
+                            </p>
+                          )}
+                        </div>
+                        {/* Row 2: NEXT TRACK : next track */}
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">{t?.next ?? "Next"} track:</span>
+                          <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-400" title={nextLabel ?? undefined}>{nextLabel ?? "—"}</span>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-center justify-center gap-2 border-l border-slate-700/50 pl-2" aria-hidden>
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span
+                            className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors ${
+                              autoMix ? "bg-cyan-400/80 shadow-[0_0_4px_rgba(34,211,238,0.5)]" : "bg-slate-500/50"
+                            }`}
+                            title="AutoMix"
+                          />
+                          <span className={`text-[7px] font-semibold uppercase tracking-wider ${autoMix ? "text-emerald-400" : "text-slate-500"}`}>
+                            {t?.autoMix ?? "Automix"}
+                          </span>
+                        </div>
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span
+                            className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors ${
+                              shuffle ? "bg-cyan-400/80 shadow-[0_0_4px_rgba(34,211,238,0.5)]" : "bg-slate-500/50"
+                            }`}
+                            title="Random"
+                          />
+                          <span className={`text-[7px] font-semibold uppercase tracking-wider ${shuffle ? "text-emerald-400" : "text-slate-500"}`}>
+                            {t?.random ?? "Random"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               );

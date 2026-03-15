@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, startTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
@@ -83,8 +83,8 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const { favoriteIds, toggleFavorite } = useFavoritesState();
   const playlistAutoLoaded = useRef(false);
 
-  const { sources, setSources, playSource } = useSourcesPlayback();
-  const { setQueue } = usePlayback();
+  const { sources, setSources } = useSourcesPlayback();
+  const { setQueue, playSource } = usePlayback();
 
   useEffect(() => {
     const playlistId = searchParams.get("playlist");
@@ -116,7 +116,9 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
 
   const handleAdd = useCallback(
     (s: UnifiedSource) => {
-      setSources((prev) => [...prev, s]);
+      startTransition(() => {
+        setSources((prev) => [s, ...prev]);
+      });
       if (s.origin === "playlist" && s.playlist) savePlaylistToLocal(s.playlist);
       if (s.origin === "radio" && s.radio) saveRadioToLocal(s.radio);
     },

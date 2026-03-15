@@ -9,7 +9,7 @@ const neonRedBase =
 
 const neonCyanBase =
   "inline-flex items-center justify-center rounded-lg border-2 border-cyan-400/60 bg-slate-900/95 text-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.2),0_0_20px_rgba(34,211,238,0.15)] transition-all duration-200 hover:border-cyan-400 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.4),0_0_28px_rgba(34,211,238,0.25)] hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-40 disabled:pointer-events-none disabled:hover:scale-100 active:scale-[0.97]";
-const neonCyanActive = "border-cyan-400 text-red-500 shadow-[0_0_0_2px_rgba(34,211,238,0.5),0_0_24px_rgba(34,211,238,0.35),0_0_40px_rgba(34,211,238,0.15)]";
+const neonCyanActive = "border-cyan-400 text-cyan-400 shadow-[0_0_0_2px_rgba(34,211,238,0.5),0_0_24px_rgba(34,211,238,0.35),0_0_40px_rgba(34,211,238,0.15)]";
 
 const neonWhiteBase =
   "inline-flex items-center justify-center rounded-lg border-2 border-white/60 bg-slate-900/95 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.2),0_0_20px_rgba(255,255,255,0.15)] transition-all duration-200 hover:border-white hover:shadow-[0_0_0_2px_rgba(255,255,255,0.4),0_0_28px_rgba(255,255,255,0.25)] hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-white/50 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-40 disabled:pointer-events-none disabled:hover:scale-100 active:scale-[0.97]";
