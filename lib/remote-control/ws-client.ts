@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { ClientMessage, ServerMessage, StationPlaybackState, DeviceMode, RemoteCommand } from "./types";
+import type { ClientMessage, ServerMessage, StationPlaybackState, DeviceMode, DeviceInfo, RemoteCommand } from "./types";
 
 export function getWsUrl(): string {
   if (typeof window === "undefined") return "";
@@ -126,7 +126,7 @@ export function useRemoteControlWs(
   return { status, wsRef, sendState, deviceMode, sendSetMaster, sendSetControl, masterDeviceId, sendCommand };
 }
 
-export type DeviceInfo = { id: string; connectedAt: string; mode?: DeviceMode };
+export type { DeviceInfo };
 
 export function useRemoteController() {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);

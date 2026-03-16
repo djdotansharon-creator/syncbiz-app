@@ -48,6 +48,13 @@ export type PlaySourcePayload = {
 /** Device mode: MASTER = active player, CONTROL = monitor/standby */
 export type DeviceMode = "MASTER" | "CONTROL";
 
+/** Device info from DEVICE_LIST – matches server payload */
+export type DeviceInfo = {
+  id: string;
+  connectedAt: string;
+  mode?: DeviceMode;
+};
+
 /** Message from client to server */
 export type ClientMessage =
   | { type: "REGISTER"; role: ClientRole; deviceId?: string; isMobile?: boolean }
@@ -59,7 +66,7 @@ export type ClientMessage =
 /** Message from server to client */
 export type ServerMessage =
   | { type: "REGISTERED"; deviceId?: string }
-  | { type: "DEVICE_LIST"; devices: { id: string; connectedAt: string; mode?: DeviceMode }[]; masterDeviceId?: string | null }
+  | { type: "DEVICE_LIST"; devices: DeviceInfo[]; masterDeviceId?: string | null }
   | { type: "STATE_UPDATE"; deviceId: string; state: StationPlaybackState }
   | { type: "COMMAND"; command: RemoteCommand; payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number } }
   | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string }

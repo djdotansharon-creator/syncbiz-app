@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRemoteController } from "@/lib/remote-control/ws-client";
-import type { StationPlaybackState } from "@/lib/remote-control/types";
+import type { StationPlaybackState, DeviceInfo } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
 
@@ -24,7 +24,7 @@ type StationControllerContextValue = {
   /** WS connection status. */
   status: "connecting" | "connected" | "disconnected" | "error";
   /** Available player devices. */
-  devices: { id: string; connectedAt: string }[];
+  devices: DeviceInfo[];
   /** Send command to the selected device. */
   sendPlay: () => void;
   sendPause: () => void;
@@ -141,7 +141,7 @@ export function useStationController() {
     setSelectedDeviceId: () => {},
     remoteState: null,
     status: "disconnected" as const,
-    devices: [] as { id: string; connectedAt: string }[],
+    devices: [] as DeviceInfo[],
     sendPlay: () => {},
     sendPause: () => {},
     sendStop: () => {},
