@@ -29,6 +29,7 @@ import {
 import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
+import { useDevicePlayer } from "@/lib/device-player-context";
 import type { SCWidget } from "@/types/yt-sc";
 
 function isHlsUrl(url: string | null): boolean {
@@ -107,6 +108,8 @@ function SourceIcon({ type, origin, size = "md" }: { type: TrackSource; origin?:
 export function AudioPlayer() {
   const { t } = useTranslations();
   const [shareOpen, setShareOpen] = useState(false);
+  const deviceCtx = useDevicePlayer();
+  const isControlMirror = deviceCtx?.isActive && deviceCtx.deviceMode === "CONTROL";
   const {
     currentTrack,
     currentSource,
@@ -130,6 +133,7 @@ export function AudioPlayer() {
     playSource,
     setLastMessage,
     registerStopAllPlayers,
+    registerSeekCallback,
     currentPlayUrl,
     isEmbedded,
   } = usePlayback();
@@ -348,6 +352,26 @@ export function AudioPlayer() {
     return unregister;
   }, [registerStopAllPlayers, stopAllEmbedded]);
 
+  useEffect(() => {
+    const seekToLocal = (seconds: number) => {
+      const sec = Math.max(0, seconds);
+      if (isYouTube) {
+        const p = ytPlayerRef.current;
+        if (isYtPlayerReady(p)) {
+          safeSeekTo(p, sec, true);
+          setPosition(sec);
+        }
+      } else if (isSoundCloud && scWidgetRef.current) {
+        scWidgetRef.current.seekTo(sec * 1000);
+        setPosition(sec);
+      } else if (isStreamUrl && audioRef.current) {
+        audioRef.current.currentTime = sec;
+        setPosition(sec);
+      }
+    };
+    return registerSeekCallback(seekToLocal);
+  }, [registerSeekCallback, isYouTube, isSoundCloud, isStreamUrl]);
+
   /** Stop/destroy previous embed when switching source or track – ensures clean transition before loading new media */
   useEffect(() => {
     if (!isYouTube && !isSoundCloud) {
@@ -539,14 +563,28 @@ export function AudioPlayer() {
       if (isYouTube) {
         const p = ytPlayerRef.current;
         if (isYtPlayerReady(p)) {
-          setPosition(safeGetCurrentTime(p));
-          setDuration(safeGetDuration(p));
+          const pos = safeGetCurrentTime(p);
+          const dur = safeGetDuration(p);
+          setPosition(pos);
+          setDuration(dur);
           const frac = safeGetVideoLoadedFraction(p);
           setBufferedPercent(frac * 100);
+          if (deviceCtx?.isActive && deviceCtx.deviceMode === "MASTER" && Number.isFinite(pos) && Number.isFinite(dur)) {
+            deviceCtx.reportPosition(pos, dur);
+          }
         }
       } else if (isSoundCloud && scWidgetRef.current) {
-        scWidgetRef.current.getPosition((pos) => setPosition(pos / 1000));
-        scWidgetRef.current.getDuration((dur) => setDuration(dur / 1000));
+        scWidgetRef.current.getPosition((pos) => {
+          const p = pos / 1000;
+          setPosition(p);
+          scWidgetRef.current?.getDuration((dur) => {
+            const d = dur / 1000;
+            setDuration(d);
+            if (deviceCtx?.isActive && deviceCtx.deviceMode === "MASTER" && Number.isFinite(p) && Number.isFinite(d)) {
+              deviceCtx.reportPosition(p, d);
+            }
+          });
+        });
       } else if (isStreamUrl && audioRef.current) {
         const a = audioRef.current;
         const t = a.currentTime;
@@ -559,13 +597,16 @@ export function AudioPlayer() {
             const end = a.buffered.end(a.buffered.length - 1);
             setBufferedPercent((end / d) * 100);
           }
+          if (deviceCtx?.isActive && deviceCtx.deviceMode === "MASTER" && Number.isFinite(t) && Number.isFinite(d)) {
+            deviceCtx.reportPosition(t, d);
+          }
         }
       }
     };
     poll();
     const id = setInterval(poll, 500);
     return () => clearInterval(id);
-  }, [currentSource, isYouTube, isSoundCloud, isStreamUrl]);
+  }, [currentSource, isYouTube, isSoundCloud, isStreamUrl, deviceCtx?.isActive, deviceCtx?.deviceMode]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -583,6 +624,58 @@ export function AudioPlayer() {
 
   const hasPrevNext = (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1);
   const thumbnailCover = ytMultiTrackState?.currentThumbnail ?? currentTrack?.cover ?? currentSource?.cover ?? null;
+
+  /** Unified display values: MASTER uses local state, CONTROL uses masterState – exact parity. */
+  const ms = deviceCtx?.masterState;
+  const displayStatus = isControlMirror ? (ms?.status ?? "idle") : status;
+  const displayTrack = isControlMirror ? ms?.currentTrack : currentTrack;
+  const displaySource = isControlMirror ? ms?.currentSource : currentSource;
+  const displayPosition = isControlMirror
+    ? (typeof ms?.position === "number" && Number.isFinite(ms.position) ? ms.position : 0)
+    : position;
+  const displayDuration = isControlMirror
+    ? (typeof ms?.duration === "number" && Number.isFinite(ms.duration) ? ms.duration : 0)
+    : duration;
+  const displayVolume = isControlMirror
+    ? (typeof ms?.volume === "number" && Number.isFinite(ms.volume) ? ms.volume : 80)
+    : volume;
+  const displayThumbnailCover =
+    isControlMirror
+      ? (ms?.currentTrack?.cover ?? ms?.currentSource?.cover ?? null)
+      : (ytMultiTrackState?.currentThumbnail ?? currentTrack?.cover ?? currentSource?.cover ?? null);
+  const displayTitle = isControlMirror
+    ? (ms?.currentTrack?.title ?? ms?.currentSource?.title ?? "No track selected")
+    : (ytMultiTrackState?.currentTitle ?? currentTrack?.title ?? "No track selected");
+  const displayNextLabel = isControlMirror
+    ? (ms?.queue?.[(ms?.queueIndex ?? 0) + 1]?.title ?? null)
+    : (() => {
+        const tracks = currentPlaylist ? getPlaylistTracks(currentPlaylist) : [];
+        const hasMore = tracks.length > 1 && currentTrackIndex < tracks.length - 1;
+        const nextTrack = hasMore ? tracks[currentTrackIndex + 1] : null;
+        const safeQueue = Array.isArray(queue) ? queue : [];
+        const nextSrc = queueIndex >= 0 && queueIndex < safeQueue.length - 1 ? safeQueue[queueIndex + 1] : null;
+        return ytMultiTrackState?.nextTitle ?? nextTrack?.name ?? nextSrc?.title ?? null;
+      })();
+  const displayHasContent = isControlMirror ? !!(ms?.currentSource || ms?.currentTrack) : !!currentSource;
+  const displayHasPrevNext = isControlMirror
+    ? ((ms?.queue?.length ?? 0) > 1)
+    : (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1);
+  const displayCanSeek = isControlMirror
+    ? (displayDuration > 0)
+    : (!!currentSource &&
+        ((isYouTube && isYtPlayerReady(ytPlayerRef.current)) ||
+          (!!scWidgetRef.current && isSoundCloud) ||
+          (isStreamUrl && Number.isFinite(duration) && duration > 0)));
+  const displayBufferedPercent = isControlMirror ? 0 : bufferedPercent;
+  const displayProgressPercent = displayDuration > 0 ? Math.min(100, (displayPosition / displayDuration) * 100) : 0;
+
+  const onPrev = isControlMirror ? () => { endedHandledRef.current = true; deviceCtx!.prevOrSend(); } : () => { endedHandledRef.current = true; prev(); };
+  const onNext = isControlMirror ? () => { endedHandledRef.current = true; deviceCtx!.nextOrSend(); } : () => { endedHandledRef.current = true; next(); };
+  const onStop = isControlMirror ? deviceCtx!.stopOrSend : stop;
+  const onPlayPause = isControlMirror
+    ? (displayStatus === "playing" ? deviceCtx!.pauseOrSend : deviceCtx!.playOrSend)
+    : (status === "playing" ? pause : () => { if (status === "paused" && currentSource) play(); else if (currentSource) playSource(currentSource); });
+  const onVolumeChange = isControlMirror ? deviceCtx!.setVolumeOrSend : setVolume;
 
   const canSeek =
     currentSource &&
@@ -610,13 +703,17 @@ export function AudioPlayer() {
     [isYouTube, isSoundCloud, isStreamUrl]
   );
 
-  const handleSeekChange = useCallback(
-    (percent: number) => {
-      if (!canSeek || duration <= 0) return;
-      const sec = (percent / 100) * duration;
-      seekTo(sec);
+  const onSeekChange = useCallback(
+    (pct: number) => {
+      if (isControlMirror) {
+        if (displayDuration <= 0) return;
+        deviceCtx!.seekOrSend((pct / 100) * displayDuration);
+      } else {
+        if (!canSeek || duration <= 0) return;
+        seekTo((pct / 100) * duration);
+      }
     },
-    [canSeek, duration, seekTo]
+    [isControlMirror, deviceCtx, displayDuration, canSeek, duration, seekTo]
   );
 
   const getPercentFromClientX = useCallback((clientX: number): number => {
@@ -631,11 +728,11 @@ export function AudioPlayer() {
     (e: React.MouseEvent) => {
       const percent = getPercentFromClientX(e.clientX);
       setHoverPercent(percent);
-      if (isDraggingRef.current && canSeek && duration > 0) {
-        handleSeekChange(percent);
+      if (isDraggingRef.current && displayCanSeek && displayDuration > 0) {
+        onSeekChange(percent);
       }
     },
-    [canSeek, duration, handleSeekChange, getPercentFromClientX]
+    [displayCanSeek, displayDuration, onSeekChange, getPercentFromClientX]
   );
 
   const handleTimelineMouseEnter = useCallback(() => {
@@ -650,13 +747,13 @@ export function AudioPlayer() {
   const handleSeekStart = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
-      if (!canSeek || duration <= 0) return;
+      if (!displayCanSeek || displayDuration <= 0) return;
       isDraggingRef.current = true;
       isSeekingRef.current = true;
       const percent = getPercentFromClientX(e.clientX);
-      handleSeekChange(percent);
+      onSeekChange(percent);
     },
-    [canSeek, duration, handleSeekChange, getPercentFromClientX]
+    [displayCanSeek, displayDuration, onSeekChange, getPercentFromClientX]
   );
 
   const handleSeekEnd = useCallback(() => {
@@ -666,33 +763,33 @@ export function AudioPlayer() {
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
-      if (!canSeek || duration <= 0) return;
+      if (!displayCanSeek || displayDuration <= 0) return;
       const touch = e.touches[0];
       if (touch) {
         isDraggingRef.current = true;
         isSeekingRef.current = true;
         const percent = getPercentFromClientX(touch.clientX);
-        handleSeekChange(percent);
+        onSeekChange(percent);
       }
     },
-    [canSeek, duration, handleSeekChange, getPercentFromClientX]
+    [displayCanSeek, displayDuration, onSeekChange, getPercentFromClientX]
   );
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!isDraggingRef.current) return;
-      if (!canSeek || duration <= 0) return;
+      if (!displayCanSeek || displayDuration <= 0) return;
       const percent = getPercentFromClientX(e.clientX);
-      handleSeekChange(percent);
+      onSeekChange(percent);
     };
     const onUp = () => handleSeekEnd();
     const onTouchMove = (e: TouchEvent) => {
       if (!isDraggingRef.current) return;
-      if (!canSeek || duration <= 0) return;
+      if (!displayCanSeek || displayDuration <= 0) return;
       const touch = e.touches[0];
       if (touch) {
         const percent = getPercentFromClientX(touch.clientX);
-        handleSeekChange(percent);
+        onSeekChange(percent);
       }
     };
     const onTouchEnd = () => handleSeekEnd();
@@ -706,7 +803,7 @@ export function AudioPlayer() {
       window.removeEventListener("touchmove", onTouchMove);
       window.removeEventListener("touchend", onTouchEnd);
     };
-  }, [canSeek, duration, handleSeekChange, getPercentFromClientX, handleSeekEnd]);
+  }, [displayCanSeek, displayDuration, onSeekChange, getPercentFromClientX, handleSeekEnd]);
 
   const progressPercent = duration > 0 ? Math.min(100, (position / duration) * 100) : 0;
   const hoverTime = duration > 0 ? (hoverPercent / 100) * duration : 0;
@@ -736,15 +833,15 @@ export function AudioPlayer() {
             {/* Outer ring – playback-active pulse when playing; ring animates, cover stays static */}
             <div
               className={`relative flex shrink-0 items-center justify-center rounded-full border-2 p-[6px] bg-slate-800/80 ${
-                status === "playing"
+                displayStatus === "playing"
                   ? "playing-active-ring"
                   : "border-slate-600/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_0_1px_rgba(0,0,0,0.2),0_2px_12px_rgba(0,0,0,0.3)]"
               }`}
             >
               <div className="relative h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 rounded-full overflow-hidden bg-slate-800/90 shadow-[inset_0_0_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]">
                 <div className="h-full w-full overflow-hidden rounded-full">
-                {thumbnailCover ? (
-                  <HydrationSafeImage src={thumbnailCover} alt="" className="h-full w-full object-cover" />
+                {displayThumbnailCover ? (
+                  <HydrationSafeImage src={displayThumbnailCover} alt="" className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
                 )}
@@ -759,11 +856,8 @@ export function AudioPlayer() {
             <div className="flex flex-wrap items-center w-full gap-2 gap-y-2 sm:gap-3">
               <NeonControlButton
                 size="md"
-                onClick={() => {
-                  endedHandledRef.current = true;
-                  prev();
-                }}
-                disabled={!hasPrevNext}
+                onClick={onPrev}
+                disabled={!displayHasPrevNext}
                 aria-label="Previous"
                 title="Previous"
               >
@@ -771,43 +865,33 @@ export function AudioPlayer() {
                   <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
                 </svg>
               </NeonControlButton>
-              <NeonControlButton size="md" onClick={stop} disabled={!currentSource} aria-label="Stop" title="Stop">
+              <NeonControlButton size="md" onClick={onStop} disabled={!displayHasContent} aria-label="Stop" title="Stop">
                 <svg className="h-5 w-5 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 6h12v12H6z" />
                 </svg>
               </NeonControlButton>
               <NeonControlButton
                 size="xl"
-                onClick={
-                  status === "playing"
-                    ? pause
-                    : () => {
-                        if (status === "paused" && currentSource) play();
-                        else if (currentSource) playSource(currentSource);
-                      }
-                }
-                disabled={!currentSource}
-                active={status === "playing"}
-                aria-label={status === "playing" ? "Pause" : "Play"}
-                title={status === "playing" ? "Pause" : "Play"}
+                onClick={onPlayPause}
+                disabled={!displayHasContent}
+                active={displayStatus === "playing"}
+                aria-label={displayStatus === "playing" ? "Pause" : "Play"}
+                title={displayStatus === "playing" ? "Pause" : "Play"}
                 className="!h-11 !min-w-[90px] !w-auto !px-4 !rounded-2xl sm:!h-12 sm:!min-w-[110px] sm:!px-6"
               >
                 <span className="relative flex h-8 w-8 items-center justify-center sm:h-9 sm:w-9" aria-hidden>
-                  <svg className={`absolute ${status === "playing" ? "opacity-100" : "pointer-events-none opacity-0"}`} viewBox="0 0 24 24" fill="currentColor">
+                  <svg className={`absolute ${displayStatus === "playing" ? "opacity-100" : "pointer-events-none opacity-0"}`} viewBox="0 0 24 24" fill="currentColor">
                     <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                   </svg>
-                  <svg className={`absolute ml-0.5 sm:ml-1 ${status === "playing" ? "pointer-events-none opacity-0" : "opacity-100"}`} viewBox="0 0 24 24" fill="currentColor">
+                  <svg className={`absolute ml-0.5 sm:ml-1 ${displayStatus === "playing" ? "pointer-events-none opacity-0" : "opacity-100"}`} viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7L8 5z" />
                   </svg>
                 </span>
               </NeonControlButton>
               <NeonControlButton
                 size="md"
-                onClick={() => {
-                  endedHandledRef.current = true;
-                  next();
-                }}
-                disabled={!hasPrevNext}
+                onClick={onNext}
+                disabled={!displayHasPrevNext}
                 aria-label="Next"
                 title="Next"
               >
@@ -816,12 +900,12 @@ export function AudioPlayer() {
                 </svg>
               </NeonControlButton>
               <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
-              <NeonControlButton size="2xs" variant="cyan" className="!rounded-lg" onClick={() => setAutoMix((a) => !a)} active={autoMix} aria-label="AutoMix" title="AutoMix">
+              <NeonControlButton size="2xs" variant="cyan" className="!rounded-lg" onClick={() => !isControlMirror && setAutoMix((a) => !a)} active={autoMix} disabled={isControlMirror} aria-label="AutoMix" title="AutoMix">
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
                 </svg>
               </NeonControlButton>
-              <NeonControlButton size="2xs" variant="cyan" className="!rounded-lg" onClick={toggleShuffle} active={shuffle} aria-label="Random" title="Random">
+              <NeonControlButton size="2xs" variant="cyan" className="!rounded-lg" onClick={() => !isControlMirror && toggleShuffle()} active={shuffle} disabled={isControlMirror} aria-label="Random" title="Random">
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 4l5 5-5 5M20 4l-5 5 5 5M20 20l-5-5 5-5M4 20l5-5-5-5" />
                 </svg>
@@ -831,18 +915,18 @@ export function AudioPlayer() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (volume > 0) {
-                      volumeBeforeMuteRef.current = volume;
-                      setVolume(0);
+                    if (displayVolume > 0) {
+                      volumeBeforeMuteRef.current = displayVolume;
+                      onVolumeChange(0);
                     } else {
-                      setVolume(volumeBeforeMuteRef.current);
+                      onVolumeChange(volumeBeforeMuteRef.current);
                     }
                   }}
                   className="flex shrink-0 items-center justify-center text-cyan-500 hover:text-cyan-400 transition-colors"
-                  aria-label={volume === 0 ? "Unmute" : "Mute"}
-                  title={volume === 0 ? "Unmute" : "Mute"}
+                  aria-label={displayVolume === 0 ? "Unmute" : "Mute"}
+                  title={displayVolume === 0 ? "Unmute" : "Mute"}
                 >
-                  {volume === 0 ? (
+                  {displayVolume === 0 ? (
                     <svg className="h-4 w-4 sm:h-5 sm:w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                       <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
                     </svg>
@@ -858,22 +942,22 @@ export function AudioPlayer() {
                   {/* Fill – 3px, solid strong blue */}
                   <div
                     className="absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-cyan-500 transition-all duration-100"
-                    style={{ width: `${volume}%` }}
+                    style={{ width: `${displayVolume}%` }}
                     aria-hidden
                   />
                   <input
                     type="range"
                     min={0}
                     max={100}
-                    value={volume}
-                    onChange={(e) => setVolume(Number(e.target.value))}
+                    value={displayVolume}
+                    onChange={(e) => onVolumeChange(Number(e.target.value))}
                     className="player-volume-slider relative z-10 h-[3px] w-full cursor-pointer"
                     aria-label="Volume"
                   />
                 </div>
-                <span className="w-5 shrink-0 text-end text-[10px] font-bold tabular-nums text-cyan-500 sm:w-6 sm:text-xs" style={{ color: "#06b6d4" }}>{volume}</span>
+                <span className="w-5 shrink-0 text-end text-[10px] font-bold tabular-nums text-cyan-500 sm:w-6 sm:text-xs" style={{ color: "#06b6d4" }}>{displayVolume}</span>
               </div>
-              <NeonControlButton size="2xs" variant="white" className="!rounded-lg" onClick={() => setShareOpen(true)} disabled={!currentSource} aria-label={t.share} title={t.share}>
+              <NeonControlButton size="2xs" variant="white" className="!rounded-lg" onClick={() => setShareOpen(true)} disabled={!displayHasContent || isControlMirror} aria-label={t.share} title={t.share}>
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="18" cy="5" r="3" />
                   <circle cx="6" cy="12" r="3" />
@@ -886,44 +970,27 @@ export function AudioPlayer() {
 
             {/* ROW 2: Track display panel – source icon + status + title + next (unified deck display) */}
             {(() => {
-              const displayTitle = ytMultiTrackState?.currentTitle ?? currentTrack?.title ?? "No track selected";
-              let tracks: { name: string }[] = [];
-              try {
-                tracks = currentPlaylist ? getPlaylistTracks(currentPlaylist) : [];
-              } catch {
-                tracks = [];
-              }
-              const hasMoreTracks = tracks.length > 1 && currentTrackIndex < tracks.length - 1;
-              const nextTrackName = hasMoreTracks ? tracks[currentTrackIndex + 1]?.name : null;
-              const safeQueue = Array.isArray(queue) ? queue : [];
-              const nextSource = queueIndex >= 0 && queueIndex < safeQueue.length - 1 ? safeQueue[queueIndex + 1] : null;
-              const nextLabel =
-                ytMultiTrackState?.nextTitle ??
-                (ytMultiTrackState?.nextThumbnail ? (t?.nextInPlaylist ?? "Next in playlist") : null) ??
-                nextTrackName ??
-                nextSource?.title ??
-                null;
               return (
                 <div className="flex w-full">
                   <div className="relative flex min-w-0 w-full flex-col rounded-lg border border-slate-700/60 bg-slate-900/40 py-2.5 pl-4 pr-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_1px_3px_rgba(0,0,0,0.2)] ring-1 ring-slate-700/40">
                     {/* Main row: left = icon + status (original compact structure), center = inner display frame */}
                     <div className="flex min-w-0 flex-1 items-stretch gap-4">
                       <div className="flex w-9 shrink-0 flex-col items-center justify-center gap-[15px] border-r border-slate-700/50 pr-4 sm:w-10">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-800/80 ring-1 ring-slate-700/60 sm:h-10 sm:w-10" title={currentSource?.origin === "radio" ? "Radio" : currentTrack?.type ?? "Local"}>
-                          <SourceIcon type={currentTrack?.type ?? "local"} origin={currentSource?.origin} size="lg" />
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-800/80 ring-1 ring-slate-700/60 sm:h-10 sm:w-10" title={displaySource?.title ? (isControlMirror ? "Remote" : (currentSource?.origin === "radio" ? "Radio" : currentTrack?.type ?? "Local")) : "Local"}>
+                          <SourceIcon type={(isControlMirror ? "local" : currentTrack?.type) ?? "local"} origin={isControlMirror ? undefined : currentSource?.origin} size="lg" />
                         </div>
                         <div className="flex flex-col items-center gap-[15px]">
                           <span
                             className={`inline-flex w-full items-center justify-center gap-0.5 rounded-full px-1 py-px text-[7px] font-semibold uppercase tracking-wider ${
-                              status === "playing"
+                              displayStatus === "playing"
                                 ? "bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/40"
-                                : status === "paused"
+                                : displayStatus === "paused"
                                   ? "bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/40"
                                   : "bg-slate-800/80 text-slate-500 ring-1 ring-slate-600/30"
                             }`}
                           >
-                            <span className={`h-1 w-1 shrink-0 rounded-full ${status === "playing" ? "bg-emerald-400 playing-led-pulse" : status === "paused" ? "bg-amber-400" : "bg-slate-500"}`} />
-                            {status}
+                            <span className={`h-1 w-1 shrink-0 rounded-full ${displayStatus === "playing" ? "bg-emerald-400 playing-led-pulse" : displayStatus === "paused" ? "bg-amber-400" : "bg-slate-500"}`} />
+                            {displayStatus}
                           </span>
                           <span className="inline-flex w-full items-center justify-center gap-0.5 rounded-full bg-slate-700/50 px-1 py-px text-[7px] font-semibold uppercase tracking-wider text-slate-400 ring-1 ring-slate-600/40">
                             <span className="h-1 w-1 shrink-0 rounded-full bg-slate-400" />
@@ -935,7 +1002,7 @@ export function AudioPlayer() {
                         {/* Row 1: PLAY NOW : current track */}
                         <div ref={titleContainerRef} className="relative flex min-w-0 flex-1 items-center overflow-hidden gap-1.5">
                           <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
-                            {displayTitle}
+                            {displayTitle as string}
                           </span>
                           <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">{t?.playNow ?? "Play now"}:</span>
                           {titleOverflows ? (
@@ -954,7 +1021,7 @@ export function AudioPlayer() {
                         {/* Row 2: NEXT TRACK : next track */}
                         <div className="flex min-w-0 items-center gap-1.5">
                           <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">{t?.next ?? "Next"} track:</span>
-                          <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-400" title={nextLabel ?? undefined}>{nextLabel ?? "—"}</span>
+                          <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-400" title={displayNextLabel ?? undefined}>{displayNextLabel ?? "—"}</span>
                         </div>
                       </div>
                       <div className="flex shrink-0 flex-col items-center justify-center gap-2 border-l border-slate-700/50 pl-2" aria-hidden>
@@ -990,18 +1057,18 @@ export function AudioPlayer() {
             {/* ROW 3: Timeline – [current time] [progress bar] [total duration] */}
             <div className="flex w-full items-center gap-3">
               <span className="w-10 shrink-0 text-right text-xs font-semibold tabular-nums text-slate-400 sm:w-12" aria-live="polite">
-                {formatTime(position)}
+                {formatTime(displayPosition)}
               </span>
             <div
               ref={timelineRef}
               role="slider"
               aria-label="Track progress"
               aria-valuemin={0}
-              aria-valuemax={duration}
-              aria-valuenow={position}
-              aria-disabled={!canSeek}
-              tabIndex={canSeek ? 0 : undefined}
-              className={`relative flex flex-1 min-w-0 select-none py-1.5 ${canSeek ? "cursor-pointer" : "cursor-default opacity-80"}`}
+              aria-valuemax={displayDuration}
+              aria-valuenow={displayPosition}
+              aria-disabled={!displayCanSeek}
+              tabIndex={displayCanSeek ? 0 : undefined}
+              className={`relative flex flex-1 min-w-0 select-none py-1.5 ${displayCanSeek ? "cursor-pointer" : "cursor-default opacity-80"}`}
             onMouseMove={handleTimelineMouseMove}
             onMouseEnter={handleTimelineMouseEnter}
             onMouseLeave={handleTimelineMouseLeave}
@@ -1011,24 +1078,24 @@ export function AudioPlayer() {
             {/* Track background */}
             <div className="absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-slate-700/80" />
             {/* Buffered layer */}
-            {bufferedPercent > 0 && (
+            {displayBufferedPercent > 0 && (
               <div
                 className="absolute left-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-slate-500/60 transition-all duration-150"
-                style={{ width: `${Math.min(bufferedPercent, 100)}%` }}
+                style={{ width: `${Math.min(displayBufferedPercent, 100)}%` }}
               />
             )}
             {/* Played layer */}
             <div
               className="absolute left-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-[#1ed760] shadow-[0_0_6px_rgba(30,215,96,0.4)] transition-all duration-100"
-              style={{ width: `${progressPercent}%` }}
+              style={{ width: `${displayProgressPercent}%` }}
             />
             {/* Draggable thumb – clamped so it stays visible */}
             <div
               className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#1ed760] shadow-[0_0_0_2px_rgba(30,215,96,0.3),0_0_8px_var(--neon-green-glow)] transition-all duration-100 hover:scale-110"
-              style={{ left: `${Math.max(0, Math.min(100, progressPercent))}%` }}
+              style={{ left: `${Math.max(0, Math.min(100, displayProgressPercent))}%` }}
             />
             {/* Hover time preview tooltip – centered above hover position */}
-            {isHoveringTimeline && duration > 0 && (
+            {isHoveringTimeline && displayDuration > 0 && (
               <div
                 className="pointer-events-none absolute bottom-full z-10 mb-1 rounded-full bg-slate-800 px-2 py-1 text-xs font-semibold tabular-nums text-slate-200 shadow-lg ring-1 ring-slate-600/80"
                 style={{ left: `${hoverPercent}%`, transform: "translate(-50%, -100%)" }}
@@ -1038,7 +1105,7 @@ export function AudioPlayer() {
             )}
           </div>
               <span className="w-10 shrink-0 text-left text-xs font-semibold tabular-nums text-slate-400 sm:w-12" aria-live="polite">
-                {formatTime(duration)}
+                {formatTime(displayDuration)}
               </span>
             </div>
           </div>

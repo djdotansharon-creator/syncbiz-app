@@ -9,6 +9,7 @@ import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
 import { AudioPlayer } from "@/components/audio-player";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
+import { DeviceModeHeaderButtons } from "@/components/device-mode-header-buttons";
 
 const categoryKeys = ["dashboard", "sources", "radio", "schedules", "devices", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
@@ -120,6 +121,7 @@ const navKeys = [
   "sources",
   "radio",
   "favorites",
+  "remote",
   "schedules",
   "devices",
   "logs",
@@ -127,7 +129,7 @@ const navKeys = [
   "architecture",
 ] as const;
 const navItems = navKeys.map((key) => ({
-  href: key === "dashboard" ? "/dashboard" : `/${key}`,
+  href: key === "dashboard" ? "/dashboard" : key === "remote" ? "/mobile" : `/${key}`,
   labelKey: key === "sources" ? "library" : key,
 }));
 
@@ -234,6 +236,18 @@ export function AppShell({ children }: { children: ReactNode }) {
     hour12: false,
   });
 
+  // Mobile remote: minimal layout, AudioPlayer off-screen but mounted for playback
+  if (pathname === "/mobile") {
+    return (
+      <>
+        <div className="fixed -left-[9999px] top-0 z-0 opacity-0 pointer-events-none" aria-hidden>
+          <AudioPlayer />
+        </div>
+        {children}
+      </>
+    );
+  }
+
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-50">
       <aside className="hidden w-56 flex-col border-r border-slate-800/60 bg-slate-950/95 px-4 py-5 lg:flex sticky top-0 self-start h-screen overflow-y-auto">
@@ -316,6 +330,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </span>
                 </div>
               </div>
+              <DeviceModeHeaderButtons />
               <span className="hidden items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/80 px-2.5 py-1 text-xs text-slate-400 sm:flex">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 {t.agentsHealthy}

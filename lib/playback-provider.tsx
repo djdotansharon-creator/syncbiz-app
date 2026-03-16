@@ -119,6 +119,9 @@ type PlaybackContextValue = PlaybackState & {
   playPlaylist: (playlist: Playlist, trackIndex?: number) => void;
   setQueue: (sources: UnifiedSource[]) => void;
   registerStopAllPlayers: (fn: () => void) => () => void;
+  /** Seek to position (seconds). Used by remote control. AudioPlayer registers implementation. */
+  seekTo: (seconds: number) => void;
+  registerSeekCallback: (fn: (seconds: number) => void) => () => void;
   currentPlayUrl: string | null;
   isEmbedded: boolean;
 };
@@ -239,6 +242,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     : false;
 
   const stopAllPlayersRef = useRef<(() => void) | null>(null);
+  const seekCallbackRef = useRef<((seconds: number) => void) | null>(null);
   const transportLockRef = useRef(false);
 
   useEffect(() => {
@@ -250,6 +254,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     return () => {
       if (stopAllPlayersRef.current === fn) stopAllPlayersRef.current = null;
     };
+  }, []);
+
+  const registerSeekCallback = useCallback((fn: (seconds: number) => void) => {
+    seekCallbackRef.current = fn;
+    return () => {
+      if (seekCallbackRef.current === fn) seekCallbackRef.current = null;
+    };
+  }, []);
+
+  const seekTo = useCallback((seconds: number) => {
+    seekCallbackRef.current?.(seconds);
   }, []);
 
   /** Stop all known players: embedded YT/SC, local Winamp. Call before starting new source. */
@@ -564,6 +579,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       playPlaylist,
       setQueue,
       registerStopAllPlayers,
+      seekTo,
+      registerSeekCallback,
       currentPlayUrl,
       isEmbedded,
     }),
@@ -586,6 +603,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       playPlaylist,
       setQueue,
       registerStopAllPlayers,
+      seekTo,
+      registerSeekCallback,
       currentPlayUrl,
       isEmbedded,
     ],

@@ -22,6 +22,14 @@ type Props = {
   onToggleFavorite?: () => void;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
+  /** Override play handler (e.g. for remote CONTROL mode). */
+  onPlaySource?: (source: UnifiedSource) => void;
+  /** Override stop handler (e.g. for remote CONTROL mode). */
+  onStop?: () => void;
+  /** Override pause handler (e.g. for remote CONTROL mode). */
+  onPause?: () => void;
+  /** Override active state (e.g. when showing remote master state). */
+  isActive?: boolean;
 };
 
 function SourceLogo({ type, origin, size = "md" }: { type: UnifiedSource["type"]; origin?: UnifiedSource["origin"]; size?: "sm" | "md" }) {
@@ -65,7 +73,18 @@ function SourceLogo({ type, origin, size = "md" }: { type: UnifiedSource["type"]
   );
 }
 
-export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, draggable, onDragStart }: Props) {
+export function SourceCard({
+  source,
+  onRemove,
+  isFavorite,
+  onToggleFavorite,
+  draggable,
+  onDragStart,
+  onPlaySource: onPlaySourceProp,
+  onStop: onStopProp,
+  onPause: onPauseProp,
+  isActive: isActiveProp,
+}: Props) {
   const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -73,7 +92,10 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
   const [mounted, setMounted] = useState(false);
 
   const { playSource, stop, pause, currentSource } = usePlayback();
-  const active = mounted && currentSource?.id === source.id;
+  const playSourceFn = onPlaySourceProp ?? playSource;
+  const stopFn = onStopProp ?? stop;
+  const pauseFn = onPauseProp ?? pause;
+  const active = isActiveProp ?? (mounted && currentSource?.id === source.id);
 
   useEffect(() => {
     setMounted(true);
@@ -180,17 +202,17 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
         <div className="mt-1 flex w-full min-w-0 flex-wrap items-center justify-center gap-1.5" role="group" aria-label="Source controls">
           {active && (
             <>
-              <NeonControlButton onClick={stop} size="sm" title="Stop" aria-label="Stop">
+              <NeonControlButton onClick={stopFn} size="sm" title="Stop" aria-label="Stop">
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 6h12v12H6z" />
                 </svg>
               </NeonControlButton>
-              <NeonControlButton onClick={() => playSource(source)} size="md" active title="Play" aria-label="Play">
+              <NeonControlButton onClick={() => playSourceFn(source)} size="md" active title="Play" aria-label="Play">
                 <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M8 5v14l11-7L8 5z" />
                 </svg>
               </NeonControlButton>
-              <NeonControlButton onClick={pause} size="sm" active title="Pause" aria-label="Pause">
+              <NeonControlButton onClick={pauseFn} size="sm" active title="Pause" aria-label="Pause">
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                 </svg>
@@ -198,7 +220,7 @@ export function SourceCard({ source, onRemove, isFavorite, onToggleFavorite, dra
             </>
           )}
           {!active && (
-            <NeonControlButton onClick={() => playSource(source)} size="md" title="Play" aria-label="Play">
+            <NeonControlButton onClick={() => playSourceFn(source)} size="md" title="Play" aria-label="Play">
               <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7L8 5z" />
               </svg>

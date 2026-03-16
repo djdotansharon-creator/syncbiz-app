@@ -98,6 +98,7 @@ export const labels: Record<string, { en: string; he: string }> = {
   library: { en: "Library", he: "ספרייה" },
   favorites: { en: "Favorites", he: "מועדפים" },
   radio: { en: "Radio", he: "רדיו" },
+  remote: { en: "Remote", he: "שלט רחוק" },
   headerSubtitle: {
     en: "Schedule playback and send commands to endpoint devices",
     he: "תזמן השמעה ושלוח פקודות למכשירי קצה",

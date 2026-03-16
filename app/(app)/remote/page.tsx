@@ -5,8 +5,7 @@ import Link from "next/link";
 import { useRemoteController } from "@/lib/remote-control/ws-client";
 
 export default function RemoteControllerPage() {
-  const { devices, status, sendCommand } = useRemoteController();
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+  const { devices, masterDeviceId, status, sendCommand } = useRemoteController();
   const [loadUrl, setLoadUrl] = useState("");
 
   const statusColor =
@@ -38,33 +37,28 @@ export default function RemoteControllerPage() {
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium uppercase tracking-wider text-slate-500">
-              Connected devices
+              Target (MASTER only)
             </label>
-            <select
-              value={selectedDeviceId}
-              onChange={(e) => setSelectedDeviceId(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-sm text-slate-200 focus:border-sky-500/50 focus:outline-none focus:ring-2 focus:ring-sky-500/30"
-            >
-              <option value="">Select a device</option>
-              {devices.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.id.slice(0, 8)}… ({new Date(d.connectedAt).toLocaleTimeString()})
-                </option>
-              ))}
-            </select>
+            <p className="mt-1 text-sm text-slate-300">
+              {masterDeviceId ? (
+                <>Controlling: {masterDeviceId.slice(0, 12)}…</>
+              ) : (
+                "No MASTER. Open Remote Player on a device and switch to MASTER."
+              )}
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <button
-              onClick={() => selectedDeviceId && sendCommand(selectedDeviceId, "PLAY")}
-              disabled={!selectedDeviceId || status !== "connected"}
+              onClick={() => masterDeviceId && sendCommand(masterDeviceId, "PLAY")}
+              disabled={!masterDeviceId || status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
             >
               Play
             </button>
             <button
-              onClick={() => selectedDeviceId && sendCommand(selectedDeviceId, "PAUSE")}
-              disabled={!selectedDeviceId || status !== "connected"}
+              onClick={() => masterDeviceId && sendCommand(masterDeviceId, "PAUSE")}
+              disabled={!masterDeviceId || status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
             >
               Pause
@@ -85,11 +79,11 @@ export default function RemoteControllerPage() {
               />
               <button
                 onClick={() =>
-                  selectedDeviceId &&
+                  masterDeviceId &&
                   loadUrl &&
-                  sendCommand(selectedDeviceId, "LOAD_PLAYLIST", { url: loadUrl })
+                  sendCommand(masterDeviceId, "LOAD_PLAYLIST", { url: loadUrl })
                 }
-                disabled={!selectedDeviceId || !loadUrl || status !== "connected"}
+                disabled={!masterDeviceId || !loadUrl || status !== "connected"}
                 className="rounded-lg border border-sky-500/50 bg-sky-500/20 px-4 py-2 text-sm font-medium text-sky-300 transition hover:bg-sky-500/30 disabled:opacity-50"
               >
                 Load

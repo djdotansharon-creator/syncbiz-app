@@ -15,6 +15,7 @@ import { RadioIcon } from "@/components/ui/radio-icon";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { SourcesPlaybackProvider, useSourcesPlayback } from "@/lib/sources-playback-context";
 import { usePlayback } from "@/lib/playback-provider";
+import { useDevicePlayer } from "@/lib/device-player-context";
 import { SourceCard } from "@/components/source-card-unified";
 import { LibraryInputArea } from "@/components/library-input-area";
 import { getFavorites, addFavorite as addFav, removeFavorite as removeFav } from "@/lib/favorites-store";
@@ -85,6 +86,13 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
 
   const { sources, setSources } = useSourcesPlayback();
   const { setQueue, playSource } = usePlayback();
+  const deviceCtx = useDevicePlayer();
+  const isDevicePlayer = deviceCtx?.isActive ?? false;
+  const isMaster = deviceCtx?.deviceMode === "MASTER";
+  const playSourceOverride = isDevicePlayer && !isMaster ? deviceCtx?.playSourceOrSend : undefined;
+  const stopOverride = isDevicePlayer && !isMaster ? deviceCtx?.stopOrSend : undefined;
+  const pauseOverride = isDevicePlayer && !isMaster ? deviceCtx?.pauseOrSend : undefined;
+  const masterState = deviceCtx?.masterState;
 
   useEffect(() => {
     const playlistId = searchParams.get("playlist");
@@ -243,6 +251,10 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                 e.dataTransfer.setData("application/syncbiz-source-id", source.id);
                 e.dataTransfer.effectAllowed = "move";
               }}
+              onPlaySource={playSourceOverride}
+              onStop={stopOverride}
+              onPause={pauseOverride}
+              isActive={isMaster ? undefined : masterState?.currentSource?.id === source.id}
             />
           ))}
         </div>
@@ -260,6 +272,10 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                 e.dataTransfer.setData("application/syncbiz-source-id", source.id);
                 e.dataTransfer.effectAllowed = "move";
               }}
+              onPlaySource={playSourceOverride}
+              onStop={stopOverride}
+              onPause={pauseOverride}
+              isActive={isMaster ? undefined : masterState?.currentSource?.id === source.id}
             />
           ))}
         </div>
@@ -275,6 +291,10 @@ function SourceRow({
   onToggleFavorite,
   draggable,
   onDragStart,
+  onPlaySource,
+  onStop,
+  onPause,
+  isActive: isActiveProp,
 }: {
   source: UnifiedSource;
   onRemove: (id: string) => void;
@@ -282,12 +302,19 @@ function SourceRow({
   onToggleFavorite?: () => void;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
+  onPlaySource?: (s: UnifiedSource) => void;
+  onStop?: () => void;
+  onPause?: () => void;
+  isActive?: boolean;
 }) {
   const { t } = useTranslations();
   const { playSource, stop, pause, currentSource } = usePlayback();
   const [shareOpen, setShareOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const active = mounted && currentSource?.id === source.id;
+  const playFn = onPlaySource ?? playSource;
+  const stopFn = onStop ?? stop;
+  const pauseFn = onPause ?? pause;
+  const active = isActiveProp ?? (mounted && currentSource?.id === source.id);
 
   useEffect(() => {
     setMounted(true);
@@ -371,17 +398,17 @@ function SourceRow({
         )}
         {active && (
           <>
-            <NeonControlButton size="sm" onClick={stop} title="Stop" aria-label="Stop">
+            <NeonControlButton size="sm" onClick={stopFn} title="Stop" aria-label="Stop">
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M6 6h12v12H6z" />
               </svg>
             </NeonControlButton>
-            <NeonControlButton size="md" onClick={() => playSource(source)} active title="Play" aria-label="Play">
+            <NeonControlButton size="md" onClick={() => playFn(source)} active title="Play" aria-label="Play">
               <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7L8 5z" />
               </svg>
             </NeonControlButton>
-            <NeonControlButton size="sm" onClick={pause} active title="Pause" aria-label="Pause">
+            <NeonControlButton size="sm" onClick={pauseFn} active title="Pause" aria-label="Pause">
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
               </svg>
@@ -389,7 +416,7 @@ function SourceRow({
           </>
         )}
         {!active && (
-          <NeonControlButton size="md" onClick={() => playSource(source)} title="Play" aria-label="Play">
+          <NeonControlButton size="md" onClick={() => playFn(source)} title="Play" aria-label="Play">
             <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M8 5v14l11-7L8 5z" />
             </svg>
