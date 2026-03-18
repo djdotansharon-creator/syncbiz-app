@@ -57,7 +57,7 @@ export type DeviceInfo = {
 
 /** Message from client to server */
 export type ClientMessage =
-  | { type: "REGISTER"; role: ClientRole; deviceId?: string; isMobile?: boolean }
+  | { type: "REGISTER"; role: ClientRole; deviceId?: string; isMobile?: boolean; userId?: string }
   | { type: "COMMAND"; targetDeviceId: string; command: RemoteCommand; payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number } }
   | { type: "STATE_UPDATE"; state: StationPlaybackState }
   | { type: "SET_MASTER" }
@@ -69,5 +69,5 @@ export type ServerMessage =
   | { type: "DEVICE_LIST"; devices: DeviceInfo[]; masterDeviceId?: string | null }
   | { type: "STATE_UPDATE"; deviceId: string; state: StationPlaybackState }
   | { type: "COMMAND"; command: RemoteCommand; payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number } }
-  | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string }
+  | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string; secondaryDesktop?: boolean }
   | { type: "ERROR"; message: string };

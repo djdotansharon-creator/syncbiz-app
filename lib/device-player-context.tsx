@@ -15,6 +15,7 @@ import { getDeviceId, initDeviceId } from "@/lib/device-id";
 import { usePlayback } from "@/lib/playback-provider";
 import { useRemoteControlWs } from "@/lib/remote-control/ws-client";
 import { useIsMobile } from "@/lib/use-is-mobile";
+import { SecondaryDesktopModal } from "@/components/secondary-desktop-modal";
 import { urlToUnifiedSource } from "@/lib/remote-control/url-to-source";
 import { payloadToUnifiedSource } from "@/lib/remote-control/payload-to-source";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
@@ -74,10 +75,19 @@ export function useDevicePlayer() {
 
 export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  // E: Device role visible across full top nav. Active on all desktop routes except /mobile.
   const isActive = isDeviceRoleActive(pathname);
   const isMobile = useIsMobile();
   const deviceId = isActive ? getDeviceId() : null;
+
+  const [userId, setUserId] = useState<string | undefined>(undefined);
+  const [secondaryDesktopModalOpen, setSecondaryDesktopModalOpen] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((data: { email?: string | null }) => setUserId(data?.email ?? ""))
+      .catch(() => setUserId(""));
+  }, []);
   const { play, pause, stop, next, prev, playSource, setVolume, seekTo, status: playStatus, currentSource, currentTrackIndex, queue, queueIndex, volume } = usePlayback();
   const [masterConfirmOpen, setMasterConfirmOpen] = useState(false);
   const [masterState, setMasterState] = useState<StationPlaybackState | null>(null);
@@ -117,20 +127,25 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     [play, pause, stop, next, prev, playSource, seekTo, setVolume]
   );
 
+  const effectiveUserId = userId ?? "";
   const { status, deviceMode, sendSetMaster, sendSetControl, sendState, sendCommand, masterDeviceId } = useRemoteControlWs(
     "device",
     deviceId,
     onCommand,
     (mode) => {
       if (mode === "MASTER") setMasterState(null);
-      // B: On MASTER->CONTROL demotion, stop all local playback immediately.
       if (mode === "CONTROL") stop();
     },
     {
       isMobile,
       onStateUpdate: (state) => setMasterState(state),
+      userId: effectiveUserId,
+      onSecondaryDesktop: () => setSecondaryDesktopModalOpen(true),
     }
   );
+
+  // Standalone mode: when no WebSocket connection, act as MASTER so local playback works
+  const effectiveDeviceMode = status === "connected" ? deviceMode : "MASTER";
 
   useEffect(() => {
     if (isActive) initDeviceId();
@@ -181,54 +196,54 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
 
   const playSourceOrSend = useCallback(
     (source: UnifiedSource) => {
-      if (deviceMode === "MASTER") {
+      if (effectiveDeviceMode === "MASTER") {
         playSource(source);
       } else {
         sendCommandToMaster("PLAY_SOURCE", { source: unifiedSourceToPayload(source) });
       }
     },
-    [deviceMode, playSource, sendCommandToMaster]
+    [effectiveDeviceMode, playSource, sendCommandToMaster]
   );
 
   const playOrSend = useCallback(() => {
-    if (deviceMode === "MASTER") play();
+    if (effectiveDeviceMode === "MASTER") play();
     else sendCommandToMaster("PLAY");
-  }, [deviceMode, play, sendCommandToMaster]);
+  }, [effectiveDeviceMode, play, sendCommandToMaster]);
 
   const pauseOrSend = useCallback(() => {
-    if (deviceMode === "MASTER") pause();
+    if (effectiveDeviceMode === "MASTER") pause();
     else sendCommandToMaster("PAUSE");
-  }, [deviceMode, pause, sendCommandToMaster]);
+  }, [effectiveDeviceMode, pause, sendCommandToMaster]);
 
   const stopOrSend = useCallback(() => {
-    if (deviceMode === "MASTER") stop();
+    if (effectiveDeviceMode === "MASTER") stop();
     else sendCommandToMaster("STOP");
-  }, [deviceMode, stop, sendCommandToMaster]);
+  }, [effectiveDeviceMode, stop, sendCommandToMaster]);
 
   const nextOrSend = useCallback(() => {
-    if (deviceMode === "MASTER") next();
+    if (effectiveDeviceMode === "MASTER") next();
     else sendCommandToMaster("NEXT");
-  }, [deviceMode, next, sendCommandToMaster]);
+  }, [effectiveDeviceMode, next, sendCommandToMaster]);
 
   const prevOrSend = useCallback(() => {
-    if (deviceMode === "MASTER") prev();
+    if (effectiveDeviceMode === "MASTER") prev();
     else sendCommandToMaster("PREV");
-  }, [deviceMode, prev, sendCommandToMaster]);
+  }, [effectiveDeviceMode, prev, sendCommandToMaster]);
 
   const seekOrSend = useCallback(
     (seconds: number) => {
-      if (deviceMode === "MASTER") seekTo(seconds);
+      if (effectiveDeviceMode === "MASTER") seekTo(seconds);
       else sendCommandToMaster("SEEK", { position: seconds });
     },
-    [deviceMode, seekTo, sendCommandToMaster]
+    [effectiveDeviceMode, seekTo, sendCommandToMaster]
   );
 
   const setVolumeOrSend = useCallback(
     (value: number) => {
-      if (deviceMode === "MASTER") setVolume(value);
+      if (effectiveDeviceMode === "MASTER") setVolume(value);
       else sendCommandToMaster("SET_VOLUME", { volume: value });
     },
-    [deviceMode, setVolume, sendCommandToMaster]
+    [effectiveDeviceMode, setVolume, sendCommandToMaster]
   );
 
   const value = useMemo<DevicePlayerContextValue>(
@@ -236,7 +251,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       isActive,
       deviceId,
       status,
-      deviceMode,
+      deviceMode: effectiveDeviceMode,
       masterDeviceId,
       masterState,
       masterConfirmOpen,
@@ -258,7 +273,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       isActive,
       deviceId,
       status,
-      deviceMode,
+      effectiveDeviceMode,
       masterDeviceId,
       masterState,
       masterConfirmOpen,
@@ -280,6 +295,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   return (
     <DevicePlayerContext.Provider value={value}>
       {children}
+      <SecondaryDesktopModal isOpen={secondaryDesktopModalOpen} onClose={() => setSecondaryDesktopModalOpen(false)} />
     </DevicePlayerContext.Provider>
   );
 }

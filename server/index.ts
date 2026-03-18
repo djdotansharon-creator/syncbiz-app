@@ -15,48 +15,74 @@ type DeviceConnection = {
   role: "device" | "controller";
   mode: DeviceMode;
   isMobile?: boolean;
+  userId?: string;
 };
 
 const devices = new Map<string, DeviceConnection>();
-const controllers: import("ws").WebSocket[] = [];
+type ControllerEntry = { ws: import("ws").WebSocket; userId: string };
+const controllers: ControllerEntry[] = [];
 
-/** Current MASTER device ID. Only one device can be MASTER. */
-let masterDeviceId: string | null = null;
+/** MASTER device ID per user. One MASTER per user; user-scoped sessions. */
+const masterByUserId = new Map<string, string>();
 
 /** Last known playback state per device (station). */
 const deviceState = new Map<string, StationPlaybackState>();
 
-function broadcastDeviceList() {
+function getMasterForUser(userId: string): string | null {
+  const id = masterByUserId.get(userId);
+  if (!id) return null;
+  const conn = devices.get(id);
+  if (!conn || conn.ws.readyState !== 1) return null;
+  return id;
+}
+
+function broadcastDeviceListForUser(userId: string) {
   const list: { id: string; connectedAt: string; mode?: DeviceMode }[] = [];
   devices.forEach((d) => {
-    if (d.role === "device") list.push({ id: d.id, connectedAt: d.connectedAt, mode: d.mode });
+    if (d.role === "device" && (d.userId ?? "") === userId) {
+      list.push({ id: d.id, connectedAt: d.connectedAt, mode: d.mode });
+    }
   });
+  const masterDeviceId = getMasterForUser(userId);
   const msg: ServerMessage = { type: "DEVICE_LIST", devices: list, masterDeviceId };
   const raw = JSON.stringify(msg);
-  controllers.forEach((ws) => {
-    if (ws.readyState === 1) ws.send(raw);
+  controllers.forEach((c) => {
+    if ((c.userId ?? "") === userId && c.ws.readyState === 1) c.ws.send(raw);
   });
 }
 
-function broadcastStateUpdate(deviceId: string, state: StationPlaybackState) {
+function broadcastDeviceList() {
+  const userIds = new Set<string>();
+  controllers.forEach((c) => userIds.add(c.userId ?? ""));
+  devices.forEach((d) => {
+    if (d.role === "device") userIds.add(d.userId ?? "");
+  });
+  userIds.forEach((uid) => broadcastDeviceListForUser(uid));
+}
+
+function broadcastStateUpdate(deviceId: string, state: StationPlaybackState, userId: string) {
   deviceState.set(deviceId, state);
   const msg: ServerMessage = { type: "STATE_UPDATE", deviceId, state };
   const raw = JSON.stringify(msg);
-  controllers.forEach((ws) => {
-    if (ws.readyState === 1) ws.send(raw);
+  controllers.forEach((c) => {
+    if ((c.userId ?? "") === userId && c.ws.readyState === 1) c.ws.send(raw);
   });
-  // Also send to other devices (CONTROL devices mirror master state)
   devices.forEach((d) => {
-    if (d.role === "device" && d.id !== deviceId && d.ws.readyState === 1) {
+    if (d.role === "device" && (d.userId ?? "") === userId && d.id !== deviceId && d.ws.readyState === 1) {
       d.ws.send(raw);
     }
   });
 }
 
-function sendInitialStateToController(ws: import("ws").WebSocket) {
-  deviceState.forEach((state, deviceId) => {
-    const msg: ServerMessage = { type: "STATE_UPDATE", deviceId, state };
-    if (ws.readyState === 1) ws.send(JSON.stringify(msg));
+function sendInitialStateToController(ws: import("ws").WebSocket, userId: string) {
+  devices.forEach((d) => {
+    if (d.role === "device" && (d.userId ?? "") === userId) {
+      const state = deviceState.get(d.id);
+      if (state) {
+        const msg: ServerMessage = { type: "STATE_UPDATE", deviceId: d.id, state };
+        if (ws.readyState === 1) ws.send(JSON.stringify(msg));
+      }
+    }
   });
 }
 
@@ -89,13 +115,25 @@ wss.on("connection", (ws) => {
       if (msg.role === "device" && msg.deviceId) {
         deviceId = msg.deviceId;
         const isMobile = msg.isMobile ?? false;
-        // A: No auto-MASTER on connect. First desktop gets MASTER; first mobile gets CONTROL.
-        // New devices always get CONTROL unless we have no MASTER and this is a desktop.
+        const userId = (msg.userId ?? "").trim() || "";
+
+        // User-aware MASTER logic:
+        // 1. Desktop with no MASTER for this user → MASTER
+        // 2. Desktop with existing MASTER for this user → CONTROL + secondaryDesktop
+        // 3. Mobile → always CONTROL, never auto-promote
         let mode: DeviceMode = "CONTROL";
-        if (masterDeviceId === null && !isMobile) {
-          mode = "MASTER";
-          masterDeviceId = deviceId;
+        let secondaryDesktop = false;
+        const existingMasterId = getMasterForUser(userId);
+
+        if (!isMobile) {
+          if (!existingMasterId) {
+            mode = "MASTER";
+            masterByUserId.set(userId, deviceId);
+          } else {
+            secondaryDesktop = true;
+          }
         }
+
         devices.set(deviceId, {
           id: deviceId,
           ws,
@@ -103,62 +141,67 @@ wss.on("connection", (ws) => {
           role: "device",
           mode,
           isMobile: msg.isMobile,
+          userId,
         });
         const reply: ServerMessage = { type: "REGISTERED", deviceId };
         ws.send(JSON.stringify(reply));
+        const masterDeviceIdForClient = getMasterForUser(userId);
         const setModeMsg: ServerMessage =
-          mode === "CONTROL" && masterDeviceId
-            ? { type: "SET_DEVICE_MODE", mode, masterDeviceId }
-            : { type: "SET_DEVICE_MODE", mode };
+          mode === "CONTROL" && masterDeviceIdForClient
+            ? { type: "SET_DEVICE_MODE", mode, masterDeviceId: masterDeviceIdForClient, secondaryDesktop }
+            : { type: "SET_DEVICE_MODE", mode, secondaryDesktop };
         ws.send(JSON.stringify(setModeMsg));
-        if (mode === "CONTROL" && masterDeviceId) {
-          const masterState = deviceState.get(masterDeviceId);
+        if (mode === "CONTROL" && masterDeviceIdForClient) {
+          const masterState = deviceState.get(masterDeviceIdForClient);
           if (masterState) {
-            ws.send(JSON.stringify({ type: "STATE_UPDATE", deviceId: masterDeviceId, state: masterState } as ServerMessage));
+            ws.send(JSON.stringify({ type: "STATE_UPDATE", deviceId: masterDeviceIdForClient, state: masterState } as ServerMessage));
           }
         }
         broadcastDeviceList();
       } else if (msg.role === "controller") {
-        controllers.push(ws);
+        const userId = (msg.userId ?? "").trim() || "";
+        controllers.push({ ws, userId });
         const reply: ServerMessage = { type: "REGISTERED" };
         ws.send(JSON.stringify(reply));
-        broadcastDeviceList();
-        sendInitialStateToController(ws);
+        broadcastDeviceListForUser(userId);
+        sendInitialStateToController(ws, userId);
       }
       return;
     }
 
     if (msg.type === "STATE_UPDATE" && role === "device" && deviceId) {
-      broadcastStateUpdate(deviceId, msg.state);
+      const conn = devices.get(deviceId);
+      const userId = conn?.userId ?? "";
+      broadcastStateUpdate(deviceId, msg.state, userId);
       return;
     }
 
     if (msg.type === "SET_MASTER" && role === "device" && deviceId) {
       const conn = devices.get(deviceId);
       const isMobile = conn?.isMobile ?? false;
+      const userId = conn?.userId ?? "";
+      const currentMasterId = getMasterForUser(userId);
       // Mobile becoming MASTER must NOT demote desktop. Desktop becoming MASTER demotes other non-mobile masters.
       if (isMobile) {
-        const currentMaster = masterDeviceId ? devices.get(masterDeviceId) : null;
+        const currentMaster = currentMasterId ? devices.get(currentMasterId) : null;
         if (currentMaster && !currentMaster.isMobile) {
-          // Desktop is master; reject mobile's request to avoid demoting desktop
           return;
         }
       }
-      const prevMaster = masterDeviceId && masterDeviceId !== deviceId ? devices.get(masterDeviceId) : null;
+      const prevMaster = currentMasterId && currentMasterId !== deviceId ? devices.get(currentMasterId) : null;
       if (prevMaster && prevMaster.ws.readyState === 1 && !prevMaster.isMobile) {
         prevMaster.mode = "CONTROL";
         prevMaster.ws.send(
           JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL", masterDeviceId: deviceId } as ServerMessage)
         );
       }
-      masterDeviceId = deviceId;
+      masterByUserId.set(userId, deviceId);
       if (conn) conn.mode = "MASTER";
       if (ws.readyState === 1) {
         ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "MASTER" } as ServerMessage));
       }
-      // Notify all CONTROL devices of new master
       devices.forEach((d) => {
-        if (d.role === "device" && d.mode === "CONTROL" && d.ws.readyState === 1) {
+        if (d.role === "device" && (d.userId ?? "") === userId && d.mode === "CONTROL" && d.ws.readyState === 1) {
           d.ws.send(
             JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL", masterDeviceId: deviceId } as ServerMessage)
           );
@@ -169,12 +212,12 @@ wss.on("connection", (ws) => {
     }
 
     if (msg.type === "SET_CONTROL" && role === "device" && deviceId) {
-      if (masterDeviceId !== deviceId) return;
-      masterDeviceId = null;
       const conn = devices.get(deviceId);
+      const userId = conn?.userId ?? "";
+      const currentMasterId = getMasterForUser(userId);
+      if (currentMasterId !== deviceId) return;
+      masterByUserId.delete(userId);
       if (conn) conn.mode = "CONTROL";
-      // B: No auto-promotion. MASTER becomes CONTROL only by explicit user action.
-      // Other devices stay CONTROL until they explicitly request SET_MASTER.
       if (ws.readyState === 1) {
         ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL" } as ServerMessage));
       }
@@ -183,9 +226,12 @@ wss.on("connection", (ws) => {
     }
 
     if (msg.type === "COMMAND") {
-      // C: Always route to current MASTER only. Ignore stale targetDeviceId from controller.
-      const targetId = masterDeviceId ?? msg.targetDeviceId;
-      const target = targetId ? devices.get(targetId) : null;
+      // C: Always route to current MASTER only. Need userId to resolve master.
+      const userId = role === "controller"
+        ? (controllers.find((c) => c.ws === ws)?.userId ?? "")
+        : (devices.get(deviceId!)?.userId ?? "");
+      const masterId = getMasterForUser(userId) ?? msg.targetDeviceId;
+      const target = masterId ? devices.get(masterId) : null;
       if (!target || target.role !== "device" || target.mode !== "MASTER") {
         ws.send(JSON.stringify({ type: "ERROR", message: "No MASTER device" } as ServerMessage));
         return;
@@ -197,7 +243,7 @@ wss.on("connection", (ws) => {
       };
       const canSend =
         role === "controller" ||
-        (role === "device" && deviceId && target.id === masterDeviceId && target.mode === "MASTER");
+        (role === "device" && deviceId && target.id === masterId && target.mode === "MASTER");
       if (canSend && target.ws.readyState === 1) {
         target.ws.send(JSON.stringify(cmd));
       }
@@ -206,14 +252,16 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     if (deviceId) {
-      if (masterDeviceId === deviceId) {
-        masterDeviceId = null;
-        // A: No auto-promotion on disconnect. Remaining devices stay CONTROL.
+      const conn = devices.get(deviceId);
+      const userId = conn?.userId ?? "";
+      const currentMasterId = getMasterForUser(userId);
+      if (currentMasterId === deviceId) {
+        masterByUserId.delete(userId);
       }
       devices.delete(deviceId);
       deviceState.delete(deviceId);
     }
-    const idx = controllers.indexOf(ws);
+    const idx = controllers.findIndex((c) => c.ws === ws);
     if (idx >= 0) controllers.splice(idx, 1);
     broadcastDeviceList();
   });

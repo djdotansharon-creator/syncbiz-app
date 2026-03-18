@@ -21,7 +21,12 @@ export function useRemoteControlWs(
   deviceId: string | null,
   onCommand?: (cmd: { command: string; payload?: { url?: string; source?: unknown } }) => void,
   onDeviceMode?: (mode: DeviceMode) => void,
-  options?: { isMobile?: boolean; onStateUpdate?: (state: StationPlaybackState) => void }
+  options?: {
+    isMobile?: boolean;
+    onStateUpdate?: (state: StationPlaybackState) => void;
+    userId?: string | null;
+    onSecondaryDesktop?: () => void;
+  }
 ) {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("CONTROL");
@@ -30,10 +35,12 @@ export function useRemoteControlWs(
   const onCommandRef = useRef(onCommand);
   const onDeviceModeRef = useRef(onDeviceMode);
   const onStateUpdateRef = useRef(options?.onStateUpdate);
+  const onSecondaryDesktopRef = useRef(options?.onSecondaryDesktop);
   const deviceModeRef = useRef<DeviceMode>("CONTROL");
   onCommandRef.current = onCommand;
   onDeviceModeRef.current = onDeviceMode;
   onStateUpdateRef.current = options?.onStateUpdate;
+  onSecondaryDesktopRef.current = options?.onSecondaryDesktop;
   deviceModeRef.current = deviceMode;
 
   useEffect(() => {
@@ -47,10 +54,11 @@ export function useRemoteControlWs(
     setStatus("connecting");
 
     ws.onopen = () => {
+      const userId = options?.userId ?? undefined;
       const msg: ClientMessage =
         role === "device"
-          ? { type: "REGISTER", role: "device", deviceId: deviceId ?? undefined, isMobile: options?.isMobile }
-          : { type: "REGISTER", role: "controller" };
+          ? { type: "REGISTER", role: "device", deviceId: deviceId ?? undefined, isMobile: options?.isMobile, userId }
+          : { type: "REGISTER", role: "controller", userId };
       ws.send(JSON.stringify(msg));
       setStatus("connected");
     };
@@ -64,6 +72,9 @@ export function useRemoteControlWs(
           if ("masterDeviceId" in data && data.masterDeviceId) setMasterDeviceId(data.masterDeviceId);
           else if (data.mode === "MASTER") setMasterDeviceId(null);
           onDeviceModeRef.current?.(data.mode);
+          if ("secondaryDesktop" in data && data.secondaryDesktop) {
+            onSecondaryDesktopRef.current?.();
+          }
         } else if (data.type === "COMMAND" && onCommandRef.current) {
           // B: Only execute commands when this device is MASTER. CONTROL devices must never output audio.
           if (deviceModeRef.current === "MASTER") {
@@ -89,7 +100,7 @@ export function useRemoteControlWs(
       setStatus("disconnected");
       setMasterDeviceId(null);
     };
-  }, [role, deviceId, options?.isMobile]);
+  }, [role, deviceId, options?.isMobile, options?.userId]);
 
   const sendState = (state: StationPlaybackState) => {
     const ws = wsRef.current;
@@ -132,11 +143,19 @@ export function useRemoteController() {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [masterDeviceId, setMasterDeviceId] = useState<string | null>(null);
   const [remoteState, setRemoteState] = useState<Record<string, StationPlaybackState>>({});
+  const [userId, setUserId] = useState<string | undefined>(undefined);
   const wsRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const statusRef = useRef(status);
   statusRef.current = status;
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((data: { email?: string | null }) => setUserId(data?.email ?? ""))
+      .catch(() => setUserId(""));
+  }, []);
 
   const tryReconnect = () => {
     const ws = wsRef.current;
@@ -157,7 +176,7 @@ export function useRemoteController() {
     setStatus("connecting");
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "REGISTER", role: "controller" } as ClientMessage));
+      ws.send(JSON.stringify({ type: "REGISTER", role: "controller", userId: userId ?? "" } as ClientMessage));
       setStatus("connected");
     };
 
@@ -187,7 +206,7 @@ export function useRemoteController() {
       ws.close();
       wsRef.current = null;
     };
-  }, [reconnectTrigger]);
+  }, [reconnectTrigger, userId]);
 
   useEffect(() => {
     if (typeof document === "undefined" || typeof window === "undefined") return;
