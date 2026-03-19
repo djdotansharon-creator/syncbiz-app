@@ -32,13 +32,21 @@ type Props = {
 
 export function SourcesManager({ initialSources, pageTitle, pageSubtitle }: Props) {
   const [effectiveSources, setEffectiveSources] = useState<UnifiedSource[]>(initialSources);
+  const prevIdsRef = useRef<string>("");
 
   useEffect(() => {
     if (initialSources.length > 0) {
+      const ids = initialSources.map((s) => s.id).join(",");
+      if (ids === prevIdsRef.current) return;
+      prevIdsRef.current = ids;
       setEffectiveSources(initialSources);
     } else {
       fetchUnifiedSourcesWithFallback().then((items) => {
-        setEffectiveSources(items.filter((s) => s.origin !== "radio"));
+        const filtered = items.filter((s) => s.origin !== "radio");
+        const ids = filtered.map((s) => s.id).join(",");
+        if (ids === prevIdsRef.current) return;
+        prevIdsRef.current = ids;
+        setEffectiveSources(filtered);
       });
     }
   }, [initialSources]);
@@ -118,7 +126,12 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
 
   const displaySources = filtered;
 
+  // Sync display to main queue only when IDs actually change (avoids layout thrash from ref churn)
+  const prevIdsRef = useRef<string>("");
   useEffect(() => {
+    const ids = displaySources.map((s) => s.id).join(",");
+    if (ids === prevIdsRef.current) return;
+    prevIdsRef.current = ids;
     setQueue(displaySources);
   }, [displaySources, setQueue]);
 

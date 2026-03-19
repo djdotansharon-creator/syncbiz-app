@@ -1,6 +1,6 @@
 "use client";
 
-import { useStationController } from "@/lib/station-controller-context";
+import { usePlayback } from "@/lib/playback-provider";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { MobileSourceCardActions } from "@/components/mobile-source-card-actions";
 import type { UnifiedSource } from "@/lib/source-types";
@@ -11,30 +11,28 @@ type Props = {
   editReturnTo?: string;
 };
 
-/** Compact playlist/source card for mobile – controller mode only, touch-friendly. */
-export function MobileSourceCard({ source, onRemove, editReturnTo }: Props) {
-  const station = useStationController();
+/** Compact source card for mobile Player mode – plays locally on the phone. */
+export function MobileSourceCardLocal({ source, onRemove, editReturnTo }: Props) {
+  const { playSource, currentSource } = usePlayback();
 
-  const isControllerMode = station.isCrossDevice;
-  const active = isControllerMode && station.remoteState?.currentSource?.id === source.id;
+  const active = currentSource?.id === source.id;
 
   const handlePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isControllerMode) station.sendPlaySource(source);
+    playSource(source);
   };
 
   return (
     <div
       className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 ${
-        active ? "border-sky-500/50 bg-sky-500/10" : "border-slate-700/60 bg-slate-900/40"
+        active ? "border-emerald-500/50 bg-emerald-500/10" : "border-slate-700/60 bg-slate-900/40"
       }`}
     >
       <button
         type="button"
         onClick={handlePlay}
-        disabled={!isControllerMode}
-        className={`flex min-w-0 flex-1 items-center gap-3 text-left transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 ${
-          active ? "text-sky-200" : ""
+        className={`flex min-w-0 flex-1 items-center gap-3 text-left transition active:scale-[0.98] ${
+          active ? "text-emerald-200" : ""
         }`}
       >
         <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-slate-800/80">
@@ -58,7 +56,7 @@ export function MobileSourceCard({ source, onRemove, editReturnTo }: Props) {
         </div>
         <div className="shrink-0">
           {active ? (
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-500/30 text-sky-400">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/30 text-emerald-400">
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
               </svg>
@@ -72,7 +70,7 @@ export function MobileSourceCard({ source, onRemove, editReturnTo }: Props) {
           )}
         </div>
       </button>
-      <MobileSourceCardActions source={source} onRemove={onRemove} isControllerMode editReturnTo={editReturnTo} />
+      <MobileSourceCardActions source={source} onRemove={onRemove} isControllerMode={false} editReturnTo={editReturnTo} />
     </div>
   );
 }

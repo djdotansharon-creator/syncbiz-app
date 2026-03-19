@@ -118,6 +118,7 @@ type PlaybackContextValue = PlaybackState & {
   playSourceFromDb: (source: Source) => void;
   playPlaylist: (playlist: Playlist, trackIndex?: number) => void;
   setQueue: (sources: UnifiedSource[]) => void;
+  replaceSource: (tempId: string, real: UnifiedSource) => void;
   registerStopAllPlayers: (fn: () => void) => () => void;
   /** Seek to position (seconds). Used by remote control. AudioPlayer registers implementation. */
   seekTo: (seconds: number) => void;
@@ -278,6 +279,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const playLocal = useCallback((url: string, browserPreference?: string) => {
+    // play-local runs on server and opens URL there – useless on mobile
+    if (typeof window !== "undefined" && window.location.pathname === "/mobile") {
+      window.open(url, "_blank");
+      return;
+    }
     fetch("/api/commands/play-local", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -441,7 +447,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
       if (s.queue.length > 1 && s.queueIndex > 0) {
         const prevSource = s.queue[s.queueIndex - 1];
-        queueMicrotask(() => playSource(prevSource));
+        queueMicrotask(() => {
+          try {
+            playSource(prevSource);
+          } finally {
+            transportLockRef.current = false;
+          }
+        });
         return s;
       }
       transportLockRef.current = false;
@@ -500,7 +512,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             transportLockRef.current = false;
             return s;
           }
-          queueMicrotask(() => playSource(nextSource));
+          queueMicrotask(() => {
+            try {
+              playSource(nextSource);
+            } finally {
+              transportLockRef.current = false;
+            }
+          });
         }
         return s;
       }
@@ -559,6 +577,21 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  /** Replace a temp source with the real one (e.g. after API create). Atomic update for queue + currentSource. */
+  const replaceSource = useCallback((tempId: string, real: UnifiedSource) => {
+    setState((s) => {
+      const newQueue = s.queue.map((x) => (x.id === tempId ? real : x));
+      const newCurrentSource = s.currentSource?.id === tempId ? real : s.currentSource;
+      const qi = newCurrentSource ? newQueue.findIndex((x) => x.id === newCurrentSource.id) : -1;
+      return {
+        ...s,
+        currentSource: newCurrentSource ?? s.currentSource,
+        queue: newQueue,
+        queueIndex: qi >= 0 ? qi : s.queueIndex,
+      };
+    });
+  }, []);
+
   const value = useMemo<PlaybackContextValue>(
     () => ({
       ...state,
@@ -578,6 +611,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       playSourceFromDb,
       playPlaylist,
       setQueue,
+      replaceSource,
       registerStopAllPlayers,
       seekTo,
       registerSeekCallback,
@@ -602,6 +636,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       playSourceFromDb,
       playPlaylist,
       setQueue,
+      replaceSource,
       registerStopAllPlayers,
       seekTo,
       registerSeekCallback,

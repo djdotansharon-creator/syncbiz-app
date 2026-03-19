@@ -9,7 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import { useRemoteController } from "@/lib/remote-control/ws-client";
-import type { StationPlaybackState, DeviceInfo } from "@/lib/remote-control/types";
+import type { StationPlaybackState, DeviceInfo, GuestRecommendationPayload } from "@/lib/remote-control/types";
+import { GuestRecommendationModal } from "@/components/guest-recommendation-modal";
 import type { UnifiedSource } from "@/lib/source-types";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
 
@@ -39,7 +40,20 @@ type StationControllerContextValue = {
 const StationControllerContext = createContext<StationControllerContextValue | null>(null);
 
 export function StationControllerProvider({ children }: { children: ReactNode }) {
-  const { devices, masterDeviceId, status, sendCommand, remoteState: allRemoteState } = useRemoteController();
+  const [pendingGuestRecommendation, setPendingGuestRecommendation] = useState<GuestRecommendationPayload | null>(null);
+  const onGuestRecommendation = useCallback((rec: GuestRecommendationPayload) => setPendingGuestRecommendation(rec), []);
+
+  const {
+    devices,
+    masterDeviceId,
+    status,
+    sendCommand,
+    remoteState: allRemoteState,
+    sendApproveGuestRecommend,
+    sendRejectGuestRecommend,
+  } = useRemoteController({
+    onGuestRecommendation,
+  });
 
   // C: Always target current MASTER. No stale playback target references.
   const remoteState = masterDeviceId ? allRemoteState[masterDeviceId] ?? null : null;
@@ -129,6 +143,18 @@ export function StationControllerProvider({ children }: { children: ReactNode })
   return (
     <StationControllerContext.Provider value={value}>
       {children}
+      <GuestRecommendationModal
+        recommendation={pendingGuestRecommendation}
+        onClose={() => setPendingGuestRecommendation(null)}
+        onApprove={(id) => {
+          sendApproveGuestRecommend(id);
+          setPendingGuestRecommendation(null);
+        }}
+        onReject={(id) => {
+          sendRejectGuestRecommend(id);
+          setPendingGuestRecommendation(null);
+        }}
+      />
     </StationControllerContext.Provider>
   );
 }

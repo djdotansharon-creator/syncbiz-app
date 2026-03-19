@@ -16,12 +16,13 @@ import { usePlayback } from "@/lib/playback-provider";
 import { useRemoteControlWs } from "@/lib/remote-control/ws-client";
 import { useIsMobile } from "@/lib/use-is-mobile";
 import { SecondaryDesktopModal } from "@/components/secondary-desktop-modal";
+import { GuestRecommendationModal } from "@/components/guest-recommendation-modal";
 import { urlToUnifiedSource } from "@/lib/remote-control/url-to-source";
 import { payloadToUnifiedSource } from "@/lib/remote-control/payload-to-source";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
 import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
-import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode } from "@/lib/remote-control/types";
+import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
 
 type DevicePlayerContextValue = {
@@ -51,6 +52,10 @@ type DevicePlayerContextValue = {
   prevOrSend: () => void;
   seekOrSend: (seconds: number) => void;
   setVolumeOrSend: (value: number) => void;
+  /** Session code for guest recommendations. Operator shares /guest?code=XXX */
+  sessionCode: string | null;
+  /** Full guest recommendation link for sharing */
+  guestLink: string | null;
 };
 
 const DevicePlayerContext = createContext<DevicePlayerContextValue | null>(null);
@@ -64,6 +69,7 @@ function isPlaybackRoute(pathname: string): boolean {
 }
 
 /** E: Device role visible across full top nav. Active on all desktop routes except /mobile. */
+/** On /mobile, never active – mobile is either controller (sends commands) or standalone local player (no device role). */
 function isDeviceRoleActive(pathname: string): boolean {
   return pathname !== "/mobile";
 }
@@ -81,6 +87,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
 
   const [userId, setUserId] = useState<string | undefined>(undefined);
   const [secondaryDesktopModalOpen, setSecondaryDesktopModalOpen] = useState(false);
+  const [pendingGuestRecommendation, setPendingGuestRecommendation] = useState<GuestRecommendationPayload | null>(null);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -128,21 +135,43 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   );
 
   const effectiveUserId = userId ?? "";
-  const { status, deviceMode, sendSetMaster, sendSetControl, sendState, sendCommand, masterDeviceId } = useRemoteControlWs(
+  const onDeviceMode = useCallback((mode: DeviceMode) => {
+    if (mode === "MASTER") setMasterState(null);
+    if (mode === "CONTROL") stop();
+  }, [stop]);
+  const onStateUpdate = useCallback((state: StationPlaybackState) => setMasterState(state), []);
+  const onSecondaryDesktop = useCallback(() => setSecondaryDesktopModalOpen(true), []);
+  const onGuestRecommendation = useCallback((rec: GuestRecommendationPayload) => setPendingGuestRecommendation(rec), []);
+
+  const {
+    status,
+    deviceMode,
+    sendSetMaster,
+    sendSetControl,
+    sendState,
+    sendCommand,
+    masterDeviceId,
+    sessionCode,
+    sendApproveGuestRecommend,
+    sendRejectGuestRecommend,
+  } = useRemoteControlWs(
     "device",
     deviceId,
     onCommand,
-    (mode) => {
-      if (mode === "MASTER") setMasterState(null);
-      if (mode === "CONTROL") stop();
-    },
+    onDeviceMode,
     {
       isMobile,
-      onStateUpdate: (state) => setMasterState(state),
+      onStateUpdate,
       userId: effectiveUserId,
-      onSecondaryDesktop: () => setSecondaryDesktopModalOpen(true),
+      onSecondaryDesktop,
+      onGuestRecommendation,
     }
   );
+
+  const guestLink =
+    typeof window !== "undefined" && sessionCode
+      ? `${window.location.origin}/guest?code=${sessionCode}`
+      : null;
 
   // Standalone mode: when no WebSocket connection, act as MASTER so local playback works
   const effectiveDeviceMode = status === "connected" ? deviceMode : "MASTER";
@@ -268,6 +297,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       prevOrSend,
       seekOrSend,
       setVolumeOrSend,
+      sessionCode,
+      guestLink,
     }),
     [
       isActive,
@@ -289,6 +320,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       prevOrSend,
       seekOrSend,
       setVolumeOrSend,
+      sessionCode,
+      guestLink,
     ]
   );
 
@@ -296,6 +329,18 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     <DevicePlayerContext.Provider value={value}>
       {children}
       <SecondaryDesktopModal isOpen={secondaryDesktopModalOpen} onClose={() => setSecondaryDesktopModalOpen(false)} />
+      <GuestRecommendationModal
+        recommendation={pendingGuestRecommendation}
+        onClose={() => setPendingGuestRecommendation(null)}
+        onApprove={(id) => {
+          sendApproveGuestRecommend(id);
+          setPendingGuestRecommendation(null);
+        }}
+        onReject={(id) => {
+          sendRejectGuestRecommend(id);
+          setPendingGuestRecommendation(null);
+        }}
+      />
     </DevicePlayerContext.Provider>
   );
 }

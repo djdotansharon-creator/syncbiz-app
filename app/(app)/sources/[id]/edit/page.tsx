@@ -2,14 +2,16 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useTranslations } from "@/lib/locale-context";
 import type { Source } from "@/lib/types";
 
 export default function EditSourcePage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const id = params.id as string;
+  const returnTo = searchParams.get("return") || "/sources";
   const { t } = useTranslations();
   const [source, setSource] = useState<Source | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,8 +60,8 @@ export default function EditSourcePage() {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as { error?: string }).error ?? "Failed to update");
       }
-      router.push("/sources");
-      router.refresh();
+      router.push(returnTo);
+        router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update source");
     } finally {
@@ -69,7 +71,7 @@ export default function EditSourcePage() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-xl rounded-2xl border border-slate-800/80 bg-slate-950/60 p-8 text-center text-slate-500">
+      <div className="mx-auto max-w-xl rounded-2xl border border-slate-800/80 bg-slate-950/60 p-6 sm:p-8 text-center text-slate-500 min-h-[120px] flex items-center justify-center">
         Loading…
       </div>
     );
@@ -77,27 +79,27 @@ export default function EditSourcePage() {
 
   if (error || !source) {
     return (
-      <div className="mx-auto max-w-xl rounded-2xl border border-slate-800/80 bg-slate-950/60 p-8 text-center">
+      <div className="mx-auto max-w-xl rounded-2xl border border-slate-800/80 bg-slate-950/60 p-6 sm:p-8 text-center">
         <p className="text-slate-400">{error ?? "Source not found"}</p>
-        <Link href="/sources" className="mt-4 inline-block text-sm text-sky-400 hover:underline">
-          Back to Library
+        <Link href={returnTo} className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-slate-700 px-4 py-2.5 text-sm text-sky-400 hover:bg-slate-800/80 touch-manipulation">
+          {returnTo === "/mobile" ? "Back to Player" : "Back to Library"}
         </Link>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-xl space-y-6">
+    <div className="mx-auto max-w-xl space-y-4 sm:space-y-6 px-4 sm:px-0 pb-8">
       <div>
-        <Link href="/sources" className="text-sm text-slate-500 hover:text-slate-300">
-          ← {t.library}
+        <Link href={returnTo} className="inline-flex min-h-[44px] items-center text-sm text-slate-500 hover:text-slate-300 touch-manipulation -ml-1 px-1">
+          ← {returnTo === "/mobile" ? "Player" : t.library}
         </Link>
-        <h1 className="mt-2 text-xl font-semibold text-slate-50">{t.edit} {source.name}</h1>
+        <h1 className="mt-2 text-lg sm:text-xl font-semibold text-slate-50">{t.edit} {source.name}</h1>
       </div>
 
       <form
         onSubmit={handleSubmit}
-        className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-6 space-y-4"
+        className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-4 sm:p-6 space-y-4"
       >
         <div>
           <label htmlFor="name" className="block text-xs font-medium text-slate-400">
@@ -108,7 +110,7 @@ export default function EditSourcePage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
-            className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm text-slate-50 outline-none focus:border-sky-500"
+            className="mt-1 w-full min-h-[44px] rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 sm:py-2 text-base sm:text-sm text-slate-50 outline-none focus:border-sky-500 touch-manipulation"
           />
         </div>
         <div>
@@ -120,7 +122,7 @@ export default function EditSourcePage() {
             value={target}
             onChange={(e) => setTarget(e.target.value)}
             required
-            className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm text-slate-50 outline-none focus:border-sky-500"
+            className="mt-1 w-full min-h-[44px] rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 sm:py-2 text-base sm:text-sm text-slate-50 outline-none focus:border-sky-500 touch-manipulation"
           />
         </div>
         <div>
@@ -131,7 +133,7 @@ export default function EditSourcePage() {
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm text-slate-50 outline-none focus:border-sky-500"
+            className="mt-1 w-full min-h-[44px] rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 sm:py-2 text-base sm:text-sm text-slate-50 outline-none focus:border-sky-500 touch-manipulation"
           />
         </div>
         <div>
@@ -143,21 +145,21 @@ export default function EditSourcePage() {
             type="url"
             value={artworkUrl}
             onChange={(e) => setArtworkUrl(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm text-slate-50 outline-none focus:border-sky-500"
+            className="mt-1 w-full min-h-[44px] rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 sm:py-2 text-base sm:text-sm text-slate-50 outline-none focus:border-sky-500 touch-manipulation"
           />
         </div>
         {error && <p className="text-sm text-rose-400">{error}</p>}
-        <div className="flex gap-3 pt-2">
+        <div className="flex flex-wrap gap-3 pt-2">
           <button
             type="submit"
             disabled={saving}
-            className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+            className="min-h-[44px] rounded-xl bg-sky-500 px-5 py-2.5 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60 touch-manipulation"
           >
             {saving ? t.saving : t.saveSource}
           </button>
           <Link
-            href="/sources"
-            className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800"
+            href={returnTo}
+            className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-slate-700 px-5 py-2.5 text-sm font-medium text-slate-300 hover:bg-slate-800 touch-manipulation"
           >
             {t.cancel}
           </Link>

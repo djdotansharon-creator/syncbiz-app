@@ -10,58 +10,17 @@ import { RadioIcon } from "@/components/ui/radio-icon";
 import { inferPlaylistType, getYouTubeThumbnail } from "@/lib/playlist-utils";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { inferGenre } from "@/lib/infer-genre";
-import { getPlaylistTracks } from "@/lib/playlist-types";
+import { searchAll, searchExternal, type YouTubeSearchResult, type RadioSearchResult } from "@/lib/search-service";
 import { radioToUnified } from "@/lib/radio-utils";
 import type { UnifiedSource } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
 import type { RadioStream } from "@/lib/source-types";
-
-type YouTubeResult = { title: string; url: string; cover: string | null; type: "youtube" | "soundcloud"; viewCount?: number; durationSeconds?: number };
 
 const controlHeight = "h-10";
 const inputBase =
   "w-full rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 py-2 text-sm text-slate-100 placeholder:text-slate-400 transition-all focus:border-[#1ed760]/70 focus:ring-2 focus:ring-[#1ed760]/30 focus:outline-none disabled:opacity-60 backdrop-blur-sm";
 const addBtn =
   "shrink-0 rounded-full bg-gradient-to-b from-[#1ed760] to-[#1db954] px-5 text-sm font-semibold text-white shadow-[0_0_0_2px_rgba(29,185,84,0.35),0_2px_8px_rgba(29,185,84,0.2)] transition-all hover:from-[#2ee770] hover:to-[#1ed760] hover:shadow-[0_0_0_2px_rgba(30,215,96,0.5),0_4px_16px_rgba(30,215,96,0.3)] disabled:opacity-40 disabled:pointer-events-none";
-
-function searchLocal(sources: UnifiedSource[], query: string): UnifiedSource[] {
-  const q = query.trim().toLowerCase();
-  if (!q || q.length < 2) return [];
-  const words = q.split(/\s+/).filter(Boolean);
-  return sources.filter((s) => {
-    const title = s.title.toLowerCase();
-    const genre = (s.genre ?? "").toLowerCase();
-    const type = s.type.toLowerCase();
-    const radioName = s.origin === "radio" && s.radio?.name ? s.radio.name.toLowerCase() : "";
-    const sourceName = s.source?.name ? s.source.name.toLowerCase() : "";
-    let searchable = `${title} ${genre} ${type} ${radioName} ${sourceName}`;
-    if (s.playlist) {
-      const tracks = getPlaylistTracks(s.playlist);
-      const trackNames = tracks.map((t) => (t.name || (t as { title?: string }).title || "").toLowerCase()).join(" ");
-      searchable += ` ${trackNames}`;
-    }
-    return words.some((w) => searchable.includes(w));
-  });
-}
-
-type RadioResult = { title: string; url: string; cover: string | null; genre: string };
-
-async function searchYouTube(q: string): Promise<YouTubeResult[]> {
-  if (!q.trim() || q.length < 2) return [];
-  const res = await fetch(`/api/sources/search?q=${encodeURIComponent(q)}`);
-  const data = await res.json();
-  return data.results || [];
-}
-
-async function searchAll(q: string): Promise<{ youtube: YouTubeResult[]; radio: RadioResult[] }> {
-  if (!q.trim() || q.length < 2) return { youtube: [], radio: [] };
-  const res = await fetch(`/api/sources/search?q=${encodeURIComponent(q)}`);
-  const data = await res.json();
-  return {
-    youtube: data.results || [],
-    radio: data.radioResults || [],
-  };
-}
 
 async function parseUrl(url: string): Promise<{ title: string; cover: string | null; genre: string; type: string; isRadio: boolean; viewCount?: number; durationSeconds?: number; artist?: string; song?: string } | null> {
   const res = await fetch("/api/sources/parse-url", {
@@ -151,8 +110,8 @@ export function LibraryInputArea({ onAdd }: Props) {
 
   const [query, setQuery] = useState("");
   const [localResults, setLocalResults] = useState<UnifiedSource[]>([]);
-  const [youtubeResults, setYoutubeResults] = useState<YouTubeResult[]>([]);
-  const [radioResults, setRadioResults] = useState<RadioResult[]>([]);
+  const [youtubeResults, setYoutubeResults] = useState<YouTubeSearchResult[]>([]);
+  const [radioResults, setRadioResults] = useState<RadioSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [listening, setListening] = useState(false);
   const [showResults, setShowResults] = useState(false);
@@ -178,16 +137,16 @@ export function LibraryInputArea({ onAdd }: Props) {
     setSearching(true);
     setYoutubeResults([]);
     setRadioResults([]);
-    const local = searchLocal(sources, q);
-    setLocalResults(local);
     try {
-      const { youtube, radio } = await searchAll(q);
+      const { internal, external } = await searchAll(sources, q);
       if (searchQueryRef.current === q) {
-        setYoutubeResults(youtube);
-        setRadioResults(radio);
+        setLocalResults(internal);
+        setYoutubeResults(external.youtube);
+        setRadioResults(external.radio);
       }
     } catch {
       if (searchQueryRef.current === q) {
+        setLocalResults([]);
         setYoutubeResults([]);
         setRadioResults([]);
       }
@@ -259,8 +218,8 @@ export function LibraryInputArea({ onAdd }: Props) {
           const searchQuery = parsed?.artist && parsed?.song
             ? `${parsed.artist} ${parsed.song}`
             : parsed?.title ?? "";
-          const ytResults = await searchYouTube(searchQuery);
-          const first = ytResults.find((r) => r.type === "youtube") ?? ytResults[0];
+          const { youtube } = await searchExternal(searchQuery);
+          const first = youtube.find((r: YouTubeSearchResult) => r.type === "youtube") ?? youtube[0];
           if (!first) {
             setUrlError("Could not find song on YouTube");
             return;
@@ -437,7 +396,7 @@ export function LibraryInputArea({ onAdd }: Props) {
   );
 
   const handleAddYoutube = useCallback(
-    async (r: YouTubeResult) => {
+    async (r: YouTubeSearchResult) => {
       const genre = inferGenre(r.title, query);
       const created = await createPlaylistFromUrl(r.url, { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount, durationSeconds: r.durationSeconds });
       if (created) {
@@ -463,7 +422,7 @@ export function LibraryInputArea({ onAdd }: Props) {
   );
 
   const handleAddRadio = useCallback(
-    async (r: RadioResult) => {
+    async (r: RadioSearchResult) => {
       const res = await fetch("/api/radio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -486,7 +445,7 @@ export function LibraryInputArea({ onAdd }: Props) {
   );
 
   const handlePlayRadio = useCallback(
-    async (r: RadioResult) => {
+    async (r: RadioSearchResult) => {
       const res = await fetch("/api/radio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -512,7 +471,7 @@ export function LibraryInputArea({ onAdd }: Props) {
   );
 
   const handlePlayYoutube = useCallback(
-    async (r: YouTubeResult) => {
+    async (r: YouTubeSearchResult) => {
       const genre = inferGenre(r.title, query);
       const created = await createPlaylistFromUrl(r.url, { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount, durationSeconds: r.durationSeconds });
       if (created) {

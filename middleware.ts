@@ -20,6 +20,7 @@ const PROTECTED_PREFIXES = [
   "/remote",
   "/remote-player",
   "/player",
+  "/owner",
 ];
 
 const ALLOWED_PATHS = ["/", "/login", "/signup"];

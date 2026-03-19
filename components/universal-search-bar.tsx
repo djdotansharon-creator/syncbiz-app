@@ -6,36 +6,15 @@ import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { useSourcesPlayback } from "@/lib/sources-playback-context";
 import { ActionButtonPlay, ActionButtonEdit } from "@/components/ui/action-buttons";
+import { searchAll, type YouTubeSearchResult, type RadioSearchResult } from "@/lib/search-service";
 import { inferPlaylistType, getYouTubeThumbnail } from "@/lib/playlist-utils";
 import { formatViewCount } from "@/lib/format-utils";
 import { inferGenre } from "@/lib/infer-genre";
-import { getPlaylistTracks } from "@/lib/playlist-types";
+import { radioToUnified } from "@/lib/radio-utils";
+import { RadioIcon } from "@/components/ui/radio-icon";
 import type { UnifiedSource } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
-
-type YouTubeResult = { title: string; url: string; cover: string | null; type: "youtube" | "soundcloud"; viewCount?: number };
-
-function searchLocal(sources: UnifiedSource[], query: string): UnifiedSource[] {
-  const q = query.trim().toLowerCase();
-  if (!q || q.length < 2) return [];
-  return sources.filter((s) => {
-    if (s.title.toLowerCase().includes(q)) return true;
-    if (s.genre?.toLowerCase().includes(q)) return true;
-    if (s.type.toLowerCase().includes(q)) return true;
-    if (s.playlist) {
-      const tracks = getPlaylistTracks(s.playlist);
-      if (tracks.some((t) => (t.name || t.title || "").toLowerCase().includes(q))) return true;
-    }
-    return false;
-  });
-}
-
-async function searchYouTube(q: string): Promise<YouTubeResult[]> {
-  if (!q.trim() || q.length < 2) return [];
-  const res = await fetch(`/api/sources/search?q=${encodeURIComponent(q)}`);
-  const data = await res.json();
-  return data.results || [];
-}
+import type { RadioStream } from "@/lib/source-types";
 
 async function createPlaylistFromUrl(
   url: string,
@@ -110,7 +89,8 @@ export function UniversalSearchBar({ onAddSource }: Props) {
   const { playSource } = usePlayback();
   const [query, setQuery] = useState("");
   const [localResults, setLocalResults] = useState<UnifiedSource[]>([]);
-  const [youtubeResults, setYoutubeResults] = useState<YouTubeResult[]>([]);
+  const [youtubeResults, setYoutubeResults] = useState<YouTubeSearchResult[]>([]);
+  const [radioResults, setRadioResults] = useState<RadioSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [listening, setListening] = useState(false);
   const [showResults, setShowResults] = useState(false);
@@ -120,26 +100,23 @@ export function UniversalSearchBar({ onAddSource }: Props) {
   const hasQuery = query.trim().length >= 2;
   const hasLocal = localResults.length > 0;
   const hasYoutube = youtubeResults.length > 0;
-  const hasResults = hasLocal || hasYoutube;
+  const hasRadio = radioResults.length > 0;
+  const hasResults = hasLocal || hasYoutube || hasRadio;
 
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q || q.length < 2) {
       setLocalResults([]);
       setYoutubeResults([]);
+      setRadioResults([]);
       return;
     }
     setSearching(true);
-    const local = searchLocal(sources, q);
-    setLocalResults(local);
-    if (local.length > 0) {
-      setYoutubeResults([]);
-      setSearching(false);
-      return;
-    }
     try {
-      const yt = await searchYouTube(q);
-      setYoutubeResults(yt);
+      const { internal, external } = await searchAll(sources, q);
+      setLocalResults(internal);
+      setYoutubeResults(external.youtube);
+      setRadioResults(external.radio);
     } finally {
       setSearching(false);
     }
@@ -149,6 +126,7 @@ export function UniversalSearchBar({ onAddSource }: Props) {
     if (!hasQuery) {
       setLocalResults([]);
       setYoutubeResults([]);
+      setRadioResults([]);
       setShowResults(false);
       return;
     }
@@ -190,8 +168,63 @@ export function UniversalSearchBar({ onAddSource }: Props) {
     typeof window !== "undefined" &&
     (!!(window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition || !!(window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition);
 
+  const handleAddRadio = useCallback(
+    async (r: RadioSearchResult) => {
+      const res = await fetch("/api/radio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: r.title,
+          url: r.url,
+          genre: r.genre || "Radio",
+          cover: r.cover,
+        }),
+      });
+      if (res.ok) {
+        const station = (await res.json()) as RadioStream;
+        const unified = radioToUnified(station);
+        onAddSource(unified);
+        router.refresh();
+        setQuery("");
+        setYoutubeResults([]);
+        setRadioResults([]);
+        setLocalResults([]);
+        setShowResults(false);
+      }
+    },
+    [onAddSource, router]
+  );
+
+  const handlePlayRadio = useCallback(
+    async (r: RadioSearchResult) => {
+      const res = await fetch("/api/radio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: r.title,
+          url: r.url,
+          genre: r.genre || "Radio",
+          cover: r.cover,
+        }),
+      });
+      if (res.ok) {
+        const station = (await res.json()) as RadioStream;
+        const unified = radioToUnified(station);
+        onAddSource(unified);
+        playSource(unified);
+        router.refresh();
+        setQuery("");
+        setYoutubeResults([]);
+        setRadioResults([]);
+        setLocalResults([]);
+        setShowResults(false);
+      }
+    },
+    [onAddSource, playSource, router]
+  );
+
   const handleAddYoutube = useCallback(
-    async (r: YouTubeResult) => {
+    async (r: YouTubeSearchResult) => {
       const genre = inferGenre(r.title, query);
       const meta = { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount };
       const created = await createPlaylistFromUrl(r.url, meta);
@@ -218,7 +251,7 @@ export function UniversalSearchBar({ onAddSource }: Props) {
   );
 
   const handlePlayYoutube = useCallback(
-    async (r: YouTubeResult) => {
+    async (r: YouTubeSearchResult) => {
       const genre = inferGenre(r.title, query);
       const created = await createPlaylistFromUrl(r.url, { title: r.title, genre, cover: r.cover, type: r.type });
       if (created) {
@@ -305,6 +338,7 @@ export function UniversalSearchBar({ onAddSource }: Props) {
               setQuery("");
               setLocalResults([]);
               setYoutubeResults([]);
+              setRadioResults([]);
               setShowResults(false);
               inputRef.current?.focus();
             }}
@@ -370,6 +404,47 @@ export function UniversalSearchBar({ onAddSource }: Props) {
                           {source.origin === "radio" && source.radio && (
                             <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
                           )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {hasRadio && (
+                <div className="border-b border-slate-800/60 p-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">{t.radioResults ?? "Radio stations"}</p>
+                  <div className="space-y-1">
+                    {radioResults.map((r, i) => (
+                      <div key={`radio-${i}`} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-slate-800/80">
+                        <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                          {r.cover ? (
+                            <img src={r.cover} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-rose-400">
+                              <RadioIcon className="h-6 w-6" />
+                            </div>
+                          )}
+                          <span className="absolute bottom-0 right-0 rounded bg-rose-500/90 px-1 py-0.5 text-[10px] font-medium text-white">LIVE</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium text-slate-100">{r.title}</p>
+                          <p className="text-xs text-slate-500">{r.genre || "Radio"}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void handleAddRadio(r)}
+                            className="inline-flex h-9 items-center justify-center rounded-xl border border-slate-600 bg-slate-800/90 px-3 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+                          >
+                            {t.addToRadio ?? "Add to Radio"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handlePlayRadio(r)}
+                            className="inline-flex h-9 items-center justify-center rounded-xl bg-[#1db954] px-3 text-xs font-semibold text-white transition hover:bg-[#1ed760]"
+                          >
+                            {t.playNow}
+                          </button>
                         </div>
                       </div>
                     ))}

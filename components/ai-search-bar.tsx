@@ -128,14 +128,9 @@ export function AISearchBar() {
       setSources(unified);
       const local = searchLocal(unified, q);
       setLocalResults(local);
-      if (local.length > 0) {
-        setYoutubeResults([]);
-        setSearching(false);
-        return;
-      }
       const yt = await searchYouTube(q);
       setYoutubeResults(yt);
-      if (yt.length === 0) {
+      if (local.length === 0 && yt.length === 0) {
         setError(t.noSearchResults ?? "No results in library or YouTube.");
       }
     } catch {

@@ -27,6 +27,7 @@
 
 # local app data (deleted sources, etc.)
 /data/
+/server/data/
 
 # debug
 npm-debug.log*

@@ -10,7 +10,9 @@ export type MvpLogEvent =
   | "playback_error"
   | "playlist_load_failed"
   | "invalid_url"
-  | "empty_playlist";
+  | "empty_playlist"
+  | "mobile_play_source"
+  | "mobile_search_play";
 
 export function log(event: MvpLogEvent, data?: Record<string, unknown>): void {
   const payload = data ? { event, ...data } : { event };

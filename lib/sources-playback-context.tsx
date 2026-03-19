@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -52,7 +53,12 @@ export function SourcesPlaybackProvider({
   const [status, setStatus] = useState<SourcesPlaybackStatus>("idle");
   const [volume, setVolumeState] = useState(80);
 
+  // Only sync when IDs actually change (avoids render loop from unstable initialSources ref)
+  const prevIdsRef = useRef<string>("");
   useEffect(() => {
+    const ids = initialSources.map((s) => s.id).join(",");
+    if (ids === prevIdsRef.current) return;
+    prevIdsRef.current = ids;
     setSourcesState(initialSources);
   }, [initialSources]);
 

@@ -14,7 +14,15 @@ export type RemoteCommand =
   | "SEEK"
   | "SET_VOLUME";
 
-export type ClientRole = "device" | "controller";
+export type ClientRole = "device" | "controller" | "owner_global";
+
+/** Device/controller type for routing and permissions */
+export type DeviceType =
+  | "main_master_player"
+  | "secondary_desktop_controller"
+  | "mobile_controller"
+  | "mobile_player"
+  | "owner_global_controller";
 
 /** Serializable playback state for cross-device sync. */
 export type StationPlaybackState = {
@@ -53,21 +61,52 @@ export type DeviceInfo = {
   id: string;
   connectedAt: string;
   mode?: DeviceMode;
+  branchId?: string;
+  deviceType?: DeviceType;
+};
+
+/** Branch summary for owner – branches with connected MASTER */
+export type BranchSummary = {
+  branchId: string;
+  branchName?: string;
+  masterDeviceId: string;
+  connectedAt: string;
+  hasDevices: boolean;
+};
+
+/** Guest recommendation payload (minimal, for transport) */
+export type GuestRecommendationPayload = {
+  id: string;
+  sourceUrl: string;
+  sourceType: string;
+  guestName?: string;
+  guestMessage?: string;
+  createdAt: string;
+  targetSessionId: string;
+  status: "pending" | "approved" | "rejected";
 };
 
 /** Message from client to server */
 export type ClientMessage =
-  | { type: "REGISTER"; role: ClientRole; deviceId?: string; isMobile?: boolean; userId?: string }
-  | { type: "COMMAND"; targetDeviceId: string; command: RemoteCommand; payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number } }
+  | { type: "REGISTER"; role: ClientRole; deviceId?: string; isMobile?: boolean; userId?: string; branchId?: string; deviceType?: DeviceType }
+  | { type: "BRANCH_LIST_REQUEST" }
+  | { type: "COMMAND"; targetDeviceId?: string; targetBranchId?: string; command: RemoteCommand; payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number } }
   | { type: "STATE_UPDATE"; state: StationPlaybackState }
   | { type: "SET_MASTER" }
-  | { type: "SET_CONTROL" };
+  | { type: "SET_CONTROL" }
+  | { type: "GUEST_RECOMMEND"; sessionCode: string; sourceUrl: string; guestName?: string; guestMessage?: string }
+  | { type: "APPROVE_GUEST_RECOMMEND"; recommendationId: string }
+  | { type: "REJECT_GUEST_RECOMMEND"; recommendationId: string };
 
 /** Message from server to client */
 export type ServerMessage =
-  | { type: "REGISTERED"; deviceId?: string }
-  | { type: "DEVICE_LIST"; devices: DeviceInfo[]; masterDeviceId?: string | null }
+  | { type: "REGISTERED"; deviceId?: string; sessionCode?: string }
+  | { type: "DEVICE_LIST"; devices: DeviceInfo[]; masterDeviceId?: string | null; sessionCode?: string }
   | { type: "STATE_UPDATE"; deviceId: string; state: StationPlaybackState }
   | { type: "COMMAND"; command: RemoteCommand; payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number } }
   | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string; secondaryDesktop?: boolean }
+  | { type: "GUEST_RECOMMEND_RECEIVED"; recommendation: GuestRecommendationPayload }
+  | { type: "GUEST_RECOMMEND_RESULT"; recommendationId: string; status: "approved" | "rejected" }
+  | { type: "GUEST_RECOMMEND_SENT"; recommendationId: string }
+  | { type: "BRANCH_LIST"; branches: BranchSummary[] }
   | { type: "ERROR"; message: string };

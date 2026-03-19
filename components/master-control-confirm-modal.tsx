@@ -1,18 +1,25 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 type Props = {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => void | Promise<void>;
   loading?: boolean;
+  /** When true, user must enter password before confirming. Verifies via /api/auth/verify-password. */
+  requirePassword?: boolean;
 };
 
-/** Confirmation modal for switching to MASTER mode. Same design pattern as DeleteConfirmModal. */
-export function MasterControlConfirmModal({ isOpen, onClose, onConfirm, loading = false }: Props) {
+/** Confirmation modal for switching to MASTER mode. Requires password when requirePassword is true. */
+export function MasterControlConfirmModal({ isOpen, onClose, onConfirm, loading = false, requirePassword = true }: Props) {
+  const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!isOpen) return;
+    setPassword("");
+    setPasswordError(null);
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
@@ -23,6 +30,28 @@ export function MasterControlConfirmModal({ isOpen, onClose, onConfirm, loading 
   if (!isOpen) return null;
 
   async function handleConfirm() {
+    if (requirePassword) {
+      if (!password.trim()) {
+        setPasswordError("Password is required");
+        return;
+      }
+      setPasswordError(null);
+      try {
+        const res = await fetch("/api/auth/verify-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!res.ok || !data.ok) {
+          setPasswordError(data.error ?? "Invalid password");
+          return;
+        }
+      } catch {
+        setPasswordError("Verification failed");
+        return;
+      }
+    }
     try {
       await onConfirm();
       onClose();
@@ -47,8 +76,35 @@ export function MasterControlConfirmModal({ isOpen, onClose, onConfirm, loading 
           Switch to MASTER
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-slate-400">
-          Changing this device to MASTER will stop playback from the current audio source. Do you want to continue?
+          Changing this device to MASTER will stop playback from the current audio source. This action requires your password.
         </p>
+        {requirePassword && (
+          <div className="mt-4">
+            <label htmlFor="master-password" className="block text-xs font-medium text-slate-500">
+              Your password
+            </label>
+            <input
+              id="master-password"
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setPasswordError(null);
+              }}
+              placeholder="Enter password"
+              autoComplete="current-password"
+              disabled={loading}
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/30 disabled:opacity-50"
+              aria-invalid={!!passwordError}
+              aria-describedby={passwordError ? "master-password-error" : undefined}
+            />
+            {passwordError && (
+              <p id="master-password-error" className="mt-1.5 text-xs text-rose-400">
+                {passwordError}
+              </p>
+            )}
+          </div>
+        )}
         <div className="mt-8 flex justify-end gap-3">
           <button
             type="button"

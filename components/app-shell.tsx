@@ -2,18 +2,19 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
 import { AudioPlayer } from "@/components/audio-player";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
-import { DeviceModeHeaderButtons } from "@/components/device-mode-header-buttons";
+import { DeviceModeIndicator } from "@/components/device-mode-indicator";
+import { GuestLinkButton } from "@/components/guest-link-button";
 
-const categoryKeys = ["dashboard", "sources", "radio", "schedules", "devices", "logs"] as const;
+const categoryKeys = ["dashboard", "sources", "radio", "owner", "schedules", "devices", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
-  href: key === "dashboard" ? "/dashboard" : `/${key}`,
+  href: key === "dashboard" ? "/dashboard" : key === "owner" ? "/owner" : `/${key}`,
   labelKey: key === "sources" ? "library" : key,
   iconKey: key,
 }));
@@ -71,6 +72,15 @@ function IconLogs() {
     </svg>
   );
 }
+function IconOwner() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+      <line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+  );
+}
 function IconPlaylists() {
   return (
     <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -108,6 +118,7 @@ const categoryIcons: Record<(typeof categoryKeys)[number], () => React.ReactElem
   dashboard: IconDashboard,
   sources: IconSources,
   radio: IconRadio,
+  owner: IconOwner,
   schedules: IconSchedules,
   devices: IconDevices,
   logs: IconLogs,
@@ -122,6 +133,7 @@ const navKeys = [
   "radio",
   "favorites",
   "remote",
+  "owner",
   "schedules",
   "devices",
   "logs",
@@ -129,7 +141,7 @@ const navKeys = [
   "architecture",
 ] as const;
 const navItems = navKeys.map((key) => ({
-  href: key === "dashboard" ? "/dashboard" : key === "remote" ? "/mobile" : `/${key}`,
+  href: key === "dashboard" ? "/dashboard" : key === "remote" ? "/mobile" : key === "owner" ? "/owner" : `/${key}`,
   labelKey: key === "sources" ? "library" : key,
 }));
 
@@ -219,6 +231,7 @@ function LanguageToggle() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { locale } = useLocale();
   const { t } = useTranslations();
   const [now, setNow] = useState(() => new Date());
@@ -236,11 +249,20 @@ export function AppShell({ children }: { children: ReactNode }) {
     hour12: false,
   });
 
-  // Mobile remote: minimal layout, AudioPlayer off-screen but mounted for playback
-  if (pathname === "/mobile") {
+  // Mobile: minimal layout. AudioPlayer must be in-viewport for mobile browsers to load/play
+  // (off-screen -left-[9999px] causes iOS Safari etc. to skip loading iframes/audio)
+  // Also use minimal layout for edit pages when return=/mobile (user came from mobile player)
+  const isMobileReturn = searchParams.get("return") === "/mobile";
+  const isMobileOrEditFromMobile =
+    pathname === "/mobile" || (pathname?.includes("/edit") && isMobileReturn);
+  if (isMobileOrEditFromMobile) {
     return (
       <>
-        <div className="fixed -left-[9999px] top-0 z-0 opacity-0 pointer-events-none" aria-hidden>
+        <div
+          className="fixed bottom-0 right-0 z-0 opacity-0 pointer-events-none"
+          aria-hidden
+          style={{ width: 320, height: 180 }}
+        >
           <AudioPlayer />
         </div>
         {children}
@@ -330,7 +352,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </span>
                 </div>
               </div>
-              <DeviceModeHeaderButtons />
+              <DeviceModeIndicator />
+              <GuestLinkButton />
               <span className="hidden items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/80 px-2.5 py-1 text-xs text-slate-400 sm:flex">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 {t.agentsHealthy}
