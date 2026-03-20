@@ -8,10 +8,11 @@ export function DeviceModeIndicator() {
 
   if (!ctx?.isActive) return null;
 
-  const { deviceMode } = ctx;
+  const { deviceMode, hasExistingMaster } = ctx;
   const isMaster = deviceMode === "MASTER";
 
   return (
+    <div className="flex items-center gap-2">
     <div
       className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 ${
         isMaster
@@ -36,6 +37,12 @@ export function DeviceModeIndicator() {
       >
         {deviceMode}
       </span>
+    </div>
+    {!isMaster && hasExistingMaster && (
+      <span className="hidden text-[10px] text-amber-400/90 sm:inline" title="Another MASTER is active on this branch">
+        Another MASTER active
+      </span>
+    )}
     </div>
   );
 }

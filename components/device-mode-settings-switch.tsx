@@ -14,7 +14,7 @@ export function DeviceModeSettingsSwitch() {
 
   if (!ctx?.isActive) return null;
 
-  const { deviceMode, masterConfirmOpen, setMasterConfirmOpen, sendSetMaster, sendSetControl } = ctx;
+  const { deviceMode, masterConfirmOpen, setMasterConfirmOpen, sendSetMaster, sendSetControl, hasExistingMaster } = ctx;
   const isMaster = deviceMode === "MASTER";
 
   const handleMasterClick = () => {
@@ -92,6 +92,11 @@ export function DeviceModeSettingsSwitch() {
             ? "This device outputs audio. Other devices mirror this player."
             : "This device mirrors the MASTER. Use the switch above to become MASTER."}
         </p>
+        {!isMaster && hasExistingMaster && (
+          <p className="text-[11px] text-amber-400/90">
+            Another MASTER is currently active on this branch. This device opened in CONTROL mode.
+          </p>
+        )}
       </div>
       <MasterControlConfirmModal
         isOpen={masterConfirmOpen}

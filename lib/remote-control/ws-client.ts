@@ -32,6 +32,7 @@ export function useRemoteControlWs(
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("CONTROL");
   const [masterDeviceId, setMasterDeviceId] = useState<string | null>(null);
+  const [hasExistingMaster, setHasExistingMaster] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const [sessionCode, setSessionCode] = useState<string | null>(null);
   const onCommandRef = useRef(onCommand);
@@ -59,9 +60,13 @@ export function useRemoteControlWs(
 
     ws.onopen = () => {
       const userId = options?.userId ?? undefined;
+      const isMobile =
+        typeof navigator !== "undefined" &&
+        (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+          (typeof window !== "undefined" && window.innerWidth < 768));
       const msg: ClientMessage =
         role === "device"
-          ? { type: "REGISTER", role: "device", deviceId: deviceId ?? undefined, isMobile: options?.isMobile, userId }
+          ? { type: "REGISTER", role: "device", deviceId: deviceId ?? undefined, isMobile, userId }
           : { type: "REGISTER", role: "controller", userId };
       ws.send(JSON.stringify(msg));
       setStatus("connected");
@@ -75,6 +80,7 @@ export function useRemoteControlWs(
           setDeviceMode(data.mode);
           if ("masterDeviceId" in data && data.masterDeviceId) setMasterDeviceId(data.masterDeviceId);
           else if (data.mode === "MASTER") setMasterDeviceId(null);
+          setHasExistingMaster(!!("secondaryDesktop" in data && data.secondaryDesktop));
           onDeviceModeRef.current?.(data.mode);
           if ("secondaryDesktop" in data && data.secondaryDesktop) {
             onSecondaryDesktopRef.current?.();
@@ -100,6 +106,7 @@ export function useRemoteControlWs(
     ws.onclose = () => {
       setStatus("disconnected");
       setMasterDeviceId(null);
+      setHasExistingMaster(false);
       setSessionCode(null);
     };
     ws.onerror = () => setStatus("error");
@@ -110,7 +117,7 @@ export function useRemoteControlWs(
       setStatus("disconnected");
       setMasterDeviceId(null);
     };
-  }, [role, deviceId, options?.isMobile, options?.userId]);
+  }, [role, deviceId, options?.userId]);
 
   const sendState = (state: StationPlaybackState) => {
     const ws = wsRef.current;
@@ -166,6 +173,7 @@ export function useRemoteControlWs(
     sendSetMaster,
     sendSetControl,
     masterDeviceId,
+    hasExistingMaster,
     sendCommand,
     sessionCode,
     sendApproveGuestRecommend,

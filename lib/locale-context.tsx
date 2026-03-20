@@ -99,6 +99,7 @@ export const labels: Record<string, { en: string; he: string }> = {
   favorites: { en: "Favorites", he: "מועדפים" },
   radio: { en: "Radio", he: "רדיו" },
   remote: { en: "Remote", he: "שלט רחוק" },
+  remotePlayer: { en: "Remote Player", he: "נגן מרוחק" },
   owner: { en: "Owner", he: "בעלים" },
   headerSubtitle: {
     en: "Schedule playback and send commands to endpoint devices",

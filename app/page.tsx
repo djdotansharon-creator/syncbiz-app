@@ -41,8 +41,8 @@ export default function HomePage() {
         </div>
         <p className="mt-8 text-xs text-slate-500">
           Already in?{" "}
-          <Link href="/dashboard" className="text-sky-400 hover:text-sky-300">
-            Go to dashboard
+          <Link href="/sources" className="text-sky-400 hover:text-sky-300">
+            Go to library
           </Link>
         </p>
       </div>

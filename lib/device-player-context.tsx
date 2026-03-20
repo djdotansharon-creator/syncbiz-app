@@ -14,7 +14,6 @@ import { usePathname } from "next/navigation";
 import { getDeviceId, initDeviceId } from "@/lib/device-id";
 import { usePlayback } from "@/lib/playback-provider";
 import { useRemoteControlWs } from "@/lib/remote-control/ws-client";
-import { useIsMobile } from "@/lib/use-is-mobile";
 import { SecondaryDesktopModal } from "@/components/secondary-desktop-modal";
 import { GuestRecommendationModal } from "@/components/guest-recommendation-modal";
 import { urlToUnifiedSource } from "@/lib/remote-control/url-to-source";
@@ -32,6 +31,8 @@ type DevicePlayerContextValue = {
   status: "connecting" | "connected" | "disconnected" | "error";
   deviceMode: DeviceMode;
   masterDeviceId: string | null;
+  /** True when this device opened as CONTROL because another MASTER already exists. */
+  hasExistingMaster: boolean;
   /** Remote state from master (for CONTROL mode display). */
   masterState: StationPlaybackState | null;
   masterConfirmOpen: boolean;
@@ -82,7 +83,6 @@ export function useDevicePlayer() {
 export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const isActive = isDeviceRoleActive(pathname);
-  const isMobile = useIsMobile();
   const deviceId = isActive ? getDeviceId() : null;
 
   const [userId, setUserId] = useState<string | undefined>(undefined);
@@ -151,6 +151,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     sendState,
     sendCommand,
     masterDeviceId,
+    hasExistingMaster,
     sessionCode,
     sendApproveGuestRecommend,
     sendRejectGuestRecommend,
@@ -160,7 +161,6 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     onCommand,
     onDeviceMode,
     {
-      isMobile,
       onStateUpdate,
       userId: effectiveUserId,
       onSecondaryDesktop,
@@ -173,8 +173,10 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       ? `${window.location.origin}/guest?code=${sessionCode}`
       : null;
 
-  // Standalone mode: when no WebSocket connection, act as MASTER so local playback works
-  const effectiveDeviceMode = status === "connected" ? deviceMode : "MASTER";
+  // Standalone mode: when disconnected, act as MASTER so local playback works.
+  // When connecting, use CONTROL until server confirms (avoids second desktop briefly showing MASTER).
+  const effectiveDeviceMode =
+    status === "connected" ? deviceMode : status === "connecting" ? "CONTROL" : "MASTER";
 
   useEffect(() => {
     if (isActive) initDeviceId();
@@ -282,6 +284,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       status,
       deviceMode: effectiveDeviceMode,
       masterDeviceId,
+      hasExistingMaster: hasExistingMaster ?? false,
       masterState,
       masterConfirmOpen,
       setMasterConfirmOpen,
@@ -306,6 +309,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       status,
       effectiveDeviceMode,
       masterDeviceId,
+      hasExistingMaster,
       masterState,
       masterConfirmOpen,
       reportPosition,

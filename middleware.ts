@@ -38,6 +38,12 @@ function isProtected(pathname: string): boolean {
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const cookie = req.cookies.get(COOKIE_NAME)?.value;
+  const email = cookie ? parseSessionValue(cookie) : null;
+
+  if (pathname === "/" && email) {
+    return NextResponse.redirect(new URL("/sources", req.url));
+  }
 
   if (!isProtected(pathname)) {
     return NextResponse.next();
@@ -46,9 +52,6 @@ export function middleware(req: NextRequest) {
   if (isAllowed(pathname)) {
     return NextResponse.next();
   }
-
-  const cookie = req.cookies.get(COOKIE_NAME)?.value;
-  const email = cookie ? parseSessionValue(cookie) : null;
 
   if (!email) {
     const loginUrl = new URL("/login", req.url);

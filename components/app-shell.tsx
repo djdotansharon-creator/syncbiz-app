@@ -12,11 +12,18 @@ import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { DeviceModeIndicator } from "@/components/device-mode-indicator";
 import { GuestLinkButton } from "@/components/guest-link-button";
 
-const categoryKeys = ["dashboard", "sources", "radio", "owner", "schedules", "devices", "logs"] as const;
+const categoryKeys = ["sources", "dashboard", "radio", "remotePlayer", "owner", "schedules", "devices", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
-  href: key === "dashboard" ? "/dashboard" : key === "owner" ? "/owner" : `/${key}`,
+  href:
+    key === "dashboard"
+      ? "/dashboard"
+      : key === "remotePlayer"
+        ? "/remote-player"
+        : key === "owner"
+          ? "/owner"
+          : `/${key}`,
   labelKey: key === "sources" ? "library" : key,
-  iconKey: key,
+  iconKey: key === "remotePlayer" ? "sources" : key,
 }));
 const pillLink =
   "rounded-xl border border-slate-700/80 bg-slate-900/90 px-3.5 py-2 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] transition-all duration-100 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950";
@@ -133,6 +140,7 @@ const navKeys = [
   "radio",
   "favorites",
   "remote",
+  "remotePlayer",
   "owner",
   "schedules",
   "devices",
@@ -141,7 +149,16 @@ const navKeys = [
   "architecture",
 ] as const;
 const navItems = navKeys.map((key) => ({
-  href: key === "dashboard" ? "/dashboard" : key === "remote" ? "/mobile" : key === "owner" ? "/owner" : `/${key}`,
+  href:
+    key === "dashboard"
+      ? "/dashboard"
+      : key === "remote"
+        ? "/mobile"
+        : key === "remotePlayer"
+          ? "/remote-player"
+          : key === "owner"
+            ? "/owner"
+            : `/${key}`,
   labelKey: key === "sources" ? "library" : key,
 }));
 
