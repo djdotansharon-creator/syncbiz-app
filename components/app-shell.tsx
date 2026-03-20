@@ -11,19 +11,13 @@ import { AudioPlayer } from "@/components/audio-player";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { DeviceModeIndicator } from "@/components/device-mode-indicator";
 import { GuestLinkButton } from "@/components/guest-link-button";
+import { StandaloneIndicator } from "@/components/standalone-indicator";
 
-const categoryKeys = ["dashboard", "sources", "radio", "remotePlayer", "owner", "schedules", "devices", "logs"] as const;
+const categoryKeys = ["dashboard", "sources", "radio", "owner", "schedules", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
-  href:
-    key === "dashboard"
-      ? "/dashboard"
-      : key === "remotePlayer"
-        ? "/remote-player"
-        : key === "owner"
-          ? "/owner"
-          : `/${key}`,
+  href: key === "dashboard" ? "/dashboard" : key === "owner" ? "/owner" : `/${key}`,
   labelKey: key === "sources" ? "library" : key,
-  iconKey: key === "remotePlayer" ? "sources" : key,
+  iconKey: key,
 }));
 const pillLink =
   "rounded-xl border border-slate-700/80 bg-slate-900/90 px-3.5 py-2 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] transition-all duration-100 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950";
@@ -125,10 +119,8 @@ const categoryIcons: Record<(typeof categoryKeys)[number], () => React.ReactElem
   dashboard: IconDashboard,
   sources: IconSources,
   radio: IconRadio,
-  remotePlayer: IconSources,
   owner: IconOwner,
   schedules: IconSchedules,
-  devices: IconDevices,
   logs: IconLogs,
 };
 const pillBase = "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05),0_2px_8px_rgba(0,0,0,0.25)] transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-slate-400/40 focus:ring-offset-2 focus:ring-offset-slate-950";
@@ -141,25 +133,14 @@ const navKeys = [
   "radio",
   "favorites",
   "remote",
-  "remotePlayer",
   "owner",
   "schedules",
-  "devices",
   "logs",
   "settings",
   "architecture",
 ] as const;
 const navItems = navKeys.map((key) => ({
-  href:
-    key === "dashboard"
-      ? "/dashboard"
-      : key === "remote"
-        ? "/mobile"
-        : key === "remotePlayer"
-          ? "/remote-player"
-          : key === "owner"
-            ? "/owner"
-            : `/${key}`,
+  href: key === "dashboard" ? "/dashboard" : key === "remote" ? "/mobile" : key === "owner" ? "/owner" : `/${key}`,
   labelKey: key === "sources" ? "library" : key,
 }));
 
@@ -370,6 +351,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </span>
                 </div>
               </div>
+              <StandaloneIndicator />
               <DeviceModeIndicator />
               <GuestLinkButton />
               <span className="hidden items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/80 px-2.5 py-1 text-xs text-slate-400 sm:flex">

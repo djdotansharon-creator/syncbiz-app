@@ -88,7 +88,7 @@ export type GuestRecommendationPayload = {
 
 /** Message from client to server */
 export type ClientMessage =
-  | { type: "REGISTER"; role: ClientRole; deviceId?: string; isMobile?: boolean; userId?: string; branchId?: string; deviceType?: DeviceType }
+  | { type: "REGISTER"; role: ClientRole; authToken: string; deviceId?: string; isMobile?: boolean; branchId?: string; deviceType?: DeviceType }
   | { type: "BRANCH_LIST_REQUEST" }
   | { type: "COMMAND"; targetDeviceId?: string; targetBranchId?: string; command: RemoteCommand; payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number } }
   | { type: "STATE_UPDATE"; state: StationPlaybackState }

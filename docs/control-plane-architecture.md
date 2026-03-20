@@ -48,7 +48,7 @@ Commands are routed by **explicit target**:
 ### Device Registration
 
 1. Client connects to WS (public URL, e.g. `wss://ws.syncbiz.app`).
-2. Sends `REGISTER` with role, userId, branchId (if device/controller), deviceId (if device).
+2. Sends `REGISTER` with role, authToken (from `/api/auth/ws-token`), branchId (if device/controller), deviceId (if device). Server derives userId from authToken; client never sends userId.
 3. Server stores connection, assigns MASTER if first device at branch.
 
 ### Device Presence

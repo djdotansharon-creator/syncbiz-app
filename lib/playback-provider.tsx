@@ -21,6 +21,7 @@ import { getYouTubeThumbnail } from "./playlist-utils";
 import { log as mvpLog } from "./mvp-logger";
 import { isValidPlaybackUrl } from "./url-validation";
 import { fetchUnifiedSourcesWithFallback } from "./unified-sources-client";
+import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
 
 export type PlaybackStatus = "idle" | "playing" | "paused" | "stopped";
 
@@ -293,6 +294,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const playSource = useCallback(
     (source: UnifiedSource, trackIndex = 0) => {
+      if (!deviceModeAllowsLocalPlayback.current) return;
       const playlist = source.playlist ?? null;
       const tracks = playlist ? getPlaylistTracks(playlist) : [];
       const idx = Math.min(trackIndex, Math.max(0, tracks.length - 1));
@@ -352,6 +354,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     fetchUnifiedSourcesWithFallback().then((items) => {
       if (cancelled) return;
+      if (!deviceModeAllowsLocalPlayback.current) return;
       const source = items.find((s) => s.id === persisted.sourceId);
       if (source) {
         setState((s) => ({ ...s, volume: persisted.volume }));
@@ -385,6 +388,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   );
 
   const play = useCallback(() => {
+    if (!deviceModeAllowsLocalPlayback.current) return;
     setState((s) => (s.currentSource ? { ...s, status: "playing" as const } : s));
   }, []);
 
@@ -422,6 +426,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }), []);
 
   const prev = useCallback(() => {
+    if (!deviceModeAllowsLocalPlayback.current) return;
     if (transportLockRef.current) return;
     transportLockRef.current = true;
     setState((s) => {
@@ -462,6 +467,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, [stopAllBeforePlay, playLocal, playSource, getAdvanceState]);
 
   const next = useCallback(() => {
+    if (!deviceModeAllowsLocalPlayback.current) return;
     if (transportLockRef.current) return;
     transportLockRef.current = true;
     setState((s) => {

@@ -6,7 +6,7 @@ import { useDevicePlayer } from "@/lib/device-player-context";
 export function DeviceModeIndicator() {
   const ctx = useDevicePlayer();
 
-  if (!ctx?.isActive) return null;
+  if (!ctx?.isBranchConnected) return null;
 
   const { deviceMode, hasExistingMaster } = ctx;
   const isMaster = deviceMode === "MASTER";

@@ -109,7 +109,7 @@ export function AudioPlayer() {
   const { t } = useTranslations();
   const [shareOpen, setShareOpen] = useState(false);
   const deviceCtx = useDevicePlayer();
-  const isControlMirror = deviceCtx?.isActive && deviceCtx.deviceMode === "CONTROL";
+  const isControlMirror = deviceCtx?.isBranchConnected && deviceCtx.deviceMode === "CONTROL";
   const {
     currentTrack,
     currentSource,
@@ -569,7 +569,7 @@ export function AudioPlayer() {
           setDuration(dur);
           const frac = safeGetVideoLoadedFraction(p);
           setBufferedPercent(frac * 100);
-          if (deviceCtx?.isActive && deviceCtx.deviceMode === "MASTER" && Number.isFinite(pos) && Number.isFinite(dur)) {
+          if (deviceCtx?.isBranchConnected && deviceCtx.deviceMode === "MASTER" && Number.isFinite(pos) && Number.isFinite(dur)) {
             deviceCtx.reportPosition(pos, dur);
           }
         }
@@ -580,7 +580,7 @@ export function AudioPlayer() {
           scWidgetRef.current?.getDuration((dur) => {
             const d = dur / 1000;
             setDuration(d);
-            if (deviceCtx?.isActive && deviceCtx.deviceMode === "MASTER" && Number.isFinite(p) && Number.isFinite(d)) {
+            if (deviceCtx?.isBranchConnected && deviceCtx.deviceMode === "MASTER" && Number.isFinite(p) && Number.isFinite(d)) {
               deviceCtx.reportPosition(p, d);
             }
           });
@@ -597,7 +597,7 @@ export function AudioPlayer() {
             const end = a.buffered.end(a.buffered.length - 1);
             setBufferedPercent((end / d) * 100);
           }
-          if (deviceCtx?.isActive && deviceCtx.deviceMode === "MASTER" && Number.isFinite(t) && Number.isFinite(d)) {
+          if (deviceCtx?.isBranchConnected && deviceCtx.deviceMode === "MASTER" && Number.isFinite(t) && Number.isFinite(d)) {
             deviceCtx.reportPosition(t, d);
           }
         }
@@ -606,7 +606,7 @@ export function AudioPlayer() {
     poll();
     const id = setInterval(poll, 500);
     return () => clearInterval(id);
-  }, [currentSource, isYouTube, isSoundCloud, isStreamUrl, deviceCtx?.isActive, deviceCtx?.deviceMode]);
+  }, [currentSource, isYouTube, isSoundCloud, isStreamUrl, deviceCtx?.isBranchConnected, deviceCtx?.deviceMode]);
 
   useEffect(() => {
     const audio = audioRef.current;

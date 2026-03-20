@@ -24,7 +24,7 @@ export function useRemoteControlWs(
   options?: {
     isMobile?: boolean;
     onStateUpdate?: (state: StationPlaybackState) => void;
-    userId?: string | null;
+    authToken?: string | null;
     onSecondaryDesktop?: () => void;
     onGuestRecommendation?: (recommendation: GuestRecommendationPayload) => void;
   }
@@ -50,6 +50,8 @@ export function useRemoteControlWs(
 
   useEffect(() => {
     if (role === "device" && !deviceId) return;
+    const authToken = options?.authToken?.trim();
+    if (!authToken) return;
 
     const url = getWsUrl();
     if (!url) return;
@@ -59,13 +61,12 @@ export function useRemoteControlWs(
     setStatus("connecting");
 
     ws.onopen = () => {
-      const userId = options?.userId ?? undefined;
       const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Opera Mobi|Silk|Mobile/i.test(ua);
       const msg: ClientMessage =
         role === "device"
-          ? { type: "REGISTER", role: "device", deviceId: deviceId ?? undefined, isMobile, userId }
-          : { type: "REGISTER", role: "controller", userId };
+          ? { type: "REGISTER", role: "device", authToken, deviceId: deviceId ?? undefined, isMobile, branchId: "default" }
+          : { type: "REGISTER", role: "controller", authToken, branchId: "default" };
       ws.send(JSON.stringify(msg));
       setStatus("connected");
     };
@@ -89,12 +90,15 @@ export function useRemoteControlWs(
           }
         } else if (data.type === "STATE_UPDATE" && onStateUpdateRef.current) {
           onStateUpdateRef.current(data.state);
-        } else if (data.type === "REGISTERED" && "sessionCode" in data && data.sessionCode) {
-          setSessionCode(data.sessionCode);
-        } else if (data.type === "DEVICE_LIST" && "sessionCode" in data && data.sessionCode) {
-          setSessionCode(data.sessionCode);
+        } else if (data.type === "REGISTERED" && "sessionCode" in data) {
+          if (data.sessionCode) setSessionCode(data.sessionCode);
+        } else if (data.type === "DEVICE_LIST" && "sessionCode" in data) {
+          if (data.sessionCode) setSessionCode(data.sessionCode);
         } else if (data.type === "GUEST_RECOMMEND_RECEIVED" && onGuestRecommendationRef.current) {
           onGuestRecommendationRef.current(data.recommendation);
+        } else if (data.type === "ERROR") {
+          setStatus("error");
+          ws.close();
         }
       } catch {
         /* ignore */
@@ -115,7 +119,7 @@ export function useRemoteControlWs(
       setStatus("disconnected");
       setMasterDeviceId(null);
     };
-  }, [role, deviceId, options?.userId]);
+  }, [role, deviceId, options?.authToken]);
 
   const sendState = (state: StationPlaybackState) => {
     const ws = wsRef.current;
@@ -187,7 +191,7 @@ export function useRemoteController(options?: {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [masterDeviceId, setMasterDeviceId] = useState<string | null>(null);
   const [remoteState, setRemoteState] = useState<Record<string, StationPlaybackState>>({});
-  const [userId, setUserId] = useState<string | undefined>(undefined);
+  const [wsToken, setWsToken] = useState<string | null>(null);
   const [sessionCode, setSessionCode] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
@@ -198,11 +202,34 @@ export function useRemoteController(options?: {
   onGuestRecommendationRef.current = options?.onGuestRecommendation;
 
   useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => r.json())
-      .then((data: { email?: string | null }) => setUserId(data?.email ?? ""))
-      .catch(() => setUserId(""));
-  }, []);
+    let cancelled = false;
+    const fetchToken = (retry = false) => {
+      fetch("/api/auth/ws-token")
+        .then((r) => {
+          if (cancelled) return;
+          if (r.status === 401) {
+            setWsToken(null);
+            return;
+          }
+          if (!r.ok && !retry) {
+            setTimeout(() => fetchToken(true), 1000);
+            return;
+          }
+          if (!r.ok) return;
+          return r.json();
+        })
+        .then((data: { token?: string } | undefined) => {
+          if (cancelled) return;
+          setWsToken(data?.token ?? null);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setWsToken(null);
+        });
+    };
+    fetchToken();
+    return () => { cancelled = true; };
+  }, [reconnectTrigger]);
 
   const tryReconnect = () => {
     const ws = wsRef.current;
@@ -216,20 +243,26 @@ export function useRemoteController(options?: {
 
   useEffect(() => {
     const url = getWsUrl();
-    if (!url) return;
+    const authToken = (wsToken ?? "").trim();
+    if (!url || !authToken) return;
 
     const ws = new WebSocket(url);
     wsRef.current = ws;
     setStatus("connecting");
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "REGISTER", role: "controller", userId: userId ?? "" } as ClientMessage));
+      ws.send(JSON.stringify({ type: "REGISTER", role: "controller", authToken, branchId: "default" } as ClientMessage));
       setStatus("connected");
     };
 
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data as string) as ServerMessage;
+        if (data.type === "ERROR") {
+          setStatus("error");
+          ws.close();
+          return;
+        }
         if (data.type === "DEVICE_LIST") {
           setDevices(data.devices);
           setMasterDeviceId(data.masterDeviceId ?? null);
@@ -257,7 +290,7 @@ export function useRemoteController(options?: {
       ws.close();
       wsRef.current = null;
     };
-  }, [reconnectTrigger, userId]);
+  }, [reconnectTrigger, wsToken]);
 
   useEffect(() => {
     if (typeof document === "undefined" || typeof window === "undefined") return;
@@ -319,34 +352,63 @@ export function useRemoteOwner() {
   const [branches, setBranches] = useState<BranchSummary[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
   const [remoteStateByDeviceId, setRemoteStateByDeviceId] = useState<Record<string, StationPlaybackState>>({});
-  const [userId, setUserId] = useState<string | undefined>(undefined);
+  const [wsToken, setWsToken] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
 
   useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => r.json())
-      .then((data: { email?: string | null }) => setUserId(data?.email ?? ""))
-      .catch(() => setUserId(""));
-  }, []);
+    let cancelled = false;
+    const fetchToken = (retry = false) => {
+      fetch("/api/auth/ws-token")
+        .then((r) => {
+          if (cancelled) return;
+          if (r.status === 401) {
+            setWsToken(null);
+            return;
+          }
+          if (!r.ok && !retry) {
+            setTimeout(() => fetchToken(true), 1000);
+            return;
+          }
+          if (!r.ok) return;
+          return r.json();
+        })
+        .then((data: { token?: string } | undefined) => {
+          if (cancelled) return;
+          setWsToken(data?.token ?? null);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setWsToken(null);
+        });
+    };
+    fetchToken();
+    return () => { cancelled = true; };
+  }, [reconnectTrigger]);
 
   useEffect(() => {
     const url = getWsUrl();
-    if (!url || !userId) return;
+    const authToken = (wsToken ?? "").trim();
+    if (!url || !authToken) return;
 
     const ws = new WebSocket(url);
     wsRef.current = ws;
     setStatus("connecting");
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "REGISTER", role: "owner_global", userId } as ClientMessage));
+      ws.send(JSON.stringify({ type: "REGISTER", role: "owner_global", authToken } as ClientMessage));
       setStatus("connected");
     };
 
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data as string) as ServerMessage;
+        if (data.type === "ERROR") {
+          setStatus("error");
+          ws.close();
+          return;
+        }
         if (data.type === "BRANCH_LIST") {
           setBranches(data.branches);
           setSelectedBranchId((prev) => (prev ? prev : data.branches[0]?.branchId ?? null));
@@ -369,7 +431,7 @@ export function useRemoteOwner() {
       ws.close();
       wsRef.current = null;
     };
-  }, [reconnectTrigger, userId]);
+  }, [reconnectTrigger, wsToken]);
 
   const refreshBranchList = () => {
     const ws = wsRef.current;

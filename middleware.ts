@@ -50,7 +50,15 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL("/sources", req.url));
   }
 
-  if (isMobileUserAgent(req) && pathname !== "/mobile" && !pathname.startsWith("/mobile") && isProtected(pathname) && email) {
+  const isEditRoute = /^\/(playlists|sources|radio)\/[^/]+\/edit(\/|$)/.test(pathname);
+  if (
+    isMobileUserAgent(req) &&
+    pathname !== "/mobile" &&
+    !pathname.startsWith("/mobile") &&
+    !isEditRoute &&
+    isProtected(pathname) &&
+    email
+  ) {
     return NextResponse.redirect(new URL("/mobile", req.url));
   }
 

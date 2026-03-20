@@ -12,7 +12,7 @@ export function DeviceModeSettingsSwitch() {
   const { stop } = usePlayback();
   const [controlConfirmOpen, setControlConfirmOpen] = useState(false);
 
-  if (!ctx?.isActive) return null;
+  if (!ctx?.isBranchConnected) return null;
 
   const { deviceMode, masterConfirmOpen, setMasterConfirmOpen, sendSetMaster, sendSetControl, hasExistingMaster } = ctx;
   const isMaster = deviceMode === "MASTER";

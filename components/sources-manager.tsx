@@ -95,7 +95,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const { sources, setSources } = useSourcesPlayback();
   const { setQueue, playSource } = usePlayback();
   const deviceCtx = useDevicePlayer();
-  const isDevicePlayer = deviceCtx?.isActive ?? false;
+  const isDevicePlayer = deviceCtx?.isBranchConnected ?? false;
   const isMaster = deviceCtx?.deviceMode === "MASTER";
   const playSourceOverride = isDevicePlayer && !isMaster ? deviceCtx?.playSourceOrSend : undefined;
   const stopOverride = isDevicePlayer && !isMaster ? deviceCtx?.stopOrSend : undefined;

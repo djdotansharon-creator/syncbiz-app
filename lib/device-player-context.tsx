@@ -23,10 +23,13 @@ import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
+import { deviceModeAllowsLocalPlayback } from "@/lib/device-mode-guard";
 
 type DevicePlayerContextValue = {
   /** Whether we're on a playback route and provider is active (device role visible). */
   isActive: boolean;
+  /** True only when authenticated and connected to branch control. Hide MASTER/CONTROL/Guest UI when false. */
+  isBranchConnected: boolean;
   deviceId: string | null;
   status: "connecting" | "connected" | "disconnected" | "error";
   deviceMode: DeviceMode;
@@ -86,15 +89,57 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const deviceId = isActive ? getDeviceId() : null;
 
   const [userId, setUserId] = useState<string | undefined>(undefined);
+  const [authLoaded, setAuthLoaded] = useState(false);
+  const [wsToken, setWsToken] = useState<string | null>(null);
   const [secondaryDesktopModalOpen, setSecondaryDesktopModalOpen] = useState(false);
   const [pendingGuestRecommendation, setPendingGuestRecommendation] = useState<GuestRecommendationPayload | null>(null);
 
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => r.json())
-      .then((data: { email?: string | null }) => setUserId(data?.email ?? ""))
-      .catch(() => setUserId(""));
+      .then((data: { email?: string | null }) => {
+        setUserId((data?.email ?? "").trim() || "");
+        setAuthLoaded(true);
+      })
+      .catch(() => {
+        setUserId("");
+        setAuthLoaded(true);
+      });
   }, []);
+
+  useEffect(() => {
+    if (!isActive || !authLoaded || !(userId ?? "").trim()) {
+      setWsToken(null);
+      return;
+    }
+    let cancelled = false;
+    const fetchToken = (retry = false) => {
+      fetch("/api/auth/ws-token")
+        .then((r) => {
+          if (cancelled) return;
+          if (r.status === 401) {
+            setWsToken(null);
+            return;
+          }
+          if (!r.ok && !retry) {
+            setTimeout(() => fetchToken(true), 1000);
+            return;
+          }
+          if (!r.ok) return;
+          return r.json();
+        })
+        .then((data: { token?: string } | undefined) => {
+          if (cancelled || !data?.token) return;
+          setWsToken(data.token);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setWsToken(null);
+        });
+    };
+    fetchToken();
+    return () => { cancelled = true; };
+  }, [isActive, authLoaded, userId]);
   const { play, pause, stop, next, prev, playSource, setVolume, seekTo, status: playStatus, currentSource, currentTrackIndex, queue, queueIndex, volume } = usePlayback();
   const [masterConfirmOpen, setMasterConfirmOpen] = useState(false);
   const [masterState, setMasterState] = useState<StationPlaybackState | null>(null);
@@ -134,7 +179,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     [play, pause, stop, next, prev, playSource, seekTo, setVolume]
   );
 
-  const effectiveUserId = userId ?? "";
+  const effectiveUserId = (userId ?? "").trim();
   const onDeviceMode = useCallback((mode: DeviceMode) => {
     if (mode === "MASTER") setMasterState(null);
     if (mode === "CONTROL") stop();
@@ -162,7 +207,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     onDeviceMode,
     {
       onStateUpdate,
-      userId: effectiveUserId,
+      authToken: wsToken ?? undefined,
       onSecondaryDesktop,
       onGuestRecommendation,
     }
@@ -176,9 +221,18 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // Use server truth when connected. When disconnected, act as MASTER for standalone local playback.
   const effectiveDeviceMode = status === "connected" ? deviceMode : "MASTER";
 
+  const isBranchConnected = isActive && authLoaded && !!effectiveUserId && status === "connected";
+
   useEffect(() => {
     if (isActive) initDeviceId();
+    return () => {
+      deviceModeAllowsLocalPlayback.current = true;
+    };
   }, [isActive]);
+
+  // Block local playback when on device route until we know we're MASTER (prevents CONTROL from restoring).
+  // Allow when: not on device route; or disconnected (standalone); or connected and MASTER.
+  deviceModeAllowsLocalPlayback.current = !isActive || status === "disconnected" || (status === "connected" && deviceMode === "MASTER");
 
   // Publish state when MASTER and connected – include position/duration for CONTROL sync
   useEffect(() => {
@@ -278,6 +332,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const value = useMemo<DevicePlayerContextValue>(
     () => ({
       isActive,
+      isBranchConnected,
       deviceId,
       status,
       deviceMode: effectiveDeviceMode,
@@ -303,6 +358,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     }),
     [
       isActive,
+      isBranchConnected,
       deviceId,
       status,
       effectiveDeviceMode,

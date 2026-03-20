@@ -2,6 +2,9 @@
  * MVP WebSocket server for remote player control.
  * Run: cd server && npm install && npm run dev
  *
+ * Required env: SYNCBIZ_WS_SECRET or WS_SECRET (min 16 chars)
+ * Set in .env or shell before starting.
+ *
  * Primary MASTER eligibility (desktop-only):
  * - Only non-mobile desktop devices may own the primary branch MASTER lease.
  * - Mobile devices must NEVER claim or persist primary branch ownership.
@@ -22,8 +25,17 @@
 import { WebSocketServer } from "ws";
 import type { ClientMessage, ServerMessage, StationPlaybackState, DeviceMode, GuestRecommendationPayload, BranchSummary } from "../lib/remote-control/types";
 import { loadLease, saveLease } from "./master-lease-store";
+import { verifyWsToken } from "./ws-token";
+
+const WS_SECRET = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
+if (!WS_SECRET || WS_SECRET.length < 16) {
+  console.error("[SyncBiz WS] SYNCBIZ_WS_SECRET or WS_SECRET required (min 16 chars). Exiting.");
+  process.exit(1);
+}
 
 const PORT = Number(process.env.WS_PORT) || 3001;
+const REGISTER_TIMEOUT_MS = 5000;
+const ALLOWED_BRANCH_IDS = ["default"] as const;
 
 /** Grace period (ms) before another desktop can become MASTER after primary disconnects. Default 90s. */
 const MASTER_GRACE_MS = Number(process.env.MASTER_GRACE_MS) || 90_000;
@@ -261,6 +273,33 @@ function sendBranchListToOwner(ws: import("ws").WebSocket, userId: string) {
   if (ws.readyState === 1) ws.send(JSON.stringify(msg));
 }
 
+function isBranchAuthorized(branchId: string): boolean {
+  const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
+  return ALLOWED_BRANCH_IDS.includes(normalized);
+}
+
+function validateRegisterPayload(
+  msg: unknown
+): { ok: true; role: string; branchId: string; deviceId?: string; authToken: string } | { ok: false; error: string } {
+  if (!msg || typeof msg !== "object") return { ok: false, error: "Invalid message" };
+  const m = msg as Record<string, unknown>;
+  if (m.type !== "REGISTER") return { ok: false, error: "Invalid message type" };
+  const role = m.role;
+  if (!role || !["device", "controller", "owner_global"].includes(role as string)) {
+    return { ok: false, error: "Invalid role" };
+  }
+  const authToken = typeof m.authToken === "string" ? m.authToken.trim() : "";
+  if (!authToken) return { ok: false, error: "Authentication required" };
+  const branchId = (typeof m.branchId === "string" ? m.branchId : "").trim() || DEFAULT_BRANCH_ID;
+  if (!isBranchAuthorized(branchId)) return { ok: false, error: "Branch not authorized" };
+  if (role === "device") {
+    const deviceId = typeof m.deviceId === "string" ? m.deviceId.trim() : "";
+    if (!deviceId) return { ok: false, error: "deviceId required for device registration" };
+    return { ok: true, role: role as string, branchId, deviceId, authToken };
+  }
+  return { ok: true, role: role as string, branchId, authToken };
+}
+
 function parseMessage(data: Buffer | ArrayBuffer | string | Buffer[]): ClientMessage | null {
   try {
     let str: string;
@@ -279,32 +318,57 @@ const wss = new WebSocketServer({ port: PORT });
 
 wss.on("connection", (ws) => {
   let deviceId: string | null = null;
-  let role: "device" | "controller" | null = null;
+  let role: "device" | "controller" | "owner_global" | null = null;
+  let registered = false;
+
+  const timeout = setTimeout(() => {
+    if (!registered) {
+      ws.close(4001, "REGISTER timeout");
+    }
+  }, REGISTER_TIMEOUT_MS);
 
   ws.on("message", (data) => {
-    const msg = parseMessage(data);
-    if (!msg) return;
+    if (!registered) {
+      const msg = parseMessage(data);
+      if (!msg) {
+        clearTimeout(timeout);
+        ws.close(4002, "Malformed message");
+        return;
+      }
+      if (msg.type !== "REGISTER") {
+        clearTimeout(timeout);
+        ws.close(4003, "First message must be REGISTER");
+        return;
+      }
+      const validation = validateRegisterPayload(msg);
+      if (!validation.ok) {
+        clearTimeout(timeout);
+        ws.send(JSON.stringify({ type: "ERROR", message: validation.error } as ServerMessage));
+        ws.close(4004, validation.error);
+        return;
+      }
+      const userId = verifyWsToken(validation.authToken);
+      if (!userId) {
+        clearTimeout(timeout);
+        ws.send(JSON.stringify({ type: "ERROR", message: "Invalid or expired token" } as ServerMessage));
+        ws.close(4005, "Invalid token");
+        return;
+      }
+      registered = true;
+      clearTimeout(timeout);
+      role = validation.role as "device" | "controller" | "owner_global";
+      const branchId = validation.branchId;
 
-    if (msg.type === "REGISTER") {
-      role = msg.role as "device" | "controller" | "owner_global";
-      const branchId = (msg.branchId ?? "").trim() || DEFAULT_BRANCH_ID;
-
-      if (msg.role === "owner_global") {
-        const userId = (msg.userId ?? "").trim() || "";
-        if (!userId) {
-          ws.send(JSON.stringify({ type: "ERROR", message: "userId required for owner" } as ServerMessage));
-          return;
-        }
+      if (role === "owner_global") {
         owners.push({ ws, userId });
         ws.send(JSON.stringify({ type: "REGISTERED" } as ServerMessage));
         sendBranchListToOwner(ws, userId);
         return;
       }
 
-      if (msg.role === "device" && msg.deviceId) {
-        deviceId = msg.deviceId;
-        const isMobile = msg.isMobile ?? false;
-        const userId = (msg.userId ?? "").trim() || "";
+      if (role === "device" && validation.deviceId) {
+        deviceId = validation.deviceId;
+        const isMobile = (msg as { isMobile?: boolean }).isMobile ?? false;
 
         clearExpiredGracePeriods(userId, branchId);
         let mode: DeviceMode = "CONTROL";
@@ -339,11 +403,11 @@ wss.on("connection", (ws) => {
           connectedAt: new Date().toISOString(),
           role: "device",
           mode,
-          isMobile: msg.isMobile,
+          isMobile,
           userId,
           branchId,
         });
-        const sessionCode = userId ? getOrCreateSessionCode(userId) : undefined;
+        const sessionCode = getOrCreateSessionCode(userId);
         const reply: ServerMessage = { type: "REGISTERED", deviceId, sessionCode };
         ws.send(JSON.stringify(reply));
         const masterDeviceIdForClient = getMasterForBranch(userId, branchId);
@@ -359,15 +423,22 @@ wss.on("connection", (ws) => {
           }
         }
         broadcastDeviceList();
-      } else if (msg.role === "controller") {
-        const userId = (msg.userId ?? "").trim() || "";
+      } else if (role === "controller") {
         controllers.push({ ws, userId, branchId });
-        const sessionCode = userId ? getOrCreateSessionCode(userId) : undefined;
+        const sessionCode = getOrCreateSessionCode(userId);
         const reply: ServerMessage = { type: "REGISTERED", sessionCode };
         ws.send(JSON.stringify(reply));
         broadcastDeviceListForUserAndBranch(userId, branchId);
         sendInitialStateToController(ws, userId, branchId);
       }
+      return;
+    }
+
+    const msg = parseMessage(data);
+    if (!msg) return;
+
+    if (msg.type === "REGISTER") {
+      ws.send(JSON.stringify({ type: "ERROR", message: "Already registered" } as ServerMessage));
       return;
     }
 
@@ -552,6 +623,7 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
+    clearTimeout(timeout);
     if (deviceId) {
       const conn = devices.get(deviceId);
       const userId = conn?.userId ?? "";

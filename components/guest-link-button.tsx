@@ -8,7 +8,7 @@ export function GuestLinkButton() {
   const ctx = useDevicePlayer();
   const [copied, setCopied] = useState(false);
 
-  if (!ctx?.isActive || !ctx.guestLink || ctx.status !== "connected") return null;
+  if (!ctx?.isBranchConnected || !ctx.guestLink) return null;
 
   async function handleCopy() {
     if (!ctx?.guestLink) return;
