@@ -60,10 +60,8 @@ export function useRemoteControlWs(
 
     ws.onopen = () => {
       const userId = options?.userId ?? undefined;
-      const isMobile =
-        typeof navigator !== "undefined" &&
-        (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-          (typeof window !== "undefined" && window.innerWidth < 768));
+      const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Opera Mobi|Silk|Mobile/i.test(ua);
       const msg: ClientMessage =
         role === "device"
           ? { type: "REGISTER", role: "device", deviceId: deviceId ?? undefined, isMobile, userId }

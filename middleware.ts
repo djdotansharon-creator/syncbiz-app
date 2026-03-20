@@ -36,6 +36,11 @@ function isProtected(pathname: string): boolean {
   return PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
+function isMobileUserAgent(req: NextRequest): boolean {
+  const ua = req.headers.get("user-agent") ?? "";
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Opera Mobi|Silk|Mobile/i.test(ua);
+}
+
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const cookie = req.cookies.get(COOKIE_NAME)?.value;
@@ -43,6 +48,10 @@ export function middleware(req: NextRequest) {
 
   if (pathname === "/" && email) {
     return NextResponse.redirect(new URL("/sources", req.url));
+  }
+
+  if (isMobileUserAgent(req) && pathname !== "/mobile" && !pathname.startsWith("/mobile") && isProtected(pathname) && email) {
+    return NextResponse.redirect(new URL("/mobile", req.url));
   }
 
   if (!isProtected(pathname)) {

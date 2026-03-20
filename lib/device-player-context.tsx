@@ -173,10 +173,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       ? `${window.location.origin}/guest?code=${sessionCode}`
       : null;
 
-  // Standalone mode: when disconnected, act as MASTER so local playback works.
-  // When connecting, use CONTROL until server confirms (avoids second desktop briefly showing MASTER).
-  const effectiveDeviceMode =
-    status === "connected" ? deviceMode : status === "connecting" ? "CONTROL" : "MASTER";
+  // Use server truth when connected. When disconnected, act as MASTER for standalone local playback.
+  const effectiveDeviceMode = status === "connected" ? deviceMode : "MASTER";
 
   useEffect(() => {
     if (isActive) initDeviceId();

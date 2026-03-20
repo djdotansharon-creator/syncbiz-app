@@ -12,7 +12,7 @@ import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { DeviceModeIndicator } from "@/components/device-mode-indicator";
 import { GuestLinkButton } from "@/components/guest-link-button";
 
-const categoryKeys = ["sources", "dashboard", "radio", "remotePlayer", "owner", "schedules", "devices", "logs"] as const;
+const categoryKeys = ["dashboard", "sources", "radio", "remotePlayer", "owner", "schedules", "devices", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
   href:
     key === "dashboard"

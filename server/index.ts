@@ -2,14 +2,21 @@
  * MVP WebSocket server for remote player control.
  * Run: cd server && npm install && npm run dev
  *
+ * Primary MASTER eligibility (desktop-only):
+ * - Only non-mobile desktop devices may own the primary branch MASTER lease.
+ * - Mobile devices must NEVER claim or persist primary branch ownership.
+ * - masterByBranch stores only desktop device IDs; mobile is never written.
+ * - If mobile connects first, it may play (auxiliary) but does not reserve primary.
+ * - First eligible desktop to connect becomes MASTER immediately.
+ *
  * MASTER ownership (sticky + grace period + persistence):
  * - Device identity: deviceId from client (localStorage UUID, persistent per browser).
- * - Designated primary: the device that was last MASTER; ownership reserved on disconnect.
+ * - Designated primary: the desktop that was last MASTER; ownership reserved on disconnect.
  * - Grace period: MASTER_GRACE_MS (default 90s) after primary disconnects before another desktop can auto-promote.
  * - Persistence: master lease stored in server/data/master-lease.json; survives server restarts.
  * - Temporary disconnect: primary reconnects within grace → gets MASTER back; secondaries stay CONTROL.
  * - Long offline: after grace expires, first desktop to register gets MASTER.
- * - Manual SET_MASTER: always allowed; overrides grace reservation.
+ * - Manual SET_MASTER: always allowed for desktop; overrides grace reservation.
  */
 
 import { WebSocketServer } from "ws";
@@ -98,23 +105,37 @@ function inferSourceType(url: string): string {
   return "local";
 }
 
-/** Returns the currently connected MASTER device ID for a branch. Null if disconnected or grace-expired. */
+/** Returns the currently connected primary MASTER device ID for a branch. Desktop-only; null if disconnected, mobile, or grace-expired. */
 function getMasterForBranch(userId: string, branchId: string): string | null {
   const key = branchKey(userId, branchId);
   const id = masterByBranch.get(key);
   if (!id) return null;
   const conn = devices.get(id);
   if (!conn || conn.ws.readyState !== 1) return null;
+  if (conn.isMobile) {
+    masterByBranch.delete(key);
+    masterDisconnectedAt.delete(key);
+    persistMasterLease();
+    return null;
+  }
   return id;
 }
 
-/** Returns the designated MASTER device ID (reserved) even if disconnected, if within grace period. */
+/** Returns the designated primary MASTER device ID (reserved) even if disconnected, if within grace period. Desktop-only. */
 function getReservedMasterForBranch(userId: string, branchId: string): string | null {
   const key = branchKey(userId, branchId);
   const id = masterByBranch.get(key);
   if (!id) return null;
   const conn = devices.get(id);
-  if (conn && conn.ws.readyState === 1) return id;
+  if (conn) {
+    if (conn.isMobile) {
+      masterByBranch.delete(key);
+      masterDisconnectedAt.delete(key);
+      persistMasterLease();
+      return null;
+    }
+    if (conn.ws.readyState === 1) return id;
+  }
   const disconnectedAt = masterDisconnectedAt.get(key);
   if (!disconnectedAt) return null;
   if (Date.now() - disconnectedAt > MASTER_GRACE_MS) {
@@ -209,7 +230,7 @@ function sendInitialStateToController(ws: import("ws").WebSocket, userId: string
   });
 }
 
-/** Build branch list for owner: branches with connected MASTER devices for this userId. */
+/** Build branch list for owner: branches with connected desktop MASTER devices for this userId. */
 function getBranchListForOwner(userId: string): BranchSummary[] {
   const branches: BranchSummary[] = [];
   const seen = new Set<string>();
@@ -217,7 +238,7 @@ function getBranchListForOwner(userId: string): BranchSummary[] {
     if (!key.startsWith(userId + ":")) return;
     const branchId = key.slice(userId.length + 1);
     const conn = devices.get(deviceId);
-    if (!conn || conn.ws.readyState !== 1 || conn.mode !== "MASTER") return;
+    if (!conn || conn.ws.readyState !== 1 || conn.mode !== "MASTER" || conn.isMobile) return;
     if (seen.has(branchId)) return;
     seen.add(branchId);
     let deviceCount = 0;
@@ -288,10 +309,16 @@ wss.on("connection", (ws) => {
         clearExpiredGracePeriods(userId, branchId);
         let mode: DeviceMode = "CONTROL";
         let secondaryDesktop = false;
-        const reservedMasterId = getReservedMasterForBranch(userId, branchId);
         const key = branchKey(userId, branchId);
 
-        if (!isMobile) {
+        if (isMobile) {
+          if (masterByBranch.get(key) === deviceId) {
+            masterByBranch.delete(key);
+            masterDisconnectedAt.delete(key);
+            persistMasterLease();
+          }
+        } else {
+          const reservedMasterId = getReservedMasterForBranch(userId, branchId);
           if (deviceId === reservedMasterId) {
             mode = "MASTER";
             masterDisconnectedAt.delete(key);
@@ -439,23 +466,26 @@ wss.on("connection", (ws) => {
       const isMobile = conn?.isMobile ?? false;
       const userId = conn?.userId ?? "";
       const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
-      const currentMasterId = getMasterForBranch(userId, branchId);
-      // Mobile becoming MASTER must NOT demote desktop. Desktop becoming MASTER demotes other non-mobile masters.
-      if (isMobile) {
-        const currentMaster = currentMasterId ? devices.get(currentMasterId) : null;
-        if (currentMaster && !currentMaster.isMobile) {
-          return;
-        }
-      }
-      const prevMasterId = currentMasterId && currentMasterId !== deviceId ? currentMasterId : null;
-      const prevMaster = prevMasterId ? devices.get(prevMasterId) : null;
-      if (prevMaster && prevMaster.ws.readyState === 1 && !prevMaster.isMobile) {
-        prevMaster.mode = "CONTROL";
-        prevMaster.ws.send(
-          JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL", masterDeviceId: deviceId } as ServerMessage)
-        );
-      }
+      // Mobile must NEVER become primary branch MASTER. Reject SET_MASTER from mobile.
+      if (isMobile) return;
       const key = branchKey(userId, branchId);
+      // Demote ALL other desktop devices in this branch that have mode=MASTER (single source of truth)
+      devices.forEach((d) => {
+        if (
+          d.role === "device" &&
+          (d.userId ?? "") === userId &&
+          d.branchId === branchId &&
+          d.id !== deviceId &&
+          d.mode === "MASTER" &&
+          !d.isMobile &&
+          d.ws.readyState === 1
+        ) {
+          d.mode = "CONTROL";
+          d.ws.send(
+            JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL", masterDeviceId: deviceId } as ServerMessage)
+          );
+        }
+      });
       masterByBranch.set(key, deviceId);
       masterDisconnectedAt.delete(key);
       persistMasterLease();
@@ -463,13 +493,6 @@ wss.on("connection", (ws) => {
       if (ws.readyState === 1) {
         ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "MASTER" } as ServerMessage));
       }
-      devices.forEach((d) => {
-        if (d.role === "device" && (d.userId ?? "") === userId && d.branchId === branchId && d.mode === "CONTROL" && d.ws.readyState === 1) {
-          d.ws.send(
-            JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL", masterDeviceId: deviceId } as ServerMessage)
-          );
-        }
-      });
       broadcastDeviceList();
       return;
     }
@@ -536,7 +559,12 @@ wss.on("connection", (ws) => {
       const key = branchKey(userId, branchId);
       const designatedMasterId = masterByBranch.get(key);
       if (designatedMasterId === deviceId) {
-        masterDisconnectedAt.set(key, Date.now());
+        if (conn?.isMobile) {
+          masterByBranch.delete(key);
+          masterDisconnectedAt.delete(key);
+        } else {
+          masterDisconnectedAt.set(key, Date.now());
+        }
         persistMasterLease();
       }
       devices.delete(deviceId);
