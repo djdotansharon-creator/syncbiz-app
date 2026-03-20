@@ -125,6 +125,7 @@ const categoryIcons: Record<(typeof categoryKeys)[number], () => React.ReactElem
   dashboard: IconDashboard,
   sources: IconSources,
   radio: IconRadio,
+  remotePlayer: IconSources,
   owner: IconOwner,
   schedules: IconSchedules,
   devices: IconDevices,
