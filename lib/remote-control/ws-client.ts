@@ -68,12 +68,14 @@ export function useRemoteControlWs(
           ? { type: "REGISTER", role: "device", authToken, deviceId: deviceId ?? undefined, isMobile, branchId: "default" }
           : { type: "REGISTER", role: "controller", authToken, branchId: "default" };
       ws.send(JSON.stringify(msg));
-      setStatus("connected");
     };
 
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data as string) as ServerMessage;
+        if (data.type === "REGISTERED" || data.type === "SET_DEVICE_MODE") {
+          setStatus("connected");
+        }
         if (data.type === "SET_DEVICE_MODE") {
           deviceModeRef.current = data.mode;
           setDeviceMode(data.mode);
@@ -252,12 +254,14 @@ export function useRemoteController(options?: {
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "REGISTER", role: "controller", authToken, branchId: "default" } as ClientMessage));
-      setStatus("connected");
     };
 
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data as string) as ServerMessage;
+        if (data.type === "REGISTERED" || data.type === "DEVICE_LIST") {
+          setStatus("connected");
+        }
         if (data.type === "ERROR") {
           setStatus("error");
           ws.close();
@@ -398,12 +402,14 @@ export function useRemoteOwner() {
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "REGISTER", role: "owner_global", authToken } as ClientMessage));
-      setStatus("connected");
     };
 
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data as string) as ServerMessage;
+        if (data.type === "REGISTERED" || data.type === "BRANCH_LIST") {
+          setStatus("connected");
+        }
         if (data.type === "ERROR") {
           setStatus("error");
           ws.close();

@@ -3,9 +3,16 @@
  * Run: cd server && npm install && npm run dev
  *
  * Required env: SYNCBIZ_WS_SECRET or WS_SECRET (min 16 chars)
- * Set in .env or shell before starting.
- *
- * Primary MASTER eligibility (desktop-only):
+ * Loads ../.env so dev:all uses same secret as Next.js.
+ */
+
+import { config } from "dotenv";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+const __dirname = dirname(fileURLToPath(import.meta.url));
+config({ path: join(__dirname, "..", ".env") });
+
+/** Primary MASTER eligibility (desktop-only):
  * - Only non-mobile desktop devices may own the primary branch MASTER lease.
  * - Mobile devices must NEVER claim or persist primary branch ownership.
  * - masterByBranch stores only desktop device IDs; mobile is never written.
@@ -22,10 +29,11 @@
  * - Manual SET_MASTER: always allowed for desktop; overrides grace reservation.
  */
 
+import { createServer } from "http";
 import { WebSocketServer } from "ws";
-import type { ClientMessage, ServerMessage, StationPlaybackState, DeviceMode, GuestRecommendationPayload, BranchSummary } from "../lib/remote-control/types";
-import { loadLease, saveLease } from "./master-lease-store";
-import { verifyWsToken } from "./ws-token";
+import type { ClientMessage, ServerMessage, StationPlaybackState, DeviceMode, GuestRecommendationPayload, BranchSummary } from "../lib/remote-control/types.js";
+import { loadLease, saveLease } from "./master-lease-store.js";
+import { verifyWsToken } from "./ws-token.js";
 
 const WS_SECRET = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
 if (!WS_SECRET || WS_SECRET.length < 16) {
@@ -33,7 +41,7 @@ if (!WS_SECRET || WS_SECRET.length < 16) {
   process.exit(1);
 }
 
-const PORT = Number(process.env.WS_PORT) || 3001;
+const PORT = Number(process.env.PORT) || 3001;
 const REGISTER_TIMEOUT_MS = 5000;
 const ALLOWED_BRANCH_IDS = ["default"] as const;
 
@@ -72,8 +80,8 @@ const masterDisconnectedAt = new Map<string, number>();
 /** Load persisted lease on startup. Supports legacy masterByUserId format. */
 (function loadPersistedLease() {
   const snap = loadLease();
-  Object.entries(snap.masterByBranch).forEach(([k, v]) => masterByBranch.set(k, v));
-  Object.entries(snap.masterDisconnectedAt).forEach(([k, v]) => masterDisconnectedAt.set(k, v));
+  Object.entries(snap.masterByBranch).forEach(([k, v]) => masterByBranch.set(k, v as string));
+  Object.entries(snap.masterDisconnectedAt).forEach(([k, v]) => masterDisconnectedAt.set(k, v as number));
 })();
 
 function persistMasterLease() {
@@ -275,7 +283,7 @@ function sendBranchListToOwner(ws: import("ws").WebSocket, userId: string) {
 
 function isBranchAuthorized(branchId: string): boolean {
   const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
-  return ALLOWED_BRANCH_IDS.includes(normalized);
+  return (ALLOWED_BRANCH_IDS as unknown as string[]).includes(normalized);
 }
 
 function validateRegisterPayload(
@@ -314,7 +322,17 @@ function parseMessage(data: Buffer | ArrayBuffer | string | Buffer[]): ClientMes
   }
 }
 
-const wss = new WebSocketServer({ port: PORT });
+const httpServer = createServer((req, res) => {
+  if (req.method === "GET" && req.url === "/health") {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+});
+
+const wss = new WebSocketServer({ server: httpServer });
 
 wss.on("connection", (ws) => {
   let deviceId: string | null = null;
@@ -650,4 +668,6 @@ wss.on("connection", (ws) => {
   });
 });
 
-console.log(`[SyncBiz WS] Server listening on ws://localhost:${PORT} (MASTER_GRACE_MS=${MASTER_GRACE_MS})`);
+httpServer.listen(PORT, "0.0.0.0", () => {
+  console.log(`[SyncBiz WS] Server listening on 0.0.0.0:${PORT} (MASTER_GRACE_MS=${MASTER_GRACE_MS})`);
+});

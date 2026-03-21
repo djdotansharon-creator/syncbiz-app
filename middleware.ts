@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { parseSessionValue } from "@/lib/auth";
+import { parseSessionValue } from "@/lib/auth-session";
 
 const COOKIE_NAME = "syncbiz-session";
 

@@ -1,0 +1,11 @@
+# Exclude from Docker build context (project root)
+node_modules
+server/node_modules
+.next
+dist
+server/dist
+.git
+*.log
+.env
+.env.*
+.DS_Store

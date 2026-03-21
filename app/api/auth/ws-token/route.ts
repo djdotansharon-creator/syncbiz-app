@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { parseSessionValue, createWsToken } from "@/lib/auth";
+import { parseSessionValue } from "@/lib/auth-session";
+import { createWsToken } from "@/lib/auth-ws-token";
 
 const COOKIE_NAME = "syncbiz-session";
 
