@@ -1,39 +1,19 @@
-# Build from repo root — needed because tsconfig rootDir is ".."
-FROM node:20-alpine AS builder
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy entire repo (needed for ../lib/remote-control/types.ts)
-COPY . .
+COPY server/package.json server/package-lock.json* ./server/
 
-# Install server dependencies
 WORKDIR /app/server
 RUN npm install
 
-# Build TypeScript (outDir = server/dist)
-RUN npm run build
-
-# ---- Runtime image ----
-FROM node:20-alpine AS runner
+WORKDIR /app
+COPY lib ./lib
+COPY server ./server
 
 WORKDIR /app/server
+RUN npm run build
 
-# Copy built output
-COPY --from=builder /app/server/dist ./dist
+EXPOSE 3001
 
-# Copy production dependencies
-COPY --from=builder /app/server/node_modules ./node_modules
-COPY --from=builder /app/server/package.json ./package.json
-
-EXPOSE 3000
-
-CMD ["npm", "run", "start"]
-```
-
----
-
-וצור `server/.dockerignore`:
-```
-node_modules
-dist
-.env
+CMD ["node", "dist/index.js"]
