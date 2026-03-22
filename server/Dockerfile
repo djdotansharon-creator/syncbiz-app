@@ -1,28 +1,39 @@
-# Production Dockerfile for Railway WS service
-# Build context: project root (to access lib/)
-# Build: docker build -f server/Dockerfile .
-
-FROM node:20-alpine
+# Build from repo root — needed because tsconfig rootDir is ".."
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# 1. Copy package files for dependency layer caching
-COPY server/package.json server/package-lock.json* ./server/
+# Copy entire repo (needed for ../lib/remote-control/types.ts)
+COPY . .
 
-# 2. Install deps (include devDependencies for tsc build)
+# Install server dependencies
 WORKDIR /app/server
-RUN npm ci
+RUN npm install
 
-# 3. Copy lib (server imports from ../lib/remote-control/types.ts)
-WORKDIR /app
-COPY lib/ ./lib/
-
-# 4. Copy server source
-WORKDIR /app/server
-COPY server/ ./
-
-# 5. Build
+# Build TypeScript (outDir = server/dist)
 RUN npm run build
 
-# 6. Start
+# ---- Runtime image ----
+FROM node:20-alpine AS runner
+
+WORKDIR /app/server
+
+# Copy built output
+COPY --from=builder /app/server/dist ./dist
+
+# Copy production dependencies
+COPY --from=builder /app/server/node_modules ./node_modules
+COPY --from=builder /app/server/package.json ./package.json
+
+EXPOSE 3000
+
 CMD ["npm", "run", "start"]
+```
+
+---
+
+וצור `server/.dockerignore`:
+```
+node_modules
+dist
+.env
