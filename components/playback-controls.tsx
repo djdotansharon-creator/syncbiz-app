@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 /** Transport-style icons – crisp, centered, deck-ready */
 function IconPlay({ className }: { className?: string }) {
@@ -54,6 +54,17 @@ export function PlaybackControls({
   const [internalVolume, setInternalVolume] = useState(50);
   const volume = controlledVolume ?? internalVolume;
   const setVolume = onVolumeChange ?? setInternalVolume;
+
+  // Draft volume for immediate UI updates while dragging; commit only on release
+  const [draftVolume, setDraftVolume] = useState(() => volume);
+  useEffect(() => {
+    setDraftVolume(volume);
+  }, [volume]);
+
+  const commitVolume = useCallback(() => {
+    const clamped = Math.max(0, Math.min(100, Math.round(draftVolume)));
+    setVolume(clamped);
+  }, [draftVolume, setVolume]);
 
   const [loading, setLoading] = useState<"play" | "pause" | "stop" | null>(null);
   const busy = loading !== null;
@@ -190,14 +201,18 @@ export function PlaybackControls({
           type="range"
           min={0}
           max={100}
-          value={volume}
-          onChange={(e) => setVolume(Number(e.target.value))}
+          value={draftVolume}
+          onChange={(e) => setDraftVolume(Number(e.target.value))}
+          onPointerUp={commitVolume}
+          onMouseUp={commitVolume}
+          onTouchEnd={commitVolume}
+          onKeyUp={commitVolume}
           disabled={disabled}
           className="h-1.5 w-20 shrink-0 appearance-none rounded-full bg-slate-700/80 focus:outline-none focus:ring-0 sm:w-24 [&::-webkit-slider-thumb]:cursor-pointer"
           aria-label="Volume"
         />
         <span className="w-7 text-end text-xs font-semibold tabular-nums text-slate-400">
-          {volume}
+          {draftVolume}
         </span>
       </div>
     </div>
