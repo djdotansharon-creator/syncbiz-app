@@ -1,4 +1,6 @@
 import { DeviceModeSettingsSwitch } from "@/components/device-mode-settings-switch";
+import { MixDurationSetting } from "@/components/mix-duration-setting";
+import { AdminUsersSection } from "@/components/admin-users-section";
 
 export default function SettingsPage() {
   return (
@@ -6,9 +8,11 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-xl font-semibold text-slate-50">Settings</h1>
         <p className="mt-0.5 text-xs text-slate-400">
-          Account and playback preferences. Mock-only for MVP.
+          Account and playback preferences.
         </p>
       </div>
+
+      <AdminUsersSection />
 
       <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
         <h2 className="text-sm font-semibold text-slate-50">Remote player</h2>
@@ -17,6 +21,15 @@ export default function SettingsPage() {
         </p>
         <div className="mt-4">
           <DeviceModeSettingsSwitch />
+        </div>
+        <div className="mt-6 pt-6 border-t border-slate-800/60">
+          <h3 className="text-xs font-semibold text-slate-300">Mix / crossfade</h3>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            Crossfade length when AutoMix is on. Direct audio URL playback only.
+          </p>
+          <div className="mt-3">
+            <MixDurationSetting />
+          </div>
         </div>
       </section>
 

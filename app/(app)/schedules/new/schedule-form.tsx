@@ -35,11 +35,14 @@ export function ScheduleForm({
     setSaving(true);
     const form = e.currentTarget;
     const formData = new FormData(form);
+    const sourceId = formData.get("sourceId") as string;
     const body = {
       name: formData.get("name") as string,
       branchId: "bldn-001",
+      targetType: "SOURCE" as const,
+      targetId: sourceId,
+      sourceId,
       deviceId: (formData.get("deviceId") as string) || undefined,
-      sourceId: formData.get("sourceId") as string,
       daysOfWeek: days,
       startTimeLocal: formData.get("startTime") as string,
       endTimeLocal: (formData.get("endTime") as string) || undefined,

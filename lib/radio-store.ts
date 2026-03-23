@@ -25,12 +25,15 @@ function generateId(): string {
   return `radio-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+const DEFAULT_BRANCH_ID = "default";
+
 export type RadioCreateInput = {
   id?: string;
   name: string;
   url: string;
   genre?: string;
   cover?: string | null;
+  branchId?: string;
 };
 
 export async function listRadioStations(): Promise<RadioStream[]> {
@@ -69,12 +72,16 @@ export async function getRadioStation(id: string): Promise<RadioStream | null> {
 export async function createRadioStation(input: RadioCreateInput): Promise<RadioStream> {
   await ensureRadioDir();
   const id = input.id ?? generateId();
+  const branchId = typeof input.branchId === "string" && input.branchId.trim()
+    ? input.branchId.trim()
+    : DEFAULT_BRANCH_ID;
   const station: RadioStream = {
     id,
     name: input.name.trim(),
     url: input.url.trim(),
     genre: (input.genre ?? "Radio").trim(),
     cover: input.cover ?? null,
+    branchId,
     createdAt: new Date().toISOString(),
   };
   const toWrite = { ...station, title: station.name, type: "radio" as const };

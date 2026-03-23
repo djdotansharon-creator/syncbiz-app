@@ -67,7 +67,8 @@ export default async function SchedulesPage() {
         ) : (
           schedules.map((schedule) => {
             const device = devices.find((d) => d.id === schedule.deviceId) ?? null;
-            const source = sources.find((s) => s.id === schedule.sourceId) ?? null;
+            const sourceId = schedule.targetType === "SOURCE" ? schedule.targetId : schedule.sourceId;
+            const source = sources.find((s) => s.id === (sourceId ?? schedule.sourceId)) ?? null;
             return (
               <ScheduleCard
                 key={schedule.id}

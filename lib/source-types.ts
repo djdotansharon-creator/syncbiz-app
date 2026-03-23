@@ -16,6 +16,8 @@ export type RadioStream = {
   genre: string;
   cover: string | null;
   createdAt: string;
+  /** Branch ownership. Legacy records may lack this; resolved as "default". */
+  branchId?: string;
 };
 
 /** Unified source for display - from playlist, db source, or radio. */

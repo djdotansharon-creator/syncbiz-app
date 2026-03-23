@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateCredentials, createSessionValue } from "@/lib/auth";
+import { validateCredentialsAsync, createSessionValue } from "@/lib/auth";
+import { getOrCreateUserByEmail } from "@/lib/user-store";
+import { emitEvent, EVENT_TYPES } from "@/lib/analytics-boundary";
 
 const COOKIE_NAME = "syncbiz-session";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
@@ -16,12 +18,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!validateCredentials(email, password)) {
+    if (!(await validateCredentialsAsync(email, password))) {
       return NextResponse.json(
         { error: "Invalid email or password" },
         { status: 401 }
       );
     }
+
+    const user = await getOrCreateUserByEmail(email);
+    emitEvent(EVENT_TYPES.USER_LOGIN, { userId: user.id, email: user.email });
 
     const sessionValue = createSessionValue(email);
     const res = NextResponse.json({ ok: true });

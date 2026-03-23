@@ -21,6 +21,8 @@ export type Playlist = {
   /** Alias for thumbnail; used in JSON storage format. */
   cover?: string;
   createdAt: string;
+  /** Branch ownership. Legacy records may lack this; resolved as "default". */
+  branchId?: string;
   /** View count (from YouTube etc.) – stored when adding from search. */
   viewCount?: number;
   /** Duration in seconds (from YouTube etc.) – stored when adding/refreshing. */

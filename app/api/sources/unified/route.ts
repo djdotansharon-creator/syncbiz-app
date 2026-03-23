@@ -4,8 +4,11 @@ import { listRadioStations } from "@/lib/radio-store";
 import { radioToUnified } from "@/lib/radio-utils";
 import { db } from "@/lib/store";
 import { getDeletedSourceIds } from "@/lib/deleted-sources-store";
+import { getCurrentUserFromCookies, hasBranchAccess } from "@/lib/auth-helpers";
+import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import type { UnifiedSource, SourceProviderType } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
+import type { Source } from "@/lib/types";
 import { getSourceArtworkUrl, detectProvider } from "@/lib/player-utils";
 import { getYouTubeThumbnail } from "@/lib/playlist-utils";
 import { inferGenre } from "@/lib/infer-genre";
@@ -50,6 +53,10 @@ function dbSourceToUnified(s: { id: string; name: string; target: string; artwor
 }
 
 export async function GET() {
+  const user = await getCurrentUserFromCookies();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const [playlists, radioStations, dbSources, deletedIds] = await Promise.all([
       listPlaylists(),
@@ -60,14 +67,27 @@ export async function GET() {
 
     const filteredDbSources = dbSources.filter((s) => !deletedIds.has(s.id));
 
-    const items: UnifiedSource[] = [
-      ...playlists.map(playlistToUnified),
-      ...radioStations.map(radioToUnified),
-      ...filteredDbSources.map(dbSourceToUnified),
-    ];
+    const items: UnifiedSource[] = [];
 
-    // No metadata fetch on page load. Use only what's in the store.
-    // Metadata is fetched only when: adding URL, or user clicks refresh.
+    for (const p of playlists) {
+      const branchId = resolveMediaBranchId(p);
+      if (await hasBranchAccess(user.id, branchId)) {
+        items.push(playlistToUnified(p));
+      }
+    }
+    for (const r of radioStations) {
+      const branchId = resolveMediaBranchId(r);
+      if (await hasBranchAccess(user.id, branchId)) {
+        items.push(radioToUnified(r));
+      }
+    }
+    for (const s of filteredDbSources) {
+      const branchId = (s as Source).branchId ?? "default";
+      if (await hasBranchAccess(user.id, branchId)) {
+        items.push(dbSourceToUnified(s));
+      }
+    }
+
     return NextResponse.json(items);
   } catch (e) {
     console.error("[api/sources/unified] GET error:", e);

@@ -26,3 +26,8 @@ export function getDataDir(): string {
   const vol = getVolumePath();
   return vol ?? join(cwd(), "data");
 }
+
+/** Path to users.json for persistent user/membership data. */
+export function getUsersDataPath(): string {
+  return join(getDataDir(), "users.json");
+}

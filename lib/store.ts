@@ -123,14 +123,38 @@ export const db = {
     sources[idx] = { ...sources[idx], ...data };
     return sources[idx];
   },
-  addSchedule(input: Omit<Schedule, "id" | "accountId">): Schedule {
+  getSchedule(id: string): Schedule | null {
+    return schedules.find((s) => s.id === id) ?? null;
+  },
+  addSchedule(input: Omit<Schedule, "id" | "accountId"> & Partial<Pick<Schedule, "targetType" | "targetId">>): Schedule {
+    const targetType = input.targetType ?? "SOURCE";
+    const targetId = input.targetId ?? input.sourceId ?? "";
+    const now = new Date().toISOString();
     const schedule: Schedule = {
       ...input,
-      id: `sch-${String(schedules.length + 1).padStart(3, "0")}`,
+      targetType,
+      targetId,
+      sourceId: input.sourceId ?? (targetType === "SOURCE" ? targetId : undefined),
+      createdAt: input.createdAt ?? now,
+      updatedAt: now,
+      id: `sch-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       accountId: demoAccount.id,
     };
     schedules = [schedule, ...schedules];
     return schedule;
+  },
+  updateSchedule(id: string, data: Partial<Schedule>): Schedule | null {
+    const idx = schedules.findIndex((s) => s.id === id);
+    if (idx < 0) return null;
+    const updated: Schedule = {
+      ...schedules[idx],
+      ...data,
+      id: schedules[idx].id,
+      accountId: schedules[idx].accountId,
+      updatedAt: new Date().toISOString(),
+    };
+    schedules[idx] = updated;
+    return updated;
   },
   deleteSchedule(id: string): boolean {
     const before = schedules.length;

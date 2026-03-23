@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { parseSessionValue, validateCredentials } from "@/lib/auth";
+import { parseSessionValue, validateCredentialsAsync } from "@/lib/auth";
 
 const COOKIE_NAME = "syncbiz-session";
 
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!validateCredentials(email, password)) {
+    if (!(await validateCredentialsAsync(email, password))) {
       return NextResponse.json(
         { error: "Invalid password" },
         { status: 401 }

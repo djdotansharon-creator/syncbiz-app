@@ -113,22 +113,36 @@ export type Source = {
   isLive: boolean;
 };
 
+/** Schedule target types. ANNOUNCEMENT, AI_ANNOUNCEMENT reserved for future. */
+export type ScheduleTargetType = "SOURCE" | "PLAYLIST" | "RADIO";
+
 export type Schedule = {
   id: string;
   accountId: string;
   name?: string;
   branchId: string;
+  /** Target type – what to play at scheduled time. */
+  targetType: ScheduleTargetType;
+  /** ID of the target (source id, playlist id, or radio station id). */
+  targetId: string;
+  /** @deprecated Use targetType=SOURCE + targetId. Kept for backward compat. */
+  sourceId?: string;
   deviceId?: string;
-  sourceId: string;
   daysOfWeek: number[]; // 0 (Sunday) - 6 (Saturday)
   startTimeLocal: string; // HH:mm
   endTimeLocal: string; // HH:mm
   enabled: boolean;
   priority: number;
+  /** IANA timezone for schedule (e.g. America/New_York). Optional; uses branch default if unset. */
+  timezone?: string;
   /** Optional hint sent to endpoint; depends on playback system */
   requestedStartPosition?: number;
   /** Optional hint sent to endpoint; depends on playback system */
   requestedEndPosition?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  createdBy?: string;
+  updatedBy?: string;
 };
 
 export type Announcement = {

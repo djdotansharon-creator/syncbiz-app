@@ -67,14 +67,20 @@ export async function getPlaylist(id: string): Promise<Playlist | null> {
   }
 }
 
+const DEFAULT_BRANCH_ID = "default";
+
 export async function createPlaylist(input: PlaylistCreateInput): Promise<Playlist> {
   await ensurePlaylistsDir();
   const id = input.id ?? generateId();
   const thumbnail = (input.thumbnail ?? "").trim();
+  const branchId = typeof input.branchId === "string" && input.branchId.trim()
+    ? input.branchId.trim()
+    : DEFAULT_BRANCH_ID;
   const playlist: Playlist = {
     ...input,
     id,
     thumbnail,
+    branchId,
     createdAt: new Date().toISOString(),
   };
   const toWrite = { ...playlist, cover: thumbnail || undefined };

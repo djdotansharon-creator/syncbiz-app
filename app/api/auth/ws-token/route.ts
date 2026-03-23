@@ -1,20 +1,15 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { parseSessionValue } from "@/lib/auth-session";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { createWsToken } from "@/lib/auth-ws-token";
 
-const COOKIE_NAME = "syncbiz-session";
-
-/** Returns short-lived token for WS REGISTER. Requires authenticated session. */
+/** Returns short-lived token for WS REGISTER. Requires authenticated session. Uses stable userId. */
 export async function GET() {
-  const cookieStore = await cookies();
-  const cookie = cookieStore.get(COOKIE_NAME)?.value;
-  const userId = cookie ? parseSessionValue(cookie) : null;
-  if (!userId) {
+  const user = await getCurrentUserFromCookies();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const token = createWsToken(userId);
+    const token = createWsToken(user.id);
     return NextResponse.json({ token });
   } catch (err) {
     return NextResponse.json({ error: "Token creation failed" }, { status: 500 });

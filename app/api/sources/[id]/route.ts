@@ -1,22 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { db } from "@/lib/store";
 import { addDeletedSourceId } from "@/lib/deleted-sources-store";
-import { parseSessionValue } from "@/lib/auth-session";
+import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import type { Source } from "@/lib/types";
-
-const COOKIE_NAME = "syncbiz-session";
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const user = await getCurrentUserFromCookies();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const { id } = await params;
     const source = db.getSources().find((s) => s.id === id);
     if (!source) {
       return NextResponse.json({ error: "Source not found" }, { status: 404 });
+    }
+    const branchId = source.branchId ?? "default";
+    if (!(await hasBranchAccess(user.id, branchId))) {
+      return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
     return NextResponse.json(source);
   } catch (e) {
@@ -30,12 +35,20 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const user = await getCurrentUserFromCookies();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const { id } = await params;
-    const data = (await req.json()) as Partial<{ name: string; target: string; type: string; description?: string; artworkUrl?: string; browserPreference?: string }>;
     const source = db.getSources().find((s) => s.id === id);
     if (!source) {
       return NextResponse.json({ error: "Source not found" }, { status: 404 });
     }
+    const branchId = source.branchId ?? "default";
+    if (!(await hasBranchAccess(user.id, branchId))) {
+      return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
+    }
+    const data = (await req.json()) as Partial<{ name: string; target: string; type: string; description?: string; artworkUrl?: string; browserPreference?: string }>;
     const updated = db.updateSource(id, {
       ...(data.name != null && { name: data.name }),
       ...(data.target != null && { target: data.target, uriOrPath: data.target }),
@@ -44,9 +57,8 @@ export async function PATCH(
       ...(data.artworkUrl != null && { artworkUrl: data.artworkUrl }),
       ...(data.browserPreference != null && { browserPreference: data.browserPreference as Source["browserPreference"] }),
     });
-    const cookie = (await cookies()).get(COOKIE_NAME)?.value;
-    const userId = cookie ? parseSessionValue(cookie) : null;
-    if (userId) void notifyLibraryUpdated(userId, { entityType: "source", action: "updated" });
+    const userId = await getUserIdFromSession();
+    if (userId) void notifyLibraryUpdated(userId, { branchId: source.branchId, entityType: "source", action: "updated" });
     return NextResponse.json(updated);
   } catch (e) {
     console.error("[api/sources] PATCH error:", e);
@@ -59,16 +71,23 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const user = await getCurrentUserFromCookies();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const { id } = await params;
-    const exists = db.getSources().some((s) => s.id === id);
-    if (!exists) {
+    const source = db.getSources().find((s) => s.id === id);
+    if (!source) {
       return NextResponse.json({ error: "Source not found" }, { status: 404 });
+    }
+    const branchId = source.branchId ?? "default";
+    if (!(await hasBranchAccess(user.id, branchId))) {
+      return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
     await addDeletedSourceId(id);
     db.deleteSource(id);
-    const cookie = (await cookies()).get(COOKIE_NAME)?.value;
-    const userId = cookie ? parseSessionValue(cookie) : null;
-    if (userId) void notifyLibraryUpdated(userId, { entityType: "source", action: "deleted" });
+    const userId = await getUserIdFromSession();
+    if (userId) void notifyLibraryUpdated(userId, { branchId: source.branchId, entityType: "source", action: "deleted" });
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error("[api/sources] DELETE error:", e);

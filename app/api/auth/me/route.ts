@@ -1,16 +1,23 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { parseSessionValue } from "@/lib/auth";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
+import { getAccessType, getAssignedBranchIds } from "@/lib/user-store";
 
-const COOKIE_NAME = "syncbiz-session";
-
-/** Returns current user email from session. Used for user-aware WS device registration. */
+/** Returns current user from session. V1 public shape: accessType, accountId, branchIds. */
 export async function GET() {
-  const cookieStore = await cookies();
-  const cookie = cookieStore.get(COOKIE_NAME)?.value;
-  const email = cookie ? parseSessionValue(cookie) : null;
-  if (!email) {
-    return NextResponse.json({ email: null }, { status: 200 });
+  const user = await getCurrentUserFromCookies();
+  if (!user) {
+    return NextResponse.json({ email: null, userId: null }, { status: 200 });
   }
-  return NextResponse.json({ email });
+  const [accessType, branchIds] = await Promise.all([
+    getAccessType(user.id),
+    getAssignedBranchIds(user.id),
+  ]);
+  return NextResponse.json({
+    email: user.email,
+    userId: user.id,
+    accountId: user.tenantId,
+    tenantId: user.tenantId,
+    accessType,
+    branchIds,
+  });
 }
