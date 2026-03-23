@@ -12,7 +12,13 @@ export function DeviceModeSettingsSwitch() {
   const { stop } = usePlayback();
   const [controlConfirmOpen, setControlConfirmOpen] = useState(false);
 
-  if (!ctx?.isBranchConnected) return null;
+  if (!ctx?.isBranchConnected) {
+    return (
+      <p className="text-xs text-slate-500">
+        Connect to branch to choose MASTER / CONTROL mode.
+      </p>
+    );
+  }
 
   const { deviceMode, masterConfirmOpen, setMasterConfirmOpen, sendSetMaster, sendSetControl, hasExistingMaster } = ctx;
   const isMaster = deviceMode === "MASTER";
@@ -94,7 +100,7 @@ export function DeviceModeSettingsSwitch() {
         </p>
         {!isMaster && hasExistingMaster && (
           <p className="text-[11px] text-amber-400/90">
-            Another MASTER is currently active on this branch. This device opened in CONTROL mode.
+            Controlling: Branch Master. This device mirrors the main player.
           </p>
         )}
       </div>

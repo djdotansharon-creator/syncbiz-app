@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { listRadioStations, createRadioStation } from "@/lib/radio-store";
+import { parseSessionValue } from "@/lib/auth-session";
+import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
+
+const COOKIE_NAME = "syncbiz-session";
 
 export async function GET() {
   try {
@@ -25,6 +30,9 @@ export async function POST(req: NextRequest) {
       genre: typeof body.genre === "string" ? body.genre.trim() : "Radio",
       cover: body.cover ?? null,
     });
+    const cookie = (await cookies()).get(COOKIE_NAME)?.value;
+    const userId = cookie ? parseSessionValue(cookie) : null;
+    if (userId) void notifyLibraryUpdated(userId, { entityType: "radio", action: "created" });
     return NextResponse.json(station);
   } catch (e) {
     console.error("[api/radio] POST", e);

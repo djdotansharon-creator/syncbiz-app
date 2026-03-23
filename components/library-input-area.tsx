@@ -95,14 +95,17 @@ function SourceLogo({ type, origin, size = "sm" }: { type: UnifiedSource["type"]
 
 type Props = {
   onAdd: (source: UnifiedSource) => void;
+  /** When in CONTROL mode, use this to send PLAY_SOURCE to MASTER instead of local play. */
+  playSourceOverride?: (source: UnifiedSource) => void;
 };
 
-export function LibraryInputArea({ onAdd }: Props) {
+export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
   const router = useRouter();
   const { t } = useTranslations();
   const { locale } = useLocale();
   const { sources } = useSourcesPlayback();
   const { playSource } = usePlayback();
+  const effectivePlaySource = playSourceOverride ?? playSource;
 
   const [urlValue, setUrlValue] = useState("");
   const [urlIngesting, setUrlIngesting] = useState(false);
@@ -459,7 +462,7 @@ export function LibraryInputArea({ onAdd }: Props) {
       if (res.ok) {
         const station = (await res.json()) as RadioStream;
         const unified = radioToUnified(station);
-        playSource(unified);
+        effectivePlaySource(unified);
         setQuery("");
         setRadioResults([]);
         setYoutubeResults([]);
@@ -467,7 +470,7 @@ export function LibraryInputArea({ onAdd }: Props) {
         setShowResults(false);
       }
     },
-    [playSource, router]
+    [effectivePlaySource, router]
   );
 
   const handlePlayYoutube = useCallback(
@@ -486,7 +489,7 @@ export function LibraryInputArea({ onAdd }: Props) {
           playlist: created,
         };
         onAdd(u);
-        playSource(u);
+        effectivePlaySource(u);
         setQuery("");
         setYoutubeResults([]);
         setRadioResults([]);
@@ -494,7 +497,7 @@ export function LibraryInputArea({ onAdd }: Props) {
         setShowResults(false);
       }
     },
-    [query, playSource, router, onAdd]
+    [query, effectivePlaySource, router, onAdd]
   );
 
   return (
@@ -749,7 +752,7 @@ export function LibraryInputArea({ onAdd }: Props) {
                         <div className="flex shrink-0 items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => playSource(source)}
+                            onClick={() => effectivePlaySource(source)}
                             className="inline-flex h-8 items-center justify-center rounded-lg bg-[#1db954] px-2.5 text-xs font-medium text-white transition hover:bg-[#1ed760]"
                           >
                             {t.play}

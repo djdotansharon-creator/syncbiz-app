@@ -16,8 +16,16 @@ export default function LibraryPage() {
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const { setQueue } = usePlayback();
 
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
   useEffect(() => {
     setFavoriteIds(getFavorites());
+  }, []);
+
+  useEffect(() => {
+    const handler = () => setRefreshTrigger((t) => t + 1);
+    window.addEventListener("library-updated", handler);
+    return () => window.removeEventListener("library-updated", handler);
   }, []);
 
   const handleRemove = useCallback((id: string) => {
@@ -57,7 +65,7 @@ export default function LibraryPage() {
     }
     fetchPlaylists();
     return () => { cancelled = true; };
-  }, [setQueue]);
+  }, [setQueue, refreshTrigger]);
 
   if (loading) {
     return (

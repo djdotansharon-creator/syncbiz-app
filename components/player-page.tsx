@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Device, Source } from "@/lib/types";
 import {
@@ -13,6 +13,8 @@ import {
   getSourceIconType,
 } from "@/lib/player-utils";
 import { SourceIconBadge } from "@/components/source-icon-badge";
+import { usePlaybackOptional } from "@/lib/playback-provider";
+import type { UnifiedSource } from "@/lib/source-types";
 
 type Props = {
   devices: Device[];
@@ -84,12 +86,32 @@ function playlistToSource(playlist: { id: string; name: string; url: string; thu
   } as Source;
 }
 
+/** Convert UnifiedSource (from PlaybackProvider) to Source for PlayerPage display. */
+function unifiedSourceToPlayerSource(u: UnifiedSource): Source {
+  const target = u.source?.target ?? u.url ?? u.playlist?.url ?? u.radio?.url ?? "";
+  const provider = u.type === "youtube" ? "youtube" : u.type === "soundcloud" ? "soundcloud" : "external";
+  const playerMode = provider === "external" ? "external" : "embedded";
+  return {
+    id: u.id,
+    name: u.title,
+    target,
+    uriOrPath: target,
+    artworkUrl: u.cover ?? u.source?.artworkUrl ?? undefined,
+    provider,
+    playerMode,
+    accountId: "",
+    branchId: "",
+    type: "stream_url",
+  } as Source;
+}
+
 export function PlayerPage({ devices }: Props) {
   const searchParams = useSearchParams();
   const sourceId = searchParams.get("sourceId");
   const playlistId = searchParams.get("playlistId");
+  const playback = usePlaybackOptional();
 
-  const [source, setSource] = useState<Source | null>(null);
+  const [urlSource, setUrlSource] = useState<Source | null>(null);
   const [status, setStatus] = useState<RuntimeStatus>("idle");
   const [volume, setVolume] = useState(80);
   const [position, setPosition] = useState(0);
@@ -102,6 +124,12 @@ export function PlayerPage({ devices }: Props) {
   const ytPlayerRef = useRef<YTPlayer | null>(null);
   const scWidgetRef = useRef<SCWidget | null>(null);
   const positionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /** Prefer live playback state (controller-driven) over URL-driven source. */
+  const source = useMemo(() => {
+    if (playback?.currentSource) return unifiedSourceToPlayerSource(playback.currentSource);
+    return urlSource;
+  }, [playback?.currentSource, urlSource]);
 
   const { provider } = source ? resolveSourcePlayerInfo(source) : { provider: "external" as const };
   const artworkUrl = source ? getSourceArtworkUrl(source) : null;
@@ -118,11 +146,11 @@ export function PlayerPage({ devices }: Props) {
         throw new Error(data?.error ?? "Source not found");
       }
       const data: Source = await res.json();
-      setSource(data);
+      setUrlSource(data);
       setStatus("loading");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load source");
-      setSource(null);
+      setUrlSource(null);
       setStatus("idle");
     }
   }, []);
@@ -137,23 +165,36 @@ export function PlayerPage({ devices }: Props) {
         throw new Error(data?.error ?? "Playlist not found");
       }
       const data = await res.json();
-      setSource(playlistToSource(data));
+      setUrlSource(playlistToSource(data));
       setStatus("loading");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load playlist");
-      setSource(null);
+      setUrlSource(null);
       setStatus("idle");
     }
   }, []);
 
+  /** URL-driven load: only when no live playback and URL has sourceId/playlistId. */
   useEffect(() => {
+    if (playback?.currentSource) return;
     if (sourceId) void fetchSource(sourceId);
     else if (playlistId) void fetchPlaylist(playlistId);
     else {
-      setSource(null);
+      setUrlSource(null);
       setStatus("idle");
     }
-  }, [sourceId, playlistId, fetchSource, fetchPlaylist]);
+  }, [sourceId, playlistId, fetchSource, fetchPlaylist, playback?.currentSource]);
+
+  /** When live playback provides source (or source changes), trigger embed load so iframe loads. */
+  const prevDisplaySourceIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!source || !isEmbedded) return;
+    const displayId = source.id;
+    if (prevDisplaySourceIdRef.current !== displayId) {
+      prevDisplaySourceIdRef.current = displayId;
+      setStatus("loading");
+    }
+  }, [source, isEmbedded]);
 
   const loadYouTubePlayer = useCallback(() => {
     if (!source || provider !== "youtube") return;

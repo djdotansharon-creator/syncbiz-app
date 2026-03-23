@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { listPlaylists, createPlaylist } from "@/lib/playlist-store";
+import { parseSessionValue } from "@/lib/auth-session";
+import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import type { PlaylistCreateInput, PlaylistType } from "@/lib/playlist-types";
+
+const COOKIE_NAME = "syncbiz-session";
 
 const VALID_TYPES: PlaylistType[] = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"];
 
@@ -51,6 +56,9 @@ export async function POST(req: NextRequest) {
       viewCount,
       durationSeconds,
     });
+    const cookie = (await cookies()).get(COOKIE_NAME)?.value;
+    const userId = cookie ? parseSessionValue(cookie) : null;
+    if (userId) void notifyLibraryUpdated(userId, { entityType: "playlist", action: "created" });
     return NextResponse.json(playlist, { status: 201 });
   } catch (e) {
     console.error("[api/playlists] POST error:", e);

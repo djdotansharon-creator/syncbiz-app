@@ -34,6 +34,14 @@ export function SourcesManager({ initialSources, pageTitle, pageSubtitle }: Prop
   const [effectiveSources, setEffectiveSources] = useState<UnifiedSource[]>(initialSources);
   const prevIdsRef = useRef<string>("");
 
+  const refetchSources = useCallback(() => {
+    fetchUnifiedSourcesWithFallback().then((items) => {
+      const filtered = items.filter((s) => s.origin !== "radio");
+      prevIdsRef.current = filtered.map((s) => s.id).join(",");
+      setEffectiveSources(filtered);
+    });
+  }, []);
+
   useEffect(() => {
     if (initialSources.length > 0) {
       const ids = initialSources.map((s) => s.id).join(",");
@@ -41,15 +49,15 @@ export function SourcesManager({ initialSources, pageTitle, pageSubtitle }: Prop
       prevIdsRef.current = ids;
       setEffectiveSources(initialSources);
     } else {
-      fetchUnifiedSourcesWithFallback().then((items) => {
-        const filtered = items.filter((s) => s.origin !== "radio");
-        const ids = filtered.map((s) => s.id).join(",");
-        if (ids === prevIdsRef.current) return;
-        prevIdsRef.current = ids;
-        setEffectiveSources(filtered);
-      });
+      refetchSources();
     }
-  }, [initialSources]);
+  }, [initialSources, refetchSources]);
+
+  useEffect(() => {
+    const handler = () => refetchSources();
+    window.addEventListener("library-updated", handler);
+    return () => window.removeEventListener("library-updated", handler);
+  }, [refetchSources]);
 
   return (
     <SourcesPlaybackProvider sources={effectiveSources}>
@@ -163,7 +171,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         <p className="mt-0.5 text-sm text-slate-300">{pageSubtitle ?? t.libraryPageSubtitle}</p>
       </div>
 
-      <LibraryInputArea onAdd={handleAdd} />
+      <LibraryInputArea onAdd={handleAdd} playSourceOverride={playSourceOverride} />
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">

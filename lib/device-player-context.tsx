@@ -91,6 +91,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState<string | undefined>(undefined);
   const [authLoaded, setAuthLoaded] = useState(false);
   const [wsToken, setWsToken] = useState<string | null>(null);
+  const [tokenRefreshTrigger, setTokenRefreshTrigger] = useState(0);
   const [secondaryDesktopModalOpen, setSecondaryDesktopModalOpen] = useState(false);
   const [pendingGuestRecommendation, setPendingGuestRecommendation] = useState<GuestRecommendationPayload | null>(null);
 
@@ -113,12 +114,18 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       return;
     }
     let cancelled = false;
+    if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
+      console.info("[SyncBiz WS client] token refresh requested", { role: "device" });
+    }
     const fetchToken = (retry = false) => {
       fetch("/api/auth/ws-token")
         .then((r) => {
           if (cancelled) return;
           if (r.status === 401) {
             setWsToken(null);
+            if (process.env.NODE_ENV === "development") {
+              console.info("[SyncBiz WS client] token refresh failure (401)");
+            }
             return;
           }
           if (!r.ok && !retry) {
@@ -129,17 +136,73 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
           return r.json();
         })
         .then((data: { token?: string } | undefined) => {
-          if (cancelled || !data?.token) return;
+          if (cancelled) return;
+          if (!data?.token) {
+            if (process.env.NODE_ENV === "development") {
+              console.info("[SyncBiz WS client] token refresh failure (no token)");
+            }
+            return;
+          }
           setWsToken(data.token);
+          if (process.env.NODE_ENV === "development") {
+            console.info("[SyncBiz WS client] token refresh success", { role: "device" });
+          }
         })
         .catch(() => {
           if (cancelled) return;
           setWsToken(null);
+          if (process.env.NODE_ENV === "development") {
+            console.info("[SyncBiz WS client] token refresh failure (network)");
+          }
         });
     };
     fetchToken();
     return () => { cancelled = true; };
-  }, [isActive, authLoaded, userId]);
+  }, [isActive, authLoaded, userId, tokenRefreshTrigger]);
+
+  /** Proactive token refresh: fetch new token before expiry. Does NOT trigger reconnect. */
+  const PROACTIVE_REFRESH_INTERVAL_MS = 45_000;
+
+  useEffect(() => {
+    if (!isActive || !wsToken || !authLoaded) return;
+    if (process.env.NODE_ENV === "development") {
+      const refreshAt = new Date(Date.now() + PROACTIVE_REFRESH_INTERVAL_MS).toISOString();
+      console.info("[SyncBiz WS client] proactive token refresh scheduled", { role: "device", refreshAt });
+    }
+    const id = setInterval(() => {
+      fetch("/api/auth/ws-token")
+        .then((r) => r.ok ? r.json() : null)
+        .then((data: { token?: string } | null) => {
+          if (data?.token) {
+            setWsToken(data.token);
+            if (process.env.NODE_ENV === "development") {
+              console.info("[SyncBiz WS client] token refreshed (no reconnect)", { role: "device" });
+            }
+          }
+        })
+        .catch(() => {});
+    }, PROACTIVE_REFRESH_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [isActive, authLoaded, wsToken]);
+
+  useEffect(() => {
+    if (!isActive || typeof document === "undefined" || typeof window === "undefined") return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") setTokenRefreshTrigger((k) => k + 1);
+    };
+    const onFocus = () => setTokenRefreshTrigger((k) => k + 1);
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setTokenRefreshTrigger((k) => k + 1);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [isActive]);
   const { play, pause, stop, next, prev, playSource, setVolume, seekTo, status: playStatus, currentSource, currentTrackIndex, queue, queueIndex, volume } = usePlayback();
   const [masterConfirmOpen, setMasterConfirmOpen] = useState(false);
   const [masterState, setMasterState] = useState<StationPlaybackState | null>(null);
@@ -188,6 +251,23 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const onSecondaryDesktop = useCallback(() => setSecondaryDesktopModalOpen(true), []);
   const onGuestRecommendation = useCallback((rec: GuestRecommendationPayload) => setPendingGuestRecommendation(rec), []);
 
+  const lastAuthErrorAtRef = useRef<number>(0);
+  const AUTH_RETRY_BACKOFF_MS = 3000;
+  const onAuthError = useCallback(() => {
+    const now = Date.now();
+    if (now - lastAuthErrorAtRef.current < AUTH_RETRY_BACKOFF_MS) {
+      if (process.env.NODE_ENV === "development") {
+        console.info("[SyncBiz WS client] reconnect due to auth expiry - retry skipped due to backoff");
+      }
+      return;
+    }
+    lastAuthErrorAtRef.current = now;
+    if (process.env.NODE_ENV === "development") {
+      console.info("[SyncBiz WS client] reconnect due to auth expiry", { role: "device" });
+    }
+    setTokenRefreshTrigger((k) => k + 1);
+  }, []);
+
   const {
     status,
     deviceMode,
@@ -210,6 +290,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       authToken: wsToken ?? undefined,
       onSecondaryDesktop,
       onGuestRecommendation,
+      onAuthError,
     }
   );
 

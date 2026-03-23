@@ -45,6 +45,13 @@ const PORT = Number(process.env.PORT) || 3001;
 const REGISTER_TIMEOUT_MS = 5000;
 const ALLOWED_BRANCH_IDS = ["default"] as const;
 
+/** Heartbeat: ping interval (ms). Default 30s. */
+const HEARTBEAT_PING_INTERVAL_MS = Number(process.env.HEARTBEAT_PING_INTERVAL_MS) || 30_000;
+/** Close socket if no pong received within this window (ms). Default 90s. */
+const HEARTBEAT_PONG_TIMEOUT_MS = Number(process.env.HEARTBEAT_PONG_TIMEOUT_MS) || 90_000;
+/** Presence: lastSeen within this window (ms) = online; older = stale. Default 60s. */
+const PRESENCE_ONLINE_THRESHOLD_MS = Number(process.env.PRESENCE_ONLINE_THRESHOLD_MS) || 60_000;
+
 /** Grace period (ms) before another desktop can become MASTER after primary disconnects. Default 90s. */
 const MASTER_GRACE_MS = Number(process.env.MASTER_GRACE_MS) || 90_000;
 
@@ -58,6 +65,7 @@ type DeviceConnection = {
   id: string;
   ws: import("ws").WebSocket;
   connectedAt: string;
+  lastSeen: string;
   role: "device" | "controller";
   mode: DeviceMode;
   isMobile?: boolean;
@@ -71,23 +79,33 @@ const controllers: ControllerEntry[] = [];
 type OwnerEntry = { ws: import("ws").WebSocket; userId: string };
 const owners: OwnerEntry[] = [];
 
+/** Per-socket heartbeat: last pong timestamp. Used to detect stale connections. */
+const socketLastPongAt = new Map<import("ws").WebSocket, number>();
+
 /** MASTER device ID per (userId, branchId). Key = branchKey(userId, branchId). Persisted to disk. */
 const masterByBranch = new Map<string, string>();
 
 /** When the designated MASTER disconnected (timestamp). Key = branchKey. Persisted to disk. */
 const masterDisconnectedAt = new Map<string, number>();
 
+/** Designated primary MASTER per branch. Only this device can be MASTER. Persisted to disk. */
+const primaryMasterByBranch = new Map<string, string>();
+
 /** Load persisted lease on startup. Supports legacy masterByUserId format. */
 (function loadPersistedLease() {
   const snap = loadLease();
   Object.entries(snap.masterByBranch).forEach(([k, v]) => masterByBranch.set(k, v as string));
   Object.entries(snap.masterDisconnectedAt).forEach(([k, v]) => masterDisconnectedAt.set(k, v as number));
+  if (snap.primaryMasterByBranch) {
+    Object.entries(snap.primaryMasterByBranch).forEach(([k, v]) => primaryMasterByBranch.set(k, v as string));
+  }
 })();
 
 function persistMasterLease() {
   saveLease({
     masterByBranch: Object.fromEntries(masterByBranch),
     masterDisconnectedAt: Object.fromEntries(masterDisconnectedAt),
+    primaryMasterByBranch: Object.fromEntries(primaryMasterByBranch),
   });
 }
 
@@ -188,11 +206,30 @@ function getReservedMasterForUser(userId: string): string | null {
   return getReservedMasterForBranch(userId, DEFAULT_BRANCH_ID);
 }
 
+function broadcastLibraryUpdated(userId: string, branchId: string, entityType?: "playlist" | "source" | "radio", action?: "created" | "updated" | "deleted") {
+  const msg: ServerMessage = { type: "LIBRARY_UPDATED", branchId, entityType, action };
+  const raw = JSON.stringify(msg);
+  controllers.forEach((c) => {
+    if ((c.userId ?? "") === userId && c.branchId === branchId && c.ws.readyState === 1) c.ws.send(raw);
+  });
+  devices.forEach((d) => {
+    if (d.role === "device" && (d.userId ?? "") === userId && d.branchId === branchId && d.ws.readyState === 1) {
+      d.ws.send(raw);
+    }
+  });
+  owners.forEach((o) => {
+    if ((o.userId ?? "") === userId && o.ws.readyState === 1) o.ws.send(raw);
+  });
+}
+
 function broadcastDeviceListForUserAndBranch(userId: string, branchId: string) {
-  const list: { id: string; connectedAt: string; mode?: DeviceMode; branchId?: string }[] = [];
+  const now = Date.now();
+  const list: { id: string; connectedAt: string; lastSeen?: string; presence?: "online" | "stale"; mode?: DeviceMode; branchId?: string }[] = [];
   devices.forEach((d) => {
     if (d.role === "device" && (d.userId ?? "") === userId && d.branchId === branchId) {
-      list.push({ id: d.id, connectedAt: d.connectedAt, mode: d.mode, branchId: d.branchId });
+      const lastSeenMs = d.lastSeen ? new Date(d.lastSeen).getTime() : now;
+      const presence = now - lastSeenMs <= PRESENCE_ONLINE_THRESHOLD_MS ? "online" : "stale";
+      list.push({ id: d.id, connectedAt: d.connectedAt, lastSeen: d.lastSeen, presence, mode: d.mode, branchId: d.branchId });
     }
   });
   const masterDeviceId = getMasterForBranch(userId, branchId);
@@ -328,6 +365,35 @@ const httpServer = createServer((req, res) => {
     res.end("ok");
     return;
   }
+  if (req.method === "POST" && req.url === "/internal/library-updated") {
+    const secret = req.headers["x-syncbiz-secret"] ?? req.headers["x-syncbiz-internal-secret"];
+    if (secret !== WS_SECRET) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Forbidden" }));
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      try {
+        const data = body ? (JSON.parse(body) as { userId?: string; branchId?: string; entityType?: "playlist" | "source" | "radio"; action?: "created" | "updated" | "deleted" }) : {};
+        const userId = typeof data.userId === "string" ? data.userId.trim() : "";
+        const branchId = (typeof data.branchId === "string" ? data.branchId.trim() : "") || DEFAULT_BRANCH_ID;
+        if (userId) {
+          broadcastLibraryUpdated(userId, branchId, data.entityType, data.action);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } else {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "userId required" }));
+        }
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON" }));
+      }
+    });
+    return;
+  }
   res.writeHead(404);
   res.end();
 });
@@ -338,6 +404,19 @@ wss.on("connection", (ws) => {
   let deviceId: string | null = null;
   let role: "device" | "controller" | "owner_global" | null = null;
   let registered = false;
+
+  socketLastPongAt.set(ws, Date.now());
+  ws.on("pong", () => {
+    socketLastPongAt.set(ws, Date.now());
+    const nowIso = new Date().toISOString();
+    devices.forEach((d) => {
+      if (d.ws === ws) {
+        d.lastSeen = nowIso;
+      }
+    });
+  });
+
+  console.log("[SyncBiz WS] connect");
 
   const timeout = setTimeout(() => {
     if (!registered) {
@@ -381,6 +460,7 @@ wss.on("connection", (ws) => {
         owners.push({ ws, userId });
         ws.send(JSON.stringify({ type: "REGISTERED" } as ServerMessage));
         sendBranchListToOwner(ws, userId);
+        console.log("[SyncBiz WS] register owner", { userId });
         return;
       }
 
@@ -392,6 +472,7 @@ wss.on("connection", (ws) => {
         let mode: DeviceMode = "CONTROL";
         let secondaryDesktop = false;
         const key = branchKey(userId, branchId);
+        const primaryId = primaryMasterByBranch.get(key);
 
         if (isMobile) {
           if (masterByBranch.get(key) === deviceId) {
@@ -399,32 +480,46 @@ wss.on("connection", (ws) => {
             masterDisconnectedAt.delete(key);
             persistMasterLease();
           }
+        } else if (primaryId) {
+          if (deviceId === primaryId) {
+            mode = "MASTER";
+            masterDisconnectedAt.delete(key);
+            masterByBranch.set(key, deviceId);
+            persistMasterLease();
+          } else {
+            secondaryDesktop = devices.has(primaryId);
+          }
         } else {
           const reservedMasterId = getReservedMasterForBranch(userId, branchId);
           if (deviceId === reservedMasterId) {
             mode = "MASTER";
             masterDisconnectedAt.delete(key);
             masterByBranch.set(key, deviceId);
+            primaryMasterByBranch.set(key, deviceId);
             persistMasterLease();
           } else if (reservedMasterId) {
             secondaryDesktop = true;
           } else {
             mode = "MASTER";
             masterByBranch.set(key, deviceId);
+            primaryMasterByBranch.set(key, deviceId);
             persistMasterLease();
           }
         }
 
+        const now = new Date().toISOString();
         devices.set(deviceId, {
           id: deviceId,
           ws,
-          connectedAt: new Date().toISOString(),
+          connectedAt: now,
+          lastSeen: now,
           role: "device",
           mode,
           isMobile,
           userId,
           branchId,
         });
+        console.log("[SyncBiz WS] register device", { deviceId, userId, branchId, mode });
         const sessionCode = getOrCreateSessionCode(userId);
         const reply: ServerMessage = { type: "REGISTERED", deviceId, sessionCode };
         ws.send(JSON.stringify(reply));
@@ -448,6 +543,7 @@ wss.on("connection", (ws) => {
         ws.send(JSON.stringify(reply));
         broadcastDeviceListForUserAndBranch(userId, branchId);
         sendInitialStateToController(ws, userId, branchId);
+        console.log("[SyncBiz WS] register controller", { userId, branchId });
       }
       return;
     }
@@ -544,6 +640,7 @@ wss.on("connection", (ws) => {
 
     if (msg.type === "STATE_UPDATE" && role === "device" && deviceId) {
       const conn = devices.get(deviceId);
+      if (conn) conn.lastSeen = new Date().toISOString();
       const userId = conn?.userId ?? "";
       const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
       broadcastStateUpdate(deviceId, msg.state, userId, branchId);
@@ -552,12 +649,15 @@ wss.on("connection", (ws) => {
 
     if (msg.type === "SET_MASTER" && role === "device" && deviceId) {
       const conn = devices.get(deviceId);
+      if (conn) conn.lastSeen = new Date().toISOString();
       const isMobile = conn?.isMobile ?? false;
       const userId = conn?.userId ?? "";
       const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
       // Mobile must NEVER become primary branch MASTER. Reject SET_MASTER from mobile.
       if (isMobile) return;
       const key = branchKey(userId, branchId);
+      const primaryId = primaryMasterByBranch.get(key);
+      if (primaryId && primaryId !== deviceId) return;
       // Demote ALL other desktop devices in this branch that have mode=MASTER (single source of truth)
       devices.forEach((d) => {
         if (
@@ -588,9 +688,12 @@ wss.on("connection", (ws) => {
 
     if (msg.type === "SET_CONTROL" && role === "device" && deviceId) {
       const conn = devices.get(deviceId);
+      if (conn) conn.lastSeen = new Date().toISOString();
       const userId = conn?.userId ?? "";
       const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
       const key = branchKey(userId, branchId);
+      const primaryId = primaryMasterByBranch.get(key);
+      if (primaryId && primaryId === deviceId) return;
       const designatedMasterId = masterByBranch.get(key);
       if (designatedMasterId !== deviceId) return;
       masterByBranch.delete(key);
@@ -642,23 +745,29 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     clearTimeout(timeout);
+    socketLastPongAt.delete(ws);
+    const roleLabel = role ?? "unregistered";
+    const idLabel = deviceId ?? "-";
+    console.log("[SyncBiz WS] disconnect", { role: roleLabel, deviceId: idLabel });
     if (deviceId) {
       const conn = devices.get(deviceId);
-      const userId = conn?.userId ?? "";
-      const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
-      const key = branchKey(userId, branchId);
-      const designatedMasterId = masterByBranch.get(key);
-      if (designatedMasterId === deviceId) {
-        if (conn?.isMobile) {
-          masterByBranch.delete(key);
-          masterDisconnectedAt.delete(key);
-        } else {
-          masterDisconnectedAt.set(key, Date.now());
+      if (conn && conn.ws === ws) {
+        const userId = conn.userId ?? "";
+        const branchId = conn.branchId ?? DEFAULT_BRANCH_ID;
+        const key = branchKey(userId, branchId);
+        const designatedMasterId = masterByBranch.get(key);
+        if (designatedMasterId === deviceId) {
+          if (conn.isMobile) {
+            masterByBranch.delete(key);
+            masterDisconnectedAt.delete(key);
+          } else {
+            masterDisconnectedAt.set(key, Date.now());
+          }
+          persistMasterLease();
         }
-        persistMasterLease();
+        devices.delete(deviceId);
+        deviceState.delete(deviceId);
       }
-      devices.delete(deviceId);
-      deviceState.delete(deviceId);
     }
     const cIdx = controllers.findIndex((c) => c.ws === ws);
     if (cIdx >= 0) controllers.splice(cIdx, 1);
@@ -668,6 +777,47 @@ wss.on("connection", (ws) => {
   });
 });
 
+/** Heartbeat: ping connected sockets and close stale ones. */
+function runHeartbeat() {
+  const now = Date.now();
+  const toClose: import("ws").WebSocket[] = [];
+  devices.forEach((d) => {
+    if (d.ws.readyState === 1) {
+      const last = socketLastPongAt.get(d.ws) ?? now;
+      if (now - last > HEARTBEAT_PONG_TIMEOUT_MS) {
+        console.log("[SyncBiz WS] heartbeat timeout, closing stale device", { deviceId: d.id });
+        toClose.push(d.ws);
+      } else {
+        d.ws.ping();
+      }
+    }
+  });
+  controllers.forEach((c) => {
+    if (c.ws.readyState === 1) {
+      const last = socketLastPongAt.get(c.ws) ?? now;
+      if (now - last > HEARTBEAT_PONG_TIMEOUT_MS) {
+        console.log("[SyncBiz WS] heartbeat timeout, closing stale controller", { userId: c.userId });
+        toClose.push(c.ws);
+      } else {
+        c.ws.ping();
+      }
+    }
+  });
+  owners.forEach((o) => {
+    if (o.ws.readyState === 1) {
+      const last = socketLastPongAt.get(o.ws) ?? now;
+      if (now - last > HEARTBEAT_PONG_TIMEOUT_MS) {
+        console.log("[SyncBiz WS] heartbeat timeout, closing stale owner", { userId: o.userId });
+        toClose.push(o.ws);
+      } else {
+        o.ws.ping();
+      }
+    }
+  });
+  toClose.forEach((ws) => ws.close(4006, "Heartbeat timeout"));
+}
+setInterval(runHeartbeat, Math.min(HEARTBEAT_PING_INTERVAL_MS, 15_000));
+
 httpServer.listen(PORT, "0.0.0.0", () => {
-  console.log(`[SyncBiz WS] Server listening on 0.0.0.0:${PORT} (MASTER_GRACE_MS=${MASTER_GRACE_MS})`);
+  console.log(`[SyncBiz WS] Server listening on 0.0.0.0:${PORT} (MASTER_GRACE_MS=${MASTER_GRACE_MS}, HEARTBEAT=${HEARTBEAT_PING_INTERVAL_MS}ms ping / ${HEARTBEAT_PONG_TIMEOUT_MS}ms timeout)`);
 });

@@ -56,10 +56,17 @@ export type PlaySourcePayload = {
 /** Device mode: MASTER = active player, CONTROL = monitor/standby */
 export type DeviceMode = "MASTER" | "CONTROL";
 
+/** Presence: online = recently active (heartbeat); stale = connected but lastSeen old. */
+export type DevicePresence = "online" | "stale";
+
 /** Device info from DEVICE_LIST – matches server payload */
 export type DeviceInfo = {
   id: string;
   connectedAt: string;
+  /** Last activity timestamp (ISO). Updated on heartbeat pong and app messages. */
+  lastSeen?: string;
+  /** Derived from lastSeen: online if recent, stale if older. */
+  presence?: DevicePresence;
   mode?: DeviceMode;
   branchId?: string;
   deviceType?: DeviceType;
@@ -109,4 +116,5 @@ export type ServerMessage =
   | { type: "GUEST_RECOMMEND_RESULT"; recommendationId: string; status: "approved" | "rejected" }
   | { type: "GUEST_RECOMMEND_SENT"; recommendationId: string }
   | { type: "BRANCH_LIST"; branches: BranchSummary[] }
+  | { type: "LIBRARY_UPDATED"; branchId: string; entityType?: "playlist" | "source" | "radio"; action?: "created" | "updated" | "deleted" }
   | { type: "ERROR"; message: string };

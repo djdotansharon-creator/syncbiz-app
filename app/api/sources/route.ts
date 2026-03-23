@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { db } from "@/lib/store";
+import { parseSessionValue } from "@/lib/auth-session";
+import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import type { Source } from "@/lib/types";
+
+const COOKIE_NAME = "syncbiz-session";
 
 export async function GET() {
   return NextResponse.json(db.getSources());
@@ -35,5 +40,8 @@ export async function POST(req: NextRequest) {
     isLive: data.isLive ?? false,
   });
 
+  const cookie = (await cookies()).get(COOKIE_NAME)?.value;
+  const userId = cookie ? parseSessionValue(cookie) : null;
+  if (userId) void notifyLibraryUpdated(userId, { branchId: data.branchId, entityType: "source", action: "created" });
   return NextResponse.json(source, { status: 201 });
 }

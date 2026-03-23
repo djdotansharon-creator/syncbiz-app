@@ -177,6 +177,7 @@ export function AudioPlayer() {
   const [hoverPercent, setHoverPercent] = useState(0);
   const [titleOverflows, setTitleOverflows] = useState(false);
   const [autoMix, setAutoMix] = useState(false);
+  const [embedReady, setEmbedReady] = useState(false);
   const isSeekingRef = useRef(false);
   const isDraggingRef = useRef(false);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -221,6 +222,7 @@ export function AudioPlayer() {
             if (!isYtPlayerReady(target)) return;
             ytPlayerRef.current = target;
             safeSetVolume(target, volumeRef.current);
+            setEmbedReady(true);
             if (statusRef.current === "playing") safePlayVideo(target);
           },
         },
@@ -260,6 +262,7 @@ export function AudioPlayer() {
       widget.setVolume(volumeRef.current);
       widget.bind("ready", () => {
         if (lastScEmbedUrlRef.current !== scEmbedUrl) return;
+        setEmbedReady(true);
         if (statusRef.current === "playing") widget.play();
       });
       widget.bind("finish", () => {
@@ -284,6 +287,7 @@ export function AudioPlayer() {
   }, [isYouTube, isSoundCloud, loadYouTube, loadSoundCloud]);
 
   useEffect(() => {
+    setEmbedReady(false);
     setPosition(0);
     setDuration(0);
     setBufferedPercent(0);
@@ -330,6 +334,7 @@ export function AudioPlayer() {
       }
       scWidgetRef.current = null;
     }
+    lastScEmbedUrlRef.current = null;
     const audio = audioRef.current;
     if (hlsRef.current) {
       try {
@@ -398,7 +403,7 @@ export function AudioPlayer() {
         if (status === "stopped") scWidgetRef.current.seekTo(0);
       }
     }
-  }, [status, isYouTube, isSoundCloud]);
+  }, [status, isYouTube, isSoundCloud, embedReady]);
 
   // Set audio src when stream URL changes (with HLS.js for .m3u8).
   // IMPORTANT: Do NOT include status in deps – re-running on status change causes src reset and playback jumps.
@@ -1114,8 +1119,9 @@ export function AudioPlayer() {
       </div>
 
       {/* Off-screen embeds for YouTube/SoundCloud – always mount both to avoid React removeChild conflict */}
+      {/* key forces remount when source changes, giving fresh embed containers and avoiding stale refs */}
       {isEmbedded && (
-        <div className="pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0" aria-hidden>
+        <div key={currentPlayUrl ?? "none"} className="pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0" aria-hidden>
           {/* Wrapper div prevents YT API DOM manipulation from conflicting with React unmount */}
           <div style={{ display: isYouTube ? "block" : "none" }} className="h-full w-full">
             <div ref={ytContainerRef} className="h-full w-full" />

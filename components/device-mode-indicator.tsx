@@ -6,9 +6,24 @@ import { useDevicePlayer } from "@/lib/device-player-context";
 export function DeviceModeIndicator() {
   const ctx = useDevicePlayer();
 
-  if (!ctx?.isBranchConnected) return null;
+  if (!ctx) return null;
 
-  const { deviceMode, hasExistingMaster } = ctx;
+  const { deviceMode, hasExistingMaster, isBranchConnected } = ctx;
+
+  if (!isBranchConnected) {
+    return (
+      <div
+        className="inline-flex items-center gap-2 rounded-lg border border-slate-600/60 bg-slate-800/40 px-2.5 py-1.5"
+        role="status"
+        aria-label="Device mode: Standalone"
+        title="Not connected to branch. Playing locally only."
+      >
+        <span className="h-2 w-2 shrink-0 rounded-full bg-slate-400 shadow-[0_0_6px_rgba(148,163,184,0.4)]" />
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Standalone</span>
+      </div>
+    );
+  }
+
   const isMaster = deviceMode === "MASTER";
 
   return (
@@ -39,8 +54,8 @@ export function DeviceModeIndicator() {
       </span>
     </div>
     {!isMaster && hasExistingMaster && (
-      <span className="hidden text-[10px] text-amber-400/90 sm:inline" title="Another MASTER is active on this branch">
-        Another MASTER active
+      <span className="hidden text-[10px] text-amber-400/90 sm:inline" title="Playback controlled by the branch master player">
+        Controlling: Branch Master
       </span>
     )}
     </div>

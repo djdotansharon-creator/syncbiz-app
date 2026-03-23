@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { getPlaylist, updatePlaylist, deletePlaylist } from "@/lib/playlist-store";
+import { parseSessionValue } from "@/lib/auth-session";
+import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import type { PlaylistType, PlaylistTrack } from "@/lib/playlist-types";
+
+const COOKIE_NAME = "syncbiz-session";
 
 const VALID_TYPES: PlaylistType[] = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"];
 
@@ -80,6 +85,9 @@ export async function DELETE(
     if (!ok) {
       return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
     }
+    const cookie = (await cookies()).get(COOKIE_NAME)?.value;
+    const userId = cookie ? parseSessionValue(cookie) : null;
+    if (userId) void notifyLibraryUpdated(userId, { entityType: "playlist", action: "deleted" });
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error("[api/playlists] DELETE error:", e);

@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { db } from "@/lib/store";
 import { addDeletedSourceId } from "@/lib/deleted-sources-store";
+import { parseSessionValue } from "@/lib/auth-session";
+import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import type { Source } from "@/lib/types";
+
+const COOKIE_NAME = "syncbiz-session";
 
 export async function GET(
   _req: NextRequest,
@@ -39,6 +44,9 @@ export async function PATCH(
       ...(data.artworkUrl != null && { artworkUrl: data.artworkUrl }),
       ...(data.browserPreference != null && { browserPreference: data.browserPreference as Source["browserPreference"] }),
     });
+    const cookie = (await cookies()).get(COOKIE_NAME)?.value;
+    const userId = cookie ? parseSessionValue(cookie) : null;
+    if (userId) void notifyLibraryUpdated(userId, { entityType: "source", action: "updated" });
     return NextResponse.json(updated);
   } catch (e) {
     console.error("[api/sources] PATCH error:", e);
@@ -58,6 +66,9 @@ export async function DELETE(
     }
     await addDeletedSourceId(id);
     db.deleteSource(id);
+    const cookie = (await cookies()).get(COOKIE_NAME)?.value;
+    const userId = cookie ? parseSessionValue(cookie) : null;
+    if (userId) void notifyLibraryUpdated(userId, { entityType: "source", action: "deleted" });
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error("[api/sources] DELETE error:", e);
