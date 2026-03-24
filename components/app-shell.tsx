@@ -234,12 +234,28 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { locale } = useLocale();
   const { t } = useTranslations();
   const [now, setNow] = useState(() => new Date());
+  const [sessionName, setSessionName] = useState<string | null>(null);
+  const [sessionAccountName, setSessionAccountName] = useState<string | null>(null);
   const greeting = getTimeBasedGreeting(locale, t);
   const headerSubtitle = t.headerSubtitle ?? labels.headerSubtitle?.en ?? "Schedule playback and send commands to endpoint devices";
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { name?: string | null; email?: string | null; accountName?: string | null } | null) => {
+        if (cancelled || !data) return;
+        const displayName = (data.name ?? "").trim() || (data.email ?? "").trim() || null;
+        setSessionName(displayName);
+        setSessionAccountName((data.accountName ?? "").trim() || null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   const timeStr = now.toLocaleTimeString(locale === "he" ? "he-IL" : "en-US", {
@@ -343,11 +359,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <span className="shrink-0 text-slate-500">{greeting}</span>
                   <span className="h-3 w-px shrink-0 bg-slate-700/50" aria-hidden />
                   <span className="truncate font-medium text-slate-100">
-                    {t.subscriberName ?? "Subscriber"}
+                    {sessionName ?? t.subscriberName ?? "Subscriber"}
                   </span>
                   <span className="h-3 w-px shrink-0 bg-slate-700/50" aria-hidden />
-                  <span className="truncate text-slate-400">
-                    {t.companyName ?? "Company"}
+                  <span className="truncate text-slate-300">
+                    {sessionAccountName ?? t.companyName ?? "Company"}
                   </span>
                 </div>
               </div>
