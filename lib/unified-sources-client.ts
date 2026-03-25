@@ -40,12 +40,8 @@ export async function fetchUnifiedSourcesWithFallback(): Promise<UnifiedSource[]
     if (radio.length > 0) {
       radio.forEach((s) => s.radio && addRadioStationLocal(s.radio));
     }
-
-    if (items.length > 0) return dedupeById(items);
-
-    const localPlaylists = getPlaylistsLocal().map(playlistToUnified);
-    const localRadio = getRadioStationsLocal().map(radioToUnified);
-    return dedupeById([...localPlaylists, ...localRadio, ...others]);
+    // Important: if API succeeds (even with empty list), trust tenant-scoped server result.
+    return dedupeById(items);
   } catch {
     const localPlaylists = getPlaylistsLocal().map(playlistToUnified);
     const localRadio = getRadioStationsLocal().map(radioToUnified);

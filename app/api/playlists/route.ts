@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listPlaylists, createPlaylist } from "@/lib/playlist-store";
+import { listPlaylistsForTenant, createPlaylist } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
@@ -13,8 +13,11 @@ export async function GET() {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (!user.tenantId?.trim()) {
+    return NextResponse.json({ error: "Tenant context missing" }, { status: 400 });
+  }
   try {
-    const all = await listPlaylists();
+    const all = await listPlaylistsForTenant(user.tenantId);
     const filtered = [];
     for (const p of all) {
       const branchId = resolveMediaBranchId(p);
@@ -73,6 +76,7 @@ export async function POST(req: NextRequest) {
       url,
       thumbnail,
       branchId,
+      tenantId: user.tenantId,
       viewCount,
       durationSeconds,
     });

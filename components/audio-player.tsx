@@ -19,6 +19,8 @@ import {
   safeGetPlaylistIndex,
   safeGetVideoData,
   safeSetVolume,
+  safeMute,
+  safeUnMute,
   safePlayVideo,
   safePauseVideo,
   safeStopVideo,
@@ -29,7 +31,21 @@ import {
 import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
+
+/** Crossfade runtime diagnostics – key transitions only, no 500ms spam */
+function xfadeLog(phase: string, data?: Record<string, unknown>) {
+  console.log("[SyncBiz Xfade]", phase, data ?? "");
+}
+
+/** YouTube AutoMix diagnostics – key transitions only. States: -1=unstarted 0=ended 1=playing 2=paused 3=buffering 5=cued */
+function ytXfadeLog(phase: string, data?: Record<string, unknown>) {
+  console.log("[SyncBiz YT-Xfade]", phase, data ?? "");
+}
+
+/** Seconds before mix window to start preloading next YT player. YT iframe load typically takes 3–10s. */
+const YT_PRELOAD_BUFFER_SEC = 12;
 import { useDevicePlayer } from "@/lib/device-player-context";
+import { getMixDuration, getAutoMix, setAutoMix as persistAutoMix, onMixDurationChanged } from "@/lib/mix-preferences";
 import type { SCWidget } from "@/types/yt-sc";
 
 function isHlsUrl(url: string | null): boolean {
@@ -53,6 +69,135 @@ function getEmbedType(url: string): "youtube" | "soundcloud" | null {
   if (u.includes("youtube") || u.includes("youtu.be")) return "youtube";
   if (u.includes("soundcloud")) return "soundcloud";
   return null;
+}
+
+type CrossfadeCallbacks = {
+  onComplete: () => void;
+  onError: () => void;
+  isAborted: () => boolean;
+  getStatus: () => string;
+};
+
+/** Crossfade for direct audio: fade out current, fade in next, then advance state.
+ * Returns abort function. On error/abort: cleanup only, call onError (do NOT advance). */
+function runCrossfade(
+  currentAudio: HTMLAudioElement,
+  nextUrl: string,
+  targetVolume: number,
+  mixDurationSec: number,
+  callbacks: CrossfadeCallbacks
+): () => void {
+  const { onComplete, onError, isAborted, getStatus } = callbacks;
+  xfadeLog("run_start", { nextUrl: nextUrl.slice(0, 60), mixSec: mixDurationSec });
+  const temp = document.createElement("audio");
+  temp.volume = 0;
+  temp.preload = "auto";
+  temp.src = nextUrl;
+
+  const startMs = Date.now();
+  const durationMs = mixDurationSec * 1000;
+  let completed = false;
+  let rafId: number | null = null;
+  let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const cleanup = () => {
+    if (loadTimeoutId != null) {
+      clearTimeout(loadTimeoutId);
+      loadTimeoutId = null;
+    }
+    if (rafId != null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    temp.removeEventListener("canplay", onTempCanPlay);
+    temp.removeEventListener("error", onTempError);
+    temp.pause();
+    temp.removeAttribute("src");
+    temp.load();
+  };
+
+  const finish = (success: boolean) => {
+    if (completed) return;
+    completed = true;
+    xfadeLog("finish", { success });
+    if (!success) {
+      currentAudio.volume = targetVolume;
+    }
+    cleanup();
+    if (success) onComplete();
+    else onError();
+  };
+
+  const onTempError = () => {
+    xfadeLog("temp_error", { nextUrl: nextUrl.slice(0, 50) });
+    finish(false);
+  };
+
+  const onTempCanPlay = () => {
+    temp.removeEventListener("canplay", onTempCanPlay);
+    xfadeLog("temp_canplay");
+    temp.play().then(
+      () => xfadeLog("temp_play_ok"),
+      () => {
+        xfadeLog("temp_play_fail");
+        finish(false);
+      }
+    );
+
+    let tickCount = 0;
+    const tick = () => {
+      if (isAborted()) {
+        xfadeLog("abort", { tickCount });
+        finish(false);
+        return;
+      }
+      const elapsed = Date.now() - startMs;
+      const frac = Math.min(1, elapsed / durationMs);
+
+      currentAudio.volume = Math.max(0, targetVolume * (1 - frac));
+      temp.volume = targetVolume * frac;
+
+      if (tickCount === 0) xfadeLog("tick_first", { currentVol: currentAudio.volume, tempVol: temp.volume });
+      tickCount++;
+
+      if (frac >= 1) {
+        xfadeLog("handoff_start", { tickCount, tempTime: temp.currentTime });
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+        currentAudio.volume = targetVolume;
+        const main = currentAudio;
+        main.src = nextUrl;
+        main.load();
+        main.volume = 0;
+        const onMainCanPlay = () => {
+          main.removeEventListener("canplay", onMainCanPlay);
+          if (completed) return;
+          main.currentTime = temp.currentTime;
+          main.volume = targetVolume;
+          const st = getStatus();
+          xfadeLog("main_canplay", { status: st, willPlay: st === "playing" });
+          if (st === "playing") main.play().catch(() => {});
+          finish(true);
+        };
+        main.addEventListener("canplay", onMainCanPlay);
+        return;
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+  };
+
+  temp.addEventListener("canplay", onTempCanPlay);
+  temp.addEventListener("error", onTempError);
+
+  loadTimeoutId = setTimeout(() => {
+    if (!completed) {
+      xfadeLog("load_timeout");
+      finish(false);
+    }
+  }, 10000);
+
+  return () => finish(false);
 }
 
 function SourceIcon({ type, origin, size = "md" }: { type: TrackSource; origin?: "playlist" | "source" | "radio"; size?: "sm" | "md" | "lg" }) {
@@ -136,13 +281,18 @@ export function AudioPlayer() {
     registerSeekCallback,
     currentPlayUrl,
     isEmbedded,
+    getNextStreamUrl,
+    getNextEmbeddedSource,
   } = usePlayback();
 
   const ytContainerRef = useRef<HTMLDivElement>(null);
+  const ytContainerNextRef = useRef<HTMLDivElement>(null);
   const scIframeRef = useRef<HTMLIFrameElement>(null);
   const ytPlayerRef = useRef<YTPlayerAPI | null>(null);
+  const ytPlayerNextRef = useRef<YTPlayerAPI | null>(null);
   const scWidgetRef = useRef<SCWidget | null>(null);
   const currentVidRef = useRef<string | null>(null);
+  const lastYtVidRef = useRef<string | null>(null);
 
   const embedType = currentPlayUrl ? getEmbedType(currentPlayUrl) : null;
   const isYouTube = embedType === "youtube";
@@ -176,7 +326,8 @@ export function AudioPlayer() {
   const [isHoveringTimeline, setIsHoveringTimeline] = useState(false);
   const [hoverPercent, setHoverPercent] = useState(0);
   const [titleOverflows, setTitleOverflows] = useState(false);
-  const [autoMix, setAutoMix] = useState(false);
+  const [autoMix, setAutoMixState] = useState(false);
+  const [mixDurationDisplay, setMixDurationDisplay] = useState(6);
   const [embedReady, setEmbedReady] = useState(false);
   const isSeekingRef = useRef(false);
   const isDraggingRef = useRef(false);
@@ -186,9 +337,22 @@ export function AudioPlayer() {
   const volumeRef = useRef(volume);
   const statusRef = useRef(status);
   const volumeBeforeMuteRef = useRef(80);
+  const autoMixRef = useRef(autoMix);
   const nextRef = useRef(next);
+  autoMixRef.current = autoMix;
   const lastScEmbedUrlRef = useRef<string | null>(null);
   const endedHandledRef = useRef(false);
+  const crossfadeStartedRef = useRef(false);
+  const crossfadeAbortRef = useRef(false);
+  const crossfadeCleanupRef = useRef<(() => void) | null>(null);
+  const crossfadeInMixWindowRef = useRef(false);
+  const crossfadeDurNonFiniteLoggedRef = useRef(false);
+  const ytCrossfadeStartedRef = useRef(false);
+  const ytCrossfadeAbortRef = useRef(false);
+  const ytCrossfadeCleanupRef = useRef<(() => void) | null>(null);
+  const ytOverlapActiveRef = useRef(false);
+  const ytNextVideoIdRef = useRef<string | null>(null);
+  const ytCurrentInNextSlotRef = useRef(false);
   volumeRef.current = volume;
   statusRef.current = status;
   nextRef.current = next;
@@ -196,6 +360,11 @@ export function AudioPlayer() {
   /** Load YouTube player – deps exclude volume/status so volume changes never recreate the player */
   const loadYouTube = useCallback(() => {
     if (!vid || !ytContainerRef.current) return;
+    if (lastYtVidRef.current === vid) {
+      lastYtVidRef.current = null;
+      return;
+    }
+    ytCurrentInNextSlotRef.current = false;
     const oldPlayer = ytPlayerRef.current;
     if (isYtPlayerReady(oldPlayer)) safeStopVideo(oldPlayer);
     ytPlayerRef.current = null;
@@ -238,6 +407,133 @@ export function AudioPlayer() {
     first?.parentNode?.insertBefore(tag, first);
     window.onYouTubeIframeAPIReady = () => loadYT();
   }, [vid, ytPlaylistId]);
+
+  /** YouTube AutoMix Phase 1: preload next in hidden player. No volume fade. At mix point, start next; on current ENDED, handoff. */
+  const runYtPreload = useCallback(
+    (nextVideoId: string, callbacks: { onError: () => void; isAborted: () => boolean }): (() => void) => {
+      const currentPlayer = ytPlayerRef.current;
+      if (!isYtPlayerReady(currentPlayer)) {
+        ytXfadeLog("no_current");
+        callbacks.onError();
+        return () => {};
+      }
+      const preloadContainer = ytCurrentInNextSlotRef.current ? ytContainerRef.current : ytContainerNextRef.current;
+      if (!preloadContainer || !window.YT?.Player) {
+        ytXfadeLog("no_container");
+        callbacks.onError();
+        return () => {};
+      }
+      const oldNext = ytPlayerNextRef.current;
+      if (isYtPlayerReady(oldNext)) {
+        safeStopVideo(oldNext);
+        safeDestroyYtPlayer(oldNext);
+      }
+      ytPlayerNextRef.current = null;
+      const triggerTime = Date.now();
+      ytXfadeLog("preload_triggered", { nextVideoId, triggerTime });
+      let completed = false;
+      let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        if (loadTimeoutId != null) {
+          clearTimeout(loadTimeoutId);
+          loadTimeoutId = null;
+        }
+      };
+
+      const abort = () => {
+        if (completed) return;
+        completed = true;
+        ytXfadeLog("preload_abort");
+        cleanup();
+        if (isYtPlayerReady(ytPlayerNextRef.current)) {
+          safeStopVideo(ytPlayerNextRef.current);
+          safeDestroyYtPlayer(ytPlayerNextRef.current);
+          ytPlayerNextRef.current = null;
+        }
+        callbacks.onError();
+      };
+
+      try {
+        ytXfadeLog("next_hidden_yt_player_creating", { videoId: nextVideoId });
+        new window.YT.Player(preloadContainer, {
+          videoId: nextVideoId,
+          width: 320,
+          height: 180,
+          playerVars: { enablejsapi: 1, origin: typeof window !== "undefined" ? window.location.origin : "" },
+          events: {
+            onReady(evt: { target: YTPlayerAPI }) {
+              if (completed || callbacks.isAborted()) return;
+              const target = evt.target;
+              if (!isYtPlayerReady(target)) {
+                ytXfadeLog("next_not_ready");
+                abort();
+                return;
+              }
+              const readyLatencyMs = Date.now() - triggerTime;
+              ytXfadeLog("next_hidden_yt_player_ready", { readyLatencyMs });
+              ytPlayerNextRef.current = target;
+              safeSetVolume(target, 0);
+              safeMute(target);
+            },
+          },
+        });
+      } catch (e) {
+        ytXfadeLog("error", { err: String(e) });
+        abort();
+        return () => {};
+      }
+
+      loadTimeoutId = setTimeout(() => {
+        if (!completed) {
+          ytXfadeLog("preload_timeout");
+          abort();
+        }
+      }, 12000);
+
+      return () => abort();
+    },
+    []
+  );
+
+  /** Handoff: promote next to current when overlap ends (current track ended). */
+  const doYtHandoff = useCallback((nextVideoId: string) => {
+    const np = ytPlayerNextRef.current;
+    if (!isYtPlayerReady(np)) {
+      ytXfadeLog("handoff_abort", { reason: "next_not_ready" });
+      return;
+    }
+    const npStateBefore = safeGetPlayerState(np);
+    ytXfadeLog("handoff_started", { nextPlayerStateBefore: npStateBefore });
+    const oldCurrent = ytPlayerRef.current;
+    if (isYtPlayerReady(oldCurrent)) {
+      safeStopVideo(oldCurrent);
+      safeDestroyYtPlayer(oldCurrent);
+    }
+    safeUnMute(np);
+    ytPlayerRef.current = np;
+    ytPlayerNextRef.current = null;
+    currentVidRef.current = nextVideoId;
+    lastYtVidRef.current = nextVideoId;
+    ytCurrentInNextSlotRef.current = !ytCurrentInNextSlotRef.current;
+    safeSetVolume(np, volumeRef.current);
+    safePlayVideo(np);
+    const npStateAfter = safeGetPlayerState(np);
+    ytXfadeLog("handoff_promoted", { nextPlayerStateAfter: npStateAfter });
+    nextRef.current({ skipPlay: true });
+    endedHandledRef.current = true;
+    ytOverlapActiveRef.current = false;
+    ytCrossfadeStartedRef.current = false;
+    ytXfadeLog("handoff_completed");
+    setTimeout(() => {
+      const finalState = safeGetPlayerState(ytPlayerRef.current);
+      ytXfadeLog("handoff_500ms_later", { playerState: finalState });
+    }, 500);
+    setTimeout(() => {
+      const finalState = safeGetPlayerState(ytPlayerRef.current);
+      ytXfadeLog("handoff_1500ms_later", { playerState: finalState });
+    }, 1500);
+  }, []);
 
   /** Load SoundCloud widget – deps exclude next/volume/status to avoid recreation loops and jitter */
   const loadSoundCloud = useCallback(() => {
@@ -287,11 +583,13 @@ export function AudioPlayer() {
   }, [isYouTube, isSoundCloud, loadYouTube, loadSoundCloud]);
 
   useEffect(() => {
+    const vidFromUrl = isYouTube && currentPlayUrl ? getYouTubeVideoId(currentPlayUrl) : null;
+    if (isYouTube && vidFromUrl && lastYtVidRef.current === vidFromUrl) return;
     setEmbedReady(false);
     setPosition(0);
     setDuration(0);
     setBufferedPercent(0);
-  }, [currentPlayUrl]);
+  }, [currentPlayUrl, isYouTube]);
 
   const handlePlaybackError = useCallback(
     (err: unknown, context?: string) => {
@@ -325,6 +623,12 @@ export function AudioPlayer() {
       safeDestroyYtPlayer(ytPlayerRef.current);
       ytPlayerRef.current = null;
     }
+    if (ytPlayerNextRef.current && isYtPlayerReady(ytPlayerNextRef.current)) {
+      safeStopVideo(ytPlayerNextRef.current);
+      safeDestroyYtPlayer(ytPlayerNextRef.current);
+      ytPlayerNextRef.current = null;
+    }
+    lastYtVidRef.current = null;
     if (scWidgetRef.current) {
       try {
         scWidgetRef.current.pause();
@@ -377,13 +681,15 @@ export function AudioPlayer() {
     return registerSeekCallback(seekToLocal);
   }, [registerSeekCallback, isYouTube, isSoundCloud, isStreamUrl]);
 
-  /** Stop/destroy previous embed when switching source or track – ensures clean transition before loading new media */
+  /** Stop/destroy previous embed when switching source or track – ensures clean transition before loading new media.
+   * Skip when lastYtVidRef is set (YT crossfade handoff) – promoted player is already in place. */
   useEffect(() => {
     if (!isYouTube && !isSoundCloud) {
       lastScEmbedUrlRef.current = null;
       return;
     }
     return () => {
+      if (isYouTube && lastYtVidRef.current) return;
       stopAllEmbedded();
       lastScEmbedUrlRef.current = null;
     };
@@ -504,7 +810,45 @@ export function AudioPlayer() {
 
   useEffect(() => {
     endedHandledRef.current = false;
+    crossfadeStartedRef.current = false;
+    crossfadeAbortRef.current = false;
+    crossfadeInMixWindowRef.current = false;
+    crossfadeDurNonFiniteLoggedRef.current = false;
+    crossfadeCleanupRef.current?.();
+    crossfadeCleanupRef.current = null;
+    ytCrossfadeStartedRef.current = false;
+    ytCrossfadeAbortRef.current = false;
+    ytOverlapActiveRef.current = false;
+    ytNextVideoIdRef.current = null;
+    ytCrossfadeCleanupRef.current?.();
+    ytCrossfadeCleanupRef.current = null;
   }, [currentPlayUrl]);
+
+  useEffect(() => {
+    return () => {
+      crossfadeCleanupRef.current?.();
+      crossfadeCleanupRef.current = null;
+      ytCrossfadeCleanupRef.current?.();
+      ytCrossfadeCleanupRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    setMixDurationDisplay(getMixDuration());
+    return onMixDurationChanged((s) => setMixDurationDisplay(s));
+  }, []);
+
+  useEffect(() => {
+    setAutoMixState(getAutoMix());
+  }, []);
+
+  const setAutoMix = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
+    setAutoMixState((prev) => {
+      const next = typeof value === "function" ? value(prev) : value;
+      persistAutoMix(next);
+      return next;
+    });
+  }, []);
 
   /** Clear multi-track state when switching away from multi-track YT source */
   useEffect(() => {
@@ -549,8 +893,21 @@ export function AudioPlayer() {
         const playerState = safeGetPlayerState(p);
         if (playerState === window.YT!.PlayerState.ENDED) {
           if (!isYouTubeMix && !endedHandledRef.current) {
-            endedHandledRef.current = true;
-            nextRef.current();
+            const overlapActive = !!ytOverlapActiveRef.current;
+            const nextVid = ytNextVideoIdRef.current;
+            ytXfadeLog("current_ended", { overlapActive, nextVid: nextVid ?? null });
+            if (overlapActive && nextVid) {
+              ytXfadeLog("handoff_path_taken");
+              doYtHandoff(nextVid);
+            } else {
+              endedHandledRef.current = true;
+              if (ytCrossfadeStartedRef.current) {
+                ytCrossfadeCleanupRef.current?.();
+                ytCrossfadeStartedRef.current = false;
+                ytNextVideoIdRef.current = null;
+              }
+              nextRef.current();
+            }
           }
         } else {
           endedHandledRef.current = false;
@@ -559,7 +916,7 @@ export function AudioPlayer() {
     };
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
-  }, [status, isYouTube, isYouTubeMix]);
+  }, [status, isYouTube, isYouTubeMix, doYtHandoff]);
 
   useEffect(() => {
     if (!currentSource || isSeekingRef.current) return;
@@ -576,6 +933,67 @@ export function AudioPlayer() {
           setBufferedPercent(frac * 100);
           if (deviceCtx?.isBranchConnected && deviceCtx.deviceMode === "MASTER" && Number.isFinite(pos) && Number.isFinite(dur)) {
             deviceCtx.reportPosition(pos, dur);
+          }
+          if (
+            autoMixRef.current &&
+            statusRef.current === "playing" &&
+            !isYouTubeMix &&
+            !isYouTubeMultiTrack &&
+            !ytCrossfadeStartedRef.current &&
+            Number.isFinite(dur) &&
+            dur > 0
+          ) {
+            const mixSec = getMixDuration();
+            const preloadThreshold = Math.max(0, dur - mixSec - YT_PRELOAD_BUFFER_SEC);
+            const mixPointThreshold = Math.max(0, dur - mixSec);
+            const nextEmbed = getNextEmbeddedSource();
+            const nextUrl = nextEmbed?.type === "youtube" ? nextEmbed.url : null;
+            const nextIsMix = nextUrl ? isYouTubeMixUrl(nextUrl) : false;
+            const nextIsMultiTrack = nextUrl ? isYouTubeMultiTrackUrl(nextUrl) : false;
+            const nextIsSingleVideo = nextUrl && !nextIsMix && !nextIsMultiTrack;
+            const nextVid = nextEmbed?.type === "youtube" && nextIsSingleVideo ? nextEmbed.videoId : null;
+            if (pos >= preloadThreshold && (nextEmbed || nextUrl)) {
+              ytXfadeLog("automix_source_check", {
+                currentUrl: currentPlayUrl?.slice(0, 60),
+                nextUrl: nextUrl?.slice(0, 60),
+                currentVid: vid ?? null,
+                nextVid: nextEmbed?.type === "youtube" ? nextEmbed.videoId : null,
+                isYouTubeMix,
+                isYouTubeMultiTrack,
+                nextIsMix,
+                nextIsMultiTrack,
+                nextIsSingleVideo,
+                automixAllowed: !!nextVid,
+              });
+            }
+            if (pos >= preloadThreshold && nextVid && !ytCrossfadeStartedRef.current) {
+              const currState = safeGetPlayerState(p);
+              const secLeft = dur - pos;
+              ytXfadeLog("preload_trigger_reached", { pos, dur, mixSec, secLeft, nextVid, currentPlayerState: currState });
+              ytCrossfadeStartedRef.current = true;
+              ytNextVideoIdRef.current = nextVid;
+              ytCrossfadeAbortRef.current = false;
+              ytCrossfadeCleanupRef.current?.();
+              const abort = runYtPreload(nextVid, {
+                onError: () => {
+                  ytXfadeLog("preload_error");
+                  ytCrossfadeStartedRef.current = false;
+                  ytNextVideoIdRef.current = null;
+                },
+                isAborted: () => ytCrossfadeAbortRef.current || statusRef.current !== "playing",
+              });
+              ytCrossfadeCleanupRef.current = abort;
+            }
+
+            if (pos >= mixPointThreshold && nextVid && !ytOverlapActiveRef.current && isYtPlayerReady(ytPlayerNextRef.current) && ytNextVideoIdRef.current === nextVid) {
+              const np = ytPlayerNextRef.current;
+              const currState = safeGetPlayerState(p);
+              ytXfadeLog("mix_point_reached_starting_next", { pos, dur, mixSec, currentPlayerState: currState });
+              safeUnMute(np);
+              safeSetVolume(np, volumeRef.current);
+              safePlayVideo(np);
+              ytOverlapActiveRef.current = true;
+            }
           }
         }
       } else if (isSoundCloud && scWidgetRef.current) {
@@ -596,6 +1014,12 @@ export function AudioPlayer() {
         const d = a.duration;
         lastKnownDurationRef.current = d;
         setPosition(t);
+        if (!Number.isFinite(d) || d <= 0) {
+          if (!crossfadeDurNonFiniteLoggedRef.current) {
+            xfadeLog("duration_not_finite", { d, url: currentPlayUrl?.slice(0, 50), type: currentTrack?.type, origin: currentSource?.origin });
+            crossfadeDurNonFiniteLoggedRef.current = true;
+          }
+        }
         if (Number.isFinite(d) && d > 0) {
           setDuration(d);
           if (a.buffered.length > 0) {
@@ -605,13 +1029,53 @@ export function AudioPlayer() {
           if (deviceCtx?.isBranchConnected && deviceCtx.deviceMode === "MASTER" && Number.isFinite(t) && Number.isFinite(d)) {
             deviceCtx.reportPosition(t, d);
           }
+          // Crossfade for direct audio URL only (no HLS): AutoMix ON + within mix window
+          const mixSec = getMixDuration();
+          const threshold = Math.max(0, d - mixSec);
+          const inMixWindow = t >= threshold;
+          if (inMixWindow && !crossfadeInMixWindowRef.current) {
+            crossfadeInMixWindowRef.current = true;
+            const nextUrl = getNextStreamUrl();
+            const ok = !!(autoMixRef.current && statusRef.current === "playing" && currentPlayUrl && !isHlsUrl(currentPlayUrl) && !crossfadeStartedRef.current && nextUrl);
+            xfadeLog("mix_window_entered", { t, d, mixSec, threshold, nextUrl: nextUrl ? "yes" : "no", autoMix: autoMixRef.current, status: statusRef.current, hls: isHlsUrl(currentPlayUrl ?? ""), willTrigger: ok });
+          }
+          if (
+            autoMixRef.current &&
+            statusRef.current === "playing" &&
+            currentPlayUrl &&
+            !isHlsUrl(currentPlayUrl) &&
+            !crossfadeStartedRef.current
+          ) {
+            const nextUrl = getNextStreamUrl();
+            if (nextUrl && t >= Math.max(0, d - mixSec)) {
+              xfadeLog("trigger", { t, d, mixSec, nextUrl: nextUrl.slice(0, 60) });
+              crossfadeStartedRef.current = true;
+              crossfadeAbortRef.current = false;
+              crossfadeCleanupRef.current?.();
+              const abort = runCrossfade(a, nextUrl, volumeRef.current / 100, mixSec, {
+                onComplete: () => {
+                  xfadeLog("onComplete");
+                  lastStreamUrlRef.current = nextUrl;
+                  (nextRef.current as ((opts?: { skipPlay?: boolean }) => void) | undefined)?.({ skipPlay: true });
+                  endedHandledRef.current = true;
+                },
+                onError: () => {
+                  xfadeLog("onError");
+                  crossfadeStartedRef.current = false;
+                },
+                isAborted: () => crossfadeAbortRef.current || statusRef.current !== "playing",
+                getStatus: () => statusRef.current,
+              });
+              crossfadeCleanupRef.current = abort;
+            }
+          }
         }
       }
     };
     poll();
     const id = setInterval(poll, 500);
     return () => clearInterval(id);
-  }, [currentSource, isYouTube, isSoundCloud, isStreamUrl, deviceCtx?.isBranchConnected, deviceCtx?.deviceMode]);
+  }, [currentSource, isYouTube, isSoundCloud, isStreamUrl, isYouTubeMix, isYouTubeMultiTrack, getNextEmbeddedSource, runYtPreload, deviceCtx?.isBranchConnected, deviceCtx?.deviceMode]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -619,7 +1083,11 @@ export function AudioPlayer() {
     const onEnded = () => {
       const d = lastKnownDurationRef.current;
       if (!Number.isFinite(d) || d <= 0) return;
-      if (endedHandledRef.current) return;
+      if (endedHandledRef.current || crossfadeStartedRef.current) {
+        xfadeLog("ended_skipped", { endedHandled: endedHandledRef.current, crossfadeStarted: crossfadeStartedRef.current });
+        return;
+      }
+      xfadeLog("ended_advance");
       endedHandledRef.current = true;
       nextRef.current();
     };
@@ -675,8 +1143,8 @@ export function AudioPlayer() {
   const displayProgressPercent = displayDuration > 0 ? Math.min(100, (displayPosition / displayDuration) * 100) : 0;
 
   const onPrev = isControlMirror ? () => { endedHandledRef.current = true; deviceCtx!.prevOrSend(); } : () => { endedHandledRef.current = true; prev(); };
-  const onNext = isControlMirror ? () => { endedHandledRef.current = true; deviceCtx!.nextOrSend(); } : () => { endedHandledRef.current = true; next(); };
-  const onStop = isControlMirror ? deviceCtx!.stopOrSend : stop;
+  const onNext = isControlMirror ? () => { crossfadeAbortRef.current = true; crossfadeCleanupRef.current?.(); ytCrossfadeAbortRef.current = true; ytCrossfadeCleanupRef.current?.(); endedHandledRef.current = true; deviceCtx!.nextOrSend(); } : () => { crossfadeAbortRef.current = true; crossfadeCleanupRef.current?.(); ytCrossfadeAbortRef.current = true; ytCrossfadeCleanupRef.current?.(); endedHandledRef.current = true; next(); };
+  const onStop = isControlMirror ? () => { crossfadeAbortRef.current = true; crossfadeCleanupRef.current?.(); ytCrossfadeAbortRef.current = true; ytCrossfadeCleanupRef.current?.(); deviceCtx!.stopOrSend(); } : () => { crossfadeAbortRef.current = true; crossfadeCleanupRef.current?.(); ytCrossfadeAbortRef.current = true; ytCrossfadeCleanupRef.current?.(); stop(); };
   const onPlayPause = isControlMirror
     ? (displayStatus === "playing" ? deviceCtx!.pauseOrSend : deviceCtx!.playOrSend)
     : (status === "playing" ? pause : () => { if (status === "paused" && currentSource) play(); else if (currentSource) playSource(currentSource); });
@@ -1029,27 +1497,34 @@ export function AudioPlayer() {
                           <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-400" title={displayNextLabel ?? undefined}>{displayNextLabel ?? "—"}</span>
                         </div>
                       </div>
-                      <div className="flex shrink-0 flex-col items-center justify-center gap-2 border-l border-slate-700/50 pl-2" aria-hidden>
-                        <div className="flex flex-col items-center gap-0.5">
-                          <span
-                            className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors ${
-                              autoMix ? "bg-cyan-400/80 shadow-[0_0_4px_rgba(34,211,238,0.5)]" : "bg-slate-500/50"
-                            }`}
-                            title="AutoMix"
-                          />
-                          <span className={`text-[7px] font-semibold uppercase tracking-wider ${autoMix ? "text-emerald-400" : "text-slate-500"}`}>
-                            {t?.autoMix ?? "Automix"}
-                          </span>
+                      <div className="flex shrink-0 flex-col items-stretch gap-2 border-l border-slate-700/50 pl-2">
+                        {/* AutoMix status: two-part module [ ● AUTOMIX ] [ 9S ] */}
+                        <div className="flex items-center gap-1" role="status" aria-label={autoMix ? `AutoMix ${mixDurationDisplay}s` : "AutoMix off"} title={autoMix ? `AutoMix on, ${mixDurationDisplay}s crossfade` : "AutoMix off"}>
+                          <div className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 ${
+                            autoMix ? "border-cyan-500/30 bg-slate-800/50" : "border-slate-600/30 bg-slate-800/20"
+                          }`}>
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                              autoMix ? "bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" : "bg-slate-500/50"
+                            }`} aria-hidden />
+                            <span className={`text-[9px] font-semibold uppercase tracking-wider ${autoMix ? "text-cyan-400" : "text-slate-500"}`}>
+                              {(t?.autoMix ?? "AUTOMIX").toUpperCase()}
+                            </span>
+                          </div>
+                          <div className={`inline-flex min-w-[28px] items-center justify-center rounded border px-1 py-0.5 tabular-nums ${
+                            autoMix ? "border-cyan-500/30 bg-slate-800/50 text-cyan-400 text-[10px] font-bold" : "border-slate-600/30 bg-slate-800/20 text-slate-500 text-[10px] font-bold"
+                          }`}>
+                            {mixDurationDisplay}S
+                          </div>
                         </div>
-                        <div className="flex flex-col items-center gap-0.5">
-                          <span
-                            className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors ${
-                              shuffle ? "bg-cyan-400/80 shadow-[0_0_4px_rgba(34,211,238,0.5)]" : "bg-slate-500/50"
-                            }`}
-                            title="Random"
-                          />
-                          <span className={`text-[7px] font-semibold uppercase tracking-wider ${shuffle ? "text-emerald-400" : "text-slate-500"}`}>
-                            {t?.random ?? "Random"}
+                        {/* Random status: same modular language [ ● RANDOM ] */}
+                        <div className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 w-fit ${
+                          shuffle ? "border-cyan-500/30 bg-slate-800/50" : "border-slate-600/30 bg-slate-800/20"
+                        }`} role="status" aria-label={shuffle ? "Random on" : "Random off"} title="Random">
+                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                            shuffle ? "bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" : "bg-slate-500/50"
+                          }`} aria-hidden />
+                          <span className={`text-[9px] font-semibold uppercase tracking-wider ${shuffle ? "text-cyan-400" : "text-slate-500"}`}>
+                            {(t?.random ?? "RANDOM").toUpperCase()}
                           </span>
                         </div>
                       </div>
@@ -1119,12 +1594,13 @@ export function AudioPlayer() {
       </div>
 
       {/* Off-screen embeds for YouTube/SoundCloud – always mount both to avoid React removeChild conflict */}
-      {/* key forces remount when source changes, giving fresh embed containers and avoiding stale refs */}
+      {/* key by embedType so YT→YT switches don't remount (needed for crossfade handoff) */}
       {isEmbedded && (
-        <div key={currentPlayUrl ?? "none"} className="pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0" aria-hidden>
+        <div key={embedType ?? "none"} className="pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0" aria-hidden>
           {/* Wrapper div prevents YT API DOM manipulation from conflicting with React unmount */}
           <div style={{ display: isYouTube ? "block" : "none" }} className="h-full w-full">
             <div ref={ytContainerRef} className="h-full w-full" />
+            <div ref={ytContainerNextRef} className="absolute left-0 top-0 h-full w-full" aria-hidden />
           </div>
           <div style={{ display: isSoundCloud ? "block" : "none" }} className="h-full w-full">
             <iframe

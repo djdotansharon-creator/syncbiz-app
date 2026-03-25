@@ -4,10 +4,16 @@ import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 
-async function requireRadioAccess(station: { branchId?: string } | null) {
+async function requireRadioAccess(station: { branchId?: string; tenantId?: string } | null) {
   const user = await getCurrentUserFromCookies();
   if (!user) return { ok: false as const, status: 401 } as const;
   if (!station) return { ok: false as const, status: 404 } as const;
+  if (station.tenantId && station.tenantId !== user.tenantId) {
+    return { ok: false as const, status: 404 } as const;
+  }
+  if (!station.tenantId && user.tenantId !== "tnt-default") {
+    return { ok: false as const, status: 404 } as const;
+  }
   const branchId = resolveMediaBranchId(station);
   if (!(await hasBranchAccess(user.id, branchId))) {
     return { ok: false as const, status: 403 } as const;

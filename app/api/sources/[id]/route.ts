@@ -5,6 +5,10 @@ import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import type { Source } from "@/lib/types";
 
+function resolveAccountScope(userTenantId: string): string {
+  return userTenantId === "tnt-default" ? "acct-demo-001" : userTenantId;
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -15,7 +19,7 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
-    const source = db.getSources().find((s) => s.id === id);
+    const source = db.getSources(resolveAccountScope(user.tenantId)).find((s) => s.id === id);
     if (!source) {
       return NextResponse.json({ error: "Source not found" }, { status: 404 });
     }
@@ -40,7 +44,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
-    const source = db.getSources().find((s) => s.id === id);
+    const source = db.getSources(resolveAccountScope(user.tenantId)).find((s) => s.id === id);
     if (!source) {
       return NextResponse.json({ error: "Source not found" }, { status: 404 });
     }
@@ -76,7 +80,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
-    const source = db.getSources().find((s) => s.id === id);
+    const source = db.getSources(resolveAccountScope(user.tenantId)).find((s) => s.id === id);
     if (!source) {
       return NextResponse.json({ error: "Source not found" }, { status: 404 });
     }

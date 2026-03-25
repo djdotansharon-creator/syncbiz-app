@@ -58,17 +58,56 @@ export const db = {
   getAccount(): Account {
     return demoAccount;
   },
-  getBranches(): Branch[] {
-    return branches;
+  getBranches(accountId?: string): Branch[] {
+    if (!accountId) return branches;
+    return branches.filter((b) => b.accountId === accountId);
   },
-  getDevices(): Device[] {
-    return devices;
+  addBranch(
+    input: Pick<Branch, "accountId" | "name"> &
+      Partial<Pick<Branch, "id" | "code" | "timezone" | "city" | "country" | "status">>,
+  ): Branch {
+    const normalizedAccountId = input.accountId.trim();
+    const normalizedName = input.name.trim();
+    const desiredId = (input.id ?? "").trim();
+    const id =
+      desiredId ||
+      `br-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    if (!normalizedAccountId) {
+      throw new Error("accountId is required");
+    }
+    if (!normalizedName) {
+      throw new Error("name is required");
+    }
+    if (branches.some((b) => b.accountId === normalizedAccountId && b.id === id)) {
+      throw new Error("branch id already exists in account");
+    }
+    const code = (input.code ?? normalizedName.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24)).trim() || "BRANCH";
+    const branch: Branch = {
+      id,
+      accountId: normalizedAccountId,
+      name: normalizedName,
+      code,
+      timezone: input.timezone ?? "America/New_York",
+      city: input.city ?? "",
+      country: input.country ?? "",
+      status: input.status ?? "active",
+      devicesOnline: 0,
+      devicesTotal: 0,
+    };
+    branches = [branch, ...branches];
+    return branch;
   },
-  getSources(): Source[] {
-    return sources;
+  getDevices(accountId?: string): Device[] {
+    if (!accountId) return devices;
+    return devices.filter((d) => d.accountId === accountId);
   },
-  getSchedules(): Schedule[] {
-    return schedules;
+  getSources(accountId?: string): Source[] {
+    if (!accountId) return sources;
+    return sources.filter((s) => s.accountId === accountId);
+  },
+  getSchedules(accountId?: string): Schedule[] {
+    if (!accountId) return schedules;
+    return schedules.filter((s) => s.accountId === accountId);
   },
   getAnnouncements(): Announcement[] {
     return announcements;
@@ -76,7 +115,7 @@ export const db = {
   getLogs(): LogEntry[] {
     return logs;
   },
-  addDevice(input: Omit<Device, "id" | "accountId" | "lastSeen" | "lastHeartbeat"> & Partial<Pick<Device, "platform" | "health" | "capabilities">>): Device {
+  addDevice(input: Omit<Device, "id" | "accountId" | "lastSeen" | "lastHeartbeat"> & Partial<Pick<Device, "platform" | "health" | "capabilities" | "accountId">>): Device {
     const now = new Date().toISOString();
     const device: Device = {
       name: input.name,
@@ -91,14 +130,14 @@ export const db = {
       health: input.health ?? "ok",
       capabilities: input.capabilities ?? ["supportsPlay", "supportsStop", "supportsVolume", "supportsResume"],
       id: `dev-${String(devices.length + 1).padStart(3, "0")}`,
-      accountId: demoAccount.id,
+      accountId: input.accountId ?? demoAccount.id,
       lastSeen: now,
       lastHeartbeat: now,
     };
     devices = [device, ...devices];
     return device;
   },
-  addSource(input: Omit<Source, "id" | "accountId">): Source {
+  addSource(input: Omit<Source, "id" | "accountId"> & Partial<Pick<Source, "accountId">>): Source {
     const target = input.target ?? (input as Source & { uriOrPath?: string }).uriOrPath ?? "";
     const source: Source = {
       ...input,
@@ -107,7 +146,7 @@ export const db = {
       provider: input.provider,
       playerMode: input.playerMode,
       id: `src-${String(sources.length + 1).padStart(3, "0")}`,
-      accountId: demoAccount.id,
+      accountId: input.accountId ?? demoAccount.id,
     };
     sources = [source, ...sources];
     return source;
@@ -123,10 +162,11 @@ export const db = {
     sources[idx] = { ...sources[idx], ...data };
     return sources[idx];
   },
-  getSchedule(id: string): Schedule | null {
-    return schedules.find((s) => s.id === id) ?? null;
+  getSchedule(id: string, accountId?: string): Schedule | null {
+    const list = accountId ? schedules.filter((s) => s.accountId === accountId) : schedules;
+    return list.find((s) => s.id === id) ?? null;
   },
-  addSchedule(input: Omit<Schedule, "id" | "accountId"> & Partial<Pick<Schedule, "targetType" | "targetId">>): Schedule {
+  addSchedule(input: Omit<Schedule, "id" | "accountId"> & Partial<Pick<Schedule, "targetType" | "targetId" | "accountId">>): Schedule {
     const targetType = input.targetType ?? "SOURCE";
     const targetId = input.targetId ?? input.sourceId ?? "";
     const now = new Date().toISOString();
@@ -138,7 +178,7 @@ export const db = {
       createdAt: input.createdAt ?? now,
       updatedAt: now,
       id: `sch-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      accountId: demoAccount.id,
+      accountId: input.accountId ?? demoAccount.id,
     };
     schedules = [schedule, ...schedules];
     return schedule;

@@ -4,6 +4,10 @@ import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from
 import { validateScheduleTarget } from "@/lib/schedule-target-validator";
 import type { Schedule, ScheduleTargetType } from "@/lib/types";
 
+function resolveAccountScope(userTenantId: string): string {
+  return userTenantId === "tnt-default" ? "acct-demo-001" : userTenantId;
+}
+
 async function requireScheduleAccess(schedule: Schedule | null) {
   const user = await getCurrentUserFromCookies();
   if (!user) return { ok: false as const, status: 401 } as const;
@@ -20,7 +24,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const schedule = db.getSchedule(id);
+  const user = await getCurrentUserFromCookies();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const schedule = db.getSchedule(id, resolveAccountScope(user.tenantId));
   const access = await requireScheduleAccess(schedule);
   if (!access.ok) {
     return NextResponse.json(
@@ -36,7 +42,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const existing = db.getSchedule(id);
+  const user = await getCurrentUserFromCookies();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const existing = db.getSchedule(id, resolveAccountScope(user.tenantId));
   const access = await requireScheduleAccess(existing);
   if (!access.ok) {
     return NextResponse.json(
@@ -93,7 +101,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const schedule = db.getSchedule(id);
+  const user = await getCurrentUserFromCookies();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const schedule = db.getSchedule(id, resolveAccountScope(user.tenantId));
   const access = await requireScheduleAccess(schedule);
   if (!access.ok) {
     return NextResponse.json(

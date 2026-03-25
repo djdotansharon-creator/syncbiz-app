@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listRadioStations, createRadioStation } from "@/lib/radio-store";
+import { listRadioStationsForTenant, createRadioStation } from "@/lib/radio-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
@@ -11,8 +11,11 @@ export async function GET() {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (!user.tenantId?.trim()) {
+    return NextResponse.json({ error: "Tenant context missing" }, { status: 400 });
+  }
   try {
-    const all = await listRadioStations();
+    const all = await listRadioStationsForTenant(user.tenantId);
     const filtered = [];
     for (const s of all) {
       const branchId = resolveMediaBranchId(s);
@@ -49,6 +52,7 @@ export async function POST(req: NextRequest) {
       genre: typeof body.genre === "string" ? body.genre.trim() : "Radio",
       cover: body.cover ?? null,
       branchId,
+      tenantId: user.tenantId,
     });
     const uid = await getUserIdFromSession();
     if (uid) void notifyLibraryUpdated(uid, { branchId, entityType: "radio", action: "created" });

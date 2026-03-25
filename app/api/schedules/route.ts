@@ -4,12 +4,19 @@ import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from
 import { validateScheduleTarget } from "@/lib/schedule-target-validator";
 import type { Schedule, ScheduleTargetType } from "@/lib/types";
 
+function resolveAccountScope(userTenantId: string): string {
+  return userTenantId === "tnt-default" ? "acct-demo-001" : userTenantId;
+}
+
 export async function GET() {
   const user = await getCurrentUserFromCookies();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const all = db.getSchedules();
+  if (!user.tenantId?.trim()) {
+    return NextResponse.json({ error: "Tenant context missing" }, { status: 400 });
+  }
+  const all = db.getSchedules(resolveAccountScope(user.tenantId));
   const filtered = [];
   for (const s of all) {
     const branchId = (s.branchId ?? "default").trim() || "default";
@@ -80,6 +87,7 @@ export async function POST(req: NextRequest) {
     requestedStartPosition: data.requestedStartPosition,
     requestedEndPosition: data.requestedEndPosition,
     createdBy: uid ?? undefined,
+    accountId: resolveAccountScope(user.tenantId),
   });
 
   return NextResponse.json(schedule, { status: 201 });

@@ -12,6 +12,9 @@ export interface YTPlayerAPI {
   stopVideo: () => void;
   destroy?: () => void;
   setVolume: (vol: number) => void;
+  mute?: () => void;
+  unMute?: () => void;
+  isMuted?: () => boolean;
   getPlayerState: () => number;
   getCurrentTime: () => number;
   getDuration: () => number;
@@ -60,6 +63,16 @@ export function safeGetPlayerState(player: unknown): number {
 /** Safe setVolume - no-op if not ready. */
 export function safeSetVolume(player: unknown, vol: number): void {
   safeYtCall(player, "setVolume", vol);
+}
+
+/** Safe mute - no-op if not ready or unavailable. */
+export function safeMute(player: unknown): void {
+  safeYtCall(player, "mute");
+}
+
+/** Safe unMute - no-op if not ready or unavailable. */
+export function safeUnMute(player: unknown): void {
+  safeYtCall(player, "unMute");
 }
 
 /** Safe playVideo. */

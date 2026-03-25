@@ -30,6 +30,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   try {
+    if (!admin.tenantId?.trim()) {
+      return NextResponse.json({ error: "Admin tenant context missing" }, { status: 400 });
+    }
     const body = (await req.json()) as {
       email?: string;
       password?: string;
@@ -77,6 +80,7 @@ export async function POST(req: NextRequest) {
       password,
       tenantRole,
       branchAssignments,
+      tenantId: admin.tenantId.trim(),
     });
     return NextResponse.json(user, { status: 201 });
   } catch (e) {

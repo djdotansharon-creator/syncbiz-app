@@ -26,11 +26,14 @@ export function validateCredentials(email: string, password: string): boolean {
 export async function validateCredentialsAsync(email: string, password: string): Promise<boolean> {
   const normalized = email?.trim().toLowerCase();
   if (!normalized || !password) return false;
+  const user = await getUserByEmail(normalized);
+  if (user?.passwordHash) {
+    return verifyPassword(password, user.passwordHash);
+  }
   if (TEST_USERS[normalized]) {
     return TEST_USERS[normalized] === password;
   }
-  const user = await getUserByEmail(normalized);
-  return !!(user?.passwordHash && verifyPassword(password, user.passwordHash));
+  return false;
 }
 
 export { parseSessionValue, createSessionValue };

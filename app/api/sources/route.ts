@@ -4,12 +4,19 @@ import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import type { Source } from "@/lib/types";
 
+function resolveAccountScope(userTenantId: string): string {
+  return userTenantId === "tnt-default" ? "acct-demo-001" : userTenantId;
+}
+
 export async function GET() {
   const user = await getCurrentUserFromCookies();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const all = db.getSources();
+  if (!user.tenantId?.trim()) {
+    return NextResponse.json({ error: "Tenant context missing" }, { status: 400 });
+  }
+  const all = db.getSources(resolveAccountScope(user.tenantId));
   const filtered: Source[] = [];
   for (const s of all) {
     const branchId = s.branchId ?? "default";
@@ -55,6 +62,7 @@ export async function POST(req: NextRequest) {
     playerMode: data.playerMode,
     tags: data.tags ?? [],
     isLive: data.isLive ?? false,
+    accountId: resolveAccountScope(user.tenantId),
   });
 
   const userId = await getUserIdFromSession();

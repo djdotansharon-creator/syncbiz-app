@@ -15,7 +15,8 @@ import type { Playlist } from "./playlist-types";
 import type { UnifiedSource, SourceProviderType } from "./source-types";
 import type { Source } from "./types";
 import { getPlaylistTracks } from "./playlist-types";
-import { canEmbedInCard } from "./playlist-utils";
+import { canEmbedInCard, getYouTubeVideoId } from "./playlist-utils";
+import { getShuffle, setShufflePreference } from "./mix-preferences";
 import { supportsEmbedded, getSourceArtworkUrl } from "./player-utils";
 import { getYouTubeThumbnail } from "./playlist-utils";
 import { log as mvpLog } from "./mvp-logger";
@@ -108,7 +109,7 @@ type PlaybackContextValue = PlaybackState & {
   pause: () => void;
   stop: () => void;
   prev: () => void;
-  next: () => void;
+  next: (opts?: { skipPlay?: boolean } | unknown) => void;
   setVolume: (value: number) => void;
   setShuffle: (value: boolean) => void;
   toggleShuffle: () => void;
@@ -126,6 +127,10 @@ type PlaybackContextValue = PlaybackState & {
   registerSeekCallback: (fn: (seconds: number) => void) => () => void;
   currentPlayUrl: string | null;
   isEmbedded: boolean;
+  /** Next direct-audio URL for crossfade. Null if next is embedded or no next. */
+  getNextStreamUrl: () => string | null;
+  /** Next embedded source for YouTube AutoMix crossfade. Null if no next YouTube. YouTube only in Phase 1. */
+  getNextEmbeddedSource: () => { type: "youtube"; url: string; videoId: string } | null;
 };
 
 const PlaybackContext = createContext<PlaybackContextValue | null>(null);
@@ -181,6 +186,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     initDeviceId();
+  }, []);
+
+  useEffect(() => {
+    const saved = getShuffle();
+    setState((s) => (s.shuffle !== saved ? { ...s, shuffle: saved } : s));
   }, []);
 
   // Persist playback state for restore on refresh
@@ -466,9 +476,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     });
   }, [stopAllBeforePlay, playLocal, playSource, getAdvanceState]);
 
-  const next = useCallback(() => {
+  const next = useCallback((opts?: { skipPlay?: boolean } | unknown) => {
     if (!deviceModeAllowsLocalPlayback.current) return;
     if (transportLockRef.current) return;
+    const skipPlay = opts && typeof opts === "object" && "skipPlay" in opts && (opts as { skipPlay?: boolean }).skipPlay === true;
     transportLockRef.current = true;
     setState((s) => {
       if (!s.currentSource) {
@@ -484,10 +495,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         const track = tracks[nextIdx];
         const url = track?.url ?? s.currentSource.url;
         const embedded = track ? canEmbedInCard(track.type) : false;
-        if (!embedded && url) {
+        if (!skipPlay && !embedded && url) {
           stopAllBeforePlay();
           playLocal(url);
         }
+        transportLockRef.current = false;
         return getAdvanceState(s, nextIdx);
       }
 
@@ -498,10 +510,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         const track = tracks[0];
         const url = track?.url ?? s.currentSource.url;
         const embedded = track ? canEmbedInCard(track.type) : false;
-        if (!embedded && url) {
+        if (!skipPlay && !embedded && url) {
           stopAllBeforePlay();
           playLocal(url);
         }
+        transportLockRef.current = false;
         return getAdvanceState(s, 0);
       }
 
@@ -518,13 +531,25 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             transportLockRef.current = false;
             return s;
           }
-          queueMicrotask(() => {
-            try {
-              playSource(nextSource);
-            } finally {
-              transportLockRef.current = false;
-            }
-          });
+          if (!skipPlay) {
+            queueMicrotask(() => {
+              try {
+                playSource(nextSource);
+              } finally {
+                transportLockRef.current = false;
+              }
+            });
+          } else {
+            transportLockRef.current = false;
+            return {
+              ...s,
+              currentSource: nextSource,
+              currentPlaylist: nextSource.playlist ?? s.currentPlaylist,
+              currentTrackIndex: 0,
+              queueIndex: nextQueueIdx % s.queue.length,
+              status: "playing" as const,
+            };
+          }
         }
         return s;
       }
@@ -533,16 +558,117 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     });
   }, [stopAllBeforePlay, playLocal, playSource, getShuffledIndex, getAdvanceState, stop]);
 
+  const getNextStreamUrl = useCallback((): string | null => {
+    return (() => {
+      const s = state;
+      if (!s.currentSource) return null;
+      const playlist = s.currentPlaylist;
+      const tracks = playlist ? getPlaylistTracks(playlist) : [];
+      const trackCount = tracks.length || 1;
+
+      if (trackCount > 1 && s.currentTrackIndex < trackCount - 1) {
+        const nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
+        const track = tracks[nextIdx];
+        const url = track?.url ?? s.currentSource.url;
+        const embedded = track ? canEmbedInCard(track.type) : false;
+        return !embedded && url ? url : null;
+      }
+
+      const atLastTrack = s.currentTrackIndex >= trackCount - 1;
+      const atLastInQueue = s.queueIndex >= s.queue.length - 1 || s.queue.length <= 1;
+
+      if (atLastTrack && s.repeat && trackCount >= 1) {
+        const track = tracks[0];
+        const url = track?.url ?? s.currentSource.url;
+        const embedded = track ? canEmbedInCard(track.type) : false;
+        return !embedded && url ? url : null;
+      }
+
+      if (s.queue.length >= 1 && atLastTrack) {
+        const nextQueueIdx = s.shuffle
+          ? getShuffledIndex(s.queue.length, atLastInQueue ? -1 : s.queueIndex)
+          : atLastInQueue
+            ? 0
+            : s.queueIndex + 1;
+        const nextSource = s.queue[nextQueueIdx % s.queue.length];
+        if (nextSource && nextSource.id !== s.currentSource.id) {
+          const t = unifiedToPlaybackTrack(nextSource, 0);
+          const embedded = t ? canEmbedInCard(t.type) : false;
+          return !embedded && t?.url ? t.url : null;
+        }
+      }
+      return null;
+    })();
+  }, [state, getShuffledIndex]);
+
+  /** Next embedded source for YouTube AutoMix. Returns YouTube only (Phase 1). */
+  const getNextEmbeddedSource = useCallback((): { type: "youtube"; url: string; videoId: string } | null => {
+    const s = state;
+    if (!s.currentSource) return null;
+    const playlist = s.currentPlaylist;
+    const tracks = playlist ? getPlaylistTracks(playlist) : [];
+    const trackCount = tracks.length || 1;
+
+    if (trackCount > 1 && s.currentTrackIndex < trackCount - 1) {
+      const nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
+      const track = tracks[nextIdx];
+      const url = track?.url ?? s.currentSource.url;
+      const embedded = track ? canEmbedInCard(track.type) : false;
+      if (embedded && url && track?.type === "youtube") {
+        const videoId = getYouTubeVideoId(url);
+        return videoId ? { type: "youtube", url, videoId } : null;
+      }
+      return null;
+    }
+
+    const atLastTrack = s.currentTrackIndex >= trackCount - 1;
+    const atLastInQueue = s.queueIndex >= s.queue.length - 1 || s.queue.length <= 1;
+
+    if (atLastTrack && s.repeat && trackCount >= 1) {
+      const track = tracks[0];
+      const url = track?.url ?? s.currentSource.url;
+      const embedded = track ? canEmbedInCard(track.type) : false;
+      if (embedded && url && track?.type === "youtube") {
+        const videoId = getYouTubeVideoId(url);
+        return videoId ? { type: "youtube", url, videoId } : null;
+      }
+      return null;
+    }
+
+    if (s.queue.length >= 1 && atLastTrack) {
+      const nextQueueIdx = s.shuffle
+        ? getShuffledIndex(s.queue.length, atLastInQueue ? -1 : s.queueIndex)
+        : atLastInQueue
+          ? 0
+          : s.queueIndex + 1;
+      const nextSource = s.queue[nextQueueIdx % s.queue.length];
+      if (nextSource && nextSource.id !== s.currentSource.id) {
+        const t = unifiedToPlaybackTrack(nextSource, 0);
+        const embedded = t ? canEmbedInCard(t.type) : false;
+        if (embedded && t?.url && t.type === "youtube") {
+          const videoId = getYouTubeVideoId(t.url);
+          return videoId ? { type: "youtube", url: t.url, videoId } : null;
+        }
+      }
+    }
+    return null;
+  }, [state, getShuffledIndex]);
+
   const setVolume = useCallback((value: number) => {
     setState((s) => ({ ...s, volume: Math.max(0, Math.min(100, value)) }));
   }, []);
 
   const setShuffle = useCallback((value: boolean) => {
+    setShufflePreference(value);
     setState((s) => ({ ...s, shuffle: value }));
   }, []);
 
   const toggleShuffle = useCallback(() => {
-    setState((s) => ({ ...s, shuffle: !s.shuffle }));
+    setState((s) => {
+      const next = !s.shuffle;
+      setShufflePreference(next);
+      return { ...s, shuffle: next };
+    });
   }, []);
 
   const setRepeat = useCallback((value: boolean) => {
@@ -623,6 +749,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       registerSeekCallback,
       currentPlayUrl,
       isEmbedded,
+      getNextStreamUrl,
+      getNextEmbeddedSource,
     }),
     [
       state,
@@ -648,6 +776,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       registerSeekCallback,
       currentPlayUrl,
       isEmbedded,
+      getNextStreamUrl,
+      getNextEmbeddedSource,
     ],
   );
 

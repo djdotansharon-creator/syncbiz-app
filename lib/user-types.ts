@@ -35,6 +35,8 @@ export type User = {
   passwordHash?: string;
   /** Optional; not required for first slice. */
   name?: string;
+  firstName?: string;
+  lastName?: string;
 };
 
 /** Membership – user ↔ tenant, tenant-level role. */

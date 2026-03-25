@@ -34,6 +34,7 @@ export type RadioCreateInput = {
   genre?: string;
   cover?: string | null;
   branchId?: string;
+  tenantId?: string;
 };
 
 export async function listRadioStations(): Promise<RadioStream[]> {
@@ -56,6 +57,16 @@ export async function listRadioStations(): Promise<RadioStream[]> {
   }
 
   return stations.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+}
+
+export async function listRadioStationsForTenant(tenantId: string): Promise<RadioStream[]> {
+  const all = await listRadioStations();
+  const tid = (tenantId ?? "").trim();
+  if (!tid) return [];
+  if (tid === "tnt-default") {
+    return all.filter((s) => !s.tenantId || s.tenantId === tid);
+  }
+  return all.filter((s) => s.tenantId === tid);
 }
 
 export async function getRadioStation(id: string): Promise<RadioStream | null> {
@@ -82,6 +93,7 @@ export async function createRadioStation(input: RadioCreateInput): Promise<Radio
     genre: (input.genre ?? "Radio").trim(),
     cover: input.cover ?? null,
     branchId,
+    tenantId: input.tenantId?.trim() || undefined,
     createdAt: new Date().toISOString(),
   };
   const toWrite = { ...station, title: station.name, type: "radio" as const };

@@ -37,7 +37,10 @@ declare global {
           width?: number;
           height?: number;
           playerVars?: Record<string, unknown>;
-          events?: { onReady?: (e: { target: YTPlayerTarget }) => void };
+          events?: {
+            onReady?: (e: { target: YTPlayerTarget }) => void;
+            onStateChange?: (e: { data: number }) => void;
+          };
         },
       ) => unknown;
       PlayerState: {

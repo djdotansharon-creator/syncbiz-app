@@ -6,6 +6,7 @@
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { dirname } from "path";
+import { createHash, randomBytes } from "crypto";
 import { getUsersDataPath } from "./data-path";
 import { hashPassword } from "./password-utils";
 import { emitEvent, EVENT_TYPES } from "./analytics-boundary";
@@ -25,6 +26,15 @@ type PersistedData = {
   users: User[];
   memberships: Membership[];
   branchAssignments: UserBranchAssignment[];
+  resetTokens?: PasswordResetToken[];
+};
+
+type PasswordResetToken = {
+  tokenHash: string;
+  userId: string;
+  createdAt: string;
+  expiresAt: string;
+  usedAt?: string;
 };
 
 const tenants = new Map<string, Tenant>();
@@ -32,8 +42,7 @@ const users = new Map<string, User>();
 const usersByEmail = new Map<string, string>();
 const membershipsByUser = new Map<string, Membership[]>();
 const branchAssignmentsByUser = new Map<string, UserBranchAssignment[]>();
-
-let loaded = false;
+let resetTokens: PasswordResetToken[] = [];
 
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
@@ -46,8 +55,12 @@ async function ensureDataDir(): Promise<void> {
 }
 
 async function loadFromFile(): Promise<void> {
-  if (loaded) return;
-  loaded = true;
+  tenants.clear();
+  users.clear();
+  usersByEmail.clear();
+  membershipsByUser.clear();
+  branchAssignmentsByUser.clear();
+  resetTokens = [];
   const path = getUsersDataPath();
   try {
     if (!existsSync(path)) {
@@ -71,6 +84,7 @@ async function loadFromFile(): Promise<void> {
       list.push(a);
       branchAssignmentsByUser.set(a.userId, list);
     });
+    resetTokens = Array.isArray(data.resetTokens) ? data.resetTokens : [];
     if (tenants.size === 0) {
       tenants.set(DEFAULT_TENANT_ID, {
         id: DEFAULT_TENANT_ID,
@@ -82,15 +96,36 @@ async function loadFromFile(): Promise<void> {
     if (needsLegacy) {
       await seedLegacyAndSave();
     }
+    const needsIdentityPatch = patchLegacyIdentityDefaults();
+    if (needsIdentityPatch) {
+      await saveToFile();
+    }
   } catch (e) {
     console.warn("[user-store] Load failed, seeding fresh:", e);
-    tenants.clear();
-    users.clear();
-    usersByEmail.clear();
-    membershipsByUser.clear();
-    branchAssignmentsByUser.clear();
     await seedLegacyAndSave();
   }
+}
+
+function patchLegacyIdentityDefaults(): boolean {
+  let changed = false;
+  const tenant = tenants.get(DEFAULT_TENANT_ID);
+  if (tenant && tenant.name === "SyncBiz Demo") {
+    tenants.set(DEFAULT_TENANT_ID, { ...tenant, name: "Octopus DJ" });
+    changed = true;
+  }
+  const demoNameByEmail: Record<string, string> = {
+    "djdotansharon@gmail.com": "Dotan Sharon",
+    "test@syncbiz.com": "Test User",
+  };
+  for (const user of users.values()) {
+    if (user.tenantId !== DEFAULT_TENANT_ID) continue;
+    if (user.name?.trim()) continue;
+    const mapped = demoNameByEmail[user.email.trim().toLowerCase()];
+    if (!mapped) continue;
+    users.set(user.id, { ...user, name: mapped });
+    changed = true;
+  }
+  return changed;
 }
 
 async function seedLegacyAndSave(): Promise<void> {
@@ -132,6 +167,7 @@ async function saveToFile(): Promise<void> {
     users: [...users.values()].map((u) => ({ ...u })),
     memberships: [...membershipsByUser.values()].flat(),
     branchAssignments: [...branchAssignmentsByUser.values()].flat(),
+    resetTokens: [...resetTokens],
   };
   await writeFile(path, JSON.stringify(data, null, 2), "utf-8");
 }
@@ -184,6 +220,11 @@ export async function getUserById(userId: string): Promise<User | null> {
   return users.get(userId) ?? null;
 }
 
+export async function getTenantById(tenantId: string): Promise<Tenant | null> {
+  await loadFromFile();
+  return tenants.get(tenantId) ?? null;
+}
+
 /** List all users. */
 export async function listUsers(): Promise<User[]> {
   await loadFromFile();
@@ -199,6 +240,8 @@ export async function createUser(params: {
   password: string;
   tenantRole: TenantRole;
   branchAssignments: Array<{ branchId: string; role: BranchRole }>;
+  tenantId: string;
+  name?: string;
 }): Promise<User> {
   await loadFromFile();
   const norm = params.email?.trim().toLowerCase();
@@ -211,17 +254,25 @@ export async function createUser(params: {
   }
   const now = new Date().toISOString();
   const id = generateId("usr");
+  const tenantId = (params.tenantId ?? "").trim();
+  if (!tenantId) {
+    throw new Error("tenantId is required for user creation");
+  }
+  if (!tenants.has(tenantId)) {
+    throw new Error("tenantId does not exist");
+  }
   const user: User = {
     id,
     email: norm,
-    tenantId: DEFAULT_TENANT_ID,
+    tenantId,
     createdAt: now,
     passwordHash: hashPassword(params.password),
+    name: params.name?.trim() || undefined,
   };
   users.set(id, user);
   usersByEmail.set(norm, id);
   membershipsByUser.set(id, [
-    { userId: id, tenantId: DEFAULT_TENANT_ID, role: params.tenantRole },
+    { userId: id, tenantId, role: params.tenantRole },
   ]);
   const assignments = (params.branchAssignments ?? []).length > 0
     ? params.branchAssignments.map((a) => ({
@@ -234,6 +285,84 @@ export async function createUser(params: {
   await saveToFile();
   emitEvent(EVENT_TYPES.USER_CREATED, { userId: id, email: norm });
   return { ...user, passwordHash: undefined };
+}
+
+export async function createWorkspaceOwner(params: {
+  email: string;
+  password: string;
+  workspaceName: string;
+  ownerName?: string;
+}): Promise<{ user: User; tenant: Tenant }> {
+  await loadFromFile();
+  const norm = params.email?.trim().toLowerCase();
+  if (!norm) throw new Error("Email required");
+  if (!params.password || params.password.length < 6) throw new Error("Password must be at least 6 characters");
+  if (usersByEmail.has(norm)) throw new Error("User already exists");
+
+  const now = new Date().toISOString();
+  const tenantId = generateId("tnt");
+  if (!tenantId || tenantId === DEFAULT_TENANT_ID) {
+    throw new Error("Failed to allocate isolated tenant");
+  }
+  const tenant: Tenant = {
+    id: tenantId,
+    name: params.workspaceName?.trim() || "SyncBiz Workspace",
+    createdAt: now,
+  };
+  tenants.set(tenantId, tenant);
+  // Persist tenant first so createUser() reload/validation sees it.
+  await saveToFile();
+
+  const created = await createUser({
+    email: norm,
+    password: params.password,
+    tenantRole: "TENANT_OWNER",
+    branchAssignments: [{ branchId: DEFAULT_BRANCH_ID, role: "BRANCH_MANAGER" }],
+    tenantId,
+    name: params.ownerName,
+  });
+  return { user: created, tenant };
+}
+
+function hashResetToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+export async function createPasswordResetToken(email: string): Promise<string | null> {
+  await loadFromFile();
+  const user = await getUserByEmail(email);
+  if (!user) return null;
+  const rawToken = randomBytes(32).toString("hex");
+  const now = new Date();
+  const expires = new Date(now.getTime() + 1000 * 60 * 30); // 30 minutes
+  resetTokens = resetTokens.filter((t) => !(t.userId === user.id && !t.usedAt));
+  resetTokens.push({
+    tokenHash: hashResetToken(rawToken),
+    userId: user.id,
+    createdAt: now.toISOString(),
+    expiresAt: expires.toISOString(),
+  });
+  await saveToFile();
+  return rawToken;
+}
+
+export async function resetPasswordWithToken(token: string, newPassword: string): Promise<"ok" | "invalid_token" | "expired" | "weak_password"> {
+  await loadFromFile();
+  if (!newPassword || newPassword.length < 6) return "weak_password";
+  const tokenHash = hashResetToken(token);
+  const idx = resetTokens.findIndex((t) => t.tokenHash === tokenHash && !t.usedAt);
+  if (idx < 0) return "invalid_token";
+  const rec = resetTokens[idx];
+  if (new Date(rec.expiresAt).getTime() < Date.now()) return "expired";
+  const user = users.get(rec.userId);
+  if (!user) return "invalid_token";
+  users.set(user.id, {
+    ...user,
+    passwordHash: hashPassword(newPassword),
+  });
+  resetTokens[idx] = { ...rec, usedAt: new Date().toISOString() };
+  await saveToFile();
+  return "ok";
 }
 
 /** Get tenant-level role for user. */

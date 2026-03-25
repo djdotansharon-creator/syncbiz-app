@@ -121,12 +121,12 @@ function LoginForm() {
                 />
                 Remember me
               </label>
-              <button
-                type="button"
+              <Link
+                href="/reset-password"
                 className="text-sky-400 hover:text-sky-300"
               >
                 Forgot password?
-              </button>
+              </Link>
             </div>
             <button
               type="submit"

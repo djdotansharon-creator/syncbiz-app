@@ -7,10 +7,16 @@ import type { PlaylistType, PlaylistTrack } from "@/lib/playlist-types";
 
 const VALID_TYPES: PlaylistType[] = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"];
 
-async function requirePlaylistAccess(playlist: { branchId?: string } | null) {
+async function requirePlaylistAccess(playlist: { branchId?: string; tenantId?: string } | null) {
   const user = await getCurrentUserFromCookies();
   if (!user) return { ok: false as const, status: 401 } as const;
   if (!playlist) return { ok: false as const, status: 404 } as const;
+  if (playlist.tenantId && playlist.tenantId !== user.tenantId) {
+    return { ok: false as const, status: 404 } as const;
+  }
+  if (!playlist.tenantId && user.tenantId !== "tnt-default") {
+    return { ok: false as const, status: 404 } as const;
+  }
   const branchId = resolveMediaBranchId(playlist);
   if (!(await hasBranchAccess(user.id, branchId))) {
     return { ok: false as const, status: 403 } as const;

@@ -55,6 +55,17 @@ export async function listPlaylists(): Promise<Playlist[]> {
   return playlists.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 }
 
+export async function listPlaylistsForTenant(tenantId: string): Promise<Playlist[]> {
+  const all = await listPlaylists();
+  const tid = (tenantId ?? "").trim();
+  if (!tid) return [];
+  if (tid === "tnt-default") {
+    // Backward compatibility: legacy records without tenantId belong to demo tenant.
+    return all.filter((p) => !p.tenantId || p.tenantId === tid);
+  }
+  return all.filter((p) => p.tenantId === tid);
+}
+
 export async function getPlaylist(id: string): Promise<Playlist | null> {
   await ensurePlaylistsDir();
   try {
@@ -81,6 +92,7 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
     id,
     thumbnail,
     branchId,
+    tenantId: input.tenantId?.trim() || undefined,
     createdAt: new Date().toISOString(),
   };
   const toWrite = { ...playlist, cover: thumbnail || undefined };

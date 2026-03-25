@@ -4,11 +4,14 @@ import { useState, useEffect } from "react";
 
 type UserSummary = { id: string; email: string; tenantId: string; createdAt: string };
 type BranchOption = { id: string; name: string };
+type SessionSummary = { accessType?: "OWNER" | "BRANCH_USER"; branchIds?: string[] };
 
 export function AdminUsersSection() {
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [canManage, setCanManage] = useState(false);
+  const [myAccessType, setMyAccessType] = useState<"OWNER" | "BRANCH_USER" | null>(null);
+  const [myBranchIds, setMyBranchIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -16,6 +19,10 @@ export function AdminUsersSection() {
   const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>(["default"]);
   const [status, setStatus] = useState<"idle" | "creating" | "error" | "ok">("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  const [newBranchName, setNewBranchName] = useState("");
+  const [newBranchId, setNewBranchId] = useState("");
+  const [branchCreateStatus, setBranchCreateStatus] = useState<"idle" | "creating" | "error" | "ok">("idle");
+  const [branchCreateError, setBranchCreateError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -26,8 +33,11 @@ export function AdminUsersSection() {
     ])
       .then(([me, list, branchList]) => {
         if (cancelled) return;
-        const at = (me as { accessType?: string }).accessType;
+        const meData = me as SessionSummary;
+        const at = meData.accessType;
         setCanManage(at === "OWNER");
+        setMyAccessType(at ?? null);
+        setMyBranchIds(Array.isArray(meData.branchIds) ? meData.branchIds : []);
         setUsers(Array.isArray(list) ? list : []);
         const branchOpts = Array.isArray(branchList)
           ? branchList.map((b: { id: string; name: string }) => ({ id: b.id, name: b.name }))
@@ -84,6 +94,50 @@ export function AdminUsersSection() {
     }
   };
 
+  const reloadBranches = async () => {
+    const res = await fetch("/api/branches");
+    const branchList = res.ok ? await res.json() : [];
+    const branchOpts = Array.isArray(branchList)
+      ? branchList.map((b: { id: string; name: string }) => ({ id: b.id, name: b.name }))
+      : [];
+    if (branchOpts.length > 0 && !branchOpts.some((b) => b.id === "default")) {
+      branchOpts.unshift({ id: "default", name: "Default" });
+    }
+    const next = branchOpts.length > 0 ? branchOpts : [{ id: "default", name: "Default" }];
+    setBranches(next);
+    setSelectedBranchIds((prev) => prev.filter((id) => next.some((b) => b.id === id)));
+  };
+
+  const handleCreateBranch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBranchCreateStatus("creating");
+    setBranchCreateError("");
+    try {
+      const payload = {
+        name: newBranchName.trim(),
+        id: newBranchId.trim() || undefined,
+      };
+      const res = await fetch("/api/branches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setBranchCreateStatus("error");
+        setBranchCreateError(data.error ?? "Failed to create branch");
+        return;
+      }
+      setBranchCreateStatus("ok");
+      setNewBranchName("");
+      setNewBranchId("");
+      await reloadBranches();
+    } catch {
+      setBranchCreateStatus("error");
+      setBranchCreateError("Network error");
+    }
+  };
+
   if (loading || !canManage) return null;
 
   return (
@@ -92,6 +146,42 @@ export function AdminUsersSection() {
       <p className="mt-0.5 text-xs text-slate-400">
         Create additional users. V1: Owner (full account) or Branch User (assigned branches only).
       </p>
+      <p className="mt-2 text-xs text-slate-500">
+        Current session scope: {myAccessType ?? "UNKNOWN"} | branches: {myBranchIds.length > 0 ? myBranchIds.join(", ") : "none"}
+      </p>
+      <form onSubmit={handleCreateBranch} className="mt-4 space-y-3 rounded-lg border border-slate-800/60 bg-slate-900/30 p-3">
+        <p className="text-xs font-medium text-slate-300">Create branch for validation</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="block text-xs text-slate-500">Branch name</label>
+            <input
+              value={newBranchName}
+              onChange={(e) => setNewBranchName(e.target.value)}
+              required
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder-slate-500"
+              placeholder="Branch A"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500">Branch id (optional)</label>
+            <input
+              value={newBranchId}
+              onChange={(e) => setNewBranchId(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder-slate-500"
+              placeholder="branch-a"
+            />
+          </div>
+        </div>
+        {branchCreateStatus === "error" && <p className="text-xs text-red-400">{branchCreateError}</p>}
+        {branchCreateStatus === "ok" && <p className="text-xs text-emerald-400">Branch created</p>}
+        <button
+          type="submit"
+          disabled={branchCreateStatus === "creating"}
+          className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-700 disabled:opacity-50"
+        >
+          {branchCreateStatus === "creating" ? "Creating…" : "Create branch"}
+        </button>
+      </form>
       <form onSubmit={handleCreate} className="mt-4 space-y-3">
         <div>
           <label className="block text-xs text-slate-500">Email</label>

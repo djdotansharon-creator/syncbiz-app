@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { listPlaylists } from "@/lib/playlist-store";
-import { listRadioStations } from "@/lib/radio-store";
+import { listPlaylistsForTenant } from "@/lib/playlist-store";
+import { listRadioStationsForTenant } from "@/lib/radio-store";
 import { radioToUnified } from "@/lib/radio-utils";
 import { db } from "@/lib/store";
 import { getDeletedSourceIds } from "@/lib/deleted-sources-store";
@@ -12,6 +12,10 @@ import type { Source } from "@/lib/types";
 import { getSourceArtworkUrl, detectProvider } from "@/lib/player-utils";
 import { getYouTubeThumbnail } from "@/lib/playlist-utils";
 import { inferGenre } from "@/lib/infer-genre";
+
+function resolveAccountScope(userTenantId: string): string {
+  return userTenantId === "tnt-default" ? "acct-demo-001" : userTenantId;
+}
 
 function playlistToUnified(p: Playlist): UnifiedSource {
   const cover = p.thumbnail || p.cover || null;
@@ -59,9 +63,9 @@ export async function GET() {
   }
   try {
     const [playlists, radioStations, dbSources, deletedIds] = await Promise.all([
-      listPlaylists(),
-      listRadioStations(),
-      Promise.resolve(db.getSources()),
+      listPlaylistsForTenant(user.tenantId),
+      listRadioStationsForTenant(user.tenantId),
+      Promise.resolve(db.getSources(resolveAccountScope(user.tenantId))),
       getDeletedSourceIds(),
     ]);
 

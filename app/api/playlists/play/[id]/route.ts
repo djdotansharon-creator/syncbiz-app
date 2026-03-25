@@ -21,6 +21,9 @@ export async function POST(
   if (!playlist) {
     return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
   }
+  if ((playlist.tenantId && playlist.tenantId !== user.tenantId) || (!playlist.tenantId && user.tenantId !== "tnt-default")) {
+    return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
+  }
   const branchId = resolveMediaBranchId(playlist);
   if (!(await hasBranchAccess(user.id, branchId))) {
     return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
