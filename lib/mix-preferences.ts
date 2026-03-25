@@ -25,6 +25,7 @@ export function getMixDuration(): MixDuration {
 }
 
 const MIX_DURATION_CHANGED = "syncbiz-mix-duration-changed";
+const AUTOMIX_CHANGED = "syncbiz-automix-changed";
 
 export function setMixDuration(seconds: MixDuration): void {
   if (typeof window === "undefined") return;
@@ -60,9 +61,18 @@ export function setAutoMix(value: boolean): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY_AUTOMIX, value ? "1" : "0");
+    window.dispatchEvent(new CustomEvent(AUTOMIX_CHANGED, { detail: value }));
   } catch {
     /* ignore */
   }
+}
+
+/** Subscribe to AutoMix preference changes (localStorage-driven). */
+export function onAutoMixChanged(cb: (value: boolean) => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const handler = (e: Event) => cb((e as CustomEvent<boolean>).detail);
+  window.addEventListener(AUTOMIX_CHANGED, handler);
+  return () => window.removeEventListener(AUTOMIX_CHANGED, handler);
 }
 
 /** Shuffle/Random on/off. Client-only read to avoid SSR/hydration mismatch. */

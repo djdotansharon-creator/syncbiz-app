@@ -93,6 +93,7 @@ export const labels: Record<string, { en: string; he: string }> = {
   announcements: { en: "Announcements", he: "הכרזות" },
   logs: { en: "Logs", he: "לוגים" },
   settings: { en: "Settings", he: "הגדרות" },
+  "access-control": { en: "Access Control", he: "Access Control" },
   architecture: { en: "Architecture", he: "ארכיטקטורה" },
   playlists: { en: "Playlists", he: "פלייליסטים" },
   library: { en: "Library", he: "ספרייה" },

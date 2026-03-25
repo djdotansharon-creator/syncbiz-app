@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { usePlayback } from "@/lib/playback-provider";
 import { useRemoteControlWs } from "@/lib/remote-control/ws-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
+import { getAutoMix } from "@/lib/mix-preferences";
 
 /** Publishes playback state to the station server when this device is the active player. */
 export function StationPlayerSync({ deviceId }: { deviceId: string }) {
@@ -12,6 +13,7 @@ export function StationPlayerSync({ deviceId }: { deviceId: string }) {
     status: playStatus,
     currentSource,
     currentTrackIndex,
+    shuffle,
     queue,
     queueIndex,
   } = usePlayback();
@@ -25,13 +27,15 @@ export function StationPlayerSync({ deviceId }: { deviceId: string }) {
       currentSource,
       currentTrackIndex,
       queue,
-      queueIndex
+      queueIndex,
+      shuffle,
+      getAutoMix()
     );
     const key = JSON.stringify(state);
     if (key === lastSentRef.current) return;
     lastSentRef.current = key;
     sendState(state);
-  }, [status, sendState, playStatus, currentSource?.id, currentTrackIndex, queue, queueIndex]);
+  }, [status, sendState, playStatus, currentSource?.id, currentTrackIndex, shuffle, queue, queueIndex]);
 
   return null;
 }

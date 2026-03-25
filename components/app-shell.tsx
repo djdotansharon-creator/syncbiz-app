@@ -137,6 +137,7 @@ const navKeys = [
   "schedules",
   "logs",
   "settings",
+  "access-control",
   "architecture",
 ] as const;
 const navItems = navKeys.map((key) => ({

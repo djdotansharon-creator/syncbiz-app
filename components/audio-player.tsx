@@ -45,7 +45,7 @@ function ytXfadeLog(phase: string, data?: Record<string, unknown>) {
 /** Seconds before mix window to start preloading next YT player. YT iframe load typically takes 3–10s. */
 const YT_PRELOAD_BUFFER_SEC = 12;
 import { useDevicePlayer } from "@/lib/device-player-context";
-import { getMixDuration, getAutoMix, setAutoMix as persistAutoMix, onMixDurationChanged } from "@/lib/mix-preferences";
+import { getMixDuration, getAutoMix, setAutoMix as persistAutoMix, onMixDurationChanged, onAutoMixChanged } from "@/lib/mix-preferences";
 import type { SCWidget } from "@/types/yt-sc";
 
 function isHlsUrl(url: string | null): boolean {
@@ -840,6 +840,7 @@ export function AudioPlayer() {
 
   useEffect(() => {
     setAutoMixState(getAutoMix());
+    return onAutoMixChanged((v) => setAutoMixState(v));
   }, []);
 
   const setAutoMix = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
@@ -1112,6 +1113,10 @@ export function AudioPlayer() {
   const displayVolume = isControlMirror
     ? (typeof ms?.volume === "number" && Number.isFinite(ms.volume) ? ms.volume : 80)
     : volume;
+  const displayShuffle =
+    isControlMirror ? (typeof ms?.shuffle === "boolean" ? ms?.shuffle : shuffle) : shuffle;
+  const displayAutoMix =
+    isControlMirror ? (typeof ms?.autoMix === "boolean" ? ms?.autoMix : autoMix) : autoMix;
   const displayThumbnailCover =
     isControlMirror
       ? (ms?.currentTrack?.cover ?? ms?.currentSource?.cover ?? null)
@@ -1373,12 +1378,36 @@ export function AudioPlayer() {
                 </svg>
               </NeonControlButton>
               <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
-              <NeonControlButton size="2xs" variant="cyan" className="!rounded-lg" onClick={() => !isControlMirror && setAutoMix((a) => !a)} active={autoMix} disabled={isControlMirror} aria-label="AutoMix" title="AutoMix">
+              <NeonControlButton
+                size="2xs"
+                variant="cyan"
+                className="!rounded-lg"
+                onClick={() => {
+                  if (!isControlMirror) setAutoMix((a) => !a);
+                  else deviceCtx?.setAutoMixOrSend?.(!displayAutoMix);
+                }}
+                active={displayAutoMix}
+                disabled={!displayHasContent}
+                aria-label="AutoMix"
+                title="AutoMix"
+              >
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
                 </svg>
               </NeonControlButton>
-              <NeonControlButton size="2xs" variant="cyan" className="!rounded-lg" onClick={() => !isControlMirror && toggleShuffle()} active={shuffle} disabled={isControlMirror} aria-label="Random" title="Random">
+              <NeonControlButton
+                size="2xs"
+                variant="cyan"
+                className="!rounded-lg"
+                onClick={() => {
+                  if (!isControlMirror) toggleShuffle();
+                  else deviceCtx?.setShuffleOrSend?.(!displayShuffle);
+                }}
+                active={displayShuffle}
+                disabled={!displayHasContent}
+                aria-label="Random"
+                title="Random"
+              >
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 4l5 5-5 5M20 4l-5 5 5 5M20 20l-5-5 5-5M4 20l5-5-5-5" />
                 </svg>
@@ -1499,31 +1528,31 @@ export function AudioPlayer() {
                       </div>
                       <div className="flex shrink-0 flex-col items-stretch gap-2 border-l border-slate-700/50 pl-2">
                         {/* AutoMix status: two-part module [ ● AUTOMIX ] [ 9S ] */}
-                        <div className="flex items-center gap-1" role="status" aria-label={autoMix ? `AutoMix ${mixDurationDisplay}s` : "AutoMix off"} title={autoMix ? `AutoMix on, ${mixDurationDisplay}s crossfade` : "AutoMix off"}>
+                        <div className="flex items-center gap-1" role="status" aria-label={displayAutoMix ? `AutoMix ${mixDurationDisplay}s` : "AutoMix off"} title={displayAutoMix ? `AutoMix on, ${mixDurationDisplay}s crossfade` : "AutoMix off"}>
                           <div className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 ${
-                            autoMix ? "border-cyan-500/30 bg-slate-800/50" : "border-slate-600/30 bg-slate-800/20"
+                            displayAutoMix ? "border-cyan-500/30 bg-slate-800/50" : "border-slate-600/30 bg-slate-800/20"
                           }`}>
                             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                              autoMix ? "bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" : "bg-slate-500/50"
+                              displayAutoMix ? "bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" : "bg-slate-500/50"
                             }`} aria-hidden />
-                            <span className={`text-[9px] font-semibold uppercase tracking-wider ${autoMix ? "text-cyan-400" : "text-slate-500"}`}>
+                            <span className={`text-[9px] font-semibold uppercase tracking-wider ${displayAutoMix ? "text-cyan-400" : "text-slate-500"}`}>
                               {(t?.autoMix ?? "AUTOMIX").toUpperCase()}
                             </span>
                           </div>
                           <div className={`inline-flex min-w-[28px] items-center justify-center rounded border px-1 py-0.5 tabular-nums ${
-                            autoMix ? "border-cyan-500/30 bg-slate-800/50 text-cyan-400 text-[10px] font-bold" : "border-slate-600/30 bg-slate-800/20 text-slate-500 text-[10px] font-bold"
+                            displayAutoMix ? "border-cyan-500/30 bg-slate-800/50 text-cyan-400 text-[10px] font-bold" : "border-slate-600/30 bg-slate-800/20 text-slate-500 text-[10px] font-bold"
                           }`}>
                             {mixDurationDisplay}S
                           </div>
                         </div>
                         {/* Random status: same modular language [ ● RANDOM ] */}
                         <div className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 w-fit ${
-                          shuffle ? "border-cyan-500/30 bg-slate-800/50" : "border-slate-600/30 bg-slate-800/20"
-                        }`} role="status" aria-label={shuffle ? "Random on" : "Random off"} title="Random">
+                          displayShuffle ? "border-cyan-500/30 bg-slate-800/50" : "border-slate-600/30 bg-slate-800/20"
+                        }`} role="status" aria-label={displayShuffle ? "Random on" : "Random off"} title="Random">
                           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                            shuffle ? "bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" : "bg-slate-500/50"
+                            displayShuffle ? "bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" : "bg-slate-500/50"
                           }`} aria-hidden />
-                          <span className={`text-[9px] font-semibold uppercase tracking-wider ${shuffle ? "text-cyan-400" : "text-slate-500"}`}>
+                          <span className={`text-[9px] font-semibold uppercase tracking-wider ${displayShuffle ? "text-cyan-400" : "text-slate-500"}`}>
                             {(t?.random ?? "RANDOM").toUpperCase()}
                           </span>
                         </div>

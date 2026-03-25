@@ -1,6 +1,5 @@
 import { DeviceModeSettingsSwitch } from "@/components/device-mode-settings-switch";
 import { MixDurationSetting } from "@/components/mix-duration-setting";
-import { AdminUsersSection } from "@/components/admin-users-section";
 
 export default function SettingsPage() {
   return (
@@ -11,8 +10,6 @@ export default function SettingsPage() {
           Account and playback preferences.
         </p>
       </div>
-
-      <AdminUsersSection />
 
       <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
         <h2 className="text-sm font-semibold text-slate-50">Remote player</h2>

@@ -19,7 +19,7 @@ export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "er
 export function useRemoteControlWs(
   role: "device" | "controller",
   deviceId: string | null,
-  onCommand?: (cmd: { command: string; payload?: { url?: string; source?: unknown } }) => void,
+  onCommand?: (cmd: { command: string; payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean } }) => void,
   onDeviceMode?: (mode: DeviceMode) => void,
   options?: {
     isMobile?: boolean;
@@ -192,7 +192,7 @@ export function useRemoteControlWs(
   const sendCommand = (
     targetDeviceId: string,
     command: RemoteCommand,
-    payload?: { url?: string; source?: unknown; position?: number; volume?: number }
+    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean }
   ) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === 1) {
@@ -432,7 +432,7 @@ export function useRemoteController(options?: {
   const sendCommand = (
     targetDeviceId: string,
     command: RemoteCommand,
-    payload?: { url?: string; source?: unknown; position?: number; volume?: number }
+    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean }
   ) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== 1) return;
@@ -659,7 +659,7 @@ export function useRemoteOwner() {
 
   const sendCommand = (
     command: RemoteCommand,
-    payload?: { url?: string; source?: unknown; position?: number; volume?: number }
+    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean }
   ) => {
     const ws = wsRef.current;
     const bid = selectedBranchId;

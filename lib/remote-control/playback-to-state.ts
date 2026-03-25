@@ -13,6 +13,8 @@ export function playbackToStationState(
   currentTrackIndex: number,
   queue: UnifiedSource[],
   queueIndex: number,
+  shuffle?: boolean,
+  autoMix?: boolean,
   positionDuration?: { position: number; duration: number },
   volume?: number
 ): StationPlaybackState {
@@ -34,6 +36,8 @@ export function playbackToStationState(
     currentTrackIndex,
     queue: queue.map((s) => ({ id: s.id, title: s.title, cover: s.cover ?? null })),
     queueIndex,
+    shuffle: typeof shuffle === "boolean" ? shuffle : undefined,
+    autoMix: typeof autoMix === "boolean" ? autoMix : undefined,
   };
 
   if (positionDuration && Number.isFinite(positionDuration.position) && Number.isFinite(positionDuration.duration)) {

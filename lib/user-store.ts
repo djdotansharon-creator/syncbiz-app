@@ -274,17 +274,150 @@ export async function createUser(params: {
   membershipsByUser.set(id, [
     { userId: id, tenantId, role: params.tenantRole },
   ]);
-  const assignments = (params.branchAssignments ?? []).length > 0
-    ? params.branchAssignments.map((a) => ({
-        userId: id,
-        branchId: (a.branchId ?? DEFAULT_BRANCH_ID).trim() || DEFAULT_BRANCH_ID,
-        role: a.role,
-      }))
-    : [{ userId: id, branchId: DEFAULT_BRANCH_ID, role: "BRANCH_CONTROLLER" as BranchRole }];
+
+  const rawAssignments = Array.isArray(params.branchAssignments) ? params.branchAssignments : [];
+  const tenantRequiresExplicitBranches = params.tenantRole === "TENANT_MEMBER";
+  if (tenantRequiresExplicitBranches) {
+    if (rawAssignments.length === 0) {
+      throw new Error("branchIds are required for BRANCH_USER");
+    }
+    if (rawAssignments.some((a) => !(typeof a?.branchId === "string" && a.branchId.trim().length > 0))) {
+      throw new Error("branchIds must be valid strings for BRANCH_USER");
+    }
+  }
+
+  const assignments =
+    rawAssignments.length > 0
+      ? rawAssignments.map((a) => ({
+          userId: id,
+          branchId: (a.branchId ?? DEFAULT_BRANCH_ID).trim() || DEFAULT_BRANCH_ID,
+          role: a.role,
+        }))
+      : [{ userId: id, branchId: DEFAULT_BRANCH_ID, role: "BRANCH_CONTROLLER" as BranchRole }];
+
   branchAssignmentsByUser.set(id, assignments);
   await saveToFile();
   emitEvent(EVENT_TYPES.USER_CREATED, { userId: id, email: norm });
   return { ...user, passwordHash: undefined };
+}
+
+/**
+ * List users for admin UI with resolved access scope.
+ * Loads operational maps once and computes scope without extra file reads.
+ */
+export async function listUsersWithScopeForTenant(tenantId: string): Promise<
+  Array<{
+    id: string;
+    email: string;
+    tenantId: string;
+    createdAt: string;
+    name?: string;
+    accessType: AccessType;
+    branchIds: string[];
+  }>
+> {
+  await loadFromFile();
+  const tid = (tenantId ?? "").trim();
+  const all = [...users.values()].filter((u) => u.tenantId === tid);
+  return all.map((u) => {
+    const memberships = membershipsByUser.get(u.id) ?? [];
+    const membership = memberships.find((m) => m.tenantId === tid) ?? memberships[0];
+    const role = membership?.role ?? null;
+    const accessType: AccessType = role === "TENANT_OWNER" || role === "TENANT_ADMIN" ? "OWNER" : "BRANCH_USER";
+    if (accessType === "OWNER") {
+      // For OWNER we treat access as "all branches" conceptually; return [] to avoid accidental assumptions.
+      return {
+        id: u.id,
+        email: u.email,
+        tenantId: u.tenantId,
+        createdAt: u.createdAt,
+        name: u.name,
+        accessType,
+        branchIds: [],
+      };
+    }
+    const assignments = branchAssignmentsByUser.get(u.id) ?? [];
+    const ids = [...new Set(assignments.map((a) => a.branchId))].map((x) => (x ?? "").trim()).filter(Boolean);
+    // No fallback: if branches are missing, return empty to keep admin mistakes visible.
+    return {
+      id: u.id,
+      email: u.email,
+      tenantId: u.tenantId,
+      createdAt: u.createdAt,
+      name: u.name,
+      accessType,
+      branchIds: ids,
+    };
+  });
+}
+
+/**
+ * Update existing user identity + access scope.
+ * Does not touch password (password changes remain out of scope for now).
+ */
+export async function updateUser(params: {
+  email: string;
+  tenantId: string;
+  tenantRole: TenantRole;
+  name?: string;
+  branchAssignments: Array<{ branchId: string; role: BranchRole }>;
+}): Promise<User> {
+  await loadFromFile();
+  const norm = params.email?.trim().toLowerCase();
+  if (!norm) throw new Error("Email required");
+  const id = usersByEmail.get(norm);
+  if (!id) throw new Error("User not found");
+  const existing = users.get(id);
+  if (!existing) throw new Error("User not found");
+
+  const tid = (params.tenantId ?? "").trim();
+  if (existing.tenantId !== tid) {
+    throw new Error("Forbidden: user not in this tenant");
+  }
+
+  const nextName =
+    typeof params.name === "string" ? params.name.trim() : undefined;
+
+  users.set(id, {
+    ...existing,
+    name: nextName && nextName.length > 0 ? nextName : nextName === "" ? undefined : existing.name,
+  });
+
+  // Replace tenant membership role for the target tenant.
+  const memberships = membershipsByUser.get(id) ?? [];
+  const nextMemberships = memberships
+    .filter((m) => m.tenantId !== tid)
+    .concat([{ userId: id, tenantId: tid, role: params.tenantRole } as Membership]);
+  membershipsByUser.set(id, nextMemberships);
+
+  // Replace branch assignments for the target user.
+  const rawAssignments = Array.isArray(params.branchAssignments) ? params.branchAssignments : [];
+  const tenantRequiresExplicitBranches = params.tenantRole === "TENANT_MEMBER";
+  if (tenantRequiresExplicitBranches) {
+    if (rawAssignments.length === 0) {
+      throw new Error("branchIds are required for BRANCH_USER");
+    }
+    if (rawAssignments.some((a) => !(typeof a?.branchId === "string" && a.branchId.trim().length > 0))) {
+      throw new Error("branchIds must be valid strings for BRANCH_USER");
+    }
+  }
+
+  const assignments =
+    rawAssignments.length > 0
+      ? rawAssignments.map((a) => ({
+          userId: id,
+          branchId: (a.branchId ?? DEFAULT_BRANCH_ID).trim() || DEFAULT_BRANCH_ID,
+          role: a.role,
+        }))
+      : [{ userId: id, branchId: DEFAULT_BRANCH_ID, role: "BRANCH_CONTROLLER" as BranchRole }];
+  branchAssignmentsByUser.set(id, assignments);
+
+  await saveToFile();
+  emitEvent(EVENT_TYPES.USER_UPDATED, { userId: id, email: norm });
+  emitEvent(EVENT_TYPES.BRANCH_ASSIGNMENT_CHANGED, { userId: id, email: norm });
+
+  const updated = users.get(id)!;
+  return { ...updated, passwordHash: undefined };
 }
 
 export async function createWorkspaceOwner(params: {

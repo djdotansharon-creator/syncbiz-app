@@ -10,6 +10,7 @@ const PROTECTED_PREFIXES = [
   "/library",
   "/playlists",
   "/settings",
+  "/access-control",
   "/devices",
   "/logs",
   "/radio",

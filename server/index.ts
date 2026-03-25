@@ -473,6 +473,8 @@ wss.on("connection", (ws) => {
         let secondaryDesktop = false;
         const key = branchKey(userId, branchId);
         const primaryId = primaryMasterByBranch.get(key);
+        let reservedMasterId: string | null = null;
+        let masterDecisionReason = "";
 
         if (isMobile) {
           if (masterByBranch.get(key) === deviceId) {
@@ -480,30 +482,36 @@ wss.on("connection", (ws) => {
             masterDisconnectedAt.delete(key);
             persistMasterLease();
           }
+          masterDecisionReason = "mobile: never claim primary MASTER lease";
         } else if (primaryId) {
           if (deviceId === primaryId) {
             mode = "MASTER";
             masterDisconnectedAt.delete(key);
             masterByBranch.set(key, deviceId);
             persistMasterLease();
+            masterDecisionReason = "desktop: device matches primary reservation -> MASTER";
           } else {
             secondaryDesktop = devices.has(primaryId);
+            masterDecisionReason = "desktop: different device than primary reservation -> CONTROL";
           }
         } else {
-          const reservedMasterId = getReservedMasterForBranch(userId, branchId);
+          reservedMasterId = getReservedMasterForBranch(userId, branchId);
           if (deviceId === reservedMasterId) {
             mode = "MASTER";
             masterDisconnectedAt.delete(key);
             masterByBranch.set(key, deviceId);
             primaryMasterByBranch.set(key, deviceId);
             persistMasterLease();
+            masterDecisionReason = "desktop: reserved master within grace -> MASTER";
           } else if (reservedMasterId) {
             secondaryDesktop = true;
+            masterDecisionReason = "desktop: reserved master within grace (other device) -> CONTROL";
           } else {
             mode = "MASTER";
             masterByBranch.set(key, deviceId);
             primaryMasterByBranch.set(key, deviceId);
             persistMasterLease();
+            masterDecisionReason = "desktop: no primary/reservation -> first eligible -> MASTER";
           }
         }
 
@@ -520,6 +528,20 @@ wss.on("connection", (ws) => {
           branchId,
         });
         console.log("[SyncBiz WS] register device", { deviceId, userId, branchId, mode });
+        if (process.env.NODE_ENV === "development") {
+          console.info("[SyncBiz WS] register device decision", {
+            userId,
+            branchId,
+            deviceId,
+            isMobile,
+            key,
+            primaryId,
+            reservedMasterId,
+            secondaryDesktop,
+            mode,
+            reason: masterDecisionReason,
+          });
+        }
         const sessionCode = getOrCreateSessionCode(userId);
         const reply: ServerMessage = { type: "REGISTERED", deviceId, sessionCode };
         ws.send(JSON.stringify(reply));
@@ -653,11 +675,62 @@ wss.on("connection", (ws) => {
       const isMobile = conn?.isMobile ?? false;
       const userId = conn?.userId ?? "";
       const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
-      // Mobile must NEVER become primary branch MASTER. Reject SET_MASTER from mobile.
-      if (isMobile) return;
       const key = branchKey(userId, branchId);
       const primaryId = primaryMasterByBranch.get(key);
-      if (primaryId && primaryId !== deviceId) return;
+
+      if (process.env.NODE_ENV === "development") {
+        console.info("[SyncBiz WS] SET_MASTER attempt", {
+          userId,
+          branchId,
+          deviceId,
+          isMobile,
+          primaryId,
+          primaryMatchesDevice: primaryId ? primaryId === deviceId : null,
+          masterByBranchCurrent: masterByBranch.get(key) ?? null,
+        });
+      }
+
+      // Mobile must NEVER become primary branch MASTER. Reject SET_MASTER from mobile.
+      if (isMobile) return;
+
+      if (primaryId && primaryId !== deviceId) {
+        // Stale-primary recovery:
+        // If the reserved primary is not actually connected (WS not OPEN), we treat it as stale
+        // and allow the current connected desktop device to reclaim MASTER.
+        const reservedConn = devices.get(primaryId);
+        const reservedWsOpen = !!reservedConn && reservedConn.ws.readyState === 1 && !reservedConn.isMobile;
+        if (!reservedWsOpen) {
+          if (process.env.NODE_ENV === "development") {
+            console.info("[SyncBiz WS] SET_MASTER stale-primary cleanup", {
+              userId,
+              branchId,
+              currentDeviceId: deviceId,
+              reservedPrimaryId: primaryId,
+              reservedExists: !!reservedConn,
+              reservedWsReadyState: reservedConn?.ws.readyState ?? null,
+              reservedIsMobile: reservedConn?.isMobile ?? null,
+            });
+          }
+          // Clean reservation + grace tracking for this branch/user.
+          primaryMasterByBranch.delete(key);
+          masterDisconnectedAt.delete(key);
+          if (masterByBranch.get(key) === primaryId) {
+            masterByBranch.delete(key);
+          }
+          persistMasterLease();
+        } else {
+          if (process.env.NODE_ENV === "development") {
+            console.info("[SyncBiz WS] SET_MASTER blocked (active reserved primary)", {
+              userId,
+              branchId,
+              currentDeviceId: deviceId,
+              reservedPrimaryId: primaryId,
+            });
+          }
+          return;
+        }
+      }
+
       // Demote ALL other desktop devices in this branch that have mode=MASTER (single source of truth)
       devices.forEach((d) => {
         if (

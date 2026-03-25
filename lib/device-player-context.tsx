@@ -24,6 +24,7 @@ import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
 import { deviceModeAllowsLocalPlayback } from "@/lib/device-mode-guard";
+import { getAutoMix, setAutoMix, onAutoMixChanged } from "@/lib/mix-preferences";
 
 type DevicePlayerContextValue = {
   /** Whether we're on a playback route and provider is active (device role visible). */
@@ -45,7 +46,7 @@ type DevicePlayerContextValue = {
   sendSetMaster: () => void;
   sendSetControl: () => void;
   /** Send command to master (when in CONTROL mode). */
-  sendCommandToMaster: (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number }) => void;
+  sendCommandToMaster: (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean }) => void;
   /** Play source locally (MASTER) or send to master (CONTROL). */
   playSourceOrSend: (source: UnifiedSource) => void;
   /** Play/pause/stop/next/prev - local when MASTER, send to master when CONTROL. */
@@ -56,6 +57,10 @@ type DevicePlayerContextValue = {
   prevOrSend: () => void;
   seekOrSend: (seconds: number) => void;
   setVolumeOrSend: (value: number) => void;
+  /** Shuffle is MASTER-controlled; CONTROL sends explicit command and waits for STATE_UPDATE. */
+  setShuffleOrSend: (value: boolean) => void;
+  /** AutoMix is MASTER-controlled; CONTROL sends explicit command and waits for STATE_UPDATE. */
+  setAutoMixOrSend: (value: boolean) => void;
   /** Session code for guest recommendations. Operator shares /guest?code=XXX */
   sessionCode: string | null;
   /** Full guest recommendation link for sharing */
@@ -203,9 +208,27 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("pageshow", onPageShow);
     };
   }, [isActive]);
-  const { play, pause, stop, next, prev, playSource, setVolume, seekTo, status: playStatus, currentSource, currentTrackIndex, queue, queueIndex, volume } = usePlayback();
+  const {
+    play,
+    pause,
+    stop,
+    next,
+    prev,
+    playSource,
+    setVolume,
+    seekTo,
+    shuffle,
+    setShuffle,
+    status: playStatus,
+    currentSource,
+    currentTrackIndex,
+    queue,
+    queueIndex,
+    volume,
+  } = usePlayback();
   const [masterConfirmOpen, setMasterConfirmOpen] = useState(false);
   const [masterState, setMasterState] = useState<StationPlaybackState | null>(null);
+  const [autoMixState, setAutoMixState] = useState<boolean>(() => getAutoMix());
   const reportedPositionRef = useRef<{ position: number; duration: number } | null>(null);
 
   const reportPosition = useCallback((position: number, duration: number) => {
@@ -214,14 +237,20 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  useEffect(() => {
+    return onAutoMixChanged((v) => setAutoMixState(v));
+  }, []);
+
   const onCommand = useCallback(
-    (cmd: { command: string; payload?: { url?: string; source?: unknown; position?: number; volume?: number } }) => {
+    (cmd: { command: string; payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean } }) => {
       const command = cmd.command as RemoteCommand;
       if (command === "PLAY") play();
       else if (command === "PAUSE") pause();
       else if (command === "STOP") stop();
       else if (command === "NEXT") next();
       else if (command === "PREV") prev();
+      else if (command === "SET_SHUFFLE" && typeof cmd.payload?.value === "boolean") setShuffle(cmd.payload.value);
+      else if (command === "SET_AUTOMIX" && typeof cmd.payload?.value === "boolean") setAutoMix(cmd.payload.value);
       else if (command === "SEEK" && typeof cmd.payload?.position === "number") {
         seekTo(cmd.payload.position);
       } else if (command === "SET_VOLUME" && typeof cmd.payload?.volume === "number") {
@@ -239,7 +268,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
           .catch(() => playSource(payloadToUnifiedSource(payload)));
       }
     },
-    [play, pause, stop, next, prev, playSource, seekTo, setVolume]
+    [play, pause, stop, next, prev, playSource, seekTo, setVolume, setShuffle, setAutoMix]
   );
 
   const effectiveUserId = (userId ?? "").trim();
@@ -325,11 +354,13 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       currentTrackIndex,
       queue,
       queueIndex,
+      shuffle,
+      autoMixState,
       pd ? { position: pd.position, duration: pd.duration } : undefined,
       volume
     );
     sendState(state);
-  }, [isActive, status, deviceMode, sendState, playStatus, currentSource?.id, currentTrackIndex, queue, queueIndex, volume]);
+  }, [isActive, status, deviceMode, sendState, playStatus, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState]);
 
   // When playing, send state more frequently so CONTROL progress stays in sync
   useEffect(() => {
@@ -342,16 +373,18 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         currentTrackIndex,
         queue,
         queueIndex,
+        shuffle,
+        autoMixState,
         pd ? { position: pd.position, duration: pd.duration } : undefined,
         volume
       );
       sendState(state);
     }, 1000);
     return () => clearInterval(id);
-  }, [isActive, status, deviceMode, playStatus, sendState, currentSource?.id, currentTrackIndex, queue, queueIndex, volume]);
+  }, [isActive, status, deviceMode, playStatus, sendState, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState]);
 
   const sendCommandToMaster = useCallback(
-    (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number }) => {
+    (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean }) => {
       if (!masterDeviceId) return;
       sendCommand(masterDeviceId, command, payload);
     },
@@ -410,6 +443,22 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     [effectiveDeviceMode, setVolume, sendCommandToMaster]
   );
 
+  const setShuffleOrSend = useCallback(
+    (value: boolean) => {
+      if (effectiveDeviceMode === "MASTER") setShuffle(value);
+      else sendCommandToMaster("SET_SHUFFLE", { value });
+    },
+    [effectiveDeviceMode, setShuffle, sendCommandToMaster]
+  );
+
+  const setAutoMixOrSend = useCallback(
+    (value: boolean) => {
+      if (effectiveDeviceMode === "MASTER") setAutoMix(value);
+      else sendCommandToMaster("SET_AUTOMIX", { value });
+    },
+    [effectiveDeviceMode, sendCommandToMaster]
+  );
+
   const value = useMemo<DevicePlayerContextValue>(
     () => ({
       isActive,
@@ -434,6 +483,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       prevOrSend,
       seekOrSend,
       setVolumeOrSend,
+      setShuffleOrSend,
+      setAutoMixOrSend,
       sessionCode,
       guestLink,
     }),
@@ -459,6 +510,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       prevOrSend,
       seekOrSend,
       setVolumeOrSend,
+      setShuffleOrSend,
+      setAutoMixOrSend,
       sessionCode,
       guestLink,
     ]
