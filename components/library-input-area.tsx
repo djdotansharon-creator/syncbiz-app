@@ -1,20 +1,28 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "@/lib/locale-context";
+import { getTranslations } from "@/lib/translations";
 import { usePlayback } from "@/lib/playback-provider";
 import { useSourcesPlayback } from "@/lib/sources-playback-context";
 import { ActionButtonEdit } from "@/components/ui/action-buttons";
 import { RadioIcon } from "@/components/ui/radio-icon";
-import { inferPlaylistType, getYouTubeThumbnail } from "@/lib/playlist-utils";
+import { inferPlaylistType, getYouTubeThumbnail, getYouTubeVideoId } from "@/lib/playlist-utils";
+import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { inferGenre } from "@/lib/infer-genre";
 import { searchAll, searchExternal, type YouTubeSearchResult, type RadioSearchResult } from "@/lib/search-service";
 import { radioToUnified } from "@/lib/radio-utils";
-import type { UnifiedSource } from "@/lib/source-types";
+import {
+  pickUnifiedFoundationFields,
+  parseUrlFoundationHints,
+  unifiedFoundationHints,
+  type UnifiedSource,
+  type ParseUrlJson,
+  type RadioStream,
+} from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
-import type { RadioStream } from "@/lib/source-types";
 
 const controlHeight = "h-10";
 const inputBase =
@@ -22,37 +30,23 @@ const inputBase =
 const addBtn =
   "shrink-0 rounded-full bg-gradient-to-b from-[#1ed760] to-[#1db954] px-5 text-sm font-semibold text-white shadow-[0_0_0_2px_rgba(29,185,84,0.35),0_2px_8px_rgba(29,185,84,0.2)] transition-all hover:from-[#2ee770] hover:to-[#1ed760] hover:shadow-[0_0_0_2px_rgba(30,215,96,0.5),0_4px_16px_rgba(30,215,96,0.3)] disabled:opacity-40 disabled:pointer-events-none";
 
-async function parseUrl(url: string): Promise<{ title: string; cover: string | null; genre: string; type: string; isRadio: boolean; viewCount?: number; durationSeconds?: number; artist?: string; song?: string } | null> {
-  const res = await fetch("/api/sources/parse-url", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
-  });
-  if (!res.ok) return null;
-  return res.json();
-}
-
-async function createPlaylistFromUrl(
-  url: string,
-  meta?: { title: string; genre: string; cover: string | null; type: string; viewCount?: number; durationSeconds?: number }
-): Promise<Playlist | null> {
-  const type = meta?.type || inferPlaylistType(url);
-  const cover = meta?.cover || (type === "youtube" ? getYouTubeThumbnail(url) : null);
-  const res = await fetch("/api/playlists", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: meta?.title || "Untitled",
-      url,
-      genre: meta?.genre || "Mixed",
-      type,
-      thumbnail: cover || "",
-      viewCount: meta?.viewCount,
-      durationSeconds: meta?.durationSeconds,
-    }),
-  });
-  if (!res.ok) return null;
-  return res.json();
+async function parseUrl(url: string): Promise<ParseUrlJson | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 2500);
+  try {
+    const res = await fetch("/api/sources/parse-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function SourceLogo({ type, origin, size = "sm" }: { type: UnifiedSource["type"]; origin?: UnifiedSource["origin"]; size?: "sm" | "md" }) {
@@ -103,6 +97,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
   const router = useRouter();
   const { t } = useTranslations();
   const { locale } = useLocale();
+  const tx = useMemo(() => getTranslations(locale), [locale]);
   const { sources } = useSourcesPlayback();
   const { playSource } = usePlayback();
   const effectivePlaySource = playSourceOverride ?? playSource;
@@ -188,7 +183,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
       const trimmed = url.trim();
       if (!trimmed) return;
       if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-        setUrlError("Please enter a valid URL starting with http:// or https://");
+        setUrlError(tx.urlErrorInvalidHttp);
         return;
       }
       if (ingestingRef.current) return;
@@ -200,22 +195,36 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
         const isRadio = type === "winamp" || !!trimmed.match(/\.(m3u8?|pls|aac|mp3)(\?|$)/i);
         const isShazam = /shazam\.com\/song\//i.test(trimmed);
 
+        /** Fallback only when `/api/sources/parse-url` fails — must not replace full resolve for normal ingest. */
         const fastPathMeta = {
-          title: type === "youtube" ? "YouTube" : type === "soundcloud" ? "SoundCloud" : type === "spotify" ? "Spotify" : isRadio ? "Radio Station" : "Untitled",
+          title:
+            type === "youtube"
+              ? tx.providerYouTube
+              : type === "soundcloud"
+                ? tx.providerSoundCloud
+                : type === "spotify"
+                  ? tx.providerSpotify
+                  : isRadio
+                    ? tx.defaultRadioStationName
+                    : tx.defaultUntitled,
           cover: type === "youtube" ? getYouTubeThumbnail(trimmed) : null,
-          genre: isRadio ? "Live Radio" : "Mixed",
+          genre: isRadio ? tx.defaultLiveRadioGenre : tx.defaultGenreMixed,
           type: isRadio ? "stream-url" : type,
           isRadio,
         };
 
-        let parsed: Awaited<ReturnType<typeof parseUrl>>;
-        const useFastPath = !isShazam && !isRadio && (type === "youtube" || type === "soundcloud" || type === "spotify");
-        if (useFastPath) {
-          parsed = fastPathMeta as Awaited<ReturnType<typeof parseUrl>>;
-        } else {
-          const fromApi = await parseUrl(trimmed);
-          parsed = fromApi ?? (fastPathMeta as Awaited<ReturnType<typeof parseUrl>>);
-        }
+        const fromApi = await parseUrl(trimmed);
+        const parsed =
+          fromApi ??
+          ({
+            ...fastPathMeta,
+            ...parseUrlFoundationHints({
+              rawUrl: trimmed,
+              inferredType: type,
+              isRadio,
+              isShazam,
+            }),
+          } as ParseUrlJson);
 
         if (isShazam) {
           const searchQuery = parsed?.artist && parsed?.song
@@ -224,16 +233,20 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
           const { youtube } = await searchExternal(searchQuery);
           const first = youtube.find((r: YouTubeSearchResult) => r.type === "youtube") ?? youtube[0];
           if (!first) {
-            setUrlError("Could not find song on YouTube");
+            setUrlError(tx.urlErrorYoutubeNotFound);
             return;
           }
+          const resolvedFirstUrl =
+            first.type === "youtube"
+              ? await resolveYouTubePlayableUrlForSearch(first.url)
+              : first.url;
           const res = await fetch("/api/playlists", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: parsed?.title ?? "Untitled",
-              url: first.url,
-              genre: parsed?.genre ?? "Mixed",
+              name: parsed?.title ?? tx.defaultUntitled,
+              url: resolvedFirstUrl,
+              genre: parsed?.genre ?? tx.defaultGenreMixed,
               type: "youtube",
               thumbnail: first.cover || (parsed?.cover ?? ""),
               viewCount: first.viewCount,
@@ -244,45 +257,56 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
             onAdd({
               id: `pl-${created.id}`,
               title: created.name,
-              genre: created.genre || "Mixed",
+              genre: created.genre || tx.defaultGenreMixed,
               cover: created.thumbnail || null,
               type: "youtube",
               url: created.url,
               origin: "playlist",
               playlist: created,
+              ...pickUnifiedFoundationFields(parsed as Record<string, unknown>),
             });
             setUrlValue("");
-          } else setUrlError("Failed to add");
+          } else setUrlError(tx.urlErrorFailedAdd);
         } else if (isRadio) {
           const res = await fetch("/api/radio", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: parsed?.title ?? "Untitled", url: trimmed, genre: parsed?.genre ?? "Mixed", cover: parsed?.cover ?? null }),
+            body: JSON.stringify({
+              name: parsed?.title ?? tx.defaultUntitled,
+              url: trimmed,
+              genre: parsed?.genre ?? tx.defaultGenreMixed,
+              cover: parsed?.cover ?? null,
+            }),
           });
           if (res.ok) {
             const station = (await res.json()) as RadioStream;
             onAdd({
               id: station.id,
               title: station.name,
-              genre: station.genre || "Live Radio",
+              genre: station.genre || tx.defaultLiveRadioGenre,
               cover: station.cover || null,
               type: "stream-url",
               url: station.url,
               origin: "radio",
               radio: station,
+              ...pickUnifiedFoundationFields(parsed as Record<string, unknown>),
             });
             setUrlValue("");
-          } else setUrlError("Failed to add");
+          } else setUrlError(tx.urlErrorFailedAdd);
         } else {
           const validTypes = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"] as const;
           const apiType = validTypes.includes((parsed?.type ?? type) as (typeof validTypes)[number]) ? (parsed?.type ?? type) : type;
+          const playableUrl =
+            apiType === "youtube"
+              ? await resolveYouTubePlayableUrlForSearch(trimmed)
+              : trimmed;
           const res = await fetch("/api/playlists", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: parsed?.title ?? "Untitled",
-              url: trimmed,
-              genre: parsed?.genre ?? "Mixed",
+              name: parsed?.title ?? tx.defaultUntitled,
+              url: playableUrl,
+              genre: parsed?.genre ?? tx.defaultGenreMixed,
               type: apiType,
               thumbnail: parsed?.cover ?? "",
               viewCount: parsed?.viewCount,
@@ -294,24 +318,25 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
             onAdd({
               id: `pl-${created.id}`,
               title: created.name,
-              genre: created.genre || "Mixed",
+              genre: created.genre || tx.defaultGenreMixed,
               cover: created.thumbnail || null,
               type: created.type as UnifiedSource["type"],
               url: created.url,
               origin: "playlist",
               playlist: created,
+              ...pickUnifiedFoundationFields(parsed as Record<string, unknown>),
             });
             setUrlValue("");
-          } else setUrlError("Failed to add");
+          } else setUrlError(tx.urlErrorFailedAdd);
         }
       } catch {
-        setUrlError("Failed to add");
+        setUrlError(tx.urlErrorFailedAdd);
       } finally {
         ingestingRef.current = false;
         setUrlIngesting(false);
       }
     },
-    [onAdd, router]
+    [onAdd, router, tx]
   );
 
   const handleUrlSubmit = (e: React.FormEvent) => {
@@ -374,17 +399,22 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
     async () => {
       for (const r of youtubeResults) {
         const genre = inferGenre(r.title, query);
-        const created = await createPlaylistFromUrl(r.url, { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount, durationSeconds: r.durationSeconds });
+        let playableUrl = r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
+        if (r.type === "youtube" && !getYouTubeVideoId(playableUrl) && getYouTubeVideoId(r.url)) {
+          playableUrl = r.url;
+        }
+        const created = await createPlaylistFromUrl(playableUrl, { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount, durationSeconds: r.durationSeconds });
         if (created) {
           const unified: UnifiedSource = {
             id: `pl-${created.id}`,
             title: created.name,
-            genre: created.genre || "Mixed",
+            genre: created.genre || tx.defaultGenreMixed,
             cover: created.thumbnail || null,
             type: created.type as UnifiedSource["type"],
             url: created.url,
             origin: "playlist",
             playlist: created,
+            ...unifiedFoundationHints("playlist", created.type as UnifiedSource["type"], created.url),
           };
           onAdd(unified);
         }
@@ -395,23 +425,28 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
       setLocalResults([]);
       setShowResults(false);
     },
-    [query, youtubeResults, onAdd, router]
+    [query, youtubeResults, onAdd, router, tx]
   );
 
   const handleAddYoutube = useCallback(
     async (r: YouTubeSearchResult) => {
       const genre = inferGenre(r.title, query);
-      const created = await createPlaylistFromUrl(r.url, { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount, durationSeconds: r.durationSeconds });
+      let playableUrl = r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
+      if (r.type === "youtube" && !getYouTubeVideoId(playableUrl) && getYouTubeVideoId(r.url)) {
+        playableUrl = r.url;
+      }
+      const created = await createPlaylistFromUrl(playableUrl, { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount, durationSeconds: r.durationSeconds });
       if (created) {
         const unified: UnifiedSource = {
           id: `pl-${created.id}`,
           title: created.name,
-          genre: created.genre || "Mixed",
+          genre: created.genre || tx.defaultGenreMixed,
           cover: created.thumbnail || null,
           type: created.type as UnifiedSource["type"],
           url: created.url,
           origin: "playlist",
           playlist: created,
+          ...unifiedFoundationHints("playlist", created.type as UnifiedSource["type"], created.url),
         };
         onAdd(unified);
         setQuery("");
@@ -421,7 +456,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
         setShowResults(false);
       }
     },
-    [query, onAdd, router]
+    [query, onAdd, router, tx]
   );
 
   const handleAddRadio = useCallback(
@@ -432,11 +467,13 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
         body: JSON.stringify({
           name: r.title,
           url: r.url,
-          genre: r.genre || "Radio",
+          genre: r.genre || tx.defaultGenreRadioShort,
           cover: r.cover,
         }),
       });
       if (res.ok) {
+        const station = (await res.json()) as RadioStream;
+        onAdd(radioToUnified(station));
         setQuery("");
         setRadioResults([]);
         setYoutubeResults([]);
@@ -444,7 +481,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
         setShowResults(false);
       }
     },
-    [router]
+    [onAdd, tx]
   );
 
   const handlePlayRadio = useCallback(
@@ -455,7 +492,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
         body: JSON.stringify({
           name: r.title,
           url: r.url,
-          genre: r.genre || "Radio",
+          genre: r.genre || tx.defaultGenreRadioShort,
           cover: r.cover,
         }),
       });
@@ -470,23 +507,29 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
         setShowResults(false);
       }
     },
-    [effectivePlaySource, router]
+    [effectivePlaySource, router, tx]
   );
 
   const handlePlayYoutube = useCallback(
     async (r: YouTubeSearchResult) => {
       const genre = inferGenre(r.title, query);
-      const created = await createPlaylistFromUrl(r.url, { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount, durationSeconds: r.durationSeconds });
+      let playableUrl = r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
+      if (r.type === "youtube" && !getYouTubeVideoId(playableUrl) && getYouTubeVideoId(r.url)) {
+        playableUrl = r.url;
+      }
+      const created = await createPlaylistFromUrl(playableUrl, { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount, durationSeconds: r.durationSeconds });
       if (created) {
+        const sourceType = created.type as UnifiedSource["type"];
         const u: UnifiedSource = {
           id: `pl-${created.id}`,
           title: created.name,
-          genre: "Mixed",
+          genre: created.genre || tx.defaultGenreMixed,
           cover: created.thumbnail || null,
-          type: "youtube",
+          type: sourceType,
           url: created.url,
           origin: "playlist",
           playlist: created,
+          ...unifiedFoundationHints("playlist", sourceType, created.url),
         };
         onAdd(u);
         effectivePlaySource(u);
@@ -497,7 +540,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
         setShowResults(false);
       }
     },
-    [query, effectivePlaySource, router, onAdd]
+    [query, effectivePlaySource, router, onAdd, tx]
   );
 
   return (
@@ -661,7 +704,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
                 inputRef.current?.focus();
               }}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-700/60 hover:text-slate-200"
-              aria-label="Clear"
+              aria-label={t.clearSearchAria}
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -765,10 +808,10 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
                             {t.open}
                           </button>
                           {source.origin === "playlist" && source.playlist && (
-                            <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
+                            <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title={t.editPlaylist} aria-label={t.editPlaylist} />
                           )}
                           {source.origin === "radio" && source.radio && (
-                            <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
+                            <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title={t.radioEdit} aria-label={t.radioEdit} />
                           )}
                           {source.origin === "source" && source.source && (
                             <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
@@ -800,7 +843,9 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-slate-100">{r.title}</p>
                           <p className="text-[10px] text-slate-500">
-                            {r.genre && r.genre !== "Radio" ? r.genre : "Radio"}
+                            {r.genre && r.genre !== "Radio" && r.genre !== tx.defaultGenreRadioShort
+                              ? r.genre
+                              : tx.defaultGenreRadioShort}
                           </p>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
@@ -845,10 +890,12 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-slate-100">{r.title}</p>
                           <p className="text-[10px] text-slate-500">
-                            YouTube
+                            {tx.providerYouTube}
                             {(() => {
                               const g = inferGenre(r.title, query);
-                              return g && g !== "Mixed" ? <span className="ml-1.5 text-slate-400">• {g}</span> : null;
+                              return g && g !== "Mixed" && g !== tx.defaultGenreMixed ? (
+                                <span className="ml-1.5 text-slate-400">• {g}</span>
+                              ) : null;
                             })()}
                             {r.viewCount != null && (
                               <span className="ml-1.5 text-slate-400">

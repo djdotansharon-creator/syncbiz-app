@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource } from "@/lib/playback-provider";
 import { getPlaylistTracks } from "@/lib/playlist-types";
-import { useTranslations } from "@/lib/locale-context";
+import { useLocale, useTranslations, labels } from "@/lib/locale-context";
+import { getTranslations } from "@/lib/translations";
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { getYouTubeVideoId, getYouTubePlaylistId, getYouTubeThumbnail, isYouTubeMixUrl, isYouTubeMultiTrackUrl } from "@/lib/playlist-utils";
@@ -29,8 +30,10 @@ import {
   type YTPlayerAPI,
 } from "@/lib/yt-player-utils";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
+import { ActionButtonShare } from "@/components/ui/action-buttons";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
+import { resolveDeckSourceBadge } from "@/lib/deck-source-badge";
 
 /** Crossfade runtime diagnostics – key transitions only, no 500ms spam */
 function xfadeLog(phase: string, data?: Record<string, unknown>) {
@@ -251,6 +254,11 @@ function SourceIcon({ type, origin, size = "md" }: { type: TrackSource; origin?:
 }
 
 export function AudioPlayer() {
+  const pathname = usePathname();
+  /** Visual deck mode on /sources – unified with library theme tokens (no playback changes). */
+  const isSourcesLibraryDeck = pathname?.startsWith("/sources") ?? false;
+
+  const { locale } = useLocale();
   const { t } = useTranslations();
   const [shareOpen, setShareOpen] = useState(false);
   const deviceCtx = useDevicePlayer();
@@ -279,6 +287,7 @@ export function AudioPlayer() {
     setLastMessage,
     registerStopAllPlayers,
     registerSeekCallback,
+    reportRecoveryProgress,
     currentPlayUrl,
     isEmbedded,
     getNextStreamUrl,
@@ -353,9 +362,34 @@ export function AudioPlayer() {
   const ytOverlapActiveRef = useRef(false);
   const ytNextVideoIdRef = useRef<string | null>(null);
   const ytCurrentInNextSlotRef = useRef(false);
+  const lastUiPositionRef = useRef(0);
+  const lastUiDurationRef = useRef(0);
+  const lastUiBufferedRef = useRef(0);
   volumeRef.current = volume;
   statusRef.current = status;
   nextRef.current = next;
+
+  const updatePositionIfChanged = useCallback((next: number) => {
+    if (!Number.isFinite(next)) return;
+    if (Math.abs(next - lastUiPositionRef.current) < 0.2) return;
+    lastUiPositionRef.current = next;
+    setPosition(next);
+  }, []);
+
+  const updateDurationIfChanged = useCallback((next: number) => {
+    if (!Number.isFinite(next)) return;
+    if (Math.abs(next - lastUiDurationRef.current) < 0.2) return;
+    lastUiDurationRef.current = next;
+    setDuration(next);
+  }, []);
+
+  const updateBufferedIfChanged = useCallback((next: number) => {
+    if (!Number.isFinite(next)) return;
+    const clamped = Math.max(0, Math.min(100, next));
+    if (Math.abs(clamped - lastUiBufferedRef.current) < 1) return;
+    lastUiBufferedRef.current = clamped;
+    setBufferedPercent(clamped);
+  }, []);
 
   /** Load YouTube player – deps exclude volume/status so volume changes never recreate the player */
   const loadYouTube = useCallback(() => {
@@ -594,9 +628,9 @@ export function AudioPlayer() {
   const handlePlaybackError = useCallback(
     (err: unknown, context?: string) => {
       mvpLog("playback_error", { error: String(err), context });
-      setLastMessage("Playback failed. Please try again.");
+      setLastMessage(getTranslations(locale).playbackFailed);
     },
-    [setLastMessage]
+    [setLastMessage, locale]
   );
 
   // HTML5 audio play/pause – only call play() when paused to avoid redundant calls that can cause jumps
@@ -756,7 +790,7 @@ export function AudioPlayer() {
           hls.on(Hls.Events.ERROR, (_e, data) => {
             if (data.fatal) {
               mvpLog("playback_error", { error: data.type, context: "hls" });
-              setLastMessage("Stream failed to load.");
+              setLastMessage(getTranslations(locale).streamFailed);
             }
           });
           hls.loadSource(currentPlayUrl);
@@ -800,7 +834,7 @@ export function AudioPlayer() {
     audio.src = currentPlayUrl;
     if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
     return () => audio.removeEventListener("error", onError);
-  }, [isStreamUrl, currentPlayUrl, handlePlaybackError]);
+  }, [isStreamUrl, currentPlayUrl, handlePlaybackError, locale]);
 
   useEffect(() => {
     const p = ytPlayerRef.current;
@@ -869,10 +903,11 @@ export function AudioPlayer() {
       const total = playlist.length || 1;
       const nextVid = playlist[idx + 1] ?? null;
       const nextThumb = nextVid ? `https://img.youtube.com/vi/${nextVid}/hqdefault.jpg` : null;
+      const ytFallback = getTranslations(locale).providerYouTube;
       setYtMultiTrackState((prev) => {
         if (prev && prev.currentIndex === idx && prev.currentTitle === data.title) return prev;
         return {
-          currentTitle: data.title || "YouTube",
+          currentTitle: data.title || ytFallback,
           currentThumbnail: data.video_id ? `https://img.youtube.com/vi/${data.video_id}/hqdefault.jpg` : null,
           currentIndex: idx,
           total,
@@ -884,40 +919,7 @@ export function AudioPlayer() {
     poll();
     const id = setInterval(poll, 800);
     return () => clearInterval(id);
-  }, [isYouTubeMultiTrack, isYouTube]);
-
-  useEffect(() => {
-    if (status !== "playing" && status !== "paused") return;
-    const tick = () => {
-      const p = ytPlayerRef.current;
-      if (isYtPlayerReady(p) && isYouTube) {
-        const playerState = safeGetPlayerState(p);
-        if (playerState === window.YT!.PlayerState.ENDED) {
-          if (!isYouTubeMix && !endedHandledRef.current) {
-            const overlapActive = !!ytOverlapActiveRef.current;
-            const nextVid = ytNextVideoIdRef.current;
-            ytXfadeLog("current_ended", { overlapActive, nextVid: nextVid ?? null });
-            if (overlapActive && nextVid) {
-              ytXfadeLog("handoff_path_taken");
-              doYtHandoff(nextVid);
-            } else {
-              endedHandledRef.current = true;
-              if (ytCrossfadeStartedRef.current) {
-                ytCrossfadeCleanupRef.current?.();
-                ytCrossfadeStartedRef.current = false;
-                ytNextVideoIdRef.current = null;
-              }
-              nextRef.current();
-            }
-          }
-        } else {
-          endedHandledRef.current = false;
-        }
-      }
-    };
-    const id = setInterval(tick, 500);
-    return () => clearInterval(id);
-  }, [status, isYouTube, isYouTubeMix, doYtHandoff]);
+  }, [isYouTubeMultiTrack, isYouTube, locale]);
 
   useEffect(() => {
     if (!currentSource || isSeekingRef.current) return;
@@ -926,15 +928,38 @@ export function AudioPlayer() {
       if (isYouTube) {
         const p = ytPlayerRef.current;
         if (isYtPlayerReady(p)) {
+          const playerState = safeGetPlayerState(p);
+          if (playerState === window.YT!.PlayerState.ENDED) {
+            if (!isYouTubeMix && !endedHandledRef.current) {
+              const overlapActive = !!ytOverlapActiveRef.current;
+              const nextVid = ytNextVideoIdRef.current;
+              ytXfadeLog("current_ended", { overlapActive, nextVid: nextVid ?? null });
+              if (overlapActive && nextVid) {
+                ytXfadeLog("handoff_path_taken");
+                doYtHandoff(nextVid);
+              } else {
+                endedHandledRef.current = true;
+                if (ytCrossfadeStartedRef.current) {
+                  ytCrossfadeCleanupRef.current?.();
+                  ytCrossfadeStartedRef.current = false;
+                  ytNextVideoIdRef.current = null;
+                }
+                nextRef.current();
+              }
+            }
+          } else {
+            endedHandledRef.current = false;
+          }
           const pos = safeGetCurrentTime(p);
           const dur = safeGetDuration(p);
-          setPosition(pos);
-          setDuration(dur);
+          updatePositionIfChanged(pos);
+          updateDurationIfChanged(dur);
           const frac = safeGetVideoLoadedFraction(p);
-          setBufferedPercent(frac * 100);
+          updateBufferedIfChanged(frac * 100);
           if (deviceCtx?.isBranchConnected && deviceCtx.deviceMode === "MASTER" && Number.isFinite(pos) && Number.isFinite(dur)) {
             deviceCtx.reportPosition(pos, dur);
           }
+          reportRecoveryProgress(pos);
           if (
             autoMixRef.current &&
             statusRef.current === "playing" &&
@@ -1000,13 +1025,14 @@ export function AudioPlayer() {
       } else if (isSoundCloud && scWidgetRef.current) {
         scWidgetRef.current.getPosition((pos) => {
           const p = pos / 1000;
-          setPosition(p);
+          updatePositionIfChanged(p);
           scWidgetRef.current?.getDuration((dur) => {
             const d = dur / 1000;
-            setDuration(d);
+            updateDurationIfChanged(d);
             if (deviceCtx?.isBranchConnected && deviceCtx.deviceMode === "MASTER" && Number.isFinite(p) && Number.isFinite(d)) {
               deviceCtx.reportPosition(p, d);
             }
+            reportRecoveryProgress(p);
           });
         });
       } else if (isStreamUrl && audioRef.current) {
@@ -1014,7 +1040,7 @@ export function AudioPlayer() {
         const t = a.currentTime;
         const d = a.duration;
         lastKnownDurationRef.current = d;
-        setPosition(t);
+        updatePositionIfChanged(t);
         if (!Number.isFinite(d) || d <= 0) {
           if (!crossfadeDurNonFiniteLoggedRef.current) {
             xfadeLog("duration_not_finite", { d, url: currentPlayUrl?.slice(0, 50), type: currentTrack?.type, origin: currentSource?.origin });
@@ -1022,14 +1048,15 @@ export function AudioPlayer() {
           }
         }
         if (Number.isFinite(d) && d > 0) {
-          setDuration(d);
+          updateDurationIfChanged(d);
           if (a.buffered.length > 0) {
             const end = a.buffered.end(a.buffered.length - 1);
-            setBufferedPercent((end / d) * 100);
+            updateBufferedIfChanged((end / d) * 100);
           }
           if (deviceCtx?.isBranchConnected && deviceCtx.deviceMode === "MASTER" && Number.isFinite(t) && Number.isFinite(d)) {
             deviceCtx.reportPosition(t, d);
           }
+          reportRecoveryProgress(t);
           // Crossfade for direct audio URL only (no HLS): AutoMix ON + within mix window
           const mixSec = getMixDuration();
           const threshold = Math.max(0, d - mixSec);
@@ -1076,7 +1103,7 @@ export function AudioPlayer() {
     poll();
     const id = setInterval(poll, 500);
     return () => clearInterval(id);
-  }, [currentSource, isYouTube, isSoundCloud, isStreamUrl, isYouTubeMix, isYouTubeMultiTrack, getNextEmbeddedSource, runYtPreload, deviceCtx?.isBranchConnected, deviceCtx?.deviceMode]);
+  }, [currentSource, isYouTube, isSoundCloud, isStreamUrl, isYouTubeMix, isYouTubeMultiTrack, getNextEmbeddedSource, runYtPreload, deviceCtx?.isBranchConnected, deviceCtx?.deviceMode, doYtHandoff, updatePositionIfChanged, updateDurationIfChanged, updateBufferedIfChanged, reportRecoveryProgress]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -1122,8 +1149,8 @@ export function AudioPlayer() {
       ? (ms?.currentTrack?.cover ?? ms?.currentSource?.cover ?? null)
       : (ytMultiTrackState?.currentThumbnail ?? currentTrack?.cover ?? currentSource?.cover ?? null);
   const displayTitle = isControlMirror
-    ? (ms?.currentTrack?.title ?? ms?.currentSource?.title ?? "No track selected")
-    : (ytMultiTrackState?.currentTitle ?? currentTrack?.title ?? "No track selected");
+    ? (ms?.currentTrack?.title ?? ms?.currentSource?.title ?? t.noSourceSelected)
+    : (ytMultiTrackState?.currentTitle ?? currentTrack?.title ?? t.noSourceSelected);
   const displayNextLabel = isControlMirror
     ? (ms?.queue?.[(ms?.queueIndex ?? 0) + 1]?.title ?? null)
     : (() => {
@@ -1146,6 +1173,42 @@ export function AudioPlayer() {
           (isStreamUrl && Number.isFinite(duration) && duration > 0)));
   const displayBufferedPercent = isControlMirror ? 0 : bufferedPercent;
   const displayProgressPercent = displayDuration > 0 ? Math.min(100, (displayPosition / displayDuration) * 100) : 0;
+
+  const displayStatusLabel =
+    displayStatus === "playing"
+      ? t.playing
+      : displayStatus === "paused"
+        ? t.paused
+        : displayStatus === "stopped"
+          ? t.stopped
+          : t.idle;
+
+  const trackTypeForTooltip = (displayTrack as PlaybackTrack | undefined)?.type;
+  const originForTooltip = (displaySource as typeof currentSource | null | undefined)?.origin;
+  const sourceIconTitle = !displaySource?.title
+    ? t.providerLocal
+    : isControlMirror
+      ? t.providerRemote
+      : originForTooltip === "radio"
+        ? labels.radio[locale]
+        : trackTypeForTooltip === "youtube"
+          ? t.providerYouTube
+          : trackTypeForTooltip === "soundcloud"
+            ? t.providerSoundCloud
+            : trackTypeForTooltip === "spotify"
+              ? t.providerSpotify
+              : t.providerLocal;
+
+  const deckSourceBadgeLabel = isControlMirror
+    ? t.deckBadgeRemote
+    : resolveDeckSourceBadge(currentSource ?? undefined, currentTrack ?? undefined, {
+        youtube: t.deckBadgeYoutube,
+        soundcloud: t.deckBadgeSoundcloud,
+        radio: t.deckBadgeRadio,
+        liveStream: t.deckBadgeLiveStream,
+        syncbizPlaylist: t.deckBadgeSyncbizPlaylist,
+        local: t.deckBadgeLocal,
+      });
 
   const onPrev = isControlMirror ? () => { endedHandledRef.current = true; deviceCtx!.prevOrSend(); } : () => { endedHandledRef.current = true; prev(); };
   const onNext = isControlMirror ? () => { crossfadeAbortRef.current = true; crossfadeCleanupRef.current?.(); ytCrossfadeAbortRef.current = true; ytCrossfadeCleanupRef.current?.(); endedHandledRef.current = true; deviceCtx!.nextOrSend(); } : () => { crossfadeAbortRef.current = true; crossfadeCleanupRef.current?.(); ytCrossfadeAbortRef.current = true; ytCrossfadeCleanupRef.current?.(); endedHandledRef.current = true; next(); };
@@ -1299,33 +1362,53 @@ export function AudioPlayer() {
 
   return (
     <header
-      className="sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/98 px-3 py-3 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.08)] backdrop-blur-md overflow-hidden sm:px-4"
+      className={
+        isSourcesLibraryDeck
+          ? "audio-player-library-deck sticky top-0 z-50 px-3 py-3 backdrop-blur-md overflow-hidden sm:px-4"
+          : "sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/98 px-3 py-3 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.08)] backdrop-blur-md overflow-hidden sm:px-4"
+      }
       role="region"
-      aria-label="Player controller"
+      aria-label={t.playerControllerAria}
     >
       <div className="mx-auto max-w-6xl flex min-w-0 justify-center">
         {/* Player unit: [ Circular artwork ] [ Control + Track panel ] */}
         <div className="flex min-w-0 items-center gap-3 sm:gap-5 sm:gap-6">
           {/* LEFT: Circular artwork – static cover, playback motion on outer ring only */}
           <div className="relative flex shrink-0 items-center justify-center">
-            {/* Outer ring – playback-active pulse when playing; ring animates, cover stays static */}
-            <div
-              className={`relative flex shrink-0 items-center justify-center rounded-full border-2 p-[6px] bg-slate-800/80 ${
-                displayStatus === "playing"
-                  ? "playing-active-ring"
-                  : "border-slate-600/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_0_1px_rgba(0,0,0,0.2),0_2px_12px_rgba(0,0,0,0.3)]"
-              }`}
-            >
-              <div className="relative h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 rounded-full overflow-hidden bg-slate-800/90 shadow-[inset_0_0_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]">
-                <div className="h-full w-full overflow-hidden rounded-full">
-                {displayThumbnailCover ? (
-                  <HydrationSafeImage src={displayThumbnailCover} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
-                )}
+            {isSourcesLibraryDeck ? (
+              <div
+                className={`library-deck-art-host flex shrink-0 items-center justify-center ${
+                  displayStatus === "playing" ? "library-deck-art-host--playing" : "library-deck-art-host--idle"
+                }`}
+              >
+                {displayStatus === "playing" ? <div className="library-deck-art-ring" aria-hidden /> : null}
+                <div className="library-deck-art-inner h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 rounded-full overflow-hidden bg-slate-800/90 shadow-[inset_0_0_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]">
+                  <div className="h-full w-full overflow-hidden rounded-full">
+                    {displayThumbnailCover ? (
+                      <HydrationSafeImage src={displayThumbnailCover} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div
+                className={`relative flex shrink-0 items-center justify-center rounded-full border-2 p-[6px] bg-slate-800/80 ${
+                  displayStatus === "playing" ? "playing-active-ring" : "border-slate-600/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_0_1px_rgba(0,0,0,0.2),0_2px_12px_rgba(0,0,0,0.3)]"
+                }`}
+              >
+                <div className="relative h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 rounded-full overflow-hidden bg-slate-800/90 shadow-[inset_0_0_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]">
+                  <div className="h-full w-full overflow-hidden rounded-full">
+                    {displayThumbnailCover ? (
+                      <HydrationSafeImage src={displayThumbnailCover} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Control row | Track title | Timeline – unified width */}
@@ -1334,28 +1417,43 @@ export function AudioPlayer() {
             <div className="flex flex-wrap items-center w-full gap-2 gap-y-2 sm:gap-3">
               <NeonControlButton
                 size="md"
+                variant={isSourcesLibraryDeck ? "cyan" : "green"}
+                libraryDeck={isSourcesLibraryDeck}
                 onClick={onPrev}
                 disabled={!displayHasPrevNext}
-                aria-label="Previous"
-                title="Previous"
+                aria-label={t.previousTrack}
+                title={t.previousTrack}
               >
                 <svg className="h-5 w-5 scale-x-[-1] sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
                 </svg>
               </NeonControlButton>
-              <NeonControlButton size="md" onClick={onStop} disabled={!displayHasContent} aria-label="Stop" title="Stop">
+              <NeonControlButton
+                size="md"
+                variant={isSourcesLibraryDeck ? "cyan" : "green"}
+                libraryDeck={isSourcesLibraryDeck}
+                onClick={onStop}
+                disabled={!displayHasContent}
+                aria-label={t.stopPlayback}
+                title={t.stopPlayback}
+              >
                 <svg className="h-5 w-5 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 6h12v12H6z" />
                 </svg>
               </NeonControlButton>
               <NeonControlButton
                 size="xl"
+                variant={isSourcesLibraryDeck ? "cyan" : "green"}
+                libraryDeck={isSourcesLibraryDeck}
+                libraryDeckHero={isSourcesLibraryDeck}
                 onClick={onPlayPause}
                 disabled={!displayHasContent}
                 active={displayStatus === "playing"}
-                aria-label={displayStatus === "playing" ? "Pause" : "Play"}
-                title={displayStatus === "playing" ? "Pause" : "Play"}
-                className="!h-11 !min-w-[90px] !w-auto !px-4 !rounded-2xl sm:!h-12 sm:!min-w-[110px] sm:!px-6"
+                aria-label={displayStatus === "playing" ? t.pausePlayback : t.play}
+                title={displayStatus === "playing" ? t.pausePlayback : t.play}
+                className={`!h-11 !min-w-[90px] !w-auto !px-4 sm:!h-12 sm:!min-w-[110px] sm:!px-6${
+                  isSourcesLibraryDeck && displayStatus === "playing" ? " library-player-play-emerald" : ""
+                }`}
               >
                 <span className="relative flex h-8 w-8 items-center justify-center sm:h-9 sm:w-9" aria-hidden>
                   <svg className={`absolute ${displayStatus === "playing" ? "opacity-100" : "pointer-events-none opacity-0"}`} viewBox="0 0 24 24" fill="currentColor">
@@ -1368,10 +1466,12 @@ export function AudioPlayer() {
               </NeonControlButton>
               <NeonControlButton
                 size="md"
+                variant={isSourcesLibraryDeck ? "cyan" : "green"}
+                libraryDeck={isSourcesLibraryDeck}
                 onClick={onNext}
                 disabled={!displayHasPrevNext}
-                aria-label="Next"
-                title="Next"
+                aria-label={t.next}
+                title={t.next}
               >
                 <svg className="h-5 w-5 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
@@ -1381,15 +1481,15 @@ export function AudioPlayer() {
               <NeonControlButton
                 size="2xs"
                 variant="cyan"
-                className="!rounded-lg"
+                libraryDeck={isSourcesLibraryDeck}
                 onClick={() => {
                   if (!isControlMirror) setAutoMix((a) => !a);
                   else deviceCtx?.setAutoMixOrSend?.(!displayAutoMix);
                 }}
                 active={displayAutoMix}
                 disabled={!displayHasContent}
-                aria-label="AutoMix"
-                title="AutoMix"
+                aria-label={t.autoMix}
+                title={t.autoMix}
               >
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
@@ -1398,22 +1498,28 @@ export function AudioPlayer() {
               <NeonControlButton
                 size="2xs"
                 variant="cyan"
-                className="!rounded-lg"
+                libraryDeck={isSourcesLibraryDeck}
                 onClick={() => {
                   if (!isControlMirror) toggleShuffle();
                   else deviceCtx?.setShuffleOrSend?.(!displayShuffle);
                 }}
                 active={displayShuffle}
                 disabled={!displayHasContent}
-                aria-label="Random"
-                title="Random"
+                aria-label={t.random}
+                title={t.random}
               >
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 4l5 5-5 5M20 4l-5 5 5 5M20 20l-5-5 5-5M4 20l5-5-5-5" />
                 </svg>
               </NeonControlButton>
               <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
-              <div className="flex min-w-[52px] shrink items-center gap-1 rounded-lg border border-cyan-500/50 bg-slate-900/80 px-1.5 py-1 sm:min-w-[70px] sm:gap-1.5 sm:px-2 md:min-w-[90px] md:gap-2 md:px-2.5 lg:min-w-[120px]">
+              <div
+                className={`flex min-w-[52px] shrink items-center gap-1 rounded-xl border px-1.5 py-1 sm:min-w-[70px] sm:gap-1.5 sm:px-2 md:min-w-[90px] md:gap-2 md:px-2.5 lg:min-w-[120px] ${
+                  isSourcesLibraryDeck
+                    ? "library-player-volume-shell border-[color:var(--lib-accent-border)] bg-[color:var(--lib-surface-segment)] shadow-[var(--lib-shadow-rail-inset)]"
+                    : "rounded-lg border-cyan-500/50 bg-slate-900/80"
+                }`}
+              >
                 <button
                   type="button"
                   onClick={() => {
@@ -1424,9 +1530,13 @@ export function AudioPlayer() {
                       onVolumeChange(volumeBeforeMuteRef.current);
                     }
                   }}
-                  className="flex shrink-0 items-center justify-center text-cyan-500 hover:text-cyan-400 transition-colors"
-                  aria-label={displayVolume === 0 ? "Unmute" : "Mute"}
-                  title={displayVolume === 0 ? "Unmute" : "Mute"}
+                  className={
+                    isSourcesLibraryDeck
+                      ? "flex shrink-0 items-center justify-center text-[color:var(--lib-accent)] transition-colors hover:opacity-90"
+                      : "flex shrink-0 items-center justify-center text-cyan-500 hover:text-cyan-400 transition-colors"
+                  }
+                  aria-label={displayVolume === 0 ? t.unmute : t.mute}
+                  title={displayVolume === 0 ? t.unmute : t.mute}
                 >
                   {displayVolume === 0 ? (
                     <svg className="h-4 w-4 sm:h-5 sm:w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -1440,10 +1550,15 @@ export function AudioPlayer() {
                 </button>
                 <div className="relative flex flex-1 min-w-0 items-center py-2">
                   {/* Track background – 3px */}
-                  <div className="absolute inset-x-0 top-1/2 h-[3px] w-full -translate-y-1/2 rounded-full bg-slate-700/80" aria-hidden />
+                  <div
+                    className={`absolute inset-x-0 top-1/2 h-[3px] w-full -translate-y-1/2 rounded-full ${isSourcesLibraryDeck ? "bg-[color:var(--lib-border-muted)]" : "bg-slate-700/80"}`}
+                    aria-hidden
+                  />
                   {/* Fill – 3px, solid strong blue */}
                   <div
-                    className="absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-cyan-500 transition-all duration-100"
+                    className={`absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full transition-all duration-100 ${
+                      isSourcesLibraryDeck ? "bg-[color:var(--lib-accent)]" : "bg-cyan-500"
+                    }`}
                     style={{ width: `${displayVolume}%` }}
                     aria-hidden
                   />
@@ -1454,31 +1569,72 @@ export function AudioPlayer() {
                     value={displayVolume}
                     onChange={(e) => onVolumeChange(Number(e.target.value))}
                     className="player-volume-slider relative z-10 h-[3px] w-full cursor-pointer"
-                    aria-label="Volume"
+                    aria-label={t.volumeAria}
                   />
                 </div>
-                <span className="w-5 shrink-0 text-end text-[10px] font-bold tabular-nums text-cyan-500 sm:w-6 sm:text-xs" style={{ color: "#06b6d4" }}>{displayVolume}</span>
+                <span
+                  className={`w-5 shrink-0 text-end text-[10px] font-bold tabular-nums sm:w-6 sm:text-xs ${
+                    isSourcesLibraryDeck ? "text-[color:var(--lib-accent-text)]" : "text-cyan-500"
+                  }`}
+                  style={isSourcesLibraryDeck ? undefined : { color: "#06b6d4" }}
+                >
+                  {displayVolume}
+                </span>
               </div>
-              <NeonControlButton size="2xs" variant="white" className="!rounded-lg" onClick={() => setShareOpen(true)} disabled={!displayHasContent || isControlMirror} aria-label={t.share} title={t.share}>
-                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="18" cy="5" r="3" />
-                  <circle cx="6" cy="12" r="3" />
-                  <circle cx="18" cy="19" r="3" />
-                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-                </svg>
-              </NeonControlButton>
+              {isSourcesLibraryDeck ? (
+                <ActionButtonShare
+                  variant="player"
+                  onClick={() => setShareOpen(true)}
+                  disabled={!displayHasContent || isControlMirror}
+                  aria-label={t.share}
+                  title={t.share}
+                />
+              ) : (
+                <NeonControlButton
+                  size="2xs"
+                  variant="white"
+                  onClick={() => setShareOpen(true)}
+                  disabled={!displayHasContent || isControlMirror}
+                  aria-label={t.share}
+                  title={t.share}
+                >
+                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="18" cy="5" r="3" />
+                    <circle cx="6" cy="12" r="3" />
+                    <circle cx="18" cy="19" r="3" />
+                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                  </svg>
+                </NeonControlButton>
+              )}
             </div>
 
             {/* ROW 2: Track display panel – source icon + status + title + next (unified deck display) */}
             {(() => {
               return (
                 <div className="flex w-full">
-                  <div className="relative flex min-w-0 w-full flex-col rounded-lg border border-slate-700/60 bg-slate-900/40 py-2.5 pl-4 pr-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_1px_3px_rgba(0,0,0,0.2)] ring-1 ring-slate-700/40">
+                  <div
+                    className={`relative flex min-w-0 w-full flex-col py-2.5 pl-4 pr-2.5 ${
+                      isSourcesLibraryDeck
+                        ? "library-player-track-shell rounded-2xl"
+                        : "rounded-lg border border-slate-700/60 bg-slate-900/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_1px_3px_rgba(0,0,0,0.2)] ring-1 ring-slate-700/40"
+                    }`}
+                  >
                     {/* Main row: left = icon + status (original compact structure), center = inner display frame */}
                     <div className="flex min-w-0 flex-1 items-stretch gap-4">
-                      <div className="flex w-9 shrink-0 flex-col items-center justify-center gap-[15px] border-r border-slate-700/50 pr-4 sm:w-10">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-800/80 ring-1 ring-slate-700/60 sm:h-10 sm:w-10" title={displaySource?.title ? (isControlMirror ? "Remote" : (currentSource?.origin === "radio" ? "Radio" : currentTrack?.type ?? "Local")) : "Local"}>
+                      <div
+                        className={`flex w-9 shrink-0 flex-col items-center justify-center gap-[15px] border-r pr-4 sm:w-10 ${
+                          isSourcesLibraryDeck ? "border-[color:var(--lib-border-muted)]" : "border-slate-700/50"
+                        }`}
+                      >
+                        <div
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl sm:h-10 sm:w-10 ${
+                            isSourcesLibraryDeck
+                              ? "bg-[color:var(--lib-surface-segment)] ring-1 ring-[color:var(--lib-border-subtle)]"
+                              : "rounded-lg bg-slate-800/80 ring-1 ring-slate-700/60"
+                          }`}
+                          title={sourceIconTitle}
+                        >
                           <SourceIcon type={(isControlMirror ? "local" : currentTrack?.type) ?? "local"} origin={isControlMirror ? undefined : currentSource?.origin} size="lg" />
                         </div>
                         <div className="flex flex-col items-center gap-[15px]">
@@ -1492,43 +1648,108 @@ export function AudioPlayer() {
                             }`}
                           >
                             <span className={`h-1 w-1 shrink-0 rounded-full ${displayStatus === "playing" ? "bg-emerald-400 playing-led-pulse" : displayStatus === "paused" ? "bg-amber-400" : "bg-slate-500"}`} />
-                            {displayStatus}
+                            {displayStatusLabel}
                           </span>
-                          <span className="inline-flex w-full items-center justify-center gap-0.5 rounded-full bg-slate-700/50 px-1 py-px text-[7px] font-semibold uppercase tracking-wider text-slate-400 ring-1 ring-slate-600/40">
-                            <span className="h-1 w-1 shrink-0 rounded-full bg-slate-400" />
-                            Live
+                          <span
+                            className={`inline-flex w-full items-center justify-center gap-0.5 rounded-full px-1 py-px text-[7px] font-semibold uppercase tracking-wider ring-1 ${
+                              isSourcesLibraryDeck
+                                ? "bg-[color:var(--lib-surface-segment)] text-[color:var(--lib-text-muted)] ring-[color:var(--lib-border-subtle)]"
+                                : "bg-slate-700/50 text-slate-400 ring-slate-600/40"
+                            }`}
+                            title={deckSourceBadgeLabel}
+                          >
+                            <span
+                              className={`h-1 w-1 shrink-0 rounded-full ${
+                                isSourcesLibraryDeck ? "bg-[color:var(--lib-accent)]" : "bg-slate-400"
+                              }`}
+                              aria-hidden
+                            />
+                            {deckSourceBadgeLabel}
                           </span>
                         </div>
                       </div>
-                      <div className="relative flex min-w-0 flex-1 flex-col gap-1 rounded border border-slate-700/50 bg-slate-800/30 px-2.5 py-1.5">
+                      <div
+                        className={`relative flex min-w-0 flex-1 flex-col gap-1 px-2.5 py-1.5 ${
+                          isSourcesLibraryDeck ? "library-player-track-inner rounded-xl" : "rounded border border-slate-700/50 bg-slate-800/30"
+                        }`}
+                      >
                         {/* Row 1: PLAY NOW : current track */}
                         <div ref={titleContainerRef} className="relative flex min-w-0 flex-1 items-center overflow-hidden gap-1.5">
                           <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
                             {displayTitle as string}
                           </span>
-                          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">{t?.playNow ?? "Play now"}:</span>
+                          <span
+                            className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider sm:text-xs ${
+                              isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"
+                            }`}
+                          >
+                            {t.playNowColon}
+                          </span>
                           {titleOverflows ? (
                             <div className="min-w-0 flex-1 overflow-hidden">
                               <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
-                                <span className="text-xs font-medium text-slate-100 sm:text-sm">{displayTitle}</span>
-                                <span className="text-xs font-medium text-slate-100 sm:text-sm">{displayTitle}</span>
+                                <span
+                                  className={`text-xs font-medium sm:text-sm ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"}`}
+                                >
+                                  {displayTitle}
+                                </span>
+                                <span
+                                  className={`text-xs font-medium sm:text-sm ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"}`}
+                                >
+                                  {displayTitle}
+                                </span>
                               </div>
                             </div>
                           ) : (
-                            <p className="min-w-0 flex-1 truncate text-xs font-medium text-slate-100 sm:text-sm" title={displayTitle}>
+                            <p
+                              className={`min-w-0 flex-1 truncate text-xs font-medium sm:text-sm ${
+                                isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"
+                              }`}
+                              title={displayTitle}
+                            >
                               {displayTitle}
                             </p>
                           )}
                         </div>
                         {/* Row 2: NEXT TRACK : next track */}
                         <div className="flex min-w-0 items-center gap-1.5">
-                          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:text-xs">{t?.next ?? "Next"} track:</span>
-                          <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-400" title={displayNextLabel ?? undefined}>{displayNextLabel ?? "—"}</span>
+                          <span
+                            className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider sm:text-xs ${
+                              isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"
+                            }`}
+                          >
+                            {t.nextTrackColon}
+                          </span>
+                          <span
+                            className={`min-w-0 flex-1 truncate text-xs font-medium ${
+                              isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-400"
+                            }`}
+                            title={displayNextLabel ?? undefined}
+                          >
+                            {displayNextLabel ?? "—"}
+                          </span>
                         </div>
                       </div>
-                      <div className="flex shrink-0 flex-col items-stretch gap-2 border-l border-slate-700/50 pl-2">
+                      <div
+                        className={`flex shrink-0 flex-col items-stretch gap-2 border-l pl-2 ${
+                          isSourcesLibraryDeck ? "border-[color:var(--lib-border-muted)]" : "border-slate-700/50"
+                        }`}
+                      >
                         {/* AutoMix status: two-part module [ ● AUTOMIX ] [ 9S ] */}
-                        <div className="flex items-center gap-1" role="status" aria-label={displayAutoMix ? `AutoMix ${mixDurationDisplay}s` : "AutoMix off"} title={displayAutoMix ? `AutoMix on, ${mixDurationDisplay}s crossfade` : "AutoMix off"}>
+                        <div
+                          className="flex items-center gap-1"
+                          role="status"
+                          aria-label={
+                            displayAutoMix
+                              ? t.autoMixAriaOn.replace("{seconds}", String(mixDurationDisplay))
+                              : t.autoMixAriaOff
+                          }
+                          title={
+                            displayAutoMix
+                              ? t.autoMixTitleOn.replace("{seconds}", String(mixDurationDisplay))
+                              : t.autoMixTitleOff
+                          }
+                        >
                           <div className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 ${
                             displayAutoMix ? "border-cyan-500/30 bg-slate-800/50" : "border-slate-600/30 bg-slate-800/20"
                           }`}>
@@ -1548,7 +1769,7 @@ export function AudioPlayer() {
                         {/* Random status: same modular language [ ● RANDOM ] */}
                         <div className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 w-fit ${
                           displayShuffle ? "border-cyan-500/30 bg-slate-800/50" : "border-slate-600/30 bg-slate-800/20"
-                        }`} role="status" aria-label={displayShuffle ? "Random on" : "Random off"} title="Random">
+                        }`} role="status" aria-label={displayShuffle ? t.randomAriaOn : t.randomAriaOff} title={t.randomTitle}>
                           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
                             displayShuffle ? "bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" : "bg-slate-500/50"
                           }`} aria-hidden />
@@ -1565,13 +1786,18 @@ export function AudioPlayer() {
 
             {/* ROW 3: Timeline – [current time] [progress bar] [total duration] */}
             <div className="flex w-full items-center gap-3">
-              <span className="w-10 shrink-0 text-right text-xs font-semibold tabular-nums text-slate-400 sm:w-12" aria-live="polite">
+              <span
+                className={`w-10 shrink-0 text-right text-xs font-semibold tabular-nums sm:w-12 ${
+                  isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-400"
+                }`}
+                aria-live="polite"
+              >
                 {formatTime(displayPosition)}
               </span>
             <div
               ref={timelineRef}
               role="slider"
-              aria-label="Track progress"
+              aria-label={t.trackProgressAria}
               aria-valuemin={0}
               aria-valuemax={displayDuration}
               aria-valuenow={displayPosition}
@@ -1585,22 +1811,36 @@ export function AudioPlayer() {
             onTouchStart={handleTouchStart}
           >
             {/* Track background */}
-            <div className="absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-slate-700/80" />
+            <div
+              className={`absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-full ${
+                isSourcesLibraryDeck ? "bg-[color:var(--lib-border-muted)]" : "bg-slate-700/80"
+              }`}
+            />
             {/* Buffered layer */}
             {displayBufferedPercent > 0 && (
               <div
-                className="absolute left-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-slate-500/60 transition-all duration-150"
+                className={`absolute left-0 top-1/2 h-2 -translate-y-1/2 rounded-full transition-all duration-150 ${
+                  isSourcesLibraryDeck ? "library-player-timeline-buffer" : "bg-slate-500/60"
+                }`}
                 style={{ width: `${Math.min(displayBufferedPercent, 100)}%` }}
               />
             )}
             {/* Played layer */}
             <div
-              className="absolute left-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-[#1ed760] shadow-[0_0_6px_rgba(30,215,96,0.4)] transition-all duration-100"
+              className={`absolute left-0 top-1/2 h-2 -translate-y-1/2 rounded-full transition-all duration-100 ${
+                isSourcesLibraryDeck
+                  ? "library-player-timeline-played"
+                  : "bg-[#1ed760] shadow-[0_0_6px_rgba(30,215,96,0.4)]"
+              }`}
               style={{ width: `${displayProgressPercent}%` }}
             />
             {/* Draggable thumb – clamped so it stays visible */}
             <div
-              className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#1ed760] shadow-[0_0_0_2px_rgba(30,215,96,0.3),0_0_8px_var(--neon-green-glow)] transition-all duration-100 hover:scale-110"
+              className={`absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full transition-all duration-100 hover:scale-110 ${
+                isSourcesLibraryDeck
+                  ? "library-player-timeline-thumb ring-1 ring-[color:var(--lib-accent-border)]"
+                  : "bg-[#1ed760] shadow-[0_0_0_2px_rgba(30,215,96,0.3),0_0_8px_var(--neon-green-glow)]"
+              }`}
               style={{ left: `${Math.max(0, Math.min(100, displayProgressPercent))}%` }}
             />
             {/* Hover time preview tooltip – centered above hover position */}
@@ -1613,7 +1853,12 @@ export function AudioPlayer() {
               </div>
             )}
           </div>
-              <span className="w-10 shrink-0 text-left text-xs font-semibold tabular-nums text-slate-400 sm:w-12" aria-live="polite">
+              <span
+                className={`w-10 shrink-0 text-left text-xs font-semibold tabular-nums sm:w-12 ${
+                  isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-400"
+                }`}
+                aria-live="polite"
+              >
                 {formatTime(displayDuration)}
               </span>
             </div>
@@ -1635,7 +1880,7 @@ export function AudioPlayer() {
             <iframe
               ref={scIframeRef}
               src={isSoundCloud && scEmbedUrl ? scEmbedUrl : "about:blank"}
-              title="SoundCloud"
+              title={t.embedSoundCloudFrameTitle}
               className="h-[166px] w-full border-0"
               allow="autoplay"
             />

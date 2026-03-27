@@ -50,6 +50,12 @@ export type AnnouncementType = "tts" | "announcement_trigger" | "promo_trigger";
 
 export type LogLevel = "info" | "warning" | "error";
 
+/** Open taxonomy: genre, mood, energy, audience, season, business context, etc. */
+export type TaxonomyTag = {
+  key: string;
+  value: string;
+};
+
 export type Account = {
   id: string;
   name: string;
@@ -110,6 +116,8 @@ export type Source = {
   /** Player mode: embedded (in /player) or external (launch via command). */
   playerMode?: PlayerMode;
   tags?: string[];
+  /** Future: structured taxonomy (additive; optional on persisted sources). */
+  taxonomyTags?: TaxonomyTag[];
   isLive: boolean;
 };
 
@@ -143,6 +151,8 @@ export type Schedule = {
   updatedAt?: string;
   createdBy?: string;
   updatedBy?: string;
+  /** Future: taxonomy for schedule grouping (additive). */
+  taxonomyTags?: TaxonomyTag[];
 };
 
 export type Announcement = {
@@ -172,6 +182,128 @@ export type LogEntry = {
   deviceId?: string;
   sourceId?: string;
   scheduleId?: string;
+};
+
+// --- Long-term foundation (additive; control-plane metadata; no runtime enforcement yet) ---
+
+/** Where playback should execute (intent; adapters map to concrete engine). */
+export type ExecutionTarget =
+  | "browser_embed"
+  | "native_audio_engine"
+  | "radio_stream"
+  | "ai_asset";
+
+/** Policy for choosing browser vs native executor when both may apply. */
+export type EngineSelectionPolicy =
+  | "prefer_native"
+  | "prefer_browser"
+  | "force_native"
+  | "browser_only";
+
+/** Native / execution backends; mpv primary, vlc secondary, winamp legacy only. */
+export type PlaybackEngineType = "browser" | "mpv" | "vlc" | "winamp_legacy";
+
+/** Future mix/crossfade behavior hints (not bound to a single engine). */
+export type MixStrategyId =
+  | "browser_overlap"
+  | "native_gapless"
+  | "native_crossfade"
+  | "interrupt_resume_aware"
+  | "default";
+
+/** Coarse shape from URL resolve (optional; complements contentNodeKind). */
+export type ResolveMediaKind = "single_track" | "multi_item" | "stream" | "unknown";
+
+/** Generalized library node (future persistence; optional legacy pointers today). */
+export type ContentNodeKind =
+  | "track"
+  | "single_track"
+  | "mix_set"
+  | "external_playlist"
+  | "syncbiz_playlist"
+  | "radio_stream"
+  | "ai_asset"
+  | "unknown";
+
+export type ContentNode = {
+  id: string;
+  kind: ContentNodeKind;
+  title: string;
+  branchId?: string;
+  tenantId?: string;
+  taxonomyTags?: TaxonomyTag[];
+  executionTarget?: ExecutionTarget;
+  engineSelectionPolicy?: EngineSelectionPolicy;
+  mixStrategyHint?: MixStrategyId;
+  legacyPlaylistId?: string;
+  legacySourceId?: string;
+};
+
+/** Reusable business playback block (daypart / mood block). */
+export type PlayBlock = {
+  id: string;
+  name: string;
+  description?: string;
+  itemRefs?: string[];
+  branchId?: string;
+  tenantId?: string;
+};
+
+/** Future automation rule (planner output targets intents, not engine commands). */
+export type ScheduleRule = {
+  id: string;
+  branchId: string;
+  targetRef?: {
+    kind: "play_block" | "content_node" | "broadcast_event";
+    id: string;
+  };
+  enabled?: boolean;
+};
+
+export type ResumePolicy =
+  | "resume_exact"
+  | "resume_from_next"
+  | "restart_block"
+  | "overlay_duck"
+  | "hard_cut_resume";
+
+/** Timed or manual interruptive business audio moment. */
+export type BroadcastEvent = {
+  id: string;
+  eventType: string;
+  title: string;
+  triggerAt?: string;
+  targetBranchId: string;
+  payload?: Record<string, unknown>;
+  audioSourceType?: string;
+  priority: number;
+  resumePolicy?: ResumePolicy;
+  executionTarget?: ExecutionTarget;
+  engineSelectionPolicy?: EngineSelectionPolicy;
+  preferredEngineType?: PlaybackEngineType;
+};
+
+/** Registered execution capability on a device/branch (metadata only for now). */
+export type PlaybackEngine = {
+  id: string;
+  branchId?: string;
+  deviceId?: string;
+  engineType: PlaybackEngineType;
+  status?: "online" | "offline" | "degraded";
+  supportedFormats?: string[];
+  supportsResume?: boolean;
+  supportsOverlay?: boolean;
+  supportsQueue?: boolean;
+};
+
+/** Control-plane registration for an execution path (browser bridge vs native; metadata only). */
+export type ExecutionAdapter = {
+  id: string;
+  branchId?: string;
+  deviceId?: string;
+  engineType: PlaybackEngineType;
+  label?: string;
+  status?: "active" | "inactive";
 };
 
 /** Commands sent to the local endpoint agent. Device executes playback. */

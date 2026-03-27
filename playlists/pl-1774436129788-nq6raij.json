@@ -1,0 +1,12 @@
+{
+  "name": "YouTube",
+  "genre": "Mixed",
+  "type": "youtube",
+  "url": "https://www.youtube.com/watch?v=kR9uHYvS9bE&list=RDkR9uHYvS9bE&start_radio=1",
+  "thumbnail": "https://img.youtube.com/vi/kR9uHYvS9bE/hqdefault.jpg",
+  "branchId": "default",
+  "tenantId": "tnt-1774433368276-a497g6pcj",
+  "id": "pl-1774436129788-nq6raij",
+  "createdAt": "2026-03-25T10:55:29.788Z",
+  "cover": "https://img.youtube.com/vi/kR9uHYvS9bE/hqdefault.jpg"
+}

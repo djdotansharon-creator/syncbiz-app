@@ -7,6 +7,7 @@ import { getDeletedSourceIds } from "@/lib/deleted-sources-store";
 import { getCurrentUserFromCookies, hasBranchAccess } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import type { UnifiedSource, SourceProviderType } from "@/lib/source-types";
+import { unifiedFoundationHints } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
 import type { Source } from "@/lib/types";
 import { getSourceArtworkUrl, detectProvider } from "@/lib/player-utils";
@@ -28,6 +29,7 @@ function playlistToUnified(p: Playlist): UnifiedSource {
     url: p.url,
     origin: "playlist",
     playlist: p,
+    ...unifiedFoundationHints("playlist", p.type as SourceProviderType, p.url),
   };
 }
 
@@ -53,7 +55,18 @@ function dbSourceToUnified(s: { id: string; name: string; target: string; artwor
     url: target,
     origin: "source",
     source: s as import("@/lib/types").Source,
+    ...unifiedFoundationHints("source", type, target),
   };
+}
+
+function getSourceCreatedAtMs(source: UnifiedSource): number {
+  const createdAt =
+    source.playlist?.createdAt ??
+    source.radio?.createdAt ??
+    ((source.source as { createdAt?: string } | undefined)?.createdAt ?? "") ??
+    "";
+  const t = Date.parse(createdAt);
+  return Number.isFinite(t) ? t : 0;
 }
 
 export async function GET() {
@@ -92,6 +105,7 @@ export async function GET() {
       }
     }
 
+    items.sort((a, b) => getSourceCreatedAtMs(b) - getSourceCreatedAtMs(a));
     return NextResponse.json(items);
   } catch (e) {
     console.error("[api/sources/unified] GET error:", e);

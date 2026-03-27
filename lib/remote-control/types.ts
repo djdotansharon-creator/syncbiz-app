@@ -3,6 +3,9 @@
  * Used by both the WebSocket server and the frontend.
  */
 
+import type { UnifiedSourceFoundation } from "@/lib/source-types";
+import type { PlaybackEngineType } from "@/lib/types";
+
 export type RemoteCommand =
   | "PLAY"
   | "PAUSE"
@@ -46,6 +49,9 @@ export type StationPlaybackState = {
   positionAt?: number;
   /** Volume 0–100 (from MASTER). */
   volume?: number;
+  /** Future: which engine is driving playback on MASTER (metadata only). */
+  activePlaybackEngineId?: string;
+  activePlaybackEngineType?: PlaybackEngineType;
 };
 
 /** Minimal source payload for PLAY_SOURCE command. */
@@ -57,7 +63,7 @@ export type PlaySourcePayload = {
   type: string;
   url: string;
   origin: "playlist" | "source" | "radio";
-};
+} & Partial<UnifiedSourceFoundation>;
 
 /** Device mode: MASTER = active player, CONTROL = monitor/standby */
 export type DeviceMode = "MASTER" | "CONTROL";

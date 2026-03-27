@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseSearchIntent } from "@/lib/search-intent";
 import { searchYouTubeWithApi } from "@/lib/youtube-api-search";
 import { searchYouTubeWithYtDlp } from "@/lib/yt-dlp-search";
+import { rankMusicFirst, rankRadioMusicFirst } from "@/lib/music-search-relevance";
 
 type SearchResult = {
   title: string;
@@ -130,5 +131,9 @@ export async function GET(req: NextRequest) {
     console.warn("[sources/search] Radio Browser API failed:", e);
   }
 
-  return NextResponse.json({ results, radioResults });
+  const rankedYoutube = results.length > 0 ? rankMusicFirst(results, q, { maxResults: RESULT_LIMIT }) : [];
+  const rankedRadio =
+    radioResults.length > 0 ? rankRadioMusicFirst(radioResults, q, RADIO_LIMIT) : [];
+
+  return NextResponse.json({ results: rankedYoutube, radioResults: rankedRadio });
 }

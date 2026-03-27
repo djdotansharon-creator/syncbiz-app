@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { inferPlaylistType, getYouTubeThumbnail, getYouTubeVideoId, isShazamUrl, extractShazamSongFromPath } from "@/lib/playlist-utils";
 import { inferGenre } from "@/lib/infer-genre";
 import { resolveYouTubeMetadata } from "@/lib/youtube-metadata-resolver";
+import type { ParseUrlJson } from "@/lib/source-types";
+import { parseUrlFoundationHints } from "@/lib/source-types";
 
 const DEFAULT_GENRE = "Mixed";
 const LIVE_RADIO_GENRE = "Live Radio";
@@ -98,17 +100,7 @@ export async function POST(req: NextRequest) {
     const isRadio = isStreamOrRadioUrl(raw) || type === "winamp";
     const isShazam = isShazamUrl(raw);
 
-    const result: {
-      title: string;
-      cover: string | null;
-      genre: string;
-      type: string;
-      isRadio: boolean;
-      viewCount?: number;
-      durationSeconds?: number;
-      artist?: string;
-      song?: string;
-    } = {
+    const result: ParseUrlJson = {
       title: "",
       cover: null,
       genre: isRadio ? LIVE_RADIO_GENRE : DEFAULT_GENRE,
@@ -218,7 +210,15 @@ export async function POST(req: NextRequest) {
       result.genre = inferGenre(result.title);
     }
 
-    return NextResponse.json(result);
+    return NextResponse.json({
+      ...result,
+      ...parseUrlFoundationHints({
+        rawUrl: raw,
+        inferredType: result.type,
+        isRadio,
+        isShazam,
+      }),
+    });
   } catch (e) {
     console.warn("[parse-url]", e);
     return NextResponse.json(

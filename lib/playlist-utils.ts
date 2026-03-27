@@ -19,7 +19,11 @@ export function getSpotifyId(url: string): string | null {
 /** Get YouTube video ID from URL. */
 export function getYouTubeVideoId(url: string): string | null {
   const u = url.trim();
-  const m = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\s?/]+)/i);
+  let m = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\s?/]+)/i);
+  if (m) return m[1];
+  m = u.match(/youtube\.com\/shorts\/([^/?\s]+)/i);
+  if (m) return m[1];
+  m = u.match(/youtube\.com\/live\/([^/?\s]+)/i);
   return m ? m[1] : null;
 }
 

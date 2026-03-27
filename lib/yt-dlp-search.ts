@@ -197,3 +197,52 @@ export async function fetchYouTubeViewCountByYtDlp(
   const meta = await fetchYouTubeMetadataByYtDlp(url);
   return meta?.viewCount;
 }
+
+/**
+ * Resolve the first video's watch URL for a YouTube playlist/mix URL.
+ * Used to normalize search-selected URLs so the embedded player can start (needs a `v=` videoId).
+ */
+export async function resolveYouTubeFirstVideoUrlFromPlaylistUrl(
+  url: string
+): Promise<string | null> {
+  const wrap = await getYtDlp();
+  if (!wrap) return null;
+
+  const stdout = await runWithTimeout(
+    wrap.execPromise(
+      // Extract only the first item. `--flat-playlist` reduces nesting, `--playlist-items 1` limits output.
+      [url, "--dump-json", "--no-warnings", "--no-download", "--flat-playlist", "--playlist-items", "1"],
+    ),
+    TIMEOUT_MS
+  ).catch(() => null);
+
+  const raw = typeof stdout === "string" ? stdout : "";
+  const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line) as Record<string, unknown> & { id?: string; webpage_url?: string; entries?: unknown[] };
+
+      // Common case: a single video object with `id` / `webpage_url`.
+      const id = typeof obj.id === "string" ? obj.id : undefined;
+      const webpageUrl = typeof obj.webpage_url === "string" ? obj.webpage_url : undefined;
+      if (webpageUrl) return webpageUrl;
+      if (id) return `https://www.youtube.com/watch?v=${id}`;
+
+      // Fallback: playlist-like object with `entries`.
+      const entries = Array.isArray(obj.entries) ? obj.entries : null;
+      if (entries && entries.length > 0) {
+        const first = entries[0] as Record<string, unknown> | undefined;
+        const entryId = typeof first?.id === "string" ? first.id : undefined;
+        const entryWebpageUrl = typeof first?.webpage_url === "string" ? first.webpage_url : undefined;
+        if (entryWebpageUrl) return entryWebpageUrl;
+        if (entryId) return `https://www.youtube.com/watch?v=${entryId}`;
+      }
+    } catch {
+      /* ignore JSON parse failures for non-JSON lines */
+    }
+  }
+
+  return null;
+}

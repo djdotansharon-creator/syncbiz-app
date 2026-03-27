@@ -7,36 +7,13 @@ import { usePlayback } from "@/lib/playback-provider";
 import { useSourcesPlayback } from "@/lib/sources-playback-context";
 import { ActionButtonPlay, ActionButtonEdit } from "@/components/ui/action-buttons";
 import { searchAll, type YouTubeSearchResult, type RadioSearchResult } from "@/lib/search-service";
-import { inferPlaylistType, getYouTubeThumbnail } from "@/lib/playlist-utils";
+import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { formatViewCount } from "@/lib/format-utils";
 import { inferGenre } from "@/lib/infer-genre";
 import { radioToUnified } from "@/lib/radio-utils";
 import { RadioIcon } from "@/components/ui/radio-icon";
 import type { UnifiedSource } from "@/lib/source-types";
-import type { Playlist } from "@/lib/playlist-types";
 import type { RadioStream } from "@/lib/source-types";
-
-async function createPlaylistFromUrl(
-  url: string,
-  meta?: { title: string; genre: string; cover: string | null; type: string; viewCount?: number }
-): Promise<Playlist | null> {
-  const type = meta?.type || inferPlaylistType(url);
-  const cover = meta?.cover || (type === "youtube" ? getYouTubeThumbnail(url) : null);
-  const res = await fetch("/api/playlists", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: meta?.title || "Untitled",
-      url,
-      genre: meta?.genre || "Mixed",
-      type,
-      thumbnail: cover || "",
-      viewCount: meta?.viewCount,
-    }),
-  });
-  if (!res.ok) return null;
-  return res.json();
-}
 
 function SourceLogo({ type, origin, size = "sm" }: { type: UnifiedSource["type"]; origin?: UnifiedSource["origin"]; size?: "sm" | "md" }) {
   const sizeClass = size === "sm" ? "h-5 w-5" : "h-6 w-6";
@@ -226,8 +203,10 @@ export function UniversalSearchBar({ onAddSource }: Props) {
   const handleAddYoutube = useCallback(
     async (r: YouTubeSearchResult) => {
       const genre = inferGenre(r.title, query);
+      const playable =
+        r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
       const meta = { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount };
-      const created = await createPlaylistFromUrl(r.url, meta);
+      const created = await createPlaylistFromUrl(playable, meta);
       if (created) {
         const unified: UnifiedSource = {
           id: `pl-${created.id}`,
@@ -253,7 +232,14 @@ export function UniversalSearchBar({ onAddSource }: Props) {
   const handlePlayYoutube = useCallback(
     async (r: YouTubeSearchResult) => {
       const genre = inferGenre(r.title, query);
-      const created = await createPlaylistFromUrl(r.url, { title: r.title, genre, cover: r.cover, type: r.type });
+      const playable =
+        r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
+      const created = await createPlaylistFromUrl(playable, {
+        title: r.title,
+        genre,
+        cover: r.cover,
+        type: r.type,
+      });
       if (created) {
         const u: UnifiedSource = {
           id: `pl-${created.id}`,

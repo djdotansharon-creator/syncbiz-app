@@ -125,6 +125,7 @@ type PlaybackContextValue = PlaybackState & {
   /** Seek to position (seconds). Used by remote control. AudioPlayer registers implementation. */
   seekTo: (seconds: number) => void;
   registerSeekCallback: (fn: (seconds: number) => void) => () => void;
+  reportRecoveryProgress: (seconds: number) => void;
   currentPlayUrl: string | null;
   isEmbedded: boolean;
   /** Next direct-audio URL for crossfade. Null if next is embedded or no next. */
@@ -136,6 +137,20 @@ type PlaybackContextValue = PlaybackState & {
 const PlaybackContext = createContext<PlaybackContextValue | null>(null);
 
 const STORAGE_KEY = "syncbiz-playback";
+const RECOVERY_STORAGE_KEY = "syncbiz-playback-recovery-v2";
+const RECOVERY_TTL_MS = 1000 * 60 * 60 * 24;
+const RECOVERY_AUTOPLAY_WINDOW_MS = 1000 * 60 * 30;
+
+type PersistedPlaybackV2 = {
+  currentSourceId: string;
+  queueIds: string[];
+  queueIndex: number;
+  trackIndex: number;
+  status: PlaybackStatus;
+  volume: number;
+  positionSeconds: number;
+  updatedAt: number;
+};
 
 function loadPersistedPlayback(): { sourceId: string; trackIndex: number; status: PlaybackStatus; volume: number } | null {
   if (typeof window === "undefined") return null;
@@ -165,6 +180,50 @@ function savePersistedPlayback(sourceId: string, trackIndex: number, status: Pla
     } else {
       sessionStorage.removeItem(STORAGE_KEY);
     }
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadPersistedPlaybackV2(): PersistedPlaybackV2 | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(RECOVERY_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedPlaybackV2>;
+    if (!parsed?.currentSourceId || !Array.isArray(parsed.queueIds)) return null;
+    const status = parsed.status;
+    if (!(status === "playing" || status === "paused")) return null;
+    const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
+    if (!updatedAt || Date.now() - updatedAt > RECOVERY_TTL_MS) return null;
+    return {
+      currentSourceId: parsed.currentSourceId,
+      queueIds: parsed.queueIds.filter((x): x is string => typeof x === "string"),
+      queueIndex: typeof parsed.queueIndex === "number" ? parsed.queueIndex : -1,
+      trackIndex: typeof parsed.trackIndex === "number" ? parsed.trackIndex : 0,
+      status,
+      volume: typeof parsed.volume === "number" ? Math.max(0, Math.min(100, parsed.volume)) : 80,
+      positionSeconds: typeof parsed.positionSeconds === "number" ? Math.max(0, parsed.positionSeconds) : 0,
+      updatedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearPersistedPlaybackV2() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(RECOVERY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function savePersistedPlaybackV2(payload: PersistedPlaybackV2) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(RECOVERY_STORAGE_KEY, JSON.stringify(payload));
   } catch {
     /* ignore */
   }
@@ -255,6 +314,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const stopAllPlayersRef = useRef<(() => void) | null>(null);
   const seekCallbackRef = useRef<((seconds: number) => void) | null>(null);
+  const pendingSeekOnRestoreRef = useRef<number | null>(null);
+  const recoveryPositionRef = useRef<number>(0);
+  const lastRecoveryWriteAtRef = useRef<number>(0);
   const transportLockRef = useRef(false);
 
   useEffect(() => {
@@ -270,6 +332,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const registerSeekCallback = useCallback((fn: (seconds: number) => void) => {
     seekCallbackRef.current = fn;
+    if (pendingSeekOnRestoreRef.current != null) {
+      fn(pendingSeekOnRestoreRef.current);
+      pendingSeekOnRestoreRef.current = null;
+    }
     return () => {
       if (seekCallbackRef.current === fn) seekCallbackRef.current = null;
     };
@@ -278,6 +344,40 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const seekTo = useCallback((seconds: number) => {
     seekCallbackRef.current?.(seconds);
   }, []);
+
+  const persistRecoverySnapshot = useCallback((overridePositionSeconds?: number) => {
+    const src = state.currentSource;
+    if (!src || (state.status !== "playing" && state.status !== "paused")) {
+      clearPersistedPlaybackV2();
+      return;
+    }
+    const pos = Number.isFinite(overridePositionSeconds)
+      ? (overridePositionSeconds as number)
+      : recoveryPositionRef.current;
+    savePersistedPlaybackV2({
+      currentSourceId: src.id,
+      queueIds: state.queue.map((q) => q.id),
+      queueIndex: state.queueIndex,
+      trackIndex: state.currentTrackIndex,
+      status: state.status,
+      volume: state.volume,
+      positionSeconds: Math.max(0, pos),
+      updatedAt: Date.now(),
+    });
+  }, [state.currentSource, state.queue, state.queueIndex, state.currentTrackIndex, state.status, state.volume]);
+
+  const reportRecoveryProgress = useCallback((seconds: number) => {
+    if (!Number.isFinite(seconds)) return;
+    recoveryPositionRef.current = Math.max(0, seconds);
+    const now = Date.now();
+    if (now - lastRecoveryWriteAtRef.current < 2000) return;
+    lastRecoveryWriteAtRef.current = now;
+    persistRecoverySnapshot(recoveryPositionRef.current);
+  }, [persistRecoverySnapshot]);
+
+  useEffect(() => {
+    persistRecoverySnapshot();
+  }, [persistRecoverySnapshot]);
 
   /** Stop all known players: embedded YT/SC, local Winamp. Call before starting new source. */
   const stopAllBeforePlay = useCallback(() => {
@@ -358,17 +458,60 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   // Restore playback state from sessionStorage after refresh (e.g. Radio station)
   useEffect(() => {
     if (hasRestoredRef.current || state.currentSource) return;
-    const persisted = loadPersistedPlayback();
-    if (!persisted) return;
+    const persistedV2 = loadPersistedPlaybackV2();
+    const persistedV1 = loadPersistedPlayback();
+    if (!persistedV2 && !persistedV1) return;
     hasRestoredRef.current = true;
     let cancelled = false;
     fetchUnifiedSourcesWithFallback().then((items) => {
       if (cancelled) return;
       if (!deviceModeAllowsLocalPlayback.current) return;
-      const source = items.find((s) => s.id === persisted.sourceId);
+      const byId = new Map(items.map((i) => [i.id, i] as const));
+      if (persistedV2) {
+        const restoredQueue = persistedV2.queueIds.map((id) => byId.get(id)).filter((s): s is UnifiedSource => !!s);
+        const source =
+          byId.get(persistedV2.currentSourceId) ??
+          (persistedV2.queueIndex >= 0 ? restoredQueue[persistedV2.queueIndex] : undefined) ??
+          restoredQueue[0];
+        if (!source) {
+          clearPersistedPlaybackV2();
+          return;
+        }
+        recoveryPositionRef.current = persistedV2.positionSeconds;
+        pendingSeekOnRestoreRef.current = persistedV2.positionSeconds;
+        setState((s) => ({
+          ...s,
+          volume: persistedV2.volume,
+          queue: restoredQueue.length > 0 ? restoredQueue : [source],
+          queueIndex: restoredQueue.findIndex((q) => q.id === source.id),
+          currentSource: source,
+          currentPlaylist: source.playlist ?? null,
+          currentTrackIndex: persistedV2.trackIndex,
+          status: "paused",
+        }));
+        const shouldAutoplay =
+          persistedV2.status === "playing" && Date.now() - persistedV2.updatedAt <= RECOVERY_AUTOPLAY_WINDOW_MS;
+        if (shouldAutoplay) {
+          setTimeout(() => {
+            if (cancelled) return;
+            playSource(source, persistedV2.trackIndex);
+            setTimeout(() => {
+              if (cancelled) return;
+              const pending = pendingSeekOnRestoreRef.current;
+              if (pending != null) {
+                seekTo(pending);
+                pendingSeekOnRestoreRef.current = null;
+              }
+            }, 350);
+          }, 0);
+        }
+        return;
+      }
+
+      const source = items.find((s) => s.id === persistedV1!.sourceId);
       if (source) {
-        setState((s) => ({ ...s, volume: persisted.volume }));
-        playSource(source, persisted.trackIndex);
+        setState((s) => ({ ...s, volume: persistedV1!.volume }));
+        playSource(source, persistedV1!.trackIndex);
       } else if (typeof window !== "undefined") {
         try {
           sessionStorage.removeItem(STORAGE_KEY);
@@ -378,7 +521,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       }
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [playSource, state.currentSource]);
+  }, [playSource, seekTo, state.currentSource]);
 
   const playPlaylist = useCallback(
     (playlist: Playlist, trackIndex = 0) => {
@@ -747,6 +890,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       registerStopAllPlayers,
       seekTo,
       registerSeekCallback,
+      reportRecoveryProgress,
       currentPlayUrl,
       isEmbedded,
       getNextStreamUrl,
@@ -774,6 +918,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       registerStopAllPlayers,
       seekTo,
       registerSeekCallback,
+      reportRecoveryProgress,
       currentPlayUrl,
       isEmbedded,
       getNextStreamUrl,

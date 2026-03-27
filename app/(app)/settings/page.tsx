@@ -1,5 +1,6 @@
 import { DeviceModeSettingsSwitch } from "@/components/device-mode-settings-switch";
 import { MixDurationSetting } from "@/components/mix-duration-setting";
+import { SettingsPreferencesControls } from "@/components/settings-preferences-controls";
 
 export default function SettingsPage() {
   return (
@@ -10,6 +11,16 @@ export default function SettingsPage() {
           Account and playback preferences.
         </p>
       </div>
+
+      <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
+        <h2 className="text-sm font-semibold text-slate-50">Preferences</h2>
+        <p className="mt-0.5 text-xs text-slate-400">
+          Theme and language preferences.
+        </p>
+        <div className="mt-4">
+          <SettingsPreferencesControls />
+        </div>
+      </section>
 
       <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
         <h2 className="text-sm font-semibold text-slate-50">Remote player</h2>

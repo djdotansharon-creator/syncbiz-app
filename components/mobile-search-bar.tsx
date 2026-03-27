@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { searchAll, type YouTubeSearchResult, type RadioSearchResult } from "@/lib/search-service";
-import { inferPlaylistType, getYouTubeThumbnail } from "@/lib/playlist-utils";
+import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { inferGenre } from "@/lib/infer-genre";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { radioToUnified } from "@/lib/radio-utils";
@@ -26,29 +26,6 @@ type Props = {
   /** When set, edit links include return param for redirect after save (e.g. /mobile). */
   editReturnTo?: string;
 };
-
-async function createPlaylistFromUrl(
-  url: string,
-  meta?: { title: string; genre: string; cover: string | null; type: string; viewCount?: number; durationSeconds?: number }
-): Promise<Playlist | null> {
-  const type = meta?.type || inferPlaylistType(url);
-  const cover = meta?.cover || (type === "youtube" ? getYouTubeThumbnail(url) : null);
-  const res = await fetch("/api/playlists", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: meta?.title || "Untitled",
-      url,
-      genre: meta?.genre || "Mixed",
-      type,
-      thumbnail: cover || "",
-      viewCount: meta?.viewCount,
-      durationSeconds: meta?.durationSeconds,
-    }),
-  });
-  if (!res.ok) return null;
-  return res.json();
-}
 
 export function MobileSearchBar({
   sources,
@@ -131,7 +108,9 @@ export function MobileSearchBar({
   const handleAddYoutube = useCallback(
     async (r: YouTubeSearchResult) => {
       const genre = inferGenre(r.title, query);
-      const created = await createPlaylistFromUrl(r.url, {
+      const playable =
+        r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
+      const created = await createPlaylistFromUrl(playable, {
         title: r.title,
         genre,
         cover: r.cover,
@@ -165,41 +144,44 @@ export function MobileSearchBar({
       if (playInFlightRef.current.has(key)) return;
       playInFlightRef.current.add(key);
 
-      const genre = inferGenre(r.title, query);
-      const tempId = `temp-yt-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      const minimalPlaylist: Playlist = {
-        id: tempId,
-        name: r.title,
-        genre,
-        type: r.type,
-        url: r.url,
-        thumbnail: r.cover || "",
-        createdAt: new Date().toISOString(),
-      };
-      const u: UnifiedSource = {
-        id: `pl-${tempId}`,
-        title: r.title,
-        genre,
-        cover: r.cover || null,
-        type: "youtube",
-        url: r.url,
-        origin: "playlist",
-        playlist: minimalPlaylist,
-      };
-      onAdd(u);
-      onPlay(u);
-      setQuery("");
-      setShowResults(false);
+      void (async () => {
+        try {
+          const playable =
+            r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
+          const genre = inferGenre(r.title, query);
+          const tempId = `temp-yt-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+          const minimalPlaylist: Playlist = {
+            id: tempId,
+            name: r.title,
+            genre,
+            type: r.type,
+            url: playable,
+            thumbnail: r.cover || "",
+            createdAt: new Date().toISOString(),
+          };
+          const u: UnifiedSource = {
+            id: `pl-${tempId}`,
+            title: r.title,
+            genre,
+            cover: r.cover || null,
+            type: "youtube",
+            url: playable,
+            origin: "playlist",
+            playlist: minimalPlaylist,
+          };
+          onAdd(u);
+          onPlay(u);
+          setQuery("");
+          setShowResults(false);
 
-      createPlaylistFromUrl(r.url, {
-        title: r.title,
-        genre,
-        cover: r.cover,
-        type: r.type,
-        viewCount: r.viewCount,
-        durationSeconds: r.durationSeconds,
-      })
-        .then((created) => {
+          const created = await createPlaylistFromUrl(playable, {
+            title: r.title,
+            genre,
+            cover: r.cover,
+            type: r.type,
+            viewCount: r.viewCount,
+            durationSeconds: r.durationSeconds,
+          });
           if (created) {
             savePlaylistToLocal(created);
             const real: UnifiedSource = {
@@ -218,10 +200,10 @@ export function MobileSearchBar({
               onAdd(real);
             }
           }
-        })
-        .finally(() => {
+        } finally {
           playInFlightRef.current.delete(key);
-        });
+        }
+      })();
     },
     [query, onAdd, onPlay, onReplaceSource]
   );
@@ -229,7 +211,9 @@ export function MobileSearchBar({
   const handleSendYoutube = useCallback(
     async (r: YouTubeSearchResult) => {
       const genre = inferGenre(r.title, query);
-      const created = await createPlaylistFromUrl(r.url, {
+      const playable =
+        r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
+      const created = await createPlaylistFromUrl(playable, {
         title: r.title,
         genre,
         cover: r.cover,

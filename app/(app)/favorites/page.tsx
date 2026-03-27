@@ -1,30 +1,13 @@
 import { Suspense } from "react";
-import { getApiBase } from "@/lib/api-base";
 import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
 import { FavoritesManager } from "@/components/favorites-manager";
-import type { UnifiedSource } from "@/lib/source-types";
-
-async function getUnifiedSources(): Promise<UnifiedSource[]> {
-  try {
-    const base = getApiBase();
-    const res = await fetch(`${base}/api/sources/unified`, { cache: "no-store" });
-    if (!res.ok) {
-      console.error("[favorites] API error:", res.status, await res.text());
-      return [];
-    }
-    const data = await res.json();
-    return Array.isArray(data) ? data : [];
-  } catch (e) {
-    console.error("[favorites] getUnifiedSources error:", e);
-    return [];
-  }
-}
+import { fetchUnifiedSourcesForServerComponent } from "@/lib/server-unified-sources-fetch";
 
 export default async function FavoritesPage() {
   const locale = await getLocale();
   const t = getTranslations(locale);
-  const sources = await getUnifiedSources();
+  const sources = await fetchUnifiedSourcesForServerComponent();
 
   return (
     <div className="space-y-8">

@@ -4,13 +4,13 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
-import { inferPlaylistType, getYouTubeVideoId, getYouTubeThumbnail } from "@/lib/playlist-utils";
+import { getYouTubeVideoId } from "@/lib/playlist-utils";
+import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { formatViewCount } from "@/lib/format-utils";
 import { inferGenre } from "@/lib/infer-genre";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { ActionButtonEdit } from "@/components/ui/action-buttons";
 import type { UnifiedSource } from "@/lib/source-types";
-import type { Playlist } from "@/lib/playlist-types";
 
 type YouTubeResult = { title: string; url: string; cover: string | null; type: "youtube" | "soundcloud"; viewCount?: number };
 
@@ -55,7 +55,7 @@ function findDuplicateByUrl(sources: UnifiedSource[], url: string): UnifiedSourc
 }
 
 async function fetchSources(): Promise<UnifiedSource[]> {
-  const res = await fetch("/api/sources/unified", { cache: "no-store" });
+  const res = await fetch("/api/sources/unified", { cache: "no-store", credentials: "include" });
   if (!res.ok) return [];
   return res.json();
 }
@@ -65,28 +65,6 @@ async function searchYouTube(q: string): Promise<YouTubeResult[]> {
   const res = await fetch(`/api/sources/search?q=${encodeURIComponent(q)}`);
   const data = await res.json();
   return data.results || [];
-}
-
-async function createPlaylistFromUrl(
-  url: string,
-  meta?: { title: string; genre: string; cover: string | null; type: string; viewCount?: number }
-): Promise<Playlist | null> {
-  const type = meta?.type || inferPlaylistType(url);
-  const cover = meta?.cover || (type === "youtube" ? getYouTubeThumbnail(url) : null);
-  const res = await fetch("/api/playlists", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: meta?.title || "Untitled",
-      url,
-      genre: meta?.genre || "Mixed",
-      type,
-      thumbnail: cover || "",
-      viewCount: meta?.viewCount,
-    }),
-  });
-  if (!res.ok) return null;
-  return res.json();
 }
 
 const inputBase =
@@ -191,7 +169,9 @@ export function AISearchBar() {
 
   const handleAddYoutube = useCallback(
     async (r: YouTubeResult) => {
-      const existing = findDuplicateByUrl(sources, r.url);
+      const playable =
+        r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
+      const existing = findDuplicateByUrl(sources, playable);
       if (existing) {
         router.push("/sources");
         router.refresh();
@@ -200,7 +180,7 @@ export function AISearchBar() {
         return;
       }
       const genre = inferGenre(r.title, query);
-      const created = await createPlaylistFromUrl(r.url, {
+      const created = await createPlaylistFromUrl(playable, {
         title: r.title,
         genre,
         cover: r.cover,
@@ -221,7 +201,9 @@ export function AISearchBar() {
 
   const handlePlayYoutube = useCallback(
     async (r: YouTubeResult) => {
-      const existing = findDuplicateByUrl(sources, r.url);
+      const playable =
+        r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
+      const existing = findDuplicateByUrl(sources, playable);
       if (existing) {
         playSource(existing);
         setQuery("");
@@ -229,7 +211,7 @@ export function AISearchBar() {
         return;
       }
       const genre = inferGenre(r.title, query);
-      const created = await createPlaylistFromUrl(r.url, {
+      const created = await createPlaylistFromUrl(playable, {
         title: r.title,
         genre,
         cover: r.cover,

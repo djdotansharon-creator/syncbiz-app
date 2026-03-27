@@ -54,6 +54,10 @@ export function NeonControlButton({
   title,
   className,
   children,
+  /** When true, `/sources` deck applies premium library rail geometry (rounded-xl, token borders) via CSS. */
+  libraryDeck = false,
+  /** Larger primary play control on deck: keeps rounded-2xl hero geometry. */
+  libraryDeckHero = false,
 }: {
   onClick?: () => void;
   disabled?: boolean;
@@ -65,6 +69,8 @@ export function NeonControlButton({
   title?: string;
   className?: string;
   children: React.ReactNode;
+  libraryDeck?: boolean;
+  libraryDeckHero?: boolean;
 }) {
   const base =
     variant === "red" ? neonRedBase :
@@ -72,10 +78,17 @@ export function NeonControlButton({
     variant === "white" ? neonWhiteBase :
     variant === "subtle" ? subtleBase : neonGreenBase;
   const activeCls =
-    variant === "green" && active ? neonGreenActive :
-    variant === "cyan" && active ? neonCyanActive :
-    variant === "white" && active ? neonWhiteActive :
-    variant === "subtle" && active ? subtleActive : "";
+    libraryDeck && active
+      ? "library-deck-neon-btn-active"
+      : variant === "green" && active
+        ? neonGreenActive
+        : variant === "cyan" && active
+          ? neonCyanActive
+          : variant === "white" && active
+            ? neonWhiteActive
+            : variant === "subtle" && active
+              ? subtleActive
+              : "";
   return (
     <button
       type={type}
@@ -83,7 +96,11 @@ export function NeonControlButton({
       disabled={disabled}
       aria-label={ariaLabel}
       title={title}
-      className={`shrink-0 ${sizeMap[size]} ${base} ${activeCls} ${className ?? ""}`}
+      className={`shrink-0 ${sizeMap[size]} ${base} ${activeCls} ${
+        libraryDeck && variant !== "red"
+          ? `library-deck-neon-btn${libraryDeckHero ? " library-deck-neon-btn--hero" : ""}`
+          : ""
+      } ${className ?? ""}`}
     >
       {children}
     </button>

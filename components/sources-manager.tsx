@@ -20,9 +20,70 @@ import { SourceCard } from "@/components/source-card-unified";
 import { LibraryInputArea } from "@/components/library-input-area";
 import { getFavorites, addFavorite as addFav, removeFavorite as removeFav } from "@/lib/favorites-store";
 import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal, removePlaylistFromLocal, removeRadioFromLocal } from "@/lib/unified-sources-client";
-import type { UnifiedSource } from "@/lib/source-types";
+import {
+  classifyLibraryEntityContract,
+  type LibraryCollectionSubtype,
+  type UnifiedSource,
+  unifiedFoundationHints,
+} from "@/lib/source-types";
+import {
+  LIBRARY_SECTION_ORDER,
+  partitionSourcesByLibrarySection,
+  type LibrarySectionId,
+} from "@/lib/library-grouping";
+import { librarySectionLabel } from "@/lib/library-section-i18n";
+import { useLibraryTheme } from "@/lib/library-theme-context";
+
+/**
+ * Library grouping product note (implemented in `lib/library-grouping.ts`, not UI): mix/set auto-classification
+ * treats duration >= 20 minutes as a strong candidate; 15–20 minutes is hint-only and requires supporting signals.
+ */
 
 type ViewMode = "grid" | "list";
+
+type LibraryViewId =
+  | "all_library"
+  | "recently_added"
+  | "playlists"
+  | "external_playlists"
+  | "single_tracks"
+  | "favorites"
+  | "sources"
+  | "saved_sources";
+type CollectionGroupId = "curated_masters" | "dayparts_hours" | "client_specific";
+type LibrarySelection =
+  | { type: "library_view"; id: LibraryViewId }
+  | { type: "collection_group"; id: CollectionGroupId }
+  | { type: "collection_container"; subtype: LibraryCollectionSubtype; key: string }
+  | { type: "source_channel"; key: string }
+  | { type: "single_tracks_view" };
+
+type CollectionContainer = {
+  key: string;
+  label: string;
+  subtype: LibraryCollectionSubtype;
+  itemCount: number;
+  meta?: string;
+  cover?: string | null;
+};
+
+type SourceChannelContainer = {
+  key: string;
+  label: string;
+  platformLabel: string;
+  itemCount: number;
+  cover?: string | null;
+};
+
+type PlaylistTile = {
+  key: string;
+  label: string;
+};
+type PlaylistContainerPayload = {
+  subtype: LibraryCollectionSubtype;
+  key: string;
+  label?: string;
+};
 
 type Props = {
   initialSources: UnifiedSource[];
@@ -91,13 +152,234 @@ function useFavoritesState() {
   return { favoriteIds, addFavorite, removeFavorite, toggleFavorite };
 }
 
+function useFollowedSourcesState() {
+  const STORAGE_KEY = "syncbiz-followed-source-keys";
+  const [followedSourceKeys, setFollowedSourceKeys] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      setFollowedSourceKeys(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      setFollowedSourceKeys([]);
+    }
+  }, []);
+  const toggleFollowedSource = useCallback((key: string) => {
+    setFollowedSourceKeys((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+  return { followedSourceKeys, toggleFollowedSource };
+}
+
+function inferDaypartLabel(source: UnifiedSource): string {
+  const t = `${source.title} ${source.genre ?? ""}`.toLowerCase();
+  if (/(morning|breakfast|sunrise)/i.test(t)) return "Morning";
+  if (/(afternoon|lunch|midday)/i.test(t)) return "Afternoon";
+  if (/(evening|dinner|sunset)/i.test(t)) return "Evening";
+  if (/(night|late|midnight)/i.test(t)) return "Late Night";
+  return "General Daypart";
+}
+
+function inferClientLabel(source: UnifiedSource): string {
+  const branchId = source.playlist?.branchId ?? source.source?.branchId ?? source.radio?.branchId;
+  const tenantId = source.playlist?.tenantId ?? source.radio?.tenantId;
+  if (branchId) return `Branch ${branchId}`;
+  if (tenantId) return `Tenant ${tenantId}`;
+  return "Default Client";
+}
+
+function inferCuratedProfile(source: UnifiedSource): {
+  style: string;
+  mood: string;
+  energy: "Low" | "Medium" | "High";
+  useCase: string;
+} {
+  const text = `${source.title} ${source.genre ?? ""}`.toLowerCase();
+  const style =
+    /mizrahi/i.test(text) ? "Mizrahi" :
+    /israeli|hebrew/i.test(text) ? "Israeli" :
+    /mediterranean/i.test(text) ? "Mediterranean" :
+    /greek|taverna/i.test(text) ? "Greek" :
+    /house/i.test(text) ? "House" :
+    /rock/i.test(text) ? "Rock" :
+    (source.genre?.trim() || "General");
+  const mood =
+    /(celebration|hafla|party|dance)/i.test(text) ? "Celebratory" :
+    /(calm|slow|soft|spa|chill)/i.test(text) ? "Calm" :
+    /(lounge|ambient)/i.test(text) ? "Lounge" :
+    /(upbeat|happy|uplift)/i.test(text) ? "Upbeat" :
+    "Vibes";
+  const energy: "Low" | "Medium" | "High" =
+    /(high energy|dance|hafla|party|rock|upbeat)/i.test(text) ? "High" :
+    /(calm|slow|spa|ambient|lounge)/i.test(text) ? "Low" :
+    "Medium";
+  const useCase =
+    /(restaurant|dinner|evening)/i.test(text) ? "Restaurant Evening" :
+    /(spa|wellness|relax)/i.test(text) ? "Spa Calm" :
+    /(morning|sunrise|breakfast)/i.test(text) ? "Morning Chill" :
+    /(celebration|hafla|event|wedding)/i.test(text) ? "Celebration / Hafla" :
+    "General Service";
+  return { style, mood, energy, useCase };
+}
+
+function buildHumanCuratedLabel(profile: {
+  style: string;
+  mood: string;
+  energy: "Low" | "Medium" | "High";
+  useCase: string;
+}): string {
+  if (profile.useCase !== "General Service") return profile.useCase;
+  if (profile.mood === "Vibes") {
+    if (profile.energy === "High") return `${profile.style} Energy`;
+    if (profile.energy === "Low") return `${profile.style} Calm`;
+    return `${profile.style} Lounge`;
+  }
+  return `${profile.style} ${profile.mood}`;
+}
+
+function normalizeCollectionLabel(label: string): string {
+  return label.trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function getCuratedCollectionKey(source: UnifiedSource): string {
+  const curated = inferCuratedProfile(source);
+  const curatedLabel = buildHumanCuratedLabel(curated);
+  return `curated:${normalizeCollectionLabel(curatedLabel)}`;
+}
+
+const FIXED_DAYPART_PADS: Array<{ label: "Morning" | "Afternoon" | "Evening" | "Night"; key: string; tone: string }> = [
+  { label: "Morning", key: "daypart:morning", tone: "from-amber-500/35 to-orange-500/20 border-amber-300/45" },
+  { label: "Afternoon", key: "daypart:afternoon", tone: "from-sky-500/35 to-cyan-500/20 border-sky-300/45" },
+  { label: "Evening", key: "daypart:evening", tone: "from-violet-500/35 to-fuchsia-500/20 border-violet-300/45" },
+  { label: "Night", key: "daypart:late_night", tone: "from-indigo-500/35 to-slate-700/35 border-indigo-300/45" },
+];
+const PLAYLIST_TILES_STORAGE_KEY = "syncbiz-custom-playlist-tiles";
+const PLAYLIST_ASSIGNMENTS_STORAGE_KEY = "syncbiz-playlist-item-assignments";
+const DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY = "syncbiz-daypart-playlist-assignments";
+
+function isLikelyMixSet(source: UnifiedSource): boolean {
+  if (source.contentNodeKind === "mix_set") return true;
+  const title = (source.title ?? "").toLowerCase();
+  if (/\b(mix|set|session)\b/.test(title) || /\blive\s+set\b/.test(title)) return true;
+  const duration = source.playlist?.durationSeconds ?? 0;
+  return duration >= 20 * 60;
+}
+
+function getSourceCreatedAtMs(source: UnifiedSource): number {
+  const raw = source.playlist?.createdAt ?? source.radio?.createdAt;
+  if (!raw) return 0;
+  const ts = Date.parse(raw);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function inferSourceChannel(source: UnifiedSource): SourceChannelContainer {
+  const title = source.title?.trim() || "Unknown Source";
+  const split = title.includes(" - ") ? title.split(" - ")[0].trim() : title;
+  const label = split.length > 2 ? split : title;
+  const platformLabel =
+    source.type === "youtube"
+      ? "YouTube"
+      : source.type === "soundcloud"
+        ? "SoundCloud"
+        : source.type === "spotify"
+          ? "Spotify"
+          : source.origin === "radio"
+            ? "Radio"
+            : "Source";
+  const key = `source:${platformLabel.toLowerCase()}:${label.toLowerCase().replace(/\s+/g, "_")}`;
+  return { key, label, platformLabel, itemCount: 1, cover: source.cover };
+}
+
+function makeCollectionContainers(sources: UnifiedSource[]) {
+  const curatedMap = new Map<string, CollectionContainer>();
+  const daypartMap = new Map<string, CollectionContainer>();
+  const clientMap = new Map<string, CollectionContainer>();
+  const externalMap = new Map<string, CollectionContainer>();
+  const sourceChannelMap = new Map<string, SourceChannelContainer>();
+
+  for (const source of sources) {
+    const contract = classifyLibraryEntityContract(source);
+    const curated = inferCuratedProfile(source);
+    const curatedLabel = buildHumanCuratedLabel(curated);
+    const curatedKey = `curated:${normalizeCollectionLabel(curatedLabel)}`;
+    const curatedPrev = curatedMap.get(curatedKey);
+    curatedMap.set(curatedKey, {
+      key: curatedKey,
+      label: curatedLabel,
+      subtype: "genre_collection",
+      itemCount: (curatedPrev?.itemCount ?? 0) + 1,
+      meta: curated.useCase !== "General Service" ? curated.useCase : undefined,
+      cover: curatedPrev?.cover ?? source.cover,
+    });
+
+    const daypart = inferDaypartLabel(source);
+    const daypartKey = `daypart:${daypart.toLowerCase().replace(/\s+/g, "_")}`;
+    const daypartPrev = daypartMap.get(daypartKey);
+    daypartMap.set(daypartKey, {
+      key: daypartKey,
+      label: daypart,
+      subtype: "daypart_collection",
+      itemCount: (daypartPrev?.itemCount ?? 0) + 1,
+      cover: daypartPrev?.cover ?? source.cover,
+    });
+
+    const client = inferClientLabel(source);
+    const clientKey = `client:${client.toLowerCase().replace(/\s+/g, "_")}`;
+    const clientPrev = clientMap.get(clientKey);
+    clientMap.set(clientKey, {
+      key: clientKey,
+      label: client,
+      subtype: "client_collection",
+      itemCount: (clientPrev?.itemCount ?? 0) + 1,
+      cover: clientPrev?.cover ?? source.cover,
+    });
+
+    if (contract.entityKind === "collection" && contract.collectionSubtype === "external_playlist") {
+      const externalKey = `external:${source.id}`;
+      externalMap.set(externalKey, {
+        key: externalKey,
+        label: source.title,
+        subtype: "external_playlist",
+        itemCount: 1,
+        cover: source.cover,
+      });
+    }
+
+    const sourceChannel = inferSourceChannel(source);
+    const prevSourceChannel = sourceChannelMap.get(sourceChannel.key);
+    sourceChannelMap.set(sourceChannel.key, {
+      ...sourceChannel,
+      itemCount: (prevSourceChannel?.itemCount ?? 0) + 1,
+      cover: prevSourceChannel?.cover ?? sourceChannel.cover,
+    });
+  }
+
+  const byLabel = (a: CollectionContainer, b: CollectionContainer) => a.label.localeCompare(b.label);
+  return {
+    curated: [...curatedMap.values()].sort((a, b) => b.itemCount - a.itemCount || a.label.localeCompare(b.label)),
+    dayparts: [...daypartMap.values()].sort(byLabel),
+    clients: [...clientMap.values()].sort(byLabel),
+    external: [...externalMap.values()].sort(byLabel),
+    sources: [...sourceChannelMap.values()].sort((a, b) => a.label.localeCompare(b.label)),
+  };
+}
+
 function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; pageSubtitle?: string }) {
   const searchParams = useSearchParams();
   const { locale } = useLocale();
   const { t } = useTranslations();
+  const { libraryTheme } = useLibraryTheme();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [genreFilter, setGenreFilter] = useState("");
+  const [selection, setSelection] = useState<LibrarySelection>({ type: "library_view", id: "all_library" });
+  const [customPlaylists, setCustomPlaylists] = useState<PlaylistTile[]>([]);
+  const [playlistItemAssignments, setPlaylistItemAssignments] = useState<Record<string, string[]>>({});
+  const [daypartPlaylistAssignments, setDaypartPlaylistAssignments] = useState<Record<string, string>>({});
+  const sourceBackSelectionRef = useRef<LibrarySelection>({ type: "library_view", id: "sources" });
   const { favoriteIds, toggleFavorite } = useFavoritesState();
+  const { followedSourceKeys, toggleFollowedSource } = useFollowedSourcesState();
   const playlistAutoLoaded = useRef(false);
 
   const { sources, setSources } = useSourcesPlayback();
@@ -109,6 +391,33 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const stopOverride = isDevicePlayer && !isMaster ? deviceCtx?.stopOrSend : undefined;
   const pauseOverride = isDevicePlayer && !isMaster ? deviceCtx?.pauseOrSend : undefined;
   const masterState = deviceCtx?.masterState;
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PLAYLIST_TILES_STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as PlaylistTile[]) : [];
+      setCustomPlaylists(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setCustomPlaylists([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PLAYLIST_ASSIGNMENTS_STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
+      setPlaylistItemAssignments(parsed && typeof parsed === "object" ? parsed : {});
+    } catch {
+      setPlaylistItemAssignments({});
+    }
+    try {
+      const raw = localStorage.getItem(DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+      setDaypartPlaylistAssignments(parsed && typeof parsed === "object" ? parsed : {});
+    } catch {
+      setDaypartPlaylistAssignments({});
+    }
+  }, []);
 
   useEffect(() => {
     const playlistId = searchParams.get("playlist");
@@ -133,8 +442,90 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   }, [sources, genreFilter]);
 
   const displaySources = filtered;
+  const containers = useMemo(() => makeCollectionContainers(displaySources), [displaySources]);
 
-  // Sync display to main queue only when IDs actually change (avoids layout thrash from ref churn)
+  const visibleSources = useMemo(() => {
+    if (selection.type === "single_tracks_view") {
+      return displaySources.filter((s) => {
+        const contract = classifyLibraryEntityContract(s);
+        return contract.entityKind === "item" && contract.itemSubtype === "single_track";
+      });
+    }
+    if (selection.type === "library_view") {
+      if (selection.id === "all_library") return displaySources;
+      if (selection.id === "recently_added") return displaySources.slice(0, 24);
+      if (selection.id === "playlists") {
+        return displaySources.filter((s) => s.origin === "playlist");
+      }
+      if (selection.id === "favorites") return displaySources.filter((s) => favoriteIds.includes(s.id));
+      if (selection.id === "single_tracks") {
+        return displaySources.filter((s) => {
+          const contract = classifyLibraryEntityContract(s);
+          return contract.entityKind === "item" && contract.itemSubtype === "single_track";
+        });
+      }
+      if (selection.id === "external_playlists") {
+        return displaySources.filter((s) => {
+          const contract = classifyLibraryEntityContract(s);
+          return contract.entityKind === "collection" && contract.collectionSubtype === "external_playlist";
+        });
+      }
+      if (selection.id === "sources") {
+        return displaySources.filter((s) => ["youtube", "soundcloud", "spotify"].includes(s.type));
+      }
+      if (selection.id === "saved_sources") {
+        return displaySources.filter((s) => followedSourceKeys.includes(inferSourceChannel(s).key));
+      }
+    }
+    if (selection.type === "source_channel") {
+      return displaySources.filter((s) => inferSourceChannel(s).key === selection.key);
+    }
+    if (selection.type === "collection_container") {
+      if (selection.subtype === "genre_collection") {
+        return displaySources.filter((s) => {
+          return selection.key === getCuratedCollectionKey(s);
+        });
+      }
+      if (selection.subtype === "daypart_collection") {
+        const inferred = selection.key.startsWith("customplaylist:")
+          ? []
+          : displaySources.filter((s) => `daypart:${inferDaypartLabel(s).toLowerCase().replace(/\s+/g, "_")}` === selection.key);
+        const assignedPlaylistKey = daypartPlaylistAssignments[selection.key];
+        const assigned = assignedPlaylistKey
+          ? displaySources.filter((s) => s.origin === "playlist" && `syncbiz:${s.id}` === assignedPlaylistKey)
+          : [];
+        const assignedItemIds = playlistItemAssignments[selection.key] ?? [];
+        const assignedItems = displaySources.filter((s) => assignedItemIds.includes(s.id));
+        const map = new Map<string, UnifiedSource>();
+        for (const s of [...assigned, ...assignedItems, ...inferred]) map.set(s.id, s);
+        return [...map.values()];
+      }
+      if (selection.subtype === "client_collection") {
+        return displaySources.filter(
+          (s) => `client:${inferClientLabel(s).toLowerCase().replace(/\s+/g, "_")}` === selection.key
+        );
+      }
+      if (selection.subtype === "external_playlist") {
+        return displaySources.filter((s) => `external:${s.id}` === selection.key);
+      }
+      if (selection.subtype === "syncbiz_playlist") {
+        const own = displaySources.filter((s) => s.origin === "playlist" && s.id === selection.key.replace("syncbiz:", ""));
+        const assignedIds = playlistItemAssignments[selection.key] ?? [];
+        const assigned = displaySources.filter((s) => assignedIds.includes(s.id));
+        const map = new Map<string, UnifiedSource>();
+        for (const s of [...own, ...assigned]) map.set(s.id, s);
+        return [...map.values()];
+      }
+    }
+    return displaySources;
+  }, [selection, displaySources, favoriteIds, followedSourceKeys, playlistItemAssignments, daypartPlaylistAssignments]);
+
+  const sectionBuckets = useMemo(
+    () => partitionSourcesByLibrarySection(visibleSources),
+    [visibleSources]
+  );
+
+  // Queue follows base filtered order only; library rail selection is visual browsing state.
   const prevIdsRef = useRef<string>("");
   useEffect(() => {
     const ids = displaySources.map((s) => s.id).join(",");
@@ -142,6 +533,269 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     prevIdsRef.current = ids;
     setQueue(displaySources);
   }, [displaySources, setQueue]);
+
+  const selectedCollectionCards = useMemo(() => {
+    if (selection.type === "collection_group") {
+      if (selection.id === "curated_masters") {
+        return containers.curated;
+      }
+      if (selection.id === "dayparts_hours") return containers.dayparts;
+      if (selection.id === "client_specific") return containers.clients;
+    }
+    if (selection.type === "library_view" && selection.id === "external_playlists") {
+      return containers.external;
+    }
+    return null;
+  }, [selection, containers]);
+
+  const userPlaylistContainers = useMemo(() => {
+    return displaySources
+      .filter((s) => {
+        const contract = classifyLibraryEntityContract(s);
+        return contract.entityKind === "collection" && contract.collectionSubtype === "syncbiz_playlist" && s.origin === "playlist";
+      })
+      .map((s) => ({
+        key: `syncbiz:${s.id}`,
+        label: s.title,
+        subtype: "syncbiz_playlist" as const,
+        itemCount: 1 + (playlistItemAssignments[`syncbiz:${s.id}`]?.length ?? 0),
+        cover: s.cover,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [displaySources, playlistItemAssignments]);
+
+  const playlistSourceByKey = useMemo(() => {
+    const map = new Map<string, UnifiedSource>();
+    for (const s of displaySources) {
+      if (s.origin === "playlist") map.set(`syncbiz:${s.id}`, s);
+    }
+    return map;
+  }, [displaySources]);
+
+  const selectedSourceCards = useMemo(() => {
+    if (selection.type === "library_view" && selection.id === "sources") return containers.sources;
+    if (selection.type === "library_view" && selection.id === "saved_sources") {
+      return containers.sources.filter((s) => followedSourceKeys.includes(s.key));
+    }
+    return null;
+  }, [selection, containers.sources, followedSourceKeys]);
+
+  const collectionContextByKey = useMemo(() => {
+    const map = new Map<string, { cover?: string | null; label: string; meta?: string; count: number }>();
+    for (const c of [...containers.curated, ...containers.dayparts, ...containers.clients, ...containers.external]) {
+      map.set(c.key, { cover: c.cover, label: c.label, meta: c.meta, count: c.itemCount });
+    }
+    for (const p of customPlaylists) {
+      map.set(p.key, { label: p.label, meta: "Custom playlist", count: 0, cover: null });
+    }
+    return map;
+  }, [containers, customPlaylists]);
+
+  const collectionOpenContext = useMemo(() => {
+    if (selection.type !== "collection_container") return null;
+    const found = collectionContextByKey.get(selection.key);
+    if (!found) return null;
+    return {
+      title: found.label,
+      subtitle: found.meta ?? "Collection destination",
+      count: found.count,
+      cover: found.cover ?? null,
+    };
+  }, [selection, collectionContextByKey]);
+
+  const sourceOpenContext = useMemo(() => {
+    if (selection.type !== "source_channel") return null;
+    const sourceCard = containers.sources.find((s) => s.key === selection.key);
+    if (!sourceCard) return null;
+    return sourceCard;
+  }, [selection, containers.sources]);
+
+  const sourceDetailItems = useMemo(() => {
+    if (!sourceOpenContext) return null;
+    const deduped = [...new Map(visibleSources.map((s) => [s.id, s])).values()];
+    return [...deduped]
+      .sort((a, b) => {
+        const coverScore = Number(Boolean(b.cover)) - Number(Boolean(a.cover));
+        if (coverScore !== 0) return coverScore;
+        const recency = getSourceCreatedAtMs(b) - getSourceCreatedAtMs(a);
+        if (recency !== 0) return recency;
+        return (b.viewCount ?? 0) - (a.viewCount ?? 0);
+      })
+      .slice(0, 20);
+  }, [sourceOpenContext, visibleSources]);
+
+  const openSourceChannel = useCallback((key: string) => {
+    setSelection((prev) => {
+      if (prev.type !== "source_channel") {
+        sourceBackSelectionRef.current = prev;
+      }
+      return { type: "source_channel", key };
+    });
+  }, []);
+
+  const goBackFromSourceDetail = useCallback(() => {
+    const prev = sourceBackSelectionRef.current;
+    if (prev.type === "source_channel") {
+      setSelection({ type: "library_view", id: "sources" });
+      return;
+    }
+    setSelection(prev);
+  }, []);
+
+  const groupContext = useMemo(() => {
+    if (selection.type !== "collection_group") return null;
+    if (selection.id === "curated_masters") {
+      return {
+        title: "Ready Playlists",
+        subtitle: "Curated ready-to-use music collections.",
+        count: containers.curated.length,
+      };
+    }
+    if (selection.id === "dayparts_hours") {
+      return {
+        title: "Business Moments",
+        subtitle: "Daypart and moment collections for business programming.",
+        count: containers.dayparts.length,
+      };
+    }
+    return {
+      title: "Client Collections",
+      subtitle: "Collections grouped by client and branch context.",
+      count: containers.clients.length,
+    };
+  }, [selection, containers]);
+
+  const selectCollectionGroup = useCallback((id: CollectionGroupId) => {
+    setSelection({ type: "collection_group", id });
+  }, []);
+
+  const resolveCollectionCardSources = useCallback(
+    (container: CollectionContainer): UnifiedSource[] => {
+      if (container.subtype === "genre_collection") {
+        return displaySources.filter((s) => {
+          return getCuratedCollectionKey(s) === container.key;
+        });
+      }
+      if (container.subtype === "daypart_collection") {
+        return displaySources.filter(
+          (s) => `daypart:${inferDaypartLabel(s).toLowerCase().replace(/\s+/g, "_")}` === container.key
+        );
+      }
+      if (container.subtype === "client_collection") {
+        return displaySources.filter(
+          (s) => `client:${inferClientLabel(s).toLowerCase().replace(/\s+/g, "_")}` === container.key
+        );
+      }
+      if (container.subtype === "external_playlist") {
+        return displaySources.filter((s) => `external:${s.id}` === container.key);
+      }
+      return displaySources.filter((s) => s.origin === "playlist" && `syncbiz:${s.id}` === container.key);
+    },
+    [displaySources]
+  );
+
+  const resolveSourcesForSelection = useCallback(
+    (subtype: LibraryCollectionSubtype, key: string): UnifiedSource[] => {
+      if (subtype === "genre_collection") {
+        return displaySources.filter((s) => getCuratedCollectionKey(s) === key);
+      }
+      if (subtype === "daypart_collection") {
+        if (key.startsWith("customplaylist:")) return [];
+        return displaySources.filter(
+          (s) => `daypart:${inferDaypartLabel(s).toLowerCase().replace(/\s+/g, "_")}` === key
+        );
+      }
+      if (subtype === "client_collection") {
+        return displaySources.filter(
+          (s) => `client:${inferClientLabel(s).toLowerCase().replace(/\s+/g, "_")}` === key
+        );
+      }
+      if (subtype === "external_playlist") {
+        return displaySources.filter((s) => `external:${s.id}` === key);
+      }
+      return displaySources.filter((s) => s.origin === "playlist" && `syncbiz:${s.id}` === key);
+    },
+    [displaySources]
+  );
+
+  const playCollectionSelection = useCallback(
+    (subtype: LibraryCollectionSubtype, key: string) => {
+      const queue = resolveSourcesForSelection(subtype, key);
+      if (queue.length === 0) return;
+      setQueue(queue);
+      if (playSourceOverride) playSourceOverride(queue[0]);
+      else playSource(queue[0]);
+    },
+    [resolveSourcesForSelection, setQueue, playSourceOverride, playSource]
+  );
+
+  const openDaypartTile = useCallback((daypartKey: string) => {
+    const assignedPlaylistKey = daypartPlaylistAssignments[daypartKey];
+    if (assignedPlaylistKey) {
+      setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: assignedPlaylistKey });
+      return;
+    }
+    setSelection({ type: "collection_container", subtype: "daypart_collection", key: daypartKey });
+  }, [daypartPlaylistAssignments]);
+
+  const extractDroppedSourceIds = useCallback((e: React.DragEvent): string[] => {
+    const queueIdsJson = e.dataTransfer.getData("application/syncbiz-queue-source-ids");
+    if (queueIdsJson) {
+      try {
+        const ids = JSON.parse(queueIdsJson) as string[];
+        if (Array.isArray(ids)) return ids;
+      } catch {}
+    }
+    const sourceJson = e.dataTransfer.getData("application/syncbiz-source-json");
+    if (sourceJson) {
+      try {
+        const source = JSON.parse(sourceJson) as UnifiedSource;
+        if (source?.id) return [source.id];
+      } catch {}
+    }
+    const sourceId = e.dataTransfer.getData("application/syncbiz-source-id");
+    if (sourceId) return [sourceId];
+    return [];
+  }, []);
+
+  const extractDroppedPlaylistContainer = useCallback((e: React.DragEvent): PlaylistContainerPayload | null => {
+    const playlistPayloadJson = e.dataTransfer.getData("application/syncbiz-playlist-container");
+    if (playlistPayloadJson) {
+      try {
+        const payload = JSON.parse(playlistPayloadJson) as PlaylistContainerPayload;
+        if (payload?.key && payload?.subtype) return payload;
+      } catch {}
+    }
+    const sourceJson = e.dataTransfer.getData("application/syncbiz-source-json");
+    if (sourceJson) {
+      try {
+        const source = JSON.parse(sourceJson) as UnifiedSource;
+        if (source?.origin === "playlist") {
+          return { subtype: "syncbiz_playlist", key: `syncbiz:${source.id}`, label: source.title };
+        }
+      } catch {}
+    }
+    return null;
+  }, []);
+
+  const assignItemsToPlaylist = useCallback((playlistKey: string, sourceIds: string[]) => {
+    if (sourceIds.length === 0) return;
+    setPlaylistItemAssignments((prev) => {
+      const existing = prev[playlistKey] ?? [];
+      const merged = Array.from(new Set([...existing, ...sourceIds]));
+      const next = { ...prev, [playlistKey]: merged };
+      localStorage.setItem(PLAYLIST_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const assignPlaylistToDaypart = useCallback((daypartKey: string, playlistKey: string) => {
+    setDaypartPlaylistAssignments((prev) => {
+      const next = { ...prev, [daypartKey]: playlistKey };
+      localStorage.setItem(DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   const handleAdd = useCallback(
     (s: UnifiedSource) => {
@@ -163,144 +817,890 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     [setSources]
   );
 
+  const handleCreatePlaylist = useCallback(async () => {
+    const nameRaw = window.prompt("Playlist name");
+    const name = (nameRaw ?? "").trim();
+    if (!name) return;
+
+    const res = await fetch("/api/playlists", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        url: `local://user-playlist/${Date.now()}`,
+        type: "local",
+        genre: "Custom",
+        cover: "",
+      }),
+    });
+    if (!res.ok) return;
+
+    const created = await res.json();
+    const sourceType = created.type as UnifiedSource["type"];
+    const unified: UnifiedSource = {
+      id: `pl-${created.id}`,
+      title: created.name,
+      genre: created.genre || "Custom",
+      cover: created.thumbnail || null,
+      type: sourceType,
+      url: created.url,
+      origin: "playlist",
+      playlist: created,
+      ...unifiedFoundationHints("playlist", sourceType, created.url),
+    };
+
+    savePlaylistToLocal(created);
+    setSources((prev) => [unified, ...prev]);
+    setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: `syncbiz:${unified.id}` });
+  }, [savePlaylistToLocal, setSelection, setSources]);
+
+  const handleAddPlaylistTile = useCallback(() => {
+    const raw = window.prompt("Playlist name");
+    const label = (raw ?? "").trim();
+    if (!label) return;
+
+    const key = `customplaylist:${label.toLowerCase().replace(/\s+/g, "_")}`;
+    setCustomPlaylists((prev) => {
+      if (prev.some((p) => p.key === key)) return prev;
+      const next = [...prev, { key, label }];
+      localStorage.setItem(PLAYLIST_TILES_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const handleDeletePlaylistContainer = useCallback(
+    async (playlistKey: string) => {
+      const source = playlistSourceByKey.get(playlistKey);
+      if (!source?.playlist) return;
+      if (!window.confirm("Delete this playlist?")) return;
+
+      await fetch(`/api/playlists/${source.playlist.id}`, { method: "DELETE" });
+      handleRemove(source.id, "playlist");
+
+      setPlaylistItemAssignments((prev) => {
+        const next = { ...prev };
+        delete next[playlistKey];
+        localStorage.setItem(PLAYLIST_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+
+      setDaypartPlaylistAssignments((prev) => {
+        const next = { ...prev };
+        for (const [k, v] of Object.entries(next)) {
+          if (v === playlistKey) delete next[k];
+        }
+        localStorage.setItem(DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+    },
+    [playlistSourceByKey, handleRemove]
+  );
+
+  const activePlaylistKey =
+    selection.type === "collection_container" && selection.subtype === "syncbiz_playlist" ? selection.key : null;
+
+  const removeItemFromPlaylistOnly = useCallback((playlistKey: string, sourceId: string) => {
+    setPlaylistItemAssignments((prev) => {
+      const nextItems = (prev[playlistKey] ?? []).filter((id) => id !== sourceId);
+      const next = { ...prev, [playlistKey]: nextItems };
+      localStorage.setItem(PLAYLIST_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const deleteSourceDetailItem = useCallback(
+    async (item: UnifiedSource) => {
+      if (!(item.origin === "playlist" || item.origin === "source" || item.origin === "radio")) return;
+      if (!window.confirm("Delete this item from library?")) return;
+
+      if (item.origin === "playlist" && item.playlist) {
+        await fetch(`/api/playlists/${item.playlist.id}`, { method: "DELETE" });
+      } else if (item.origin === "source" && item.source) {
+        await fetch(`/api/sources/${item.source.id}`, { method: "DELETE" });
+      } else if (item.origin === "radio" && item.radio) {
+        await fetch(`/api/radio/${item.radio.id}`, { method: "DELETE" });
+      }
+
+      handleRemove(item.id, item.origin);
+    },
+    [handleRemove]
+  );
+
   return (
-    <div className="space-y-6">
-      {/* Title & subtitle – no frame, lively colors like player */}
-      <div>
-        <h1 className="text-lg font-semibold tracking-tight text-slate-100">{pageTitle ?? t.library}</h1>
-        <p className="mt-0.5 text-sm text-slate-300">{pageSubtitle ?? t.libraryPageSubtitle}</p>
-      </div>
+    <div className="library-theme library-page-shell flex w-full min-w-0 flex-col space-y-0" data-library-theme={libraryTheme}>
+      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-2.5 lg:-mt-3 lg:-mx-1 lg:grid-cols-[186px_minmax(0,1fr)_206px] xl:-mt-3 xl:-mx-1 xl:grid-cols-[196px_minmax(0,1fr)_216px]">
+        <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl border-cyan-500/35 p-2.5 shadow-[0_0_0_1px_rgba(34,211,238,0.14),0_10px_28px_rgba(0,0,0,0.34)] lg:col-start-1 lg:row-start-1 lg:justify-self-stretch lg:-ml-[1px] xl:-ml-[1px]">
+          <div className="space-y-4">
+            <section>
+              <div className="mb-2 flex items-center justify-between px-1">
+                <p className="library-section-title text-[10px] font-semibold uppercase tracking-[0.16em]">
+                  Ready Playlists
+                </p>
+                <button
+                  type="button"
+                  onClick={() => selectCollectionGroup("curated_masters")}
+                  className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                >
+                  Open
+                </button>
+              </div>
+              <div className="library-dark-scroll max-h-64 space-y-2 overflow-y-auto pr-1">
+                {containers.curated.slice(0, 8).map((c) => (
+                  <button
+                    key={`ready-right:${c.key}`}
+                    type="button"
+                    draggable
+                    onDragStart={(e) => {
+                      const sourcesForDrop = resolveSourcesForSelection(c.subtype, c.key);
+                      const ids = sourcesForDrop.map((s) => s.id);
+                      e.dataTransfer.setData(
+                        "application/syncbiz-playlist-container",
+                        JSON.stringify({ subtype: c.subtype, key: c.key, label: c.label } satisfies PlaylistContainerPayload)
+                      );
+                      if (ids.length === 0) return;
+                      e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
+                      e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sourcesForDrop));
+                      e.dataTransfer.effectAllowed = "copyMove";
+                    }}
+                    onDoubleClick={() => playCollectionSelection(c.subtype, c.key)}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "copy";
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const ids = extractDroppedSourceIds(e);
+                      assignItemsToPlaylist(c.key, ids);
+                    }}
+                    onClick={() => setSelection({ type: "collection_container", subtype: c.subtype, key: c.key })}
+                    className="library-source-card flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left"
+                  >
+                    <span className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-[color:var(--lib-surface-card-art)]">
+                      {c.cover ? <HydrationSafeImage src={c.cover} alt="" className="h-full w-full object-cover" /> : null}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="library-card-title block truncate text-xs font-medium">{c.label}</span>
+                      <span className="library-card-meta block text-[10px]">{c.itemCount} items</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
 
-      <LibraryInputArea onAdd={handleAdd} playSourceOverride={playSourceOverride} />
-
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex h-9 rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 p-0.5" role="tablist">
-            <button
-              type="button"
-              onClick={() => setViewMode("grid")}
-              className={`flex h-full items-center gap-2 rounded-lg px-3 text-sm font-medium transition ${
-                viewMode === "grid" ? "bg-slate-700 text-slate-100" : "text-slate-500 hover:text-slate-300"
-              }`}
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="7" height="7" rx="1" />
-                <rect x="14" y="3" width="7" height="7" rx="1" />
-                <rect x="3" y="14" width="7" height="7" rx="1" />
-                <rect x="14" y="14" width="7" height="7" rx="1" />
-              </svg>
-              {t.gridView}
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("list")}
-              className={`flex h-full items-center gap-2 rounded-lg px-3 text-sm font-medium transition ${
-                viewMode === "list" ? "bg-slate-700 text-slate-100" : "text-slate-500 hover:text-slate-300"
-              }`}
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="8" y1="6" x2="21" y2="6" />
-                <line x1="8" y1="12" x2="21" y2="12" />
-                <line x1="8" y1="18" x2="21" y2="18" />
-                <line x1="3" y1="6" x2="3.01" y2="6" />
-                <line x1="3" y1="12" x2="3.01" y2="12" />
-                <line x1="3" y1="18" x2="3.01" y2="18" />
-              </svg>
-              {t.listView}
-            </button>
+            <section>
+              <div className="mb-1 flex items-center justify-between px-1">
+                <p className="library-section-title text-[10px] font-semibold uppercase tracking-[0.16em]">
+                  Playlist Tiles
+                </p>
+                <button
+                  type="button"
+                  onClick={handleAddPlaylistTile}
+                  className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                >
+                  Add Playlist
+                </button>
+              </div>
+              <div className="space-y-2">
+                {FIXED_DAYPART_PADS.map((pad) => (
+                  (() => {
+                    const assignedPlaylistKey = daypartPlaylistAssignments[pad.key];
+                    const assignedPlaylist = assignedPlaylistKey ? playlistSourceByKey.get(assignedPlaylistKey) : undefined;
+                    const tileCover = assignedPlaylist?.cover ?? containers.dayparts.find((d) => d.key === pad.key)?.cover ?? null;
+                    return (
+                  <div
+                    key={`daypart-pad:${pad.key}`}
+                    draggable
+                    onDragStart={(e) => {
+                      const sourcesForDrop = resolveSourcesForSelection("daypart_collection", pad.key);
+                      const ids = sourcesForDrop.map((s) => s.id);
+                      e.dataTransfer.setData(
+                        "application/syncbiz-playlist-container",
+                        JSON.stringify({ subtype: "daypart_collection", key: pad.key, label: pad.label } satisfies PlaylistContainerPayload)
+                      );
+                      if (ids.length === 0) return;
+                      e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
+                      e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sourcesForDrop));
+                      e.dataTransfer.effectAllowed = "copyMove";
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "copy";
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const droppedPlaylist = extractDroppedPlaylistContainer(e);
+                      if (droppedPlaylist) {
+                        assignPlaylistToDaypart(pad.key, droppedPlaylist.key);
+                      } else {
+                        const ids = extractDroppedSourceIds(e);
+                        assignItemsToPlaylist(pad.key, ids);
+                      }
+                      openDaypartTile(pad.key);
+                    }}
+                    data-drop-target="daypart-playlist"
+                    data-daypart={pad.label.toLowerCase()}
+                    className={`rounded-xl border bg-gradient-to-r px-3 py-2.5 ${pad.tone}`}
+                    title="Drop songs or playlists here (coming soon)"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onDoubleClick={() => playCollectionSelection("daypart_collection", pad.key)}
+                        onClick={() => openDaypartTile(pad.key)}
+                        className="min-w-0 flex flex-1 items-center gap-2 text-left"
+                      >
+                        <span className="h-8 w-8 shrink-0 overflow-hidden rounded-md bg-[color:var(--lib-surface-card-art)]">
+                          {tileCover ? <HydrationSafeImage src={tileCover} alt="" className="h-full w-full object-cover" /> : null}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="library-text-title block truncate text-sm font-semibold">{pad.label}</span>
+                          <span className="library-card-meta block truncate text-[10px]">
+                            {assignedPlaylist?.title ?? "Playlist"}
+                          </span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="library-nav-link rounded-lg p-1.5"
+                        title="Schedule this playlist (coming soon)"
+                        aria-label={`Schedule ${pad.label}`}
+                      >
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="9" />
+                          <path d="M12 7v5l3 2" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                    );
+                  })()
+                ))}
+                {customPlaylists.map((pad) => (
+                  (() => {
+                    const assignedPlaylistKey = daypartPlaylistAssignments[pad.key];
+                    const assignedPlaylist = assignedPlaylistKey ? playlistSourceByKey.get(assignedPlaylistKey) : undefined;
+                    const tileCover = assignedPlaylist?.cover ?? null;
+                    return (
+                  <div
+                    key={`daypart-pad-custom:${pad.key}`}
+                    draggable
+                    onDragStart={(e) => {
+                      const sourcesForDrop = resolveSourcesForSelection("daypart_collection", pad.key);
+                      const ids = sourcesForDrop.map((s) => s.id);
+                      e.dataTransfer.setData(
+                        "application/syncbiz-playlist-container",
+                        JSON.stringify({ subtype: "daypart_collection", key: pad.key, label: pad.label } satisfies PlaylistContainerPayload)
+                      );
+                      if (ids.length === 0) return;
+                      e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
+                      e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sourcesForDrop));
+                      e.dataTransfer.effectAllowed = "copyMove";
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "copy";
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const droppedPlaylist = extractDroppedPlaylistContainer(e);
+                      if (droppedPlaylist) {
+                        assignPlaylistToDaypart(pad.key, droppedPlaylist.key);
+                      } else {
+                        const ids = extractDroppedSourceIds(e);
+                        assignItemsToPlaylist(pad.key, ids);
+                      }
+                      openDaypartTile(pad.key);
+                    }}
+                    data-drop-target="daypart-playlist"
+                    data-daypart={pad.label.toLowerCase()}
+                    className="rounded-xl border border-emerald-300/45 bg-gradient-to-r from-emerald-500/35 to-teal-500/20 px-3 py-2.5"
+                    title="Drop songs or playlists here (coming soon)"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onDoubleClick={() => playCollectionSelection("daypart_collection", pad.key)}
+                        onClick={() => openDaypartTile(pad.key)}
+                        className="min-w-0 flex flex-1 items-center gap-2 text-left"
+                      >
+                        <span className="h-8 w-8 shrink-0 overflow-hidden rounded-md bg-[color:var(--lib-surface-card-art)]">
+                          {tileCover ? <HydrationSafeImage src={tileCover} alt="" className="h-full w-full object-cover" /> : null}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="library-text-title block truncate text-sm font-semibold">{pad.label}</span>
+                          <span className="library-card-meta block truncate text-[10px]">
+                            {assignedPlaylist?.title ?? "Playlist"}
+                          </span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="library-nav-link rounded-lg p-1.5"
+                        title="Schedule this playlist (coming soon)"
+                        aria-label={`Schedule ${pad.label}`}
+                      >
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="9" />
+                          <path d="M12 7v5l3 2" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                    );
+                  })()
+                ))}
+              </div>
+            </section>
           </div>
-          {genres.length > 0 && (
-            <select
-              value={genreFilter}
-              onChange={(e) => setGenreFilter(e.target.value)}
-              className="h-9 rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 px-3 text-sm text-slate-200"
-            >
-              <option value="">{t.allGenres}</option>
-              {genres.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          )}
-          <Link
-            href="/sources"
-            className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 text-xs font-semibold uppercase tracking-wider text-sky-300"
-            aria-current="page"
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-            {t.library}
-          </Link>
-          <Link
-            href="/favorites"
-            className="flex h-9 items-center gap-2 rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 px-3 text-sm font-medium text-slate-200 transition hover:border-slate-700 hover:bg-slate-800 hover:text-slate-100"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-            </svg>
-            {t.favorites}
-          </Link>
-          <Link
-            href="/radio"
-            className="flex h-9 items-center gap-2 rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 px-3 text-sm font-medium text-slate-200 transition hover:border-slate-700 hover:bg-slate-800 hover:text-slate-100"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
-              <path d="M4 14h16" />
-              <circle cx="12" cy="18" r="2" />
-            </svg>
-            {labels.radio?.[locale] ?? "Radio"}
-          </Link>
-        </div>
-      </div>
+        </aside>
 
-      {displaySources.length === 0 ? (
-        <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 ring-1 ring-slate-700/60 py-16 text-center text-sm text-slate-500">
-          {t.noSourcesYetDragDrop}
+        <div className="library-list-shell row-start-1 min-w-0 self-start overflow-hidden rounded-2xl p-2.5 lg:col-start-2 lg:row-start-1 lg:px-3 xl:px-3">
+          <div className="library-sources-input-shell">
+            <LibraryInputArea onAdd={handleAdd} playSourceOverride={playSourceOverride} />
+          </div>
+
+          <div className="library-command-rail mt-3.5 flex min-w-0 flex-wrap items-center justify-between gap-4 rounded-2xl p-2 backdrop-blur-md lg:overflow-x-auto">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3 lg:flex-nowrap">
+              <div className="library-segment-bar flex h-10 rounded-xl p-0.5" role="tablist">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("grid")}
+                  className={`flex h-full items-center gap-2 rounded-lg px-3.5 text-sm font-medium transition-[color,background,box-shadow] duration-200 ease-out ${
+                    viewMode === "grid" ? "library-segment-btn-active" : "library-segment-btn-idle"
+                  }`}
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="3" width="7" height="7" rx="1" />
+                    <rect x="14" y="3" width="7" height="7" rx="1" />
+                    <rect x="3" y="14" width="7" height="7" rx="1" />
+                    <rect x="14" y="14" width="7" height="7" rx="1" />
+                  </svg>
+                  {t.gridView}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("list")}
+                  className={`flex h-full items-center gap-2 rounded-lg px-3.5 text-sm font-medium transition-[color,background,box-shadow] duration-200 ease-out ${
+                    viewMode === "list" ? "library-segment-btn-active" : "library-segment-btn-idle"
+                  }`}
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="8" y1="6" x2="21" y2="6" />
+                    <line x1="8" y1="12" x2="21" y2="12" />
+                    <line x1="8" y1="18" x2="21" y2="18" />
+                    <line x1="3" y1="6" x2="3.01" y2="6" />
+                    <line x1="3" y1="12" x2="3.01" y2="12" />
+                    <line x1="3" y1="18" x2="3.01" y2="18" />
+                  </svg>
+                  {t.listView}
+                </button>
+              </div>
+              {genres.length > 0 && (
+                <select
+                  value={genreFilter}
+                  onChange={(e) => setGenreFilter(e.target.value)}
+                  className="library-select h-10 min-w-[8rem] rounded-xl px-3 text-sm"
+                >
+                  <option value="">{t.allGenres}</option>
+                  {genres.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <Link
+                href="/sources"
+                className="library-nav-link-current inline-flex h-10 items-center gap-2 rounded-xl px-3.5 text-xs font-semibold uppercase tracking-wider"
+                aria-current="page"
+              >
+                <span className="library-nav-dot h-1.5 w-1.5 rounded-full" />
+                {t.library}
+              </Link>
+              <Link
+                href="/favorites"
+                className="library-nav-link flex h-10 items-center gap-2 rounded-xl px-3.5 text-sm font-medium"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                </svg>
+                {t.favorites}
+              </Link>
+              <Link
+                href="/radio"
+                className="library-nav-link flex h-10 items-center gap-2 rounded-xl px-3.5 text-sm font-medium"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
+                  <path d="M4 14h16" />
+                  <circle cx="12" cy="18" r="2" />
+                </svg>
+                {labels.radio[locale]}
+              </Link>
+            </div>
+          </div>
+
+          <div className="library-dark-scroll mt-2 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1">
+          {displaySources.length === 0 ? (
+            <div className="library-empty-state relative overflow-hidden rounded-2xl py-20 text-center">
+              <div className="library-empty-icon-plate mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl">
+                <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25">
+                  <path d="M9 18V5l12-2v13" />
+                  <circle cx="6" cy="18" r="3" />
+                  <circle cx="18" cy="16" r="3" />
+                </svg>
+              </div>
+              <p className="library-empty-text mx-auto max-w-sm text-sm leading-relaxed">{t.noSourcesYetDragDrop}</p>
+            </div>
+          ) : selectedCollectionCards ? (
+            <div className="space-y-4">
+              {groupContext ? (
+                <header className="library-list-shell rounded-2xl px-4 py-3">
+                  <div className="flex items-end justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="library-text-title text-base font-semibold tracking-tight">{groupContext.title}</h2>
+                      <p className="library-text-subtitle mt-0.5 text-xs">{groupContext.subtitle}</p>
+                    </div>
+                    <span className="library-section-count shrink-0 text-xs tabular-nums">
+                      {groupContext.count} collections
+                    </span>
+                  </div>
+                </header>
+              ) : null}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
+                {selectedCollectionCards.map((c) => (
+                  <button
+                    key={c.key}
+                    type="button"
+                    draggable
+                    onDragStart={(e) => {
+                      const sourcesForDrop = resolveCollectionCardSources(c);
+                      const ids = sourcesForDrop.map((s) => s.id);
+                      e.dataTransfer.setData(
+                        "application/syncbiz-playlist-container",
+                        JSON.stringify({ subtype: c.subtype, key: c.key, label: c.label } satisfies PlaylistContainerPayload)
+                      );
+                      if (ids.length === 0) return;
+                      e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
+                      e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sourcesForDrop));
+                      e.dataTransfer.effectAllowed = "copyMove";
+                    }}
+                    onDoubleClick={() => playCollectionSelection(c.subtype, c.key)}
+                    onClick={() => setSelection({ type: "collection_container", subtype: c.subtype, key: c.key })}
+                    className="library-source-card flex h-[252px] w-full min-w-[220px] max-w-none flex-col overflow-hidden rounded-2xl p-4 text-left"
+                  >
+                    <div className="mb-2 aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg bg-[color:var(--lib-surface-card-art)]">
+                      {c.cover ? <HydrationSafeImage src={c.cover} alt="" className="h-full w-full object-cover" /> : null}
+                    </div>
+                    <div className="min-h-0 flex-1">
+                      <p className="library-card-title text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
+                        {c.label}
+                      </p>
+                      <p className="library-card-meta mt-1 text-xs truncate">{c.meta ?? "Ready collection"} • {c.itemCount} items</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : selectedSourceCards ? (
+            <div className="space-y-4">
+              <header className="library-list-shell rounded-2xl px-4 py-3">
+                <h2 className="library-text-title text-base font-semibold tracking-tight">Sources</h2>
+                <p className="library-text-subtitle mt-0.5 text-xs">Open, follow, and revisit recognizable channels and source worlds.</p>
+              </header>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
+                {selectedSourceCards.map((s) => (
+                  <div key={s.key} className="library-source-card flex h-[268px] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl p-4">
+                    <button
+                      type="button"
+                      onClick={() => openSourceChannel(s.key)}
+                      className="w-full min-h-0 flex-1 text-left"
+                    >
+                      <div className="mb-2 aspect-[16/9] w-full overflow-hidden rounded-lg bg-[color:var(--lib-surface-card-art)]">
+                        {s.cover ? <HydrationSafeImage src={s.cover} alt="" className="h-full w-full object-cover" /> : null}
+                      </div>
+                      <p className="library-card-title text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
+                        {s.label}
+                      </p>
+                      <p className="library-card-meta mt-1 text-xs truncate">{s.platformLabel} • {s.itemCount} items</p>
+                    </button>
+                    <div className="mt-3 flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => openSourceChannel(s.key)}
+                        className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                      >
+                        Open
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleFollowedSource(s.key)}
+                        className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                      >
+                        {followedSourceKeys.includes(s.key) ? "Remove" : "Save"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-12 library-sections-canvas">
+              {collectionOpenContext ? (
+                <header className="library-list-shell rounded-2xl px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-[color:var(--lib-surface-card-art)]">
+                      {collectionOpenContext.cover ? (
+                        <HydrationSafeImage src={collectionOpenContext.cover} alt="" className="h-full w-full object-cover" />
+                      ) : null}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="library-text-title truncate text-lg font-semibold">{collectionOpenContext.title}</h2>
+                      <p className="library-text-subtitle mt-0.5 text-xs">{collectionOpenContext.subtitle}</p>
+                      <p className="library-card-meta mt-1 text-xs">{collectionOpenContext.count} items</p>
+                    </div>
+                  </div>
+                </header>
+              ) : null}
+              {sourceOpenContext ? (
+                <header className="library-list-shell rounded-2xl px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-[color:var(--lib-surface-card-art)]">
+                      {sourceOpenContext.cover ? (
+                        <HydrationSafeImage src={sourceOpenContext.cover} alt="" className="h-full w-full object-cover" />
+                      ) : null}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="library-text-title truncate text-lg font-semibold">{sourceOpenContext.label}</h2>
+                      <p className="library-text-subtitle mt-0.5 text-xs">{sourceOpenContext.platformLabel}</p>
+                      <p className="library-card-meta mt-1 text-xs">{sourceOpenContext.itemCount} items</p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={goBackFromSourceDetail}
+                          className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                        >
+                          Back
+                        </button>
+                        {/* Future-safe: potential internal media routing actions (e.g. Play Video / Send to Screen)
+                            should be implemented here as SyncBiz-native controls, not external platform exits. */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const first = visibleSources[0];
+                            if (first) {
+                              if (playSourceOverride) playSourceOverride(first);
+                              else playSource(first);
+                            }
+                          }}
+                          className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                        >
+                          Play All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleFollowedSource(sourceOpenContext.key)}
+                          className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                        >
+                          {followedSourceKeys.includes(sourceOpenContext.key) ? "Remove" : "Save"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </header>
+              ) : null}
+              {sourceOpenContext && sourceDetailItems ? (
+                <div className="space-y-8">
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="library-section-title text-[11px] font-semibold uppercase tracking-[0.16em]">From This Source</h3>
+                      <span className="library-card-meta text-xs tabular-nums">{sourceDetailItems.length}</span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
+                      {sourceDetailItems.map((item) => (
+                        <div key={`source-item:${item.id}`} className="library-source-card flex h-[252px] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl p-3">
+                          <div className="aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg bg-[color:var(--lib-surface-card-art)]">
+                            {item.cover ? <HydrationSafeImage src={item.cover} alt="" className="h-full w-full object-cover" /> : null}
+                          </div>
+                          <div className="min-h-0 flex-1">
+                            <p className="library-card-title mt-2 text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
+                              {item.title}
+                            </p>
+                            <p className="library-card-meta mt-0.5 text-xs truncate">{item.genre || item.type}</p>
+                          </div>
+                          <div className="mt-2 flex items-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (playSourceOverride) playSourceOverride(item);
+                                else playSource(item);
+                              }}
+                              className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                            >
+                              Play
+                            </button>
+                            {(item.origin === "playlist" || item.origin === "source" || item.origin === "radio") ? (
+                              <button
+                                type="button"
+                                onClick={() => void deleteSourceDetailItem(item)}
+                                className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                              >
+                                Delete
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              ) : activePlaylistKey ? (
+                <div className="space-y-8">
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="library-section-title text-[11px] font-semibold uppercase tracking-[0.16em]">Playlist Items</h3>
+                      <span className="library-card-meta text-xs tabular-nums">{visibleSources.length}</span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
+                      {visibleSources.map((item) => {
+                        const isContainerSelf = item.origin === "playlist" && `syncbiz:${item.id}` === activePlaylistKey;
+                        const canRemoveFromPlaylist = !isContainerSelf && (playlistItemAssignments[activePlaylistKey] ?? []).includes(item.id);
+                        return (
+                          <div key={`playlist-item:${item.id}`} className="library-source-card flex h-[252px] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl p-3">
+                            <div className="aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg bg-[color:var(--lib-surface-card-art)]">
+                              {item.cover ? <HydrationSafeImage src={item.cover} alt="" className="h-full w-full object-cover" /> : null}
+                            </div>
+                            <div className="min-h-0 flex-1">
+                              <p className="library-card-title mt-2 text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
+                                {item.title}
+                              </p>
+                              <p className="library-card-meta mt-0.5 text-xs truncate">{item.genre || item.type}</p>
+                            </div>
+                            <div className="mt-2 flex items-center gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (playSourceOverride) playSourceOverride(item);
+                                  else playSource(item);
+                                }}
+                                className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                              >
+                                Play
+                              </button>
+                              {canRemoveFromPlaylist ? (
+                                <button
+                                  type="button"
+                                  onClick={() => removeItemFromPlaylistOnly(activePlaylistKey, item.id)}
+                                  className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                                >
+                                  Remove
+                                </button>
+                              ) : null}
+                              {(item.origin === "playlist" || item.origin === "source" || item.origin === "radio") ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void deleteSourceDetailItem(item)}
+                                  className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                                >
+                                  Delete
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                </div>
+              ) : (
+              LIBRARY_SECTION_ORDER.map((sectionId: LibrarySectionId) => {
+                const sectionItems = sectionBuckets[sectionId];
+                if (sectionItems.length === 0) return null;
+                return (
+                  <section key={sectionId} className="library-section space-y-5">
+                    <div className="library-section-header flex items-end gap-4 pb-3">
+                      <div className="min-w-0 flex-1">
+                        <h2 className="library-section-title text-[11px] font-semibold uppercase tracking-[0.18em]">
+                          {librarySectionLabel(t, sectionId)}
+                        </h2>
+                      </div>
+                      <span className="library-section-count shrink-0 text-[11px] tabular-nums">{sectionItems.length}</span>
+                    </div>
+                    {viewMode === "grid" ? (
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
+                        {sectionItems.map((source) => (
+                          <div key={source.id} className="w-full max-w-[320px] [&>article]:h-full [&>article]:min-h-[340px] [&>article]:overflow-hidden">
+                            <SourceCard
+                              source={source}
+                              onRemove={handleRemove}
+                              isFavorite={favoriteIds.includes(source.id)}
+                              onToggleFavorite={() => toggleFavorite(source.id)}
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData("application/syncbiz-source-id", source.id);
+                                e.dataTransfer.setData("application/syncbiz-source-json", JSON.stringify(source));
+                                e.dataTransfer.effectAllowed = "move";
+                              }}
+                              onPlaySource={playSourceOverride}
+                              onStop={stopOverride}
+                              onPause={pauseOverride}
+                              isActive={isMaster ? undefined : masterState?.currentSource?.id === source.id}
+                              libraryDeckChrome
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="library-list-shell divide-y divide-[color:var(--lib-border-muted)] overflow-hidden rounded-2xl backdrop-blur-sm">
+                        {sectionItems.map((source) => (
+                          <SourceRow
+                            key={source.id}
+                            source={source}
+                            onRemove={handleRemove}
+                            isFavorite={favoriteIds.includes(source.id)}
+                            onToggleFavorite={() => toggleFavorite(source.id)}
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData("application/syncbiz-source-id", source.id);
+                              e.dataTransfer.setData("application/syncbiz-source-json", JSON.stringify(source));
+                              e.dataTransfer.effectAllowed = "move";
+                            }}
+                            onPlaySource={playSourceOverride}
+                            onStop={stopOverride}
+                            onPause={pauseOverride}
+                            isActive={isMaster ? undefined : masterState?.currentSource?.id === source.id}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                );
+              }))}
+            </div>
+          )}
+          </div>
         </div>
-      ) : viewMode === "grid" ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {displaySources.map((source) => (
-            <SourceCard
-              key={source.id}
-              source={source}
-              onRemove={handleRemove}
-              isFavorite={favoriteIds.includes(source.id)}
-              onToggleFavorite={() => toggleFavorite(source.id)}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData("application/syncbiz-source-id", source.id);
-                e.dataTransfer.effectAllowed = "move";
-              }}
-              onPlaySource={playSourceOverride}
-              onStop={stopOverride}
-              onPause={pauseOverride}
-              isActive={isMaster ? undefined : masterState?.currentSource?.id === source.id}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 ring-1 ring-slate-700/60 divide-y divide-slate-800/60 overflow-hidden">
-          {displaySources.map((source) => (
-            <SourceRow
-              key={source.id}
-              source={source}
-              onRemove={handleRemove}
-              isFavorite={favoriteIds.includes(source.id)}
-              onToggleFavorite={() => toggleFavorite(source.id)}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData("application/syncbiz-source-id", source.id);
-                e.dataTransfer.effectAllowed = "move";
-              }}
-              onPlaySource={playSourceOverride}
-              onStop={stopOverride}
-              onPause={pauseOverride}
-              isActive={isMaster ? undefined : masterState?.currentSource?.id === source.id}
-            />
-          ))}
-        </div>
-      )}
+
+        <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl p-2.5 lg:col-start-3 lg:row-start-1 lg:justify-self-stretch lg:-mr-[1px] xl:-mr-[1px]">
+          <div className="space-y-4">
+            <section>
+              <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
+                Library
+              </p>
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSelection({ type: "library_view", id: "all_library" })}
+                  className="library-nav-link-current flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm"
+                >
+                  <span>All Library</span>
+                  <span className="text-xs tabular-nums">{displaySources.length}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelection({ type: "library_view", id: "recently_added" })}
+                  className="library-nav-link flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm"
+                >
+                  <span>Recently Added</span>
+                  <span className="text-xs tabular-nums">{Math.min(displaySources.length, 24)}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelection({ type: "library_view", id: "playlists" })}
+                  className="library-nav-link flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm"
+                >
+                  <span>Playlists</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelection({ type: "library_view", id: "sources" })}
+                  className="library-nav-link flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm"
+                >
+                  <span>Sources</span>
+                  <span className="text-xs tabular-nums">{containers.sources.length}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelection({ type: "library_view", id: "favorites" })}
+                  className="library-nav-link flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm"
+                >
+                  <span>Favorites</span>
+                  <span className="text-xs tabular-nums">{favoriteIds.length}</span>
+                </button>
+              </div>
+            </section>
+
+            <section>
+              <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
+                Your Playlists
+              </p>
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => void handleCreatePlaylist()}
+                  className="library-nav-link-current flex w-full items-center justify-center rounded-xl px-3 py-2 text-sm"
+                >
+                  Add Playlist
+                </button>
+                <div className="library-dark-scroll max-h-48 space-y-1 overflow-y-auto pr-1">
+                {userPlaylistContainers.slice(0, 10).map((p) => (
+                  <div key={p.key} className="library-source-card flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs">
+                    <button
+                      type="button"
+                      draggable
+                      onDragStart={(e) => {
+                        const sourcesForDrop = resolveSourcesForSelection("syncbiz_playlist", p.key);
+                        const ids = sourcesForDrop.map((s) => s.id);
+                        e.dataTransfer.setData(
+                          "application/syncbiz-playlist-container",
+                          JSON.stringify({ subtype: "syncbiz_playlist", key: p.key, label: p.label } satisfies PlaylistContainerPayload)
+                        );
+                        if (ids.length === 0) return;
+                        e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
+                        e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sourcesForDrop));
+                        e.dataTransfer.effectAllowed = "copyMove";
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "copy";
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const ids = extractDroppedSourceIds(e);
+                        assignItemsToPlaylist(p.key, ids);
+                      }}
+                      onDoubleClick={() => playCollectionSelection("syncbiz_playlist", p.key)}
+                      onClick={() => setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: p.key })}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    >
+                      <span className="h-8 w-8 shrink-0 overflow-hidden rounded-md bg-[color:var(--lib-surface-card-art)]">
+                        {p.cover ? <HydrationSafeImage src={p.cover} alt="" className="h-full w-full object-cover" /> : null}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{p.label}</span>
+                        <span className="library-card-meta block text-[10px]">{p.itemCount} item</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeletePlaylistContainer(p.key)}
+                      className="library-nav-link rounded-lg px-2 py-1 text-[10px]"
+                      title="Delete playlist"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                ))}
+                </div>
+                {userPlaylistContainers.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-[color:var(--lib-text-faint)]">Create your first playlist to start building your own container.</p>
+                ) : null}
+              </div>
+            </section>
+          </div>
+        </aside>
+
+      </div>
     </div>
   );
 }
@@ -345,16 +1745,16 @@ function SourceRow({
     <div
       draggable={draggable}
       onDragStart={onDragStart}
-      className={`flex items-center gap-4 rounded-xl px-4 py-3 transition-all hover:bg-slate-900/40 ${
-        active ? "playing-active bg-slate-900/60" : ""
+      className={`group/row flex items-start gap-4 px-4 py-3.5 transition-[background,box-shadow] duration-200 ease-out ${
+        active ? "library-playing-row library-row-active-bg" : "library-row-hover"
       } ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
     >
       {/* Image left */}
-      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+      <div className="library-thumb-frame relative h-14 w-14 shrink-0 overflow-hidden rounded-xl ring-1 ring-[color:var(--lib-border-thumb)]">
         {source.cover ? (
           <HydrationSafeImage src={source.cover} alt="" className="h-full w-full object-cover" />
         ) : (
-          <div className={`flex h-full w-full items-center justify-center ${source.origin === "radio" ? "text-rose-400/70" : "text-slate-500"}`}>
+          <div className={`flex h-full w-full items-center justify-center ${source.origin === "radio" ? "text-rose-400/70" : "text-[color:var(--lib-text-secondary)]"}`}>
             {source.origin === "radio" ? (
               <RadioIcon className="h-7 w-7" />
             ) : (
@@ -371,12 +1771,12 @@ function SourceRow({
         </div>
       </div>
       {/* Details opposite image */}
-      <div className="min-w-0 flex-1 flex items-center gap-3">
+      <div className="min-w-0 flex-1 flex items-start gap-3">
         {onToggleFavorite && (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
-            className={`shrink-0 rounded-lg p-1 transition-colors hover:bg-slate-700/60 ${isFavorite ? "text-amber-400" : "text-slate-500 hover:text-amber-400/70"}`}
+            className={`shrink-0 rounded-lg p-1 transition-colors hover:bg-[color:var(--lib-surface-row-hover)] ${isFavorite ? "text-amber-400" : "text-[color:var(--lib-text-secondary)] hover:text-amber-400/80"}`}
             title={isFavorite ? t.removeFromFavorites : t.addToFavorites}
             aria-label={isFavorite ? t.removeFromFavorites : t.addToFavorites}
           >
@@ -385,14 +1785,14 @@ function SourceRow({
             </svg>
           </button>
         )}
-        <div className="min-w-0 flex flex-col gap-0.5">
-          <span className="truncate font-medium text-slate-100">{source.title}</span>
-          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+        <div className="min-w-0 flex flex-col gap-0.5 pr-2">
+          <span className="library-text-title font-medium tracking-tight leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">{source.title}</span>
+          <div className="library-card-meta flex items-center gap-1.5 text-xs">
             {source.genre && <span>{source.genre}</span>}
             {(source.viewCount ?? source.playlist?.viewCount) != null && (
               <>
                 {source.genre && <span>•</span>}
-                <span className="tabular-nums">{formatViewCount(source.viewCount ?? source.playlist?.viewCount ?? 0)} {t.views ?? "views"}</span>
+                <span className="tabular-nums">{formatViewCount(source.viewCount ?? source.playlist?.viewCount ?? 0)} {t.views}</span>
               </>
             )}
             {(source.playlist?.durationSeconds ?? 0) > 0 && (
@@ -405,10 +1805,7 @@ function SourceRow({
         </div>
         <SourceLogo type={source.type} origin={source.origin} size="md" />
       </div>
-      {/* Spacer to center controls */}
-      <div className="flex-1 min-w-0" />
-      {/* Controls centered */}
-      <div className="flex flex-nowrap items-center gap-2 shrink-0" role="group" aria-label="Source controls">
+      <div className="library-row-controls ml-2 flex flex-nowrap items-center gap-2 shrink-0" role="group" aria-label={t.sourceControlsAria}>
         {shareOpen && (
           <ShareModal
             item={unifiedSourceToShareable(source)}
@@ -419,17 +1816,17 @@ function SourceRow({
         )}
         {active && (
           <>
-            <NeonControlButton size="sm" onClick={stopFn} title="Stop" aria-label="Stop">
+            <NeonControlButton variant="cyan" libraryDeck size="sm" onClick={stopFn} title={t.stopPlayback} aria-label={t.stopPlayback}>
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M6 6h12v12H6z" />
               </svg>
             </NeonControlButton>
-            <NeonControlButton size="md" onClick={() => playFn(source)} active title="Play" aria-label="Play">
+            <NeonControlButton variant="cyan" libraryDeck size="md" onClick={() => playFn(source)} active title={t.play} aria-label={t.play}>
               <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7L8 5z" />
               </svg>
             </NeonControlButton>
-            <NeonControlButton size="sm" onClick={pauseFn} active title="Pause" aria-label="Pause">
+            <NeonControlButton variant="cyan" libraryDeck size="sm" onClick={pauseFn} active title={t.pausePlayback} aria-label={t.pausePlayback}>
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
               </svg>
@@ -437,25 +1834,24 @@ function SourceRow({
           </>
         )}
         {!active && (
-          <NeonControlButton size="md" onClick={() => playFn(source)} title="Play" aria-label="Play">
+          <NeonControlButton variant="cyan" libraryDeck size="md" onClick={() => playFn(source)} title={t.play} aria-label={t.play}>
             <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M8 5v14l11-7L8 5z" />
             </svg>
           </NeonControlButton>
         )}
         {source.origin === "playlist" && source.playlist && (
-          <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
+          <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title={t.editPlaylist} aria-label={t.editPlaylist} />
         )}
         {source.origin === "radio" && source.radio && (
-          <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
+          <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title={t.radioEdit} aria-label={t.radioEdit} />
         )}
         {source.origin === "source" && source.source && (
-          <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
+          <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
         )}
         <ShareButton source={source} onShareOpen={() => setShareOpen(true)} />
         <SourceRowDeleteButton source={source} onRemove={onRemove} />
       </div>
-      <div className="flex-1 min-w-0" />
     </div>
   );
 }
@@ -504,12 +1900,25 @@ function ShareButton({ source, onShareOpen }: { source: UnifiedSource; onShareOp
 }
 
 function SourceLogo({ type, origin, size }: { type: UnifiedSource["type"]; origin?: UnifiedSource["origin"]; size: "sm" | "md" }) {
+  const { t } = useTranslations();
+  const { locale } = useLocale();
   const sizeClass = size === "sm" ? "h-5 w-5" : "h-6 w-6";
   const color =
-    type === "youtube" ? "text-[#ff0000]" : type === "soundcloud" ? "text-[#ff5500]" : type === "spotify" ? "text-[#1db954]" : "text-slate-300";
+    type === "youtube" ? "text-[#ff0000]" : type === "soundcloud" ? "text-[#ff5500]" : type === "spotify" ? "text-[#1db954]" : "text-[color:var(--lib-text-secondary)]";
+  const typeTitle =
+    type === "youtube"
+      ? t.providerYouTube
+      : type === "soundcloud"
+        ? t.providerSoundCloud
+        : type === "spotify"
+          ? t.providerSpotify
+          : t.providerLocal;
   if (origin === "radio") {
     return (
-      <span className={`flex ${sizeClass} items-center justify-center rounded-lg bg-black/60 p-1 text-rose-400`}>
+      <span
+        className={`library-badge-logo flex ${sizeClass} items-center justify-center rounded-lg p-1 text-rose-400`}
+        title={labels.radio[locale]}
+      >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={sizeClass}>
           <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
           <path d="M4 14h16" />
@@ -519,7 +1928,7 @@ function SourceLogo({ type, origin, size }: { type: UnifiedSource["type"]; origi
     );
   }
   return (
-    <span className={`flex ${sizeClass} items-center justify-center rounded-lg bg-black/60 p-1 ${color}`}>
+    <span className={`library-badge-logo flex ${sizeClass} items-center justify-center rounded-lg p-1 ${color}`} title={typeTitle}>
       {type === "youtube" && (
         <svg viewBox="0 0 24 24" fill="currentColor" className={sizeClass}>
           <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />

@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { PlaybackProvider } from "@/lib/playback-provider";
 import { LocaleProvider } from "@/lib/locale-context";
+import { LibraryThemeProvider } from "@/lib/library-theme-context";
 import { MobileRoleProvider } from "@/lib/mobile-role-context";
 import { DevicePlayerProvider } from "@/lib/device-player-context";
 
@@ -15,11 +16,13 @@ export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <PlaybackProvider>
       <LocaleProvider>
-        <MobileRoleProvider>
-          <DevicePlayerProvider>
-            {children}
-          </DevicePlayerProvider>
-        </MobileRoleProvider>
+        <LibraryThemeProvider>
+          <MobileRoleProvider>
+            <DevicePlayerProvider>
+              {children}
+            </DevicePlayerProvider>
+          </MobileRoleProvider>
+        </LibraryThemeProvider>
       </LocaleProvider>
     </PlaybackProvider>
   );

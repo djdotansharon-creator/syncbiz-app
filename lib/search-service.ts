@@ -8,6 +8,7 @@
 
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import type { UnifiedSource } from "@/lib/source-types";
+import { rankLibrarySourcesMusicFirst } from "@/lib/music-search-relevance";
 
 export type YouTubeSearchResult = {
   title: string;
@@ -35,7 +36,7 @@ export function searchInternal(sources: UnifiedSource[], query: string): Unified
   const q = query.trim().toLowerCase();
   if (!q || q.length < 2) return [];
   const words = q.split(/\s+/).filter(Boolean);
-  return sources.filter((s) => {
+  const candidates = sources.filter((s) => {
     const title = s.title.toLowerCase();
     const genre = (s.genre ?? "").toLowerCase();
     const type = s.type.toLowerCase();
@@ -49,6 +50,7 @@ export function searchInternal(sources: UnifiedSource[], query: string): Unified
     }
     return words.some((w) => searchable.includes(w));
   });
+  return rankLibrarySourcesMusicFirst(candidates, query.trim());
 }
 
 /** External discovery – calls API. Extensible: add more providers to the response. */

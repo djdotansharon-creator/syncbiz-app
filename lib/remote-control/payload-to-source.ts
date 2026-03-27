@@ -4,6 +4,7 @@
 
 import type { PlaySourcePayload } from "./types";
 import type { UnifiedSource, SourceProviderType } from "@/lib/source-types";
+import { pickUnifiedFoundationFields } from "@/lib/source-types";
 
 export function payloadToUnifiedSource(payload: PlaySourcePayload): UnifiedSource {
   return {
@@ -14,5 +15,6 @@ export function payloadToUnifiedSource(payload: PlaySourcePayload): UnifiedSourc
     type: payload.type as SourceProviderType,
     url: payload.url,
     origin: payload.origin,
+    ...pickUnifiedFoundationFields(payload as Record<string, unknown>),
   };
 }

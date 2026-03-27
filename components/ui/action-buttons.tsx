@@ -355,6 +355,7 @@ export function ActionButtonDelete({
  * ───────────────────────────────────────────────────────────────────────────── */
 export function ActionButtonShare({
   onClick,
+  disabled,
   size = "md",
   variant = "default",
   "aria-label": ariaLabel = "Share",
@@ -362,6 +363,7 @@ export function ActionButtonShare({
   className = "",
 }: {
   onClick?: () => void;
+  disabled?: boolean;
   size?: Size;
   variant?: "default" | "player";
   "aria-label"?: string;
@@ -378,11 +380,13 @@ export function ActionButtonShare({
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-label={ariaLabel}
       title={title}
       className={`${baseStyles} inline-flex items-center justify-center ${btnSize || ""}
         ${style}
         focus:ring-slate-400/40 focus:ring-2
+        disabled:opacity-40 disabled:pointer-events-none disabled:hover:scale-100
         ${className}`}
     >
       <svg className={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

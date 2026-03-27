@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "@/lib/locale-context";
+import { useLocale, useTranslations, labels } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { ShareModal } from "@/components/share-modal";
@@ -30,22 +30,35 @@ type Props = {
   onPause?: () => void;
   /** Override active state (e.g. when showing remote master state). */
   isActive?: boolean;
+  /** Match header-deck control chrome (e.g. on /sources). */
+  libraryDeckChrome?: boolean;
 };
 
 function SourceLogo({ type, origin, size = "md" }: { type: UnifiedSource["type"]; origin?: UnifiedSource["origin"]; size?: "sm" | "md" }) {
+  const { t } = useTranslations();
+  const { locale } = useLocale();
   const sizeClass = size === "sm" ? "h-4 w-4" : "h-5 w-5";
   const boxClass = size === "sm" ? "h-6 w-6" : "h-7 w-7";
   const color =
-    type === "youtube" ? "text-[#ff0000]" : type === "soundcloud" ? "text-[#ff5500]" : type === "spotify" ? "text-[#1db954]" : "text-slate-300";
+    type === "youtube" ? "text-[#ff4d4d]" : type === "soundcloud" ? "text-[#ff7733]" : type === "spotify" ? "text-[#1ed760]" : "text-[color:var(--lib-text-secondary)]";
+  const badge = "library-badge-logo flex items-center justify-center rounded-md backdrop-blur-sm";
+  const typeTitle =
+    type === "youtube"
+      ? t.providerYouTube
+      : type === "soundcloud"
+        ? t.providerSoundCloud
+        : type === "spotify"
+          ? t.providerSpotify
+          : t.providerLocal;
   if (origin === "radio") {
     return (
-      <span className={`flex ${boxClass} items-center justify-center rounded-lg bg-black/70 shadow-[0_2px_6px_rgba(0,0,0,0.4)] ring-1 ring-black/30 text-rose-400`} title="Radio">
+      <span className={`${badge} ${boxClass} text-rose-300`} title={labels.radio[locale]}>
         <RadioIcon className={sizeClass} />
       </span>
     );
   }
   return (
-    <span className={`flex ${boxClass} items-center justify-center rounded-lg bg-black/70 shadow-[0_2px_6px_rgba(0,0,0,0.4)] ring-1 ring-black/30 ${color}`} title={type}>
+    <span className={`${badge} ${boxClass} ${color}`} title={typeTitle}>
       {type === "youtube" && (
         <svg className={sizeClass} viewBox="0 0 24 24" fill="currentColor">
           <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
@@ -84,6 +97,7 @@ export function SourceCard({
   onStop: onStopProp,
   onPause: onPauseProp,
   isActive: isActiveProp,
+  libraryDeckChrome = false,
 }: Props) {
   const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -119,21 +133,29 @@ export function SourceCard({
     }
   }
 
+  const durationSec = source.playlist?.durationSeconds ?? 0;
+
   return (
     <article
       draggable={draggable}
       onDragStart={onDragStart}
-      className={`flex flex-col overflow-hidden rounded-xl border bg-slate-950/60 backdrop-blur-sm transition-all hover:border-slate-600/70 hover:bg-slate-900/50 hover:shadow-[0_0_20px_rgba(30,215,96,0.08)] ${
-        active ? "playing-active border-[#1ed760]/40 shadow-[0_0_24px_rgba(30,215,96,0.12)]" : "border-slate-800/80"
+      className={`library-source-card group flex flex-col overflow-hidden rounded-2xl backdrop-blur-md transition-transform duration-200 ease-out hover:-translate-y-0.5 ${
+        active ? "library-playing-active" : ""
       } ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
     >
-      <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-900">
+      <div className="library-card-art-bg relative aspect-[4/3] w-full overflow-hidden">
         {source.cover ? (
           <>
-            <HydrationSafeImage src={source.cover} alt="" className="h-full w-full object-cover" />
+            <HydrationSafeImage src={source.cover} alt="" className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]" />
+            <div className="library-card-art-overlay pointer-events-none absolute inset-0" aria-hidden />
             {source.origin === "radio" && (
-              <span className="absolute top-2 right-2 rounded bg-rose-500/90 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-sm">
-                {t.live ?? "LIVE"}
+              <span className="library-live-badge absolute right-2 top-2 rounded-md px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-lg backdrop-blur-sm">
+                {t.live}
+              </span>
+            )}
+            {durationSec > 0 && (
+              <span className="library-pill-overlay library-pill-overlay-soft absolute bottom-2 right-2 rounded-md px-2 py-0.5 text-[10px] font-medium tabular-nums shadow-lg backdrop-blur-md">
+                {formatDuration(durationSec)}
               </span>
             )}
           </>
@@ -141,7 +163,7 @@ export function SourceCard({
         {hasInvalidUrl && (
           <div
             className="absolute top-2 left-2 flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/90 text-slate-900"
-            title="Invalid URL – edit to fix"
+            title={t.invalidStreamUrlTitle}
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -150,24 +172,31 @@ export function SourceCard({
           </div>
         )}
         {!source.cover && (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-700 to-slate-900 text-slate-500">
-            <svg className="h-14 w-14 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <div className="library-card-placeholder-bg relative flex h-full w-full items-center justify-center">
+            <svg className="h-14 w-14 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M9 18V5l12-2v13" />
               <circle cx="6" cy="18" r="3" />
               <circle cx="18" cy="16" r="3" />
             </svg>
+            {durationSec > 0 && (
+              <span className="library-pill-overlay library-pill-overlay-soft absolute bottom-2 right-2 rounded-md px-2 py-0.5 text-[10px] font-medium tabular-nums backdrop-blur-md">
+                {formatDuration(durationSec)}
+              </span>
+            )}
           </div>
         )}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5 p-3">
-        <div className="flex items-center justify-between gap-1.5">
-          <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-100">{source.title}</h3>
+      <div className="library-card-footer flex min-w-0 flex-1 flex-col gap-2 p-3.5">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="library-card-title min-w-0 flex-1 truncate text-[15px] font-semibold leading-snug tracking-tight">
+            {source.title}
+          </h3>
           <div className="flex items-center gap-1">
             {onToggleFavorite && (
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
-                className={`rounded p-0.5 transition-colors hover:bg-slate-700/60 ${isFavorite ? "text-amber-400" : "text-slate-500 hover:text-amber-400/70"}`}
+                className={`rounded-md p-0.5 transition-colors duration-200 hover:bg-[color:var(--lib-surface-card-hover)] ${isFavorite ? "text-amber-400" : "text-[color:var(--lib-text-secondary)] hover:text-amber-400/80"}`}
                 title={isFavorite ? t.removeFromFavorites : t.addToFavorites}
                 aria-label={isFavorite ? t.removeFromFavorites : t.addToFavorites}
               >
@@ -179,40 +208,63 @@ export function SourceCard({
             <SourceLogo type={source.type} origin={source.origin} size="md" />
           </div>
         </div>
-        {(source.genre || (source.viewCount ?? source.playlist?.viewCount) != null || (source.playlist?.durationSeconds ?? 0) > 0) && (
-          <div className="flex flex-col gap-0.5">
-            <div className="flex items-center justify-between gap-2">
+        {(source.genre ||
+          (source.viewCount ?? source.playlist?.viewCount) != null ||
+          (durationSec > 0 && !source.cover)) && (
+          <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
               {source.genre && (
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{source.genre}</p>
+                <p className="library-card-meta text-[10px] font-semibold uppercase tracking-[0.14em]">{source.genre}</p>
               )}
-              <div className="flex items-center gap-1.5 text-xs text-slate-500 tabular-nums">
+              <div className="library-card-meta ml-auto flex items-center gap-2 text-[11px] tabular-nums">
                 {(source.viewCount ?? source.playlist?.viewCount) != null && (
-                  <span>{formatViewCount(source.viewCount ?? source.playlist?.viewCount ?? 0)} {t.views ?? "views"}</span>
+                  <span>{formatViewCount(source.viewCount ?? source.playlist?.viewCount ?? 0)} {t.views}</span>
                 )}
-                {(source.viewCount ?? source.playlist?.viewCount) != null && (source.playlist?.durationSeconds ?? 0) > 0 && (
-                  <span className="text-slate-600">•</span>
+                {(source.viewCount ?? source.playlist?.viewCount) != null && durationSec > 0 && !source.cover && (
+                  <span className="library-card-meta-muted">•</span>
                 )}
-                {(source.playlist?.durationSeconds ?? 0) > 0 && (
-                  <span>{formatDuration(source.playlist?.durationSeconds ?? 0)}</span>
-                )}
+                {durationSec > 0 && !source.cover && <span>{formatDuration(durationSec)}</span>}
               </div>
             </div>
           </div>
         )}
-        <div className="mt-1 flex w-full min-w-0 flex-wrap items-center justify-center gap-1.5" role="group" aria-label="Source controls">
+        <div className="mt-1 flex w-full min-w-0 flex-wrap items-center justify-center gap-1.5" role="group" aria-label={t.sourceControlsAria}>
           {active && (
             <>
-              <NeonControlButton onClick={stopFn} size="sm" title="Stop" aria-label="Stop">
+              <NeonControlButton
+                variant="cyan"
+                libraryDeck={libraryDeckChrome}
+                onClick={stopFn}
+                size="sm"
+                title={t.stopPlayback}
+                aria-label={t.stopPlayback}
+              >
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 6h12v12H6z" />
                 </svg>
               </NeonControlButton>
-              <NeonControlButton onClick={() => playSourceFn(source)} size="md" active title="Play" aria-label="Play">
+              <NeonControlButton
+                variant="cyan"
+                libraryDeck={libraryDeckChrome}
+                onClick={() => playSourceFn(source)}
+                size="md"
+                active
+                title={t.play}
+                aria-label={t.play}
+              >
                 <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M8 5v14l11-7L8 5z" />
                 </svg>
               </NeonControlButton>
-              <NeonControlButton onClick={pauseFn} size="sm" active title="Pause" aria-label="Pause">
+              <NeonControlButton
+                variant="cyan"
+                libraryDeck={libraryDeckChrome}
+                onClick={pauseFn}
+                size="sm"
+                active
+                title={t.pausePlayback}
+                aria-label={t.pausePlayback}
+              >
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                 </svg>
@@ -220,20 +272,27 @@ export function SourceCard({
             </>
           )}
           {!active && (
-            <NeonControlButton onClick={() => playSourceFn(source)} size="md" title="Play" aria-label="Play">
+            <NeonControlButton
+              variant="cyan"
+              libraryDeck={libraryDeckChrome}
+              onClick={() => playSourceFn(source)}
+              size="md"
+              title={t.play}
+              aria-label={t.play}
+            >
               <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7L8 5z" />
               </svg>
             </NeonControlButton>
           )}
           {source.origin === "playlist" && source.playlist && (
-            <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title="Edit playlist" aria-label="Edit playlist" />
+            <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title={t.editPlaylist} aria-label={t.editPlaylist} />
           )}
           {source.origin === "radio" && source.radio && (
-            <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title="Edit station" aria-label="Edit station" />
+            <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title={t.radioEdit} aria-label={t.radioEdit} />
           )}
           {source.origin === "source" && source.source && (
-            <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
+            <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
           )}
           <ActionButtonShare variant="player" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share} />
           <NeonControlButton variant="red" size="sm" onClick={() => setDeleteOpen(true)} title={t.deletePlaylist} aria-label={t.deletePlaylist}>

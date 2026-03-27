@@ -25,7 +25,7 @@ function playlistToUnified(p: Playlist): UnifiedSource {
 
 export async function fetchUnifiedSourcesWithFallback(): Promise<UnifiedSource[]> {
   try {
-    const res = await fetch("/api/sources/unified", { cache: "no-store" });
+    const res = await fetch("/api/sources/unified", { cache: "no-store", credentials: "include" });
     if (!res.ok) throw new Error("API error");
     const items = (await res.json()) as UnifiedSource[];
     if (!Array.isArray(items)) throw new Error("Invalid response");

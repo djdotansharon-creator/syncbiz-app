@@ -1,5 +1,4 @@
-import type { RadioStream } from "./source-types";
-import type { UnifiedSource } from "./source-types";
+import { unifiedFoundationHints, type RadioStream, type UnifiedSource } from "./source-types";
 
 const DEFAULT_RADIO_IMAGE = "/radio-default.svg";
 
@@ -13,5 +12,6 @@ export function radioToUnified(r: RadioStream): UnifiedSource {
     url: r.url,
     origin: "radio",
     radio: r,
+    ...unifiedFoundationHints("radio", "stream-url", r.url),
   };
 }

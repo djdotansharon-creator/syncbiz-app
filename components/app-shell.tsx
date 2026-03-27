@@ -7,7 +7,15 @@ import type { ReactNode } from "react";
 
 import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
+import { useLibraryTheme } from "@/lib/library-theme-context";
 import { AudioPlayer } from "@/components/audio-player";
+import { usePlayback } from "@/lib/playback-provider";
+import { inferPlaylistType } from "@/lib/playlist-utils";
+import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
+import { radioToUnified } from "@/lib/radio-utils";
+import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal } from "@/lib/unified-sources-client";
+import { unifiedFoundationHints, type UnifiedSource, type ParseUrlJson, type RadioStream } from "@/lib/source-types";
+import { searchExternal } from "@/lib/search-service";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { DeviceModeIndicator } from "@/components/device-mode-indicator";
 import { GuestLinkButton } from "@/components/guest-link-button";
@@ -193,42 +201,6 @@ function LogoutButton() {
   );
 }
 
-function LanguageToggle() {
-  const { locale, setLocale } = useLocale();
-  return (
-    <div
-      className="flex rounded-lg border border-slate-700/80 bg-slate-900/60 p-0.5"
-      role="group"
-      aria-label="Language"
-    >
-      <button
-        type="button"
-        onClick={() => setLocale("en")}
-        className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-          locale === "en"
-            ? "bg-slate-700 text-slate-100"
-            : "text-slate-400 hover:text-slate-200"
-        }`}
-        aria-pressed={locale === "en"}
-      >
-        EN
-      </button>
-      <button
-        type="button"
-        onClick={() => setLocale("he")}
-        className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-          locale === "he"
-            ? "bg-slate-700 text-slate-100"
-            : "text-slate-400 hover:text-slate-200"
-        }`}
-        aria-pressed={locale === "he"}
-      >
-        HE
-      </button>
-    </div>
-  );
-}
-
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -265,6 +237,204 @@ export function AppShell({ children }: { children: ReactNode }) {
     hour12: false,
   });
 
+  const isSourcesLibraryRoute = pathname?.startsWith("/sources") ?? false;
+  const isMediaThemeRoute =
+    pathname?.startsWith("/sources") ||
+    pathname?.startsWith("/radio") ||
+    pathname?.startsWith("/favorites") ||
+    false;
+  const { libraryTheme } = useLibraryTheme();
+  const { playSource, setQueue } = usePlayback();
+  const [playerDropActive, setPlayerDropActive] = useState(false);
+
+  const parseDroppedUrl = async (url: string): Promise<ParseUrlJson | null> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
+    try {
+      const res = await fetch("/api/sources/parse-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+        signal: controller.signal,
+      });
+      if (!res.ok) return null;
+      return res.json();
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  const extractUrlFromDrop = (e: React.DragEvent): string | null => {
+    const uriList = e.dataTransfer.getData("text/uri-list");
+    const plain = e.dataTransfer.getData("text/plain");
+    const raw = (uriList || plain || "").trim();
+    const first = raw.split(/[\r\n]+/)[0]?.trim();
+    if (!first) return null;
+    return first.startsWith("http://") || first.startsWith("https://") ? first : null;
+  };
+
+  const playDroppedUrl = async (rawUrl: string) => {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) return;
+    const parsed = await parseDroppedUrl(trimmed);
+    const inferredType = inferPlaylistType(trimmed);
+    const typeCandidate = parsed?.type ?? inferredType;
+    const apiType = ["youtube", "soundcloud", "spotify", "winamp", "local", "stream-url"].includes(typeCandidate)
+      ? typeCandidate
+      : inferredType;
+    const isRadio = parsed?.isRadio || apiType === "winamp" || /\.(m3u8?|pls|aac|mp3)(\?|$)/i.test(trimmed);
+
+    if (parsed?.type === "shazam") {
+      const searchQuery =
+        parsed?.artist && parsed?.song
+          ? `${parsed.artist} ${parsed.song}`
+          : parsed?.title ?? "";
+      const { youtube } = await searchExternal(searchQuery);
+      const first = youtube.find((r) => r.type === "youtube") ?? youtube[0];
+      if (!first) return;
+      const resolvedFirstUrl =
+        first.type === "youtube"
+          ? await resolveYouTubePlayableUrlForSearch(first.url)
+          : first.url;
+      const created = await createPlaylistFromUrl(resolvedFirstUrl, {
+        title: parsed?.title || first.title || "Untitled",
+        genre: parsed?.genre || "Mixed",
+        cover: first.cover || parsed?.cover || null,
+        type: "youtube",
+        viewCount: first.viewCount,
+        durationSeconds: first.durationSeconds,
+      });
+      if (!created) return;
+      const unified: UnifiedSource = {
+        id: `pl-${created.id}`,
+        title: created.name,
+        genre: created.genre || "Mixed",
+        cover: created.thumbnail || null,
+        type: created.type as UnifiedSource["type"],
+        url: created.url,
+        origin: "playlist",
+        playlist: created,
+        ...unifiedFoundationHints("playlist", created.type as UnifiedSource["type"], created.url),
+      };
+      savePlaylistToLocal(created);
+      setQueue([unified]);
+      playSource(unified);
+      return;
+    }
+
+    if (isRadio) {
+      const res = await fetch("/api/radio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: parsed?.title || "Radio Station",
+          url: trimmed,
+          genre: parsed?.genre || "Live Radio",
+          cover: parsed?.cover || null,
+        }),
+      });
+      if (!res.ok) return;
+      const station = (await res.json()) as RadioStream;
+      const unified = radioToUnified(station);
+      saveRadioToLocal(station);
+      setQueue([unified]);
+      playSource(unified);
+      return;
+    }
+
+    const playableUrl = apiType === "youtube" ? await resolveYouTubePlayableUrlForSearch(trimmed) : trimmed;
+    const created = await createPlaylistFromUrl(playableUrl, {
+      title: parsed?.title || "Untitled",
+      genre: parsed?.genre || "Mixed",
+      cover: parsed?.cover || null,
+      type: apiType,
+      viewCount: parsed?.viewCount,
+      durationSeconds: parsed?.durationSeconds,
+    });
+    if (!created) return;
+    const unified: UnifiedSource = {
+      id: `pl-${created.id}`,
+      title: created.name,
+      genre: created.genre || "Mixed",
+      cover: created.thumbnail || null,
+      type: created.type as UnifiedSource["type"],
+      url: created.url,
+      origin: "playlist",
+      playlist: created,
+      ...unifiedFoundationHints("playlist", created.type as UnifiedSource["type"], created.url),
+    };
+    savePlaylistToLocal(created);
+    setQueue([unified]);
+    playSource(unified);
+  };
+
+  const handlePlayerDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setPlayerDropActive(false);
+
+    const queueSourcesJson = e.dataTransfer.getData("application/syncbiz-queue-sources");
+    if (queueSourcesJson) {
+      try {
+        const queue = JSON.parse(queueSourcesJson) as UnifiedSource[];
+        if (Array.isArray(queue) && queue.length > 0) {
+          setQueue(queue);
+          playSource(queue[0]);
+          return;
+        }
+      } catch {
+        // Ignore malformed payload.
+      }
+    }
+
+    const queueJson = e.dataTransfer.getData("application/syncbiz-queue-source-ids");
+    if (queueJson) {
+      try {
+        const ids = JSON.parse(queueJson) as string[];
+        const allSources = await fetchUnifiedSourcesWithFallback();
+        const byId = new Map(allSources.map((s) => [s.id, s] as const));
+        const queue = ids.map((id) => byId.get(id)).filter((s): s is UnifiedSource => !!s);
+        if (queue.length > 0) {
+          setQueue(queue);
+          playSource(queue[0]);
+          return;
+        }
+      } catch {
+        // Ignore malformed payload.
+      }
+    }
+
+    const sourceJson = e.dataTransfer.getData("application/syncbiz-source-json");
+    if (sourceJson) {
+      try {
+        const source = JSON.parse(sourceJson) as UnifiedSource;
+        if (source?.id && source?.url) {
+          setQueue([source]);
+          playSource(source);
+          return;
+        }
+      } catch {
+        // Ignore malformed payload.
+      }
+    }
+
+    const sourceId = e.dataTransfer.getData("application/syncbiz-source-id");
+    if (sourceId) {
+      const allSources = await fetchUnifiedSourcesWithFallback();
+      const source = allSources.find((s) => s.id === sourceId);
+      if (source) {
+        setQueue([source]);
+        playSource(source);
+        return;
+      }
+    }
+
+    const url = extractUrlFromDrop(e);
+    if (url) await playDroppedUrl(url);
+  };
+
   // Mobile: minimal layout. AudioPlayer must be in-viewport for mobile browsers to load/play
   // (off-screen -left-[9999px] causes iOS Safari etc. to skip loading iframes/audio)
   // Also use minimal layout for edit pages when return=/mobile (user came from mobile player)
@@ -288,7 +458,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-50">
-      <aside className="hidden w-56 flex-col border-r border-slate-800/60 bg-slate-950/95 px-4 py-5 lg:flex sticky top-0 self-start h-screen overflow-y-auto">
+      <aside
+        className={`hidden w-56 flex-col border-r border-slate-800/60 bg-slate-950/95 px-4 py-5 lg:flex sticky top-0 self-start h-screen overflow-y-auto${
+          isMediaThemeRoute ? " media-theme-sidebar" : ""
+        }`}
+        {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
+      >
         <Link href="/library" className="flex items-center gap-2.5 px-1">
           <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-base font-semibold text-sky-400 ring-1 ring-sky-500/30">
             SB
@@ -312,14 +487,24 @@ export function AppShell({ children }: { children: ReactNode }) {
                 key={item.href}
                 href={item.href}
                 className={`flex items-center gap-2.5 rounded-lg px-3 py-2 transition ${
-                  isActive
-                    ? "bg-slate-800/80 text-sky-100"
-                    : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                  isMediaThemeRoute
+                    ? isActive
+                      ? "media-sidebar-link media-sidebar-link-active"
+                      : "media-sidebar-link media-sidebar-link-idle"
+                    : isActive
+                      ? "bg-slate-800/80 text-sky-100"
+                      : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
                 }`}
               >
                 <span
                   className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                    isActive ? "bg-sky-400" : "bg-slate-600"
+                    isMediaThemeRoute
+                      ? isActive
+                        ? "media-sidebar-dot-active"
+                        : "media-sidebar-dot-idle"
+                      : isActive
+                        ? "bg-sky-400"
+                        : "bg-slate-600"
                   }`}
                 />
                 {label}
@@ -332,13 +517,22 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div className="flex min-h-screen flex-1 flex-col">
+      <div
+        className={`flex min-h-screen flex-1 flex-col${isMediaThemeRoute ? " app-sources-theme-scope" : ""}`}
+        {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
+      >
         <header
-          className="sticky top-0 z-50 flex flex-col overflow-hidden border-b border-slate-800/80 bg-slate-950/98 shadow-[0_4px_24px_rgba(0,0,0,0.4)] backdrop-blur-md"
+          className={`sticky top-0 z-50 flex flex-col overflow-hidden border-b border-slate-800/80 bg-slate-950/98 shadow-[0_4px_24px_rgba(0,0,0,0.4)] backdrop-blur-md${
+            isMediaThemeRoute ? " sources-app-header" : ""
+          }`}
           role="banner"
         >
           {/* Row 1: Title, greeting, time */}
-          <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 border-b border-slate-800/60 px-3 py-3 sm:gap-3 sm:px-6">
+          <div
+            className={`flex min-w-0 flex-nowrap items-center justify-between gap-2 border-b border-slate-800/60 px-3 py-3 sm:gap-3 sm:px-6${
+              isMediaThemeRoute ? " sources-app-header-row1" : ""
+            }`}
+          >
             <div className="min-w-0 flex-1">
               <h1 className="text-base font-bold tracking-tight text-slate-50">
                 {t.businessMediaScheduler ?? "Business Media Scheduler"}
@@ -349,7 +543,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
             <div className="flex min-w-0 shrink items-center gap-2">
               <div
-                className="flex min-w-0 shrink items-center gap-1.5 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] sm:gap-2.5 sm:px-3"
+                className={`flex min-w-0 shrink items-center gap-1.5 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] sm:gap-2.5 sm:px-3${
+                  isSourcesLibraryRoute ? " sources-header-meta-plate" : ""
+                }`}
                 dir={locale === "he" ? "rtl" : "ltr"}
               >
                 <span className="shrink-0 text-base font-semibold tabular-nums text-slate-200" suppressHydrationWarning>
@@ -381,7 +577,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
           {/* Row 2: Nav pills + language */}
-          <div className="flex flex-nowrap items-center justify-between gap-2 border-b border-slate-800/50 px-3 py-1.5 sm:px-4">
+          <div
+            className={`flex flex-nowrap items-center justify-between gap-2 border-b border-slate-800/50 px-3 py-1.5 sm:px-4${
+              isMediaThemeRoute ? " sources-app-header-row2" : ""
+            }`}
+          >
             <nav className="flex flex-wrap items-center gap-1.5" aria-label="Main">
               {categoryItems.map((item) => {
                 const isActive =
@@ -390,29 +590,103 @@ export function AppShell({ children }: { children: ReactNode }) {
                     : pathname.startsWith(item.href);
                 const label = labels[item.labelKey]?.[locale] ?? item.labelKey;
                 const Icon = categoryIcons[item.iconKey];
+                const pillClass = isMediaThemeRoute
+                  ? `inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05),0_2px_8px_rgba(0,0,0,0.25)] transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-slate-400/40 focus:ring-offset-0 source-nav-pill ${
+                      isActive ? "source-nav-pill-active" : "source-nav-pill-idle"
+                    }`
+                  : `${pillBase} ${isActive ? pillActive : pillInactive}`;
+                const focusRing = isMediaThemeRoute ? "" : " focus:ring-offset-2 focus:ring-offset-slate-950";
                 return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`${pillBase} ${isActive ? pillActive : pillInactive}`}
-                  >
+                  <Link key={item.href} href={item.href} className={`${pillClass}${focusRing}`}>
                     {Icon && <Icon />}
                     {label}
                   </Link>
                 );
               })}
             </nav>
-            <div className="ms-auto flex shrink-0 items-center gap-2">
+            <div className="sources-system-cluster ms-auto flex shrink-0 items-center gap-2">
               <LogoutButton />
-              <LanguageToggle />
             </div>
           </div>
           {/* Row 3: Player */}
-          <AudioPlayer />
+          {isMediaThemeRoute ? (
+            <div className="library-theme library-player-route-bridge" data-library-theme={libraryTheme}>
+              <div className="grid items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_260px] 2xl:grid-cols-[minmax(0,1fr)_280px]">
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "copy";
+                    setPlayerDropActive(true);
+                  }}
+                  onDragLeave={() => setPlayerDropActive(false)}
+                  onDrop={(e) => void handlePlayerDrop(e)}
+                  className={`relative min-w-0 overflow-hidden rounded-2xl border bg-slate-950/72 p-1.5 shadow-[0_0_0_1px_rgba(56,189,248,0.06),0_12px_30px_rgba(0,0,0,0.42)] backdrop-blur-md transition-colors ${
+                    playerDropActive ? "border-cyan-400/70" : "border-slate-700/70"
+                  }`}
+                >
+                  {playerDropActive ? (
+                    <div className="pointer-events-none absolute right-3 top-3 z-10 rounded-md border border-cyan-300/45 bg-cyan-500/14 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100">
+                      Drop To Play
+                    </div>
+                  ) : null}
+                  <AudioPlayer />
+                </div>
+                <aside className="hidden xl:block">
+                  <div className="h-full rounded-2xl border border-cyan-500/25 bg-slate-950/80 p-3 shadow-[0_0_0_1px_rgba(6,182,212,0.08),0_10px_24px_rgba(0,0,0,0.45)] backdrop-blur-md">
+                    <header className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200/90">
+                          Command Pads
+                        </p>
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200/90">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                          Standby
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-300/80">Live operator trigger area</p>
+                    </header>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { title: "Jingles", tone: "border-sky-400/30 bg-sky-500/10 text-sky-100", dot: "bg-sky-300" },
+                        { title: "Birthdays", tone: "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100", dot: "bg-fuchsia-300" },
+                        { title: "Broadcasts", tone: "border-amber-400/30 bg-amber-500/10 text-amber-100", dot: "bg-amber-300" },
+                        { title: "Announcements", tone: "border-rose-400/30 bg-rose-500/10 text-rose-100", dot: "bg-rose-300" },
+                      ].map((group) => (
+                        <button
+                          key={group.title}
+                          type="button"
+                          className={`rounded-xl border px-2.5 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition ${group.tone}`}
+                          disabled
+                          aria-disabled
+                        >
+                          <p className="text-xs font-semibold tracking-tight">{group.title}</p>
+                          <p className="mt-1 flex items-center gap-1 text-[10px] opacity-90">
+                            <span className={`h-1.5 w-1.5 rounded-full ${group.dot}`} />
+                            Soon
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          ) : (
+            <AudioPlayer />
+          )}
         </header>
 
-        <main className="flex-1 px-4 pb-4 py-5 sm:px-6">
-          <div className="mx-auto max-w-5xl">{children}</div>
+        <main
+          className={`flex-1 px-4 pb-4 sm:px-6${isSourcesLibraryRoute ? " pt-2" : " py-5"}${isMediaThemeRoute ? " library-main-below-deck" : ""}`}
+          {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
+        >
+          <div
+            className={
+              isSourcesLibraryRoute ? "mx-auto w-full max-w-none" : "mx-auto max-w-5xl"
+            }
+          >
+            {children}
+          </div>
         </main>
       </div>
     </div>
