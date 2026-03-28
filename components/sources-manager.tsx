@@ -1,25 +1,26 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef, startTransition } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, startTransition, type DragEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { useLocale, useTranslations } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
-import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
-import { ActionButtonEdit, ActionButtonShare } from "@/components/ui/action-buttons";
 import { RadioIcon } from "@/components/ui/radio-icon";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { SourcesPlaybackProvider, useSourcesPlayback } from "@/lib/sources-playback-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { useDevicePlayer } from "@/lib/device-player-context";
-import { SourceCard } from "@/components/source-card-unified";
+import { SourceCard, type LibraryItemDeleteContext } from "@/components/source-card-unified";
+import { LibraryItemContextDeleteModal } from "@/components/library-item-context-delete-modal";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
+import { LibrarySourceItemActions } from "@/components/library-source-item-actions";
 import { LibraryInputArea } from "@/components/library-input-area";
 import { getFavorites, addFavorite as addFav, removeFavorite as removeFav } from "@/lib/favorites-store";
 import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal, removePlaylistFromLocal, removeRadioFromLocal } from "@/lib/unified-sources-client";
+import { getPlaylistTracks } from "@/lib/playlist-types";
 import {
   classifyLibraryEntityContract,
   type LibraryCollectionSubtype,
@@ -259,6 +260,10 @@ const PLAYLIST_TILES_STORAGE_KEY = "syncbiz-custom-playlist-tiles";
 const PLAYLIST_ASSIGNMENTS_STORAGE_KEY = "syncbiz-playlist-item-assignments";
 const DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY = "syncbiz-daypart-playlist-assignments";
 
+/** Borderless white side actions: Your Playlists (trash), Playlist Tiles (schedule). */
+const LIBRARY_SIDE_ACTION_ICON_BTN_CLASS =
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent p-0 text-white shadow-none outline-none ring-0 transition-colors hover:bg-white/10 active:bg-white/[0.14] focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-0";
+
 function isLikelyMixSet(source: UnifiedSource): boolean {
   if (source.contentNodeKind === "mix_set") return true;
   const title = (source.title ?? "").toLowerCase();
@@ -290,6 +295,56 @@ function inferSourceChannel(source: UnifiedSource): SourceChannelContainer {
             : "Source";
   const key = `source:${platformLabel.toLowerCase()}:${label.toLowerCase().replace(/\s+/g, "_")}`;
   return { key, label, platformLabel, itemCount: 1, cover: source.cover };
+}
+
+/** Matches playlist drop targets that prefer `syncbiz-queue-source-ids`, with single-item fallbacks for other consumers. */
+function setLibrarySourcesPlaylistDragPayload(e: DragEvent, sources: UnifiedSource[]) {
+  if (sources.length === 0) {
+    e.preventDefault();
+    return;
+  }
+  const ids = sources.map((s) => s.id);
+  e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
+  e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sources));
+  if (sources.length === 1) {
+    e.dataTransfer.setData("application/syncbiz-source-id", sources[0].id);
+    e.dataTransfer.setData("application/syncbiz-source-json", JSON.stringify(sources[0]));
+  }
+  e.dataTransfer.setData("application/syncbiz-library-item-drag", "1");
+  e.dataTransfer.effectAllowed = "copyMove";
+}
+
+function firstUsableCoverUrl(c: string | null | undefined): string | null {
+  const t = c?.trim();
+  return t ? t : null;
+}
+
+function isUserSyncbizPlaylistSource(source: UnifiedSource): boolean {
+  if (source.origin !== "playlist") return false;
+  const contract = classifyLibraryEntityContract(source);
+  return contract.entityKind === "collection" && contract.collectionSubtype === "syncbiz_playlist";
+}
+
+/** Cover for user playlists: playlist/UnifiedSource art, then first track art, then first assigned library item with art. */
+function deriveSyncbizPlaylistCover(
+  playlistUnified: UnifiedSource,
+  assignedIds: string[],
+  displayById: Map<string, UnifiedSource>
+): string | null {
+  const direct = firstUsableCoverUrl(playlistUnified.cover);
+  if (direct) return direct;
+  if (playlistUnified.playlist) {
+    for (const track of getPlaylistTracks(playlistUnified.playlist)) {
+      const tc = firstUsableCoverUrl(track.cover ?? null);
+      if (tc) return tc;
+    }
+  }
+  for (const id of assignedIds) {
+    const item = displayById.get(id);
+    const ic = firstUsableCoverUrl(item?.cover);
+    if (ic) return ic;
+  }
+  return null;
 }
 
 function makeCollectionContainers(sources: UnifiedSource[]) {
@@ -377,13 +432,15 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const [customPlaylists, setCustomPlaylists] = useState<PlaylistTile[]>([]);
   const [playlistItemAssignments, setPlaylistItemAssignments] = useState<Record<string, string[]>>({});
   const [daypartPlaylistAssignments, setDaypartPlaylistAssignments] = useState<Record<string, string>>({});
+  const [playlistContainerDeleteKey, setPlaylistContainerDeleteKey] = useState<string | null>(null);
+  const [playlistContainerDeleting, setPlaylistContainerDeleting] = useState(false);
   const sourceBackSelectionRef = useRef<LibrarySelection>({ type: "library_view", id: "sources" });
   const { favoriteIds, toggleFavorite } = useFavoritesState();
   const { followedSourceKeys, toggleFollowedSource } = useFollowedSourcesState();
   const playlistAutoLoaded = useRef(false);
 
   const { sources, setSources } = useSourcesPlayback();
-  const { setQueue, playSource } = usePlayback();
+  const { setQueue, playSource, stop, pause } = usePlayback();
   const deviceCtx = useDevicePlayer();
   const isDevicePlayer = deviceCtx?.isBranchConnected ?? false;
   const isMaster = deviceCtx?.deviceMode === "MASTER";
@@ -442,6 +499,10 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   }, [sources, genreFilter]);
 
   const displaySources = filtered;
+  const displaySourcesById = useMemo(
+    () => new Map(displaySources.map((s) => [s.id, s] as const)),
+    [displaySources]
+  );
   const containers = useMemo(() => makeCollectionContainers(displaySources), [displaySources]);
 
   const visibleSources = useMemo(() => {
@@ -509,12 +570,8 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         return displaySources.filter((s) => `external:${s.id}` === selection.key);
       }
       if (selection.subtype === "syncbiz_playlist") {
-        const own = displaySources.filter((s) => s.origin === "playlist" && s.id === selection.key.replace("syncbiz:", ""));
         const assignedIds = playlistItemAssignments[selection.key] ?? [];
-        const assigned = displaySources.filter((s) => assignedIds.includes(s.id));
-        const map = new Map<string, UnifiedSource>();
-        for (const s of [...own, ...assigned]) map.set(s.id, s);
-        return [...map.values()];
+        return displaySources.filter((s) => assignedIds.includes(s.id));
       }
     }
     return displaySources;
@@ -554,15 +611,19 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         const contract = classifyLibraryEntityContract(s);
         return contract.entityKind === "collection" && contract.collectionSubtype === "syncbiz_playlist" && s.origin === "playlist";
       })
-      .map((s) => ({
-        key: `syncbiz:${s.id}`,
-        label: s.title,
-        subtype: "syncbiz_playlist" as const,
-        itemCount: 1 + (playlistItemAssignments[`syncbiz:${s.id}`]?.length ?? 0),
-        cover: s.cover,
-      }))
+      .map((s) => {
+        const key = `syncbiz:${s.id}`;
+        const assignedIds = playlistItemAssignments[key] ?? [];
+        return {
+          key,
+          label: s.title,
+          subtype: "syncbiz_playlist" as const,
+          itemCount: 1 + assignedIds.length,
+          cover: deriveSyncbizPlaylistCover(s, assignedIds, displaySourcesById),
+        };
+      })
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [displaySources, playlistItemAssignments]);
+  }, [displaySources, displaySourcesById, playlistItemAssignments]);
 
   const playlistSourceByKey = useMemo(() => {
     const map = new Map<string, UnifiedSource>();
@@ -588,20 +649,33 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     for (const p of customPlaylists) {
       map.set(p.key, { label: p.label, meta: "Custom playlist", count: 0, cover: null });
     }
+    for (const s of displaySources) {
+      if (!isUserSyncbizPlaylistSource(s)) continue;
+      const key = `syncbiz:${s.id}`;
+      const assignedIds = playlistItemAssignments[key] ?? [];
+      map.set(key, {
+        label: s.title,
+        meta: "Your playlist",
+        count: 1 + assignedIds.length,
+        cover: deriveSyncbizPlaylistCover(s, assignedIds, displaySourcesById),
+      });
+    }
     return map;
-  }, [containers, customPlaylists]);
+  }, [containers, customPlaylists, displaySources, displaySourcesById, playlistItemAssignments]);
 
   const collectionOpenContext = useMemo(() => {
     if (selection.type !== "collection_container") return null;
     const found = collectionContextByKey.get(selection.key);
     if (!found) return null;
+    const count =
+      selection.subtype === "syncbiz_playlist" ? visibleSources.length : found.count;
     return {
       title: found.label,
       subtitle: found.meta ?? "Collection destination",
-      count: found.count,
+      count,
       cover: found.cover ?? null,
     };
-  }, [selection, collectionContextByKey]);
+  }, [selection, collectionContextByKey, visibleSources]);
 
   const sourceOpenContext = useMemo(() => {
     if (selection.type !== "source_channel") return null;
@@ -868,11 +942,10 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     });
   }, []);
 
-  const handleDeletePlaylistContainer = useCallback(
+  const executeDeletePlaylistContainer = useCallback(
     async (playlistKey: string) => {
       const source = playlistSourceByKey.get(playlistKey);
       if (!source?.playlist) return;
-      if (!window.confirm("Delete this playlist?")) return;
 
       await fetch(`/api/playlists/${source.playlist.id}`, { method: "DELETE" });
       handleRemove(source.id, "playlist");
@@ -892,6 +965,12 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         localStorage.setItem(DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(next));
         return next;
       });
+
+      setSelection((sel) =>
+        sel.type === "collection_container" && sel.subtype === "syncbiz_playlist" && sel.key === playlistKey
+          ? { type: "library_view", id: "all_library" }
+          : sel
+      );
     },
     [playlistSourceByKey, handleRemove]
   );
@@ -908,11 +987,9 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     });
   }, []);
 
-  const deleteSourceDetailItem = useCallback(
+  const performDeleteSourceFromLibrary = useCallback(
     async (item: UnifiedSource) => {
       if (!(item.origin === "playlist" || item.origin === "source" || item.origin === "radio")) return;
-      if (!window.confirm("Delete this item from library?")) return;
-
       if (item.origin === "playlist" && item.playlist) {
         await fetch(`/api/playlists/${item.playlist.id}`, { method: "DELETE" });
       } else if (item.origin === "source" && item.source) {
@@ -920,16 +997,29 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
       } else if (item.origin === "radio" && item.radio) {
         await fetch(`/api/radio/${item.radio.id}`, { method: "DELETE" });
       }
-
       handleRemove(item.id, item.origin);
     },
     [handleRemove]
   );
 
+  const getItemDeleteContext = useCallback(
+    (item: UnifiedSource): LibraryItemDeleteContext => {
+      if (selection.type === "collection_container") {
+        const key = selection.key;
+        return {
+          kind: "in_playlist",
+          onRemoveFromPlaylist: () => removeItemFromPlaylistOnly(key, item.id),
+        };
+      }
+      return { kind: "all_library" };
+    },
+    [selection, removeItemFromPlaylistOnly]
+  );
+
   return (
     <div className="library-theme library-page-shell flex w-full min-w-0 flex-col space-y-0" data-library-theme={libraryTheme}>
-      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-2.5 lg:-mt-3 lg:-mx-1 lg:grid-cols-[186px_minmax(0,1fr)_206px] xl:-mt-3 xl:-mx-1 xl:grid-cols-[196px_minmax(0,1fr)_216px]">
-        <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl border-cyan-500/35 p-2.5 shadow-[0_0_0_1px_rgba(34,211,238,0.14),0_10px_28px_rgba(0,0,0,0.34)] lg:col-start-1 lg:row-start-1 lg:justify-self-stretch lg:-ml-[1px] xl:-ml-[1px]">
+      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:grid-cols-[186px_minmax(0,1fr)_206px] xl:-mx-1 xl:grid-cols-[196px_minmax(0,1fr)_216px]">
+        <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl border-cyan-500/35 p-2.5 shadow-[0_10px_28px_rgba(0,0,0,0.34)] lg:col-start-1 lg:row-start-1 lg:justify-self-stretch">
           <div className="space-y-4">
             <section>
               <div className="mb-2 flex items-center justify-between px-1">
@@ -1061,11 +1151,11 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                       </button>
                       <button
                         type="button"
-                        className="library-nav-link rounded-lg p-1.5"
+                        className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
                         title="Schedule this playlist (coming soon)"
                         aria-label={`Schedule ${pad.label}`}
                       >
-                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <circle cx="12" cy="12" r="9" />
                           <path d="M12 7v5l3 2" />
                         </svg>
@@ -1135,11 +1225,11 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                       </button>
                       <button
                         type="button"
-                        className="library-nav-link rounded-lg p-1.5"
+                        className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
                         title="Schedule this playlist (coming soon)"
                         aria-label={`Schedule ${pad.label}`}
                       >
-                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <circle cx="12" cy="12" r="9" />
                           <path d="M12 7v5l3 2" />
                         </svg>
@@ -1309,8 +1399,15 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                 <p className="library-text-subtitle mt-0.5 text-xs">Open, follow, and revisit recognizable channels and source worlds.</p>
               </header>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
-                {selectedSourceCards.map((s) => (
-                  <div key={s.key} className="library-source-card flex h-[268px] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl p-4">
+                {selectedSourceCards.map((s) => {
+                  const channelSources = displaySources.filter((src) => inferSourceChannel(src).key === s.key);
+                  return (
+                  <div
+                    key={s.key}
+                    draggable={channelSources.length > 0}
+                    onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, channelSources)}
+                    className={`library-source-card flex h-[268px] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl p-4 ${channelSources.length > 0 ? "cursor-grab active:cursor-grabbing" : ""}`}
+                  >
                     <button
                       type="button"
                       onClick={() => openSourceChannel(s.key)}
@@ -1341,7 +1438,8 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : (
@@ -1349,10 +1447,12 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
               {collectionOpenContext ? (
                 <header className="library-list-shell rounded-2xl px-4 py-3">
                   <div className="flex items-start gap-3">
-                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-[color:var(--lib-surface-card-art)]">
+                    <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl ring-1 ring-[color:var(--lib-border-thumb)] bg-[color:var(--lib-surface-card-art)]">
                       {collectionOpenContext.cover ? (
                         <HydrationSafeImage src={collectionOpenContext.cover} alt="" className="h-full w-full object-cover" />
-                      ) : null}
+                      ) : (
+                        <LibraryPlaylistCoverFallback className="h-full w-full" />
+                      )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <h2 className="library-text-title truncate text-lg font-semibold">{collectionOpenContext.title}</h2>
@@ -1418,38 +1518,20 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                     </div>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
                       {sourceDetailItems.map((item) => (
-                        <div key={`source-item:${item.id}`} className="library-source-card flex h-[252px] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl p-3">
-                          <div className="aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg bg-[color:var(--lib-surface-card-art)]">
-                            {item.cover ? <HydrationSafeImage src={item.cover} alt="" className="h-full w-full object-cover" /> : null}
-                          </div>
-                          <div className="min-h-0 flex-1">
-                            <p className="library-card-title mt-2 text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
-                              {item.title}
-                            </p>
-                            <p className="library-card-meta mt-0.5 text-xs truncate">{item.genre || item.type}</p>
-                          </div>
-                          <div className="mt-2 flex items-center gap-2 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (playSourceOverride) playSourceOverride(item);
-                                else playSource(item);
-                              }}
-                              className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
-                            >
-                              Play
-                            </button>
-                            {(item.origin === "playlist" || item.origin === "source" || item.origin === "radio") ? (
-                              <button
-                                type="button"
-                                onClick={() => void deleteSourceDetailItem(item)}
-                                className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
-                              >
-                                Delete
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
+                        <CenterGridLibraryItemCard
+                          key={`source-item:${item.id}`}
+                          item={item}
+                          itemDeleteContext={getItemDeleteContext(item)}
+                          onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [item])}
+                          playSourceOverride={playSourceOverride}
+                          playSource={playSource}
+                          stopOverride={stopOverride}
+                          pauseOverride={pauseOverride}
+                          stop={stop}
+                          pause={pause}
+                          isActive={isMaster ? false : masterState?.currentSource?.id === item.id}
+                          onDeleteFromLibrary={performDeleteSourceFromLibrary}
+                        />
                       ))}
                     </div>
                   </section>
@@ -1462,53 +1544,22 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                       <span className="library-card-meta text-xs tabular-nums">{visibleSources.length}</span>
                     </div>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
-                      {visibleSources.map((item) => {
-                        const isContainerSelf = item.origin === "playlist" && `syncbiz:${item.id}` === activePlaylistKey;
-                        const canRemoveFromPlaylist = !isContainerSelf && (playlistItemAssignments[activePlaylistKey] ?? []).includes(item.id);
-                        return (
-                          <div key={`playlist-item:${item.id}`} className="library-source-card flex h-[252px] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl p-3">
-                            <div className="aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg bg-[color:var(--lib-surface-card-art)]">
-                              {item.cover ? <HydrationSafeImage src={item.cover} alt="" className="h-full w-full object-cover" /> : null}
-                            </div>
-                            <div className="min-h-0 flex-1">
-                              <p className="library-card-title mt-2 text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
-                                {item.title}
-                              </p>
-                              <p className="library-card-meta mt-0.5 text-xs truncate">{item.genre || item.type}</p>
-                            </div>
-                            <div className="mt-2 flex items-center gap-2 pt-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (playSourceOverride) playSourceOverride(item);
-                                  else playSource(item);
-                                }}
-                                className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
-                              >
-                                Play
-                              </button>
-                              {canRemoveFromPlaylist ? (
-                                <button
-                                  type="button"
-                                  onClick={() => removeItemFromPlaylistOnly(activePlaylistKey, item.id)}
-                                  className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
-                                >
-                                  Remove
-                                </button>
-                              ) : null}
-                              {(item.origin === "playlist" || item.origin === "source" || item.origin === "radio") ? (
-                                <button
-                                  type="button"
-                                  onClick={() => void deleteSourceDetailItem(item)}
-                                  className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
-                                >
-                                  Delete
-                                </button>
-                              ) : null}
-                            </div>
-                          </div>
-                        );
-                      })}
+                      {visibleSources.map((item) => (
+                        <CenterGridLibraryItemCard
+                          key={`playlist-item:${item.id}`}
+                          item={item}
+                          itemDeleteContext={getItemDeleteContext(item)}
+                          onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [item])}
+                          playSourceOverride={playSourceOverride}
+                          playSource={playSource}
+                          stopOverride={stopOverride}
+                          pauseOverride={pauseOverride}
+                          stop={stop}
+                          pause={pause}
+                          isActive={isMaster ? false : masterState?.currentSource?.id === item.id}
+                          onDeleteFromLibrary={performDeleteSourceFromLibrary}
+                        />
+                      ))}
                     </div>
                   </section>
                 </div>
@@ -1536,16 +1587,22 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                               isFavorite={favoriteIds.includes(source.id)}
                               onToggleFavorite={() => toggleFavorite(source.id)}
                               draggable
-                              onDragStart={(e) => {
-                                e.dataTransfer.setData("application/syncbiz-source-id", source.id);
-                                e.dataTransfer.setData("application/syncbiz-source-json", JSON.stringify(source));
-                                e.dataTransfer.effectAllowed = "move";
-                              }}
+                              onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [source])}
                               onPlaySource={playSourceOverride}
                               onStop={stopOverride}
                               onPause={pauseOverride}
                               isActive={isMaster ? undefined : masterState?.currentSource?.id === source.id}
                               libraryDeckChrome
+                              itemDeleteContext={getItemDeleteContext(source)}
+                              explicitArtUrl={
+                                isUserSyncbizPlaylistSource(source)
+                                  ? deriveSyncbizPlaylistCover(
+                                      source,
+                                      playlistItemAssignments[`syncbiz:${source.id}`] ?? [],
+                                      displaySourcesById
+                                    )
+                                  : undefined
+                              }
                             />
                           </div>
                         ))}
@@ -1556,19 +1613,25 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           <SourceRow
                             key={source.id}
                             source={source}
-                            onRemove={handleRemove}
                             isFavorite={favoriteIds.includes(source.id)}
                             onToggleFavorite={() => toggleFavorite(source.id)}
                             draggable
-                            onDragStart={(e) => {
-                              e.dataTransfer.setData("application/syncbiz-source-id", source.id);
-                              e.dataTransfer.setData("application/syncbiz-source-json", JSON.stringify(source));
-                              e.dataTransfer.effectAllowed = "move";
-                            }}
+                            onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [source])}
                             onPlaySource={playSourceOverride}
                             onStop={stopOverride}
                             onPause={pauseOverride}
                             isActive={isMaster ? undefined : masterState?.currentSource?.id === source.id}
+                            itemDeleteContext={getItemDeleteContext(source)}
+                            onDeleteFromLibrary={performDeleteSourceFromLibrary}
+                            explicitArtUrl={
+                              isUserSyncbizPlaylistSource(source)
+                                ? deriveSyncbizPlaylistCover(
+                                    source,
+                                    playlistItemAssignments[`syncbiz:${source.id}`] ?? [],
+                                    displaySourcesById
+                                  )
+                                : undefined
+                            }
                           />
                         ))}
                       </div>
@@ -1581,7 +1644,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
           </div>
         </div>
 
-        <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl p-2.5 lg:col-start-3 lg:row-start-1 lg:justify-self-stretch lg:-mr-[1px] xl:-mr-[1px]">
+        <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl p-2.5 lg:col-start-3 lg:row-start-1 lg:justify-self-stretch">
           <div className="space-y-4">
             <section>
               <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
@@ -1673,8 +1736,12 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                       onClick={() => setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: p.key })}
                       className="flex min-w-0 flex-1 items-center gap-2 text-left"
                     >
-                      <span className="h-8 w-8 shrink-0 overflow-hidden rounded-md bg-[color:var(--lib-surface-card-art)]">
-                        {p.cover ? <HydrationSafeImage src={p.cover} alt="" className="h-full w-full object-cover" /> : null}
+                      <span className="h-8 w-8 shrink-0 overflow-hidden rounded-md ring-1 ring-[color:var(--lib-border-thumb)] bg-[color:var(--lib-surface-card-art)]">
+                        {p.cover ? (
+                          <HydrationSafeImage src={p.cover} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <LibraryPlaylistCoverFallback className="h-full w-full" />
+                        )}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-medium">{p.label}</span>
@@ -1683,11 +1750,16 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                     </button>
                     <button
                       type="button"
-                      onClick={() => void handleDeletePlaylistContainer(p.key)}
-                      className="library-nav-link rounded-lg px-2 py-1 text-[10px]"
-                      title="Delete playlist"
+                      className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
+                      onClick={() => setPlaylistContainerDeleteKey(p.key)}
+                      title={t.deletePlaylist}
+                      aria-label={t.deletePlaylist}
                     >
-                      Delete
+                      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <line x1="10" y1="11" x2="10" y2="17" />
+                        <line x1="14" y1="11" x2="14" y2="17" />
+                      </svg>
                     </button>
                   </div>
                 ))}
@@ -1701,13 +1773,148 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         </aside>
 
       </div>
+
+      <DeleteConfirmModal
+        isOpen={playlistContainerDeleteKey !== null}
+        onClose={() => {
+          if (playlistContainerDeleting) return;
+          setPlaylistContainerDeleteKey(null);
+        }}
+        onConfirm={async () => {
+          if (!playlistContainerDeleteKey) return;
+          const key = playlistContainerDeleteKey;
+          setPlaylistContainerDeleting(true);
+          try {
+            await executeDeletePlaylistContainer(key);
+          } finally {
+            setPlaylistContainerDeleting(false);
+          }
+        }}
+        loading={playlistContainerDeleting}
+        title={t.deletePlaylist}
+        message={t.deletePlaylistConfirm}
+        confirmLabel={t.confirmDelete}
+      />
     </div>
+  );
+}
+
+function LibraryPlaylistCoverFallback({ className }: { className?: string }) {
+  return (
+    <div
+      aria-hidden
+      className={`flex items-center justify-center bg-gradient-to-br from-cyan-600/30 via-slate-800/75 to-slate-950 text-cyan-400/45 ${className ?? ""}`}
+    >
+      <svg className="h-[55%] w-[55%] min-h-3 min-w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M9 18V5l12-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="18" cy="16" r="3" />
+      </svg>
+    </div>
+  );
+}
+
+function canDeleteFromLibrary(item: UnifiedSource): boolean {
+  return item.origin === "playlist" || item.origin === "source" || item.origin === "radio";
+}
+
+type CenterGridLibraryItemCardProps = {
+  item: UnifiedSource;
+  itemDeleteContext: LibraryItemDeleteContext;
+  onDragStart: (e: DragEvent) => void;
+  playSourceOverride?: (s: UnifiedSource) => void;
+  playSource: (s: UnifiedSource) => void;
+  stopOverride?: () => void;
+  pauseOverride?: () => void;
+  stop: () => void;
+  pause: () => void;
+  isActive: boolean;
+  onDeleteFromLibrary: (item: UnifiedSource) => Promise<void>;
+};
+
+function CenterGridLibraryItemCard({
+  item,
+  itemDeleteContext,
+  onDragStart,
+  playSourceOverride,
+  playSource,
+  stopOverride,
+  pauseOverride,
+  stop,
+  pause,
+  isActive,
+  onDeleteFromLibrary,
+}: CenterGridLibraryItemCardProps) {
+  const [shareOpen, setShareOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const playFn = playSourceOverride ?? playSource;
+  const stopFn = stopOverride ?? stop;
+  const pauseFn = pauseOverride ?? pause;
+  const canDel = canDeleteFromLibrary(item);
+  const showDeleteControl = canDel || itemDeleteContext.kind === "in_playlist";
+
+  async function handleDeleteLibrary() {
+    setDeleting(true);
+    try {
+      await onDeleteFromLibrary(item);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <>
+      <div
+        draggable
+        onDragStart={onDragStart}
+        className="library-source-card flex h-[252px] w-full max-w-[320px] cursor-grab flex-col overflow-hidden rounded-2xl p-3 active:cursor-grabbing"
+      >
+        <div className="aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg bg-[color:var(--lib-surface-card-art)]">
+          {item.cover ? <HydrationSafeImage src={item.cover} alt="" className="h-full w-full object-cover" /> : null}
+        </div>
+        <div className="min-h-0 flex-1">
+          <p className="library-card-title mt-2 text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
+            {item.title}
+          </p>
+          <p className="library-card-meta mt-0.5 text-xs truncate">{item.genre || item.type}</p>
+        </div>
+        <LibrarySourceItemActions
+          source={item}
+          onPlay={() => playFn(item)}
+          isActive={isActive}
+          onStop={stopFn}
+          onPause={pauseFn}
+          libraryDeckChrome
+          compact
+          onShareOpen={() => setShareOpen(true)}
+          onDeletePress={() => setDeleteOpen(true)}
+          showLibraryDelete={showDeleteControl}
+        />
+      </div>
+      {shareOpen ? (
+        <ShareModal
+          item={unifiedSourceToShareable(item)}
+          fallbackPlaylistId={item.origin === "playlist" ? item.id : undefined}
+          fallbackRadioId={item.origin === "radio" && item.radio ? item.radio.id : undefined}
+          onClose={() => setShareOpen(false)}
+        />
+      ) : null}
+      <LibraryItemContextDeleteModal
+        isOpen={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        variant={itemDeleteContext.kind === "in_playlist" ? "in_playlist" : "all_library"}
+        onRemoveFromPlaylist={itemDeleteContext.kind === "in_playlist" ? itemDeleteContext.onRemoveFromPlaylist : undefined}
+        onDeleteFromLibrary={handleDeleteLibrary}
+        loading={deleting}
+        showDeleteFromLibrary={canDel}
+      />
+    </>
   );
 }
 
 function SourceRow({
   source,
-  onRemove,
   isFavorite,
   onToggleFavorite,
   draggable,
@@ -1716,9 +1923,11 @@ function SourceRow({
   onStop,
   onPause,
   isActive: isActiveProp,
+  itemDeleteContext,
+  onDeleteFromLibrary,
+  explicitArtUrl,
 }: {
   source: UnifiedSource;
-  onRemove: (id: string) => void;
   isFavorite?: boolean;
   onToggleFavorite?: () => void;
   draggable?: boolean;
@@ -1727,21 +1936,40 @@ function SourceRow({
   onStop?: () => void;
   onPause?: () => void;
   isActive?: boolean;
+  itemDeleteContext: LibraryItemDeleteContext;
+  onDeleteFromLibrary: (item: UnifiedSource) => Promise<void>;
+  explicitArtUrl?: string | null;
 }) {
   const { t } = useTranslations();
   const { playSource, stop, pause, currentSource } = usePlayback();
   const [shareOpen, setShareOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [mounted, setMounted] = useState(false);
   const playFn = onPlaySource ?? playSource;
   const stopFn = onStop ?? stop;
   const pauseFn = onPause ?? pause;
   const active = isActiveProp ?? (mounted && currentSource?.id === source.id);
+  const canDel = canDeleteFromLibrary(source);
+  const showDeleteControl = canDel || itemDeleteContext.kind === "in_playlist";
+  const useExplicitPlaylistArt = explicitArtUrl !== undefined;
+  const thumbCover = useExplicitPlaylistArt ? explicitArtUrl : source.cover;
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  async function handleDeleteLibrary() {
+    setDeleting(true);
+    try {
+      await onDeleteFromLibrary(source);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
+    <>
     <div
       draggable={draggable}
       onDragStart={onDragStart}
@@ -1751,8 +1979,10 @@ function SourceRow({
     >
       {/* Image left */}
       <div className="library-thumb-frame relative h-14 w-14 shrink-0 overflow-hidden rounded-xl ring-1 ring-[color:var(--lib-border-thumb)]">
-        {source.cover ? (
-          <HydrationSafeImage src={source.cover} alt="" className="h-full w-full object-cover" />
+        {thumbCover ? (
+          <HydrationSafeImage src={thumbCover} alt="" className="h-full w-full object-cover" />
+        ) : useExplicitPlaylistArt ? (
+          <LibraryPlaylistCoverFallback className="h-full w-full" />
         ) : (
           <div className={`flex h-full w-full items-center justify-center ${source.origin === "radio" ? "text-rose-400/70" : "text-[color:var(--lib-text-secondary)]"}`}>
             {source.origin === "radio" ? (
@@ -1806,96 +2036,38 @@ function SourceRow({
         <SourceLogo type={source.type} origin={source.origin} size="md" />
       </div>
       <div className="library-row-controls ml-2 flex flex-nowrap items-center gap-2 shrink-0" role="group" aria-label={t.sourceControlsAria}>
-        {shareOpen && (
-          <ShareModal
-            item={unifiedSourceToShareable(source)}
-            fallbackPlaylistId={source.origin === "playlist" ? source.id : undefined}
-            fallbackRadioId={source.origin === "radio" && source.radio ? source.radio.id : undefined}
-            onClose={() => setShareOpen(false)}
-          />
-        )}
-        {active && (
-          <>
-            <NeonControlButton variant="cyan" libraryDeck size="sm" onClick={stopFn} title={t.stopPlayback} aria-label={t.stopPlayback}>
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M6 6h12v12H6z" />
-              </svg>
-            </NeonControlButton>
-            <NeonControlButton variant="cyan" libraryDeck size="md" onClick={() => playFn(source)} active title={t.play} aria-label={t.play}>
-              <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7L8 5z" />
-              </svg>
-            </NeonControlButton>
-            <NeonControlButton variant="cyan" libraryDeck size="sm" onClick={pauseFn} active title={t.pausePlayback} aria-label={t.pausePlayback}>
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-              </svg>
-            </NeonControlButton>
-          </>
-        )}
-        {!active && (
-          <NeonControlButton variant="cyan" libraryDeck size="md" onClick={() => playFn(source)} title={t.play} aria-label={t.play}>
-            <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M8 5v14l11-7L8 5z" />
-            </svg>
-          </NeonControlButton>
-        )}
-        {source.origin === "playlist" && source.playlist && (
-          <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title={t.editPlaylist} aria-label={t.editPlaylist} />
-        )}
-        {source.origin === "radio" && source.radio && (
-          <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title={t.radioEdit} aria-label={t.radioEdit} />
-        )}
-        {source.origin === "source" && source.source && (
-          <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
-        )}
-        <ShareButton source={source} onShareOpen={() => setShareOpen(true)} />
-        <SourceRowDeleteButton source={source} onRemove={onRemove} />
+        <LibrarySourceItemActions
+          source={source}
+          onPlay={() => playFn(source)}
+          isActive={active}
+          onStop={stopFn}
+          onPause={pauseFn}
+          libraryDeckChrome
+          compact
+          onShareOpen={() => setShareOpen(true)}
+          onDeletePress={() => setDeleteOpen(true)}
+          showLibraryDelete={showDeleteControl}
+        />
       </div>
     </div>
-  );
-}
-
-function SourceRowDeleteButton({ source, onRemove }: { source: UnifiedSource; onRemove: (id: string, origin?: UnifiedSource["origin"]) => void }) {
-  const { t } = useTranslations();
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
-  async function handleDelete() {
-    setDeleting(true);
-    try {
-      if (source.origin === "playlist" && source.playlist) {
-        await fetch(`/api/playlists/${source.playlist.id}`, { method: "DELETE" });
-      } else if (source.origin === "source" && source.source) {
-        await fetch(`/api/sources/${source.source.id}`, { method: "DELETE" });
-      } else if (source.origin === "radio" && source.radio) {
-        await fetch(`/api/radio/${source.radio.id}`, { method: "DELETE" });
-      }
-    } finally {
-      onRemove(source.id, source.origin);
-      setDeleting(false);
-      setDeleteOpen(false);
-    }
-  }
-
-  return (
-    <>
-      <NeonControlButton variant="red" size="sm" onClick={() => setDeleteOpen(true)} title={t.deletePlaylist} aria-label={t.deletePlaylist}>
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-          <line x1="10" y1="11" x2="10" y2="17" />
-          <line x1="14" y1="11" x2="14" y2="17" />
-        </svg>
-      </NeonControlButton>
-      <DeleteConfirmModal isOpen={deleteOpen} onClose={() => setDeleteOpen(false)} onConfirm={handleDelete} loading={deleting} message={t.deleteSourceConfirm} />
+    {shareOpen ? (
+      <ShareModal
+        item={unifiedSourceToShareable(source)}
+        fallbackPlaylistId={source.origin === "playlist" ? source.id : undefined}
+        fallbackRadioId={source.origin === "radio" && source.radio ? source.radio.id : undefined}
+        onClose={() => setShareOpen(false)}
+      />
+    ) : null}
+    <LibraryItemContextDeleteModal
+      isOpen={deleteOpen}
+      onClose={() => setDeleteOpen(false)}
+      variant={itemDeleteContext.kind === "in_playlist" ? "in_playlist" : "all_library"}
+      onRemoveFromPlaylist={itemDeleteContext.kind === "in_playlist" ? itemDeleteContext.onRemoveFromPlaylist : undefined}
+      onDeleteFromLibrary={handleDeleteLibrary}
+      loading={deleting}
+      showDeleteFromLibrary={canDel}
+    />
     </>
-  );
-}
-
-function ShareButton({ source, onShareOpen }: { source: UnifiedSource; onShareOpen: () => void }) {
-  const { t } = useTranslations();
-  return (
-    <ActionButtonShare variant="player" onClick={onShareOpen} title={t.share} aria-label={t.share} />
   );
 }
 

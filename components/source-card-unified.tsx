@@ -1,19 +1,21 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { useLocale, useTranslations, labels } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
-import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
+import { LibraryItemContextDeleteModal } from "@/components/library-item-context-delete-modal";
+import { LibrarySourceItemActions } from "@/components/library-source-item-actions";
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
-import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
-import { ActionButtonEdit, ActionButtonShare } from "@/components/ui/action-buttons";
 import { RadioIcon } from "@/components/ui/radio-icon";
 import { isValidStreamUrl } from "@/lib/url-validation";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import type { UnifiedSource } from "@/lib/source-types";
+
+export type LibraryItemDeleteContext =
+  | { kind: "all_library" }
+  | { kind: "in_playlist"; onRemoveFromPlaylist: () => void };
 
 type Props = {
   source: UnifiedSource;
@@ -32,7 +34,29 @@ type Props = {
   isActive?: boolean;
   /** Match header-deck control chrome (e.g. on /sources). */
   libraryDeckChrome?: boolean;
+  /** Delete modal: playlist assignment vs full library removal. Defaults to full library wording. */
+  itemDeleteContext?: LibraryItemDeleteContext;
+  /**
+   * When set (including `null`), drives card artwork for user SyncBiz playlists: URL shows image, `null` shows playlist fallback.
+   * When omitted, uses `source.cover` only (legacy behavior).
+   */
+  explicitArtUrl?: string | null;
 };
+
+function PlaylistCardArtFallback({ className }: { className?: string }) {
+  return (
+    <div
+      aria-hidden
+      className={`flex items-center justify-center bg-gradient-to-br from-cyan-600/30 via-slate-800/75 to-slate-950 text-cyan-400/45 ${className ?? ""}`}
+    >
+      <svg className="h-14 w-14 opacity-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M9 18V5l12-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="18" cy="16" r="3" />
+      </svg>
+    </div>
+  );
+}
 
 function SourceLogo({ type, origin, size = "md" }: { type: UnifiedSource["type"]; origin?: UnifiedSource["origin"]; size?: "sm" | "md" }) {
   const { t } = useTranslations();
@@ -98,6 +122,8 @@ export function SourceCard({
   onPause: onPauseProp,
   isActive: isActiveProp,
   libraryDeckChrome = false,
+  itemDeleteContext,
+  explicitArtUrl,
 }: Props) {
   const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -129,13 +155,15 @@ export function SourceCard({
     } finally {
       onRemove(source.id, source.origin);
       setDeleting(false);
-      setDeleteOpen(false);
     }
   }
 
   const durationSec = source.playlist?.durationSeconds ?? 0;
+  const useExplicitPlaylistArt = explicitArtUrl !== undefined;
+  const cardCover = useExplicitPlaylistArt ? explicitArtUrl : source.cover;
 
   return (
+    <>
     <article
       draggable={draggable}
       onDragStart={onDragStart}
@@ -144,9 +172,9 @@ export function SourceCard({
       } ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
     >
       <div className="library-card-art-bg relative aspect-[4/3] w-full overflow-hidden">
-        {source.cover ? (
+        {cardCover ? (
           <>
-            <HydrationSafeImage src={source.cover} alt="" className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]" />
+            <HydrationSafeImage src={cardCover} alt="" className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]" />
             <div className="library-card-art-overlay pointer-events-none absolute inset-0" aria-hidden />
             {source.origin === "radio" && (
               <span className="library-live-badge absolute right-2 top-2 rounded-md px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-lg backdrop-blur-sm">
@@ -171,7 +199,17 @@ export function SourceCard({
             </svg>
           </div>
         )}
-        {!source.cover && (
+        {!cardCover && useExplicitPlaylistArt && (
+          <div className="relative h-full w-full">
+            <PlaylistCardArtFallback className="h-full w-full" />
+            {durationSec > 0 && (
+              <span className="library-pill-overlay library-pill-overlay-soft absolute bottom-2 right-2 rounded-md px-2 py-0.5 text-[10px] font-medium tabular-nums backdrop-blur-md">
+                {formatDuration(durationSec)}
+              </span>
+            )}
+          </div>
+        )}
+        {!cardCover && !useExplicitPlaylistArt && (
           <div className="library-card-placeholder-bg relative flex h-full w-full items-center justify-center">
             <svg className="h-14 w-14 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M9 18V5l12-2v13" />
@@ -210,7 +248,7 @@ export function SourceCard({
         </div>
         {(source.genre ||
           (source.viewCount ?? source.playlist?.viewCount) != null ||
-          (durationSec > 0 && !source.cover)) && (
+          (durationSec > 0 && !cardCover)) && (
           <div className="flex flex-col gap-1">
             <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
               {source.genre && (
@@ -220,99 +258,45 @@ export function SourceCard({
                 {(source.viewCount ?? source.playlist?.viewCount) != null && (
                   <span>{formatViewCount(source.viewCount ?? source.playlist?.viewCount ?? 0)} {t.views}</span>
                 )}
-                {(source.viewCount ?? source.playlist?.viewCount) != null && durationSec > 0 && !source.cover && (
+                {(source.viewCount ?? source.playlist?.viewCount) != null && durationSec > 0 && !cardCover && (
                   <span className="library-card-meta-muted">•</span>
                 )}
-                {durationSec > 0 && !source.cover && <span>{formatDuration(durationSec)}</span>}
+                {durationSec > 0 && !cardCover && <span>{formatDuration(durationSec)}</span>}
               </div>
             </div>
           </div>
         )}
-        <div className="mt-1 flex w-full min-w-0 flex-wrap items-center justify-center gap-1.5" role="group" aria-label={t.sourceControlsAria}>
-          {active && (
-            <>
-              <NeonControlButton
-                variant="cyan"
-                libraryDeck={libraryDeckChrome}
-                onClick={stopFn}
-                size="sm"
-                title={t.stopPlayback}
-                aria-label={t.stopPlayback}
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 6h12v12H6z" />
-                </svg>
-              </NeonControlButton>
-              <NeonControlButton
-                variant="cyan"
-                libraryDeck={libraryDeckChrome}
-                onClick={() => playSourceFn(source)}
-                size="md"
-                active
-                title={t.play}
-                aria-label={t.play}
-              >
-                <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M8 5v14l11-7L8 5z" />
-                </svg>
-              </NeonControlButton>
-              <NeonControlButton
-                variant="cyan"
-                libraryDeck={libraryDeckChrome}
-                onClick={pauseFn}
-                size="sm"
-                active
-                title={t.pausePlayback}
-                aria-label={t.pausePlayback}
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                </svg>
-              </NeonControlButton>
-            </>
-          )}
-          {!active && (
-            <NeonControlButton
-              variant="cyan"
-              libraryDeck={libraryDeckChrome}
-              onClick={() => playSourceFn(source)}
-              size="md"
-              title={t.play}
-              aria-label={t.play}
-            >
-              <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7L8 5z" />
-              </svg>
-            </NeonControlButton>
-          )}
-          {source.origin === "playlist" && source.playlist && (
-            <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title={t.editPlaylist} aria-label={t.editPlaylist} />
-          )}
-          {source.origin === "radio" && source.radio && (
-            <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title={t.radioEdit} aria-label={t.radioEdit} />
-          )}
-          {source.origin === "source" && source.source && (
-            <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
-          )}
-          <ActionButtonShare variant="player" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share} />
-          <NeonControlButton variant="red" size="sm" onClick={() => setDeleteOpen(true)} title={t.deletePlaylist} aria-label={t.deletePlaylist}>
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              <line x1="10" y1="11" x2="10" y2="17" />
-              <line x1="14" y1="11" x2="14" y2="17" />
-            </svg>
-          </NeonControlButton>
-        </div>
+        <LibrarySourceItemActions
+          source={source}
+          onPlay={() => playSourceFn(source)}
+          isActive={active}
+          onStop={stopFn}
+          onPause={pauseFn}
+          libraryDeckChrome={libraryDeckChrome}
+          onShareOpen={() => setShareOpen(true)}
+          onDeletePress={() => setDeleteOpen(true)}
+        />
       </div>
-      <DeleteConfirmModal isOpen={deleteOpen} onClose={() => setDeleteOpen(false)} onConfirm={handleDelete} loading={deleting} message={t.deleteSourceConfirm} />
-      {shareOpen && (
+      {shareOpen ? (
         <ShareModal
           item={unifiedSourceToShareable(source)}
           fallbackPlaylistId={source.origin === "playlist" ? source.id : undefined}
           fallbackRadioId={source.origin === "radio" && source.radio ? source.radio.id : undefined}
           onClose={() => setShareOpen(false)}
         />
-      )}
+      ) : null}
     </article>
+    <LibraryItemContextDeleteModal
+      isOpen={deleteOpen}
+      onClose={() => setDeleteOpen(false)}
+      variant={itemDeleteContext?.kind === "in_playlist" ? "in_playlist" : "all_library"}
+      onRemoveFromPlaylist={itemDeleteContext?.kind === "in_playlist" ? itemDeleteContext.onRemoveFromPlaylist : undefined}
+      onDeleteFromLibrary={handleDelete}
+      loading={deleting}
+      showDeleteFromLibrary={
+        source.origin === "playlist" || source.origin === "source" || source.origin === "radio"
+      }
+    />
+    </>
   );
 }

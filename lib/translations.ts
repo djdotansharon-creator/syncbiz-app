@@ -91,6 +91,15 @@ const TRANSLATIONS = {
     deleting: "Deleting…",
     deleteScheduleConfirm: "Delete this schedule block?",
     deleteSourceConfirm: "Are you sure you want to delete this source? This cannot be undone.",
+    libraryDeleteInPlaylistTitle: "Remove or delete?",
+    libraryDeleteInPlaylistMessage:
+      "This item stays in All Library unless you delete it. Remove only unlinks it from this playlist; delete removes it from your library and every playlist.",
+    libraryRemoveFromPlaylistOnly: "Remove from this playlist",
+    libraryDeleteFromLibraryEntirely: "Delete from library",
+    libraryDeleteAllTitle: "Delete from library?",
+    libraryDeleteAllMessage:
+      "This permanently removes the item from your library. It will disappear from All Library and from every playlist that included it.",
+    libraryDeleteFromLibraryAndAllPlaylists: "Delete from library and all playlists",
     confirmDelete: "Confirm Delete",
     logoutConfirm: "Are you sure you want to log out?",
     logoutConfirmTitle: "Log out",
@@ -373,6 +382,15 @@ const TRANSLATIONS = {
     deleting: "מוחק…",
     deleteScheduleConfirm: "למחוק את בלוק לוח הזמנים?",
     deleteSourceConfirm: "האם אתה בטוח שברצונך למחוק מקור זה? לא ניתן לבטל פעולה זו.",
+    libraryDeleteInPlaylistTitle: "להסיר או למחוק?",
+    libraryDeleteInPlaylistMessage:
+      "הפריט נשאר בספרייה המלאה אלא אם תמחק אותו. הסרה מנתקת רק מפלייליסט זה; מחיקה מסירה מהספרייה ומכל הפלייליסטים.",
+    libraryRemoveFromPlaylistOnly: "הסר מפלייליסט זה",
+    libraryDeleteFromLibraryEntirely: "מחק מהספרייה",
+    libraryDeleteAllTitle: "למחוק מהספרייה?",
+    libraryDeleteAllMessage:
+      "פעולה זו מסירה לצמיתות את הפריט מהספרייה. הוא ייעלם מהספרייה המלאה ומכל פלייליסט שכלל אותו.",
+    libraryDeleteFromLibraryAndAllPlaylists: "מחק מהספרייה ומכל הפלייליסטים",
     confirmDelete: "מחק מאושר",
     logoutConfirm: "האם אתה בטוח שברצונך להתנתק?",
     logoutConfirmTitle: "התנתקות",

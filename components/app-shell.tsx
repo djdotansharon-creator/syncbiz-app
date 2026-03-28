@@ -375,11 +375,17 @@ export function AppShell({ children }: { children: ReactNode }) {
     e.stopPropagation();
     setPlayerDropActive(false);
 
+    const isLibraryItemDrag = e.dataTransfer.getData("application/syncbiz-library-item-drag") === "1";
+
     const queueSourcesJson = e.dataTransfer.getData("application/syncbiz-queue-sources");
     if (queueSourcesJson) {
       try {
         const queue = JSON.parse(queueSourcesJson) as UnifiedSource[];
         if (Array.isArray(queue) && queue.length > 0) {
+          if (isLibraryItemDrag) {
+            playSource(queue[0]);
+            return;
+          }
           setQueue(queue);
           playSource(queue[0]);
           return;
@@ -397,6 +403,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         const byId = new Map(allSources.map((s) => [s.id, s] as const));
         const queue = ids.map((id) => byId.get(id)).filter((s): s is UnifiedSource => !!s);
         if (queue.length > 0) {
+          if (isLibraryItemDrag) {
+            playSource(queue[0]);
+            return;
+          }
           setQueue(queue);
           playSource(queue[0]);
           return;
@@ -411,6 +421,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       try {
         const source = JSON.parse(sourceJson) as UnifiedSource;
         if (source?.id && source?.url) {
+          if (isLibraryItemDrag) {
+            playSource(source);
+            return;
+          }
           setQueue([source]);
           playSource(source);
           return;
@@ -425,6 +439,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       const allSources = await fetchUnifiedSourcesWithFallback();
       const source = allSources.find((s) => s.id === sourceId);
       if (source) {
+        if (isLibraryItemDrag) {
+          playSource(source);
+          return;
+        }
         setQueue([source]);
         playSource(source);
         return;
@@ -620,7 +638,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   }}
                   onDragLeave={() => setPlayerDropActive(false)}
                   onDrop={(e) => void handlePlayerDrop(e)}
-                  className={`relative min-w-0 overflow-hidden rounded-2xl border bg-slate-950/72 p-1.5 shadow-[0_0_0_1px_rgba(56,189,248,0.06),0_12px_30px_rgba(0,0,0,0.42)] backdrop-blur-md transition-colors ${
+                  className={`relative min-w-0 overflow-hidden rounded-2xl border bg-slate-950/72 p-1.5 shadow-[0_12px_30px_rgba(0,0,0,0.42)] backdrop-blur-md transition-colors ${
                     playerDropActive ? "border-cyan-400/70" : "border-slate-700/70"
                   }`}
                 >
@@ -631,8 +649,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                   ) : null}
                   <AudioPlayer />
                 </div>
-                <aside className="hidden xl:block">
-                  <div className="h-full rounded-2xl border border-cyan-500/25 bg-slate-950/80 p-3 shadow-[0_0_0_1px_rgba(6,182,212,0.08),0_10px_24px_rgba(0,0,0,0.45)] backdrop-blur-md">
+                <aside className="library-deck-pads-aside relative hidden xl:block">
+                  <div className="h-full rounded-2xl border border-cyan-500/25 bg-slate-950/80 p-3 shadow-[0_10px_24px_rgba(0,0,0,0.45)] backdrop-blur-md">
                     <header className="pb-2">
                       <div className="flex items-center justify-between">
                         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200/90">
@@ -677,7 +695,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
 
         <main
-          className={`flex-1 px-4 pb-4 sm:px-6${isSourcesLibraryRoute ? " pt-2" : " py-5"}${isMediaThemeRoute ? " library-main-below-deck" : ""}`}
+          className={`flex-1 px-4 pb-4 sm:px-6${isSourcesLibraryRoute ? " pt-4" : " py-5"}${isMediaThemeRoute ? " library-main-below-deck" : ""}`}
           {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
         >
           <div

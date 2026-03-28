@@ -538,7 +538,7 @@ input[type="range"]:not(.player-volume-slider)::-moz-range-track {
 
   --lib-overlay-art: linear-gradient(to top, rgba(2, 6, 23, 0.82), rgba(15, 23, 42, 0.2), transparent);
 
-  --lib-shadow-deck-drop: 0 6px 30px rgba(0, 0, 0, 0.58), 0 0 0 1px rgba(34, 211, 238, 0.045);
+  --lib-shadow-deck-drop: 0 6px 30px rgba(0, 0, 0, 0.58);
   --lib-deck-control-aura: rgba(34, 211, 238, 0.08);
   --lib-deck-control-aura-strong: rgba(34, 211, 238, 0.14);
 
@@ -953,7 +953,7 @@ input[type="range"]:not(.player-volume-slider)::-moz-range-track {
  * strong candidate; 15–20m is hint-only and needs supporting signals (see `lib/library-grouping.ts`).
  */
 .library-theme.library-player-route-bridge .audio-player-library-deck {
-  border-bottom: 1px solid var(--lib-border-subtle);
+  border-bottom: none;
   background: var(--lib-surface-rail);
   box-shadow: var(--lib-shadow-rail-inset), var(--lib-shadow-deck-drop);
 }
@@ -991,17 +991,52 @@ input[type="range"]:not(.player-volume-slider)::-moz-range-track {
   box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.64), inset 0 1px 0 rgba(255, 255, 255, 0.025);
 }
 
-/* Hairline between header deck and library main (`data-library-theme` on `<main>`). */
-main.library-main-below-deck[data-library-theme="deep-blue"] {
-  box-shadow: inset 0 1px 0 0 rgba(51, 65, 85, 0.55);
+/* Top segment only: soften double-edge read in the grid gap between player shell and Command Pads (card borders unchanged). */
+.library-theme.library-player-route-bridge[data-library-theme="deep-blue"] > .grid > aside.library-deck-pads-aside::before {
+  content: "";
+  position: absolute;
+  left: -0.75rem;
+  top: 0;
+  width: 0.75rem;
+  height: 2.75rem;
+  pointer-events: none;
+  z-index: 5;
+  background: linear-gradient(to right, transparent, rgba(0, 3, 8, 0.48) 50%, transparent);
 }
+
+.library-theme.library-player-route-bridge[data-library-theme="graphite-black"] > .grid > aside.library-deck-pads-aside::before {
+  content: "";
+  position: absolute;
+  left: -0.75rem;
+  top: 0;
+  width: 0.75rem;
+  height: 2.75rem;
+  pointer-events: none;
+  z-index: 5;
+  background: linear-gradient(to right, transparent, rgba(3, 3, 3, 0.5) 50%, transparent);
+}
+
+.library-theme.library-player-route-bridge[data-library-theme="pearl-light"] > .grid > aside.library-deck-pads-aside::before {
+  content: "";
+  position: absolute;
+  left: -0.75rem;
+  top: 0;
+  width: 0.75rem;
+  height: 2.75rem;
+  pointer-events: none;
+  z-index: 5;
+  background: linear-gradient(to right, transparent, rgba(248, 250, 252, 0.5) 50%, transparent);
+}
+
+/* Main: no extra inset line under the deck (shell + header border handle separation). */
+main.library-main-below-deck[data-library-theme="deep-blue"],
 main.library-main-below-deck[data-library-theme="graphite-black"] {
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  box-shadow: none;
 }
 main.library-main-below-deck[data-library-theme="pearl-light"] {
   background-color: transparent;
   color: inherit;
-  box-shadow: inset 0 1px 0 0 rgba(15, 23, 42, 0.06);
+  box-shadow: none;
 }
 
 /* Pearl: full light canvas under header — removes “dark app with a white patch” */
@@ -1012,7 +1047,7 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
     rgba(248, 250, 252, 0.97) 38%,
     #f1f5f9 100%
   );
-  border-bottom-color: rgba(15, 23, 42, 0.09);
+  border-bottom: none;
   box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.85), var(--lib-shadow-deck-drop);
 }
 
@@ -1214,7 +1249,7 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 .app-sources-theme-scope[data-library-theme="deep-blue"] .sources-app-header {
   background: rgba(0, 3, 8, 0.98);
   border-bottom-color: rgba(8, 16, 34, 0.96);
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.68), 0 0 0 1px rgba(34, 211, 238, 0.035);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.68);
 }
 
 /* Left sidebar ownership for media routes (/sources, /radio, /favorites). */
