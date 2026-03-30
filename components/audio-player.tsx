@@ -33,6 +33,11 @@ import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { ActionButtonShare } from "@/components/ui/action-buttons";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
+import {
+  acquirePlaybackWakeLock,
+  playbackLifecycleLog,
+  releasePlaybackWakeLock,
+} from "@/lib/playback-resilience";
 import { resolveDeckSourceBadge } from "@/lib/deck-source-badge";
 
 /** Crossfade runtime diagnostics – key transitions only, no 500ms spam */
@@ -365,9 +370,20 @@ export function AudioPlayer() {
   const lastUiPositionRef = useRef(0);
   const lastUiDurationRef = useRef(0);
   const lastUiBufferedRef = useRef(0);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const isYouTubeRef = useRef(false);
+  const isSoundCloudRef = useRef(false);
+  const isStreamUrlRef = useRef(false);
+  const isControlMirrorRef = useRef(false);
+  const embedReadyRef = useRef(false);
   volumeRef.current = volume;
   statusRef.current = status;
   nextRef.current = next;
+  isYouTubeRef.current = isYouTube;
+  isSoundCloudRef.current = Boolean(isSoundCloud);
+  isStreamUrlRef.current = Boolean(isStreamUrl);
+  isControlMirrorRef.current = Boolean(isControlMirror);
+  embedReadyRef.current = embedReady;
 
   const updatePositionIfChanged = useCallback((next: number) => {
     if (!Number.isFinite(next)) return;
@@ -632,6 +648,109 @@ export function AudioPlayer() {
     },
     [setLastMessage, locale]
   );
+
+  /** Best-effort resume when tab/app returns — does not override user pause (status must still be playing). */
+  const nudgeResumePlayback = useCallback(() => {
+    if (typeof document !== "undefined" && document.hidden) return;
+    if (isControlMirrorRef.current) return;
+    if (statusRef.current !== "playing") return;
+    playbackLifecycleLog("resume_media_attempt", {
+      isStreamUrl: isStreamUrlRef.current,
+      isYouTube: isYouTubeRef.current,
+      isSoundCloud: isSoundCloudRef.current,
+      embedReady: embedReadyRef.current,
+    });
+    try {
+      if (isStreamUrlRef.current && audioRef.current?.paused) {
+        void audioRef.current.play().catch((e) =>
+          playbackLifecycleLog("resume_media_attempt", { result: "audio_reject", error: String(e) })
+        );
+      }
+      if (isYouTubeRef.current && embedReadyRef.current) {
+        const p = ytPlayerRef.current;
+        if (isYtPlayerReady(p)) safePlayVideo(p);
+      }
+      if (isSoundCloudRef.current && scWidgetRef.current) {
+        scWidgetRef.current.play();
+      }
+    } catch (e) {
+      playbackLifecycleLog("resume_media_attempt", { result: "error", error: String(e) });
+    }
+  }, []);
+
+  useEffect(() => {
+    playbackLifecycleLog("platform_hint", {
+      wakeLockApi: typeof navigator !== "undefined" && "wakeLock" in navigator,
+      iosLike: typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent),
+      standalonePwa:
+        typeof window !== "undefined" &&
+        (window.matchMedia("(display-mode: standalone)").matches ||
+          (navigator as Navigator & { standalone?: boolean }).standalone === true),
+    });
+  }, []);
+
+  useEffect(() => {
+    if (isControlMirror) return;
+    if (status !== "playing") {
+      void releasePlaybackWakeLock(wakeLockRef);
+      return;
+    }
+    if (typeof document !== "undefined" && document.hidden) return;
+    void acquirePlaybackWakeLock(wakeLockRef);
+    return () => {
+      void releasePlaybackWakeLock(wakeLockRef);
+    };
+  }, [status, isControlMirror]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    const onVisibility = () => {
+      playbackLifecycleLog("visibility", {
+        hidden: document.hidden,
+        visibilityState: document.visibilityState,
+      });
+      if (!document.hidden) {
+        nudgeResumePlayback();
+        if (statusRef.current === "playing" && !isControlMirrorRef.current) {
+          void acquirePlaybackWakeLock(wakeLockRef);
+        }
+      }
+    };
+    const onPageHide = (e: PageTransitionEvent) => {
+      playbackLifecycleLog("pagehide", { persisted: e.persisted });
+    };
+    const onPageShow = (e: PageTransitionEvent) => {
+      playbackLifecycleLog("pageshow", { persisted: e.persisted });
+      nudgeResumePlayback();
+      if (statusRef.current === "playing" && !isControlMirrorRef.current && !document.hidden) {
+        void acquirePlaybackWakeLock(wakeLockRef);
+      }
+    };
+    const onFreeze = () => playbackLifecycleLog("freeze", {});
+    const onResume = () => {
+      playbackLifecycleLog("resume", {});
+      nudgeResumePlayback();
+    };
+    const onFocus = () => playbackLifecycleLog("focus", {});
+    const onBlur = () => playbackLifecycleLog("blur", {});
+
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("freeze", onFreeze);
+    document.addEventListener("resume", onResume);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("freeze", onFreeze);
+      document.removeEventListener("resume", onResume);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [nudgeResumePlayback]);
 
   // HTML5 audio play/pause – only call play() when paused to avoid redundant calls that can cause jumps
   useEffect(() => {
@@ -1122,6 +1241,21 @@ export function AudioPlayer() {
     audio.addEventListener("ended", onEnded);
     return () => audio.removeEventListener("ended", onEnded);
   }, [isStreamUrl]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !isStreamUrl) return;
+    const onPause = () => {
+      if (statusRef.current !== "playing") return;
+      if (audio.ended) return;
+      playbackLifecycleLog("audio_unexpected_pause", {
+        currentTime: audio.currentTime,
+        readyState: audio.readyState,
+      });
+    };
+    audio.addEventListener("pause", onPause);
+    return () => audio.removeEventListener("pause", onPause);
+  }, [isStreamUrl, currentPlayUrl]);
 
   const hasPrevNext = (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1);
   const thumbnailCover = ytMultiTrackState?.currentThumbnail ?? currentTrack?.cover ?? currentSource?.cover ?? null;

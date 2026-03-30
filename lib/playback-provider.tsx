@@ -103,6 +103,16 @@ function deriveCurrentTrack(source: UnifiedSource | null, trackIndex: number): P
   return source ? unifiedToPlaybackTrack(source, trackIndex) : null;
 }
 
+/** Active playlist for session bounds: prefer source attachment, then state snapshot. */
+function getActivePlaylist(s: Pick<PlaybackState, "currentSource" | "currentPlaylist">): Playlist | null {
+  return s.currentSource?.playlist ?? s.currentPlaylist ?? null;
+}
+
+function getPlaylistSessionTracks(s: Pick<PlaybackState, "currentSource" | "currentPlaylist">) {
+  const pl = getActivePlaylist(s);
+  return pl ? getPlaylistTracks(pl) : [];
+}
+
 type PlaybackContextValue = PlaybackState & {
   currentTrack: PlaybackTrack | null;
   play: () => void;
@@ -433,8 +443,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       stopAllBeforePlay();
 
       setState((s) => {
-        const queue = s.queue.length > 0 ? s.queue : [source];
-        const qi = queue.findIndex((x) => x.id === source.id);
+        let queue = s.queue.length > 0 ? s.queue : [source];
+        let qi = queue.findIndex((x) => x.id === source.id);
+        if (qi < 0) {
+          mvpLog("playsource_queue_miss", {
+            sourceId: source.id,
+            queueLenBefore: queue.length,
+          });
+          queue = [...queue, source];
+          qi = queue.length - 1;
+        }
         return {
           ...s,
           currentPlaylist: playlist,
@@ -442,7 +460,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           currentTrackIndex: idx,
           status: "playing",
           queue,
-          queueIndex: qi >= 0 ? qi : 0,
+          queueIndex: qi,
           lastMessage: null,
         };
       });
@@ -587,6 +605,33 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         transportLockRef.current = false;
         return s;
       }
+      const sessionTracks = getPlaylistSessionTracks(s);
+      if (sessionTracks.length > 0) {
+        const trackCount = sessionTracks.length;
+        const prevIdx =
+          trackCount === 1
+            ? 0
+            : s.currentTrackIndex > 0
+              ? s.currentTrackIndex - 1
+              : trackCount - 1;
+        const track = sessionTracks[prevIdx];
+        const url = track?.url ?? s.currentSource.url;
+        const embedded = track ? canEmbedInCard(track.type) : false;
+        mvpLog("playback_prev", {
+          scope: "playlist",
+          playlistId: getActivePlaylist(s)?.id,
+          trackCount,
+          fromIndex: s.currentTrackIndex,
+          toIndex: prevIdx,
+        });
+        if (!embedded && url) {
+          stopAllBeforePlay();
+          playLocal(url);
+        }
+        transportLockRef.current = false;
+        return getAdvanceState(s, prevIdx);
+      }
+
       const playlist = s.currentPlaylist;
       const tracks = playlist ? getPlaylistTracks(playlist) : [];
       const trackCount = tracks.length || 1;
@@ -600,10 +645,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           stopAllBeforePlay();
           playLocal(url);
         }
+        transportLockRef.current = false;
         return getAdvanceState(s, nextIdx);
       }
 
       if (s.queue.length > 1 && s.queueIndex > 0) {
+        mvpLog("playback_prev", { scope: "global_queue", queueIndex: s.queueIndex });
         const prevSource = s.queue[s.queueIndex - 1];
         queueMicrotask(() => {
           try {
@@ -614,6 +661,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         });
         return s;
       }
+      mvpLog("playback_prev", { scope: "noop" });
       transportLockRef.current = false;
       return s;
     });
@@ -629,6 +677,43 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         transportLockRef.current = false;
         return s;
       }
+
+      const sessionTracks = getPlaylistSessionTracks(s);
+      if (sessionTracks.length > 0) {
+        const trackCount = sessionTracks.length;
+        let nextIdx: number;
+        let branch: "single_wrap" | "advance" | "wrap";
+        if (trackCount === 1) {
+          nextIdx = 0;
+          branch = "single_wrap";
+        } else if (s.currentTrackIndex < trackCount - 1) {
+          nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
+          branch = "advance";
+        } else {
+          nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : 0;
+          branch = "wrap";
+        }
+        const track = sessionTracks[nextIdx];
+        const url = track?.url ?? s.currentSource.url;
+        const embedded = track ? canEmbedInCard(track.type) : false;
+        mvpLog("playback_next", {
+          scope: "playlist",
+          branch,
+          playlistId: getActivePlaylist(s)?.id,
+          trackCount,
+          shuffle: s.shuffle,
+          fromIndex: s.currentTrackIndex,
+          toIndex: nextIdx,
+          skipPlay,
+        });
+        if (!skipPlay && !embedded && url) {
+          stopAllBeforePlay();
+          playLocal(url);
+        }
+        transportLockRef.current = false;
+        return getAdvanceState(s, nextIdx);
+      }
+
       const playlist = s.currentPlaylist;
       const tracks = playlist ? getPlaylistTracks(playlist) : [];
       const trackCount = tracks.length || 1;
@@ -658,6 +743,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           playLocal(url);
         }
         transportLockRef.current = false;
+        mvpLog("playback_next", { scope: "global_queue", branch: "repeat_restart", skipPlay });
         return getAdvanceState(s, 0);
       }
 
@@ -668,6 +754,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             ? 0
             : s.queueIndex + 1;
         const nextSource = s.queue[nextQueueIdx % s.queue.length];
+        mvpLog("playback_next", {
+          scope: "global_queue",
+          branch: "queue_advance",
+          nextQueueIdx: nextQueueIdx % s.queue.length,
+          nextSourceId: nextSource?.id,
+          skipPlay,
+        });
         if (nextSource) {
           if (nextSource.id === s.currentSource.id && !s.repeat) {
             stop();
@@ -696,6 +789,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         }
         return s;
       }
+      mvpLog("playback_next", { scope: "noop", skipPlay });
       transportLockRef.current = false;
       return s;
     });
@@ -705,6 +799,32 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     return (() => {
       const s = state;
       if (!s.currentSource) return null;
+
+      const sessionTracks = getPlaylistSessionTracks(s);
+      if (sessionTracks.length > 0) {
+        const trackCount = sessionTracks.length;
+        let nextIdx: number;
+        if (trackCount === 1) {
+          nextIdx = 0;
+        } else if (s.currentTrackIndex < trackCount - 1) {
+          nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
+        } else {
+          nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : 0;
+        }
+        const track = sessionTracks[nextIdx];
+        const url = track?.url ?? s.currentSource.url;
+        const embedded = track ? canEmbedInCard(track.type) : false;
+        const out = !embedded && url ? url : null;
+        if (out) {
+          mvpLog("playback_get_next_stream", {
+            scope: "playlist",
+            playlistId: getActivePlaylist(s)?.id,
+            nextIdx,
+          });
+        }
+        return out;
+      }
+
       const playlist = s.currentPlaylist;
       const tracks = playlist ? getPlaylistTracks(playlist) : [];
       const trackCount = tracks.length || 1;
@@ -737,7 +857,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         if (nextSource && nextSource.id !== s.currentSource.id) {
           const t = unifiedToPlaybackTrack(nextSource, 0);
           const embedded = t ? canEmbedInCard(t.type) : false;
-          return !embedded && t?.url ? t.url : null;
+          const out = !embedded && t?.url ? t.url : null;
+          if (out) mvpLog("playback_get_next_stream", { scope: "global_queue", nextSourceId: nextSource.id });
+          return out;
         }
       }
       return null;
@@ -748,6 +870,36 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const getNextEmbeddedSource = useCallback((): { type: "youtube"; url: string; videoId: string } | null => {
     const s = state;
     if (!s.currentSource) return null;
+
+    const sessionTracks = getPlaylistSessionTracks(s);
+    if (sessionTracks.length > 0) {
+      const trackCount = sessionTracks.length;
+      let nextIdx: number;
+      if (trackCount === 1) {
+        nextIdx = 0;
+      } else if (s.currentTrackIndex < trackCount - 1) {
+        nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
+      } else {
+        nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : 0;
+      }
+      const track = sessionTracks[nextIdx];
+      const url = track?.url ?? s.currentSource.url;
+      const embedded = track ? canEmbedInCard(track.type) : false;
+      let result: { type: "youtube"; url: string; videoId: string } | null = null;
+      if (embedded && url && track?.type === "youtube") {
+        const videoId = getYouTubeVideoId(url);
+        result = videoId ? { type: "youtube", url, videoId } : null;
+      }
+      if (result) {
+        mvpLog("playback_get_next_embedded", {
+          scope: "playlist",
+          playlistId: getActivePlaylist(s)?.id,
+          nextIdx,
+        });
+      }
+      return result;
+    }
+
     const playlist = s.currentPlaylist;
     const tracks = playlist ? getPlaylistTracks(playlist) : [];
     const trackCount = tracks.length || 1;
@@ -790,7 +942,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         const embedded = t ? canEmbedInCard(t.type) : false;
         if (embedded && t?.url && t.type === "youtube") {
           const videoId = getYouTubeVideoId(t.url);
-          return videoId ? { type: "youtube", url: t.url, videoId } : null;
+          const y = videoId ? { type: "youtube" as const, url: t.url, videoId } : null;
+          if (y) mvpLog("playback_get_next_embedded", { scope: "global_queue", nextSourceId: nextSource.id });
+          return y;
         }
       }
     }

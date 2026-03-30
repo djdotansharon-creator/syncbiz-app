@@ -46,7 +46,12 @@ export function LibrarySourceItemActions({
   const transportMd = compact ? "md" : "md";
 
   return (
-    <div className="mt-1 flex w-full min-w-0 flex-wrap items-center justify-center gap-1.5" role="group" aria-label={t.sourceControlsAria}>
+    <div
+      className="mt-1 flex w-full min-w-0 flex-wrap items-center justify-center gap-1.5"
+      role="group"
+      aria-label={t.sourceControlsAria}
+      onClick={(e) => e.stopPropagation()}
+    >
       {isActive && (
         <>
           <NeonControlButton

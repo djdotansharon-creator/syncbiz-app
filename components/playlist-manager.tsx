@@ -7,6 +7,8 @@ import { PlaylistCard } from "@/components/playlist-card";
 import { AddPlaylistForm } from "@/components/add-playlist-form";
 import { SharePlaylistModal } from "@/components/share-playlist-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
+import { useTranslations } from "@/lib/locale-context";
+import { LIBRARY_SIDE_ACTION_ICON_BTN_CLASS } from "@/lib/library-side-action-styles";
 import { PlaylistIconBadge } from "@/components/playlist-icon-badge";
 import { PlaylistPlayerProvider, usePlaylistPlayer } from "@/lib/playlist-player-context";
 import type { Playlist } from "@/lib/playlist-types";
@@ -195,6 +197,7 @@ function PlaylistRow({
   onShare: (p: Playlist) => void;
 }) {
   const router = useRouter();
+  const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const { status, volume, isActive, play, pause, stop, setVolume } = usePlaylistPlayer();
@@ -330,11 +333,17 @@ function PlaylistRow({
           ↗
         </button>
         <button
+          type="button"
           onClick={() => setDeleteOpen(true)}
-          className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/40 text-slate-400 hover:border-rose-800/50 hover:bg-rose-950/30 hover:text-rose-400"
-          title="Delete"
+          className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
+          title={t.deletePlaylist}
+          aria-label={t.deletePlaylist}
         >
-          🗑
+          <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            <line x1="10" y1="11" x2="10" y2="17" />
+            <line x1="14" y1="11" x2="14" y2="17" />
+          </svg>
         </button>
       </div>
 
@@ -343,7 +352,8 @@ function PlaylistRow({
         onClose={() => setDeleteOpen(false)}
         onConfirm={handleDelete}
         loading={deleting}
-        message="Are you sure you want to delete this playlist? This cannot be undone."
+        title={t.deletePlaylist}
+        message={t.deletePlaylistConfirm}
       />
     </div>
   );

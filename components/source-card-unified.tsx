@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocale, useTranslations, labels } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { LibraryItemContextDeleteModal } from "@/components/library-item-context-delete-modal";
@@ -41,6 +41,10 @@ type Props = {
    * When omitted, uses `source.cover` only (legacy behavior).
    */
   explicitArtUrl?: string | null;
+  /** When set, single-click on the card opens the playlist/collection in library (debounced vs double-click). */
+  onPlaylistEntityOpen?: () => void;
+  /** When set, double-click plays the full playlist entity queue. */
+  onPlaylistEntityPlay?: () => void;
 };
 
 function PlaylistCardArtFallback({ className }: { className?: string }) {
@@ -124,12 +128,15 @@ export function SourceCard({
   libraryDeckChrome = false,
   itemDeleteContext,
   explicitArtUrl,
+  onPlaylistEntityOpen,
+  onPlaylistEntityPlay,
 }: Props) {
   const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const openClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { playSource, stop, pause, currentSource } = usePlayback();
   const playSourceFn = onPlaySourceProp ?? playSource;
@@ -139,6 +146,12 @@ export function SourceCard({
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (openClickTimerRef.current) clearTimeout(openClickTimerRef.current);
+    };
   }, []);
   const hasInvalidUrl = source.origin === "radio" && source.radio && !isValidStreamUrl(source.radio.url);
 
@@ -162,11 +175,32 @@ export function SourceCard({
   const useExplicitPlaylistArt = explicitArtUrl !== undefined;
   const cardCover = useExplicitPlaylistArt ? explicitArtUrl : source.cover;
 
+  function handleCardClickForOpen() {
+    if (!onPlaylistEntityOpen) return;
+    if (openClickTimerRef.current) clearTimeout(openClickTimerRef.current);
+    openClickTimerRef.current = setTimeout(() => {
+      onPlaylistEntityOpen();
+      openClickTimerRef.current = null;
+    }, 220);
+  }
+
+  function handleCardDoubleClickPlay(e: React.MouseEvent) {
+    if (!onPlaylistEntityPlay) return;
+    e.preventDefault();
+    if (openClickTimerRef.current) {
+      clearTimeout(openClickTimerRef.current);
+      openClickTimerRef.current = null;
+    }
+    onPlaylistEntityPlay();
+  }
+
   return (
     <>
     <article
       draggable={draggable}
       onDragStart={onDragStart}
+      onClick={onPlaylistEntityOpen ? handleCardClickForOpen : undefined}
+      onDoubleClick={onPlaylistEntityPlay ? handleCardDoubleClickPlay : undefined}
       className={`library-source-card group flex flex-col overflow-hidden rounded-2xl backdrop-blur-md transition-transform duration-200 ease-out hover:-translate-y-0.5 ${
         active ? "library-playing-active" : ""
       } ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}

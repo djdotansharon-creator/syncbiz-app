@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef, startTransition, type DragEvent } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, startTransition, type DragEvent, type MouseEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ShareModal } from "@/components/share-modal";
@@ -22,6 +22,12 @@ import { getFavorites, addFavorite as addFav, removeFavorite as removeFav } from
 import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal, removePlaylistFromLocal, removeRadioFromLocal } from "@/lib/unified-sources-client";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import {
+  expandPlaylistEntityToItems,
+  resolveSyncbizPlaylistPlayQueue,
+  SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY,
+  visibleItemsForSyncbizPlaylistGrid,
+} from "@/lib/syncbiz-playlist-queue";
+import {
   classifyLibraryEntityContract,
   type LibraryCollectionSubtype,
   type UnifiedSource,
@@ -34,6 +40,15 @@ import {
 } from "@/lib/library-grouping";
 import { librarySectionLabel } from "@/lib/library-section-i18n";
 import { useLibraryTheme } from "@/lib/library-theme-context";
+import {
+  LIBRARY_PLAYLIST_TILE_SIDE_ACTION_BTN_CLASS,
+  LIBRARY_PLAYLIST_TILE_SIDE_ACTION_CLUSTER_CLASS,
+  LIBRARY_SIDE_ACTION_ICON_BTN_CLASS,
+} from "@/lib/library-side-action-styles";
+
+/** Left-rail section headers (Ready Playlists / Playlist Tiles) — shared visual language for shell actions. */
+const LIBRARY_RAIL_SHELL_ACTION_BTN_CLASS =
+  "library-nav-link inline-flex shrink-0 items-center rounded-lg px-2.5 py-1 text-[11px] font-medium leading-none tracking-wide transition-colors";
 
 /**
  * Library grouping product note (implemented in `lib/library-grouping.ts`, not UI): mix/set auto-classification
@@ -257,12 +272,8 @@ const FIXED_DAYPART_PADS: Array<{ label: "Morning" | "Afternoon" | "Evening" | "
   { label: "Night", key: "daypart:late_night", tone: "from-indigo-500/35 to-slate-700/35 border-indigo-300/45" },
 ];
 const PLAYLIST_TILES_STORAGE_KEY = "syncbiz-custom-playlist-tiles";
-const PLAYLIST_ASSIGNMENTS_STORAGE_KEY = "syncbiz-playlist-item-assignments";
+const PLAYLIST_ASSIGNMENTS_STORAGE_KEY = SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY;
 const DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY = "syncbiz-daypart-playlist-assignments";
-
-/** Borderless white side actions: Your Playlists (trash), Playlist Tiles (schedule). */
-const LIBRARY_SIDE_ACTION_ICON_BTN_CLASS =
-  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent p-0 text-white shadow-none outline-none ring-0 transition-colors hover:bg-white/10 active:bg-white/[0.14] focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-0";
 
 function isLikelyMixSet(source: UnifiedSource): boolean {
   if (source.contentNodeKind === "mix_set") return true;
@@ -343,6 +354,18 @@ function deriveSyncbizPlaylistCover(
     const item = displayById.get(id);
     const ic = firstUsableCoverUrl(item?.cover);
     if (ic) return ic;
+  }
+  return null;
+}
+
+/** Real playlist entities (user or import) for open/play/drag behavior. */
+function getPlaylistEntitySubtypeKey(source: UnifiedSource): { subtype: LibraryCollectionSubtype; key: string } | null {
+  const contract = classifyLibraryEntityContract(source);
+  if (contract.entityKind === "collection" && contract.collectionSubtype === "syncbiz_playlist" && source.origin === "playlist") {
+    return { subtype: "syncbiz_playlist", key: `syncbiz:${source.id}` };
+  }
+  if (contract.entityKind === "collection" && contract.collectionSubtype === "external_playlist") {
+    return { subtype: "external_playlist", key: `external:${source.id}` };
   }
   return null;
 }
@@ -434,10 +457,20 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const [daypartPlaylistAssignments, setDaypartPlaylistAssignments] = useState<Record<string, string>>({});
   const [playlistContainerDeleteKey, setPlaylistContainerDeleteKey] = useState<string | null>(null);
   const [playlistContainerDeleting, setPlaylistContainerDeleting] = useState(false);
+  const [readyCollectionModalOpen, setReadyCollectionModalOpen] = useState(false);
+  const [externalPlaylistDeleteKey, setExternalPlaylistDeleteKey] = useState<string | null>(null);
+  const [externalPlaylistDeleting, setExternalPlaylistDeleting] = useState(false);
+  const [tileSlotModal, setTileSlotModal] = useState<
+    | null
+    | { key: string; variant: "clearAssignment" | "removeCustomTile" | "empty" }
+  >(null);
+  const [tileSlotActionLoading, setTileSlotActionLoading] = useState(false);
   const sourceBackSelectionRef = useRef<LibrarySelection>({ type: "library_view", id: "sources" });
   const { favoriteIds, toggleFavorite } = useFavoritesState();
   const { followedSourceKeys, toggleFollowedSource } = useFollowedSourcesState();
   const playlistAutoLoaded = useRef(false);
+  const userPlaylistRailOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userPlaylistRailOpenKeyRef = useRef<string | null>(null);
 
   const { sources, setSources } = useSourcesPlayback();
   const { setQueue, playSource, stop, pause } = usePlayback();
@@ -567,11 +600,13 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         );
       }
       if (selection.subtype === "external_playlist") {
-        return displaySources.filter((s) => `external:${s.id}` === selection.key);
+        const source = displaySources.find((s) => `external:${s.id}` === selection.key);
+        if (!source) return [];
+        const expanded = expandPlaylistEntityToItems(source);
+        return expanded.length > 0 ? expanded : [source];
       }
       if (selection.subtype === "syncbiz_playlist") {
-        const assignedIds = playlistItemAssignments[selection.key] ?? [];
-        return displaySources.filter((s) => assignedIds.includes(s.id));
+        return visibleItemsForSyncbizPlaylistGrid(selection.key, displaySources, playlistItemAssignments);
       }
     }
     return displaySources;
@@ -785,11 +820,17 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         );
       }
       if (subtype === "external_playlist") {
-        return displaySources.filter((s) => `external:${s.id}` === key);
+        const source = displaySources.find((s) => `external:${s.id}` === key);
+        if (!source) return [];
+        const expanded = expandPlaylistEntityToItems(source);
+        return expanded.length > 0 ? expanded : [source];
       }
-      return displaySources.filter((s) => s.origin === "playlist" && `syncbiz:${s.id}` === key);
+      if (subtype === "syncbiz_playlist") {
+        return resolveSyncbizPlaylistPlayQueue(key, displaySources, playlistItemAssignments);
+      }
+      return [];
     },
-    [displaySources]
+    [displaySources, playlistItemAssignments]
   );
 
   const playCollectionSelection = useCallback(
@@ -801,6 +842,27 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
       else playSource(queue[0]);
     },
     [resolveSourcesForSelection, setQueue, playSourceOverride, playSource]
+  );
+
+  const scheduleUserPlaylistRailOpen = useCallback((playlistKey: string) => {
+    userPlaylistRailOpenKeyRef.current = playlistKey;
+    if (userPlaylistRailOpenTimerRef.current) clearTimeout(userPlaylistRailOpenTimerRef.current);
+    userPlaylistRailOpenTimerRef.current = setTimeout(() => {
+      userPlaylistRailOpenTimerRef.current = null;
+      if (userPlaylistRailOpenKeyRef.current === playlistKey) {
+        setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: playlistKey });
+      }
+      userPlaylistRailOpenKeyRef.current = null;
+    }, 220);
+  }, []);
+
+  const buildPlaylistEntityDrag = useCallback(
+    (source: UnifiedSource) => {
+      const pe = getPlaylistEntitySubtypeKey(source);
+      const sourcesForDrop = pe ? resolveSourcesForSelection(pe.subtype, pe.key) : [source];
+      return { pe, sourcesForDrop };
+    },
+    [resolveSourcesForSelection]
   );
 
   const openDaypartTile = useCallback((daypartKey: string) => {
@@ -975,6 +1037,65 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     [playlistSourceByKey, handleRemove]
   );
 
+  const executeDeleteExternalPlaylistByKey = useCallback(
+    async (externalKey: string) => {
+      const source = displaySources.find((s) => `external:${s.id}` === externalKey);
+      if (!source?.playlist) return;
+
+      const res = await fetch(`/api/playlists/${source.playlist.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete");
+
+      handleRemove(source.id, "playlist");
+
+      setPlaylistItemAssignments((prev) => {
+        const next = { ...prev };
+        delete next[externalKey];
+        localStorage.setItem(PLAYLIST_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+
+      setDaypartPlaylistAssignments((prev) => {
+        const next = { ...prev };
+        for (const [k, v] of Object.entries(next)) {
+          if (v === externalKey) delete next[k];
+        }
+        localStorage.setItem(DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+
+      setSelection((sel) =>
+        sel.type === "collection_container" && sel.subtype === "external_playlist" && sel.key === externalKey
+          ? { type: "library_view", id: "all_library" }
+          : sel
+      );
+    },
+    [displaySources, handleRemove]
+  );
+
+  const openPlaylistTileTrash = useCallback(
+    (tileKey: string) => {
+      const assigned = daypartPlaylistAssignments[tileKey];
+      if (assigned) {
+        setTileSlotModal({ key: tileKey, variant: "clearAssignment" });
+        return;
+      }
+      if (tileKey.startsWith("customplaylist:")) {
+        setTileSlotModal({ key: tileKey, variant: "removeCustomTile" });
+        return;
+      }
+      setTileSlotModal({ key: tileKey, variant: "empty" });
+    },
+    [daypartPlaylistAssignments]
+  );
+
+  const openCollectionGridTrash = useCallback((c: CollectionContainer) => {
+    if (c.subtype === "external_playlist") {
+      setExternalPlaylistDeleteKey(c.key);
+    } else {
+      setReadyCollectionModalOpen(true);
+    }
+  }, []);
+
   const activePlaylistKey =
     selection.type === "collection_container" && selection.subtype === "syncbiz_playlist" ? selection.key : null;
 
@@ -1029,50 +1150,66 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                 <button
                   type="button"
                   onClick={() => selectCollectionGroup("curated_masters")}
-                  className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                  className={LIBRARY_RAIL_SHELL_ACTION_BTN_CLASS}
+                  title={t.libraryShellBrowseReadyTitle}
+                  aria-label={t.libraryShellBrowseReadyTitle}
                 >
-                  Open
+                  {t.libraryShellBrowseReady}
                 </button>
               </div>
               <div className="library-dark-scroll max-h-64 space-y-2 overflow-y-auto pr-1">
                 {containers.curated.slice(0, 8).map((c) => (
-                  <button
-                    key={`ready-right:${c.key}`}
-                    type="button"
-                    draggable
-                    onDragStart={(e) => {
-                      const sourcesForDrop = resolveSourcesForSelection(c.subtype, c.key);
-                      const ids = sourcesForDrop.map((s) => s.id);
-                      e.dataTransfer.setData(
-                        "application/syncbiz-playlist-container",
-                        JSON.stringify({ subtype: c.subtype, key: c.key, label: c.label } satisfies PlaylistContainerPayload)
-                      );
-                      if (ids.length === 0) return;
-                      e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
-                      e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sourcesForDrop));
-                      e.dataTransfer.effectAllowed = "copyMove";
-                    }}
-                    onDoubleClick={() => playCollectionSelection(c.subtype, c.key)}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = "copy";
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const ids = extractDroppedSourceIds(e);
-                      assignItemsToPlaylist(c.key, ids);
-                    }}
-                    onClick={() => setSelection({ type: "collection_container", subtype: c.subtype, key: c.key })}
-                    className="library-source-card flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left"
-                  >
-                    <span className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-[color:var(--lib-surface-card-art)]">
-                      {c.cover ? <HydrationSafeImage src={c.cover} alt="" className="h-full w-full object-cover" /> : null}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="library-card-title block truncate text-xs font-medium">{c.label}</span>
-                      <span className="library-card-meta block text-[10px]">{c.itemCount} items</span>
-                    </span>
-                  </button>
+                  <div key={`ready-right:${c.key}`} className="library-source-card flex w-full items-center gap-1 rounded-xl px-1.5 py-1.5">
+                    <button
+                      type="button"
+                      draggable
+                      onDragStart={(e) => {
+                        const sourcesForDrop = resolveSourcesForSelection(c.subtype, c.key);
+                        const ids = sourcesForDrop.map((s) => s.id);
+                        e.dataTransfer.setData(
+                          "application/syncbiz-playlist-container",
+                          JSON.stringify({ subtype: c.subtype, key: c.key, label: c.label } satisfies PlaylistContainerPayload)
+                        );
+                        if (ids.length === 0) return;
+                        e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
+                        e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sourcesForDrop));
+                        e.dataTransfer.effectAllowed = "copyMove";
+                      }}
+                      onDoubleClick={() => playCollectionSelection(c.subtype, c.key)}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "copy";
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const ids = extractDroppedSourceIds(e);
+                        assignItemsToPlaylist(c.key, ids);
+                      }}
+                      onClick={() => setSelection({ type: "collection_container", subtype: c.subtype, key: c.key })}
+                      className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-0.5 text-left"
+                    >
+                      <span className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-[color:var(--lib-surface-card-art)]">
+                        {c.cover ? <HydrationSafeImage src={c.cover} alt="" className="h-full w-full object-cover" /> : null}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="library-card-title block truncate text-xs font-medium">{c.label}</span>
+                        <span className="library-card-meta block text-[10px]">{c.itemCount} items</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
+                      onClick={() => setReadyCollectionModalOpen(true)}
+                      title={t.readyCollectionInfoTitle}
+                      aria-label={t.readyCollectionInfoTitle}
+                    >
+                      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <line x1="10" y1="11" x2="10" y2="17" />
+                        <line x1="14" y1="11" x2="14" y2="17" />
+                      </svg>
+                    </button>
+                  </div>
                 ))}
               </div>
             </section>
@@ -1085,9 +1222,11 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                 <button
                   type="button"
                   onClick={handleAddPlaylistTile}
-                  className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
+                  className={LIBRARY_RAIL_SHELL_ACTION_BTN_CLASS}
+                  title={t.libraryShellAddPlaylistTileTitle}
+                  aria-label={t.libraryShellAddPlaylistTileTitle}
                 >
-                  Add Playlist
+                  {t.libraryShellAddPlaylistTile}
                 </button>
               </div>
               <div className="space-y-2">
@@ -1096,16 +1235,18 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                     const assignedPlaylistKey = daypartPlaylistAssignments[pad.key];
                     const assignedPlaylist = assignedPlaylistKey ? playlistSourceByKey.get(assignedPlaylistKey) : undefined;
                     const tileCover = assignedPlaylist?.cover ?? containers.dayparts.find((d) => d.key === pad.key)?.cover ?? null;
+                    const tileSubtype: LibraryCollectionSubtype = assignedPlaylistKey ? "syncbiz_playlist" : "daypart_collection";
+                    const tileSelectionKey = assignedPlaylistKey ?? pad.key;
                     return (
                   <div
                     key={`daypart-pad:${pad.key}`}
                     draggable
                     onDragStart={(e) => {
-                      const sourcesForDrop = resolveSourcesForSelection("daypart_collection", pad.key);
+                      const sourcesForDrop = resolveSourcesForSelection(tileSubtype, tileSelectionKey);
                       const ids = sourcesForDrop.map((s) => s.id);
                       e.dataTransfer.setData(
                         "application/syncbiz-playlist-container",
-                        JSON.stringify({ subtype: "daypart_collection", key: pad.key, label: pad.label } satisfies PlaylistContainerPayload)
+                        JSON.stringify({ subtype: tileSubtype, key: tileSelectionKey, label: pad.label } satisfies PlaylistContainerPayload)
                       );
                       if (ids.length === 0) return;
                       e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
@@ -1135,7 +1276,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                     <div className="flex items-center justify-between gap-2">
                       <button
                         type="button"
-                        onDoubleClick={() => playCollectionSelection("daypart_collection", pad.key)}
+                        onDoubleClick={() => playCollectionSelection(tileSubtype, tileSelectionKey)}
                         onClick={() => openDaypartTile(pad.key)}
                         className="min-w-0 flex flex-1 items-center gap-2 text-left"
                       >
@@ -1149,17 +1290,39 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           </span>
                         </span>
                       </button>
-                      <button
-                        type="button"
-                        className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
-                        title="Schedule this playlist (coming soon)"
-                        aria-label={`Schedule ${pad.label}`}
-                      >
-                        <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <circle cx="12" cy="12" r="9" />
-                          <path d="M12 7v5l3 2" />
-                        </svg>
-                      </button>
+                      <div className={LIBRARY_PLAYLIST_TILE_SIDE_ACTION_CLUSTER_CLASS}>
+                        <button
+                          type="button"
+                          className={LIBRARY_PLAYLIST_TILE_SIDE_ACTION_BTN_CLASS}
+                          title={t.playlistTileScheduleActionTitle}
+                          aria-label={t.playlistTileScheduleActionTitle}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDaypartTile(pad.key);
+                          }}
+                        >
+                          <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <polyline points="12 6 12 12 16 14" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className={LIBRARY_PLAYLIST_TILE_SIDE_ACTION_BTN_CLASS}
+                          title={t.removeScheduledPlaylistTitle}
+                          aria-label={t.removeScheduledPlaylistTitle}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openPlaylistTileTrash(pad.key);
+                          }}
+                        >
+                          <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <line x1="10" y1="11" x2="10" y2="17" />
+                            <line x1="14" y1="11" x2="14" y2="17" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   </div>
                     );
@@ -1170,16 +1333,18 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                     const assignedPlaylistKey = daypartPlaylistAssignments[pad.key];
                     const assignedPlaylist = assignedPlaylistKey ? playlistSourceByKey.get(assignedPlaylistKey) : undefined;
                     const tileCover = assignedPlaylist?.cover ?? null;
+                    const tileSubtype: LibraryCollectionSubtype = assignedPlaylistKey ? "syncbiz_playlist" : "daypart_collection";
+                    const tileSelectionKey = assignedPlaylistKey ?? pad.key;
                     return (
                   <div
                     key={`daypart-pad-custom:${pad.key}`}
                     draggable
                     onDragStart={(e) => {
-                      const sourcesForDrop = resolveSourcesForSelection("daypart_collection", pad.key);
+                      const sourcesForDrop = resolveSourcesForSelection(tileSubtype, tileSelectionKey);
                       const ids = sourcesForDrop.map((s) => s.id);
                       e.dataTransfer.setData(
                         "application/syncbiz-playlist-container",
-                        JSON.stringify({ subtype: "daypart_collection", key: pad.key, label: pad.label } satisfies PlaylistContainerPayload)
+                        JSON.stringify({ subtype: tileSubtype, key: tileSelectionKey, label: pad.label } satisfies PlaylistContainerPayload)
                       );
                       if (ids.length === 0) return;
                       e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
@@ -1209,7 +1374,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                     <div className="flex items-center justify-between gap-2">
                       <button
                         type="button"
-                        onDoubleClick={() => playCollectionSelection("daypart_collection", pad.key)}
+                        onDoubleClick={() => playCollectionSelection(tileSubtype, tileSelectionKey)}
                         onClick={() => openDaypartTile(pad.key)}
                         className="min-w-0 flex flex-1 items-center gap-2 text-left"
                       >
@@ -1223,17 +1388,39 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           </span>
                         </span>
                       </button>
-                      <button
-                        type="button"
-                        className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
-                        title="Schedule this playlist (coming soon)"
-                        aria-label={`Schedule ${pad.label}`}
-                      >
-                        <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <circle cx="12" cy="12" r="9" />
-                          <path d="M12 7v5l3 2" />
-                        </svg>
-                      </button>
+                      <div className={LIBRARY_PLAYLIST_TILE_SIDE_ACTION_CLUSTER_CLASS}>
+                        <button
+                          type="button"
+                          className={LIBRARY_PLAYLIST_TILE_SIDE_ACTION_BTN_CLASS}
+                          title={t.playlistTileScheduleActionTitle}
+                          aria-label={t.playlistTileScheduleActionTitle}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDaypartTile(pad.key);
+                          }}
+                        >
+                          <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <polyline points="12 6 12 12 16 14" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className={LIBRARY_PLAYLIST_TILE_SIDE_ACTION_BTN_CLASS}
+                          title={t.removeScheduledPlaylistTitle}
+                          aria-label={t.removeScheduledPlaylistTitle}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openPlaylistTileTrash(pad.key);
+                          }}
+                        >
+                          <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <line x1="10" y1="11" x2="10" y2="17" />
+                            <line x1="14" y1="11" x2="14" y2="17" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   </div>
                     );
@@ -1359,36 +1546,56 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
               ) : null}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
                 {selectedCollectionCards.map((c) => (
-                  <button
-                    key={c.key}
-                    type="button"
-                    draggable
-                    onDragStart={(e) => {
-                      const sourcesForDrop = resolveCollectionCardSources(c);
-                      const ids = sourcesForDrop.map((s) => s.id);
-                      e.dataTransfer.setData(
-                        "application/syncbiz-playlist-container",
-                        JSON.stringify({ subtype: c.subtype, key: c.key, label: c.label } satisfies PlaylistContainerPayload)
-                      );
-                      if (ids.length === 0) return;
-                      e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
-                      e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sourcesForDrop));
-                      e.dataTransfer.effectAllowed = "copyMove";
-                    }}
-                    onDoubleClick={() => playCollectionSelection(c.subtype, c.key)}
-                    onClick={() => setSelection({ type: "collection_container", subtype: c.subtype, key: c.key })}
-                    className="library-source-card flex h-[252px] w-full min-w-[220px] max-w-none flex-col overflow-hidden rounded-2xl p-4 text-left"
-                  >
-                    <div className="mb-2 aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg bg-[color:var(--lib-surface-card-art)]">
-                      {c.cover ? <HydrationSafeImage src={c.cover} alt="" className="h-full w-full object-cover" /> : null}
-                    </div>
-                    <div className="min-h-0 flex-1">
-                      <p className="library-card-title text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
-                        {c.label}
-                      </p>
-                      <p className="library-card-meta mt-1 text-xs truncate">{c.meta ?? "Ready collection"} • {c.itemCount} items</p>
-                    </div>
-                  </button>
+                  <div key={c.key} className="relative w-full min-w-[220px] max-w-none">
+                    <button
+                      type="button"
+                      draggable
+                      onDragStart={(e) => {
+                        const sourcesForDrop =
+                          c.subtype === "external_playlist" || c.subtype === "syncbiz_playlist"
+                            ? resolveSourcesForSelection(c.subtype, c.key)
+                            : resolveCollectionCardSources(c);
+                        const ids = sourcesForDrop.map((s) => s.id);
+                        e.dataTransfer.setData(
+                          "application/syncbiz-playlist-container",
+                          JSON.stringify({ subtype: c.subtype, key: c.key, label: c.label } satisfies PlaylistContainerPayload)
+                        );
+                        if (ids.length === 0) return;
+                        e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
+                        e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sourcesForDrop));
+                        e.dataTransfer.effectAllowed = "copyMove";
+                      }}
+                      onDoubleClick={() => playCollectionSelection(c.subtype, c.key)}
+                      onClick={() => setSelection({ type: "collection_container", subtype: c.subtype, key: c.key })}
+                      className="library-source-card flex h-[252px] w-full flex-col overflow-hidden rounded-2xl p-4 text-left"
+                    >
+                      <div className="mb-2 aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg bg-[color:var(--lib-surface-card-art)]">
+                        {c.cover ? <HydrationSafeImage src={c.cover} alt="" className="h-full w-full object-cover" /> : null}
+                      </div>
+                      <div className="min-h-0 flex-1">
+                        <p className="library-card-title text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
+                          {c.label}
+                        </p>
+                        <p className="library-card-meta mt-1 text-xs truncate">{c.meta ?? "Ready collection"} • {c.itemCount} items</p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      className={`absolute right-3 top-3 z-[1] ${LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openCollectionGridTrash(c);
+                      }}
+                      title={c.subtype === "external_playlist" ? t.deletePlaylist : t.readyCollectionInfoTitle}
+                      aria-label={c.subtype === "external_playlist" ? t.deletePlaylist : t.readyCollectionInfoTitle}
+                    >
+                      <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <line x1="10" y1="11" x2="10" y2="17" />
+                        <line x1="14" y1="11" x2="14" y2="17" />
+                      </svg>
+                    </button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1579,7 +1786,9 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                     </div>
                     {viewMode === "grid" ? (
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
-                        {sectionItems.map((source) => (
+                        {sectionItems.map((source) => {
+                          const pe = getPlaylistEntitySubtypeKey(source);
+                          return (
                           <div key={source.id} className="w-full max-w-[320px] [&>article]:h-full [&>article]:min-h-[340px] [&>article]:overflow-hidden">
                             <SourceCard
                               source={source}
@@ -1587,7 +1796,16 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                               isFavorite={favoriteIds.includes(source.id)}
                               onToggleFavorite={() => toggleFavorite(source.id)}
                               draggable
-                              onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [source])}
+                              onDragStart={(e) => {
+                                const { pe: dragPe, sourcesForDrop } = buildPlaylistEntityDrag(source);
+                                setLibrarySourcesPlaylistDragPayload(e, sourcesForDrop);
+                                if (dragPe) {
+                                  e.dataTransfer.setData(
+                                    "application/syncbiz-playlist-container",
+                                    JSON.stringify({ subtype: dragPe.subtype, key: dragPe.key, label: source.title } satisfies PlaylistContainerPayload)
+                                  );
+                                }
+                              }}
                               onPlaySource={playSourceOverride}
                               onStop={stopOverride}
                               onPause={pauseOverride}
@@ -1603,20 +1821,38 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                                     )
                                   : undefined
                               }
+                              onPlaylistEntityOpen={
+                                pe
+                                  ? () => setSelection({ type: "collection_container", subtype: pe.subtype, key: pe.key })
+                                  : undefined
+                              }
+                              onPlaylistEntityPlay={pe ? () => playCollectionSelection(pe.subtype, pe.key) : undefined}
                             />
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="library-list-shell divide-y divide-[color:var(--lib-border-muted)] overflow-hidden rounded-2xl backdrop-blur-sm">
-                        {sectionItems.map((source) => (
+                        {sectionItems.map((source) => {
+                          const pe = getPlaylistEntitySubtypeKey(source);
+                          return (
                           <SourceRow
                             key={source.id}
                             source={source}
                             isFavorite={favoriteIds.includes(source.id)}
                             onToggleFavorite={() => toggleFavorite(source.id)}
                             draggable
-                            onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [source])}
+                            onDragStart={(e) => {
+                              const { pe: dragPe, sourcesForDrop } = buildPlaylistEntityDrag(source);
+                              setLibrarySourcesPlaylistDragPayload(e, sourcesForDrop);
+                              if (dragPe) {
+                                e.dataTransfer.setData(
+                                  "application/syncbiz-playlist-container",
+                                  JSON.stringify({ subtype: dragPe.subtype, key: dragPe.key, label: source.title } satisfies PlaylistContainerPayload)
+                                );
+                              }
+                            }}
                             onPlaySource={playSourceOverride}
                             onStop={stopOverride}
                             onPause={pauseOverride}
@@ -1632,8 +1868,15 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                                   )
                                 : undefined
                             }
+                            onPlaylistEntityOpen={
+                              pe
+                                ? () => setSelection({ type: "collection_container", subtype: pe.subtype, key: pe.key })
+                                : undefined
+                            }
+                            onPlaylistEntityPlay={pe ? () => playCollectionSelection(pe.subtype, pe.key) : undefined}
                           />
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </section>
@@ -1708,19 +1951,33 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                 <div className="library-dark-scroll max-h-48 space-y-1 overflow-y-auto pr-1">
                 {userPlaylistContainers.slice(0, 10).map((p) => (
                   <div key={p.key} className="library-source-card flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs">
-                    <button
-                      type="button"
+                    <div
+                      role="button"
+                      tabIndex={0}
                       draggable
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          scheduleUserPlaylistRailOpen(p.key);
+                        }
+                      }}
                       onDragStart={(e) => {
+                        e.stopPropagation();
                         const sourcesForDrop = resolveSourcesForSelection("syncbiz_playlist", p.key);
-                        const ids = sourcesForDrop.map((s) => s.id);
+                        if (sourcesForDrop.length === 0) return;
                         e.dataTransfer.setData(
                           "application/syncbiz-playlist-container",
                           JSON.stringify({ subtype: "syncbiz_playlist", key: p.key, label: p.label } satisfies PlaylistContainerPayload)
                         );
-                        if (ids.length === 0) return;
-                        e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
+                        e.dataTransfer.setData(
+                          "application/syncbiz-queue-source-ids",
+                          JSON.stringify(sourcesForDrop.map((s) => s.id))
+                        );
                         e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sourcesForDrop));
+                        if (sourcesForDrop.length === 1) {
+                          e.dataTransfer.setData("application/syncbiz-source-id", sourcesForDrop[0].id);
+                          e.dataTransfer.setData("application/syncbiz-source-json", JSON.stringify(sourcesForDrop[0]));
+                        }
                         e.dataTransfer.effectAllowed = "copyMove";
                       }}
                       onDragOver={(e) => {
@@ -1732,22 +1989,38 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                         const ids = extractDroppedSourceIds(e);
                         assignItemsToPlaylist(p.key, ids);
                       }}
-                      onDoubleClick={() => playCollectionSelection("syncbiz_playlist", p.key)}
-                      onClick={() => setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: p.key })}
-                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                      onClick={() => scheduleUserPlaylistRailOpen(p.key)}
+                      onDoubleClick={(e) => {
+                        e.preventDefault();
+                        if (userPlaylistRailOpenTimerRef.current) {
+                          clearTimeout(userPlaylistRailOpenTimerRef.current);
+                          userPlaylistRailOpenTimerRef.current = null;
+                        }
+                        userPlaylistRailOpenKeyRef.current = null;
+                        playCollectionSelection("syncbiz_playlist", p.key);
+                      }}
+                      className="flex min-w-0 flex-1 cursor-pointer select-none items-center gap-2 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-white/30"
                     >
-                      <span className="h-8 w-8 shrink-0 overflow-hidden rounded-md ring-1 ring-[color:var(--lib-border-thumb)] bg-[color:var(--lib-surface-card-art)]">
+                      <span
+                        draggable={false}
+                        className="h-8 w-8 shrink-0 overflow-hidden rounded-md ring-1 ring-[color:var(--lib-border-thumb)] bg-[color:var(--lib-surface-card-art)]"
+                      >
                         {p.cover ? (
-                          <HydrationSafeImage src={p.cover} alt="" className="h-full w-full object-cover" />
+                          <HydrationSafeImage
+                            src={p.cover}
+                            alt=""
+                            draggable={false}
+                            className="h-full w-full object-cover"
+                          />
                         ) : (
                           <LibraryPlaylistCoverFallback className="h-full w-full" />
                         )}
                       </span>
-                      <span className="min-w-0 flex-1">
+                      <span draggable={false} className="min-w-0 flex-1">
                         <span className="block truncate font-medium">{p.label}</span>
                         <span className="library-card-meta block text-[10px]">{p.itemCount} item</span>
                       </span>
-                    </button>
+                    </div>
                     <button
                       type="button"
                       className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
@@ -1795,6 +2068,102 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         message={t.deletePlaylistConfirm}
         confirmLabel={t.confirmDelete}
       />
+
+      <DeleteConfirmModal
+        isOpen={readyCollectionModalOpen}
+        onClose={() => setReadyCollectionModalOpen(false)}
+        onConfirm={async () => {}}
+        title={t.readyCollectionInfoTitle}
+        message={t.readyCollectionInfoMessage}
+        confirmLabel={t.gotIt}
+      />
+
+      <DeleteConfirmModal
+        isOpen={externalPlaylistDeleteKey !== null}
+        onClose={() => {
+          if (externalPlaylistDeleting) return;
+          setExternalPlaylistDeleteKey(null);
+        }}
+        onConfirm={async () => {
+          if (!externalPlaylistDeleteKey) return;
+          setExternalPlaylistDeleting(true);
+          try {
+            await executeDeleteExternalPlaylistByKey(externalPlaylistDeleteKey);
+          } finally {
+            setExternalPlaylistDeleting(false);
+          }
+        }}
+        loading={externalPlaylistDeleting}
+        title={t.deletePlaylist}
+        message={t.deletePlaylistConfirm}
+        confirmLabel={t.confirmDelete}
+      />
+
+      <DeleteConfirmModal
+        isOpen={tileSlotModal !== null}
+        onClose={() => {
+          if (tileSlotActionLoading) return;
+          setTileSlotModal(null);
+        }}
+        onConfirm={async () => {
+          if (!tileSlotModal) return;
+          if (tileSlotModal.variant === "empty") return;
+          setTileSlotActionLoading(true);
+          try {
+            const { key, variant } = tileSlotModal;
+            if (variant === "clearAssignment") {
+              setDaypartPlaylistAssignments((prev) => {
+                const next = { ...prev };
+                delete next[key];
+                localStorage.setItem(DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(next));
+                return next;
+              });
+            } else if (variant === "removeCustomTile") {
+              setCustomPlaylists((prev) => {
+                const next = prev.filter((p) => p.key !== key);
+                localStorage.setItem(PLAYLIST_TILES_STORAGE_KEY, JSON.stringify(next));
+                return next;
+              });
+              setDaypartPlaylistAssignments((prev) => {
+                const next = { ...prev };
+                delete next[key];
+                localStorage.setItem(DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(next));
+                return next;
+              });
+            }
+          } finally {
+            setTileSlotActionLoading(false);
+          }
+        }}
+        loading={tileSlotActionLoading}
+        title={
+          tileSlotModal?.variant === "clearAssignment"
+            ? t.removeScheduledPlaylistTitle
+            : tileSlotModal?.variant === "removeCustomTile"
+              ? t.removePlaylistTileTitle
+              : tileSlotModal?.variant === "empty"
+                ? t.slotNoPlaylistTitle
+                : t.deletePlaylist
+        }
+        message={
+          tileSlotModal?.variant === "clearAssignment"
+            ? t.removeScheduledPlaylistMessage
+            : tileSlotModal?.variant === "removeCustomTile"
+              ? t.removePlaylistTileMessage
+              : tileSlotModal?.variant === "empty"
+                ? t.slotNoPlaylistMessage
+                : t.deletePlaylistConfirm
+        }
+        confirmLabel={
+          tileSlotModal?.variant === "clearAssignment"
+            ? t.removeFromThisSlot
+            : tileSlotModal?.variant === "removeCustomTile"
+              ? t.removePlaylistTileConfirm
+              : tileSlotModal?.variant === "empty"
+                ? t.gotIt
+                : t.confirmDelete
+        }
+      />
     </div>
   );
 }
@@ -1803,6 +2172,7 @@ function LibraryPlaylistCoverFallback({ className }: { className?: string }) {
   return (
     <div
       aria-hidden
+      draggable={false}
       className={`flex items-center justify-center bg-gradient-to-br from-cyan-600/30 via-slate-800/75 to-slate-950 text-cyan-400/45 ${className ?? ""}`}
     >
       <svg className="h-[55%] w-[55%] min-h-3 min-w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -1926,6 +2296,8 @@ function SourceRow({
   itemDeleteContext,
   onDeleteFromLibrary,
   explicitArtUrl,
+  onPlaylistEntityOpen,
+  onPlaylistEntityPlay,
 }: {
   source: UnifiedSource;
   isFavorite?: boolean;
@@ -1939,6 +2311,8 @@ function SourceRow({
   itemDeleteContext: LibraryItemDeleteContext;
   onDeleteFromLibrary: (item: UnifiedSource) => Promise<void>;
   explicitArtUrl?: string | null;
+  onPlaylistEntityOpen?: () => void;
+  onPlaylistEntityPlay?: () => void;
 }) {
   const { t } = useTranslations();
   const { playSource, stop, pause, currentSource } = usePlayback();
@@ -1946,6 +2320,7 @@ function SourceRow({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const openClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playFn = onPlaySource ?? playSource;
   const stopFn = onStop ?? stop;
   const pauseFn = onPause ?? pause;
@@ -1958,6 +2333,31 @@ function SourceRow({
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (openClickTimerRef.current) clearTimeout(openClickTimerRef.current);
+    };
+  }, []);
+
+  function handleRowClickForOpen() {
+    if (!onPlaylistEntityOpen) return;
+    if (openClickTimerRef.current) clearTimeout(openClickTimerRef.current);
+    openClickTimerRef.current = setTimeout(() => {
+      onPlaylistEntityOpen();
+      openClickTimerRef.current = null;
+    }, 220);
+  }
+
+  function handleRowDoubleClickPlay(e: MouseEvent) {
+    if (!onPlaylistEntityPlay) return;
+    e.preventDefault();
+    if (openClickTimerRef.current) {
+      clearTimeout(openClickTimerRef.current);
+      openClickTimerRef.current = null;
+    }
+    onPlaylistEntityPlay();
+  }
 
   async function handleDeleteLibrary() {
     setDeleting(true);
@@ -1973,6 +2373,8 @@ function SourceRow({
     <div
       draggable={draggable}
       onDragStart={onDragStart}
+      onClick={onPlaylistEntityOpen ? handleRowClickForOpen : undefined}
+      onDoubleClick={onPlaylistEntityPlay ? handleRowDoubleClickPlay : undefined}
       className={`group/row flex items-start gap-4 px-4 py-3.5 transition-[background,box-shadow] duration-200 ease-out ${
         active ? "library-playing-row library-row-active-bg" : "library-row-hover"
       } ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
@@ -2035,7 +2437,12 @@ function SourceRow({
         </div>
         <SourceLogo type={source.type} origin={source.origin} size="md" />
       </div>
-      <div className="library-row-controls ml-2 flex flex-nowrap items-center gap-2 shrink-0" role="group" aria-label={t.sourceControlsAria}>
+      <div
+        className="library-row-controls ml-2 flex flex-nowrap items-center gap-2 shrink-0"
+        role="group"
+        aria-label={t.sourceControlsAria}
+        onClick={(e) => e.stopPropagation()}
+      >
         <LibrarySourceItemActions
           source={source}
           onPlay={() => playFn(source)}

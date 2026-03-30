@@ -14,6 +14,10 @@ import { inferPlaylistType } from "@/lib/playlist-utils";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { radioToUnified } from "@/lib/radio-utils";
 import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal } from "@/lib/unified-sources-client";
+import {
+  resolveSyncbizPlaylistPlayQueue,
+  SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY,
+} from "@/lib/syncbiz-playlist-queue";
 import { unifiedFoundationHints, type UnifiedSource, type ParseUrlJson, type RadioStream } from "@/lib/source-types";
 import { searchExternal } from "@/lib/search-service";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
@@ -410,6 +414,35 @@ export function AppShell({ children }: { children: ReactNode }) {
           setQueue(queue);
           playSource(queue[0]);
           return;
+        }
+      } catch {
+        // Ignore malformed payload.
+      }
+    }
+
+    const playlistContainerJson = e.dataTransfer.getData("application/syncbiz-playlist-container");
+    if (playlistContainerJson) {
+      try {
+        const payload = JSON.parse(playlistContainerJson) as { subtype?: string; key?: string };
+        if (payload.subtype === "syncbiz_playlist" && payload.key) {
+          let assignments: Record<string, string[]> = {};
+          try {
+            const raw = typeof window !== "undefined" ? localStorage.getItem(SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY) : null;
+            assignments = raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
+          } catch {
+            assignments = {};
+          }
+          const allSources = await fetchUnifiedSourcesWithFallback();
+          const queue = resolveSyncbizPlaylistPlayQueue(payload.key, allSources, assignments);
+          if (queue.length > 0) {
+            if (isLibraryItemDrag) {
+              playSource(queue[0]);
+              return;
+            }
+            setQueue(queue);
+            playSource(queue[0]);
+            return;
+          }
         }
       } catch {
         // Ignore malformed payload.
