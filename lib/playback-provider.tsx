@@ -15,10 +15,14 @@ import type { Playlist } from "./playlist-types";
 import type { UnifiedSource, SourceProviderType } from "./source-types";
 import type { Source } from "./types";
 import { getPlaylistTracks } from "./playlist-types";
-import { canEmbedInCard, getYouTubeVideoId } from "./playlist-utils";
+import {
+  canEmbedInCard,
+  effectivePlaybackPlaylistAttachment,
+  getYouTubeThumbnail,
+  getYouTubeVideoId,
+} from "./playlist-utils";
 import { getShuffle, setShufflePreference } from "./mix-preferences";
 import { supportsEmbedded, getSourceArtworkUrl } from "./player-utils";
-import { getYouTubeThumbnail } from "./playlist-utils";
 import { log as mvpLog } from "./mvp-logger";
 import { isValidPlaybackUrl } from "./url-validation";
 import { fetchUnifiedSourcesWithFallback } from "./unified-sources-client";
@@ -38,8 +42,9 @@ export type PlaybackTrack = {
 };
 
 function unifiedToPlaybackTrack(source: UnifiedSource, trackIndex = 0): PlaybackTrack {
-  if (source.playlist) {
-    const tracks = getPlaylistTracks(source.playlist);
+  const plAttach = effectivePlaybackPlaylistAttachment(source);
+  if (plAttach) {
+    const tracks = getPlaylistTracks(plAttach);
     const t = tracks[trackIndex] ?? tracks[0];
     const title = t?.name ?? (t as { title?: string })?.title ?? source.title;
     const type = (t?.type ?? source.type) as TrackSource;
@@ -105,7 +110,9 @@ function deriveCurrentTrack(source: UnifiedSource | null, trackIndex: number): P
 
 /** Active playlist for session bounds: prefer source attachment, then state snapshot. */
 function getActivePlaylist(s: Pick<PlaybackState, "currentSource" | "currentPlaylist">): Playlist | null {
-  return s.currentSource?.playlist ?? s.currentPlaylist ?? null;
+  const fromSource = s.currentSource ? effectivePlaybackPlaylistAttachment(s.currentSource) : null;
+  if (fromSource) return fromSource;
+  return s.currentPlaylist ?? null;
 }
 
 function getPlaylistSessionTracks(s: Pick<PlaybackState, "currentSource" | "currentPlaylist">) {
@@ -415,7 +422,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const playSource = useCallback(
     (source: UnifiedSource, trackIndex = 0) => {
       if (!deviceModeAllowsLocalPlayback.current) return;
-      const playlist = source.playlist ?? null;
+      const playlist = effectivePlaybackPlaylistAttachment(source);
       const tracks = playlist ? getPlaylistTracks(playlist) : [];
       const idx = Math.min(trackIndex, Math.max(0, tracks.length - 1));
       const track = tracks[idx] ?? null;

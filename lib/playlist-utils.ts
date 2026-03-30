@@ -1,4 +1,5 @@
 import type { Playlist, PlaylistType } from "./playlist-types";
+import type { UnifiedSource } from "./source-types";
 
 /** Map playlist type to embedded player support (opens in /player page). */
 export function isEmbeddedPlaylist(type: PlaylistType): boolean {
@@ -60,6 +61,22 @@ export function getYouTubeSourceKind(url: string | null): YouTubeSourceKind {
 /** True if URL is a YouTube multi-track source (playlist, radio, mix). */
 export function isYouTubeMultiTrackUrl(url: string | null): boolean {
   return getYouTubeSourceKind(url) === "multi";
+}
+
+/**
+ * For library `origin: "source"` rows, attached `playlist` metadata must not drive in-app
+ * multi-track sessions (next/prev over tracks) when the URL is a playlist/list context —
+ * that would nest unbounded playlist expansion inside another playlist/schedule.
+ * Real playlist entities use `origin: "playlist"`.
+ */
+export function effectivePlaybackPlaylistAttachment(source: UnifiedSource | null): Playlist | null {
+  if (!source?.playlist) return null;
+  if (source.origin === "playlist") return source.playlist;
+  const url = source.url ?? "";
+  if (String(source.type) === "playlist_url") return null;
+  if (/youtube\.com\/playlist/i.test(url)) return null;
+  if (isYouTubeMultiTrackUrl(url)) return null;
+  return source.playlist;
 }
 
 /** Build YouTube thumbnail URL. */

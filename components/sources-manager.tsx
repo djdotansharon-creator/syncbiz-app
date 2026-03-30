@@ -321,7 +321,6 @@ function setLibrarySourcesPlaylistDragPayload(e: DragEvent, sources: UnifiedSour
     e.dataTransfer.setData("application/syncbiz-source-id", sources[0].id);
     e.dataTransfer.setData("application/syncbiz-source-json", JSON.stringify(sources[0]));
   }
-  e.dataTransfer.setData("application/syncbiz-library-item-drag", "1");
   e.dataTransfer.effectAllowed = "copyMove";
 }
 
@@ -470,7 +469,6 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const { followedSourceKeys, toggleFollowedSource } = useFollowedSourcesState();
   const playlistAutoLoaded = useRef(false);
   const userPlaylistRailOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const userPlaylistRailOpenKeyRef = useRef<string | null>(null);
 
   const { sources, setSources } = useSourcesPlayback();
   const { setQueue, playSource, stop, pause } = usePlayback();
@@ -576,9 +574,12 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     }
     if (selection.type === "collection_container") {
       if (selection.subtype === "genre_collection") {
-        return displaySources.filter((s) => {
-          return selection.key === getCuratedCollectionKey(s);
-        });
+        const inferred = displaySources.filter((s) => selection.key === getCuratedCollectionKey(s));
+        const assignedIds = playlistItemAssignments[selection.key] ?? [];
+        const assignedItems = displaySources.filter((s) => assignedIds.includes(s.id));
+        const map = new Map<string, UnifiedSource>();
+        for (const s of [...inferred, ...assignedItems]) map.set(s.id, s);
+        return [...map.values()];
       }
       if (selection.subtype === "daypart_collection") {
         const inferred = selection.key.startsWith("customplaylist:")
@@ -595,9 +596,14 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         return [...map.values()];
       }
       if (selection.subtype === "client_collection") {
-        return displaySources.filter(
+        const inferred = displaySources.filter(
           (s) => `client:${inferClientLabel(s).toLowerCase().replace(/\s+/g, "_")}` === selection.key
         );
+        const assignedIds = playlistItemAssignments[selection.key] ?? [];
+        const assignedItems = displaySources.filter((s) => assignedIds.includes(s.id));
+        const map = new Map<string, UnifiedSource>();
+        for (const s of [...inferred, ...assignedItems]) map.set(s.id, s);
+        return [...map.values()];
       }
       if (selection.subtype === "external_playlist") {
         const source = displaySources.find((s) => `external:${s.id}` === selection.key);
@@ -616,15 +622,6 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     () => partitionSourcesByLibrarySection(visibleSources),
     [visibleSources]
   );
-
-  // Queue follows base filtered order only; library rail selection is visual browsing state.
-  const prevIdsRef = useRef<string>("");
-  useEffect(() => {
-    const ids = displaySources.map((s) => s.id).join(",");
-    if (ids === prevIdsRef.current) return;
-    prevIdsRef.current = ids;
-    setQueue(displaySources);
-  }, [displaySources, setQueue]);
 
   const selectedCollectionCards = useMemo(() => {
     if (selection.type === "collection_group") {
@@ -703,7 +700,11 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     const found = collectionContextByKey.get(selection.key);
     if (!found) return null;
     const count =
-      selection.subtype === "syncbiz_playlist" ? visibleSources.length : found.count;
+      selection.subtype === "syncbiz_playlist" ||
+      selection.subtype === "genre_collection" ||
+      selection.subtype === "client_collection"
+        ? visibleSources.length
+        : found.count;
     return {
       title: found.label,
       subtitle: found.meta ?? "Collection destination",
@@ -781,9 +782,12 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const resolveCollectionCardSources = useCallback(
     (container: CollectionContainer): UnifiedSource[] => {
       if (container.subtype === "genre_collection") {
-        return displaySources.filter((s) => {
-          return getCuratedCollectionKey(s) === container.key;
-        });
+        const inferred = displaySources.filter((s) => getCuratedCollectionKey(s) === container.key);
+        const assignedIds = playlistItemAssignments[container.key] ?? [];
+        const assignedItems = displaySources.filter((s) => assignedIds.includes(s.id));
+        const map = new Map<string, UnifiedSource>();
+        for (const s of [...inferred, ...assignedItems]) map.set(s.id, s);
+        return [...map.values()];
       }
       if (container.subtype === "daypart_collection") {
         return displaySources.filter(
@@ -791,22 +795,32 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         );
       }
       if (container.subtype === "client_collection") {
-        return displaySources.filter(
+        const inferred = displaySources.filter(
           (s) => `client:${inferClientLabel(s).toLowerCase().replace(/\s+/g, "_")}` === container.key
         );
+        const assignedIds = playlistItemAssignments[container.key] ?? [];
+        const assignedItems = displaySources.filter((s) => assignedIds.includes(s.id));
+        const map = new Map<string, UnifiedSource>();
+        for (const s of [...inferred, ...assignedItems]) map.set(s.id, s);
+        return [...map.values()];
       }
       if (container.subtype === "external_playlist") {
         return displaySources.filter((s) => `external:${s.id}` === container.key);
       }
       return displaySources.filter((s) => s.origin === "playlist" && `syncbiz:${s.id}` === container.key);
     },
-    [displaySources]
+    [displaySources, playlistItemAssignments]
   );
 
   const resolveSourcesForSelection = useCallback(
     (subtype: LibraryCollectionSubtype, key: string): UnifiedSource[] => {
       if (subtype === "genre_collection") {
-        return displaySources.filter((s) => getCuratedCollectionKey(s) === key);
+        const inferred = displaySources.filter((s) => getCuratedCollectionKey(s) === key);
+        const assignedIds = playlistItemAssignments[key] ?? [];
+        const assignedItems = displaySources.filter((s) => assignedIds.includes(s.id));
+        const map = new Map<string, UnifiedSource>();
+        for (const s of [...inferred, ...assignedItems]) map.set(s.id, s);
+        return [...map.values()];
       }
       if (subtype === "daypart_collection") {
         if (key.startsWith("customplaylist:")) return [];
@@ -815,9 +829,14 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         );
       }
       if (subtype === "client_collection") {
-        return displaySources.filter(
+        const inferred = displaySources.filter(
           (s) => `client:${inferClientLabel(s).toLowerCase().replace(/\s+/g, "_")}` === key
         );
+        const assignedIds = playlistItemAssignments[key] ?? [];
+        const assignedItems = displaySources.filter((s) => assignedIds.includes(s.id));
+        const map = new Map<string, UnifiedSource>();
+        for (const s of [...inferred, ...assignedItems]) map.set(s.id, s);
+        return [...map.values()];
       }
       if (subtype === "external_playlist") {
         const source = displaySources.find((s) => `external:${s.id}` === key);
@@ -845,14 +864,10 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   );
 
   const scheduleUserPlaylistRailOpen = useCallback((playlistKey: string) => {
-    userPlaylistRailOpenKeyRef.current = playlistKey;
     if (userPlaylistRailOpenTimerRef.current) clearTimeout(userPlaylistRailOpenTimerRef.current);
     userPlaylistRailOpenTimerRef.current = setTimeout(() => {
       userPlaylistRailOpenTimerRef.current = null;
-      if (userPlaylistRailOpenKeyRef.current === playlistKey) {
-        setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: playlistKey });
-      }
-      userPlaylistRailOpenKeyRef.current = null;
+      setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: playlistKey });
     }, 220);
   }, []);
 
@@ -1951,16 +1966,9 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                 <div className="library-dark-scroll max-h-48 space-y-1 overflow-y-auto pr-1">
                 {userPlaylistContainers.slice(0, 10).map((p) => (
                   <div key={p.key} className="library-source-card flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs">
-                    <div
-                      role="button"
-                      tabIndex={0}
+                    <button
+                      type="button"
                       draggable
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          scheduleUserPlaylistRailOpen(p.key);
-                        }
-                      }}
                       onDragStart={(e) => {
                         e.stopPropagation();
                         const sourcesForDrop = resolveSourcesForSelection("syncbiz_playlist", p.key);
@@ -1996,10 +2004,9 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           clearTimeout(userPlaylistRailOpenTimerRef.current);
                           userPlaylistRailOpenTimerRef.current = null;
                         }
-                        userPlaylistRailOpenKeyRef.current = null;
                         playCollectionSelection("syncbiz_playlist", p.key);
                       }}
-                      className="flex min-w-0 flex-1 cursor-pointer select-none items-center gap-2 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                      className="flex min-w-0 flex-1 cursor-grab items-center gap-2 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-white/30 active:cursor-grabbing"
                     >
                       <span
                         draggable={false}
@@ -2020,7 +2027,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                         <span className="block truncate font-medium">{p.label}</span>
                         <span className="library-card-meta block text-[10px]">{p.itemCount} item</span>
                       </span>
-                    </div>
+                    </button>
                     <button
                       type="button"
                       className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}

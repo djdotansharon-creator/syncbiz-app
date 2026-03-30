@@ -379,17 +379,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     e.stopPropagation();
     setPlayerDropActive(false);
 
-    const isLibraryItemDrag = e.dataTransfer.getData("application/syncbiz-library-item-drag") === "1";
-
     const queueSourcesJson = e.dataTransfer.getData("application/syncbiz-queue-sources");
     if (queueSourcesJson) {
       try {
         const queue = JSON.parse(queueSourcesJson) as UnifiedSource[];
         if (Array.isArray(queue) && queue.length > 0) {
-          if (isLibraryItemDrag) {
-            playSource(queue[0]);
-            return;
-          }
           setQueue(queue);
           playSource(queue[0]);
           return;
@@ -407,10 +401,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         const byId = new Map(allSources.map((s) => [s.id, s] as const));
         const queue = ids.map((id) => byId.get(id)).filter((s): s is UnifiedSource => !!s);
         if (queue.length > 0) {
-          if (isLibraryItemDrag) {
-            playSource(queue[0]);
-            return;
-          }
           setQueue(queue);
           playSource(queue[0]);
           return;
@@ -435,10 +425,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           const allSources = await fetchUnifiedSourcesWithFallback();
           const queue = resolveSyncbizPlaylistPlayQueue(payload.key, allSources, assignments);
           if (queue.length > 0) {
-            if (isLibraryItemDrag) {
-              playSource(queue[0]);
-              return;
-            }
             setQueue(queue);
             playSource(queue[0]);
             return;
@@ -454,10 +440,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       try {
         const source = JSON.parse(sourceJson) as UnifiedSource;
         if (source?.id && source?.url) {
-          if (isLibraryItemDrag) {
-            playSource(source);
-            return;
-          }
           setQueue([source]);
           playSource(source);
           return;
@@ -472,10 +454,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       const allSources = await fetchUnifiedSourcesWithFallback();
       const source = allSources.find((s) => s.id === sourceId);
       if (source) {
-        if (isLibraryItemDrag) {
-          playSource(source);
-          return;
-        }
         setQueue([source]);
         playSource(source);
         return;
