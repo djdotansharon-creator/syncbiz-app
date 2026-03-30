@@ -22,7 +22,6 @@ import { unifiedFoundationHints, type UnifiedSource, type ParseUrlJson, type Rad
 import { searchExternal } from "@/lib/search-service";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { DeviceModeIndicator } from "@/components/device-mode-indicator";
-import { GuestLinkButton } from "@/components/guest-link-button";
 import { StandaloneIndicator } from "@/components/standalone-indicator";
 
 const categoryKeys = ["dashboard", "sources", "radio", "owner", "schedules", "logs"] as const;
@@ -595,7 +594,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
               <StandaloneIndicator />
               <DeviceModeIndicator />
-              <GuestLinkButton />
               <span className="hidden items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/80 px-2.5 py-1 text-xs text-slate-400 sm:flex">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 {t.agentsHealthy}

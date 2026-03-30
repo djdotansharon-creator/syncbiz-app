@@ -3,8 +3,14 @@
 import { useState } from "react";
 import { useDevicePlayer } from "@/lib/device-player-context";
 
+/** Shared amber LED pill style for guest / “My link” controls in the library rail. */
+export const guestLinkLedButtonClass =
+  "inline-flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-600/10 px-2.5 py-1.5 text-xs font-medium text-amber-200 transition hover:border-amber-500/60 hover:bg-amber-600/20 focus:outline-none focus:ring-2 focus:ring-amber-500/30";
+
+type GuestLinkButtonProps = { className?: string };
+
 /** Compact button to copy guest recommendation link. Shown when operator has active session. */
-export function GuestLinkButton() {
+export function GuestLinkButton({ className }: GuestLinkButtonProps) {
   const ctx = useDevicePlayer();
   const [copied, setCopied] = useState(false);
 
@@ -25,7 +31,7 @@ export function GuestLinkButton() {
     <button
       type="button"
       onClick={handleCopy}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-600/10 px-2.5 py-1.5 text-xs font-medium text-amber-200 transition hover:border-amber-500/60 hover:bg-amber-600/20 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+      className={[guestLinkLedButtonClass, className].filter(Boolean).join(" ")}
       title="Copy guest recommendation link"
     >
       <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
