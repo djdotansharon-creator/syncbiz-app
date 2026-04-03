@@ -247,8 +247,43 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       if (command === "PLAY") play();
       else if (command === "PAUSE") pause();
       else if (command === "STOP") stop();
-      else if (command === "NEXT") next();
-      else if (command === "PREV") prev();
+      else if (command === "NEXT") {
+        console.log("[SyncBiz Audit] NEXT path resolved", {
+          context: "remote_command",
+          deviceMode,
+          currentSourceId: currentSource?.id,
+          currentTrackIndex,
+          queueIndex,
+          queueLength: queue.length,
+        });
+        next();
+        console.log("[SyncBiz Audit] state after manual next", {
+          context: "remote_command",
+          deviceMode,
+          currentSourceId: currentSource?.id,
+          currentTrackIndex,
+          queueIndex,
+          queueLength: queue.length,
+        });
+      } else if (command === "PREV") {
+        console.log("[SyncBiz Audit] PREV path resolved", {
+          context: "remote_command",
+          deviceMode,
+          currentSourceId: currentSource?.id,
+          currentTrackIndex,
+          queueIndex,
+          queueLength: queue.length,
+        });
+        prev();
+        console.log("[SyncBiz Audit] state after manual prev", {
+          context: "remote_command",
+          deviceMode,
+          currentSourceId: currentSource?.id,
+          currentTrackIndex,
+          queueIndex,
+          queueLength: queue.length,
+        });
+      }
       else if (command === "SET_SHUFFLE" && typeof cmd.payload?.value === "boolean") setShuffle(cmd.payload.value);
       else if (command === "SET_AUTOMIX" && typeof cmd.payload?.value === "boolean") setAutoMix(cmd.payload.value);
       else if (command === "SEEK" && typeof cmd.payload?.position === "number") {
@@ -273,8 +308,14 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
 
   const effectiveUserId = (userId ?? "").trim();
   const onDeviceMode = useCallback((mode: DeviceMode) => {
+    console.log("[SyncBiz Audit] Device mode change", {
+      mode,
+    });
     if (mode === "MASTER") setMasterState(null);
-    if (mode === "CONTROL") stop();
+    if (mode === "CONTROL") {
+      console.log("[SyncBiz Audit] CONTROL transition -> stop()");
+      stop();
+    }
   }, [stop]);
   const onStateUpdate = useCallback((state: StationPlaybackState) => setMasterState(state), []);
   const onSecondaryDesktop = useCallback(() => setSecondaryDesktopModalOpen(true), []);

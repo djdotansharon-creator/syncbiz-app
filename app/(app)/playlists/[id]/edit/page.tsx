@@ -69,7 +69,7 @@ export default function EditPlaylistPage() {
     setSaveError(null);
     try {
       const payload: Record<string, unknown> = { name, url, genre, thumbnail, type };
-      if (tracks.length > 1) {
+      if (tracks.length >= 1) {
         payload.tracks = tracks;
         payload.order = order;
       }

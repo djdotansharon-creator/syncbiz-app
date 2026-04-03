@@ -3,7 +3,7 @@ import { listPlaylistsForTenant, createPlaylist } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
-import type { PlaylistCreateInput, PlaylistType } from "@/lib/playlist-types";
+import type { PlaylistCreateInput, PlaylistTrack, PlaylistType } from "@/lib/playlist-types";
 
 const VALID_TYPES: PlaylistType[] = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"];
 const DEFAULT_BRANCH_ID = "default";
@@ -69,6 +69,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const bodyTracks = (body as { tracks?: unknown }).tracks;
+    const tracks =
+      Array.isArray(bodyTracks) && bodyTracks.length > 0 ? (bodyTracks as PlaylistTrack[]) : undefined;
+
     const playlist = await createPlaylist({
       name,
       genre,
@@ -79,6 +83,7 @@ export async function POST(req: NextRequest) {
       tenantId: user.tenantId,
       viewCount,
       durationSeconds,
+      ...(tracks ? { tracks } : {}),
     });
     const uid = await getUserIdFromSession();
     if (uid) void notifyLibraryUpdated(uid, { branchId, entityType: "playlist", action: "created" });

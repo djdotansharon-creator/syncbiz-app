@@ -39,6 +39,7 @@ import {
   releasePlaybackWakeLock,
 } from "@/lib/playback-resilience";
 import { resolveDeckSourceBadge } from "@/lib/deck-source-badge";
+import { syncbizAuditPlayerCreationTarget, syncbizAuditTransportTransitionStart } from "@/lib/syncbiz-transport-audit";
 
 /** Crossfade runtime diagnostics – key transitions only, no 500ms spam */
 function xfadeLog(phase: string, data?: Record<string, unknown>) {
@@ -350,6 +351,8 @@ export function AudioPlayer() {
   const titleContainerRef = useRef<HTMLDivElement>(null);
   const volumeRef = useRef(volume);
   const statusRef = useRef(status);
+  const currentPlayUrlRef = useRef<string | null>(null);
+  const currentSourceIdRef = useRef<string | null>(null);
   const volumeBeforeMuteRef = useRef(80);
   const autoMixRef = useRef(autoMix);
   const nextRef = useRef(next);
@@ -378,6 +381,8 @@ export function AudioPlayer() {
   const embedReadyRef = useRef(false);
   volumeRef.current = volume;
   statusRef.current = status;
+  currentPlayUrlRef.current = currentPlayUrl ?? null;
+  currentSourceIdRef.current = currentSource?.id ?? null;
   nextRef.current = next;
   isYouTubeRef.current = isYouTube;
   isSoundCloudRef.current = Boolean(isSoundCloud);
@@ -416,7 +421,16 @@ export function AudioPlayer() {
     }
     ytCurrentInNextSlotRef.current = false;
     const oldPlayer = ytPlayerRef.current;
-    if (isYtPlayerReady(oldPlayer)) safeStopVideo(oldPlayer);
+    if (isYtPlayerReady(oldPlayer)) {
+      console.log("[SyncBiz Audit] YT destroy/reset", {
+        reason: "loadYouTube_old_player",
+        currentUrl: currentPlayUrl,
+        currentSourceId: currentSource?.id ?? null,
+        currentTrackIndex,
+      });
+      safeStopVideo(oldPlayer);
+      safeDestroyYtPlayer(oldPlayer);
+    }
     ytPlayerRef.current = null;
     currentVidRef.current = vid;
     const playerVars: Record<string, string | number> = {
@@ -429,6 +443,31 @@ export function AudioPlayer() {
     }
     const loadYT = () => {
       if (!window.YT?.Player || !ytContainerRef.current || currentVidRef.current !== vid) return;
+      const hostEl = ytContainerRef.current;
+      let iframeEl: HTMLIFrameElement | null = null;
+      if (hostEl instanceof HTMLIFrameElement) {
+        iframeEl = hostEl;
+      } else if (hostEl) {
+        iframeEl = hostEl.querySelector("iframe");
+      }
+      console.log("[SyncBiz Audit] YT player create_start", {
+        currentUrl: currentPlayUrl,
+        currentSourceId: currentSource?.id ?? null,
+        currentTrackIndex,
+        videoId: vid,
+        playlistId: ytPlaylistId,
+        hasHost: !!hostEl,
+        hostTag: hostEl?.tagName,
+        hasIframe: !!iframeEl,
+        hasContentWindow: !!iframeEl?.contentWindow,
+        hasExistingPlayer: isYtPlayerReady(ytPlayerRef.current),
+      });
+      syncbizAuditPlayerCreationTarget({
+        slot: "current",
+        videoId: vid,
+        playlistId: ytPlaylistId,
+        currentSourceId: currentSource?.id ?? null,
+      });
       new window.YT.Player(ytContainerRef.current, {
         videoId: vid,
         width: 320,
@@ -436,13 +475,141 @@ export function AudioPlayer() {
         playerVars,
         events: {
           onReady(evt) {
-            if (currentVidRef.current !== vid) return;
+            if (currentVidRef.current !== vid) {
+              console.log("[SyncBiz Audit] YT onReady timing", {
+                embed: "current",
+                aborted: "stale_vid_ref",
+                expectedVideoId: vid,
+                currentVidRef: currentVidRef.current,
+              });
+              return;
+            }
             const target = evt.target;
-            if (!isYtPlayerReady(target)) return;
+            if (!isYtPlayerReady(target)) {
+              console.log("[SyncBiz Audit] YT onReady timing", {
+                embed: "current",
+                aborted: "target_not_ready",
+                videoId: vid,
+              });
+              return;
+            }
+            // Re-read DOM on ready for live diagnostics
+            const hostElLive = ytContainerRef.current;
+            let iframeElLive: HTMLIFrameElement | null = null;
+            if (hostElLive instanceof HTMLIFrameElement) {
+              iframeElLive = hostElLive;
+            } else if (hostElLive) {
+              iframeElLive = hostElLive.querySelector("iframe");
+            }
+            console.log("[SyncBiz Audit] YT iframe dom_check", {
+              embed: "current",
+              hasHost: !!hostElLive,
+              hostTag: hostElLive?.tagName,
+              hasIframe: !!iframeElLive,
+              hasContentWindow: !!iframeElLive?.contentWindow,
+              src: iframeElLive?.src,
+            });
+            console.log("[SyncBiz Audit] YT iframe dom_check_live", {
+              hasHost: !!hostElLive,
+              hostTag: hostElLive?.tagName,
+              hasIframe: !!iframeElLive,
+              hasContentWindow: !!iframeElLive?.contentWindow,
+              src: iframeElLive?.src,
+              currentUrl: currentPlayUrl,
+              currentSourceId: currentSource?.id ?? null,
+              currentTrackIndex,
+            });
+            const initialState = safeGetPlayerState(target);
+            console.log("[SyncBiz Audit] YT onReady timing", {
+              embed: "current",
+              videoId: vid,
+              playlistId: ytPlaylistId,
+              currentUrl: currentPlayUrl,
+              currentSourceId: currentSource?.id ?? null,
+              currentTrackIndex,
+              playerState: initialState,
+              statusRef: statusRef.current,
+            });
             ytPlayerRef.current = target;
             safeSetVolume(target, volumeRef.current);
             setEmbedReady(true);
-            if (statusRef.current === "playing") safePlayVideo(target);
+            const willPlay = statusRef.current === "playing";
+            if (willPlay) {
+              console.log("[SyncBiz Audit] YT command target", {
+                reason: "onReady_status_playing",
+                hasPlayer: true,
+                videoId: vid,
+                action: "safePlayVideo",
+              });
+              safePlayVideo(target);
+              const stateAfterPlay = safeGetPlayerState(target);
+              console.log("[SyncBiz Audit] YT first_state_after_ready", {
+                embed: "current",
+                videoId: vid,
+                playlistId: ytPlaylistId,
+                currentUrl: currentPlayUrl,
+                currentSourceId: currentSource?.id ?? null,
+                currentTrackIndex,
+                playerState: stateAfterPlay,
+              });
+            } else {
+              console.log("[SyncBiz Audit] YT command target", {
+                reason: "skipped_not_playing",
+                hasPlayer: true,
+                videoId: vid,
+                statusRef: statusRef.current,
+                action: "none",
+              });
+              console.log("[SyncBiz Audit] YT first_state_after_ready", {
+                embed: "current",
+                videoId: vid,
+                note: "play_not_issued",
+                playerState: initialState,
+                currentUrl: currentPlayUrl,
+                currentSourceId: currentSource?.id ?? null,
+              });
+            }
+            queueMicrotask(() => {
+              console.log("[SyncBiz Audit] currentPlayUrl final", {
+                currentPlayUrl: currentPlayUrlRef.current,
+                currentSourceId: currentSourceIdRef.current,
+                readyVideoId: vid,
+                currentVidRef: currentVidRef.current,
+                statusRef: statusRef.current,
+              });
+            });
+            const auditReadyVid = vid;
+            window.setTimeout(() => {
+              if (currentVidRef.current !== auditReadyVid) {
+                console.log("[SyncBiz Audit] YT player state shortly_after_ready", {
+                  msAfterReady: 300,
+                  aborted: "vid_replaced_before_sample",
+                  readyVideoId: auditReadyVid,
+                  currentVidRef: currentVidRef.current,
+                  currentPlayUrl: currentPlayUrlRef.current,
+                  currentSourceId: currentSourceIdRef.current,
+                });
+                return;
+              }
+              const p = ytPlayerRef.current;
+              if (!isYtPlayerReady(p)) {
+                console.log("[SyncBiz Audit] YT player state shortly_after_ready", {
+                  msAfterReady: 300,
+                  aborted: "no_current_player",
+                  readyVideoId: auditReadyVid,
+                  currentPlayUrl: currentPlayUrlRef.current,
+                });
+                return;
+              }
+              console.log("[SyncBiz Audit] YT player state shortly_after_ready", {
+                msAfterReady: 300,
+                videoId: auditReadyVid,
+                playerState: safeGetPlayerState(p),
+                currentPlayUrl: currentPlayUrlRef.current,
+                currentSourceId: currentSourceIdRef.current,
+                statusRef: statusRef.current,
+              });
+            }, 300);
           },
         },
       });
@@ -473,6 +640,21 @@ export function AudioPlayer() {
         callbacks.onError();
         return () => {};
       }
+      const hostEl = preloadContainer;
+      let iframeEl: HTMLIFrameElement | null = null;
+      if (hostEl instanceof HTMLIFrameElement) {
+        iframeEl = hostEl;
+      } else {
+        iframeEl = hostEl.querySelector("iframe");
+      }
+      console.log("[SyncBiz Audit] iframe ref state", {
+        embed: "next",
+        hasHost: !!hostEl,
+        hostTag: hostEl?.tagName,
+        hasIframe: !!iframeEl,
+        hasContentWindow: !!iframeEl?.contentWindow,
+        src: iframeEl?.src,
+      });
       const oldNext = ytPlayerNextRef.current;
       if (isYtPlayerReady(oldNext)) {
         safeStopVideo(oldNext);
@@ -506,6 +688,7 @@ export function AudioPlayer() {
 
       try {
         ytXfadeLog("next_hidden_yt_player_creating", { videoId: nextVideoId });
+        syncbizAuditPlayerCreationTarget({ slot: "preload_hidden", videoId: nextVideoId });
         new window.YT.Player(preloadContainer, {
           videoId: nextVideoId,
           width: 320,
@@ -570,7 +753,13 @@ export function AudioPlayer() {
     safePlayVideo(np);
     const npStateAfter = safeGetPlayerState(np);
     ytXfadeLog("handoff_promoted", { nextPlayerStateAfter: npStateAfter });
-    nextRef.current({ skipPlay: true });
+    syncbizAuditTransportTransitionStart({
+      phase: "doYtHandoff_before_provider_next_skipPlay",
+      nextVideoId,
+      auditTransportCase: "ended_auto",
+      skipPlay: true,
+    });
+    nextRef.current({ skipPlay: true, auditTransportCase: "ended_auto" });
     endedHandledRef.current = true;
     ytOverlapActiveRef.current = false;
     ytCrossfadeStartedRef.current = false;
@@ -614,7 +803,11 @@ export function AudioPlayer() {
       widget.bind("finish", () => {
         if (endedHandledRef.current) return;
         endedHandledRef.current = true;
-        nextRef.current();
+        syncbizAuditTransportTransitionStart({
+          phase: "soundcloud_finish_before_provider_next",
+          auditTransportCase: "ended_auto",
+        });
+        nextRef.current({ auditTransportCase: "ended_auto" });
       });
     };
     if (window.SC) {
@@ -668,6 +861,10 @@ export function AudioPlayer() {
       }
       if (isYouTubeRef.current && embedReadyRef.current) {
         const p = ytPlayerRef.current;
+        console.log("[SyncBiz Audit] YT command target", {
+          reason: "nudgeResumePlayback",
+          hasPlayer: isYtPlayerReady(p),
+        });
         if (isYtPlayerReady(p)) safePlayVideo(p);
       }
       if (isSoundCloudRef.current && scWidgetRef.current) {
@@ -851,7 +1048,14 @@ export function AudioPlayer() {
   useEffect(() => {
     const p = ytPlayerRef.current;
     if (status === "playing") {
-      if (isYtPlayerReady(p) && isYouTube) safePlayVideo(p);
+      if (isYtPlayerReady(p) && isYouTube) {
+        console.log("[SyncBiz Audit] YT command target", {
+          reason: "status_play",
+          hasPlayer: true,
+          videoUrl: currentPlayUrl,
+        });
+        safePlayVideo(p);
+      }
       else if (scWidgetRef.current && isSoundCloud) scWidgetRef.current.play();
     } else if (status === "paused" || status === "stopped") {
       if (isYtPlayerReady(p) && isYouTube) {
@@ -1049,12 +1253,60 @@ export function AudioPlayer() {
         if (isYtPlayerReady(p)) {
           const playerState = safeGetPlayerState(p);
           if (playerState === window.YT!.PlayerState.ENDED) {
-            if (!isYouTubeMix && !endedHandledRef.current) {
+            const overlapActiveOuter = !!ytOverlapActiveRef.current;
+            const nextVidOuter = ytNextVideoIdRef.current;
+            console.log("[SyncBiz Audit] YT ended outer_state", {
+              currentUrl: currentPlayUrl,
+              currentSourceId: currentSource?.id ?? null,
+              currentTrackIndex,
+              queueIndex,
+              queueLength: queue.length,
+              isYouTubeMix,
+              endedHandled: endedHandledRef.current,
+              overlapActive: overlapActiveOuter,
+              nextVid: nextVidOuter,
+            });
+            console.log("[SyncBiz Audit] YT ended", {
+              currentUrl: currentPlayUrl,
+              trackType: currentTrack?.type,
+              currentTrackIndex,
+              isMix: isYouTubeMix,
+              isMultiTrack: isYouTubeMultiTrack,
+            });
+            const willEnterInnerGuard = !isYouTubeMix && !endedHandledRef.current;
+            console.log("[SyncBiz Audit] YT ended guard_decision", {
+              currentUrl: currentPlayUrl,
+              currentSourceId: currentSource?.id ?? null,
+              currentTrackIndex,
+              queueIndex,
+              queueLength: queue.length,
+              isYouTubeMix,
+              endedHandled: endedHandledRef.current,
+              willEnterInnerGuard,
+              overlapActive: overlapActiveOuter,
+              nextVid: nextVidOuter,
+            });
+            if (willEnterInnerGuard) {
               const overlapActive = !!ytOverlapActiveRef.current;
               const nextVid = ytNextVideoIdRef.current;
+              console.log("[SyncBiz Audit] YT ended guard_state", {
+                currentUrl: currentPlayUrl,
+                currentSourceId: currentSource?.id ?? null,
+                currentTrackIndex,
+                queueIndex,
+                queueLength: queue.length,
+                endedHandled: endedHandledRef.current,
+                overlapActive,
+                nextVid,
+              });
               ytXfadeLog("current_ended", { overlapActive, nextVid: nextVid ?? null });
+              console.log("[SyncBiz Audit] YT AutoMix current_ended", {
+                overlapActive,
+                nextVid,
+              });
               if (overlapActive && nextVid) {
                 ytXfadeLog("handoff_path_taken");
+                console.log("[SyncBiz Audit] YT AutoMix handoff_path_taken", { nextVid });
                 doYtHandoff(nextVid);
               } else {
                 endedHandledRef.current = true;
@@ -1063,10 +1315,58 @@ export function AudioPlayer() {
                   ytCrossfadeStartedRef.current = false;
                   ytNextVideoIdRef.current = null;
                 }
-                nextRef.current();
+                console.log("[SyncBiz Audit] YT AutoMix fallback_next", {
+                  currentSourceId: currentSource?.id,
+                });
+                console.log("[SyncBiz Audit] YT ended next_called", {
+                  path: "fallback_next",
+                  currentUrl: currentPlayUrl,
+                  currentSourceId: currentSource?.id ?? null,
+                  currentTrackIndex,
+                  queueIndex,
+                  queueLength: queue.length,
+                });
+                console.log("[SyncBiz Audit] runtime path step", {
+                  transport: "audio_player_yt_ended",
+                  phase: "before_provider_next_ended_auto",
+                  auditTransportCase: "ended_auto",
+                  currentPlayUrlSnapshot: currentPlayUrl?.slice(0, 200) ?? null,
+                  currentSourceId: currentSource?.id ?? null,
+                  currentTrackIndex,
+                  queueLength: queue.length,
+                });
+                const beforeSourceId = currentSource?.id ?? null;
+                const beforeTrackIndex = currentTrackIndex;
+                syncbizAuditTransportTransitionStart({
+                  phase: "yt_poll_ended_fallback_before_provider_next",
+                  auditTransportCase: "ended_auto",
+                  currentSourceId: beforeSourceId,
+                  queueIndex,
+                  queueLength: queue.length,
+                });
+                nextRef.current({ auditTransportCase: "ended_auto" });
+                setTimeout(() => {
+                  console.log("[SyncBiz Audit] YT ended state_after_next", {
+                    currentUrl: currentPlayUrl,
+                    previousSourceId: beforeSourceId,
+                    previousTrackIndex: beforeTrackIndex,
+                    currentSourceId: currentSource?.id ?? null,
+                    currentTrackIndex,
+                    queueIndex,
+                    queueLength: queue.length,
+                  });
+                }, 0);
               }
             }
           } else {
+            if (endedHandledRef.current) {
+              console.log("[SyncBiz Audit] YT ended reset_flag", {
+                currentUrl: currentPlayUrl,
+                currentSourceId: currentSource?.id ?? null,
+                currentTrackIndex,
+                reason: "playerState_not_ENDED",
+              });
+            }
             endedHandledRef.current = false;
           }
           const pos = safeGetCurrentTime(p);
@@ -1110,11 +1410,27 @@ export function AudioPlayer() {
                 nextIsSingleVideo,
                 automixAllowed: !!nextVid,
               });
+              console.log("[SyncBiz Audit] YT AutoMix automix_source_check", {
+                pos,
+                dur,
+                mixSec,
+                currentUrl: currentPlayUrl,
+                nextUrl,
+                nextVid,
+              });
             }
             if (pos >= preloadThreshold && nextVid && !ytCrossfadeStartedRef.current) {
               const currState = safeGetPlayerState(p);
               const secLeft = dur - pos;
               ytXfadeLog("preload_trigger_reached", { pos, dur, mixSec, secLeft, nextVid, currentPlayerState: currState });
+              console.log("[SyncBiz Audit] YT AutoMix preload_trigger", {
+                pos,
+                dur,
+                mixSec,
+                secLeft,
+                nextVid,
+                currentPlayerState: currState,
+              });
               ytCrossfadeStartedRef.current = true;
               ytNextVideoIdRef.current = nextVid;
               ytCrossfadeAbortRef.current = false;
@@ -1122,6 +1438,7 @@ export function AudioPlayer() {
               const abort = runYtPreload(nextVid, {
                 onError: () => {
                   ytXfadeLog("preload_error");
+                  console.log("[SyncBiz Audit] YT AutoMix preload_error", { nextVid });
                   ytCrossfadeStartedRef.current = false;
                   ytNextVideoIdRef.current = null;
                 },
@@ -1134,6 +1451,13 @@ export function AudioPlayer() {
               const np = ytPlayerNextRef.current;
               const currState = safeGetPlayerState(p);
               ytXfadeLog("mix_point_reached_starting_next", { pos, dur, mixSec, currentPlayerState: currState });
+              console.log("[SyncBiz Audit] YT AutoMix mix_point_reached_starting_next", {
+                pos,
+                dur,
+                mixSec,
+                nextVid,
+                currentPlayerState: currState,
+              });
               safeUnMute(np);
               safeSetVolume(np, volumeRef.current);
               safePlayVideo(np);
@@ -1183,8 +1507,33 @@ export function AudioPlayer() {
           if (inMixWindow && !crossfadeInMixWindowRef.current) {
             crossfadeInMixWindowRef.current = true;
             const nextUrl = getNextStreamUrl();
-            const ok = !!(autoMixRef.current && statusRef.current === "playing" && currentPlayUrl && !isHlsUrl(currentPlayUrl) && !crossfadeStartedRef.current && nextUrl);
-            xfadeLog("mix_window_entered", { t, d, mixSec, threshold, nextUrl: nextUrl ? "yes" : "no", autoMix: autoMixRef.current, status: statusRef.current, hls: isHlsUrl(currentPlayUrl ?? ""), willTrigger: ok });
+            const ok = !!(
+              autoMixRef.current &&
+              statusRef.current === "playing" &&
+              currentPlayUrl &&
+              !isHlsUrl(currentPlayUrl) &&
+              !crossfadeStartedRef.current &&
+              nextUrl
+            );
+            xfadeLog("mix_window_entered", {
+              t,
+              d,
+              mixSec,
+              threshold,
+              nextUrl: nextUrl ? "yes" : "no",
+              autoMix: autoMixRef.current,
+              status: statusRef.current,
+              hls: isHlsUrl(currentPlayUrl ?? ""),
+              willTrigger: ok,
+            });
+            console.log("[SyncBiz Audit] Direct Xfade mix_window_entered", {
+              currentUrl: currentPlayUrl,
+              nextUrl,
+              t,
+              d,
+              mixSec,
+              willTrigger: ok,
+            });
           }
           if (
             autoMixRef.current &&
@@ -1196,18 +1545,42 @@ export function AudioPlayer() {
             const nextUrl = getNextStreamUrl();
             if (nextUrl && t >= Math.max(0, d - mixSec)) {
               xfadeLog("trigger", { t, d, mixSec, nextUrl: nextUrl.slice(0, 60) });
+              console.log("[SyncBiz Audit] Direct Xfade trigger", {
+                currentUrl: currentPlayUrl,
+                nextUrl,
+                t,
+                d,
+                mixSec,
+              });
               crossfadeStartedRef.current = true;
               crossfadeAbortRef.current = false;
               crossfadeCleanupRef.current?.();
               const abort = runCrossfade(a, nextUrl, volumeRef.current / 100, mixSec, {
                 onComplete: () => {
                   xfadeLog("onComplete");
+                  console.log("[SyncBiz Audit] Direct Xfade onComplete", {
+                    nextUrl,
+                    statusAfter: statusRef.current,
+                  });
                   lastStreamUrlRef.current = nextUrl;
-                  (nextRef.current as ((opts?: { skipPlay?: boolean }) => void) | undefined)?.({ skipPlay: true });
+                  syncbizAuditTransportTransitionStart({
+                    phase: "direct_audio_xfade_onComplete_before_provider_next_skipPlay",
+                    auditTransportCase: "ended_auto",
+                    skipPlay: true,
+                    nextUrlPreview: nextUrl?.slice(0, 120) ?? null,
+                  });
+                  (nextRef.current as ((opts?: { skipPlay?: boolean; auditTransportCase?: "ended_auto" }) => void) | undefined)?.({
+                    skipPlay: true,
+                    auditTransportCase: "ended_auto",
+                  });
                   endedHandledRef.current = true;
                 },
                 onError: () => {
                   xfadeLog("onError");
+                  console.log("[SyncBiz Audit] Direct Xfade onError", {
+                    nextUrl,
+                    statusAtError: statusRef.current,
+                  });
                   crossfadeStartedRef.current = false;
                 },
                 isAborted: () => crossfadeAbortRef.current || statusRef.current !== "playing",
@@ -1232,11 +1605,26 @@ export function AudioPlayer() {
       if (!Number.isFinite(d) || d <= 0) return;
       if (endedHandledRef.current || crossfadeStartedRef.current) {
         xfadeLog("ended_skipped", { endedHandled: endedHandledRef.current, crossfadeStarted: crossfadeStartedRef.current });
+        console.log("[SyncBiz Audit] Audio ended_skipped", {
+          duration: d,
+          endedHandled: endedHandledRef.current,
+          crossfadeStarted: crossfadeStartedRef.current,
+          url: currentPlayUrl,
+        });
         return;
       }
       xfadeLog("ended_advance");
+      console.log("[SyncBiz Audit] Audio ended_advance", {
+        duration: d,
+        url: currentPlayUrl,
+      });
       endedHandledRef.current = true;
-      nextRef.current();
+      syncbizAuditTransportTransitionStart({
+        phase: "html_audio_element_ended_before_provider_next",
+        auditTransportCase: "ended_auto",
+        urlPreview: currentPlayUrl?.slice(0, 120) ?? null,
+      });
+      nextRef.current({ auditTransportCase: "ended_auto" });
     };
     audio.addEventListener("ended", onEnded);
     return () => audio.removeEventListener("ended", onEnded);
@@ -1266,10 +1654,10 @@ export function AudioPlayer() {
   const displayTrack = isControlMirror ? ms?.currentTrack : currentTrack;
   const displaySource = isControlMirror ? ms?.currentSource : currentSource;
   const displayPosition = isControlMirror
-    ? (typeof ms?.position === "number" && Number.isFinite(ms.position) ? ms.position : 0)
+    ? (typeof ms?.position === "number" && Number.isFinite(ms.position) ? ms.position : Number.NaN)
     : position;
   const displayDuration = isControlMirror
-    ? (typeof ms?.duration === "number" && Number.isFinite(ms.duration) ? ms.duration : 0)
+    ? (typeof ms?.duration === "number" && Number.isFinite(ms.duration) ? ms.duration : Number.NaN)
     : duration;
   const displayVolume = isControlMirror
     ? (typeof ms?.volume === "number" && Number.isFinite(ms.volume) ? ms.volume : 80)
@@ -1306,7 +1694,12 @@ export function AudioPlayer() {
           (!!scWidgetRef.current && isSoundCloud) ||
           (isStreamUrl && Number.isFinite(duration) && duration > 0)));
   const displayBufferedPercent = isControlMirror ? 0 : bufferedPercent;
-  const displayProgressPercent = displayDuration > 0 ? Math.min(100, (displayPosition / displayDuration) * 100) : 0;
+  const displayProgressPercent =
+    Number.isFinite(displayPosition) &&
+    Number.isFinite(displayDuration) &&
+    displayDuration > 0
+      ? Math.min(100, (displayPosition / displayDuration) * 100)
+      : 0;
 
   const displayStatusLabel =
     displayStatus === "playing"
@@ -1344,8 +1737,92 @@ export function AudioPlayer() {
         local: t.deckBadgeLocal,
       });
 
-  const onPrev = isControlMirror ? () => { endedHandledRef.current = true; deviceCtx!.prevOrSend(); } : () => { endedHandledRef.current = true; prev(); };
-  const onNext = isControlMirror ? () => { crossfadeAbortRef.current = true; crossfadeCleanupRef.current?.(); ytCrossfadeAbortRef.current = true; ytCrossfadeCleanupRef.current?.(); endedHandledRef.current = true; deviceCtx!.nextOrSend(); } : () => { crossfadeAbortRef.current = true; crossfadeCleanupRef.current?.(); ytCrossfadeAbortRef.current = true; ytCrossfadeCleanupRef.current?.(); endedHandledRef.current = true; next(); };
+  const onPrev = isControlMirror
+    ? () => {
+        console.log("[SyncBiz Audit] PREV path resolved", {
+          context: "remote_ui_control",
+          deviceMode: deviceCtx?.deviceMode,
+          isControlMirror,
+          currentUrl: currentPlayUrl,
+          trackType: currentTrack?.type,
+          currentTrackIndex,
+          intendedPrevIndex: currentTrackIndex - 1,
+          queueIndex,
+          queueLength: queue.length,
+        });
+        endedHandledRef.current = true;
+        deviceCtx!.prevOrSend();
+      }
+    : () => {
+        console.log("[SyncBiz Audit] PREV path resolved", {
+          context: "local_ui",
+          deviceMode: deviceCtx?.deviceMode,
+          isControlMirror,
+          currentUrl: currentPlayUrl,
+          trackType: currentTrack?.type,
+          currentTrackIndex,
+          intendedPrevIndex: currentTrackIndex - 1,
+          queueIndex,
+          queueLength: queue.length,
+        });
+        endedHandledRef.current = true;
+        prev();
+      };
+  const onNext = isControlMirror
+    ? () => {
+        console.log("[SyncBiz Audit] NEXT path resolved", {
+          context: "remote_ui_control",
+          deviceMode: deviceCtx?.deviceMode,
+          isControlMirror,
+          currentUrl: currentPlayUrl,
+          trackType: currentTrack?.type,
+          currentTrackIndex,
+          intendedNextIndex: currentTrackIndex + 1,
+          queueIndex,
+          queueLength: queue.length,
+        });
+        crossfadeAbortRef.current = true;
+        crossfadeCleanupRef.current?.();
+        ytCrossfadeAbortRef.current = true;
+        ytCrossfadeCleanupRef.current?.();
+        endedHandledRef.current = true;
+        deviceCtx!.nextOrSend();
+      }
+    : () => {
+        console.log("[SyncBiz Audit] NEXT path resolved", {
+          context: "local_ui",
+          deviceMode: deviceCtx?.deviceMode,
+          isControlMirror,
+          currentUrl: currentPlayUrl,
+          trackType: currentTrack?.type,
+          currentTrackIndex,
+          intendedNextIndex: currentTrackIndex + 1,
+          queueIndex,
+          queueLength: queue.length,
+        });
+        console.log("[SyncBiz Audit] runtime path step", {
+          transport: "audio_player_manual_next",
+          phase: "before_provider_next",
+          auditTransportCase: null,
+          currentPlayUrlSnapshot: currentPlayUrl?.slice(0, 200) ?? null,
+          currentSourceId: currentSource?.id ?? null,
+          currentTrackIndex,
+          queueLength: queue.length,
+        });
+        crossfadeAbortRef.current = true;
+        crossfadeCleanupRef.current?.();
+        ytCrossfadeAbortRef.current = true;
+        ytCrossfadeCleanupRef.current?.();
+        endedHandledRef.current = true;
+        syncbizAuditTransportTransitionStart({
+          phase: "manual_ui_next_before_provider_next",
+          caller: "audio_player_onNext",
+          currentSourceId: currentSource?.id ?? null,
+          queueIndex,
+          queueLength: queue.length,
+        });
+        next();
+      };
   const onStop = isControlMirror ? () => { crossfadeAbortRef.current = true; crossfadeCleanupRef.current?.(); ytCrossfadeAbortRef.current = true; ytCrossfadeCleanupRef.current?.(); deviceCtx!.stopOrSend(); } : () => { crossfadeAbortRef.current = true; crossfadeCleanupRef.current?.(); ytCrossfadeAbortRef.current = true; ytCrossfadeCleanupRef.current?.(); stop(); };
   const onPlayPause = isControlMirror
     ? (displayStatus === "playing" ? deviceCtx!.pauseOrSend : deviceCtx!.playOrSend)
@@ -1553,7 +2030,17 @@ export function AudioPlayer() {
                 size="md"
                 variant={isSourcesLibraryDeck ? "cyan" : "green"}
                 libraryDeck={isSourcesLibraryDeck}
-                onClick={onPrev}
+                onClick={() => {
+                  console.log("[SyncBiz Audit] PREV click", {
+                    context: isControlMirror ? "remote_ui_control" : "local_ui",
+                    deviceMode: deviceCtx?.deviceMode ?? null,
+                    currentSourceId: currentSource?.id ?? null,
+                    currentTrackIndex,
+                    queueIndex,
+                    queueLength: queue.length,
+                  });
+                  onPrev();
+                }}
                 disabled={!displayHasPrevNext}
                 aria-label={t.previousTrack}
                 title={t.previousTrack}
@@ -1602,7 +2089,17 @@ export function AudioPlayer() {
                 size="md"
                 variant={isSourcesLibraryDeck ? "cyan" : "green"}
                 libraryDeck={isSourcesLibraryDeck}
-                onClick={onNext}
+                onClick={() => {
+                  console.log("[SyncBiz Audit] NEXT click", {
+                    context: isControlMirror ? "remote_ui_control" : "local_ui",
+                    deviceMode: deviceCtx?.deviceMode ?? null,
+                    currentSourceId: currentSource?.id ?? null,
+                    currentTrackIndex,
+                    queueIndex,
+                    queueLength: queue.length,
+                  });
+                  onNext();
+                }}
                 disabled={!displayHasPrevNext}
                 aria-label={t.next}
                 title={t.next}
@@ -1933,8 +2430,8 @@ export function AudioPlayer() {
               role="slider"
               aria-label={t.trackProgressAria}
               aria-valuemin={0}
-              aria-valuemax={displayDuration}
-              aria-valuenow={displayPosition}
+              aria-valuemax={Number.isFinite(displayDuration) ? displayDuration : 0}
+              aria-valuenow={Number.isFinite(displayPosition) ? displayPosition : 0}
               aria-disabled={!displayCanSeek}
               tabIndex={displayCanSeek ? 0 : undefined}
               className={`relative flex flex-1 min-w-0 select-none py-1.5 ${displayCanSeek ? "cursor-pointer" : "cursor-default opacity-80"}`}

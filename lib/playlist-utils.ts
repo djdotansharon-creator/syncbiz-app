@@ -28,6 +28,18 @@ export function getYouTubeVideoId(url: string): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * Single-video watch URL for SyncBiz playback/embed — strips provider-native continuation
+ * (list=, start_radio=, radio mixes, etc.). Import/resolve may still use full URLs; the player must not.
+ */
+export function canonicalYouTubeWatchUrlForPlayback(url: string): string {
+  const vid = getYouTubeVideoId(url);
+  if (!vid) return url;
+  const u = url.trim().toLowerCase();
+  if (!u.includes("youtube.com") && !u.includes("youtu.be")) return url;
+  return `https://www.youtube.com/watch?v=${vid}`;
+}
+
 /** Get YouTube playlist ID from URL (e.g. list=RDxxx, list=PLxxx). */
 export function getYouTubePlaylistId(url: string): string | null {
   const u = url.trim();

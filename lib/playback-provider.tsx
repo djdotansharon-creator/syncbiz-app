@@ -17,13 +17,23 @@ import type { Source } from "./types";
 import { getPlaylistTracks } from "./playlist-types";
 import {
   canEmbedInCard,
+  canonicalYouTubeWatchUrlForPlayback,
   effectivePlaybackPlaylistAttachment,
   getYouTubeThumbnail,
   getYouTubeVideoId,
+  isYouTubeMultiTrackUrl,
 } from "./playlist-utils";
 import { getShuffle, setShufflePreference } from "./mix-preferences";
 import { supportsEmbedded, getSourceArtworkUrl } from "./player-utils";
 import { log as mvpLog } from "./mvp-logger";
+import {
+  syncbizAuditCurrentSourceTransition,
+  syncbizAuditNextInvoked,
+  syncbizAuditPlaySourceInvoked,
+  syncbizAuditQueueIndexTransition,
+  syncbizAuditTrackChangedEmit,
+  syncbizAuditTransportTransitionStart,
+} from "./syncbiz-transport-audit";
 import { isValidPlaybackUrl } from "./url-validation";
 import { fetchUnifiedSourcesWithFallback } from "./unified-sources-client";
 import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
@@ -48,7 +58,7 @@ function unifiedToPlaybackTrack(source: UnifiedSource, trackIndex = 0): Playback
     const t = tracks[trackIndex] ?? tracks[0];
     const title = t?.name ?? (t as { title?: string })?.title ?? source.title;
     const type = (t?.type ?? source.type) as TrackSource;
-    const url = t?.url ?? source.url;
+    const url = canonicalYouTubeWatchUrlForPlayback(t?.url ?? source.url);
     const cover = t?.cover ?? source.cover ?? null;
     return {
       id: t?.id ?? `${source.id}-${trackIndex}`,
@@ -62,7 +72,7 @@ function unifiedToPlaybackTrack(source: UnifiedSource, trackIndex = 0): Playback
     id: source.id,
     title: source.title,
     type: source.type as TrackSource,
-    url: source.url,
+    url: canonicalYouTubeWatchUrlForPlayback(source.url),
     cover: source.cover,
   };
 }
@@ -108,16 +118,220 @@ function deriveCurrentTrack(source: UnifiedSource | null, trackIndex: number): P
   return source ? unifiedToPlaybackTrack(source, trackIndex) : null;
 }
 
-/** Active playlist for session bounds: prefer source attachment, then state snapshot. */
+/**
+ * Session bounds for NEXT/PREV: `fromSource` = effective attachment on current source;
+ * `snap` = `currentPlaylist`. If both exist, ids match, and snap has more resolved tracks
+ * than fromSource, return snap; else fromSource if present, else snap.
+ */
 function getActivePlaylist(s: Pick<PlaybackState, "currentSource" | "currentPlaylist">): Playlist | null {
   const fromSource = s.currentSource ? effectivePlaybackPlaylistAttachment(s.currentSource) : null;
-  if (fromSource) return fromSource;
-  return s.currentPlaylist ?? null;
+  const snap = s.currentPlaylist ?? null;
+  const fromLen = fromSource ? getPlaylistTracks(fromSource).length : 0;
+  const snapLen = snap ? getPlaylistTracks(snap).length : 0;
+  const idsMatch = !!(fromSource && snap && fromSource.id === snap.id);
+  const snapRawTracksArrayLen = snap?.tracks?.length ?? 0;
+  const snapOrderLen = snap?.order?.length ?? 0;
+  let snapOrderIdsMissingFromTracks = 0;
+  if (snap?.tracks && snap.tracks.length > 0 && snap.order && snap.order.length > 0) {
+    const idSet = new Set(snap.tracks.map((t) => t.id));
+    for (const id of snap.order) {
+      if (!idSet.has(id)) snapOrderIdsMissingFromTracks += 1;
+    }
+  }
+  const fromRawTracksArrayLen = fromSource?.tracks?.length ?? 0;
+
+  let chosen: Playlist | null;
+  let reasonChosen: string;
+  if (fromSource && snap && fromSource.id === snap.id && snapLen > fromLen) {
+    chosen = snap;
+    reasonChosen = "reconcile_snap_richer_same_id";
+  } else if (fromSource) {
+    chosen = fromSource;
+    if (!snap) reasonChosen = "prefer_fromSource_no_snap";
+    else if (!idsMatch) reasonChosen = "prefer_fromSource_id_mismatch";
+    else reasonChosen = "prefer_fromSource_snap_not_richer";
+  } else {
+    chosen = snap;
+    reasonChosen = snap ? "snap_only" : "null";
+  }
+
+  const chosenLabel = chosen === snap ? "snap" : chosen === fromSource ? "fromSource" : "null";
+
+  console.log("[SyncBiz Audit] getActivePlaylist decision", {
+    fromSourceExists: !!fromSource,
+    snapExists: !!snap,
+    fromSourceId: fromSource?.id ?? null,
+    snapId: snap?.id ?? null,
+    idsMatch,
+    reconcileWouldApply: !!(fromSource && snap && idsMatch && snapLen > fromLen),
+  });
+  console.log("[SyncBiz Audit] getActivePlaylist candidate lengths", {
+    getPlaylistTracksFromSourceLen: fromLen,
+    getPlaylistTracksSnapLen: snapLen,
+    fromRawTracksArrayLen,
+    snapRawTracksArrayLen,
+    totalRawTracksArrayLen: snapRawTracksArrayLen,
+    snapOrderLen,
+    snapOrderIdsMissingFromTracks,
+    snapHasResolvedTracksGt1: snapLen > 1,
+    snapTracksArrayGt1: snapRawTracksArrayLen > 1,
+    fromShellLikely: fromRawTracksArrayLen === 0 && fromLen <= 1,
+    snapShellLikely: snapRawTracksArrayLen === 0 && snapLen <= 1,
+  });
+  console.log("[SyncBiz Audit] getActivePlaylist chosen source", {
+    chosen: chosenLabel,
+    chosenId: chosen?.id ?? null,
+    reasonChosen,
+  });
+
+  return chosen;
 }
 
 function getPlaylistSessionTracks(s: Pick<PlaybackState, "currentSource" | "currentPlaylist">) {
   const pl = getActivePlaylist(s);
   return pl ? getPlaylistTracks(pl) : [];
+}
+
+/**
+ * SyncBiz transport: when the next/prev item exists in the internal queue and the session or
+ * snapshot currentPlaylist is collapsed (≤1 leaf), advance via queue — not playlist_session /
+ * getActivePlaylist-inflated sessionTracks.
+ */
+function preferQueueTransportOverCollapsedSession(
+  s: PlaybackState,
+  sessionTrackCount: number,
+  direction: "next" | "prev",
+): boolean {
+  if (s.queue.length <= 1) return false;
+  const nextOrPrevExistsInQueue =
+    direction === "next"
+      ? s.queueIndex >= 0 && s.queueIndex < s.queue.length - 1
+      : s.queueIndex > 0;
+  if (!nextOrPrevExistsInQueue) return false;
+  const plLeaf = s.currentPlaylist ? getPlaylistTracks(s.currentPlaylist).length : 0;
+  const sessionCollapsedToOne = sessionTrackCount <= 1;
+  const playlistSnapshotCollapsed = plLeaf <= 1;
+  return sessionCollapsedToOne || playlistSnapshotCollapsed;
+}
+
+/** TEMP audit: mirrors reasons in `effectivePlaybackPlaylistAttachment` (playlist-utils). */
+function effectiveAttachmentAuditReason(source: UnifiedSource | null): string {
+  if (!source?.playlist) return "no_playlist_on_source";
+  if (source.origin === "playlist") return "uses_source.playlist_origin_playlist";
+  const url = source.url ?? "";
+  if (String(source.type) === "playlist_url") return "suppress_type_playlist_url";
+  if (/youtube\.com\/playlist/i.test(url)) return "suppress_youtube_playlist_page";
+  if (isYouTubeMultiTrackUrl(url)) return "suppress_youtube_multi_track";
+  return "uses_source.playlist_non_playlist_origin";
+}
+
+function emitPlaylistSessionAudit(
+  s: PlaybackState,
+  ctx: {
+    transport: "prev" | "next";
+    auditTransportCase?: "ended_auto";
+    skipPlay?: boolean;
+  }
+) {
+  const playbackStatus = s.status;
+  let transportCase: string;
+  if (ctx.transport === "prev") {
+    transportCase =
+      s.status === "paused"
+        ? "manual_prev_paused"
+        : s.status === "playing"
+          ? "manual_prev_playing"
+          : `manual_prev_${s.status}`;
+  } else if (ctx.auditTransportCase === "ended_auto") {
+    transportCase = "natural_end_auto_advance";
+  } else if (s.status === "paused") {
+    transportCase = "manual_next_paused";
+  } else if (s.status === "playing") {
+    transportCase = "manual_next_playing";
+  } else {
+    transportCase = `manual_next_${s.status}`;
+  }
+
+  const eff = s.currentSource ? effectivePlaybackPlaylistAttachment(s.currentSource) : null;
+  const snap = s.currentPlaylist;
+  const effReason = effectiveAttachmentAuditReason(s.currentSource);
+  const active = getActivePlaylist(s);
+
+  console.log("[SyncBiz Audit] playlist resolution source", {
+    playbackStatus,
+    transportCase,
+    transport: ctx.transport,
+    skipPlay: ctx.skipPlay ?? false,
+    currentSourceId: s.currentSource?.id ?? null,
+    origin: s.currentSource?.origin ?? null,
+    sourceUrlSnippet: s.currentSource?.url?.slice(0, 120) ?? null,
+    playlistObjectOnSourceId: s.currentSource?.playlist?.id ?? null,
+    rawTracksOnSourcePlaylist: s.currentSource?.playlist?.tracks?.length ?? 0,
+    effectiveAttachmentResultId: eff?.id ?? null,
+    effectiveAttachmentResolvedLen: eff ? getPlaylistTracks(eff).length : 0,
+    attachmentAuditReason: effReason,
+  });
+
+  console.log("[SyncBiz Audit] playlist snapshot resolution", {
+    playbackStatus,
+    transportCase,
+    currentPlaylistSnapshotId: snap?.id ?? null,
+    snapshotRawTracksLen: snap?.tracks?.length ?? 0,
+    snapshotOrderLen: snap?.order?.length ?? 0,
+    snapshotResolvedLen: snap ? getPlaylistTracks(snap).length : 0,
+  });
+
+  const pickedFrom =
+    eff != null ? "effective_attachment_wins" : snap != null ? "snapshot_only" : "none";
+  console.log("[SyncBiz Audit] session source builder", {
+    playbackStatus,
+    transportCase,
+    activePlaylistId: active?.id ?? null,
+    currentPlaylistSnapshotId: snap?.id ?? null,
+    currentSourceId: s.currentSource?.id ?? null,
+    pickedFrom,
+    effectiveVsSnapshotSameId: eff?.id === snap?.id,
+    effectiveVsSnapshotBothPresent: !!eff && !!snap,
+    noteIfMismatch:
+      eff && snap && eff.id !== snap.id
+        ? "getActivePlaylist_prefers_attachment_id_over_snapshot"
+        : null,
+  });
+
+  if (active) {
+    const raw = active.tracks?.length ?? 0;
+    const resolved = getPlaylistTracks(active);
+    const legacy = !(active.tracks && active.tracks.length > 0);
+    const orderMismatch =
+      raw > 0 && resolved.length < raw ? "order_references_missing_track_ids" : null;
+    console.log("[SyncBiz Audit] sessionTracks build result", {
+      playbackStatus,
+      transportCase,
+      playlistIdUsedForSession: active.id,
+      currentSourceId: s.currentSource?.id ?? null,
+      totalRawTracksArrayLen: raw,
+      legacySingleTrackShell: legacy,
+      tracksCountAfterMapping: resolved.length,
+      orderArrayLen: active.order?.length ?? 0,
+      possibleExclusion: orderMismatch ?? (legacy ? "legacy_fallback_single_synthetic_track" : null),
+      firstThree: resolved.slice(0, 3).map((t) => ({
+        id: t.id,
+        url: typeof t.url === "string" ? t.url.slice(0, 100) : "",
+      })),
+    });
+  } else {
+    console.log("[SyncBiz Audit] sessionTracks build result", {
+      playbackStatus,
+      transportCase,
+      playlistIdUsedForSession: null,
+      currentSourceId: s.currentSource?.id ?? null,
+      totalRawTracksArrayLen: 0,
+      legacySingleTrackShell: null,
+      tracksCountAfterMapping: 0,
+      possibleExclusion: "no_active_playlist_object",
+      firstThree: [] as { id: string; url: string }[],
+    });
+  }
 }
 
 type PlaybackContextValue = PlaybackState & {
@@ -126,7 +340,7 @@ type PlaybackContextValue = PlaybackState & {
   pause: () => void;
   stop: () => void;
   prev: () => void;
-  next: (opts?: { skipPlay?: boolean } | unknown) => void;
+  next: (opts?: { skipPlay?: boolean; auditTransportCase?: "ended_auto" } | unknown) => void;
   setVolume: (value: number) => void;
   setShuffle: (value: boolean) => void;
   toggleShuffle: () => void;
@@ -298,6 +512,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }
     if (trackKey && trackKey !== prevTrackKeyRef.current && (status === "playing" || status === "paused")) {
       mvpLog("track_changed", { id: currentSource?.id, trackIndex: currentTrackIndex, title: currentTrack?.title });
+      syncbizAuditTrackChangedEmit({
+        id: currentSource?.id ?? null,
+        trackIndex: currentTrackIndex,
+        trackKey,
+        prevTrackKey: prevTrackKeyRef.current,
+      });
     }
     prevStatusRef.current = status;
     prevTrackKeyRef.current = trackKey;
@@ -307,9 +527,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (source.playlist) {
       const tracks = getPlaylistTracks(source.playlist);
       const t = tracks[trackIdx] ?? tracks[0];
-      return t?.url ?? source.url ?? null;
+      const raw = t?.url ?? source.url ?? null;
+      return raw ? canonicalYouTubeWatchUrlForPlayback(raw) : null;
     }
-    return source.url;
+    return canonicalYouTubeWatchUrlForPlayback(source.url);
   }, []);
 
   const isEmbeddedSource = useCallback((source: UnifiedSource, trackIdx: number): boolean => {
@@ -321,6 +542,51 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (source.source) return supportsEmbedded(source.source);
     return source.type === "youtube" || source.type === "soundcloud";
   }, []);
+
+  /** TEMP: one-screen runtime audit for transport — pair `*_entry_state_before` with `*_state_after_transition`. */
+  const logRuntimePlaybackAudit = useCallback(
+    (
+      snapshot: PlaybackState,
+      step: {
+        transport: "next";
+        phase: string;
+        auditTransportCase?: "ended_auto" | null;
+        extra?: Record<string, unknown>;
+      },
+    ) => {
+      const ap = getActivePlaylist(snapshot);
+      const st = getPlaylistSessionTracks(snapshot);
+      const cpu = snapshot.currentSource ? getPlayUrl(snapshot.currentSource, snapshot.currentTrackIndex) : null;
+      console.log("[SyncBiz Audit] runtime path step", {
+        transport: step.transport,
+        phase: step.phase,
+        auditTransportCase: step.auditTransportCase ?? null,
+        playbackStatus: snapshot.status,
+        ...step.extra,
+      });
+      console.log("[SyncBiz Audit] runtime currentSource", {
+        id: snapshot.currentSource?.id ?? null,
+        origin: snapshot.currentSource?.origin ?? null,
+        sourcePlaylistId: snapshot.currentSource?.playlist?.id ?? null,
+      });
+      console.log("[SyncBiz Audit] runtime currentPlaylist", {
+        id: snapshot.currentPlaylist?.id ?? null,
+        rawTracksLen: snapshot.currentPlaylist?.tracks?.length ?? 0,
+      });
+      console.log("[SyncBiz Audit] runtime activePlaylist", {
+        id: ap?.id ?? null,
+        getPlaylistTracksLen: ap ? getPlaylistTracks(ap).length : 0,
+      });
+      console.log("[SyncBiz Audit] runtime sessionTracks final", {
+        len: st.length,
+        firstThreeIds: st.slice(0, 3).map((t) => t.id),
+      });
+      console.log("[SyncBiz Audit] runtime currentPlayUrl final", {
+        url: cpu ? cpu.slice(0, 200) : null,
+      });
+    },
+    [getPlayUrl],
+  );
 
   const currentPlayUrl = state.currentSource
     ? getPlayUrl(state.currentSource, state.currentTrackIndex)
@@ -407,75 +673,248 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const playLocal = useCallback((url: string, browserPreference?: string) => {
+    const target = canonicalYouTubeWatchUrlForPlayback(url);
     // play-local runs on server and opens URL there – useless on mobile
     if (typeof window !== "undefined" && window.location.pathname === "/mobile") {
-      window.open(url, "_blank");
+      window.open(target, "_blank");
       return;
     }
     fetch("/api/commands/play-local", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target: url, browserPreference: browserPreference ?? "default" }),
+      body: JSON.stringify({ target: target, browserPreference: browserPreference ?? "default" }),
     }).catch(() => {});
   }, []);
 
   const playSource = useCallback(
     (source: UnifiedSource, trackIndex = 0) => {
       if (!deviceModeAllowsLocalPlayback.current) return;
-      const playlist = effectivePlaybackPlaylistAttachment(source);
-      const tracks = playlist ? getPlaylistTracks(playlist) : [];
-      const idx = Math.min(trackIndex, Math.max(0, tracks.length - 1));
-      const track = tracks[idx] ?? null;
-      const url = track?.url ?? source.url;
-
-      if (playlist && tracks.length === 0) {
-        mvpLog("empty_playlist", { id: source.id, title: source.title });
-        setState((s) => ({ ...s, lastMessage: "Playlist is empty" }));
-        return;
-      }
-
-      if (url && !isValidPlaybackUrl(url)) {
-        mvpLog("invalid_url", { url, id: source.id, title: source.title });
-        setState((s) => ({ ...s, lastMessage: "Invalid playback URL" }));
-        return;
-      }
-
-      const isRadioOrStream =
-        source.origin === "radio" ||
-        (source.type === "stream-url" && url?.startsWith("http"));
-      const embedded =
-        isRadioOrStream ||
-        (playlist && track ? canEmbedInCard(track.type) : source.type === "youtube" || source.type === "soundcloud");
-
-      stopAllBeforePlay();
-
-      setState((s) => {
-        let queue = s.queue.length > 0 ? s.queue : [source];
-        let qi = queue.findIndex((x) => x.id === source.id);
-        if (qi < 0) {
-          mvpLog("playsource_queue_miss", {
-            sourceId: source.id,
-            queueLenBefore: queue.length,
-          });
-          queue = [...queue, source];
-          qi = queue.length - 1;
-        }
-        return {
-          ...s,
-          currentPlaylist: playlist,
-          currentSource: source,
-          currentTrackIndex: idx,
-          status: "playing",
-          queue,
-          queueIndex: qi,
-          lastMessage: null,
-        };
+      syncbizAuditPlaySourceInvoked({
+        sourceId: source.id,
+        trackIndex,
+        via: "playSource",
       });
 
-      if (!embedded && url) {
-        const browserPref = source.source?.browserPreference ?? "default";
-        playLocal(url, browserPref);
+      const needsShellHydration =
+        source.origin === "playlist" &&
+        !!source.playlist?.id &&
+        !(source.playlist.tracks && source.playlist.tracks.length > 0);
+
+      console.log("[SyncBiz Audit] playSource shell hydration check", {
+        sourceId: source.id,
+        origin: source.origin,
+        playlistId: source.playlist?.id ?? null,
+        sourcePlaylistTracksLen: source.playlist?.tracks?.length ?? 0,
+        needsShellHydration,
+      });
+
+      const runPlay = (
+        resolved: UnifiedSource,
+        hydrationPath: "sync" | "merged" | "shell_fallback" = "sync",
+      ) => {
+        const playlist = effectivePlaybackPlaylistAttachment(resolved);
+        const tracks = playlist ? getPlaylistTracks(playlist) : [];
+        console.log("[SyncBiz Audit] playSource runPlay session playlist snapshot", {
+          hydrationPath,
+          runPlayVariant: hydrationPath === "merged" ? "runPlay(merged)" : "runPlay(source)",
+          resolvedSourceId: resolved.id,
+          sessionPlaylistId: playlist?.id ?? null,
+          getPlaylistTracksLen: tracks.length,
+          rawTracksArrayLenOnPlaylist: playlist?.tracks?.length ?? 0,
+        });
+        console.log("[SyncBiz Audit] runtime path step", {
+          transport: "playSource",
+          phase: "runPlay",
+          hydrationPath,
+          resolvedSourceId: resolved.id,
+          origin: resolved.origin,
+        });
+        const idx = Math.min(trackIndex, Math.max(0, tracks.length - 1));
+        const track = tracks[idx] ?? null;
+        const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? resolved.url);
+
+        if (playlist && tracks.length === 0) {
+          mvpLog("empty_playlist", { id: resolved.id, title: resolved.title });
+          setState((s) => ({ ...s, lastMessage: "Playlist is empty" }));
+          return;
+        }
+
+        if (url && !isValidPlaybackUrl(url)) {
+          mvpLog("invalid_url", { url, id: resolved.id, title: resolved.title });
+          setState((s) => ({ ...s, lastMessage: "Invalid playback URL" }));
+          return;
+        }
+
+        const isRadioOrStream =
+          resolved.origin === "radio" ||
+          (resolved.type === "stream-url" && url?.startsWith("http"));
+        const embedded =
+          isRadioOrStream ||
+          (playlist && track ? canEmbedInCard(track.type) : resolved.type === "youtube" || resolved.type === "soundcloud");
+
+        stopAllBeforePlay();
+
+        setState((s) => {
+          console.log("[SyncBiz Audit] playlist load start", {
+            sourceId: resolved.id,
+            origin: resolved.origin,
+            playlistId: playlist?.id,
+            trackIndex,
+            resolvedTrackIndex: idx,
+            queueLenBefore: s.queue.length,
+            currentSourceId: s.currentSource?.id ?? null,
+            isHydration: hasRestoredRef.current,
+          });
+          let queue =
+            s.queue.length > 0 ? s.queue.map((q) => (q.id === resolved.id ? resolved : q)) : [resolved];
+          let qi = queue.findIndex((x) => x.id === resolved.id);
+          if (qi < 0) {
+            mvpLog("playsource_queue_miss", {
+              sourceId: resolved.id,
+              queueLenBefore: queue.length,
+            });
+            console.log("[SyncBiz Audit] queue source miss", {
+              sourceId: resolved.id,
+              queueLenBefore: queue.length,
+              queueIds: queue.map((q) => q.id),
+            });
+            queue = [...queue, resolved];
+            qi = queue.length - 1;
+          }
+          console.log("[SyncBiz Audit] queue source resolve", {
+            sourceId: resolved.id,
+            playlistId: playlist?.id,
+            queueLenAfter: queue.length,
+            queueIndex: qi,
+            currentTrackIndex: idx,
+          });
+          console.log("[SyncBiz Audit] persisted_playlist_to_session_proof", {
+            playlistId: playlist?.id ?? null,
+            title: playlist?.name ?? resolved.title,
+            hasTracksArray: Array.isArray(playlist?.tracks),
+            tracksCount: playlist?.tracks?.length ?? 0,
+            resolvedLeafCount: tracks.length,
+            queueLengthAfterConversion: queue.length,
+            sessionAttachmentThin: !(
+              playlist &&
+              Array.isArray(playlist.tracks) &&
+              playlist.tracks.length > 0
+            ),
+          });
+          syncbizAuditQueueIndexTransition({
+            from: s.queueIndex,
+            to: qi,
+            via: "playSource_runPlay_setState",
+            extra: { resolvedSourceId: resolved.id },
+          });
+          syncbizAuditCurrentSourceTransition({
+            fromId: s.currentSource?.id ?? null,
+            toId: resolved.id,
+            via: "playSource_runPlay_setState",
+          });
+          return {
+            ...s,
+            currentPlaylist: playlist,
+            currentSource: resolved,
+            currentTrackIndex: idx,
+            status: "playing",
+            queue,
+            queueIndex: qi,
+            lastMessage: null,
+          };
+        });
+
+        if (!embedded && url) {
+          const browserPref = resolved.source?.browserPreference ?? "default";
+          playLocal(url, browserPref);
+        }
+      };
+
+      if (needsShellHydration) {
+        const pid = source.playlist!.id;
+        const fetchUrl = `/api/playlists/${encodeURIComponent(pid)}`;
+        void (async () => {
+          if (!deviceModeAllowsLocalPlayback.current) return;
+          try {
+            console.log("[SyncBiz Audit] playSource shell hydration fetch_start", {
+              fetchUrl,
+              playlistId: pid,
+              sourceId: source.id,
+            });
+            const res = await fetch(fetchUrl, {
+              credentials: "include",
+              cache: "no-store",
+            });
+            if (!res.ok) {
+              console.log("[SyncBiz Audit] playSource shell hydration fetch_result", {
+                fetchUrl,
+                responseOk: res.ok,
+                responseStatus: res.status,
+                returnedPlaylistId: null as string | null,
+                returnedTracksArrayLen: null as number | null,
+              });
+              console.log("[SyncBiz Audit] playSource shell hydration fallback", {
+                reason: "fetch_not_ok",
+                runPlay: "runPlay(source)",
+              });
+              runPlay(source, "shell_fallback");
+              return;
+            }
+            let full: Playlist;
+            try {
+              full = (await res.json()) as Playlist;
+            } catch {
+              console.log("[SyncBiz Audit] playSource shell hydration fetch_result", {
+                fetchUrl,
+                responseOk: true,
+                responseStatus: res.status,
+                returnedPlaylistId: null,
+                returnedTracksArrayLen: null,
+                parseError: true,
+              });
+              console.log("[SyncBiz Audit] playSource shell hydration fallback", {
+                reason: "json_parse_failed",
+                runPlay: "runPlay(source)",
+              });
+              runPlay(source, "shell_fallback");
+              return;
+            }
+            console.log("[SyncBiz Audit] playSource shell hydration fetch_result", {
+              fetchUrl,
+              responseOk: res.ok,
+              responseStatus: res.status,
+              returnedPlaylistId: full?.id ?? null,
+              returnedTracksArrayLen: full?.tracks?.length ?? 0,
+            });
+            if (!full?.id) {
+              console.log("[SyncBiz Audit] playSource shell hydration fallback", {
+                reason: "missing_playlist_id_in_body",
+                runPlay: "runPlay(source)",
+              });
+              runPlay(source, "shell_fallback");
+              return;
+            }
+            const merged: UnifiedSource = { ...source, playlist: full };
+            console.log("[SyncBiz Audit] playSource shell hydration applied", {
+              runPlay: "runPlay(merged)",
+              returnedPlaylistId: full.id,
+              returnedTracksArrayLen: full.tracks?.length ?? 0,
+              getPlaylistTracksLenAfterMerge: getPlaylistTracks(full).length,
+            });
+            runPlay(merged, "merged");
+          } catch (e) {
+            console.log("[SyncBiz Audit] playSource shell hydration fallback", {
+              reason: "fetch_exception",
+              runPlay: "runPlay(source)",
+              error: String(e),
+            });
+            runPlay(source, "shell_fallback");
+          }
+        })();
+        return;
       }
+
+      runPlay(source, "sync");
     },
     [stopAllBeforePlay, playLocal],
   );
@@ -492,12 +931,23 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       if (!deviceModeAllowsLocalPlayback.current) return;
       const byId = new Map(items.map((i) => [i.id, i] as const));
+      console.log("[SyncBiz Audit] hydration source map", {
+        count: items.length,
+        idsSample: items.slice(0, 10).map((i) => i.id),
+      });
       if (persistedV2) {
         const restoredQueue = persistedV2.queueIds.map((id) => byId.get(id)).filter((s): s is UnifiedSource => !!s);
         const source =
           byId.get(persistedV2.currentSourceId) ??
           (persistedV2.queueIndex >= 0 ? restoredQueue[persistedV2.queueIndex] : undefined) ??
           restoredQueue[0];
+        console.log("[SyncBiz Audit] current source lookup", {
+          phase: "persistedV2",
+          persistedCurrentSourceId: persistedV2.currentSourceId,
+          persistedQueueIds: persistedV2.queueIds,
+          restoredQueueLen: restoredQueue.length,
+          foundSourceId: source?.id ?? null,
+        });
         if (!source) {
           clearPersistedPlaybackV2();
           return;
@@ -608,12 +1058,30 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (transportLockRef.current) return;
     transportLockRef.current = true;
     setState((s) => {
+      const prevSourceId = s.currentSource?.id ?? null;
+      const prevTrackIndex = s.currentTrackIndex;
+      const prevQueueIndex = s.queueIndex;
+      const prevQueueLength = s.queue.length;
+      console.log("[SyncBiz Audit] PREV provider invoked", {
+        phase: "before_prev",
+        branch: "unknown",
+        playbackStatus: s.status,
+        currentSourceId: prevSourceId,
+        currentTrackIndex: prevTrackIndex,
+        queueIndex: prevQueueIndex,
+        queueLength: prevQueueLength,
+      });
       if (!s.currentSource) {
         transportLockRef.current = false;
         return s;
       }
+      emitPlaylistSessionAudit(s, { transport: "prev" });
       const sessionTracks = getPlaylistSessionTracks(s);
-      if (sessionTracks.length > 0) {
+      const curTrkPrev = sessionTracks[s.currentTrackIndex] ?? sessionTracks[0];
+      if (
+        sessionTracks.length > 0 &&
+        !preferQueueTransportOverCollapsedSession(s, sessionTracks.length, "prev")
+      ) {
         const trackCount = sessionTracks.length;
         const prevIdx =
           trackCount === 1
@@ -621,6 +1089,26 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             : s.currentTrackIndex > 0
               ? s.currentTrackIndex - 1
               : trackCount - 1;
+        console.log("[SyncBiz Audit] prev index calculation", {
+          playbackStatus: s.status,
+          currentSourceId: s.currentSource?.id ?? null,
+          currentTrackIndex: s.currentTrackIndex,
+          queueIndex: s.queueIndex,
+          queueLength: s.queue.length,
+          trackCount,
+          sessionTracksLen: sessionTracks.length,
+          prevIdx,
+          indexUnchanged: prevIdx === s.currentTrackIndex,
+          onlyOneSessionTrack: trackCount <= 1,
+          firstThreeIds: sessionTracks.slice(0, 3).map((t) => (t as { id?: string }).id ?? "n/a"),
+          selectedDiffersFromCurrent:
+            trackCount > 0
+              ? (sessionTracks[prevIdx] as { id?: string; url?: string } | undefined)?.id !==
+                  (curTrkPrev as { id?: string } | undefined)?.id ||
+                (sessionTracks[prevIdx] as { url?: string } | undefined)?.url !==
+                  (curTrkPrev as { url?: string } | undefined)?.url
+              : false,
+        });
         const track = sessionTracks[prevIdx];
         const url = track?.url ?? s.currentSource.url;
         const embedded = track ? canEmbedInCard(track.type) : false;
@@ -630,6 +1118,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           trackCount,
           fromIndex: s.currentTrackIndex,
           toIndex: prevIdx,
+        });
+        console.log("[SyncBiz Audit] PREV provider invoked", {
+          phase: "within_playlist_back",
+          branch: "within_playlist_back",
+          prevSourceId,
+          nextSourceId: s.currentSource.id,
+          prevTrackIndex,
+          nextTrackIndex: prevIdx,
+          prevQueueIndex,
+          nextQueueIndex: s.queueIndex,
+          queueLength: s.queue.length,
         });
         if (!embedded && url) {
           stopAllBeforePlay();
@@ -653,6 +1152,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           playLocal(url);
         }
         transportLockRef.current = false;
+        console.log("[SyncBiz Audit] PREV provider invoked", {
+          phase: "playlist_fallback_back",
+          branch: "playlist_fallback_back",
+          prevSourceId,
+          nextSourceId: s.currentSource.id,
+          prevTrackIndex,
+          nextTrackIndex: nextIdx,
+          prevQueueIndex,
+          nextQueueIndex: s.queueIndex,
+          queueLength: s.queue.length,
+        });
         return getAdvanceState(s, nextIdx);
       }
 
@@ -661,32 +1171,132 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         const prevSource = s.queue[s.queueIndex - 1];
         queueMicrotask(() => {
           try {
+            syncbizAuditTransportTransitionStart({
+              phase: "prev_queue_microtask_before_playSource",
+              prevSourceId: s.currentSource?.id ?? null,
+              nextSourceId: prevSource.id,
+              prevQueueIndex: s.queueIndex,
+              nextQueueIndex: s.queueIndex - 1,
+            });
             playSource(prevSource);
           } finally {
             transportLockRef.current = false;
           }
         });
+        console.log("[SyncBiz Audit] PREV provider invoked", {
+          phase: "queue_back",
+          branch: "queue_back",
+          prevSourceId,
+          nextSourceId: prevSource.id,
+          prevTrackIndex,
+          nextTrackIndex: 0,
+          prevQueueIndex,
+          nextQueueIndex: s.queueIndex - 1,
+          queueLength: s.queue.length,
+        });
         return s;
       }
       mvpLog("playback_prev", { scope: "noop" });
       transportLockRef.current = false;
+      console.log("[SyncBiz Audit] PREV provider invoked", {
+        phase: "noop",
+        branch: "noop",
+        prevSourceId,
+        nextSourceId: s.currentSource?.id ?? null,
+        prevTrackIndex,
+        nextTrackIndex: s.currentTrackIndex,
+        prevQueueIndex,
+        nextQueueIndex: s.queueIndex,
+        queueLength: s.queue.length,
+      });
       return s;
     });
   }, [stopAllBeforePlay, playLocal, playSource, getAdvanceState]);
 
-  const next = useCallback((opts?: { skipPlay?: boolean } | unknown) => {
+  const next = useCallback((opts?: { skipPlay?: boolean; auditTransportCase?: "ended_auto" } | unknown) => {
     if (!deviceModeAllowsLocalPlayback.current) return;
     if (transportLockRef.current) return;
-    const skipPlay = opts && typeof opts === "object" && "skipPlay" in opts && (opts as { skipPlay?: boolean }).skipPlay === true;
+    const skipPlay: boolean =
+      !!(opts && typeof opts === "object" && "skipPlay" in opts && (opts as { skipPlay?: boolean }).skipPlay === true);
+    const auditRaw =
+      opts && typeof opts === "object" && "auditTransportCase" in opts
+        ? (opts as { auditTransportCase?: unknown }).auditTransportCase
+        : undefined;
+    const auditTransportCase: "ended_auto" | undefined = auditRaw === "ended_auto" ? "ended_auto" : undefined;
     transportLockRef.current = true;
+    syncbizAuditTransportTransitionStart({
+      phase: "next_callback_entry",
+      auditTransportCase: auditTransportCase ?? null,
+      skipPlay,
+    });
     setState((s) => {
+      const prevSourceId = s.currentSource?.id ?? null;
+      const prevTrackIndex = s.currentTrackIndex;
+      const prevQueueIndex = s.queueIndex;
+      const prevQueueLength = s.queue.length;
+      const sessionLenForAudit = getPlaylistSessionTracks(s).length;
+      syncbizAuditNextInvoked({
+        currentSourceId: prevSourceId,
+        queueIndex: prevQueueIndex,
+        queueLength: prevQueueLength,
+        sessionTracksLen: sessionLenForAudit,
+        preferQueueCollapsed:
+          sessionLenForAudit > 0 &&
+          preferQueueTransportOverCollapsedSession(s, sessionLenForAudit, "next"),
+        auditTransportCase: auditTransportCase ?? null,
+        skipPlay,
+      });
+      console.log("[SyncBiz Audit] queue advance result", {
+        phase: "before_next",
+        branch: "unknown",
+        playbackStatus: s.status,
+        auditTransportCase: auditTransportCase ?? null,
+        currentSourceId: prevSourceId,
+        currentTrackIndex: prevTrackIndex,
+        queueIndex: prevQueueIndex,
+        queueLength: prevQueueLength,
+        skipPlay,
+      });
       if (!s.currentSource) {
         transportLockRef.current = false;
         return s;
       }
 
+      logRuntimePlaybackAudit(s, {
+        transport: "next",
+        phase: "next_entry_state_before",
+        auditTransportCase,
+      });
+
+      emitPlaylistSessionAudit(s, { transport: "next", auditTransportCase, skipPlay });
       const sessionTracks = getPlaylistSessionTracks(s);
-      if (sessionTracks.length > 0) {
+      const plSnap = s.currentPlaylist;
+      const plTracksForNext = plSnap ? getPlaylistTracks(plSnap) : [];
+      const currentPlayUrlSnapshot = getPlayUrl(s.currentSource, s.currentTrackIndex);
+      console.log("[SyncBiz Audit] next_transport_decision_snapshot", {
+        auditTransportCase: auditTransportCase ?? null,
+        skipPlay,
+        currentSourceId: s.currentSource.id,
+        currentSourceType: s.currentSource.type,
+        currentPlaylistId: plSnap?.id ?? null,
+        currentPlaylistTrackCount: plTracksForNext.length,
+        queueLength: s.queue.length,
+        currentTrackIndex: s.currentTrackIndex,
+        queueIndex: s.queueIndex,
+        currentPlayUrl: currentPlayUrlSnapshot,
+        nextTrackExistsFromQueue:
+          s.queue.length > 1 && s.queueIndex >= 0 && s.queueIndex < s.queue.length - 1,
+        nextTrackExistsFromCurrentPlaylist:
+          plTracksForNext.length > 1 && s.currentTrackIndex < plTracksForNext.length - 1,
+        sessionCollapsedToOne: sessionTracks.length <= 1,
+        isAutoMixing: null,
+        overlapActive: null,
+      });
+      const curTrkNext = sessionTracks[s.currentTrackIndex] ?? sessionTracks[0];
+      if (
+        sessionTracks.length > 0 &&
+        !preferQueueTransportOverCollapsedSession(s, sessionTracks.length, "next")
+      ) {
         const trackCount = sessionTracks.length;
         let nextIdx: number;
         let branch: "single_wrap" | "advance" | "wrap";
@@ -700,6 +1310,29 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : 0;
           branch = "wrap";
         }
+        console.log("[SyncBiz Audit] next index calculation", {
+          playbackStatus: s.status,
+          auditTransportCase: auditTransportCase ?? null,
+          currentSourceId: s.currentSource?.id ?? null,
+          currentTrackIndex: s.currentTrackIndex,
+          queueIndex: s.queueIndex,
+          queueLength: s.queue.length,
+          trackCount,
+          sessionTracksLen: sessionTracks.length,
+          branch,
+          shuffle: s.shuffle,
+          nextIdx,
+          indexUnchanged: nextIdx === s.currentTrackIndex,
+          onlyOneSessionTrack: trackCount <= 1,
+          firstThreeIds: sessionTracks.slice(0, 3).map((t) => (t as { id?: string }).id ?? "n/a"),
+          selectedDiffersFromCurrent:
+            trackCount > 0
+              ? (sessionTracks[nextIdx] as { id?: string; url?: string } | undefined)?.id !==
+                  (curTrkNext as { id?: string } | undefined)?.id ||
+                (sessionTracks[nextIdx] as { url?: string } | undefined)?.url !==
+                  (curTrkNext as { url?: string } | undefined)?.url
+              : false,
+        });
         const track = sessionTracks[nextIdx];
         const url = track?.url ?? s.currentSource.url;
         const embedded = track ? canEmbedInCard(track.type) : false;
@@ -713,12 +1346,48 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           toIndex: nextIdx,
           skipPlay,
         });
+        console.log("[SyncBiz Audit] queue advance result", {
+          phase: "playlist_session",
+          branch,
+          playbackStatus: s.status,
+          auditTransportCase: auditTransportCase ?? null,
+          prevSourceId,
+          nextSourceId: s.currentSource.id,
+          prevTrackIndex,
+          nextTrackIndex: nextIdx,
+          prevQueueIndex,
+          nextQueueIndex: s.queueIndex,
+          queueLength: s.queue.length,
+          skipPlay,
+        });
+        console.log("[SyncBiz Audit] queue advance", {
+          scope: "playlist",
+          playbackStatus: s.status,
+          auditTransportCase: auditTransportCase ?? null,
+          fromIndex: s.currentTrackIndex,
+          toIndex: nextIdx,
+          queueIndex: s.queueIndex,
+          queueLength: s.queue.length,
+          sourceId: s.currentSource.id,
+        });
         if (!skipPlay && !embedded && url) {
           stopAllBeforePlay();
           playLocal(url);
         }
         transportLockRef.current = false;
-        return getAdvanceState(s, nextIdx);
+        const nextState = getAdvanceState(s, nextIdx);
+        logRuntimePlaybackAudit(nextState, {
+          transport: "next",
+          phase: "playlist_session_state_after_transition",
+          auditTransportCase,
+          extra: {
+            branch,
+            fromIndex: s.currentTrackIndex,
+            toIndex: nextIdx,
+            skipPlay,
+          },
+        });
+        return nextState;
       }
 
       const playlist = s.currentPlaylist;
@@ -735,6 +1404,18 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           playLocal(url);
         }
         transportLockRef.current = false;
+        console.log("[SyncBiz Audit] queue advance result", {
+          phase: "playlist_fallback",
+          branch: "advance",
+          prevSourceId,
+          nextSourceId: s.currentSource.id,
+          prevTrackIndex,
+          nextTrackIndex: nextIdx,
+          prevQueueIndex,
+          nextQueueIndex: s.queueIndex,
+          queueLength: s.queue.length,
+          skipPlay,
+        });
         return getAdvanceState(s, nextIdx);
       }
 
@@ -751,6 +1432,18 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         }
         transportLockRef.current = false;
         mvpLog("playback_next", { scope: "global_queue", branch: "repeat_restart", skipPlay });
+        console.log("[SyncBiz Audit] queue advance result", {
+          phase: "repeat_restart",
+          branch: "repeat_restart",
+          prevSourceId,
+          nextSourceId: s.currentSource.id,
+          prevTrackIndex,
+          nextTrackIndex: 0,
+          prevQueueIndex,
+          nextQueueIndex: s.queueIndex,
+          queueLength: s.queue.length,
+          skipPlay,
+        });
         return getAdvanceState(s, 0);
       }
 
@@ -769,7 +1462,34 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           skipPlay,
         });
         if (nextSource) {
+          console.log("[SyncBiz Audit] queue advance", {
+            scope: "global_queue",
+            branch: "queue_advance",
+            nextQueueIdx: nextQueueIdx % s.queue.length,
+            nextSourceId: nextSource?.id,
+            currentSourceId: s.currentSource.id,
+            queueIndex: s.queueIndex,
+            queueLength: s.queue.length,
+          });
           if (nextSource.id === s.currentSource.id && !s.repeat) {
+            console.log("[SyncBiz Audit] Queue advance -> stop", {
+              queueLen: s.queue.length,
+              queueIndex: s.queueIndex,
+              sourceId: s.currentSource.id,
+              repeat: s.repeat,
+            });
+            console.log("[SyncBiz Audit] queue advance result", {
+              phase: "global_queue_stop_same_source",
+              branch: "queue_advance",
+              prevSourceId,
+              nextSourceId: nextSource.id,
+              prevTrackIndex,
+              nextTrackIndex: s.currentTrackIndex,
+              prevQueueIndex,
+              nextQueueIndex: s.queueIndex,
+              queueLength: s.queue.length,
+              skipPlay,
+            });
             stop();
             transportLockRef.current = false;
             return s;
@@ -777,6 +1497,27 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           if (!skipPlay) {
             queueMicrotask(() => {
               try {
+                syncbizAuditTransportTransitionStart({
+                  phase: "next_queue_microtask_before_playSource",
+                  prevSourceId,
+                  nextSourceId: nextSource.id,
+                  prevQueueIndex,
+                  nextQueueIndex: nextQueueIdx % s.queue.length,
+                  queueLength: s.queue.length,
+                  auditTransportCase: auditTransportCase ?? null,
+                });
+                console.log("[SyncBiz Audit] queue advance result", {
+                  phase: "global_queue_advance",
+                  branch: "queue_advance",
+                  prevSourceId,
+                  nextSourceId: nextSource.id,
+                  prevTrackIndex,
+                  nextTrackIndex: 0,
+                  prevQueueIndex,
+                  nextQueueIndex: nextQueueIdx % s.queue.length,
+                  queueLength: s.queue.length,
+                  skipPlay,
+                });
                 playSource(nextSource);
               } finally {
                 transportLockRef.current = false;
@@ -784,12 +1525,24 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             });
           } else {
             transportLockRef.current = false;
+            const qi = nextQueueIdx % s.queue.length;
+            syncbizAuditQueueIndexTransition({
+              from: prevQueueIndex,
+              to: qi,
+              via: "next_global_queue_skipPlay_setState",
+              extra: { nextSourceId: nextSource.id, auditTransportCase: auditTransportCase ?? null },
+            });
+            syncbizAuditCurrentSourceTransition({
+              fromId: prevSourceId,
+              toId: nextSource.id,
+              via: "next_global_queue_skipPlay_setState",
+            });
             return {
               ...s,
               currentSource: nextSource,
               currentPlaylist: nextSource.playlist ?? s.currentPlaylist,
               currentTrackIndex: 0,
-              queueIndex: nextQueueIdx % s.queue.length,
+              queueIndex: qi,
               status: "playing" as const,
             };
           }
@@ -797,10 +1550,32 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         return s;
       }
       mvpLog("playback_next", { scope: "noop", skipPlay });
+      console.log("[SyncBiz Audit] queue advance result", {
+        phase: "after_next_noop",
+        branch: "noop",
+        prevSourceId,
+        nextSourceId: s.currentSource?.id ?? null,
+        prevTrackIndex,
+        nextTrackIndex: s.currentTrackIndex,
+        prevQueueIndex,
+        nextQueueIndex: s.queueIndex,
+        queueLength: s.queue.length,
+        skipPlay,
+      });
       transportLockRef.current = false;
       return s;
     });
-  }, [stopAllBeforePlay, playLocal, playSource, getShuffledIndex, getAdvanceState, stop]);
+  }, [
+    stopAllBeforePlay,
+    playLocal,
+    playSource,
+    getShuffledIndex,
+    getAdvanceState,
+    stop,
+    logRuntimePlaybackAudit,
+    emitPlaylistSessionAudit,
+    getPlayUrl,
+  ]);
 
   const getNextStreamUrl = useCallback((): string | null => {
     return (() => {
@@ -808,7 +1583,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       if (!s.currentSource) return null;
 
       const sessionTracks = getPlaylistSessionTracks(s);
-      if (sessionTracks.length > 0) {
+      if (
+        sessionTracks.length > 0 &&
+        !preferQueueTransportOverCollapsedSession(s, sessionTracks.length, "next")
+      ) {
         const trackCount = sessionTracks.length;
         let nextIdx: number;
         if (trackCount === 1) {
@@ -819,7 +1597,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : 0;
         }
         const track = sessionTracks[nextIdx];
-        const url = track?.url ?? s.currentSource.url;
+        const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
         const embedded = track ? canEmbedInCard(track.type) : false;
         const out = !embedded && url ? url : null;
         if (out) {
@@ -839,7 +1617,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       if (trackCount > 1 && s.currentTrackIndex < trackCount - 1) {
         const nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
         const track = tracks[nextIdx];
-        const url = track?.url ?? s.currentSource.url;
+        const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
         const embedded = track ? canEmbedInCard(track.type) : false;
         return !embedded && url ? url : null;
       }
@@ -849,7 +1627,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
       if (atLastTrack && s.repeat && trackCount >= 1) {
         const track = tracks[0];
-        const url = track?.url ?? s.currentSource.url;
+        const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
         const embedded = track ? canEmbedInCard(track.type) : false;
         return !embedded && url ? url : null;
       }
@@ -879,7 +1657,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (!s.currentSource) return null;
 
     const sessionTracks = getPlaylistSessionTracks(s);
-    if (sessionTracks.length > 0) {
+    if (
+      sessionTracks.length > 0 &&
+      !preferQueueTransportOverCollapsedSession(s, sessionTracks.length, "next")
+    ) {
       const trackCount = sessionTracks.length;
       let nextIdx: number;
       if (trackCount === 1) {
@@ -890,7 +1671,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : 0;
       }
       const track = sessionTracks[nextIdx];
-      const url = track?.url ?? s.currentSource.url;
+      const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
       const embedded = track ? canEmbedInCard(track.type) : false;
       let result: { type: "youtube"; url: string; videoId: string } | null = null;
       if (embedded && url && track?.type === "youtube") {
@@ -914,7 +1695,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (trackCount > 1 && s.currentTrackIndex < trackCount - 1) {
       const nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
       const track = tracks[nextIdx];
-      const url = track?.url ?? s.currentSource.url;
+      const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
       const embedded = track ? canEmbedInCard(track.type) : false;
       if (embedded && url && track?.type === "youtube") {
         const videoId = getYouTubeVideoId(url);
@@ -928,7 +1709,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
     if (atLastTrack && s.repeat && trackCount >= 1) {
       const track = tracks[0];
-      const url = track?.url ?? s.currentSource.url;
+      const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
       const embedded = track ? canEmbedInCard(track.type) : false;
       if (embedded && url && track?.type === "youtube") {
         const videoId = getYouTubeVideoId(url);
@@ -1002,9 +1783,22 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         s.currentSource &&
         !sources.some((x) => x.id === s.currentSource!.id)
       ) {
+        console.log("[SyncBiz Audit] setQueue skip to preserve currentSource", {
+          currentSourceId: s.currentSource.id,
+          status: s.status,
+          existingQueueLen: s.queue.length,
+          incomingQueueLen: sources.length,
+          incomingIds: sources.map((x) => x.id),
+        });
         return s;
       }
       const qi = s.currentSource ? sources.findIndex((x) => x.id === s.currentSource!.id) : -1;
+      console.log("[SyncBiz Audit] queue item created", {
+        currentSourceId: s.currentSource?.id ?? null,
+        queueLen: sources.length,
+        queueIndex: qi,
+        queueIds: sources.map((x) => x.id),
+      });
       return {
         ...s,
         queue: sources,

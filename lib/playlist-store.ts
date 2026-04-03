@@ -8,7 +8,7 @@
 import { mkdir, readdir, readFile, writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { getPlaylistsDir } from "./data-path";
-import type { Playlist, PlaylistCreateInput } from "./playlist-types";
+import type { Playlist, PlaylistCreateInput, PlaylistTrack } from "./playlist-types";
 
 async function ensurePlaylistsDir(): Promise<void> {
   const dir = getPlaylistsDir();
@@ -87,6 +87,19 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
   const branchId = typeof input.branchId === "string" && input.branchId.trim()
     ? input.branchId.trim()
     : DEFAULT_BRANCH_ID;
+  /** Persist at least one row so GET /api/playlists/[id] exposes tracks[] (not shell-only JSON). Mirrors getPlaylistTracks legacy single-URL shape. */
+  const tracks: PlaylistTrack[] =
+    input.tracks && input.tracks.length > 0
+      ? input.tracks
+      : [
+          {
+            id,
+            name: input.name,
+            type: input.type,
+            url: input.url,
+            cover: thumbnail || undefined,
+          },
+        ];
   const playlist: Playlist = {
     ...input,
     id,
@@ -94,6 +107,7 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
     branchId,
     tenantId: input.tenantId?.trim() || undefined,
     createdAt: new Date().toISOString(),
+    tracks,
   };
   const toWrite = { ...playlist, cover: thumbnail || undefined };
   await writeFile(playlistPath(id), JSON.stringify(toWrite, null, 2), "utf-8");

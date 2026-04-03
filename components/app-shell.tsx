@@ -369,6 +369,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       ...unifiedFoundationHints("playlist", created.type as UnifiedSource["type"], created.url),
     };
     savePlaylistToLocal(created);
+    console.log("[SyncBiz Audit] playlist load resolved", {
+      sourceId: unified.id,
+      origin: unified.origin,
+      playlistId: created.id,
+      queueLen: 1,
+      isShazam: parsed?.type === "shazam",
+    });
     setQueue([unified]);
     playSource(unified);
   };

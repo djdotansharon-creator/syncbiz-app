@@ -3,7 +3,12 @@
  * Uses credentials: "include" so session cookies are always sent to same-origin API routes.
  */
 
-import { inferPlaylistType, getYouTubeThumbnail, getYouTubeVideoId } from "./playlist-utils";
+import {
+  canonicalYouTubeWatchUrlForPlayback,
+  inferPlaylistType,
+  getYouTubeThumbnail,
+  getYouTubeVideoId,
+} from "./playlist-utils";
 import type { Playlist } from "./playlist-types";
 
 export type CreatePlaylistFromSearchMeta = {
@@ -17,7 +22,7 @@ export type CreatePlaylistFromSearchMeta = {
 
 /** Resolve search/playlist YouTube URLs to a watch URL with `v=` for embed + persistence. */
 export async function resolveYouTubePlayableUrlForSearch(url: string): Promise<string> {
-  if (getYouTubeVideoId(url)) return url;
+  if (getYouTubeVideoId(url)) return canonicalYouTubeWatchUrlForPlayback(url);
   try {
     const res = await fetch("/api/sources/resolve-youtube-playable-url", {
       method: "POST",
@@ -27,7 +32,8 @@ export async function resolveYouTubePlayableUrlForSearch(url: string): Promise<s
     });
     if (!res.ok) return url;
     const data = (await res.json()) as { playableUrl?: string };
-    return data.playableUrl || url;
+    const out = data.playableUrl || url;
+    return getYouTubeVideoId(out) ? canonicalYouTubeWatchUrlForPlayback(out) : out;
   } catch {
     return url;
   }
