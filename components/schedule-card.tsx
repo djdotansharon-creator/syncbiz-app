@@ -6,7 +6,10 @@ import { ActionButtonPlayNow, ActionButtonDelete } from "@/components/ui/action-
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
+import { getPlaylistTracks, type Playlist } from "@/lib/playlist-types";
+import { canonicalYouTubeWatchUrlForPlayback } from "@/lib/playlist-utils";
 import { supportsEmbedded } from "@/lib/player-utils";
+import type { UnifiedSource } from "@/lib/source-types";
 import type { Device, Schedule, Source } from "@/lib/types";
 
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
@@ -33,7 +36,7 @@ type ScheduleCardProps = {
 export function ScheduleCard({ schedule, device, source }: ScheduleCardProps) {
   const router = useRouter();
   const { t } = useTranslations();
-  const { playSourceFromDb, setLastMessage } = usePlayback();
+  const { playSourceFromDb, setLastMessage, stop, setQueue, playSource } = usePlayback();
   const [deleting, setDeleting] = useState(false);
   const [playing, setPlaying] = useState(false);
 
@@ -55,6 +58,74 @@ export function ScheduleCard({ schedule, device, source }: ScheduleCardProps) {
   }
 
   async function handlePlayNow() {
+    const schedulePlaylistId =
+      schedule.targetType === "PLAYLIST" ? (schedule.targetId || schedule.sourceId || "").trim() : "";
+
+    if (schedulePlaylistId) {
+      if (source && supportsEmbedded(source)) {
+        router.push(`/player?playlistId=${encodeURIComponent(schedulePlaylistId)}`);
+        return;
+      }
+
+      setPlaying(true);
+      setLastMessage(null);
+      try {
+        const res = await fetch(`/api/playlists/${encodeURIComponent(schedulePlaylistId)}`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          setLastMessage(data?.error ? `Failed: ${data.error}` : "Playlist not found.");
+          return;
+        }
+        const playlist = (await res.json()) as Playlist;
+        if (!playlist?.id) {
+          setLastMessage("Failed: Invalid playlist");
+          return;
+        }
+        const unified: UnifiedSource = {
+          id: `pl-${playlist.id}`,
+          title: playlist.name,
+          genre: playlist.genre || "Mixed",
+          cover: playlist.thumbnail || playlist.cover || null,
+          type: (playlist.tracks?.[0]?.type ?? playlist.type) as UnifiedSource["type"],
+          url: playlist.url,
+          origin: "playlist",
+          playlist,
+        };
+        stop();
+        setQueue([unified]);
+        playSource(unified, 0);
+
+        const tracks = getPlaylistTracks(playlist);
+        const rawLeaf = (tracks[0]?.url ?? playlist.url).trim();
+        if (!rawLeaf) {
+          setLastMessage("Failed: No target path");
+          return;
+        }
+        const target = canonicalYouTubeWatchUrlForPlayback(rawLeaf);
+        const cmdRes = await fetch("/api/commands/play-local", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target,
+            browserPreference: source?.browserPreference ?? "default",
+          }),
+        });
+        if (cmdRes.ok) {
+          setLastMessage("Local playback command sent");
+        } else {
+          const data = await cmdRes.json().catch(() => ({}));
+          setLastMessage(data?.error ? `Failed: ${data.error}` : "Playback failed.");
+        }
+        router.refresh();
+      } finally {
+        setPlaying(false);
+      }
+      return;
+    }
+
     if (!source) return;
     if (supportsEmbedded(source)) {
       router.push(`/player?sourceId=${source.id}`);
@@ -63,7 +134,7 @@ export function ScheduleCard({ schedule, device, source }: ScheduleCardProps) {
     setPlaying(true);
     setLastMessage(null);
     try {
-      playSourceFromDb(source);
+      playSourceFromDb(source, { auditScheduledNonEmbedded: true });
       const target = (source.target ?? source.uriOrPath ?? "").trim();
       if (!target) {
         setLastMessage("Failed: No target path");

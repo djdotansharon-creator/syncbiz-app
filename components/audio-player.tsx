@@ -374,6 +374,11 @@ export function AudioPlayer() {
   const lastUiDurationRef = useRef(0);
   const lastUiBufferedRef = useRef(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  /** AUDIT: provider vs engine truth snapshot (background / silent playback). */
+  const truthAuditPollTickRef = useRef(0);
+  const truthAuditLastPollWallMsRef = useRef(0);
+  const truthAuditLastEngineTimeRef = useRef<number | null>(null);
+  const truthAuditSnapshotDedupeMsRef = useRef(0);
   const isYouTubeRef = useRef(false);
   const isSoundCloudRef = useRef(false);
   const isStreamUrlRef = useRef(false);
@@ -389,6 +394,95 @@ export function AudioPlayer() {
   isStreamUrlRef.current = Boolean(isStreamUrl);
   isControlMirrorRef.current = Boolean(isControlMirror);
   embedReadyRef.current = embedReady;
+
+  const logProviderEngineTruthSnapshot = useCallback((reason: string) => {
+    if (typeof document === "undefined") return;
+    const now = Date.now();
+    if (now - truthAuditSnapshotDedupeMsRef.current < 400) return;
+    truthAuditSnapshotDedupeMsRef.current = now;
+
+    const providerSaysPlaying = statusRef.current === "playing";
+    const tabHidden = document.hidden;
+    const visibilityState = document.visibilityState;
+    const msSinceLastPollTick =
+      truthAuditLastPollWallMsRef.current > 0 ? now - truthAuditLastPollWallMsRef.current : null;
+    const pollTick = truthAuditPollTickRef.current;
+    const lastSampledEngineTime = truthAuditLastEngineTimeRef.current;
+
+    let engineSuggestsPlaying: boolean | null = null;
+    let ytPlayerState: number | null = null;
+    let ytCurrentTime: number | null = null;
+    let audioPaused: boolean | null = null;
+    let audioCurrentTime: number | null = null;
+    let audioReadyState: number | null = null;
+    let soundCloudWidgetPresent: boolean | null = null;
+
+    if (isYouTubeRef.current) {
+      const p = ytPlayerRef.current;
+      if (isYtPlayerReady(p)) {
+        ytPlayerState = safeGetPlayerState(p);
+        ytCurrentTime = safeGetCurrentTime(p);
+        const YT = window.YT;
+        engineSuggestsPlaying =
+          YT != null &&
+          (ytPlayerState === YT.PlayerState.PLAYING || ytPlayerState === YT.PlayerState.BUFFERING);
+      } else {
+        engineSuggestsPlaying = false;
+      }
+    } else if (isStreamUrlRef.current) {
+      const a = audioRef.current;
+      if (a) {
+        audioPaused = a.paused;
+        audioCurrentTime = a.currentTime;
+        audioReadyState = a.readyState;
+        engineSuggestsPlaying = !a.paused && !a.ended;
+      } else {
+        engineSuggestsPlaying = false;
+      }
+    } else if (isSoundCloudRef.current) {
+      soundCloudWidgetPresent = !!scWidgetRef.current;
+      engineSuggestsPlaying = null;
+    }
+
+    const timeDeltaSinceLastPollSample =
+      Number.isFinite(ytCurrentTime as number) && Number.isFinite(lastSampledEngineTime as number)
+        ? (ytCurrentTime as number) - (lastSampledEngineTime as number)
+        : Number.isFinite(audioCurrentTime as number) && Number.isFinite(lastSampledEngineTime as number)
+          ? (audioCurrentTime as number) - (lastSampledEngineTime as number)
+          : null;
+
+    const divergent =
+      providerSaysPlaying && engineSuggestsPlaying === false;
+
+    console.log("[SyncBiz Audit] provider_engine_truth_snapshot", {
+      reason,
+      tabHidden,
+      visibilityState,
+      pollTick,
+      msSinceLastPollTick,
+      providerSaysPlaying,
+      engineSuggestsPlaying,
+      divergent,
+      isControlMirror: isControlMirrorRef.current,
+      deckUiNote: isControlMirrorRef.current
+        ? "CONTROL: visible PLAYING badge uses masterState in this component tree"
+        : "LOCAL: displayStatus uses PlaybackProvider status",
+      sourceYouTube: isYouTubeRef.current,
+      sourceSoundCloud: isSoundCloudRef.current,
+      sourceStreamUrl: isStreamUrlRef.current,
+      currentSourceId: currentSourceIdRef.current,
+      currentPlayUrlPreview: currentPlayUrlRef.current?.slice(0, 120) ?? null,
+      embedReady: embedReadyRef.current,
+      ytPlayerState,
+      ytCurrentTime,
+      lastSampledEngineTime,
+      timeDeltaSinceLastPollSample,
+      audioPaused,
+      audioCurrentTime,
+      audioReadyState,
+      soundCloudWidgetPresent,
+    });
+  }, []);
 
   const updatePositionIfChanged = useCallback((next: number) => {
     if (!Number.isFinite(next)) return;
@@ -906,6 +1000,9 @@ export function AudioPlayer() {
         hidden: document.hidden,
         visibilityState: document.visibilityState,
       });
+      if (document.visibilityState === "visible") {
+        logProviderEngineTruthSnapshot("visibilitychange_to_visible");
+      }
       if (!document.hidden) {
         nudgeResumePlayback();
         if (statusRef.current === "playing" && !isControlMirrorRef.current) {
@@ -918,6 +1015,9 @@ export function AudioPlayer() {
     };
     const onPageShow = (e: PageTransitionEvent) => {
       playbackLifecycleLog("pageshow", { persisted: e.persisted });
+      if (!document.hidden) {
+        logProviderEngineTruthSnapshot("pageshow");
+      }
       nudgeResumePlayback();
       if (statusRef.current === "playing" && !isControlMirrorRef.current && !document.hidden) {
         void acquirePlaybackWakeLock(wakeLockRef);
@@ -926,6 +1026,7 @@ export function AudioPlayer() {
     const onFreeze = () => playbackLifecycleLog("freeze", {});
     const onResume = () => {
       playbackLifecycleLog("resume", {});
+      logProviderEngineTruthSnapshot("document_resume");
       nudgeResumePlayback();
     };
     const onFocus = () => playbackLifecycleLog("focus", {});
@@ -947,7 +1048,7 @@ export function AudioPlayer() {
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("blur", onBlur);
     };
-  }, [nudgeResumePlayback]);
+  }, [nudgeResumePlayback, logProviderEngineTruthSnapshot]);
 
   // HTML5 audio play/pause – only call play() when paused to avoid redundant calls that can cause jumps
   useEffect(() => {
@@ -1248,6 +1349,8 @@ export function AudioPlayer() {
     if (!currentSource || isSeekingRef.current) return;
     const poll = () => {
       if (isSeekingRef.current) return;
+      truthAuditPollTickRef.current += 1;
+      truthAuditLastPollWallMsRef.current = Date.now();
       if (isYouTube) {
         const p = ytPlayerRef.current;
         if (isYtPlayerReady(p)) {
@@ -1371,6 +1474,7 @@ export function AudioPlayer() {
           }
           const pos = safeGetCurrentTime(p);
           const dur = safeGetDuration(p);
+          if (Number.isFinite(pos)) truthAuditLastEngineTimeRef.current = pos;
           updatePositionIfChanged(pos);
           updateDurationIfChanged(dur);
           const frac = safeGetVideoLoadedFraction(p);
@@ -1468,6 +1572,7 @@ export function AudioPlayer() {
       } else if (isSoundCloud && scWidgetRef.current) {
         scWidgetRef.current.getPosition((pos) => {
           const p = pos / 1000;
+          if (Number.isFinite(p)) truthAuditLastEngineTimeRef.current = p;
           updatePositionIfChanged(p);
           scWidgetRef.current?.getDuration((dur) => {
             const d = dur / 1000;
@@ -1482,6 +1587,7 @@ export function AudioPlayer() {
         const a = audioRef.current;
         const t = a.currentTime;
         const d = a.duration;
+        if (Number.isFinite(t)) truthAuditLastEngineTimeRef.current = t;
         lastKnownDurationRef.current = d;
         updatePositionIfChanged(t);
         if (!Number.isFinite(d) || d <= 0) {

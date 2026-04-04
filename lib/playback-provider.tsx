@@ -118,6 +118,31 @@ function deriveCurrentTrack(source: UnifiedSource | null, trackIndex: number): P
   return source ? unifiedToPlaybackTrack(source, trackIndex) : null;
 }
 
+/** AUDIT: scheduled non-embedded play vs first natural auto-advance — stale queue proof (no behavior change). */
+function logScheduledQueueReuseProof(
+  snap: Pick<PlaybackState, "currentSource" | "currentPlaylist" | "queue" | "queueIndex" | "currentTrackIndex">,
+  payload: {
+    reason: "scheduled_non_embedded_start" | "after_first_natural_auto_advance";
+    sourceHasPlaylistPayload: boolean | null;
+    fromScheduledPlay: boolean;
+    nextSelectedSourceId: string | null;
+  },
+) {
+  console.log("[SyncBiz Audit] scheduled_queue_reuse_proof", {
+    reason: payload.reason,
+    currentSourceId: snap.currentSource?.id ?? null,
+    currentPlaylistId: snap.currentPlaylist?.id ?? null,
+    currentPlaylistName: snap.currentPlaylist?.name ?? null,
+    queueIds: snap.queue.map((q) => q.id),
+    queueLength: snap.queue.length,
+    queueIndex: snap.queueIndex,
+    currentTrackIndex: snap.currentTrackIndex,
+    sourceHasPlaylistPayload: payload.sourceHasPlaylistPayload,
+    fromScheduledPlay: payload.fromScheduledPlay,
+    nextSelectedSourceId: payload.nextSelectedSourceId,
+  });
+}
+
 /**
  * Session bounds for NEXT/PREV: `fromSource` = effective attachment on current source;
  * `snap` = `currentPlaylist`. If both exist, ids match, and snap has more resolved tracks
@@ -348,7 +373,7 @@ type PlaybackContextValue = PlaybackState & {
   toggleRepeat: () => void;
   setLastMessage: (message: string | null) => void;
   playSource: (source: UnifiedSource, trackIndex?: number) => void;
-  playSourceFromDb: (source: Source) => void;
+  playSourceFromDb: (source: Source, opts?: { auditScheduledNonEmbedded?: boolean }) => void;
   playPlaylist: (playlist: Playlist, trackIndex?: number) => void;
   setQueue: (sources: UnifiedSource[]) => void;
   replaceSource: (tempId: string, real: UnifiedSource) => void;
@@ -601,6 +626,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const recoveryPositionRef = useRef<number>(0);
   const lastRecoveryWriteAtRef = useRef<number>(0);
   const transportLockRef = useRef(false);
+  /** Pre-invocation playback snapshot for audits (e.g. schedule Play now before playSource mutates state). */
+  const playbackStateForAuditRef = useRef(state);
+  playbackStateForAuditRef.current = state;
+  /** When true, next `ended_auto` transport logs one post-schedule advance proof then clears. */
+  const scheduledQueueReuseAuditPendingRef = useRef(false);
 
   useEffect(() => {
     transportLockRef.current = false;
@@ -1234,6 +1264,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const prevTrackIndex = s.currentTrackIndex;
       const prevQueueIndex = s.queueIndex;
       const prevQueueLength = s.queue.length;
+      const emitScheduledQueueEndedAutoProof = (nextSelectedSourceId: string | null) => {
+        if (auditTransportCase !== "ended_auto") return;
+        if (!scheduledQueueReuseAuditPendingRef.current) return;
+        scheduledQueueReuseAuditPendingRef.current = false;
+        logScheduledQueueReuseProof(s, {
+          reason: "after_first_natural_auto_advance",
+          sourceHasPlaylistPayload: !!s.currentSource?.playlist,
+          fromScheduledPlay: true,
+          nextSelectedSourceId,
+        });
+      };
       const sessionLenForAudit = getPlaylistSessionTracks(s).length;
       syncbizAuditNextInvoked({
         currentSourceId: prevSourceId,
@@ -1387,6 +1428,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             skipPlay,
           },
         });
+        emitScheduledQueueEndedAutoProof(s.currentSource.id);
         return nextState;
       }
 
@@ -1416,6 +1458,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           queueLength: s.queue.length,
           skipPlay,
         });
+        emitScheduledQueueEndedAutoProof(s.currentSource.id);
         return getAdvanceState(s, nextIdx);
       }
 
@@ -1444,6 +1487,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           queueLength: s.queue.length,
           skipPlay,
         });
+        emitScheduledQueueEndedAutoProof(s.currentSource.id);
         return getAdvanceState(s, 0);
       }
 
@@ -1490,11 +1534,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
               queueLength: s.queue.length,
               skipPlay,
             });
+            emitScheduledQueueEndedAutoProof(nextSource.id);
             stop();
             transportLockRef.current = false;
             return s;
           }
           if (!skipPlay) {
+            emitScheduledQueueEndedAutoProof(nextSource.id);
             queueMicrotask(() => {
               try {
                 syncbizAuditTransportTransitionStart({
@@ -1537,6 +1583,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
               toId: nextSource.id,
               via: "next_global_queue_skipPlay_setState",
             });
+            emitScheduledQueueEndedAutoProof(nextSource.id);
             return {
               ...s,
               currentSource: nextSource,
@@ -1547,6 +1594,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             };
           }
         }
+        emitScheduledQueueEndedAutoProof(null);
         return s;
       }
       mvpLog("playback_next", { scope: "noop", skipPlay });
@@ -1562,6 +1610,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         queueLength: s.queue.length,
         skipPlay,
       });
+      emitScheduledQueueEndedAutoProof(null);
       transportLockRef.current = false;
       return s;
     });
@@ -1769,8 +1818,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const playSourceFromDb = useCallback(
-    (source: Source) => {
-      playSource(sourceToUnified(source));
+    (source: Source, opts?: { auditScheduledNonEmbedded?: boolean }) => {
+      const unified = sourceToUnified(source);
+      if (opts?.auditScheduledNonEmbedded) {
+        scheduledQueueReuseAuditPendingRef.current = true;
+        const snap = playbackStateForAuditRef.current;
+        logScheduledQueueReuseProof(snap, {
+          reason: "scheduled_non_embedded_start",
+          sourceHasPlaylistPayload: !!unified.playlist,
+          fromScheduledPlay: true,
+          nextSelectedSourceId: null,
+        });
+      }
+      playSource(unified);
     },
     [playSource],
   );
