@@ -1,5 +1,5 @@
 {
-  "name": "Untitled",
+  "name": "SUZANA",
   "genre": "Mixed",
   "type": "youtube",
   "url": "https://www.youtube.com/watch?v=ROJYlgWVSC0&list=RDROJYlgWVSC0&start_radio=1",
@@ -8,5 +8,30 @@
   "tenantId": "tnt-default",
   "id": "pl-1774536675980-7qu7w4j",
   "createdAt": "2026-03-26T14:51:15.980Z",
-  "cover": "https://img.youtube.com/vi/ROJYlgWVSC0/hqdefault.jpg"
+  "cover": "https://img.youtube.com/vi/ROJYlgWVSC0/hqdefault.jpg",
+  "tracks": [
+    {
+      "id": "pl-1774536675980-7qu7w4j",
+      "name": "Untitled",
+      "type": "youtube",
+      "url": "https://www.youtube.com/watch?v=ROJYlgWVSC0&list=RDROJYlgWVSC0&start_radio=1",
+      "cover": "https://img.youtube.com/vi/ROJYlgWVSC0/hqdefault.jpg"
+    }
+  ],
+  "order": [
+    "pl-1774536675980-7qu7w4j"
+  ],
+  "adminNotes": "",
+  "useCase": "gym",
+  "useCases": [
+    "gym",
+    "warmup",
+    "weekend"
+  ],
+  "primaryGenre": "latin",
+  "subGenres": [
+    "afro-house"
+  ],
+  "mood": "happy",
+  "energyLevel": "medium"
 }

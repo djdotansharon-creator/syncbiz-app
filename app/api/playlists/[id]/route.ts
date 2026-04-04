@@ -3,7 +3,20 @@ import { getPlaylist, updatePlaylist, deletePlaylist } from "@/lib/playlist-stor
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
-import type { PlaylistType, PlaylistTrack } from "@/lib/playlist-types";
+import {
+  PLAYLIST_USE_CASES_PHASE1,
+  PLAYLIST_PRIMARY_GENRES_PHASE15,
+  PLAYLIST_SUB_GENRES_PHASE15,
+  PLAYLIST_MOODS_PHASE15,
+  PLAYLIST_ENERGY_LEVELS_PHASE15,
+  type PlaylistType,
+  type PlaylistTrack,
+  type PlaylistUseCasePhase1,
+  type PlaylistPrimaryGenrePhase15,
+  type PlaylistSubGenrePhase15,
+  type PlaylistMoodPhase15,
+  type PlaylistEnergyLevelPhase15,
+} from "@/lib/playlist-types";
 
 const VALID_TYPES: PlaylistType[] = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"];
 
@@ -68,6 +81,13 @@ export async function PUT(
       thumbnail: string;
       tracks?: PlaylistTrack[];
       order?: string[];
+      adminNotes?: string;
+      useCase?: string | null;
+      useCases?: unknown;
+      primaryGenre?: string | null;
+      subGenres?: unknown;
+      mood?: string | null;
+      energyLevel?: string | null;
     }>;
     const updates: Partial<typeof existing> = {};
 
@@ -86,6 +106,126 @@ export async function PUT(
     if (body.thumbnail != null) updates.thumbnail = String(body.thumbnail).trim();
     if (body.tracks != null) updates.tracks = body.tracks;
     if (body.order != null) updates.order = body.order;
+
+    if (body.adminNotes !== undefined) {
+      updates.adminNotes = String(body.adminNotes ?? "");
+    }
+    if ("useCase" in body) {
+      const raw = body.useCase == null ? "" : String(body.useCase).trim();
+      if (raw === "") {
+        updates.useCase = undefined;
+      } else if (!(PLAYLIST_USE_CASES_PHASE1 as readonly string[]).includes(raw)) {
+        return NextResponse.json(
+          {
+            error: `useCase must be one of: ${PLAYLIST_USE_CASES_PHASE1.join(", ")} or empty`,
+          },
+          { status: 400 },
+        );
+      } else {
+        updates.useCase = raw as PlaylistUseCasePhase1;
+      }
+    }
+
+    if ("useCases" in body) {
+      const raw = body.useCases;
+      if (!Array.isArray(raw)) {
+        return NextResponse.json({ error: "useCases must be an array" }, { status: 400 });
+      }
+      const seen = new Set<string>();
+      const out: PlaylistUseCasePhase1[] = [];
+      for (const item of raw) {
+        const s = String(item).trim();
+        if (!s) continue;
+        if (!(PLAYLIST_USE_CASES_PHASE1 as readonly string[]).includes(s)) {
+          return NextResponse.json(
+            {
+              error: `Each useCases entry must be one of: ${PLAYLIST_USE_CASES_PHASE1.join(", ")}`,
+            },
+            { status: 400 },
+          );
+        }
+        if (!seen.has(s)) {
+          seen.add(s);
+          out.push(s as PlaylistUseCasePhase1);
+        }
+      }
+      updates.useCases = out;
+      if (!("useCase" in body)) {
+        updates.useCase = out.length > 0 ? out[0] : undefined;
+      }
+    }
+
+    if ("primaryGenre" in body) {
+      const raw = body.primaryGenre == null ? "" : String(body.primaryGenre).trim();
+      if (raw === "") {
+        updates.primaryGenre = undefined;
+      } else if (!(PLAYLIST_PRIMARY_GENRES_PHASE15 as readonly string[]).includes(raw)) {
+        return NextResponse.json(
+          {
+            error: `primaryGenre must be one of: ${PLAYLIST_PRIMARY_GENRES_PHASE15.join(", ")} or empty`,
+          },
+          { status: 400 },
+        );
+      } else {
+        updates.primaryGenre = raw as PlaylistPrimaryGenrePhase15;
+      }
+    }
+
+    if ("subGenres" in body) {
+      const raw = body.subGenres;
+      if (!Array.isArray(raw)) {
+        return NextResponse.json({ error: "subGenres must be an array" }, { status: 400 });
+      }
+      const seen = new Set<string>();
+      const out: PlaylistSubGenrePhase15[] = [];
+      for (const item of raw) {
+        const s = String(item).trim();
+        if (!s) continue;
+        if (!(PLAYLIST_SUB_GENRES_PHASE15 as readonly string[]).includes(s)) {
+          return NextResponse.json(
+            {
+              error: `Each subGenres entry must be one of: ${PLAYLIST_SUB_GENRES_PHASE15.join(", ")}`,
+            },
+            { status: 400 },
+          );
+        }
+        if (!seen.has(s)) {
+          seen.add(s);
+          out.push(s as PlaylistSubGenrePhase15);
+        }
+      }
+      updates.subGenres = out;
+    }
+
+    if ("mood" in body) {
+      const raw = body.mood == null ? "" : String(body.mood).trim();
+      if (raw === "") {
+        updates.mood = undefined;
+      } else if (!(PLAYLIST_MOODS_PHASE15 as readonly string[]).includes(raw)) {
+        return NextResponse.json(
+          { error: `mood must be one of: ${PLAYLIST_MOODS_PHASE15.join(", ")} or empty` },
+          { status: 400 },
+        );
+      } else {
+        updates.mood = raw as PlaylistMoodPhase15;
+      }
+    }
+
+    if ("energyLevel" in body) {
+      const raw = body.energyLevel == null ? "" : String(body.energyLevel).trim();
+      if (raw === "") {
+        updates.energyLevel = undefined;
+      } else if (!(PLAYLIST_ENERGY_LEVELS_PHASE15 as readonly string[]).includes(raw)) {
+        return NextResponse.json(
+          {
+            error: `energyLevel must be one of: ${PLAYLIST_ENERGY_LEVELS_PHASE15.join(", ")} or empty`,
+          },
+          { status: 400 },
+        );
+      } else {
+        updates.energyLevel = raw as PlaylistEnergyLevelPhase15;
+      }
+    }
 
     const updated = await updatePlaylist(id, updates);
     const uid = await getUserIdFromSession();

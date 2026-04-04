@@ -1,5 +1,5 @@
 {
-  "name": "Untitled",
+  "name": "KHALA",
   "genre": "Mixed",
   "type": "youtube",
   "url": "https://www.youtube.com/watch?v=J5V_fc_7hCM&list=RDJ5V_fc_7hCM&start_radio=1",
@@ -8,5 +8,29 @@
   "tenantId": "tnt-default",
   "id": "pl-1774536732892-vqdixhb",
   "createdAt": "2026-03-26T14:52:12.892Z",
-  "cover": "https://img.youtube.com/vi/J5V_fc_7hCM/hqdefault.jpg"
+  "cover": "https://img.youtube.com/vi/J5V_fc_7hCM/hqdefault.jpg",
+  "tracks": [
+    {
+      "id": "pl-1774536732892-vqdixhb",
+      "name": "Untitled",
+      "type": "youtube",
+      "url": "https://www.youtube.com/watch?v=J5V_fc_7hCM&list=RDJ5V_fc_7hCM&start_radio=1",
+      "cover": "https://img.youtube.com/vi/J5V_fc_7hCM/hqdefault.jpg"
+    }
+  ],
+  "order": [
+    "pl-1774536732892-vqdixhb"
+  ],
+  "adminNotes": "",
+  "useCase": "gym",
+  "useCases": [
+    "gym",
+    "lounge"
+  ],
+  "primaryGenre": "house",
+  "subGenres": [
+    "afro-house"
+  ],
+  "mood": "happy",
+  "energyLevel": "medium"
 }

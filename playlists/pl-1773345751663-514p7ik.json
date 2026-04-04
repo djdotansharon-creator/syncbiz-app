@@ -6,5 +6,26 @@
   "thumbnail": "https://i.ytimg.com/vi/jFeJJAU7wkI/hqdefault.jpg",
   "id": "pl-1773345751663-514p7ik",
   "createdAt": "2026-03-12T20:02:31.663Z",
-  "cover": "https://i.ytimg.com/vi/jFeJJAU7wkI/hqdefault.jpg"
+  "cover": "https://i.ytimg.com/vi/jFeJJAU7wkI/hqdefault.jpg",
+  "tracks": [
+    {
+      "id": "pl-1773345751663-514p7ik",
+      "name": "Arabic House Music | Desert Oasis Deep House Mix | Oriental Electronic Vibes 2026",
+      "type": "youtube",
+      "url": "https://www.youtube.com/watch?v=jFeJJAU7wkI&list=RDjFeJJAU7wkI&start_radio=1",
+      "cover": "https://i.ytimg.com/vi/jFeJJAU7wkI/hqdefault.jpg"
+    }
+  ],
+  "order": [
+    "pl-1773345751663-514p7ik"
+  ],
+  "adminNotes": "",
+  "useCase": "lounge",
+  "useCases": [
+    "lounge"
+  ],
+  "primaryGenre": "oriental",
+  "subGenres": [],
+  "mood": "chill",
+  "energyLevel": "medium"
 }

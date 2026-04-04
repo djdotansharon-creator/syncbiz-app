@@ -1,3 +1,38 @@
+import {
+  playlistMetadataRegistry,
+  type MetadataEnergyLevelValue,
+  type MetadataMoodValue,
+  type MetadataPrimaryGenreValue,
+  type MetadataSubGenreValue,
+  type MetadataUseCaseValue,
+} from "./playlist-metadata-registry";
+
+/** Allowed use-case keys for playlist JSON (see `playlist-metadata-registry.ts` for labels). */
+export type PlaylistUseCasePhase1 = MetadataUseCaseValue;
+export const PLAYLIST_USE_CASES_PHASE1 = playlistMetadataRegistry.useCases.map(
+  (o) => o.value,
+) as readonly PlaylistUseCasePhase1[];
+
+export type PlaylistPrimaryGenrePhase15 = MetadataPrimaryGenreValue;
+export const PLAYLIST_PRIMARY_GENRES_PHASE15 = playlistMetadataRegistry.primaryGenres.map(
+  (o) => o.value,
+) as readonly PlaylistPrimaryGenrePhase15[];
+
+export type PlaylistSubGenrePhase15 = MetadataSubGenreValue;
+export const PLAYLIST_SUB_GENRES_PHASE15 = playlistMetadataRegistry.subGenres.map(
+  (o) => o.value,
+) as readonly PlaylistSubGenrePhase15[];
+
+export type PlaylistMoodPhase15 = MetadataMoodValue;
+export const PLAYLIST_MOODS_PHASE15 = playlistMetadataRegistry.moods.map(
+  (o) => o.value,
+) as readonly PlaylistMoodPhase15[];
+
+export type PlaylistEnergyLevelPhase15 = MetadataEnergyLevelValue;
+export const PLAYLIST_ENERGY_LEVELS_PHASE15 = playlistMetadataRegistry.energyLevels.map(
+  (o) => o.value,
+) as readonly PlaylistEnergyLevelPhase15[];
+
 /** Playlist source type for embedded or local playback. */
 export type PlaylistType = "soundcloud" | "youtube" | "spotify" | "winamp" | "local" | "stream-url";
 
@@ -33,7 +68,24 @@ export type Playlist = {
   tracks?: PlaylistTrack[];
   /** Order of track IDs for drag-drop reorder. */
   order?: string[];
+  /** Free-form notes (not used for playback). */
+  adminNotes?: string;
+  /** Legacy single use-case key; prefer `useCases` when set. */
+  useCase?: PlaylistUseCasePhase1;
+  /** Multiple use-case tags (same vocabulary as `useCase`). */
+  useCases?: PlaylistUseCasePhase1[];
+  primaryGenre?: PlaylistPrimaryGenrePhase15;
+  subGenres?: PlaylistSubGenrePhase15[];
+  mood?: PlaylistMoodPhase15;
+  energyLevel?: PlaylistEnergyLevelPhase15;
 };
+
+/** Effective use cases: prefer `useCases` when non-empty; else legacy single `useCase`. */
+export function effectivePlaylistUseCases(p: Pick<Playlist, "useCases" | "useCase">): PlaylistUseCasePhase1[] {
+  if (p.useCases && p.useCases.length > 0) return [...p.useCases];
+  if (p.useCase) return [p.useCase];
+  return [];
+}
 
 export type PlaylistCreateInput = Omit<Playlist, "id" | "createdAt"> & { id?: string };
 
