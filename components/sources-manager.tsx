@@ -21,7 +21,9 @@ import { LibraryInputArea } from "@/components/library-input-area";
 import { GuestLinkButton, guestLinkLedButtonClass } from "@/components/guest-link-button";
 import { getFavorites, addFavorite as addFav, removeFavorite as removeFav } from "@/lib/favorites-store";
 import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal, removePlaylistFromLocal, removeRadioFromLocal } from "@/lib/unified-sources-client";
-import { getPlaylistTracks } from "@/lib/playlist-types";
+import { getPlaylistTracks, type Playlist } from "@/lib/playlist-types";
+import { canonicalYouTubeWatchUrlForPlayback } from "@/lib/playlist-utils";
+import { detectProvider } from "@/lib/player-utils";
 import {
   expandPlaylistEntityToItems,
   resolveSyncbizPlaylistPlayQueue,
@@ -30,6 +32,9 @@ import {
 } from "@/lib/syncbiz-playlist-queue";
 import {
   classifyLibraryEntityContract,
+  libraryCardDisplayGenre,
+  libraryCardEffectiveViewCount,
+  libraryCardShouldShowMetaRow,
   type LibraryCollectionSubtype,
   type UnifiedSource,
   unifiedFoundationHints,
@@ -74,6 +79,76 @@ type LibrarySelection =
   | { type: "collection_container"; subtype: LibraryCollectionSubtype; key: string }
   | { type: "source_channel"; key: string }
   | { type: "single_tracks_view" };
+
+function isExternalPlaylistExpandedTrack(selection: LibrarySelection, source: UnifiedSource): boolean {
+  return (
+    selection.type === "collection_container" &&
+    selection.subtype === "external_playlist" &&
+    source.origin === "source" &&
+    source.id.includes(":track:")
+  );
+}
+
+function isExpandedPlaylistSyntheticRow(item: UnifiedSource): boolean {
+  return item.id.includes(":track:");
+}
+
+/** Match playback URL for expanded rows vs unified src-* items (YouTube variants). */
+function playbackUrlsMatchUnifiedLibrary(a: string, b: string, type: UnifiedSource["type"]): boolean {
+  const x = (a ?? "").trim();
+  const y = (b ?? "").trim();
+  if (!x || !y) return false;
+  if (type === "youtube") {
+    return (
+      canonicalYouTubeWatchUrlForPlayback(x).trim().toLowerCase() ===
+      canonicalYouTubeWatchUrlForPlayback(y).trim().toLowerCase()
+    );
+  }
+  return x.toLowerCase() === y.toLowerCase();
+}
+
+/** Match expanded row vs DB source URL using either row's or library row's provider type (types can disagree on imports). */
+function playbackUrlsMatchLibraryCrossType(
+  urlA: string,
+  typeA: UnifiedSource["type"],
+  urlB: string,
+  typeB: UnifiedSource["type"]
+): boolean {
+  return (
+    playbackUrlsMatchUnifiedLibrary(urlA, urlB, typeA) ||
+    playbackUrlsMatchUnifiedLibrary(urlA, urlB, typeB)
+  );
+}
+
+function catalogMediaTypeForAddToLibraryPayload(source: UnifiedSource): string {
+  const u = (source.url ?? "").trim();
+  const p = detectProvider(u);
+  if (p === "youtube") return "youtube";
+  if (p === "soundcloud") return "soundcloud";
+  if (u.toLowerCase().includes("spotify")) return "spotify";
+  return source.type;
+}
+
+function canDeleteFromLibrary(item: UnifiedSource): boolean {
+  return (
+    (item.origin === "playlist" && !!item.playlist) ||
+    (item.origin === "source" && !!item.source) ||
+    (item.origin === "radio" && !!item.radio)
+  );
+}
+
+function findMainLibrarySourceForExpandedTrack(item: UnifiedSource, all: UnifiedSource[]): UnifiedSource | null {
+  if (!isExpandedPlaylistSyntheticRow(item)) return null;
+  for (const s of all) {
+    if (s.origin !== "source" || !s.source) continue;
+    if (playbackUrlsMatchLibraryCrossType(item.url, item.type, s.url, s.type)) return s;
+  }
+  return null;
+}
+
+function libraryRowEligibleForLibraryDelete(item: UnifiedSource, all: UnifiedSource[]): boolean {
+  return canDeleteFromLibrary(item) || findMainLibrarySourceForExpandedTrack(item, all) != null;
+}
 
 type CollectionContainer = {
   key: string;
@@ -619,6 +694,23 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     return displaySources;
   }, [selection, displaySources, favoriteIds, followedSourceKeys, playlistItemAssignments, daypartPlaylistAssignments]);
 
+  const shouldDefaultExternalReadyPlaylistToList = useMemo(() => {
+    if (selection.type !== "collection_container" || selection.subtype !== "external_playlist") return false;
+    return visibleSources.some(
+      (s) =>
+        isExpandedPlaylistSyntheticRow(s) &&
+        findMainLibrarySourceForExpandedTrack(s, displaySources) == null
+    );
+  }, [selection, visibleSources, displaySources]);
+
+  useEffect(() => {
+    if (!shouldDefaultExternalReadyPlaylistToList) return;
+    setViewMode("list");
+  }, [
+    shouldDefaultExternalReadyPlaylistToList,
+    selection.type === "collection_container" && selection.subtype === "external_playlist" ? selection.key : null,
+  ]);
+
   const sectionBuckets = useMemo(
     () => partitionSourcesByLibrarySection(visibleSources),
     [visibleSources]
@@ -1124,6 +1216,63 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     });
   }, []);
 
+  /** Persist track removal for imported Ready (external) playlists — not assignment tiles. */
+  const removeExpandedExternalPlaylistTrack = useCallback((item: UnifiedSource) => {
+    const marker = ":track:";
+    const splitAt = item.id.indexOf(marker);
+    if (splitAt < 0) return;
+    const parentUnifiedId = item.id.slice(0, splitAt);
+    const trackKey = item.id.slice(splitAt + marker.length);
+    if (!parentUnifiedId.startsWith("pl-")) return;
+    const playlistId = parentUnifiedId.slice("pl-".length);
+
+    void (async () => {
+      try {
+        const getRes = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!getRes.ok) return;
+        const playlist = (await getRes.json()) as Playlist;
+        const tracks = getPlaylistTracks(playlist);
+        let removeAt = tracks.findIndex((t) => t.id === trackKey);
+        if (removeAt < 0) {
+          removeAt = tracks.findIndex((t, i) => (t.id || String(i)) === trackKey);
+        }
+        if (removeAt < 0) {
+          removeAt = tracks.findIndex((t) => playbackUrlsMatchUnifiedLibrary(t.url, item.url, item.type));
+        }
+        if (removeAt < 0) return;
+
+        const nextTracks = tracks.filter((_, i) => i !== removeAt);
+        const first = nextTracks[0];
+        const order = nextTracks.map((t) => t.id).filter((id): id is string => Boolean(id && String(id).trim()));
+        const body: Record<string, unknown> = {
+          tracks: nextTracks,
+          order,
+        };
+        if (first) {
+          body.url = first.url;
+          body.thumbnail = (first.cover ?? playlist.thumbnail ?? "").trim();
+        }
+
+        const putRes = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!putRes.ok) return;
+
+        const updated = (await putRes.json()) as Playlist;
+        savePlaylistToLocal(updated);
+        window.dispatchEvent(new Event("library-updated"));
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
+
   const performDeleteSourceFromLibrary = useCallback(
     async (item: UnifiedSource) => {
       if (!(item.origin === "playlist" || item.origin === "source" || item.origin === "radio")) return;
@@ -1139,10 +1288,24 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     [handleRemove]
   );
 
+  const deleteLibraryItem = useCallback(
+    async (item: UnifiedSource) => {
+      const target = findMainLibrarySourceForExpandedTrack(item, displaySources) ?? item;
+      await performDeleteSourceFromLibrary(target);
+    },
+    [displaySources, performDeleteSourceFromLibrary]
+  );
+
   const getItemDeleteContext = useCallback(
     (item: UnifiedSource): LibraryItemDeleteContext => {
       if (selection.type === "collection_container") {
         const key = selection.key;
+        if (selection.subtype === "external_playlist") {
+          return {
+            kind: "in_playlist",
+            onRemoveFromPlaylist: () => removeExpandedExternalPlaylistTrack(item),
+          };
+        }
         return {
           kind: "in_playlist",
           onRemoveFromPlaylist: () => removeItemFromPlaylistOnly(key, item.id),
@@ -1150,8 +1313,25 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
       }
       return { kind: "all_library" };
     },
-    [selection, removeItemFromPlaylistOnly]
+    [selection, removeItemFromPlaylistOnly, removeExpandedExternalPlaylistTrack]
   );
+
+  const handleAddCatalogTrackToLibrary = useCallback(async (source: UnifiedSource) => {
+    const res = await fetch("/api/sources/add-from-catalog-track", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: source.url,
+        title: source.title,
+        cover: source.cover ?? "",
+        branchId: "default",
+        mediaType: catalogMediaTypeForAddToLibraryPayload(source),
+      }),
+    });
+    if (res.status !== 200 && res.status !== 201) return;
+    window.dispatchEvent(new Event("library-updated"));
+  }, []);
 
   return (
     <div className="library-theme library-page-shell flex w-full min-w-0 flex-col space-y-0" data-library-theme={libraryTheme}>
@@ -1783,7 +1963,8 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           stop={stop}
                           pause={pause}
                           isActive={isMaster ? false : masterState?.currentSource?.id === item.id}
-                          onDeleteFromLibrary={performDeleteSourceFromLibrary}
+                          onDeleteFromLibrary={deleteLibraryItem}
+                          libraryDeleteEligible={libraryRowEligibleForLibraryDelete(item, displaySources)}
                         />
                       ))}
                     </div>
@@ -1810,7 +1991,8 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           stop={stop}
                           pause={pause}
                           isActive={isMaster ? false : masterState?.currentSource?.id === item.id}
-                          onDeleteFromLibrary={performDeleteSourceFromLibrary}
+                          onDeleteFromLibrary={deleteLibraryItem}
+                          libraryDeleteEligible={libraryRowEligibleForLibraryDelete(item, displaySources)}
                         />
                       ))}
                     </div>
@@ -1873,6 +2055,17 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                                   : undefined
                               }
                               onPlaylistEntityPlay={pe ? () => playCollectionSelection(pe.subtype, pe.key) : undefined}
+                              onAddToLibrary={
+                                isExternalPlaylistExpandedTrack(selection, source)
+                                  ? () => handleAddCatalogTrackToLibrary(source)
+                                  : undefined
+                              }
+                              onLibraryDelete={deleteLibraryItem}
+                              libraryDeleteEligible={libraryRowEligibleForLibraryDelete(source, displaySources)}
+                              expandedTrackInMainLibrary={
+                                isExternalPlaylistExpandedTrack(selection, source) &&
+                                findMainLibrarySourceForExpandedTrack(source, displaySources) != null
+                              }
                             />
                           </div>
                           );
@@ -1904,7 +2097,12 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                             onPause={pauseOverride}
                             isActive={isMaster ? undefined : masterState?.currentSource?.id === source.id}
                             itemDeleteContext={getItemDeleteContext(source)}
-                            onDeleteFromLibrary={performDeleteSourceFromLibrary}
+                            onDeleteFromLibrary={deleteLibraryItem}
+                            libraryDeleteEligible={libraryRowEligibleForLibraryDelete(source, displaySources)}
+                            expandedTrackInMainLibrary={
+                              isExternalPlaylistExpandedTrack(selection, source) &&
+                              findMainLibrarySourceForExpandedTrack(source, displaySources) != null
+                            }
                             explicitArtUrl={
                               isUserSyncbizPlaylistSource(source)
                                 ? deriveSyncbizPlaylistCover(
@@ -1920,6 +2118,11 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                                 : undefined
                             }
                             onPlaylistEntityPlay={pe ? () => playCollectionSelection(pe.subtype, pe.key) : undefined}
+                            onAddToLibrary={
+                              isExternalPlaylistExpandedTrack(selection, source)
+                                ? () => handleAddCatalogTrackToLibrary(source)
+                                : undefined
+                            }
                           />
                           );
                         })}
@@ -2222,10 +2425,6 @@ function LibraryPlaylistCoverFallback({ className }: { className?: string }) {
   );
 }
 
-function canDeleteFromLibrary(item: UnifiedSource): boolean {
-  return item.origin === "playlist" || item.origin === "source" || item.origin === "radio";
-}
-
 type CenterGridLibraryItemCardProps = {
   item: UnifiedSource;
   itemDeleteContext: LibraryItemDeleteContext;
@@ -2238,6 +2437,7 @@ type CenterGridLibraryItemCardProps = {
   pause: () => void;
   isActive: boolean;
   onDeleteFromLibrary: (item: UnifiedSource) => Promise<void>;
+  libraryDeleteEligible: boolean;
 };
 
 function CenterGridLibraryItemCard({
@@ -2252,15 +2452,21 @@ function CenterGridLibraryItemCard({
   pause,
   isActive,
   onDeleteFromLibrary,
+  libraryDeleteEligible,
 }: CenterGridLibraryItemCardProps) {
+  const { t } = useTranslations();
   const [shareOpen, setShareOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const playFn = playSourceOverride ?? playSource;
   const stopFn = stopOverride ?? stop;
   const pauseFn = pauseOverride ?? pause;
-  const canDel = canDeleteFromLibrary(item);
+  const canDel = libraryDeleteEligible;
   const showDeleteControl = canDel || itemDeleteContext.kind === "in_playlist";
+  const durationSec = item.playlist?.durationSeconds ?? 0;
+  const hasCoverArt = Boolean(item.cover);
+  const effectiveViews = libraryCardEffectiveViewCount(item);
+  const showMetaRow = libraryCardShouldShowMetaRow(item, durationSec, hasCoverArt);
 
   async function handleDeleteLibrary() {
     setDeleting(true);
@@ -2285,7 +2491,24 @@ function CenterGridLibraryItemCard({
           <p className="library-card-title mt-2 text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
             {item.title}
           </p>
-          <p className="library-card-meta mt-0.5 text-xs truncate">{item.genre || item.type}</p>
+          {showMetaRow ? (
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+              <p className="library-card-meta min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.14em]">
+                {libraryCardDisplayGenre(item)}
+              </p>
+              <div className="library-card-meta flex shrink-0 items-center gap-2 text-[11px] tabular-nums">
+                {effectiveViews != null && (
+                  <span>
+                    {formatViewCount(effectiveViews)} {t.views}
+                  </span>
+                )}
+                {effectiveViews != null && durationSec > 0 && !hasCoverArt && (
+                  <span className="library-card-meta-muted">•</span>
+                )}
+                {durationSec > 0 && !hasCoverArt && <span>{formatDuration(durationSec)}</span>}
+              </div>
+            </div>
+          ) : null}
         </div>
         <LibrarySourceItemActions
           source={item}
@@ -2315,7 +2538,7 @@ function CenterGridLibraryItemCard({
         onRemoveFromPlaylist={itemDeleteContext.kind === "in_playlist" ? itemDeleteContext.onRemoveFromPlaylist : undefined}
         onDeleteFromLibrary={handleDeleteLibrary}
         loading={deleting}
-        showDeleteFromLibrary={canDel}
+        showDeleteFromLibrary={libraryDeleteEligible}
       />
     </>
   );
@@ -2333,9 +2556,12 @@ function SourceRow({
   isActive: isActiveProp,
   itemDeleteContext,
   onDeleteFromLibrary,
+  libraryDeleteEligible,
+  expandedTrackInMainLibrary = false,
   explicitArtUrl,
   onPlaylistEntityOpen,
   onPlaylistEntityPlay,
+  onAddToLibrary,
 }: {
   source: UnifiedSource;
   isFavorite?: boolean;
@@ -2348,9 +2574,12 @@ function SourceRow({
   isActive?: boolean;
   itemDeleteContext: LibraryItemDeleteContext;
   onDeleteFromLibrary: (item: UnifiedSource) => Promise<void>;
+  libraryDeleteEligible?: boolean;
+  expandedTrackInMainLibrary?: boolean;
   explicitArtUrl?: string | null;
   onPlaylistEntityOpen?: () => void;
   onPlaylistEntityPlay?: () => void;
+  onAddToLibrary?: () => void | Promise<void>;
 }) {
   const { t } = useTranslations();
   const { playSource, stop, pause, currentSource } = usePlayback();
@@ -2363,7 +2592,7 @@ function SourceRow({
   const stopFn = onStop ?? stop;
   const pauseFn = onPause ?? pause;
   const active = isActiveProp ?? (mounted && currentSource?.id === source.id);
-  const canDel = canDeleteFromLibrary(source);
+  const canDel = libraryDeleteEligible ?? canDeleteFromLibrary(source);
   const showDeleteControl = canDel || itemDeleteContext.kind === "in_playlist";
   const useExplicitPlaylistArt = explicitArtUrl !== undefined;
   const thumbCover = useExplicitPlaylistArt ? explicitArtUrl : source.cover;
@@ -2406,12 +2635,54 @@ function SourceRow({
     }
   }
 
+  function handleRowDragStart(e: React.DragEvent<HTMLDivElement>) {
+    const el = e.target as HTMLElement | null;
+    const inControls = !!el?.closest(".library-row-controls");
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[SYNC_AUDIT] SourceRow dragstart", { inControls, willPrevent: inControls });
+    }
+    if (inControls) {
+      e.preventDefault();
+      return;
+    }
+    onDragStart?.(e);
+  }
+
   return (
     <>
     <div
       draggable={draggable}
-      onDragStart={onDragStart}
-      onClick={onPlaylistEntityOpen ? handleRowClickForOpen : undefined}
+      onDragStart={draggable ? handleRowDragStart : onDragStart}
+      onPointerDownCapture={(e) => {
+        if (!draggable) return;
+        const t = e.target as HTMLElement | null;
+        if (!t?.closest?.(".library-row-controls")) return;
+        const top = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+        const hitBtn = t.closest("button");
+        const topBtn = top?.closest("button") ?? null;
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[SYNC_AUDIT] list-row pointerdown CAPTURE (inside .library-row-controls)", {
+            eventTargetTag: t.tagName,
+            elementFromPointTag: top?.tagName ?? null,
+            hitButton: !!hitBtn,
+            topMatchesHitButton: !!(hitBtn && topBtn === hitBtn),
+          });
+        }
+      }}
+      onClick={
+        onPlaylistEntityOpen
+          ? (e) => {
+              const t = e.target as HTMLElement | null;
+              if (process.env.NODE_ENV !== "production") {
+                console.log("[SYNC_AUDIT] list-row click BUBBLE", {
+                  tag: t?.tagName,
+                  inControls: !!t?.closest?.(".library-row-controls"),
+                });
+              }
+              handleRowClickForOpen();
+            }
+          : undefined
+      }
       onDoubleClick={onPlaylistEntityPlay ? handleRowDoubleClickPlay : undefined}
       className={`group/row flex items-start gap-4 px-4 py-3.5 transition-[background,box-shadow] duration-200 ease-out ${
         active ? "library-playing-row library-row-active-bg" : "library-row-hover"
@@ -2479,6 +2750,21 @@ function SourceRow({
         className="library-row-controls ml-2 flex flex-nowrap items-center gap-2 shrink-0"
         role="group"
         aria-label={t.sourceControlsAria}
+        draggable={false}
+        onPointerDownCapture={(e) => {
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[SYNC_AUDIT] .library-row-controls pointerdown CAPTURE", {
+              targetTag: (e.target as HTMLElement | null)?.tagName,
+            });
+          }
+        }}
+        onClickCapture={(e) => {
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[SYNC_AUDIT] .library-row-controls click CAPTURE", {
+              targetTag: (e.target as HTMLElement | null)?.tagName,
+            });
+          }
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <LibrarySourceItemActions
@@ -2492,6 +2778,8 @@ function SourceRow({
           onShareOpen={() => setShareOpen(true)}
           onDeletePress={() => setDeleteOpen(true)}
           showLibraryDelete={showDeleteControl}
+          onAddToLibrary={onAddToLibrary}
+          inLibrary={expandedTrackInMainLibrary}
         />
       </div>
     </div>
