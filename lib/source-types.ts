@@ -88,6 +88,35 @@ export type UnifiedSource = {
   radio?: RadioStream;
 } & Partial<UnifiedSourceFoundation>;
 
+/** Genre line when persisted value is empty — never use `type` (provider slug) as genre. */
+export const LIBRARY_CARD_FALLBACK_GENRE = "Mixed";
+
+export function libraryCardDisplayGenre(source: Pick<UnifiedSource, "genre">): string {
+  const g = typeof source.genre === "string" ? source.genre.trim() : "";
+  return g || LIBRARY_CARD_FALLBACK_GENRE;
+}
+
+export function libraryCardEffectiveViewCount(source: UnifiedSource): number | undefined {
+  const v = source.viewCount ?? source.playlist?.viewCount;
+  if (v == null || typeof v !== "number" || !Number.isFinite(v)) return undefined;
+  return v;
+}
+
+/**
+ * Library card footer meta row: show when there is a real genre, view count, or duration-in-meta rule.
+ * When shown, `libraryCardDisplayGenre` supplies the left label (fallback "Mixed"), not `source.type`.
+ */
+export function libraryCardShouldShowMetaRow(
+  source: UnifiedSource,
+  durationSec: number,
+  hasCoverArt: boolean,
+): boolean {
+  const hasPersistedGenre = Boolean(typeof source.genre === "string" && source.genre.trim());
+  const vc = libraryCardEffectiveViewCount(source);
+  const showDurationInMeta = durationSec > 0 && !hasCoverArt;
+  return hasPersistedGenre || vc != null || showDurationInMeta;
+}
+
 /** JSON shape from POST /api/sources/parse-url (includes optional foundation hints). */
 export type ParseUrlJson = {
   title: string;

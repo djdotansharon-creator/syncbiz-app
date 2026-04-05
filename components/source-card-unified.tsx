@@ -11,7 +11,12 @@ import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { RadioIcon } from "@/components/ui/radio-icon";
 import { isValidStreamUrl } from "@/lib/url-validation";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
-import type { UnifiedSource } from "@/lib/source-types";
+import {
+  libraryCardDisplayGenre,
+  libraryCardEffectiveViewCount,
+  libraryCardShouldShowMetaRow,
+  type UnifiedSource,
+} from "@/lib/source-types";
 
 export type LibraryItemDeleteContext =
   | { kind: "all_library" }
@@ -45,7 +50,23 @@ type Props = {
   onPlaylistEntityOpen?: () => void;
   /** When set, double-click plays the full playlist entity queue. */
   onPlaylistEntityPlay?: () => void;
+  /** Add expanded Ready Playlist track to main library (DB source). */
+  onAddToLibrary?: () => void | Promise<void>;
+  /** When set, "Delete from library" runs this (e.g. resolves expanded playlist rows to src-*). */
+  onLibraryDelete?: (item: UnifiedSource) => void | Promise<void>;
+  /** When set, controls whether the modal shows "Delete from library". Omit = only real persisted entities. */
+  libraryDeleteEligible?: boolean;
+  /** Expanded imported playlist row whose URL already exists as a main-library source. */
+  expandedTrackInMainLibrary?: boolean;
 };
+
+function unifiedSourceHasPersistedLibraryEntity(s: UnifiedSource): boolean {
+  return (
+    (s.origin === "playlist" && !!s.playlist) ||
+    (s.origin === "source" && !!s.source) ||
+    (s.origin === "radio" && !!s.radio)
+  );
+}
 
 function PlaylistCardArtFallback({ className }: { className?: string }) {
   return (
@@ -130,6 +151,10 @@ export function SourceCard({
   explicitArtUrl,
   onPlaylistEntityOpen,
   onPlaylistEntityPlay,
+  onAddToLibrary,
+  onLibraryDelete,
+  libraryDeleteEligible,
+  expandedTrackInMainLibrary = false,
 }: Props) {
   const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -155,9 +180,13 @@ export function SourceCard({
   }, []);
   const hasInvalidUrl = source.origin === "radio" && source.radio && !isValidStreamUrl(source.radio.url);
 
-  async function handleDelete() {
+  async function runDeleteFromLibraryFlow() {
     setDeleting(true);
     try {
+      if (onLibraryDelete) {
+        await onLibraryDelete(source);
+        return;
+      }
       if (source.origin === "playlist" && source.playlist) {
         await fetch(`/api/playlists/${source.playlist.id}`, { method: "DELETE" });
       } else if (source.origin === "source" && source.source) {
@@ -166,7 +195,9 @@ export function SourceCard({
         await fetch(`/api/radio/${source.radio.id}`, { method: "DELETE" });
       }
     } finally {
-      onRemove(source.id, source.origin);
+      if (!onLibraryDelete) {
+        onRemove(source.id, source.origin);
+      }
       setDeleting(false);
     }
   }
@@ -174,6 +205,8 @@ export function SourceCard({
   const durationSec = source.playlist?.durationSeconds ?? 0;
   const useExplicitPlaylistArt = explicitArtUrl !== undefined;
   const cardCover = useExplicitPlaylistArt ? explicitArtUrl : source.cover;
+  const effectiveViews = libraryCardEffectiveViewCount(source);
+  const showMetaRow = libraryCardShouldShowMetaRow(source, durationSec, Boolean(cardCover));
 
   function handleCardClickForOpen() {
     if (!onPlaylistEntityOpen) return;
@@ -280,19 +313,19 @@ export function SourceCard({
             <SourceLogo type={source.type} origin={source.origin} size="md" />
           </div>
         </div>
-        {(source.genre ||
-          (source.viewCount ?? source.playlist?.viewCount) != null ||
-          (durationSec > 0 && !cardCover)) && (
+        {showMetaRow && (
           <div className="flex flex-col gap-1">
             <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-              {source.genre && (
-                <p className="library-card-meta text-[10px] font-semibold uppercase tracking-[0.14em]">{source.genre}</p>
-              )}
+              <p className="library-card-meta text-[10px] font-semibold uppercase tracking-[0.14em]">
+                {libraryCardDisplayGenre(source)}
+              </p>
               <div className="library-card-meta ml-auto flex items-center gap-2 text-[11px] tabular-nums">
-                {(source.viewCount ?? source.playlist?.viewCount) != null && (
-                  <span>{formatViewCount(source.viewCount ?? source.playlist?.viewCount ?? 0)} {t.views}</span>
+                {effectiveViews != null && (
+                  <span>
+                    {formatViewCount(effectiveViews)} {t.views}
+                  </span>
                 )}
-                {(source.viewCount ?? source.playlist?.viewCount) != null && durationSec > 0 && !cardCover && (
+                {effectiveViews != null && durationSec > 0 && !cardCover && (
                   <span className="library-card-meta-muted">•</span>
                 )}
                 {durationSec > 0 && !cardCover && <span>{formatDuration(durationSec)}</span>}
@@ -309,6 +342,8 @@ export function SourceCard({
           libraryDeckChrome={libraryDeckChrome}
           onShareOpen={() => setShareOpen(true)}
           onDeletePress={() => setDeleteOpen(true)}
+          onAddToLibrary={onAddToLibrary}
+          inLibrary={expandedTrackInMainLibrary}
         />
       </div>
       {shareOpen ? (
@@ -325,11 +360,9 @@ export function SourceCard({
       onClose={() => setDeleteOpen(false)}
       variant={itemDeleteContext?.kind === "in_playlist" ? "in_playlist" : "all_library"}
       onRemoveFromPlaylist={itemDeleteContext?.kind === "in_playlist" ? itemDeleteContext.onRemoveFromPlaylist : undefined}
-      onDeleteFromLibrary={handleDelete}
+      onDeleteFromLibrary={() => void runDeleteFromLibraryFlow()}
       loading={deleting}
-      showDeleteFromLibrary={
-        source.origin === "playlist" || source.origin === "source" || source.origin === "radio"
-      }
+      showDeleteFromLibrary={libraryDeleteEligible ?? unifiedSourceHasPersistedLibraryEntity(source)}
     />
     </>
   );
