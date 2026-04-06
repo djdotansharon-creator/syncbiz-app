@@ -8,7 +8,14 @@ import { usePlayback } from "@/lib/playback-provider";
 import { useSourcesPlayback } from "@/lib/sources-playback-context";
 import { ActionButtonEdit } from "@/components/ui/action-buttons";
 import { RadioIcon } from "@/components/ui/radio-icon";
-import { inferPlaylistType, getYouTubeThumbnail, getYouTubeVideoId } from "@/lib/playlist-utils";
+import { YouTubeMixImportPanelShell } from "@/components/youtube-mix-import-panel-shell";
+import {
+  inferPlaylistType,
+  getYouTubeThumbnail,
+  getYouTubeVideoId,
+  isYouTubeMixUrl,
+  isYouTubeMultiTrackUrl,
+} from "@/lib/playlist-utils";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { inferGenre } from "@/lib/infer-genre";
@@ -105,6 +112,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
   const [urlValue, setUrlValue] = useState("");
   const [urlIngesting, setUrlIngesting] = useState(false);
   const [urlError, setUrlError] = useState<string | null>(null);
+  const [youtubeMixImportUrl, setYoutubeMixImportUrl] = useState<string | null>(null);
 
   const [query, setQuery] = useState("");
   const [localResults, setLocalResults] = useState<UnifiedSource[]>([]);
@@ -190,6 +198,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
       ingestingRef.current = true;
       setUrlIngesting(true);
       setUrlError(null);
+      setYoutubeMixImportUrl(null);
       try {
         const type = inferPlaylistType(trimmed);
         const isRadio = type === "winamp" || !!trimmed.match(/\.(m3u8?|pls|aac|mp3)(\?|$)/i);
@@ -296,6 +305,13 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
         } else {
           const validTypes = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"] as const;
           const apiType = validTypes.includes((parsed?.type ?? type) as (typeof validTypes)[number]) ? (parsed?.type ?? type) : type;
+          if (
+            apiType === "youtube" &&
+            (isYouTubeMixUrl(trimmed) || isYouTubeMultiTrackUrl(trimmed))
+          ) {
+            setYoutubeMixImportUrl(trimmed);
+            return;
+          }
           const playableUrl =
             apiType === "youtube"
               ? await resolveYouTubePlayableUrlForSearch(trimmed)
@@ -613,7 +629,10 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
               inputMode="url"
               autoComplete="url"
               value={urlValue}
-              onChange={(e) => setUrlValue(e.target.value)}
+              onChange={(e) => {
+                setYoutubeMixImportUrl(null);
+                setUrlValue(e.target.value);
+              }}
               onDragOver={(e) => {
                 if (e.dataTransfer?.types?.includes("text/uri-list") || e.dataTransfer?.types?.includes("text/plain")) {
                   e.preventDefault();
@@ -752,6 +771,12 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
       </div>
 
       {urlError && <p className="mt-1.5 text-xs text-amber-400">{urlError}</p>}
+      {youtubeMixImportUrl ? (
+        <YouTubeMixImportPanelShell
+          sourceUrl={youtubeMixImportUrl}
+          onDismiss={() => setYoutubeMixImportUrl(null)}
+        />
+      ) : null}
 
       {/* Search results dropdown */}
       {showResults && hasQuery && (

@@ -6,7 +6,7 @@ import { db } from "@/lib/store";
 import { getDeletedSourceIds } from "@/lib/deleted-sources-store";
 import { getCurrentUserFromCookies, hasBranchAccess } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
-import type { UnifiedSource, SourceProviderType } from "@/lib/source-types";
+import { type UnifiedSource, type SourceProviderType, unifiedLibraryIdForDbSourceId } from "@/lib/source-types";
 import { unifiedFoundationHints } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
 import type { Source } from "@/lib/types";
@@ -30,6 +30,9 @@ function playlistToUnified(p: Playlist): UnifiedSource {
     origin: "playlist",
     playlist: p,
     ...unifiedFoundationHints("playlist", p.type as SourceProviderType, p.url),
+    ...(p.libraryPlacement === "ready_external"
+      ? { contentNodeKind: "external_playlist" as const }
+      : {}),
   };
 }
 
@@ -47,7 +50,7 @@ function dbSourceToUnified(s: { id: string; name: string; target: string; artwor
   const cover = getSourceArtworkUrl(s as import("@/lib/types").Source) || getYouTubeThumbnail(target) || null;
 
   return {
-    id: `src-${s.id}`,
+    id: unifiedLibraryIdForDbSourceId(s.id),
     title: s.name,
     genre: inferGenre(s.name),
     cover,

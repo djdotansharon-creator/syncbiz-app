@@ -20,6 +20,9 @@ function playlistToUnified(p: Playlist): UnifiedSource {
     url: p.url,
     origin: "playlist",
     playlist: p,
+    ...(p.libraryPlacement === "ready_external"
+      ? { contentNodeKind: "external_playlist" as const }
+      : {}),
   };
 }
 

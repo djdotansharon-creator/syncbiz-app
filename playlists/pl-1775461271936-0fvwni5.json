@@ -1,0 +1,74 @@
+{
+  "name": "אייל גולם 30 חלק א",
+  "genre": "Mixed",
+  "type": "youtube",
+  "url": "https://www.youtube.com/watch?v=kQ5OFJxgL0M",
+  "thumbnail": "https://img.youtube.com/vi/kQ5OFJxgL0M/hqdefault.jpg",
+  "branchId": "default",
+  "tenantId": "tnt-default",
+  "viewCount": 1000000,
+  "durationSeconds": 248,
+  "catalogItemId": "cat-1775414746265-fe8ahn4",
+  "tracks": [
+    {
+      "id": "kQ5OFJxgL0M",
+      "name": "אייל גולן - מחזיק לך את היד (Prod. by Yaaqov Lamay)",
+      "type": "youtube",
+      "url": "https://www.youtube.com/watch?v=kQ5OFJxgL0M",
+      "cover": "https://img.youtube.com/vi/kQ5OFJxgL0M/hqdefault.jpg",
+      "catalogItemId": "cat-1775414746265-fe8ahn4"
+    },
+    {
+      "id": "NGPjdazQ9EA",
+      "name": "אייל גולן - שום דבר ממך (Prod. by Matan Dror)",
+      "type": "youtube",
+      "url": "https://www.youtube.com/watch?v=NGPjdazQ9EA",
+      "cover": "https://img.youtube.com/vi/NGPjdazQ9EA/hqdefault.jpg",
+      "catalogItemId": "cat-1775460838254-ddnwdn7"
+    },
+    {
+      "id": "ghm4tb2sySI",
+      "name": "אייל גולן - פרחים מנייר (Prod. by Yaaqov Lamay)",
+      "type": "youtube",
+      "url": "https://www.youtube.com/watch?v=ghm4tb2sySI",
+      "cover": "https://img.youtube.com/vi/ghm4tb2sySI/hqdefault.jpg",
+      "catalogItemId": "cat-1775460838345-i6xi8g3"
+    },
+    {
+      "id": "O_8Zdls1V4A",
+      "name": "אייל גולן - אם רק הייתי (Prod. by Matan Dror)",
+      "type": "youtube",
+      "url": "https://www.youtube.com/watch?v=O_8Zdls1V4A",
+      "cover": "https://img.youtube.com/vi/O_8Zdls1V4A/hqdefault.jpg",
+      "catalogItemId": "cat-1775460838735-9uvo3vk"
+    },
+    {
+      "id": "DSIKOeQTYXU",
+      "name": "אייל גולן - קריוקי בסלון (by OFFIR MALOL)",
+      "type": "youtube",
+      "url": "https://www.youtube.com/watch?v=DSIKOeQTYXU",
+      "cover": "https://img.youtube.com/vi/DSIKOeQTYXU/hqdefault.jpg",
+      "catalogItemId": "cat-1775460839390-xeuxe7t"
+    },
+    {
+      "id": "XrnfzSCsSPY",
+      "name": "אייל גולן - הכל טוב (Prod. By Matan Dror)",
+      "type": "youtube",
+      "url": "https://www.youtube.com/watch?v=XrnfzSCsSPY",
+      "cover": "https://img.youtube.com/vi/XrnfzSCsSPY/hqdefault.jpg",
+      "catalogItemId": "cat-1775460840179-zyk3ldk"
+    }
+  ],
+  "libraryPlacement": "ready_external",
+  "id": "pl-1775461271936-0fvwni5",
+  "createdAt": "2026-04-06T07:41:11.936Z",
+  "cover": "https://img.youtube.com/vi/kQ5OFJxgL0M/hqdefault.jpg",
+  "order": [
+    "kQ5OFJxgL0M",
+    "NGPjdazQ9EA",
+    "ghm4tb2sySI",
+    "O_8Zdls1V4A",
+    "DSIKOeQTYXU",
+    "XrnfzSCsSPY"
+  ]
+}

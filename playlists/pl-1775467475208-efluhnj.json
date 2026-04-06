@@ -1,0 +1,20 @@
+{
+  "name": "דותן",
+  "genre": "Custom",
+  "type": "local",
+  "url": "local://user-playlist/1775467474582",
+  "thumbnail": "",
+  "branchId": "default",
+  "tenantId": "tnt-default",
+  "catalogItemId": "cat-1775467475205-xccetgs",
+  "id": "pl-1775467475208-efluhnj",
+  "createdAt": "2026-04-06T09:24:35.208Z",
+  "tracks": [
+    {
+      "id": "pl-1775467475208-efluhnj",
+      "name": "דותן",
+      "type": "local",
+      "url": "local://user-playlist/1775467474582"
+    }
+  ]
+}

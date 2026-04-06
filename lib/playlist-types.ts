@@ -36,6 +36,20 @@ export const PLAYLIST_ENERGY_LEVELS_PHASE15 = playlistMetadataRegistry.energyLev
 /** Playlist source type for embedded or local playback. */
 export type PlaylistType = "soundcloud" | "youtube" | "spotify" | "winamp" | "local" | "stream-url";
 
+/**
+ * Library shell bucket for persisted playlists. Only `ready_external` is stored; omit for default
+ * (Your Playlists / syncbiz_playlist contract).
+ */
+export type PlaylistLibraryPlacement = "ready_external";
+
+/**
+ * POST /api/playlists body only — not stored on `Playlist`. When present, the server sets
+ * `libraryPlacement: "ready_external"` (Ready Playlists). Only the YouTube Mix Import save
+ * flow should send this.
+ */
+export const PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT = "youtube_mix_import" as const;
+export type PlaylistCreateSaveOrigin = typeof PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT;
+
 /** Single track in a playlist. */
 export type PlaylistTrack = {
   id: string;
@@ -44,6 +58,8 @@ export type PlaylistTrack = {
   type: PlaylistType;
   url: string;
   cover?: string;
+  /** Optional link to catalog row for this track URL (Phase 1); playback still uses `url`. */
+  catalogItemId?: string;
 };
 
 export type Playlist = {
@@ -60,6 +76,8 @@ export type Playlist = {
   branchId?: string;
   /** Workspace/account ownership. */
   tenantId?: string;
+  /** Optional link to centralized catalog row (Phase 1); playback still uses `url` / tracks. */
+  catalogItemId?: string;
   /** View count (from YouTube etc.) – stored when adding from search. */
   viewCount?: number;
   /** Duration in seconds (from YouTube etc.) – stored when adding/refreshing. */
@@ -78,6 +96,8 @@ export type Playlist = {
   subGenres?: PlaylistSubGenrePhase15[];
   mood?: PlaylistMoodPhase15;
   energyLevel?: PlaylistEnergyLevelPhase15;
+  /** When set, unified library classifies as external_playlist (Ready/external path), not Your Playlists. */
+  libraryPlacement?: PlaylistLibraryPlacement;
 };
 
 /** Effective use cases: prefer `useCases` when non-empty; else legacy single `useCase`. */

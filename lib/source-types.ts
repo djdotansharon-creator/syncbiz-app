@@ -82,11 +82,21 @@ export type UnifiedSource = {
   origin: "playlist" | "source" | "radio";
   /** View count (YouTube) – from stored data or fetched when displaying */
   viewCount?: number;
+  /** Optional catalog row id (e.g. expanded playlist tracks with persisted catalog links). */
+  catalogItemId?: string;
   /** Raw data for playback logic */
   playlist?: Playlist;
   source?: Source;
   radio?: RadioStream;
 } & Partial<UnifiedSourceFoundation>;
+
+/**
+ * Unified list / playback id for a DB `Source` row. Store-generated ids are already `src-*`;
+ * prefixing again yields `src-src-*` and breaks GET `/api/sources/[id]` and `?sourceId=` flows.
+ */
+export function unifiedLibraryIdForDbSourceId(dbSourceId: string): string {
+  return dbSourceId.startsWith("src-") ? dbSourceId : `src-${dbSourceId}`;
+}
 
 /** Genre line when persisted value is empty — never use `type` (provider slug) as genre. */
 export const LIBRARY_CARD_FALLBACK_GENRE = "Mixed";
@@ -224,6 +234,9 @@ export function classifyLibraryEntityContract(source: UnifiedSource): LibraryEnt
     (u.includes("open.spotify.com") && (u.includes("/playlist/") || u.includes("/album/"))) ||
     (u.includes("soundcloud.com") && u.includes("/sets/"));
   if (isExternalPlaylist) {
+    return { entityKind: "collection", collectionSubtype: "external_playlist" };
+  }
+  if (source.origin === "playlist" && source.playlist?.libraryPlacement === "ready_external") {
     return { entityKind: "collection", collectionSubtype: "external_playlist" };
   }
   if (source.origin === "playlist") {

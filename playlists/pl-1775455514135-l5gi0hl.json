@@ -1,0 +1,21 @@
+{
+  "name": "YouTube",
+  "genre": "Mixed",
+  "type": "youtube",
+  "url": "https://www.youtube.com/watch?v=dehczXnhEMI",
+  "thumbnail": "https://img.youtube.com/vi/dehczXnhEMI/hqdefault.jpg",
+  "branchId": "default",
+  "tenantId": "tnt-default",
+  "id": "pl-1775455514135-l5gi0hl",
+  "createdAt": "2026-04-06T06:05:14.135Z",
+  "tracks": [
+    {
+      "id": "pl-1775455514135-l5gi0hl",
+      "name": "YouTube",
+      "type": "youtube",
+      "url": "https://www.youtube.com/watch?v=dehczXnhEMI",
+      "cover": "https://img.youtube.com/vi/dehczXnhEMI/hqdefault.jpg"
+    }
+  ],
+  "cover": "https://img.youtube.com/vi/dehczXnhEMI/hqdefault.jpg"
+}

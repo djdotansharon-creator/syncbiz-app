@@ -3,6 +3,7 @@
  * Uses yt-dlp-wrap to auto-download the binary when needed (no Python/yt-dlp pre-install required).
  */
 
+import { canonicalYouTubeWatchUrlForPlayback, getYouTubeVideoId } from "@/lib/playlist-utils";
 import { join } from "path";
 import { mkdir, writeFile } from "fs/promises";
 import { existsSync } from "fs";
@@ -24,6 +25,61 @@ const BINARY_NAME = isWin ? "yt-dlp.exe" : "yt-dlp";
 const BINARY_PATH = join(CACHE_DIR, BINARY_NAME);
 
 const TIMEOUT_MS = 15000;
+
+/** Max entries returned for YouTube Mix Import candidate list (server-enforced). */
+export const YOUTUBE_MIX_IMPORT_CANDIDATE_LIMIT = 25;
+
+const MIX_ENUM_TIMEOUT_MS = 22000;
+
+export type YouTubeMixImportCandidate = {
+  videoId: string;
+  title: string;
+  url: string;
+  thumbnailUrl: string;
+  durationSeconds?: number;
+  viewCount?: number;
+};
+
+export type EnumerateYouTubeMixPlaylistResult = {
+  candidates: YouTubeMixImportCandidate[];
+  /** Present when enumeration failed or produced no usable leaf videos. */
+  error?: string;
+};
+
+function mixCandidateFromFlatEntry(obj: Record<string, unknown>): YouTubeMixImportCandidate | null {
+  const idRaw = typeof obj.id === "string" ? obj.id.trim() : "";
+  if (!idRaw) return null;
+  const webpage =
+    (typeof obj.webpage_url === "string" && obj.webpage_url.trim()) ||
+    (typeof obj.url === "string" && obj.url.trim()) ||
+    "";
+  const leaf = canonicalYouTubeWatchUrlForPlayback(
+    webpage || `https://www.youtube.com/watch?v=${idRaw}`,
+  );
+  const vid = getYouTubeVideoId(leaf);
+  if (!vid) return null;
+  const title =
+    (typeof obj.title === "string" && obj.title.trim()) ||
+    (typeof obj.track === "string" && obj.track.trim()) ||
+    "YouTube video";
+  const durationRaw = obj.duration;
+  const durationSeconds =
+    typeof durationRaw === "number" && Number.isFinite(durationRaw)
+      ? Math.round(durationRaw)
+      : undefined;
+  const vc = obj.view_count;
+  const viewCount =
+    typeof vc === "number" && Number.isFinite(vc) ? Math.round(vc) : undefined;
+  const out: YouTubeMixImportCandidate = {
+    videoId: vid,
+    title,
+    url: `https://www.youtube.com/watch?v=${vid}`,
+    thumbnailUrl: `https://img.youtube.com/vi/${vid}/hqdefault.jpg`,
+  };
+  if (durationSeconds !== undefined) out.durationSeconds = durationSeconds;
+  if (viewCount !== undefined) out.viewCount = viewCount;
+  return out;
+}
 
 let ytDlpInstance: import("yt-dlp-wrap").default | null = null;
 let initPromise: Promise<import("yt-dlp-wrap").default | null> | null = null;
@@ -245,4 +301,82 @@ export async function resolveYouTubeFirstVideoUrlFromPlaylistUrl(
   }
 
   return null;
+}
+
+/**
+ * Enumerate up to `limit` leaf watch URLs from a YouTube multi-track URL (mix, radio, playlist).
+ * Uses yt-dlp flat playlist extraction only — no playback or catalog side effects.
+ */
+export async function enumerateYouTubeMixPlaylistCandidates(
+  url: string,
+  limit = YOUTUBE_MIX_IMPORT_CANDIDATE_LIMIT,
+): Promise<EnumerateYouTubeMixPlaylistResult> {
+  const wrap = await getYtDlp();
+  if (!wrap) {
+    return {
+      candidates: [],
+      error: "Track enumeration is unavailable.",
+    };
+  }
+
+  const cap = Math.min(Math.max(1, limit), YOUTUBE_MIX_IMPORT_CANDIDATE_LIMIT);
+  let stdout: string;
+  try {
+    stdout = await runWithTimeout(
+      wrap.execPromise([
+        url,
+        "--dump-json",
+        "--no-warnings",
+        "--no-download",
+        "--flat-playlist",
+        "--playlist-items",
+        `1-${cap}`,
+      ]),
+      MIX_ENUM_TIMEOUT_MS,
+    );
+  } catch {
+    return {
+      candidates: [],
+      error: "Could not load tracks for this link.",
+    };
+  }
+
+  const raw = typeof stdout === "string" ? stdout : "";
+  const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+  const candidates: YouTubeMixImportCandidate[] = [];
+  const seen = new Set<string>();
+
+  function consume(obj: Record<string, unknown>) {
+    if (candidates.length >= cap) return;
+    const c = mixCandidateFromFlatEntry(obj);
+    if (!c || seen.has(c.videoId)) return;
+    seen.add(c.videoId);
+    candidates.push(c);
+  }
+
+  for (const line of lines) {
+    if (candidates.length >= cap) break;
+    try {
+      const obj = JSON.parse(line) as Record<string, unknown>;
+      const entries = obj.entries;
+      if (Array.isArray(entries) && entries.length > 0) {
+        for (const e of entries) {
+          if (candidates.length >= cap) break;
+          if (e && typeof e === "object") consume(e as Record<string, unknown>);
+        }
+      } else {
+        consume(obj);
+      }
+    } catch {
+      /* skip bad line */
+    }
+  }
+
+  if (candidates.length === 0) {
+    return {
+      candidates: [],
+      error: "No tracks found for this link.",
+    };
+  }
+  return { candidates };
 }

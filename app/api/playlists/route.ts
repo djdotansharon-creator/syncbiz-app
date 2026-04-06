@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { findOrCreateCatalogItem, normalizeCatalogUrlKey } from "@/lib/catalog-store";
 import { listPlaylistsForTenant, createPlaylist } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
-import type { PlaylistCreateInput, PlaylistTrack, PlaylistType } from "@/lib/playlist-types";
+import {
+  PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT,
+  type PlaylistCreateInput,
+  type PlaylistTrack,
+  type PlaylistType,
+} from "@/lib/playlist-types";
 
 const VALID_TYPES: PlaylistType[] = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"];
 const DEFAULT_BRANCH_ID = "default";
@@ -70,8 +76,86 @@ export async function POST(req: NextRequest) {
     }
 
     const bodyTracks = (body as { tracks?: unknown }).tracks;
-    const tracks =
+    let tracks: PlaylistTrack[] | undefined =
       Array.isArray(bodyTracks) && bodyTracks.length > 0 ? (bodyTracks as PlaylistTrack[]) : undefined;
+
+    const saveOrigin = (body as { saveOrigin?: unknown }).saveOrigin;
+    if ("saveOrigin" in body && saveOrigin !== undefined) {
+      if (saveOrigin !== PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT) {
+        return NextResponse.json(
+          {
+            error: `saveOrigin must be omitted or "${PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT}"`,
+          },
+          { status: 400 },
+        );
+      }
+    }
+    const libraryPlacement: "ready_external" | undefined =
+      saveOrigin === PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT ? "ready_external" : undefined;
+
+    let catalogItemId: string | undefined;
+    const tenantId = (user.tenantId ?? "").trim();
+    if (tenantId) {
+      try {
+        const urlKey = normalizeCatalogUrlKey(url, type);
+        if (urlKey) {
+          const row = await findOrCreateCatalogItem({
+            tenantId,
+            urlKey,
+            type,
+            title: name,
+            thumbnailUrl: thumbnail,
+          });
+          catalogItemId = row.id;
+        }
+      } catch (e) {
+        console.warn("[api/playlists] POST catalog find-or-create skipped:", e);
+      }
+    }
+
+    if (
+      tenantId &&
+      saveOrigin === PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT &&
+      tracks &&
+      tracks.length > 0
+    ) {
+      const enriched: PlaylistTrack[] = [];
+      for (const t of tracks) {
+        if (!t || typeof t.url !== "string" || !VALID_TYPES.includes(t.type)) {
+          enriched.push(t);
+          continue;
+        }
+        const u = t.url.trim();
+        if (!u) {
+          enriched.push(t);
+          continue;
+        }
+        try {
+          const urlKey = normalizeCatalogUrlKey(u, t.type);
+          if (!urlKey) {
+            enriched.push(t);
+            continue;
+          }
+          const title = (t.name ?? t.title ?? "").trim() || "Untitled";
+          const thumb = (t.cover ?? "").trim();
+          const row = await findOrCreateCatalogItem({
+            tenantId,
+            urlKey,
+            type: t.type,
+            title,
+            thumbnailUrl: thumb,
+          });
+          enriched.push({ ...t, catalogItemId: row.id });
+        } catch (trackErr) {
+          console.warn(
+            "[api/playlists] POST youtube mix import catalog track find-or-create skipped:",
+            trackErr,
+          );
+          enriched.push(t);
+        }
+      }
+      tracks = enriched;
+    }
 
     const playlist = await createPlaylist({
       name,
@@ -83,7 +167,9 @@ export async function POST(req: NextRequest) {
       tenantId: user.tenantId,
       viewCount,
       durationSeconds,
+      ...(catalogItemId ? { catalogItemId } : {}),
       ...(tracks ? { tracks } : {}),
+      ...(libraryPlacement ? { libraryPlacement } : {}),
     });
     const uid = await getUserIdFromSession();
     if (uid) void notifyLibraryUpdated(uid, { branchId, entityType: "playlist", action: "created" });
