@@ -2,8 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
-import { usePlayback } from "@/lib/playback-provider";
 import { runSchedulePlayback } from "@/lib/schedule-playback-client";
+import { useSchedulePlaybackHandlers } from "@/lib/use-schedule-playback-handlers";
 import { useScheduleEngine } from "@/lib/schedule-engine-context";
 import {
   getScheduleAutoOptOutIds,
@@ -19,12 +19,14 @@ const POLL_MS = 8_000;
 
 /**
  * While this browser tab is open, polls schedules and starts playback when a block’s window is active.
- * Fires at most once per schedule per local day (per start time). Respects Schedule engine on/off.
+ * Schedules that **already auto-fired today** (localStorage) are excluded — a 10:00 run does not compete at 10:02.
+ * Among remaining active blocks, **latest start time** wins if windows overlap; then priority, then id.
+ * Respects Schedule engine on/off and per-block opt-out.
  */
 export function ScheduleAutoPlayer() {
   const router = useRouter();
   const { engineEnabled } = useScheduleEngine();
-  const { stop, setQueue, playSource, playSourceFromDb, setLastMessage } = usePlayback();
+  const { stop, setQueue, playSource, setLastMessage } = useSchedulePlaybackHandlers();
   const busyRef = useRef(false);
 
   useEffect(() => {
@@ -42,13 +44,14 @@ export function ScheduleAutoPlayer() {
 
         const now = new Date();
         const skipIds = getScheduleAutoOptOutIds();
-        const winner = pickWinningScheduleForNow(schedules, now, { skipScheduleIds: skipIds });
+        const pending = schedules.filter((s) => {
+          if (skipIds.has(s.id)) return false;
+          const key = scheduleAutoFireStorageKey(s, now);
+          if (typeof localStorage !== "undefined" && localStorage.getItem(key) === "1") return false;
+          return true;
+        });
+        const winner = pickWinningScheduleForNow(pending, now);
         if (!winner) return;
-
-        const key = scheduleAutoFireStorageKey(winner, now);
-        if (typeof localStorage !== "undefined" && localStorage.getItem(key) === "1") {
-          return;
-        }
 
         const sourcesRes = await fetch("/api/sources", { credentials: "include", cache: "no-store" });
         const sources = sourcesRes.ok ? ((await sourcesRes.json()) as Source[]) : [];
@@ -61,13 +64,14 @@ export function ScheduleAutoPlayer() {
         const ok = await runSchedulePlayback(
           winner,
           source,
-          { stop, setQueue, playSource, playSourceFromDb, setLastMessage },
+          { stop, setQueue, playSource, setLastMessage },
           router,
         );
         if (!ok) return;
 
+        const fireKey = scheduleAutoFireStorageKey(winner, now);
         try {
-          localStorage.setItem(key, "1");
+          localStorage.setItem(fireKey, "1");
         } catch {
           /* ignore quota */
         }
@@ -92,7 +96,7 @@ export function ScheduleAutoPlayer() {
       window.removeEventListener(SCHEDULE_AUTO_PREFS_EVENT, onPrefs);
       window.removeEventListener("storage", onPrefs);
     };
-  }, [engineEnabled, router, stop, setQueue, playSource, playSourceFromDb, setLastMessage]);
+  }, [engineEnabled, router, stop, setQueue, playSource, setLastMessage]);
 
   return null;
 }

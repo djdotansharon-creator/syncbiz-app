@@ -1580,6 +1580,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           onClick={(e) => {
                             e.stopPropagation();
                             setPlaylistTileScheduleModal({
+                              daypartKey: pad.key,
                               daypartLabel: pad.label,
                               playlistId: assignedPlaylist?.playlist?.id,
                               playlistName: assignedPlaylist?.title,
@@ -1682,6 +1683,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           onClick={(e) => {
                             e.stopPropagation();
                             setPlaylistTileScheduleModal({
+                              daypartKey: pad.key,
                               daypartLabel: pad.label,
                               playlistId: assignedPlaylist?.playlist?.id,
                               playlistName: assignedPlaylist?.title,

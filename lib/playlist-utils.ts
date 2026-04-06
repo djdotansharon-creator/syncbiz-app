@@ -1,6 +1,15 @@
 import type { Playlist, PlaylistType } from "./playlist-types";
 import type { UnifiedSource } from "./source-types";
 
+/**
+ * UnifiedSource / queue ids for playlists: stored `Playlist.id` is already `pl-*`.
+ * Do not prefix again — `pl-${playlist.id}` would yield `pl-pl-...` and breaks lookups.
+ */
+export function unifiedPlaylistSourceId(playlistId: string): string {
+  const id = (playlistId ?? "").trim();
+  return id.startsWith("pl-") ? id : `pl-${id}`;
+}
+
 /** Map playlist type to embedded player support (opens in /player page). */
 export function isEmbeddedPlaylist(type: PlaylistType): boolean {
   return type === "youtube" || type === "soundcloud" || type === "stream-url";

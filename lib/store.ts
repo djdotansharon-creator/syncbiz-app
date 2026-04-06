@@ -1,3 +1,7 @@
+import { existsSync } from "fs";
+import { mkdir, readFile, writeFile } from "fs/promises";
+import { dirname } from "path";
+import { getSchedulesDataPath } from "./data-path";
 import type {
   Account,
   Announcement,
@@ -43,6 +47,46 @@ let schedules: Schedule[] = seedSchedules.map((s) => ({
   ...s,
   accountId: demoAccount.id,
 }));
+
+/**
+ * Reload schedules from disk on every call.
+ * Next.js may run API routes in different isolates; a one-time load left stale in-memory
+ * arrays so DELETE returned 404 while the UI (from disk/RSC) still showed the row.
+ */
+async function reloadSchedulesFromDisk(): Promise<void> {
+  const path = getSchedulesDataPath();
+  await mkdir(dirname(path), { recursive: true });
+  if (existsSync(path)) {
+    try {
+      const raw = await readFile(path, "utf-8");
+      const data = JSON.parse(raw) as unknown;
+      if (Array.isArray(data)) {
+        const loaded = data.filter(
+          (row): row is Schedule =>
+            typeof row === "object" &&
+            row !== null &&
+            typeof (row as Schedule).id === "string" &&
+            (row as Schedule).id.length > 0,
+        );
+        schedules = loaded;
+      }
+    } catch (e) {
+      console.error("[store] schedules.json read failed", e);
+    }
+    return;
+  }
+  try {
+    await writeFile(path, JSON.stringify(schedules, null, 2), "utf-8");
+  } catch (e) {
+    console.error("[store] schedules.json bootstrap write failed", e);
+  }
+}
+
+async function persistSchedulesToDisk(): Promise<void> {
+  const path = getSchedulesDataPath();
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(schedules, null, 2), "utf-8");
+}
 
 let announcements: Announcement[] = seedAnnouncements.map((a) => ({
   ...a,
@@ -162,9 +206,17 @@ export const db = {
     sources[idx] = { ...sources[idx], ...data };
     return sources[idx];
   },
+  /** Lookup by id only (trimmed). Used when URL id must match persisted id regardless of minor encoding/whitespace issues. */
+  findScheduleById(id: string): Schedule | null {
+    const nid = id.trim();
+    return schedules.find((s) => s.id.trim() === nid) ?? null;
+  },
   getSchedule(id: string, accountId?: string): Schedule | null {
-    const list = accountId ? schedules.filter((s) => s.accountId === accountId) : schedules;
-    return list.find((s) => s.id === id) ?? null;
+    const nid = id.trim();
+    const list = accountId
+      ? schedules.filter((s) => (s.accountId ?? "").trim() === accountId.trim())
+      : schedules;
+    return list.find((s) => s.id.trim() === nid) ?? null;
   },
   addSchedule(input: Omit<Schedule, "id" | "accountId"> & Partial<Pick<Schedule, "targetType" | "targetId" | "accountId">>): Schedule {
     const targetType = input.targetType ?? "SOURCE";
@@ -188,7 +240,8 @@ export const db = {
     return schedule;
   },
   updateSchedule(id: string, data: Partial<Schedule>): Schedule | null {
-    const idx = schedules.findIndex((s) => s.id === id);
+    const nid = id.trim();
+    const idx = schedules.findIndex((s) => s.id.trim() === nid);
     if (idx < 0) return null;
     const merged = { ...schedules[idx], ...data };
     let endRaw = merged.endTimeLocal;
@@ -208,10 +261,20 @@ export const db = {
     return updated;
   },
   deleteSchedule(id: string): boolean {
+    const nid = id.trim();
     const before = schedules.length;
-    schedules = schedules.filter((s) => s.id !== id);
+    schedules = schedules.filter((s) => s.id.trim() !== nid);
     return schedules.length < before;
   },
+
+  /** Load or reload `data/schedules.json` before schedule reads/writes. */
+  async ensureSchedulesLoaded(): Promise<void> {
+    await reloadSchedulesFromDisk();
+  },
+  async persistSchedules(): Promise<void> {
+    await persistSchedulesToDisk();
+  },
+
   addAnnouncement(input: Omit<Announcement, "id" | "accountId">): Announcement {
     const announcement: Announcement = {
       ...input,

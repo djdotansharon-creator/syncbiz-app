@@ -37,3 +37,8 @@ export function getDataDir(): string {
 export function getUsersDataPath(): string {
   return join(getDataDir(), "users.json");
 }
+
+/** Path to schedules.json — persisted schedule blocks (API + dev survival across restarts). */
+export function getSchedulesDataPath(): string {
+  return join(getDataDir(), "schedules.json");
+}

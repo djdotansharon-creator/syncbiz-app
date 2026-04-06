@@ -10,6 +10,8 @@ type DeleteConfirmModalProps = {
   onConfirm: () => void | Promise<void>;
   title?: string;
   message?: string;
+  /** Shown when onConfirm rejects or fails (e.g. API error text). */
+  errorHint?: string | null;
   confirmLabel?: string;
   cancelLabel?: string;
   loading?: boolean;
@@ -33,6 +35,7 @@ export function DeleteConfirmModal({
   onConfirm,
   title,
   message,
+  errorHint,
   confirmLabel,
   cancelLabel,
   loading = false,
@@ -88,6 +91,11 @@ export function DeleteConfirmModal({
           <p className="mt-2 text-sm leading-relaxed text-slate-400">
             {message ?? T.deleteSourceConfirm ?? "Are you sure?"}
           </p>
+          {errorHint ? (
+            <p className="mt-2 text-sm text-rose-400/95" role="alert">
+              {errorHint}
+            </p>
+          ) : null}
           <div className="mt-4 flex justify-end gap-3">
             <button
               type="button"
@@ -129,6 +137,11 @@ export function DeleteConfirmModal({
         <p className="mt-3 text-sm leading-relaxed text-slate-400">
           {message ?? T.deleteSourceConfirm ?? "Are you sure?"}
         </p>
+        {errorHint ? (
+          <p className="mt-2 text-sm text-rose-400/95" role="alert">
+            {errorHint}
+          </p>
+        ) : null}
         <div className={BUTTON_ROW_DEFAULT_CLASS}>
           <button
             type="button"

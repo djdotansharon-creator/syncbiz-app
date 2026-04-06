@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
+import { normalizeScheduleTimeLocal } from "@/lib/schedule-target-helpers";
 import { validateScheduleTarget } from "@/lib/schedule-target-validator";
 import type { Schedule, ScheduleTargetType } from "@/lib/types";
 
@@ -8,10 +10,24 @@ function resolveAccountScope(userTenantId: string): string {
   return userTenantId === "tnt-default" ? "acct-demo-001" : userTenantId;
 }
 
+/** Next.js may pass encoded ids; clients may send stray spaces — normalize before store lookup. */
+function normalizeScheduleRouteId(raw: string | undefined): string {
+  if (raw == null || raw === "") return "";
+  try {
+    return decodeURIComponent(raw).trim();
+  } catch {
+    return raw.trim();
+  }
+}
+
 async function requireScheduleAccess(schedule: Schedule | null) {
   const user = await getCurrentUserFromCookies();
   if (!user) return { ok: false as const, status: 401 } as const;
   if (!schedule) return { ok: false as const, status: 404 } as const;
+  const scope = resolveAccountScope(user.tenantId);
+  if ((schedule.accountId ?? "").trim() !== scope) {
+    return { ok: false as const, status: 404 } as const;
+  }
   const branchId = (schedule.branchId ?? "default").trim() || "default";
   if (!(await hasBranchAccess(user.id, branchId))) {
     return { ok: false as const, status: 403 } as const;
@@ -23,10 +39,13 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
+  const { id: rawId } = await params;
+  const id = normalizeScheduleRouteId(rawId);
+  if (!id) return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const schedule = db.getSchedule(id, resolveAccountScope(user.tenantId));
+  await db.ensureSchedulesLoaded();
+  const schedule = db.findScheduleById(id);
   const access = await requireScheduleAccess(schedule);
   if (!access.ok) {
     return NextResponse.json(
@@ -41,10 +60,13 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
+  const { id: rawId } = await params;
+  const id = normalizeScheduleRouteId(rawId);
+  if (!id) return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const existing = db.getSchedule(id, resolveAccountScope(user.tenantId));
+  await db.ensureSchedulesLoaded();
+  const existing = db.findScheduleById(id);
   const access = await requireScheduleAccess(existing);
   if (!access.ok) {
     return NextResponse.json(
@@ -81,11 +103,11 @@ export async function PATCH(
   if (data.sourceId !== undefined) updates.sourceId = data.sourceId;
   if (data.deviceId !== undefined) updates.deviceId = data.deviceId;
   if (data.daysOfWeek !== undefined) updates.daysOfWeek = data.daysOfWeek;
-  if (data.startTimeLocal !== undefined) updates.startTimeLocal = data.startTimeLocal;
+  if (data.startTimeLocal !== undefined) updates.startTimeLocal = normalizeScheduleTimeLocal(data.startTimeLocal);
   if (data.endTimeLocal !== undefined) {
     const er = data.endTimeLocal;
     updates.endTimeLocal =
-      typeof er === "string" && er.trim().length > 0 ? er : "23:59";
+      typeof er === "string" && er.trim().length > 0 ? normalizeScheduleTimeLocal(er) : "23:59";
   }
   if (data.enabled !== undefined) updates.enabled = data.enabled;
   if (data.priority !== undefined) updates.priority = data.priority;
@@ -99,6 +121,8 @@ export async function PATCH(
   if (uid) updates.updatedBy = uid;
 
   const updated = db.updateSchedule(id, updates);
+  await db.persistSchedules();
+  revalidatePath("/schedules");
   return NextResponse.json(updated);
 }
 
@@ -106,10 +130,13 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
+  const { id: rawId } = await params;
+  const id = normalizeScheduleRouteId(rawId);
+  if (!id) return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const schedule = db.getSchedule(id, resolveAccountScope(user.tenantId));
+  await db.ensureSchedulesLoaded();
+  const schedule = db.findScheduleById(id);
   const access = await requireScheduleAccess(schedule);
   if (!access.ok) {
     return NextResponse.json(
@@ -121,5 +148,7 @@ export async function DELETE(
   if (!deleted) {
     return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
   }
+  await db.persistSchedules();
+  revalidatePath("/schedules");
   return NextResponse.json({ ok: true });
 }

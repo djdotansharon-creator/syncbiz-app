@@ -22,6 +22,7 @@ import {
   getYouTubeThumbnail,
   getYouTubeVideoId,
   isYouTubeMultiTrackUrl,
+  unifiedPlaylistSourceId,
 } from "./playlist-utils";
 import { getShuffle, setShufflePreference } from "./mix-preferences";
 import { supportsEmbedded, getSourceArtworkUrl } from "./player-utils";
@@ -77,7 +78,7 @@ function unifiedToPlaybackTrack(source: UnifiedSource, trackIndex = 0): Playback
   };
 }
 
-function sourceToUnified(s: Source): UnifiedSource {
+export function sourceToUnified(s: Source): UnifiedSource {
   const target = (s.target ?? s.uriOrPath ?? "").trim();
   let type: SourceProviderType = "stream-url";
   if (target.includes("youtube") || target.includes("youtu.be")) type = "youtube";
@@ -1058,7 +1059,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const playPlaylist = useCallback(
     (playlist: Playlist, trackIndex = 0) => {
       const source: UnifiedSource = {
-        id: `pl-${playlist.id}`,
+        id: unifiedPlaylistSourceId(playlist.id),
         title: playlist.name,
         genre: playlist.genre || "Mixed",
         cover: playlist.thumbnail || playlist.cover || null,

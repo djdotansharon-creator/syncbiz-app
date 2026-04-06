@@ -5,19 +5,32 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ScheduleDayLedButton } from "@/components/schedule-block-modal";
 import { useTranslations } from "@/lib/locale-context";
+import type { Playlist } from "@/lib/playlist-types";
+import {
+  normalizeScheduleTimeLocal,
+  parseScheduleTargetKey,
+  resolveScheduleTargetBranchId,
+  scheduleTargetKey,
+} from "@/lib/schedule-target-helpers";
 import type { Device, Source } from "@/lib/types";
 
 type DayOption = { value: number; label: string };
 
+type RadioRow = { id: string; name: string; branchId?: string | null };
+
 type ScheduleFormProps = {
   devices: Device[];
   sources: Source[];
+  playlists: Playlist[];
+  radioStations: RadioRow[];
   daysOptions: DayOption[];
 };
 
 export function ScheduleForm({
   devices,
   sources,
+  playlists,
+  radioStations,
   daysOptions,
 }: ScheduleFormProps) {
   const router = useRouter();
@@ -26,7 +39,9 @@ export function ScheduleForm({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [recurrence, setRecurrence] = useState<"weekly" | "one_off">("weekly");
   const [oneOffDate, setOneOffDate] = useState("");
-  const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5]); // default weekdays
+  const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5]);
+  const [targetKeyValue, setTargetKeyValue] = useState("");
+  const [startTime, setStartTime] = useState("08:00:00");
 
   function toggleDay(d: number) {
     setDays((prev) =>
@@ -37,27 +52,29 @@ export function ScheduleForm({
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaveError(null);
-    setSaving(true);
+    const parsed = parseScheduleTargetKey(targetKeyValue);
+    if (!parsed) {
+      setSaveError("Select a playback target.");
+      return;
+    }
     const form = e.currentTarget;
     const formData = new FormData(form);
-    const sourceId = formData.get("sourceId") as string;
-    const sourceObj = sources.find((s) => s.id === sourceId);
-    const branchId = (sourceObj?.branchId ?? "default").trim() || "default";
+    const branchId = resolveScheduleTargetBranchId(parsed, sources, playlists, radioStations);
     const body = {
-      name: formData.get("name") as string,
+      name: (formData.get("name") as string)?.trim() || "Schedule",
       branchId,
-      targetType: "SOURCE" as const,
-      targetId: sourceId,
-      sourceId,
+      targetType: parsed.targetType,
+      targetId: parsed.targetId,
+      sourceId: parsed.targetType === "SOURCE" ? parsed.targetId : undefined,
       deviceId: (formData.get("deviceId") as string) || undefined,
       recurrence,
       daysOfWeek: recurrence === "weekly" ? days : [],
       oneOffDateLocal: recurrence === "one_off" ? oneOffDate : undefined,
-      startTimeLocal: formData.get("startTime") as string,
-      endTimeLocal: (formData.get("endTime") as string) || undefined,
+      startTimeLocal: normalizeScheduleTimeLocal(startTime),
       enabled: true,
       priority: 1,
     };
+    setSaving(true);
     try {
       const res = await fetch("/api/schedules", {
         method: "POST",
@@ -121,23 +138,40 @@ export function ScheduleForm({
 
       <div>
         <label
-          htmlFor="sourceId"
+          htmlFor="playbackTarget"
           className="block text-xs font-medium text-slate-400"
         >
-          {t.playbackTargetSource}
+          {t.schedulePlaybackTarget}
         </label>
         <select
-          id="sourceId"
-          name="sourceId"
+          id="playbackTarget"
           required
+          value={targetKeyValue}
+          onChange={(e) => setTargetKeyValue(e.target.value)}
           className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
         >
           <option value="">{t.selectSource}</option>
-          {sources.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name} ({s.type})
-            </option>
-          ))}
+          <optgroup label={t.playbackTargetSource}>
+            {sources.map((s) => (
+              <option key={s.id} value={scheduleTargetKey("SOURCE", s.id)}>
+                {s.name} ({s.type})
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label={t.scheduleTargetPlaylist}>
+            {playlists.map((p) => (
+              <option key={p.id} value={scheduleTargetKey("PLAYLIST", p.id)}>
+                {p.name}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label={t.scheduleTargetRadio}>
+            {radioStations.map((r) => (
+              <option key={r.id} value={scheduleTargetKey("RADIO", r.id)}>
+                {r.name}
+              </option>
+            ))}
+          </optgroup>
         </select>
       </div>
 
@@ -200,38 +234,22 @@ export function ScheduleForm({
       </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label
-            htmlFor="startTime"
-            className="block text-xs font-medium text-slate-400"
-          >
-            {t.startTime}
-          </label>
-          <input
-            id="startTime"
-            name="startTime"
-            type="time"
-            required
-            defaultValue="08:00"
-            className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="endTime"
-            className="block text-xs font-medium text-slate-400"
-          >
-            {t.endTimeOptional}
-          </label>
-          <input
-            id="endTime"
-            name="endTime"
-            type="time"
-            placeholder={t.leaveEmptyAllDay}
-            className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
-          />
-        </div>
+      <div>
+        <label
+          htmlFor="startTime"
+          className="block text-xs font-medium text-slate-400"
+        >
+          {t.startTime}
+        </label>
+        <input
+          id="startTime"
+          type="time"
+          step={1}
+          required
+          value={startTime.length === 5 ? `${startTime}:00` : startTime}
+          onChange={(e) => setStartTime(e.target.value)}
+          className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+        />
       </div>
 
       {saveError ? (
@@ -243,7 +261,12 @@ export function ScheduleForm({
       <div className="flex gap-3 pt-2">
         <button
           type="submit"
-          disabled={saving || (recurrence === "weekly" && days.length === 0) || (recurrence === "one_off" && !oneOffDate)}
+          disabled={
+            saving ||
+            !targetKeyValue ||
+            (recurrence === "weekly" && days.length === 0) ||
+            (recurrence === "one_off" && !oneOffDate)
+          }
           className="rounded-xl border border-amber-500/45 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-100 shadow-[0_0_24px_rgba(245,158,11,0.12)] transition hover:bg-amber-500/25 disabled:opacity-60"
         >
           {saving ? t.saving : t.saveSchedule}

@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { LibraryPlaybackProvider, useLibraryPlayback } from "@/lib/library-playback-context";
 import type { LibraryItem } from "@/lib/library-types";
-import { getLibraryItemName, getLibraryItemCover, isPlaylist } from "@/lib/library-types";
+import { getLibraryItemId, getLibraryItemName, getLibraryItemCover, isPlaylist } from "@/lib/library-types";
 import { LibraryItemCard } from "@/components/library-item-card";
 import { SyncBizPlayer } from "@/components/syncbiz-player";
 import { AddPlaylistForm } from "@/components/add-playlist-form";
@@ -134,7 +134,7 @@ export function LibraryManager({ initialItems }: Props) {
 }
 
 function getItemKey(item: LibraryItem): string {
-  return item.kind === "playlist" ? `pl-${item.data.id}` : `src-${item.data.id}`;
+  return getLibraryItemId(item);
 }
 
 function ShuffleToggle() {

@@ -406,6 +406,7 @@ export function ActionButtonPlayNow({
   label = "Play now",
   loadingLabel = "Sending…",
   variant = "green",
+  compact = false,
   className = "",
 }: {
   onClick: () => void | Promise<void>;
@@ -415,9 +416,14 @@ export function ActionButtonPlayNow({
   loadingLabel?: string;
   /** green = legacy cards; console = cyan outline (library / URL play style) */
   variant?: "green" | "console";
+  /** Smaller console button (schedules rail) */
+  compact?: boolean;
   className?: string;
 }) {
   if (variant === "console") {
+    const compactCls = compact
+      ? "h-7 gap-1 rounded-md border px-2 py-0.5 text-[10px] leading-tight [&_svg]:h-2.5 [&_svg]:w-2.5"
+      : "h-9 gap-2 rounded-lg border-2 px-3 py-2 text-xs [&_svg]:h-3.5 [&_svg]:w-3.5";
     return (
       <button
         type="button"
@@ -425,14 +431,15 @@ export function ActionButtonPlayNow({
         disabled={disabled || loading}
         aria-label={loading ? loadingLabel : label}
         className={`${baseStyles}
-          inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border-2 border-cyan-400/60 bg-slate-900/95 px-3 py-2 text-xs font-semibold text-cyan-300
+          inline-flex shrink-0 items-center whitespace-nowrap border-cyan-400/60 bg-slate-900/95 font-semibold text-cyan-300
           shadow-[0_0_0_1px_rgba(34,211,238,0.2),inset_0_1px_0_rgba(255,255,255,0.04)]
           hover:border-cyan-400 hover:bg-slate-900 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.25),0_0_18px_rgba(34,211,238,0.12)]
           focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/45 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950
           disabled:opacity-50
+          ${compactCls}
           ${className}`}
       >
-        <svg className="h-3.5 w-3.5 shrink-0 text-cyan-200/95" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <svg className="shrink-0 text-cyan-200/95" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
           <path d="M8 5v14l11-7L8 5z" />
         </svg>
         {loading ? loadingLabel : label}

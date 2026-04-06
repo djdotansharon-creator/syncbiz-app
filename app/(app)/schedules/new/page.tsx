@@ -4,10 +4,16 @@ import { headers } from "next/headers";
 import { getApiBase } from "@/lib/api-base";
 import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
+import type { Playlist } from "@/lib/playlist-types";
 import type { Device, Source } from "@/lib/types";
 import { ScheduleForm } from "./schedule-form";
 
-async function getData(): Promise<{ devices: Device[]; sources: Source[] }> {
+async function getData(): Promise<{
+  devices: Device[];
+  sources: Source[];
+  playlists: Playlist[];
+  radioStations: { id: string; name: string; branchId?: string | null }[];
+}> {
   try {
     const base = getApiBase();
     const h = await headers();
@@ -17,21 +23,34 @@ async function getData(): Promise<{ devices: Device[]; sources: Source[] }> {
         cache: "no-store",
         ...(cookie ? { headers: { cookie } } : {}),
       });
-    const [devicesRes, sourcesRes] = await Promise.all([
+    const [devicesRes, sourcesRes, playlistsRes, radioRes] = await Promise.all([
       authFetch("/api/devices"),
       authFetch("/api/sources"),
+      authFetch("/api/playlists"),
+      authFetch("/api/radio"),
     ]);
-    const [devices, sources] = (await Promise.all([
+    const [devices, sources, playlistsRaw, radioRaw] = (await Promise.all([
       devicesRes.ok ? devicesRes.json() : [],
       sourcesRes.ok ? sourcesRes.json() : [],
-    ])) as [Device[], Source[]];
+      playlistsRes.ok ? playlistsRes.json() : [],
+      radioRes.ok ? radioRes.json() : [],
+    ])) as [Device[], Source[], unknown, unknown];
+    const playlists = Array.isArray(playlistsRaw) ? (playlistsRaw as Playlist[]) : [];
+    const radioArr = Array.isArray(radioRaw) ? radioRaw : [];
+    const radioStations = radioArr.map((r: { id?: string; name?: string; branchId?: string | null }) => ({
+      id: String(r.id ?? ""),
+      name: String(r.name ?? r.id ?? ""),
+      branchId: r.branchId,
+    }));
     return {
       devices: Array.isArray(devices) ? devices : [],
       sources: Array.isArray(sources) ? sources : [],
+      playlists,
+      radioStations,
     };
   } catch (e) {
     console.error("[schedules/new] getData error:", e);
-    return { devices: [], sources: [] };
+    return { devices: [], sources: [], playlists: [], radioStations: [] };
   }
 }
 
@@ -48,7 +67,7 @@ const DAYS = [
 export default async function NewSchedulePage() {
   const locale = await getLocale();
   const t = getTranslations(locale);
-  const { devices, sources } = await getData();
+  const { devices, sources, playlists, radioStations } = await getData();
   const daysOptions = DAYS.map((d) => ({ value: d.value, label: t[d.labelKey] }));
 
   return (
@@ -72,6 +91,8 @@ export default async function NewSchedulePage() {
       <ScheduleForm
         devices={devices}
         sources={sources}
+        playlists={playlists}
+        radioStations={radioStations}
         daysOptions={daysOptions}
       />
     </div>

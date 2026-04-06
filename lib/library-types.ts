@@ -1,5 +1,6 @@
 import type { Playlist } from "./playlist-types";
 import type { Source } from "./types";
+import { unifiedPlaylistSourceId } from "./playlist-utils";
 
 /** Unified library item: either a Playlist or a Source. */
 export type LibraryItemKind = "playlist" | "source";
@@ -31,5 +32,5 @@ export function getLibraryItemCover(item: LibraryItem): string | null {
 
 /** Unique ID for a library item. */
 export function getLibraryItemId(item: LibraryItem): string {
-  return item.kind === "playlist" ? `pl-${item.data.id}` : `src-${item.data.id}`;
+  return item.kind === "playlist" ? unifiedPlaylistSourceId(item.data.id) : `src-${item.data.id}`;
 }

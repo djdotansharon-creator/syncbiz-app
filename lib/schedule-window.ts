@@ -60,7 +60,11 @@ export function isScheduleInActiveWindow(schedule: Schedule, now: Date): boolean
   return cur >= start && cur <= end;
 }
 
-/** Among enabled schedules active at `now`, pick by lowest priority number, then id. */
+/**
+ * Among enabled schedules active at `now`, pick the block whose **start time is latest**
+ * (still ≤ now). That way overlapping windows stack: e.g. 10:00–23:59 vs 10:02–12:00 → at 10:02
+ * the 10:02 block wins, not the broader 10:00 block. Tie-break: lower priority number, then id.
+ */
 export function pickWinningScheduleForNow(
   schedules: Schedule[],
   now: Date,
@@ -72,6 +76,9 @@ export function pickWinningScheduleForNow(
   );
   if (active.length === 0) return null;
   active.sort((a, b) => {
+    const sa = parseLocalTimeToMinutes(a.startTimeLocal);
+    const sb = parseLocalTimeToMinutes(b.startTimeLocal);
+    if (sa !== sb) return sb - sa;
     const pa = numericSchedulePriority(a);
     const pb = numericSchedulePriority(b);
     if (pa !== pb) return pa - pb;

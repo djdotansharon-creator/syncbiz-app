@@ -46,9 +46,9 @@ type DevicePlayerContextValue = {
   sendSetMaster: () => void;
   sendSetControl: () => void;
   /** Send command to master (when in CONTROL mode). */
-  sendCommandToMaster: (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean }) => void;
+  sendCommandToMaster: (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number }) => void;
   /** Play source locally (MASTER) or send to master (CONTROL). */
-  playSourceOrSend: (source: UnifiedSource) => void;
+  playSourceOrSend: (source: UnifiedSource, trackIndex?: number) => void;
   /** Play/pause/stop/next/prev - local when MASTER, send to master when CONTROL. */
   playOrSend: () => void;
   pauseOrSend: () => void;
@@ -242,7 +242,10 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const onCommand = useCallback(
-    (cmd: { command: string; payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean } }) => {
+    (cmd: {
+      command: string;
+      payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number };
+    }) => {
       const command = cmd.command as RemoteCommand;
       if (command === "PLAY") play();
       else if (command === "PAUSE") pause();
@@ -294,13 +297,14 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         playSource(urlToUnifiedSource(cmd.payload.url));
       } else if (command === "PLAY_SOURCE" && cmd.payload?.source) {
         const payload = cmd.payload.source as PlaySourcePayload;
+        const trackIdx = typeof cmd.payload.trackIndex === "number" ? cmd.payload.trackIndex : 0;
         fetchUnifiedSourcesWithFallback()
           .then((items) => {
             const full = items.find((s) => s.id === payload.id);
-            if (full) playSource(full);
-            else playSource(payloadToUnifiedSource(payload));
+            if (full) playSource(full, trackIdx);
+            else playSource(payloadToUnifiedSource(payload), trackIdx);
           })
-          .catch(() => playSource(payloadToUnifiedSource(payload)));
+          .catch(() => playSource(payloadToUnifiedSource(payload), trackIdx));
       }
     },
     [play, pause, stop, next, prev, playSource, seekTo, setVolume, setShuffle, setAutoMix]
@@ -381,9 +385,11 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     };
   }, [isActive]);
 
-  // Block local playback when on device route until we know we're MASTER (prevents CONTROL from restoring).
-  // Allow when: not on device route; or disconnected (standalone); or connected and MASTER.
-  deviceModeAllowsLocalPlayback.current = !isActive || status === "disconnected" || (status === "connected" && deviceMode === "MASTER");
+  // Block local playback only when we know this tab is CONTROL on a live branch connection.
+  // While WS is "connecting" (or any non-connected state), allow local playback so scheduled auto-play
+  // and "Play now" are not no-ops — otherwise stop()+playSource() leaves an empty player and the run still looks "successful".
+  deviceModeAllowsLocalPlayback.current =
+    !isActive || status !== "connected" || (status === "connected" && deviceMode === "MASTER");
 
   // Publish state when MASTER and connected – include position/duration for CONTROL sync
   useEffect(() => {
@@ -425,7 +431,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   }, [isActive, status, deviceMode, playStatus, sendState, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState]);
 
   const sendCommandToMaster = useCallback(
-    (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean }) => {
+    (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number }) => {
       if (!masterDeviceId) return;
       sendCommand(masterDeviceId, command, payload);
     },
@@ -433,11 +439,14 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   );
 
   const playSourceOrSend = useCallback(
-    (source: UnifiedSource) => {
+    (source: UnifiedSource, trackIndex = 0) => {
       if (effectiveDeviceMode === "MASTER") {
-        playSource(source);
+        playSource(source, trackIndex);
       } else {
-        sendCommandToMaster("PLAY_SOURCE", { source: unifiedSourceToPayload(source) });
+        sendCommandToMaster("PLAY_SOURCE", {
+          source: unifiedSourceToPayload(source),
+          trackIndex,
+        });
       }
     },
     [effectiveDeviceMode, playSource, sendCommandToMaster]

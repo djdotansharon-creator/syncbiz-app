@@ -1,6 +1,9 @@
 import { headers } from "next/headers";
 
 import { getApiBase } from "@/lib/api-base";
+
+/** Lists must refetch after DELETE/POST/PATCH — avoid stale RSC cache. */
+export const dynamic = "force-dynamic";
 import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
 import type { Playlist } from "@/lib/playlist-types";

@@ -1,19 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslations } from "@/lib/locale-context";
-import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
+import { defaultStartTimeForScheduleModalContext } from "@/lib/daypart-schedule-defaults";
 import type { Playlist } from "@/lib/playlist-types";
+import {
+  normalizeScheduleTimeLocal as normalizeTimeLocal,
+  parseScheduleTargetKey as parseTargetKey,
+  resolveScheduleTargetBranchId as resolveScheduleBranchId,
+  scheduleTargetKey as targetKey,
+  scheduleTimeToHtmlInputValue,
+  type ScheduleTargetRadio,
+} from "@/lib/schedule-target-helpers";
 import type { Device, Schedule, ScheduleRecurrence, Source } from "@/lib/types";
 
 export type ScheduleModalInitialContext = {
   daypartLabel?: string;
+  /** e.g. `daypart:morning` — used for preset start time */
+  daypartKey?: string;
   playlistId?: string;
   playlistName?: string;
 };
 
-type RadioRow = { id: string; name: string; branchId?: string | null };
+type RadioRow = ScheduleTargetRadio;
 
 type Props = {
   open: boolean;
@@ -33,51 +43,6 @@ function ConsoleSurface({ children, className = "" }: { children: ReactNode; cla
       {children}
     </div>
   );
-}
-
-function targetKey(tt: string, id: string) {
-  return `${tt}:${id}`;
-}
-
-function parseTargetKey(raw: string): { targetType: "SOURCE" | "PLAYLIST" | "RADIO"; targetId: string } | null {
-  const [tt, ...rest] = raw.split(":");
-  const id = rest.join(":");
-  if (!id) return null;
-  if (tt === "SOURCE" || tt === "PLAYLIST" || tt === "RADIO") return { targetType: tt, targetId: id };
-  return null;
-}
-
-/** HTML time → HH:mm:ss for API (branch-aware schedules need valid targets). */
-function normalizeTimeLocal(raw: string): string {
-  const s = raw.trim();
-  if (!s) return "09:00:00";
-  const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-  if (!m) return s.length >= 5 ? s.slice(0, 8) : "09:00:00";
-  const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
-  const min = Math.min(59, Math.max(0, parseInt(m[2], 10)));
-  const sec = m[3] != null ? Math.min(59, Math.max(0, parseInt(m[3], 10))) : 0;
-  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-}
-
-function resolveScheduleBranchId(
-  parsed: { targetType: "SOURCE" | "PLAYLIST" | "RADIO"; targetId: string },
-  sources: Source[],
-  playlists: Playlist[],
-  radios: RadioRow[],
-): string {
-  if (parsed.targetType === "SOURCE") {
-    const src = sources.find((x) => x.id === parsed.targetId);
-    return (src?.branchId ?? "default").trim() || "default";
-  }
-  if (parsed.targetType === "PLAYLIST") {
-    const p = playlists.find((x) => x.id === parsed.targetId);
-    return resolveMediaBranchId(p ?? {});
-  }
-  if (parsed.targetType === "RADIO") {
-    const r = radios.find((x) => x.id === parsed.targetId);
-    return resolveMediaBranchId(r ?? {});
-  }
-  return "default";
 }
 
 type DayLedButtonProps = { label: string; on: boolean; onToggle: () => void };
@@ -124,97 +89,105 @@ export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, 
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [oneOffDate, setOneOffDate] = useState("");
   const [startTime, setStartTime] = useState("09:00:00");
-  const [endTime, setEndTime] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
-
-  const loadLists = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [dRes, sRes, pRes, rRes] = await Promise.all([
-        fetch("/api/devices", { credentials: "include", cache: "no-store" }),
-        fetch("/api/sources", { credentials: "include", cache: "no-store" }),
-        fetch("/api/playlists", { credentials: "include", cache: "no-store" }),
-        fetch("/api/radio", { credentials: "include", cache: "no-store" }),
-      ]);
-      if (dRes.ok) setDevices((await dRes.json()) as Device[]);
-      if (sRes.ok) setSources((await sRes.json()) as Source[]);
-      if (pRes.ok) setPlaylists((await pRes.json()) as Playlist[]);
-      if (rRes.ok) {
-        const rj = await rRes.json();
-        const arr = Array.isArray(rj) ? rj : [];
-        setRadios(
-          arr.map((x: { id?: string; name?: string; branchId?: string | null }) => ({
-            id: String(x.id ?? ""),
-            name: String(x.name ?? x.id ?? ""),
-            branchId: x.branchId,
-          })),
-        );
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  /** One open cycle: load dropdown data then either hydrate edit or new-block defaults. Avoids a race where list fetch cleared `loading` before the schedule GET finished (empty form / wrong defaults). */
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     setSaveError(null);
-    void loadLists();
-  }, [open, loadLists]);
+    setLoading(true);
 
-  useEffect(() => {
-    if (!open) return;
-    if (initialScheduleId) {
-      (async () => {
-        setLoading(true);
-        try {
-          const res = await fetch(`/api/schedules/${encodeURIComponent(initialScheduleId)}`, {
+    void (async () => {
+      try {
+        const [dRes, sRes, pRes, rRes] = await Promise.all([
+          fetch("/api/devices", { credentials: "include", cache: "no-store" }),
+          fetch("/api/sources", { credentials: "include", cache: "no-store" }),
+          fetch("/api/playlists", { credentials: "include", cache: "no-store" }),
+          fetch("/api/radio", { credentials: "include", cache: "no-store" }),
+        ]);
+        if (cancelled) return;
+
+        if (dRes.ok) setDevices((await dRes.json()) as Device[]);
+        if (sRes.ok) setSources((await sRes.json()) as Source[]);
+        if (pRes.ok) setPlaylists((await pRes.json()) as Playlist[]);
+        if (rRes.ok) {
+          const rj = await rRes.json();
+          const arr = Array.isArray(rj) ? rj : [];
+          setRadios(
+            arr.map((x: { id?: string; name?: string; branchId?: string | null }) => ({
+              id: String(x.id ?? ""),
+              name: String(x.name ?? x.id ?? ""),
+              branchId: x.branchId,
+            })),
+          );
+        }
+
+        if (cancelled) return;
+
+        const editId = (initialScheduleId ?? "").trim();
+        if (editId) {
+          const res = await fetch(`/api/schedules/${encodeURIComponent(editId)}`, {
             credentials: "include",
             cache: "no-store",
           });
-          if (!res.ok) return;
+          if (cancelled) return;
+          if (!res.ok) {
+            const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+            setSaveError(errBody.error ?? `Request failed (${res.status})`);
+            return;
+          }
           const sch = (await res.json()) as Schedule;
+          if (cancelled) return;
+
           setName(sch.name ?? "");
           setDeviceId(sch.deviceId ?? "");
           setRecurrence(sch.recurrence === "one_off" ? "one_off" : "weekly");
           setDays(sch.daysOfWeek?.length ? [...sch.daysOfWeek].sort((a, b) => a - b) : [1, 2, 3, 4, 5]);
           setOneOffDate(sch.oneOffDateLocal ?? "");
-          setStartTime(sch.startTimeLocal.length === 5 ? `${sch.startTimeLocal}:00` : sch.startTimeLocal);
-          setEndTime(
-            sch.endTimeLocal && sch.endTimeLocal !== "23:59"
-              ? sch.endTimeLocal.length === 5
-                ? `${sch.endTimeLocal}:00`
-                : sch.endTimeLocal
-              : "",
-          );
-          setTargetKeyValue(targetKey(sch.targetType, sch.targetId));
-        } finally {
-          setLoading(false);
+          setStartTime(scheduleTimeToHtmlInputValue(sch.startTimeLocal, "09:00:00"));
+          const tid = (sch.targetId ?? sch.sourceId ?? "").trim();
+          setTargetKeyValue(tid ? targetKey(sch.targetType, tid) : "");
+          return;
         }
-      })();
-      return;
-    }
-    setName(
-      initialContext?.daypartLabel && initialContext?.playlistName
-        ? `${initialContext.daypartLabel} — ${initialContext.playlistName}`
-        : initialContext?.daypartLabel
-          ? `${initialContext.daypartLabel}`
-          : "",
-    );
-    setDeviceId("");
-    setRecurrence("weekly");
-    setDays([1, 2, 3, 4, 5]);
-    setOneOffDate("");
-    setStartTime("09:00:00");
-    setEndTime("");
-    if (initialContext?.playlistId) {
-      setTargetKeyValue(targetKey("PLAYLIST", initialContext.playlistId));
-    } else {
-      setTargetKeyValue("");
-    }
+
+        setName(
+          initialContext?.daypartLabel && initialContext?.playlistName
+            ? `${initialContext.daypartLabel} — ${initialContext.playlistName}`
+            : initialContext?.daypartLabel
+              ? `${initialContext.daypartLabel}`
+              : "",
+        );
+        setDeviceId("");
+        setRecurrence("weekly");
+        setDays([1, 2, 3, 4, 5]);
+        setOneOffDate("");
+        setStartTime(
+          scheduleTimeToHtmlInputValue(
+            defaultStartTimeForScheduleModalContext({
+              daypartKey: initialContext?.daypartKey,
+              daypartLabel: initialContext?.daypartLabel,
+            }),
+            "09:00:00",
+          ),
+        );
+        if (initialContext?.playlistId) {
+          setTargetKeyValue(targetKey("PLAYLIST", initialContext.playlistId));
+        } else {
+          setTargetKeyValue("");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, initialScheduleId, initialContext]);
 
   useEffect(() => {
@@ -252,14 +225,14 @@ export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, 
       daysOfWeek: recurrence === "weekly" ? days : [],
       oneOffDateLocal: recurrence === "one_off" ? oneOffDate : undefined,
       startTimeLocal: normalizeTimeLocal(startTime),
-      endTimeLocal: endTime.trim() ? normalizeTimeLocal(endTime) : undefined,
       enabled: true,
       priority: 1,
     };
     setSaving(true);
     try {
-      const url = initialScheduleId ? `/api/schedules/${encodeURIComponent(initialScheduleId)}` : "/api/schedules";
-      const method = initialScheduleId ? "PATCH" : "POST";
+      const idForSave = (initialScheduleId ?? "").trim();
+      const url = idForSave ? `/api/schedules/${encodeURIComponent(idForSave)}` : "/api/schedules";
+      const method = idForSave ? "PATCH" : "POST";
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -441,34 +414,19 @@ export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, 
                 </div>
               )}
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label htmlFor="sch-start" className="block text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
-                    {t.startTime}
-                  </label>
-                  <input
-                    id="sch-start"
-                    type="time"
-                    step={1}
-                    required
-                    value={startTime.length === 5 ? `${startTime}:00` : startTime}
-                    onChange={(e) => setStartTime(e.target.value)}
-                    className="mt-1.5 w-full rounded-xl border border-slate-800/90 bg-slate-950/60 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-amber-500/40 focus:ring-2 focus:ring-amber-500/20"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="sch-end" className="block text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
-                    {t.endTimeOptional}
-                  </label>
-                  <input
-                    id="sch-end"
-                    type="time"
-                    step={1}
-                    value={endTime}
-                    onChange={(e) => setEndTime(e.target.value)}
-                    className="mt-1.5 w-full rounded-xl border border-slate-800/90 bg-slate-950/60 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-amber-500/40 focus:ring-2 focus:ring-amber-500/20"
-                  />
-                </div>
+              <div>
+                <label htmlFor="sch-start" className="block text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                  {t.startTime}
+                </label>
+                <input
+                  id="sch-start"
+                  type="time"
+                  step={1}
+                  required
+                  value={scheduleTimeToHtmlInputValue(startTime, "09:00:00")}
+                  onChange={(e) => setStartTime(scheduleTimeToHtmlInputValue(e.target.value, "09:00:00"))}
+                  className="mt-1.5 w-full rounded-xl border border-slate-800/90 bg-slate-950/60 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-amber-500/40 focus:ring-2 focus:ring-amber-500/20"
+                />
               </div>
 
               {saveError ? (

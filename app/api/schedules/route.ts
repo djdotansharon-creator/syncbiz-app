@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
+import { normalizeScheduleTimeLocal } from "@/lib/schedule-target-helpers";
 import { validateScheduleTarget } from "@/lib/schedule-target-validator";
 import type { Schedule, ScheduleRecurrence, ScheduleTargetType } from "@/lib/types";
 
@@ -16,6 +18,7 @@ export async function GET() {
   if (!user.tenantId?.trim()) {
     return NextResponse.json({ error: "Tenant context missing" }, { status: 400 });
   }
+  await db.ensureSchedulesLoaded();
   const all = db.getSchedules(resolveAccountScope(user.tenantId));
   const filtered = [];
   for (const s of all) {
@@ -32,6 +35,7 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  await db.ensureSchedulesLoaded();
   const data = (await req.json()) as Partial<Schedule> & { sourceId?: string };
 
   const branchId = (data.branchId ?? "default").trim() || "default";
@@ -91,7 +95,7 @@ export async function POST(req: NextRequest) {
 
   const endRaw = data.endTimeLocal;
   const endTimeLocal =
-    typeof endRaw === "string" && endRaw.trim().length > 0 ? endRaw : "23:59";
+    typeof endRaw === "string" && endRaw.trim().length > 0 ? normalizeScheduleTimeLocal(endRaw) : "23:59";
   const uid = await getUserIdFromSession();
 
   const schedule = db.addSchedule({
@@ -104,7 +108,7 @@ export async function POST(req: NextRequest) {
     recurrence,
     oneOffDateLocal: recurrence === "one_off" ? oneOffDateLocal : undefined,
     daysOfWeek,
-    startTimeLocal: data.startTimeLocal!,
+    startTimeLocal: normalizeScheduleTimeLocal(data.startTimeLocal!),
     endTimeLocal,
     enabled: data.enabled ?? true,
     priority: data.priority ?? 1,
@@ -115,6 +119,8 @@ export async function POST(req: NextRequest) {
     accountId: resolveAccountScope(user.tenantId),
   });
 
+  await db.persistSchedules();
+  revalidatePath("/schedules");
   return NextResponse.json(schedule, { status: 201 });
 }
 

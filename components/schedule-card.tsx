@@ -5,8 +5,8 @@ import { useState } from "react";
 import { ActionButtonPlayNow, ActionButtonDelete } from "@/components/ui/action-buttons";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { useTranslations } from "@/lib/locale-context";
-import { usePlayback } from "@/lib/playback-provider";
 import { runSchedulePlayback } from "@/lib/schedule-playback-client";
+import { useSchedulePlaybackHandlers } from "@/lib/use-schedule-playback-handlers";
 import type { Playlist } from "@/lib/playlist-types";
 import { ScheduleSegmentedToggle } from "@/components/schedule-segmented-toggle";
 import { ScheduleBlockModal } from "@/components/schedule-block-modal";
@@ -68,26 +68,62 @@ type ScheduleCardProps = {
 export function ScheduleCard({ schedule, device, source, playlists, radioStations }: ScheduleCardProps) {
   const router = useRouter();
   const { t } = useTranslations();
-  const { playSourceFromDb, setLastMessage, stop, setQueue, playSource } = usePlayback();
+  const { setLastMessage, stop, setQueue, playSource } = useSchedulePlaybackHandlers();
   const [deleting, setDeleting] = useState(false);
   const [playing, setPlaying] = useState(false);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const { autoPlaybackOff, setAutoPlaybackOff } = useScheduleBlockAuto(schedule.id);
 
   const targetLabel = resolveTargetLabel(schedule, source, playlists, radioStations, t.unknownSource);
 
   async function handleDelete() {
+    setDeleteError(null);
     setDeleting(true);
     try {
-      const res = await fetch(`/api/schedules/${schedule.id}`, {
+      const id = (schedule.id ?? "").trim();
+      if (!id) throw new Error("Missing schedule id");
+      const res = await fetch(`/api/schedules/${encodeURIComponent(id)}`, {
         method: "DELETE",
+        credentials: "include",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
       });
-      if (res.ok) {
-        router.refresh();
-        setDeleteOpen(false);
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        if (res.status === 404) {
+          try {
+            if (typeof localStorage !== "undefined") {
+              for (let i = localStorage.length - 1; i >= 0; i--) {
+                const k = localStorage.key(i);
+                if (k?.startsWith(`syncbiz-schedule-auto-${id}-`)) localStorage.removeItem(k);
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+          router.refresh();
+          return;
+        }
+        throw new Error(data.error ?? `Delete failed (${res.status})`);
       }
+      try {
+        if (typeof localStorage !== "undefined") {
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i);
+            if (k?.startsWith(`syncbiz-schedule-auto-${id}-`)) localStorage.removeItem(k);
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      router.refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Delete failed";
+      setDeleteError(msg);
+      throw e;
     } finally {
       setDeleting(false);
     }
@@ -100,7 +136,7 @@ export function ScheduleCard({ schedule, device, source, playlists, radioStation
       await runSchedulePlayback(
         schedule,
         source,
-        { stop, setQueue, playSource, playSourceFromDb, setLastMessage },
+        { stop, setQueue, playSource, setLastMessage },
         router,
       );
       router.refresh();
@@ -110,9 +146,13 @@ export function ScheduleCard({ schedule, device, source, playlists, radioStation
   }
 
   return (
-    <div className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5 transition hover:border-slate-700/80">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
+    <div className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-4 transition hover:border-slate-700/80">
+      {/*
+        Desktop: [ OFF | ON ] — [ title / meta ] — [ Edit · Play · Delete ], all vertically centered.
+        Mobile: title block first, then one row: toggle left, action buttons right.
+      */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-4 lg:gap-6">
+        <div className="order-1 min-w-0 flex-1 space-y-1 sm:order-2">
           <h2 className="text-base font-medium text-slate-50">
             {schedule.name}
           </h2>
@@ -123,70 +163,65 @@ export function ScheduleCard({ schedule, device, source, playlists, radioStation
             {" → "}
             <span className="text-slate-300">{targetLabel}</span>
           </p>
-          <div className="flex flex-wrap items-center gap-3 pt-2 text-xs text-slate-500">
-            <span>
-              {schedule.startTimeLocal} – {schedule.endTimeLocal || "23:59"}
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border border-slate-700/70 bg-slate-900/55 px-3 py-2.5 text-sm tabular-nums text-slate-100">
+            <span className="font-medium text-amber-100/95">
+              {schedule.startTimeLocal}
             </span>
-            <span>{formatWhen(schedule, t)}</span>
-            <span>{t.priority} {schedule.priority}</span>
+            <span className="text-slate-200">{formatWhen(schedule, t)}</span>
+            <span className="text-slate-400">
+              {t.priority} <span className="font-semibold text-slate-200">{schedule.priority}</span>
+            </span>
           </div>
         </div>
-        <div className="flex flex-col items-stretch gap-3 sm:items-end">
-          <div className="flex flex-wrap items-center justify-end gap-3">
-          <span
-            className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium ${
-              schedule.enabled
-                ? "border-emerald-500/40 bg-emerald-950/40 text-emerald-300"
-                : "border-red-500/45 bg-red-950/35 text-red-300/95"
-            }`}
-          >
-            <span
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                schedule.enabled
-                  ? "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.9)]"
-                  : "bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.85)]"
-              }`}
+        <div className="order-2 flex items-center justify-between gap-3 sm:contents">
+          <div className="shrink-0 sm:order-1">
+            <ScheduleSegmentedToggle
+              size="xs"
+              value={!autoPlaybackOff}
+              onChange={(v) => setAutoPlaybackOff(!v)}
+              leftLabel={t.scheduleEngineSegmentOff}
+              rightLabel={t.scheduleEngineSegmentOn}
+              ariaLabel={t.schedulePerBlockAutoAria}
             />
-            {schedule.enabled ? t.enabled : t.disabled}
-          </span>
-          <ScheduleSegmentedToggle
-            size="sm"
-            value={!autoPlaybackOff}
-            onChange={(v) => setAutoPlaybackOff(!v)}
-            leftLabel={t.scheduleBlockSegmentPaused}
-            rightLabel={t.scheduleBlockSegmentArmed}
-            ariaLabel={t.scheduleBlockAutoShort}
-          />
-          <button
-            type="button"
-            onClick={() => setEditOpen(true)}
-            className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-100 transition hover:bg-amber-500/20"
-          >
-            {t.edit}
-          </button>
-          <ActionButtonPlayNow
-            variant="console"
-            onClick={handlePlayNow}
-            disabled={playing}
-            loading={playing}
-            label={t.playNow}
-            loadingLabel={t.sending}
-          />
-          <ActionButtonDelete
-            onClick={() => setDeleteOpen(true)}
-            disabled={deleting}
-            title={t.delete}
-            aria-label={t.delete}
-          />
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 sm:order-3">
+            <button
+              type="button"
+              onClick={() => setEditOpen(true)}
+              className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-100 transition hover:bg-amber-500/20"
+            >
+              {t.edit}
+            </button>
+            <ActionButtonPlayNow
+              variant="console"
+              onClick={handlePlayNow}
+              disabled={playing}
+              loading={playing}
+              label={t.playNow}
+              loadingLabel={t.sending}
+            />
+            <ActionButtonDelete
+              onClick={() => {
+                setDeleteError(null);
+                setDeleteOpen(true);
+              }}
+              disabled={deleting}
+              title={t.delete}
+              aria-label={t.delete}
+            />
           </div>
         </div>
       </div>
       <DeleteConfirmModal
         isOpen={deleteOpen}
-        onClose={() => setDeleteOpen(false)}
+        onClose={() => {
+          setDeleteError(null);
+          setDeleteOpen(false);
+        }}
         onConfirm={handleDelete}
         loading={deleting}
         message={t.deleteScheduleConfirm}
+        errorHint={deleteError}
       />
       <ScheduleBlockModal
         open={editOpen}
@@ -195,7 +230,7 @@ export function ScheduleCard({ schedule, device, source, playlists, radioStation
           setEditOpen(false);
           router.refresh();
         }}
-        initialScheduleId={schedule.id}
+        initialScheduleId={(schedule.id ?? "").trim() || undefined}
       />
     </div>
   );
