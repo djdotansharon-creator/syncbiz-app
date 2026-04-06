@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { headers } from "next/headers";
+
 import { getApiBase } from "@/lib/api-base";
 import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
@@ -8,9 +10,16 @@ import { ScheduleForm } from "./schedule-form";
 async function getData(): Promise<{ devices: Device[]; sources: Source[] }> {
   try {
     const base = getApiBase();
+    const h = await headers();
+    const cookie = h.get("cookie");
+    const authFetch = (path: string) =>
+      fetch(`${base}${path}`, {
+        cache: "no-store",
+        ...(cookie ? { headers: { cookie } } : {}),
+      });
     const [devicesRes, sourcesRes] = await Promise.all([
-      fetch(`${base}/api/devices`, { cache: "no-store" }),
-      fetch(`${base}/api/sources`, { cache: "no-store" }),
+      authFetch("/api/devices"),
+      authFetch("/api/sources"),
     ]);
     const [devices, sources] = (await Promise.all([
       devicesRes.ok ? devicesRes.json() : [],

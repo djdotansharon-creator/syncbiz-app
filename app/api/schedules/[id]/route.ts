@@ -82,12 +82,18 @@ export async function PATCH(
   if (data.deviceId !== undefined) updates.deviceId = data.deviceId;
   if (data.daysOfWeek !== undefined) updates.daysOfWeek = data.daysOfWeek;
   if (data.startTimeLocal !== undefined) updates.startTimeLocal = data.startTimeLocal;
-  if (data.endTimeLocal !== undefined) updates.endTimeLocal = data.endTimeLocal;
+  if (data.endTimeLocal !== undefined) {
+    const er = data.endTimeLocal;
+    updates.endTimeLocal =
+      typeof er === "string" && er.trim().length > 0 ? er : "23:59";
+  }
   if (data.enabled !== undefined) updates.enabled = data.enabled;
   if (data.priority !== undefined) updates.priority = data.priority;
   if (data.timezone !== undefined) updates.timezone = data.timezone;
   if (data.requestedStartPosition !== undefined) updates.requestedStartPosition = data.requestedStartPosition;
   if (data.requestedEndPosition !== undefined) updates.requestedEndPosition = data.requestedEndPosition;
+  if (data.recurrence !== undefined) updates.recurrence = data.recurrence;
+  if (data.oneOffDateLocal !== undefined) updates.oneOffDateLocal = data.oneOffDateLocal;
 
   const uid = await getUserIdFromSession();
   if (uid) updates.updatedBy = uid;

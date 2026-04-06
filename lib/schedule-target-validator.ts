@@ -2,12 +2,9 @@
  * Validates schedule targets: ensures target exists and belongs to the schedule's branch.
  * Used when creating or updating schedules.
  *
- * EXECUTION CONTRACT (future):
- * A scheduler engine would:
- * - Poll or receive time triggers
- * - Resolve schedules active at current time (branch + daysOfWeek + startTimeLocal/endTimeLocal)
- * - For each schedule: resolve target by targetType+targetId, send PLAY command to device/branch
- * - This slice defines the schedule definition layer only; no execution yet.
+ * Execution: the web app runs `ScheduleAutoPlayer` (client) while a tab is open — see
+ * `lib/schedule-window.ts` and `components/schedule-auto-player.tsx`. Endpoint agents still
+ * receive commands via existing APIs; full device-side scheduling is separate.
  */
 
 import { db } from "@/lib/store";

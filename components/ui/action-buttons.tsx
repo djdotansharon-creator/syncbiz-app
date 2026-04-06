@@ -226,7 +226,7 @@ export function ActionButtonNext({
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * NEW SCHEDULE – Premium blue CTA (primary action)
+ * NEW SCHEDULE – Tesla / console amber CTA (matches schedule modal)
  * ───────────────────────────────────────────────────────────────────────────── */
 export function ActionButtonNewSchedule({
   href,
@@ -238,13 +238,9 @@ export function ActionButtonNewSchedule({
     <Link
       href={href}
       className={`${baseStyles}
-        min-h-[48px] rounded-xl px-6 py-3.5 text-sm font-semibold
-        bg-gradient-to-b from-[#3aa0ff] to-[#1E90FF]
-        text-white
-        shadow-[0_0_0_2px_rgba(30,144,255,0.4),0_4px_20px_rgba(30,144,255,0.5),0_0_30px_rgba(30,144,255,0.2),inset_0_1px_0_rgba(255,255,255,0.15)]
-        hover:from-[#4dabff] hover:to-[#3aa0ff]
-        hover:shadow-[0_0_0_3px_rgba(30,144,255,0.5),0_6px_28px_rgba(30,144,255,0.6),0_0_40px_rgba(30,144,255,0.25)]
-        focus:ring-[#1E90FF]/60 focus:ring-4
+        inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-lg border border-slate-700/80 bg-slate-900/60 px-4 py-2 text-xs font-semibold tracking-wide text-slate-200
+        transition hover:border-slate-600 hover:bg-slate-800/90 hover:text-slate-50
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950
         ${className}`}
       {...props}
     >
@@ -401,7 +397,7 @@ export function ActionButtonShare({
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * PLAY NOW – Text + icon, premium green (Schedule / Playlist cards)
+ * PLAY NOW – default: Spotify green (sources). variant console = Tesla / schedules rail
  * ───────────────────────────────────────────────────────────────────────────── */
 export function ActionButtonPlayNow({
   onClick,
@@ -409,6 +405,7 @@ export function ActionButtonPlayNow({
   loading,
   label = "Play now",
   loadingLabel = "Sending…",
+  variant = "green",
   className = "",
 }: {
   onClick: () => void | Promise<void>;
@@ -416,8 +413,33 @@ export function ActionButtonPlayNow({
   loading?: boolean;
   label?: string;
   loadingLabel?: string;
+  /** green = legacy cards; console = cyan outline (library / URL play style) */
+  variant?: "green" | "console";
   className?: string;
 }) {
+  if (variant === "console") {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled || loading}
+        aria-label={loading ? loadingLabel : label}
+        className={`${baseStyles}
+          inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border-2 border-cyan-400/60 bg-slate-900/95 px-3 py-2 text-xs font-semibold text-cyan-300
+          shadow-[0_0_0_1px_rgba(34,211,238,0.2),inset_0_1px_0_rgba(255,255,255,0.04)]
+          hover:border-cyan-400 hover:bg-slate-900 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.25),0_0_18px_rgba(34,211,238,0.12)]
+          focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/45 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950
+          disabled:opacity-50
+          ${className}`}
+      >
+        <svg className="h-3.5 w-3.5 shrink-0 text-cyan-200/95" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+          <path d="M8 5v14l11-7L8 5z" />
+        </svg>
+        {loading ? loadingLabel : label}
+      </button>
+    );
+  }
+
   return (
     <button
       type="button"

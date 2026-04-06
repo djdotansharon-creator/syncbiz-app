@@ -124,6 +124,9 @@ export type Source = {
 /** Schedule target types. ANNOUNCEMENT, AI_ANNOUNCEMENT reserved for future. */
 export type ScheduleTargetType = "SOURCE" | "PLAYLIST" | "RADIO";
 
+/** Weekly = repeat on selected weekdays; one_off = single calendar day (e.g. 31/12). */
+export type ScheduleRecurrence = "weekly" | "one_off";
+
 export type Schedule = {
   id: string;
   accountId: string;
@@ -136,9 +139,13 @@ export type Schedule = {
   /** @deprecated Use targetType=SOURCE + targetId. Kept for backward compat. */
   sourceId?: string;
   deviceId?: string;
-  daysOfWeek: number[]; // 0 (Sunday) - 6 (Saturday)
-  startTimeLocal: string; // HH:mm
-  endTimeLocal: string; // HH:mm
+  /** Default weekly when omitted (legacy schedules). */
+  recurrence?: ScheduleRecurrence;
+  /** Required when recurrence is one_off — local date YYYY-MM-DD. */
+  oneOffDateLocal?: string;
+  daysOfWeek: number[]; // 0 (Sunday) - 6 (Saturday); empty when one_off
+  startTimeLocal: string; // HH:mm or HH:mm:ss
+  endTimeLocal: string; // HH:mm or HH:mm:ss
   enabled: boolean;
   priority: number;
   /** IANA timezone for schedule (e.g. America/New_York). Optional; uses branch default if unset. */

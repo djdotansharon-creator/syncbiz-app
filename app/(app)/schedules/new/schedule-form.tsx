@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { ScheduleDayLedButton } from "@/components/schedule-block-modal";
 import { useTranslations } from "@/lib/locale-context";
 import type { Device, Source } from "@/lib/types";
 
@@ -22,6 +23,9 @@ export function ScheduleForm({
   const router = useRouter();
   const { t } = useTranslations();
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [recurrence, setRecurrence] = useState<"weekly" | "one_off">("weekly");
+  const [oneOffDate, setOneOffDate] = useState("");
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5]); // default weekdays
 
   function toggleDay(d: number) {
@@ -32,18 +36,23 @@ export function ScheduleForm({
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setSaveError(null);
     setSaving(true);
     const form = e.currentTarget;
     const formData = new FormData(form);
     const sourceId = formData.get("sourceId") as string;
+    const sourceObj = sources.find((s) => s.id === sourceId);
+    const branchId = (sourceObj?.branchId ?? "default").trim() || "default";
     const body = {
       name: formData.get("name") as string,
-      branchId: "bldn-001",
+      branchId,
       targetType: "SOURCE" as const,
       targetId: sourceId,
       sourceId,
       deviceId: (formData.get("deviceId") as string) || undefined,
-      daysOfWeek: days,
+      recurrence,
+      daysOfWeek: recurrence === "weekly" ? days : [],
+      oneOffDateLocal: recurrence === "one_off" ? oneOffDate : undefined,
       startTimeLocal: formData.get("startTime") as string,
       endTimeLocal: (formData.get("endTime") as string) || undefined,
       enabled: true,
@@ -53,12 +62,16 @@ export function ScheduleForm({
       const res = await fetch("/api/schedules", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(body),
       });
       if (res.ok) {
         router.push("/schedules");
         router.refresh();
+        return;
       }
+      const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+      setSaveError(errBody.error ?? `Request failed (${res.status})`);
     } finally {
       setSaving(false);
     }
@@ -129,24 +142,63 @@ export function ScheduleForm({
       </div>
 
       <div>
+        <p className="block text-xs font-medium text-slate-400">{t.scheduleRecurrence}</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setRecurrence("weekly")}
+            className={`rounded-lg border px-3 py-2 text-xs font-medium ${
+              recurrence === "weekly"
+                ? "border-amber-500/45 bg-amber-500/10 text-amber-100"
+                : "border-slate-800 bg-slate-900/50 text-slate-300"
+            }`}
+          >
+            {t.scheduleWeekly}
+          </button>
+          <button
+            type="button"
+            onClick={() => setRecurrence("one_off")}
+            className={`rounded-lg border px-3 py-2 text-xs font-medium ${
+              recurrence === "one_off"
+                ? "border-amber-500/45 bg-amber-500/10 text-amber-100"
+                : "border-slate-800 bg-slate-900/50 text-slate-300"
+            }`}
+          >
+            {t.scheduleOneOff}
+          </button>
+        </div>
+      </div>
+
+      {recurrence === "one_off" ? (
+        <div>
+          <label htmlFor="oneOffDate" className="block text-xs font-medium text-slate-400">
+            {t.scheduleOneOffDateLabel}
+          </label>
+          <input
+            id="oneOffDate"
+            type="date"
+            required
+            value={oneOffDate}
+            onChange={(e) => setOneOffDate(e.target.value)}
+            className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+          />
+          <p className="mt-2 text-[11px] text-slate-500">{t.scheduleHintOneOff}</p>
+        </div>
+      ) : (
+      <div>
         <p className="block text-xs font-medium text-slate-400">{t.days}</p>
         <div className="mt-2 flex flex-wrap gap-2">
           {daysOptions.map(({ value, label }) => (
-            <label
+            <ScheduleDayLedButton
               key={value}
-              className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm transition hover:border-slate-700"
-            >
-              <input
-                type="checkbox"
-                checked={days.includes(value)}
-                onChange={() => toggleDay(value)}
-                className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-900 text-sky-500 focus:ring-sky-500/30"
-              />
-              <span className="text-slate-200">{label}</span>
-            </label>
+              label={label}
+              on={days.includes(value)}
+              onToggle={() => toggleDay(value)}
+            />
           ))}
         </div>
       </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
@@ -182,11 +234,17 @@ export function ScheduleForm({
         </div>
       </div>
 
+      {saveError ? (
+        <p className="text-sm text-rose-400/95" role="alert">
+          {saveError}
+        </p>
+      ) : null}
+
       <div className="flex gap-3 pt-2">
         <button
           type="submit"
-          disabled={saving || days.length === 0}
-          className="rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-slate-950 shadow-lg shadow-sky-500/20 transition hover:bg-sky-400 disabled:opacity-60"
+          disabled={saving || (recurrence === "weekly" && days.length === 0) || (recurrence === "one_off" && !oneOffDate)}
+          className="rounded-xl border border-amber-500/45 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-100 shadow-[0_0_24px_rgba(245,158,11,0.12)] transition hover:bg-amber-500/25 disabled:opacity-60"
         >
           {saving ? t.saving : t.saveSchedule}
         </button>

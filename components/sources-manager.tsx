@@ -47,6 +47,7 @@ import {
 } from "@/lib/library-grouping";
 import { librarySectionLabel } from "@/lib/library-section-i18n";
 import { inferDaypartLabel, resolveDaypartCollectionSources } from "@/lib/daypart-collection";
+import { ScheduleBlockModal, type ScheduleModalInitialContext } from "@/components/schedule-block-modal";
 import { useLibraryTheme } from "@/lib/library-theme-context";
 import {
   LIBRARY_PLAYLIST_TILE_SIDE_ACTION_BTN_CLASS,
@@ -533,6 +534,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     | { key: string; variant: "clearAssignment" | "removeCustomTile" | "empty" }
   >(null);
   const [tileSlotActionLoading, setTileSlotActionLoading] = useState(false);
+  const [playlistTileScheduleModal, setPlaylistTileScheduleModal] = useState<ScheduleModalInitialContext | null>(null);
   /** Inline error for Add to Library (Ready Playlist decomposed rows); cleared on success or next attempt. */
   const [catalogAddError, setCatalogAddError] = useState<string | null>(null);
   const sourceBackSelectionRef = useRef<LibrarySelection>({ type: "library_view", id: "sources" });
@@ -1577,7 +1579,11 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           aria-label={t.playlistTileScheduleActionTitle}
                           onClick={(e) => {
                             e.stopPropagation();
-                            openDaypartTile(pad.key);
+                            setPlaylistTileScheduleModal({
+                              daypartLabel: pad.label,
+                              playlistId: assignedPlaylist?.playlist?.id,
+                              playlistName: assignedPlaylist?.title,
+                            });
                           }}
                         >
                           <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1675,7 +1681,11 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           aria-label={t.playlistTileScheduleActionTitle}
                           onClick={(e) => {
                             e.stopPropagation();
-                            openDaypartTile(pad.key);
+                            setPlaylistTileScheduleModal({
+                              daypartLabel: pad.label,
+                              playlistId: assignedPlaylist?.playlist?.id,
+                              playlistName: assignedPlaylist?.title,
+                            });
                           }}
                         >
                           <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2493,6 +2503,12 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                 ? t.gotIt
                 : t.confirmDelete
         }
+      />
+      <ScheduleBlockModal
+        open={playlistTileScheduleModal !== null}
+        onClose={() => setPlaylistTileScheduleModal(null)}
+        onSaved={() => setPlaylistTileScheduleModal(null)}
+        initialContext={playlistTileScheduleModal}
       />
     </div>
   );

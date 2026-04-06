@@ -6,6 +6,8 @@ import { LocaleProvider } from "@/lib/locale-context";
 import { LibraryThemeProvider } from "@/lib/library-theme-context";
 import { MobileRoleProvider } from "@/lib/mobile-role-context";
 import { DevicePlayerProvider } from "@/lib/device-player-context";
+import { ScheduleEngineProvider } from "@/lib/schedule-engine-context";
+import { ScheduleAutoPlayer } from "@/components/schedule-auto-player";
 
 /**
  * Single client boundary for all app providers.
@@ -15,15 +17,18 @@ import { DevicePlayerProvider } from "@/lib/device-player-context";
 export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <PlaybackProvider>
-      <LocaleProvider>
-        <LibraryThemeProvider>
-          <MobileRoleProvider>
-            <DevicePlayerProvider>
-              {children}
-            </DevicePlayerProvider>
-          </MobileRoleProvider>
-        </LibraryThemeProvider>
-      </LocaleProvider>
+      <ScheduleEngineProvider>
+        <LocaleProvider>
+          <LibraryThemeProvider>
+            <MobileRoleProvider>
+              <DevicePlayerProvider>
+                {children}
+                <ScheduleAutoPlayer />
+              </DevicePlayerProvider>
+            </MobileRoleProvider>
+          </LibraryThemeProvider>
+        </LocaleProvider>
+      </ScheduleEngineProvider>
     </PlaybackProvider>
   );
 }

@@ -170,8 +170,12 @@ export const db = {
     const targetType = input.targetType ?? "SOURCE";
     const targetId = input.targetId ?? input.sourceId ?? "";
     const now = new Date().toISOString();
+    const rawEnd = input.endTimeLocal;
+    const endTimeLocal =
+      typeof rawEnd === "string" && rawEnd.trim().length > 0 ? rawEnd : "23:59";
     const schedule: Schedule = {
       ...input,
+      endTimeLocal,
       targetType,
       targetId,
       sourceId: input.sourceId ?? (targetType === "SOURCE" ? targetId : undefined),
@@ -186,9 +190,16 @@ export const db = {
   updateSchedule(id: string, data: Partial<Schedule>): Schedule | null {
     const idx = schedules.findIndex((s) => s.id === id);
     if (idx < 0) return null;
+    const merged = { ...schedules[idx], ...data };
+    let endRaw = merged.endTimeLocal;
+    if (endRaw === undefined || endRaw === null) {
+      endRaw = schedules[idx].endTimeLocal;
+    }
+    const endTimeLocal =
+      typeof endRaw === "string" && endRaw.trim().length > 0 ? endRaw : "23:59";
     const updated: Schedule = {
-      ...schedules[idx],
-      ...data,
+      ...merged,
+      endTimeLocal,
       id: schedules[idx].id,
       accountId: schedules[idx].accountId,
       updatedAt: new Date().toISOString(),

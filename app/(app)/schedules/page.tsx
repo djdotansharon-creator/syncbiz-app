@@ -1,56 +1,79 @@
+import { headers } from "next/headers";
+
 import { getApiBase } from "@/lib/api-base";
 import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
+import type { Playlist } from "@/lib/playlist-types";
 import type { Device, Schedule, Source } from "@/lib/types";
 import { ScheduleCard } from "@/components/schedule-card";
+import { SchedulesPageToolbar } from "@/components/schedules-page-toolbar";
 import { ActionButtonNewSchedule } from "@/components/ui/action-buttons";
 
-async function getData(): Promise<{ schedules: Schedule[]; devices: Device[]; sources: Source[] }> {
+async function getData(): Promise<{
+  schedules: Schedule[];
+  devices: Device[];
+  sources: Source[];
+  playlists: Playlist[];
+  radioStations: { id: string; name: string }[];
+}> {
   try {
     const base = getApiBase();
-    const [schedulesRes, devicesRes, sourcesRes] = await Promise.all([
-      fetch(`${base}/api/schedules`, { cache: "no-store" }),
-      fetch(`${base}/api/devices`, { cache: "no-store" }),
-      fetch(`${base}/api/sources`, { cache: "no-store" }),
+    const h = await headers();
+    const cookie = h.get("cookie");
+    const authFetch = (path: string) =>
+      fetch(`${base}${path}`, {
+        cache: "no-store",
+        ...(cookie ? { headers: { cookie } } : {}),
+      });
+    const [schedulesRes, devicesRes, sourcesRes, playlistsRes, radioRes] = await Promise.all([
+      authFetch("/api/schedules"),
+      authFetch("/api/devices"),
+      authFetch("/api/sources"),
+      authFetch("/api/playlists"),
+      authFetch("/api/radio"),
     ]);
-    const [schedules, devices, sources] = (await Promise.all([
+    const [schedules, devices, sources, playlistsRaw, radioRaw] = (await Promise.all([
       schedulesRes.ok ? schedulesRes.json() : [],
       devicesRes.ok ? devicesRes.json() : [],
       sourcesRes.ok ? sourcesRes.json() : [],
-    ])) as [Schedule[], Device[], Source[]];
+      playlistsRes.ok ? playlistsRes.json() : [],
+      radioRes.ok ? radioRes.json() : [],
+    ])) as [Schedule[], Device[], Source[], unknown, unknown];
+    const playlists = Array.isArray(playlistsRaw) ? (playlistsRaw as Playlist[]) : [];
+    const radioStations = Array.isArray(radioRaw)
+      ? (radioRaw as { id?: string; name?: string }[]).map((r) => ({
+          id: String(r.id ?? ""),
+          name: String(r.name ?? r.id ?? ""),
+        }))
+      : [];
     return {
       schedules: Array.isArray(schedules) ? schedules : [],
       devices: Array.isArray(devices) ? devices : [],
       sources: Array.isArray(sources) ? sources : [],
+      playlists,
+      radioStations,
     };
   } catch (e) {
     console.error("[schedules] getData error:", e);
-    return { schedules: [], devices: [], sources: [] };
+    return { schedules: [], devices: [], sources: [], playlists: [], radioStations: [] };
   }
 }
 
 export default async function SchedulesPage() {
   const locale = await getLocale();
   const t = getTranslations(locale);
-  const { schedules, devices, sources } = await getData();
+  const { schedules, devices, sources, playlists, radioStations } = await getData();
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="space-y-4">
         <div>
           <h1 className="text-xl font-semibold text-slate-50">{t.schedules}</h1>
           <p className="mt-1 text-sm text-slate-400">
             {t.schedulesSubtitle}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-xs text-slate-400">
-            {schedules.length} {t.blocks}
-          </span>
-          <ActionButtonNewSchedule href="/schedules/new">
-            {t.newSchedule}
-          </ActionButtonNewSchedule>
-        </div>
+        <SchedulesPageToolbar blockCount={schedules.length} />
       </div>
 
       <div className="space-y-4">
@@ -75,6 +98,8 @@ export default async function SchedulesPage() {
                 schedule={schedule}
                 device={device}
                 source={source}
+                playlists={playlists}
+                radioStations={radioStations}
               />
             );
           })

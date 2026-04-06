@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { validateScheduleTarget } from "@/lib/schedule-target-validator";
-import type { Schedule, ScheduleTargetType } from "@/lib/types";
+import type { Schedule, ScheduleRecurrence, ScheduleTargetType } from "@/lib/types";
 
 function resolveAccountScope(userTenantId: string): string {
   return userTenantId === "tnt-default" ? "acct-demo-001" : userTenantId;
@@ -37,10 +37,31 @@ export async function POST(req: NextRequest) {
   const branchId = (data.branchId ?? "default").trim() || "default";
   const targetType: ScheduleTargetType = (data.targetType as ScheduleTargetType) ?? "SOURCE";
   const targetId = (data.targetId ?? data.sourceId ?? "").trim();
+  const recurrence: ScheduleRecurrence = data.recurrence === "one_off" ? "one_off" : "weekly";
+  const oneOffDateLocal =
+    typeof data.oneOffDateLocal === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.oneOffDateLocal.trim())
+      ? data.oneOffDateLocal.trim()
+      : undefined;
 
-  if (!branchId || !data.daysOfWeek || !data.startTimeLocal) {
+  if (!branchId || !data.startTimeLocal) {
     return NextResponse.json(
-      { error: "branchId, daysOfWeek, and startTimeLocal are required" },
+      { error: "branchId and startTimeLocal are required" },
+      { status: 400 },
+    );
+  }
+
+  let daysOfWeek = Array.isArray(data.daysOfWeek) ? data.daysOfWeek : [];
+  if (recurrence === "one_off") {
+    if (!oneOffDateLocal) {
+      return NextResponse.json(
+        { error: "oneOffDateLocal (YYYY-MM-DD) is required for one-off schedules" },
+        { status: 400 },
+      );
+    }
+    daysOfWeek = [];
+  } else if (daysOfWeek.length === 0) {
+    return NextResponse.json(
+      { error: "daysOfWeek is required for weekly schedules" },
       { status: 400 },
     );
   }
@@ -68,7 +89,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
   }
 
-  const endTimeLocal = data.endTimeLocal ?? "23:59";
+  const endRaw = data.endTimeLocal;
+  const endTimeLocal =
+    typeof endRaw === "string" && endRaw.trim().length > 0 ? endRaw : "23:59";
   const uid = await getUserIdFromSession();
 
   const schedule = db.addSchedule({
@@ -78,7 +101,9 @@ export async function POST(req: NextRequest) {
     targetId: targetId || data.sourceId!,
     sourceId: targetType === "SOURCE" ? (targetId || data.sourceId!) : undefined,
     deviceId: data.deviceId,
-    daysOfWeek: data.daysOfWeek!,
+    recurrence,
+    oneOffDateLocal: recurrence === "one_off" ? oneOffDateLocal : undefined,
+    daysOfWeek,
     startTimeLocal: data.startTimeLocal!,
     endTimeLocal,
     enabled: data.enabled ?? true,
