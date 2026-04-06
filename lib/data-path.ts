@@ -1,7 +1,7 @@
 /**
- * Paths for persistent data (playlists, radio, deleted-sources).
+ * Paths for persistent data (playlists, catalog, radio, deleted-sources).
  * On Railway: mount volume to /app/data; RAILWAY_VOLUME_MOUNT_PATH is set automatically.
- * Locally: backward compatible with playlists/, radio/, data/.
+ * Locally: backward compatible with playlists/, catalog/, radio/, data/.
  */
 import { join } from "path";
 
@@ -15,6 +15,12 @@ function getVolumePath(): string | null {
 export function getPlaylistsDir(): string {
   const vol = getVolumePath();
   return vol ? join(vol, "playlists") : join(cwd(), "playlists");
+}
+
+/** Catalog items (Phase 1): one JSON file per item under this directory. */
+export function getCatalogDir(): string {
+  const vol = getVolumePath();
+  return vol ? join(vol, "catalog") : join(cwd(), "catalog");
 }
 
 export function getRadioDir(): string {
