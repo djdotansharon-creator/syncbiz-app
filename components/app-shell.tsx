@@ -14,7 +14,9 @@ import { inferPlaylistType } from "@/lib/playlist-utils";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { radioToUnified } from "@/lib/radio-utils";
 import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal } from "@/lib/unified-sources-client";
+import { resolveDaypartCollectionSources } from "@/lib/daypart-collection";
 import {
+  playlistLeafTrackIndexForQueueItem,
   resolveSyncbizPlaylistPlayQueue,
   SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY,
 } from "@/lib/syncbiz-playlist-queue";
@@ -322,7 +324,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         ...unifiedFoundationHints("playlist", created.type as UnifiedSource["type"], created.url),
       };
       savePlaylistToLocal(created);
-      setQueue([unified]);
+      setQueue([unified], { force: true });
       playSource(unified);
       return;
     }
@@ -342,7 +344,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       const station = (await res.json()) as RadioStream;
       const unified = radioToUnified(station);
       saveRadioToLocal(station);
-      setQueue([unified]);
+      setQueue([unified], { force: true });
       playSource(unified);
       return;
     }
@@ -376,7 +378,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       queueLen: 1,
       isShazam: parsed?.type === "shazam",
     });
-    setQueue([unified]);
+    setQueue([unified], { force: true });
     playSource(unified);
   };
 
@@ -390,8 +392,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       try {
         const queue = JSON.parse(queueSourcesJson) as UnifiedSource[];
         if (Array.isArray(queue) && queue.length > 0) {
-          setQueue(queue);
-          playSource(queue[0]);
+          setQueue(queue, { force: true });
+          playSource(queue[0], playlistLeafTrackIndexForQueueItem(queue[0]));
           return;
         }
       } catch {
@@ -407,8 +409,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         const byId = new Map(allSources.map((s) => [s.id, s] as const));
         const queue = ids.map((id) => byId.get(id)).filter((s): s is UnifiedSource => !!s);
         if (queue.length > 0) {
-          setQueue(queue);
-          playSource(queue[0]);
+          setQueue(queue, { force: true });
+          playSource(queue[0], playlistLeafTrackIndexForQueueItem(queue[0]));
           return;
         }
       } catch {
@@ -431,8 +433,17 @@ export function AppShell({ children }: { children: ReactNode }) {
           const allSources = await fetchUnifiedSourcesWithFallback();
           const queue = resolveSyncbizPlaylistPlayQueue(payload.key, allSources, assignments);
           if (queue.length > 0) {
-            setQueue(queue);
-            playSource(queue[0]);
+            setQueue(queue, { force: true });
+            playSource(queue[0], playlistLeafTrackIndexForQueueItem(queue[0]));
+            return;
+          }
+        }
+        if (payload.subtype === "daypart_collection" && payload.key) {
+          const allSources = await fetchUnifiedSourcesWithFallback();
+          const queue = resolveDaypartCollectionSources(payload.key, allSources);
+          if (queue.length > 0) {
+            setQueue(queue, { force: true });
+            playSource(queue[0], playlistLeafTrackIndexForQueueItem(queue[0]));
             return;
           }
         }
@@ -446,7 +457,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       try {
         const source = JSON.parse(sourceJson) as UnifiedSource;
         if (source?.id && source?.url) {
-          setQueue([source]);
+          setQueue([source], { force: true });
           playSource(source);
           return;
         }
@@ -460,7 +471,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       const allSources = await fetchUnifiedSourcesWithFallback();
       const source = allSources.find((s) => s.id === sourceId);
       if (source) {
-        setQueue([source]);
+        setQueue([source], { force: true });
         playSource(source);
         return;
       }

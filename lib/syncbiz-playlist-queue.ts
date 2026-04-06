@@ -17,7 +17,20 @@ export function expandPlaylistEntityToItems(source: UnifiedSource): UnifiedSourc
     url: track.url,
     origin: "source",
     contentNodeKind: "single_track",
+    /** Lets PlaybackProvider resolve URL/embed via parent tracks + playSource(_, trackIndex). */
+    playlist: source.playlist,
   }));
+}
+
+/** Index of this leaf inside `getPlaylistTracks(item.playlist)` (expanded-queue rows only). */
+export function playlistLeafTrackIndexForQueueItem(item: UnifiedSource): number {
+  if (!item.playlist || !item.id.includes(":track:")) return 0;
+  const marker = ":track:";
+  const i = item.id.indexOf(marker);
+  const tid = item.id.slice(i + marker.length);
+  const tracks = getPlaylistTracks(item.playlist);
+  const idx = tracks.findIndex((t) => String(t.id ?? "") === String(tid));
+  return idx >= 0 ? idx : 0;
 }
 
 /** Center grid only: hide legacy single-URL row (playlist header is the entity). */

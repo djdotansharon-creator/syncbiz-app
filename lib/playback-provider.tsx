@@ -218,9 +218,10 @@ function getPlaylistSessionTracks(s: Pick<PlaybackState, "currentSource" | "curr
 }
 
 /**
- * SyncBiz transport: when the next/prev item exists in the internal queue and the session or
- * snapshot currentPlaylist is collapsed (≤1 leaf), advance via queue — not playlist_session /
- * getActivePlaylist-inflated sessionTracks.
+ * SyncBiz transport: when the session or snapshot currentPlaylist is collapsed (≤1 leaf) and the
+ * queue has more than one item, advance via the global queue path — not playlist_session /
+ * single_wrap (which no-ops when trackCount === 1).
+ * For "next", include the last queue slot so wrap to queue[0] runs instead of getting stuck at end.
  */
 function preferQueueTransportOverCollapsedSession(
   s: PlaybackState,
@@ -228,15 +229,20 @@ function preferQueueTransportOverCollapsedSession(
   direction: "next" | "prev",
 ): boolean {
   if (s.queue.length <= 1) return false;
-  const nextOrPrevExistsInQueue =
-    direction === "next"
-      ? s.queueIndex >= 0 && s.queueIndex < s.queue.length - 1
-      : s.queueIndex > 0;
-  if (!nextOrPrevExistsInQueue) return false;
   const plLeaf = s.currentPlaylist ? getPlaylistTracks(s.currentPlaylist).length : 0;
   const sessionCollapsedToOne = sessionTrackCount <= 1;
   const playlistSnapshotCollapsed = plLeaf <= 1;
-  return sessionCollapsedToOne || playlistSnapshotCollapsed;
+  const collapsed = sessionCollapsedToOne || playlistSnapshotCollapsed;
+
+  if (direction === "next") {
+    if (!collapsed) return false;
+    const hasForward = s.queueIndex >= 0 && s.queueIndex < s.queue.length - 1;
+    if (hasForward) return true;
+    return s.queueIndex >= 0 && s.queueIndex >= s.queue.length - 1;
+  }
+
+  if (!collapsed) return false;
+  return s.queueIndex > 0;
 }
 
 /** TEMP audit: mirrors reasons in `effectivePlaybackPlaylistAttachment` (playlist-utils). */
@@ -375,7 +381,7 @@ type PlaybackContextValue = PlaybackState & {
   playSource: (source: UnifiedSource, trackIndex?: number) => void;
   playSourceFromDb: (source: Source, opts?: { auditScheduledNonEmbedded?: boolean }) => void;
   playPlaylist: (playlist: Playlist, trackIndex?: number) => void;
-  setQueue: (sources: UnifiedSource[]) => void;
+  setQueue: (sources: UnifiedSource[], opts?: { force?: boolean }) => void;
   replaceSource: (tempId: string, real: UnifiedSource) => void;
   registerStopAllPlayers: (fn: () => void) => () => void;
   /** Seek to position (seconds). Used by remote control. AudioPlayer registers implementation. */
@@ -759,9 +765,30 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           resolvedSourceId: resolved.id,
           origin: resolved.origin,
         });
-        const idx = Math.min(trackIndex, Math.max(0, tracks.length - 1));
-        const track = tracks[idx] ?? null;
-        const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? resolved.url);
+        let idx = Math.min(trackIndex, Math.max(0, tracks.length - 1));
+        let track = tracks[idx] ?? null;
+        const rawTrackIn = track?.url?.trim() ?? "";
+        const rawResolved = resolved.url?.trim() ?? "";
+        const rawTrack = rawTrackIn.startsWith("local://") ? "" : rawTrackIn;
+        const rawRes = rawResolved.startsWith("local://") ? "" : rawResolved;
+        let url = canonicalYouTubeWatchUrlForPlayback(rawTrack || rawRes);
+
+        const urlPlayable = (u: string) =>
+          !!u && !u.startsWith("local://") && isValidPlaybackUrl(u);
+
+        if (!urlPlayable(url) && playlist && tracks.length > 0) {
+          for (let i = 0; i < tracks.length; i++) {
+            const raw = tracks[i]?.url?.trim() ?? "";
+            if (!raw || raw.startsWith("local://")) continue;
+            const cand = canonicalYouTubeWatchUrlForPlayback(raw);
+            if (urlPlayable(cand)) {
+              url = cand;
+              idx = i;
+              track = tracks[i] ?? null;
+              break;
+            }
+          }
+        }
 
         if (playlist && tracks.length === 0) {
           mvpLog("empty_playlist", { id: resolved.id, title: resolved.title });
@@ -769,8 +796,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        if (url && !isValidPlaybackUrl(url)) {
-          mvpLog("invalid_url", { url, id: resolved.id, title: resolved.title });
+        if (!urlPlayable(url)) {
+          mvpLog("invalid_url", { url: url || "(empty)", id: resolved.id, title: resolved.title });
           setState((s) => ({ ...s, lastMessage: "Invalid playback URL" }));
           return;
         }
@@ -1835,9 +1862,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     [playSource],
   );
 
-  const setQueue = useCallback((sources: UnifiedSource[]) => {
+  const setQueue = useCallback((sources: UnifiedSource[], opts?: { force?: boolean }) => {
     setState((s) => {
       if (
+        !opts?.force &&
         s.queue.length > 0 &&
         (s.status === "playing" || s.status === "paused") &&
         s.currentSource &&

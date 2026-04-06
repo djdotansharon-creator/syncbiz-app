@@ -26,6 +26,7 @@ import { canonicalYouTubeWatchUrlForPlayback } from "@/lib/playlist-utils";
 import { detectProvider } from "@/lib/player-utils";
 import {
   expandPlaylistEntityToItems,
+  playlistLeafTrackIndexForQueueItem,
   resolveSyncbizPlaylistPlayQueue,
   SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY,
   visibleItemsForSyncbizPlaylistGrid,
@@ -45,6 +46,7 @@ import {
   type LibrarySectionId,
 } from "@/lib/library-grouping";
 import { librarySectionLabel } from "@/lib/library-section-i18n";
+import { inferDaypartLabel, resolveDaypartCollectionSources } from "@/lib/daypart-collection";
 import { useLibraryTheme } from "@/lib/library-theme-context";
 import {
   LIBRARY_PLAYLIST_TILE_SIDE_ACTION_BTN_CLASS,
@@ -263,15 +265,6 @@ function useFollowedSourcesState() {
     });
   }, []);
   return { followedSourceKeys, toggleFollowedSource };
-}
-
-function inferDaypartLabel(source: UnifiedSource): string {
-  const t = `${source.title} ${source.genre ?? ""}`.toLowerCase();
-  if (/(morning|breakfast|sunrise)/i.test(t)) return "Morning";
-  if (/(afternoon|lunch|midday)/i.test(t)) return "Afternoon";
-  if (/(evening|dinner|sunset)/i.test(t)) return "Evening";
-  if (/(night|late|midnight)/i.test(t)) return "Late Night";
-  return "General Daypart";
 }
 
 function inferClientLabel(source: UnifiedSource): string {
@@ -540,6 +533,8 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     | { key: string; variant: "clearAssignment" | "removeCustomTile" | "empty" }
   >(null);
   const [tileSlotActionLoading, setTileSlotActionLoading] = useState(false);
+  /** Inline error for Add to Library (Ready Playlist decomposed rows); cleared on success or next attempt. */
+  const [catalogAddError, setCatalogAddError] = useState<string | null>(null);
   const sourceBackSelectionRef = useRef<LibrarySelection>({ type: "library_view", id: "sources" });
   const { favoriteIds, toggleFavorite } = useFavoritesState();
   const { followedSourceKeys, toggleFollowedSource } = useFollowedSourcesState();
@@ -916,10 +911,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         return [...map.values()];
       }
       if (subtype === "daypart_collection") {
-        if (key.startsWith("customplaylist:")) return [];
-        return displaySources.filter(
-          (s) => `daypart:${inferDaypartLabel(s).toLowerCase().replace(/\s+/g, "_")}` === key
-        );
+        return resolveDaypartCollectionSources(key, sources);
       }
       if (subtype === "client_collection") {
         const inferred = displaySources.filter(
@@ -938,20 +930,21 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         return expanded.length > 0 ? expanded : [source];
       }
       if (subtype === "syncbiz_playlist") {
-        return resolveSyncbizPlaylistPlayQueue(key, displaySources, playlistItemAssignments);
+        return resolveSyncbizPlaylistPlayQueue(key, sources, playlistItemAssignments);
       }
       return [];
     },
-    [displaySources, playlistItemAssignments]
+    [sources, playlistItemAssignments]
   );
 
   const playCollectionSelection = useCallback(
     (subtype: LibraryCollectionSubtype, key: string) => {
       const queue = resolveSourcesForSelection(subtype, key);
       if (queue.length === 0) return;
-      setQueue(queue);
+      setQueue(queue, { force: true });
+      const ti = playlistLeafTrackIndexForQueueItem(queue[0]);
       if (playSourceOverride) playSourceOverride(queue[0]);
-      else playSource(queue[0]);
+      else playSource(queue[0], ti);
     },
     [resolveSourcesForSelection, setQueue, playSourceOverride, playSource]
   );
@@ -1207,6 +1200,28 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const activePlaylistKey =
     selection.type === "collection_container" && selection.subtype === "syncbiz_playlist" ? selection.key : null;
 
+  /** Play / next / prev must use the full syncbiz queue order, not the stale global queue. */
+  const playSyncbizPlaylistExpandedItem = useCallback(
+    (item: UnifiedSource) => {
+      if (!activePlaylistKey) {
+        if (playSourceOverride) playSourceOverride(item);
+        else playSource(item);
+        return;
+      }
+      const queue = resolveSyncbizPlaylistPlayQueue(activePlaylistKey, sources, playlistItemAssignments);
+      if (queue.length === 0 || !queue.some((q) => q.id === item.id)) {
+        if (playSourceOverride) playSourceOverride(item);
+        else playSource(item);
+        return;
+      }
+      setQueue(queue, { force: true });
+      const ti = playlistLeafTrackIndexForQueueItem(item);
+      if (playSourceOverride) playSourceOverride(item);
+      else playSource(item, ti);
+    },
+    [activePlaylistKey, sources, playlistItemAssignments, setQueue, playSourceOverride, playSource],
+  );
+
   const removeItemFromPlaylistOnly = useCallback((playlistKey: string, sourceId: string) => {
     setPlaylistItemAssignments((prev) => {
       const nextItems = (prev[playlistKey] ?? []).filter((id) => id !== sourceId);
@@ -1223,8 +1238,9 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     if (splitAt < 0) return;
     const parentUnifiedId = item.id.slice(0, splitAt);
     const trackKey = item.id.slice(splitAt + marker.length);
-    if (!parentUnifiedId.startsWith("pl-")) return;
-    const playlistId = parentUnifiedId.slice("pl-".length);
+    const parent = sources.find((s) => s.id === parentUnifiedId);
+    if (!parent || parent.origin !== "playlist" || !parent.playlist) return;
+    const playlistId = parent.playlist.id;
 
     void (async () => {
       try {
@@ -1271,7 +1287,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         /* ignore */
       }
     })();
-  }, []);
+  }, [sources]);
 
   const performDeleteSourceFromLibrary = useCallback(
     async (item: UnifiedSource) => {
@@ -1316,22 +1332,89 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     [selection, removeItemFromPlaylistOnly, removeExpandedExternalPlaylistTrack]
   );
 
-  const handleAddCatalogTrackToLibrary = useCallback(async (source: UnifiedSource) => {
-    const res = await fetch("/api/sources/add-from-catalog-track", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+  const handleAddCatalogTrackToLibrary = useCallback(
+    async (source: UnifiedSource) => {
+      setCatalogAddError(null);
+      const requestBody = {
         url: source.url,
         title: source.title,
         cover: source.cover ?? "",
         branchId: "default",
         mediaType: catalogMediaTypeForAddToLibraryPayload(source),
-      }),
-    });
-    if (res.status !== 200 && res.status !== 201) return;
-    window.dispatchEvent(new Event("library-updated"));
-  }, []);
+      };
+      const requestBodyJson = JSON.stringify(requestBody);
+      const selectionSubtype =
+        selection.type === "collection_container" ? selection.subtype : selection.type;
+      try {
+        const res = await fetch("/api/sources/add-from-catalog-track", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: requestBodyJson,
+        });
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        const responseBody = JSON.stringify(data);
+        if (res.status !== 200 && res.status !== 201) {
+          const msg =
+            typeof data.error === "string" && data.error.trim()
+              ? data.error.trim()
+              : `Add to library failed (${res.status})`;
+          setCatalogAddError(msg);
+          console.info("[SyncBiz Audit][add-from-catalog-track]", {
+            rowId: source.id,
+            rowUrl: source.url,
+            rowType: source.type,
+            selectionSubtype,
+            requestStarted: true,
+            requestBody: requestBodyJson,
+            responseStatus: res.status,
+            responseBody,
+            unifiedRefetchRan: false,
+            hasMatchingSrcRowAfterRefetch: false,
+          });
+          return;
+        }
+        const items = await fetchUnifiedSourcesWithFallback();
+        const filtered = items.filter((s) => s.origin !== "radio");
+        const hasMatchingSrcRowAfterRefetch = filtered.some(
+          (s) =>
+            s.origin === "source" &&
+            typeof s.id === "string" &&
+            s.id.startsWith("src-") &&
+            playbackUrlsMatchLibraryCrossType(source.url, source.type, s.url, s.type),
+        );
+        setSources(filtered);
+        window.dispatchEvent(new Event("library-updated"));
+        console.info("[SyncBiz Audit][add-from-catalog-track]", {
+          rowId: source.id,
+          rowUrl: source.url,
+          rowType: source.type,
+          selectionSubtype,
+          requestStarted: true,
+          requestBody: requestBodyJson,
+          responseStatus: res.status,
+          responseBody,
+          unifiedRefetchRan: true,
+          hasMatchingSrcRowAfterRefetch,
+        });
+      } catch (e) {
+        console.info("[SyncBiz Audit][add-from-catalog-track]", {
+          rowId: source.id,
+          rowUrl: source.url,
+          rowType: source.type,
+          selectionSubtype,
+          requestStarted: true,
+          requestBody: requestBodyJson,
+          responseStatus: null,
+          responseBody: String(e),
+          unifiedRefetchRan: false,
+          hasMatchingSrcRowAfterRefetch: false,
+        });
+        setCatalogAddError("Add to library failed (network error)");
+      }
+    },
+    [setSources, selection],
+  );
 
   return (
     <div className="library-theme library-page-shell flex w-full min-w-0 flex-col space-y-0" data-library-theme={libraryTheme}>
@@ -1467,7 +1550,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
                     className={`rounded-xl border bg-gradient-to-r px-3 py-2.5 ${pad.tone}`}
-                    title="Drop songs or playlists here (coming soon)"
+                    title="Drop a playlist or library items to assign to this slot"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <button
@@ -1565,7 +1648,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
                     className="rounded-xl border border-emerald-300/45 bg-gradient-to-r from-emerald-500/35 to-teal-500/20 px-3 py-2.5"
-                    title="Drop songs or playlists here (coming soon)"
+                    title="Drop a playlist or library items to assign to this slot"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <button
@@ -1631,6 +1714,11 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
           <div className="library-sources-input-shell">
             <LibraryInputArea onAdd={handleAdd} playSourceOverride={playSourceOverride} />
           </div>
+          {catalogAddError ? (
+            <p className="mt-2 text-xs text-amber-400/95" role="alert">
+              {catalogAddError}
+            </p>
+          ) : null}
 
           <div className="library-command-rail mt-3.5 flex min-w-0 flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-slate-800/35 bg-slate-950/25 px-3 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md sm:gap-3 lg:overflow-x-auto">
             <div className="library-command-rail-browse flex min-w-0 flex-wrap items-center gap-2 sm:gap-2.5 lg:flex-nowrap lg:min-w-0">
@@ -1986,6 +2074,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [item])}
                           playSourceOverride={playSourceOverride}
                           playSource={playSource}
+                          onPlayItem={playSyncbizPlaylistExpandedItem}
                           stopOverride={stopOverride}
                           pauseOverride={pauseOverride}
                           stop={stop}
@@ -2064,7 +2153,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                               libraryDeleteEligible={libraryRowEligibleForLibraryDelete(source, displaySources)}
                               expandedTrackInMainLibrary={
                                 isExternalPlaylistExpandedTrack(selection, source) &&
-                                findMainLibrarySourceForExpandedTrack(source, displaySources) != null
+                                findMainLibrarySourceForExpandedTrack(source, sources) != null
                               }
                             />
                           </div>
@@ -2101,7 +2190,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                             libraryDeleteEligible={libraryRowEligibleForLibraryDelete(source, displaySources)}
                             expandedTrackInMainLibrary={
                               isExternalPlaylistExpandedTrack(selection, source) &&
-                              findMainLibrarySourceForExpandedTrack(source, displaySources) != null
+                              findMainLibrarySourceForExpandedTrack(source, sources) != null
                             }
                             explicitArtUrl={
                               isUserSyncbizPlaylistSource(source)
@@ -2431,6 +2520,8 @@ type CenterGridLibraryItemCardProps = {
   onDragStart: (e: DragEvent) => void;
   playSourceOverride?: (s: UnifiedSource) => void;
   playSource: (s: UnifiedSource) => void;
+  /** When set (e.g. expanded Your Playlist items), replaces default play — must set full queue + play for correct next/prev order. */
+  onPlayItem?: (item: UnifiedSource) => void;
   stopOverride?: () => void;
   pauseOverride?: () => void;
   stop: () => void;
@@ -2446,6 +2537,7 @@ function CenterGridLibraryItemCard({
   onDragStart,
   playSourceOverride,
   playSource,
+  onPlayItem,
   stopOverride,
   pauseOverride,
   stop,
@@ -2459,6 +2551,7 @@ function CenterGridLibraryItemCard({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const playFn = playSourceOverride ?? playSource;
+  const handlePlay = () => (onPlayItem ? onPlayItem(item) : playFn(item));
   const stopFn = stopOverride ?? stop;
   const pauseFn = pauseOverride ?? pause;
   const canDel = libraryDeleteEligible;
@@ -2512,7 +2605,7 @@ function CenterGridLibraryItemCard({
         </div>
         <LibrarySourceItemActions
           source={item}
-          onPlay={() => playFn(item)}
+          onPlay={handlePlay}
           isActive={isActive}
           onStop={stopFn}
           onPause={pauseFn}
