@@ -2,62 +2,13 @@
 
 import type { Playlist } from "@/lib/playlist-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
-import { getPlaylistsLocal } from "@/lib/playlists-local-store";
+import { firstHttpUrlFromPlaylist, playlistHasHttpPlayableUrl } from "@/lib/playlist-playability";
 import { unifiedPlaylistSourceId } from "@/lib/playlist-utils";
 import { radioToUnified } from "@/lib/radio-utils";
 import type { RadioStream, UnifiedSource } from "@/lib/source-types";
 import { sourceToUnified } from "@/lib/playback-provider";
 import { supportsEmbedded } from "@/lib/player-utils";
 import type { Schedule, Source } from "@/lib/types";
-
-function playlistHasHttpPlayableUrl(playlist: Playlist): boolean {
-  const top = (playlist.url ?? "").trim();
-  if (top.startsWith("http://") || top.startsWith("https://")) return true;
-  for (const t of getPlaylistTracks(playlist)) {
-    const u = (t?.url ?? "").trim();
-    if (u.startsWith("http://") || u.startsWith("https://")) return true;
-  }
-  return false;
-}
-
-function firstHttpUrlFromPlaylist(playlist: Playlist): string {
-  const top = (playlist.url ?? "").trim();
-  if (top.startsWith("http://") || top.startsWith("https://")) return top;
-  for (const t of getPlaylistTracks(playlist)) {
-    const u = (t?.url ?? "").trim();
-    if (u.startsWith("http://") || u.startsWith("https://")) return u;
-  }
-  return "";
-}
-
-/** API returns on-disk JSON; browser may have richer `tracks` in localStorage from the same session. */
-function mergePlaylistFromLocalCache(api: Playlist): Playlist {
-  if (typeof window === "undefined") return api;
-  try {
-    const local = getPlaylistsLocal().find((p) => p.id === api.id);
-    if (!local) return api;
-    const localTracks = local.tracks?.length ?? 0;
-    const apiTracks = api.tracks?.length ?? 0;
-    const localHasHttp = playlistHasHttpPlayableUrl(local);
-    const apiHasHttp = playlistHasHttpPlayableUrl(api);
-    if (localTracks > apiTracks || (localHasHttp && !apiHasHttp)) {
-      const topUrl = (() => {
-        const lu = (local.url ?? "").trim();
-        if (lu.startsWith("http://") || lu.startsWith("https://")) return lu;
-        return api.url;
-      })();
-      return {
-        ...api,
-        tracks: local.tracks ?? api.tracks,
-        order: local.order ?? api.order,
-        url: topUrl,
-      };
-    }
-  } catch {
-    /* ignore */
-  }
-  return api;
-}
 
 export type SchedulePlaybackHandlers = {
   stop: () => void;
@@ -72,6 +23,7 @@ type AppRouterLike = { push: (href: string) => void };
 /**
  * Same rules as ScheduleCard "Play now": playlist / radio / source, embedded → /player, else in-app or play-local.
  * Playlist/radio paths use setQueue(..., { force: true }) so a scheduled block always preempts whatever was playing.
+ * Playlist payload uses GET /api/playlists/:id (disk) only — no localStorage merge.
  * @returns whether playback was started or navigation was triggered successfully
  */
 export async function runSchedulePlayback(
@@ -98,12 +50,11 @@ export async function runSchedulePlayback(
       setLastMessage(data?.error ? `Failed: ${data.error}` : "Playlist not found.");
       return false;
     }
-    let playlist = (await res.json()) as Playlist;
+    const playlist = (await res.json()) as Playlist;
     if (!playlist?.id) {
       setLastMessage("Failed: Invalid playlist");
       return false;
     }
-    playlist = mergePlaylistFromLocalCache(playlist);
     if (!playlistHasHttpPlayableUrl(playlist)) {
       setLastMessage(
         "הפלייליסט נשמר רק כמעטפת קטלוג (local) בלי קישורי YouTube/HTTP. פתח את הפלייליסט בספרייה והוסף שירים, או בחר פלייליסט עם קישורים ישירים — ניגון אוטומטי בדפדפן דורש כתובת https.",

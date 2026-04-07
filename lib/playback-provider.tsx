@@ -911,11 +911,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
                 returnedPlaylistId: null as string | null,
                 returnedTracksArrayLen: null as number | null,
               });
-              console.log("[SyncBiz Audit] playSource shell hydration fallback", {
+              console.log("[SyncBiz Audit] playSource shell hydration failed", {
                 reason: "fetch_not_ok",
-                runPlay: "runPlay(source)",
               });
-              runPlay(source, "shell_fallback");
+              setState((s) => ({
+                ...s,
+                lastMessage: "Failed to load playlist for playback.",
+              }));
               return;
             }
             let full: Playlist;
@@ -930,11 +932,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
                 returnedTracksArrayLen: null,
                 parseError: true,
               });
-              console.log("[SyncBiz Audit] playSource shell hydration fallback", {
+              console.log("[SyncBiz Audit] playSource shell hydration failed", {
                 reason: "json_parse_failed",
-                runPlay: "runPlay(source)",
               });
-              runPlay(source, "shell_fallback");
+              setState((s) => ({
+                ...s,
+                lastMessage: "Failed to load playlist for playback.",
+              }));
               return;
             }
             console.log("[SyncBiz Audit] playSource shell hydration fetch_result", {
@@ -945,11 +949,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
               returnedTracksArrayLen: full?.tracks?.length ?? 0,
             });
             if (!full?.id) {
-              console.log("[SyncBiz Audit] playSource shell hydration fallback", {
+              console.log("[SyncBiz Audit] playSource shell hydration failed", {
                 reason: "missing_playlist_id_in_body",
-                runPlay: "runPlay(source)",
               });
-              runPlay(source, "shell_fallback");
+              setState((s) => ({
+                ...s,
+                lastMessage: "Failed to load playlist for playback.",
+              }));
               return;
             }
             const merged: UnifiedSource = { ...source, playlist: full };
@@ -961,12 +967,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             });
             runPlay(merged, "merged");
           } catch (e) {
-            console.log("[SyncBiz Audit] playSource shell hydration fallback", {
+            console.log("[SyncBiz Audit] playSource shell hydration failed", {
               reason: "fetch_exception",
-              runPlay: "runPlay(source)",
               error: String(e),
             });
-            runPlay(source, "shell_fallback");
+            setState((s) => ({
+              ...s,
+              lastMessage: "Failed to load playlist for playback.",
+            }));
           }
         })();
         return;

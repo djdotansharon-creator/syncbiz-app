@@ -8,6 +8,7 @@
  */
 
 import { db } from "@/lib/store";
+import { playlistHasHttpPlayableUrl } from "@/lib/playlist-playability";
 import { getPlaylist } from "@/lib/playlist-store";
 import { getRadioStation } from "@/lib/radio-store";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
@@ -54,6 +55,13 @@ export async function validateScheduleTarget(
       const playlistBranch = resolveMediaBranchId(playlist);
       if (playlistBranch !== bid) {
         return { ok: false, error: "Playlist belongs to a different branch" };
+      }
+      if (!playlistHasHttpPlayableUrl(playlist)) {
+        return {
+          ok: false,
+          error:
+            "Playlist has no playable HTTP URL (unresolved shell or catalog-only). Add tracks or pick another playlist.",
+        };
       }
       return { ok: true };
     }
