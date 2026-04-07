@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findOrCreateCatalogItem, normalizeCatalogUrlKey } from "@/lib/catalog-store";
-import { listPlaylistsForTenant, createPlaylist } from "@/lib/playlist-store";
+import { listPlaylistsForTenant, createPlaylist, isPlaylistPersistError } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
@@ -175,6 +175,9 @@ export async function POST(req: NextRequest) {
     if (uid) void notifyLibraryUpdated(uid, { branchId, entityType: "playlist", action: "created" });
     return NextResponse.json(playlist, { status: 201 });
   } catch (e) {
+    if (isPlaylistPersistError(e)) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
     console.error("[api/playlists] POST error:", e);
     return NextResponse.json(
       { error: "Failed to create playlist" },

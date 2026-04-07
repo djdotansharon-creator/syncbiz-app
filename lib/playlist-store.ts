@@ -8,7 +8,10 @@
 import { mkdir, readdir, readFile, writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { getPlaylistsDir } from "./data-path";
+import { normalizePlaylistForPersist, PlaylistPersistError } from "./playlist-persist-rules";
 import type { Playlist, PlaylistCreateInput, PlaylistTrack } from "./playlist-types";
+
+export { PlaylistPersistError, isPlaylistPersistError } from "./playlist-persist-rules";
 
 async function ensurePlaylistsDir(): Promise<void> {
   const dir = getPlaylistsDir();
@@ -109,17 +112,29 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
     createdAt: new Date().toISOString(),
     tracks,
   };
-  const toWrite = { ...playlist, cover: thumbnail || undefined };
+  const normalized = normalizePlaylistForPersist(playlist);
+  const toWrite = {
+    ...normalized,
+    cover: normalized.thumbnail || normalized.cover || undefined,
+  };
   await writeFile(playlistPath(id), JSON.stringify(toWrite, null, 2), "utf-8");
-  return playlist;
+  return normalized;
 }
 
 export async function updatePlaylist(id: string, data: Partial<Playlist>): Promise<Playlist | null> {
   const existing = await getPlaylist(id);
   if (!existing) return null;
-  const updated: Playlist = { ...existing, ...data, id };
-  await writeFile(playlistPath(id), JSON.stringify(updated, null, 2), "utf-8");
-  return updated;
+  if (data.tracks !== undefined && data.tracks.length === 0) {
+    throw new PlaylistPersistError("TRACKS_EMPTY", "tracks cannot be empty.");
+  }
+  const merged: Playlist = { ...existing, ...data, id };
+  const normalized = normalizePlaylistForPersist(merged);
+  const toWrite = {
+    ...normalized,
+    cover: normalized.thumbnail || normalized.cover || undefined,
+  };
+  await writeFile(playlistPath(id), JSON.stringify(toWrite, null, 2), "utf-8");
+  return normalized;
 }
 
 export async function deletePlaylist(id: string): Promise<boolean> {

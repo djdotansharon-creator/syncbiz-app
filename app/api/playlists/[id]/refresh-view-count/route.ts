@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPlaylist, updatePlaylist } from "@/lib/playlist-store";
+import { getPlaylist, updatePlaylist, isPlaylistPersistError } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies, hasBranchAccess } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { getYouTubeVideoId } from "@/lib/playlist-utils";
@@ -53,6 +53,14 @@ export async function POST(
   if (typeof viewCount === "number") updateData.viewCount = viewCount;
   if (typeof durationSeconds === "number") updateData.durationSeconds = durationSeconds;
 
-  const updated = await updatePlaylist(id, updateData);
-  return NextResponse.json(updated);
+  try {
+    const updated = await updatePlaylist(id, updateData);
+    return NextResponse.json(updated);
+  } catch (e) {
+    if (isPlaylistPersistError(e)) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+    console.error("[api/playlists/refresh-view-count] error:", e);
+    return NextResponse.json({ error: "Failed to update playlist" }, { status: 500 });
+  }
 }

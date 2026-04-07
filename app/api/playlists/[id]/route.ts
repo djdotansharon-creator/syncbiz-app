@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPlaylist, updatePlaylist, deletePlaylist } from "@/lib/playlist-store";
+import { getPlaylist, updatePlaylist, deletePlaylist, isPlaylistPersistError } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
@@ -234,6 +234,9 @@ export async function PUT(
     }
     return NextResponse.json(updated);
   } catch (e) {
+    if (isPlaylistPersistError(e)) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
     console.error("[api/playlists] PUT error:", e);
     return NextResponse.json(
       { error: "Failed to update playlist" },
