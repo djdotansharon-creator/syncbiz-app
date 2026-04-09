@@ -1,4 +1,4 @@
-import type { Playlist, PlaylistTrack, PlaylistType } from "./playlist-types";
+import type { Playlist, PlaylistTrack, PlaylistType, ScheduleContributorBlock } from "./playlist-types";
 
 const VALID_TYPES: PlaylistType[] = [
   "soundcloud",
@@ -149,11 +149,43 @@ export function normalizePlaylistForPersist(playlist: Playlist): Playlist {
     type: t.type,
   }));
 
+  const trackIdSet = new Set(normalizedTracks.map((t) => t.id));
+  let scheduleContributorBlocks: ScheduleContributorBlock[] | undefined = playlist.scheduleContributorBlocks;
+  if (scheduleContributorBlocks && scheduleContributorBlocks.length > 0) {
+    const seenInBlocks = new Set<string>();
+    for (const b of scheduleContributorBlocks) {
+      for (const tid of b.trackIds) {
+        if (!trackIdSet.has(tid)) {
+          throw new PlaylistPersistError(
+            "SCHEDULE_BLOCK_UNKNOWN_TRACK",
+            `scheduleContributorBlocks references unknown track id: ${tid}`,
+          );
+        }
+        if (seenInBlocks.has(tid)) {
+          throw new PlaylistPersistError(
+            "SCHEDULE_BLOCK_DUP_TRACK",
+            "Each track id may appear in at most one scheduleContributorBlocks entry.",
+          );
+        }
+        seenInBlocks.add(tid);
+      }
+    }
+    if (seenInBlocks.size !== trackIdSet.size) {
+      throw new PlaylistPersistError(
+        "SCHEDULE_BLOCKS_INCOMPLETE",
+        "scheduleContributorBlocks must list every track id exactly once.",
+      );
+    }
+  } else {
+    scheduleContributorBlocks = undefined;
+  }
+
   return {
     ...playlist,
     id,
     name,
     tracks: normalizedTracks,
     order,
+    scheduleContributorBlocks,
   };
 }

@@ -45,13 +45,14 @@ export function expandPlaylistEntityToItemsForGrid(source: UnifiedSource): Unifi
 /** Play / drag: expanded tracks + assigned library items; never duplicate the playlist shell. */
 export function resolveSyncbizPlaylistPlayQueue(
   key: string,
-  displaySources: UnifiedSource[],
+  /** Full library list — must not be genre-filtered or the playlist shell may be missing. */
+  librarySources: UnifiedSource[],
   playlistItemAssignments: Record<string, string[]>
 ): UnifiedSource[] {
-  const source = displaySources.find((s) => s.origin === "playlist" && `syncbiz:${s.id}` === key);
+  const source = librarySources.find((s) => s.origin === "playlist" && `syncbiz:${s.id}` === key);
   if (!source) return [];
   const assignedIds = playlistItemAssignments[key] ?? [];
-  const assignedItems = displaySources.filter((s) => assignedIds.includes(s.id) && s.id !== source.id);
+  const assignedItems = librarySources.filter((s) => assignedIds.includes(s.id) && s.id !== source.id);
   const expanded = expandPlaylistEntityToItems(source);
   const playItems = expanded.length > 0 ? expanded : [source];
   const map = new Map<string, UnifiedSource>();
@@ -62,12 +63,13 @@ export function resolveSyncbizPlaylistPlayQueue(
 /** Center grid: same as play merge, but legacy shell hidden; never show the playlist container card. */
 export function visibleItemsForSyncbizPlaylistGrid(
   key: string,
-  displaySources: UnifiedSource[],
+  /** Full library list — must not be genre-filtered or the playlist shell / assignments may be missing. */
+  librarySources: UnifiedSource[],
   playlistItemAssignments: Record<string, string[]>
 ): UnifiedSource[] {
-  const source = displaySources.find((s) => `syncbiz:${s.id}` === key);
+  const source = librarySources.find((s) => `syncbiz:${s.id}` === key);
   const assignedIds = playlistItemAssignments[key] ?? [];
-  const assignedItems = displaySources.filter(
+  const assignedItems = librarySources.filter(
     (s) => assignedIds.includes(s.id) && (!source || s.id !== source.id)
   );
   const expandedGrid = source ? expandPlaylistEntityToItemsForGrid(source) : [];

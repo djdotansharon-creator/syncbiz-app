@@ -293,7 +293,7 @@ const TRANSLATIONS = {
     removeScheduledPlaylistTitle: "Remove scheduled playlist?",
     removeScheduledPlaylistMessage:
       "This clears the playlist from this slot only. Tracks and playlists stay in your library.",
-    removeFromThisSlot: "Remove from this slot",
+    removeFromThisSlot: "Clear slot only",
     removePlaylistTileTitle: "Remove playlist tile?",
     removePlaylistTileMessage:
       "This removes this custom tile from the list. It does not delete playlists from your library.",
@@ -303,12 +303,17 @@ const TRANSLATIONS = {
     readyCollectionInfoTitle: "Automatic collection",
     readyCollectionInfoMessage:
       "This is a smart grouping from your library — not a separate playlist. Remove tracks from All Library if you no longer want them here.",
+    readyPlaylistsRailEmptyHint:
+      "No imported Ready playlists yet. Save a decomposed mix import — it appears here as an editable playlist.",
     gotIt: "Got it",
-    libraryShellBrowseReady: "View all",
-    libraryShellBrowseReadyTitle: "Show all ready collections in the main list",
+    libraryShellBrowseReady: "Browse groupings",
+    libraryShellBrowseReadyTitle: "Show automatic library groupings in the main grid (not the imported Ready playlist list)",
     libraryShellAddPlaylistTile: "Add tile",
     libraryShellAddPlaylistTileTitle: "Add a custom tile for daypart scheduling",
     playlistTileScheduleActionTitle: "Schedule…",
+    playlistTileDropBindPlaylistTitle: "Drop a playlist here to bind this slot. Track editing is done in playlists.",
+    playlistTileTrackDropBindingOnly:
+      "Tiles only bind a playlist. Add or reorder tracks in Your Playlists or imported playlists.",
     share: "Share",
     favorites: "Favorites",
     addToFavorites: "Add to favorites",
@@ -628,7 +633,7 @@ const TRANSLATIONS = {
     removeScheduledPlaylistTitle: "להסיר פלייליסט מתוזמן?",
     removeScheduledPlaylistMessage:
       "פעולה זו מנקה את הפלייליסט מהמשבצת בלבד. הרצועות והפלייליסטים נשארים בספרייה.",
-    removeFromThisSlot: "הסר מהמשבצת",
+    removeFromThisSlot: "נקה משבצת בלבד",
     removePlaylistTileTitle: "להסיר אריח פלייליסט?",
     removePlaylistTileMessage:
       "פעולה זו מסירה את האריח המותאם מהרשימה. היא לא מוחקת פלייליסטים מהספרייה.",
@@ -638,12 +643,17 @@ const TRANSLATIONS = {
     readyCollectionInfoTitle: "אוסף אוטומטי",
     readyCollectionInfoMessage:
       "זהו קיבוץ חכם מהספרייה — לא פלייליסט נפרד. הסר מקורות מ״כל הספרייה״ אם אינך רוצה אותם כאן.",
+    readyPlaylistsRailEmptyHint:
+      "עדיין אין פלייליסטים מוכנים מיובאים. שמרו ייבוא מיקס מפורק — הוא יופיע כאן כפלייליסט הניתן לעריכה.",
     gotIt: "הבנתי",
-    libraryShellBrowseReady: "הצג הכל",
-    libraryShellBrowseReadyTitle: "הצג את כל האוספים המוכנים ברשימה המרכזית",
+    libraryShellBrowseReady: "עיון בקיבוצים",
+    libraryShellBrowseReadyTitle: "הצג קיבוצי ספרייה אוטומטיים ברשת המרכזית (לא רשימת הפלייליסטים המוכנים המיובאים)",
     libraryShellAddPlaylistTile: "הוסף אריח",
     libraryShellAddPlaylistTileTitle: "הוסף אריח מותאם לתזמון לפי משבצות",
     playlistTileScheduleActionTitle: "תזמון…",
+    playlistTileDropBindPlaylistTitle: "גררו פלייליסט לכאן לשיוך המשבצת. עריכת רצועות נעשית בפלייליסטים.",
+    playlistTileTrackDropBindingOnly:
+      "האריחים רק מקשרים פלייליסט. הוסיפו או סדרו רצועות ב״הפלייליסטים שלך״ או בפלייליסטים מיובאים.",
     share: "שתף",
     favorites: "מועדפים",
     addToFavorites: "הוסף למועדפים",

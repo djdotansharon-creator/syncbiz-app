@@ -218,32 +218,48 @@ function getPlaylistSessionTracks(s: Pick<PlaybackState, "currentSource" | "curr
   return pl ? getPlaylistTracks(pl) : [];
 }
 
-/**
- * SyncBiz transport: when the session or snapshot currentPlaylist is collapsed (≤1 leaf) and the
- * queue has more than one item, advance via the global queue path — not playlist_session /
- * single_wrap (which no-ops when trackCount === 1).
- * For "next", include the last queue slot so wrap to queue[0] runs instead of getting stuck at end.
- */
-function preferQueueTransportOverCollapsedSession(
-  s: PlaybackState,
-  sessionTrackCount: number,
-  direction: "next" | "prev",
-): boolean {
-  if (s.queue.length <= 1) return false;
-  const plLeaf = s.currentPlaylist ? getPlaylistTracks(s.currentPlaylist).length : 0;
-  const sessionCollapsedToOne = sessionTrackCount <= 1;
-  const playlistSnapshotCollapsed = plLeaf <= 1;
-  const collapsed = sessionCollapsedToOne || playlistSnapshotCollapsed;
+type SessionNextKind = "advance" | "restart" | "exhausted";
 
-  if (direction === "next") {
-    if (!collapsed) return false;
-    const hasForward = s.queueIndex >= 0 && s.queueIndex < s.queue.length - 1;
-    if (hasForward) return true;
-    return s.queueIndex >= 0 && s.queueIndex >= s.queue.length - 1;
+/**
+ * Next index within the active playlist session only. No global queue / no jump to another top-level source.
+ * Session always loops at end; exhausted only when trackCount is 0.
+ * UI repeat flag does not disable session loop (passed for API compatibility).
+ */
+function computeSessionNextTrackIndex(
+  trackCount: number,
+  currentIndex: number,
+  shuffle: boolean,
+  _repeat: boolean,
+  getShuffledIndex: (len: number, current: number) => number,
+): { kind: SessionNextKind; nextIndex: number } {
+  if (trackCount < 1) return { kind: "exhausted", nextIndex: 0 };
+  const safeCount = trackCount;
+  const capped = Math.min(Math.max(0, currentIndex), safeCount - 1);
+
+  if (safeCount === 1) {
+    return { kind: "restart", nextIndex: 0 };
   }
 
-  if (!collapsed) return false;
-  return s.queueIndex > 0;
+  if (capped < safeCount - 1) {
+    const nextIdx = shuffle ? getShuffledIndex(safeCount, capped) : capped + 1;
+    return { kind: "advance", nextIndex: nextIdx };
+  }
+
+  const nextIdx = shuffle ? getShuffledIndex(safeCount, capped) : 0;
+  return { kind: "restart", nextIndex: nextIdx };
+}
+
+/**
+ * Product contract: autonomous transport never leaves the active playlist/session for another queued
+ * top-level source. Global queue is not used for next/prev (schedule takeover uses stop + playSource).
+ * @deprecated Kept only so audit call sites stay readable; always false.
+ */
+function preferQueueTransportOverCollapsedSession(
+  _s: PlaybackState,
+  _sessionTrackCount: number,
+  _direction: "next" | "prev",
+): boolean {
+  return false;
 }
 
 /** TEMP audit: mirrors reasons in `effectivePlaybackPlaylistAttachment` (playlist-utils). */
@@ -1232,36 +1248,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         return getAdvanceState(s, nextIdx);
       }
 
-      if (s.queue.length > 1 && s.queueIndex > 0) {
-        mvpLog("playback_prev", { scope: "global_queue", queueIndex: s.queueIndex });
-        const prevSource = s.queue[s.queueIndex - 1];
-        queueMicrotask(() => {
-          try {
-            syncbizAuditTransportTransitionStart({
-              phase: "prev_queue_microtask_before_playSource",
-              prevSourceId: s.currentSource?.id ?? null,
-              nextSourceId: prevSource.id,
-              prevQueueIndex: s.queueIndex,
-              nextQueueIndex: s.queueIndex - 1,
-            });
-            playSource(prevSource);
-          } finally {
-            transportLockRef.current = false;
-          }
-        });
-        console.log("[SyncBiz Audit] PREV provider invoked", {
-          phase: "queue_back",
-          branch: "queue_back",
-          prevSourceId,
-          nextSourceId: prevSource.id,
-          prevTrackIndex,
-          nextTrackIndex: 0,
-          prevQueueIndex,
-          nextQueueIndex: s.queueIndex - 1,
-          queueLength: s.queue.length,
-        });
-        return s;
-      }
       mvpLog("playback_prev", { scope: "noop" });
       transportLockRef.current = false;
       console.log("[SyncBiz Audit] PREV provider invoked", {
@@ -1375,18 +1361,23 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         !preferQueueTransportOverCollapsedSession(s, sessionTracks.length, "next")
       ) {
         const trackCount = sessionTracks.length;
-        let nextIdx: number;
-        let branch: "single_wrap" | "advance" | "wrap";
-        if (trackCount === 1) {
-          nextIdx = 0;
-          branch = "single_wrap";
-        } else if (s.currentTrackIndex < trackCount - 1) {
-          nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
-          branch = "advance";
-        } else {
-          nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : 0;
-          branch = "wrap";
+        const sessionStep = computeSessionNextTrackIndex(
+          trackCount,
+          s.currentTrackIndex,
+          s.shuffle,
+          s.repeat,
+          getShuffledIndex,
+        );
+
+        if (sessionStep.kind === "exhausted") {
+          transportLockRef.current = false;
+          emitScheduledQueueEndedAutoProof(null);
+          return s;
         }
+
+        const nextIdx = sessionStep.nextIndex;
+        const branch: "advance" | "restart" =
+          sessionStep.kind === "advance" ? "advance" : "restart";
         console.log("[SyncBiz Audit] next index calculation", {
           playbackStatus: s.status,
           auditTransportCase: auditTransportCase ?? null,
@@ -1470,185 +1461,49 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
       const playlist = s.currentPlaylist;
       const tracks = playlist ? getPlaylistTracks(playlist) : [];
-      const trackCount = tracks.length || 1;
-
-      if (trackCount > 1 && s.currentTrackIndex < trackCount - 1) {
-        const nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
-        const track = tracks[nextIdx];
-        const url = track?.url ?? s.currentSource.url;
-        const embedded = track ? canEmbedInCard(track.type) : false;
-        if (!skipPlay && !embedded && url) {
-          stopAllBeforePlay();
-          playLocal(url);
-        }
+      if (tracks.length === 0) {
         transportLockRef.current = false;
-        console.log("[SyncBiz Audit] queue advance result", {
-          phase: "playlist_fallback",
-          branch: "advance",
-          prevSourceId,
-          nextSourceId: s.currentSource.id,
-          prevTrackIndex,
-          nextTrackIndex: nextIdx,
-          prevQueueIndex,
-          nextQueueIndex: s.queueIndex,
-          queueLength: s.queue.length,
-          skipPlay,
-        });
-        emitScheduledQueueEndedAutoProof(s.currentSource.id);
-        return getAdvanceState(s, nextIdx);
-      }
-
-      const atLastTrack = s.currentTrackIndex >= trackCount - 1;
-      const atLastInQueue = s.queueIndex >= s.queue.length - 1 || s.queue.length <= 1;
-
-      if (atLastTrack && s.repeat && trackCount >= 1) {
-        const track = tracks[0];
-        const url = track?.url ?? s.currentSource.url;
-        const embedded = track ? canEmbedInCard(track.type) : false;
-        if (!skipPlay && !embedded && url) {
-          stopAllBeforePlay();
-          playLocal(url);
-        }
-        transportLockRef.current = false;
-        mvpLog("playback_next", { scope: "global_queue", branch: "repeat_restart", skipPlay });
-        console.log("[SyncBiz Audit] queue advance result", {
-          phase: "repeat_restart",
-          branch: "repeat_restart",
-          prevSourceId,
-          nextSourceId: s.currentSource.id,
-          prevTrackIndex,
-          nextTrackIndex: 0,
-          prevQueueIndex,
-          nextQueueIndex: s.queueIndex,
-          queueLength: s.queue.length,
-          skipPlay,
-        });
-        emitScheduledQueueEndedAutoProof(s.currentSource.id);
-        return getAdvanceState(s, 0);
-      }
-
-      if (s.queue.length >= 1 && atLastTrack) {
-        const nextQueueIdx = s.shuffle
-          ? getShuffledIndex(s.queue.length, atLastInQueue ? -1 : s.queueIndex)
-          : atLastInQueue
-            ? 0
-            : s.queueIndex + 1;
-        const nextSource = s.queue[nextQueueIdx % s.queue.length];
-        mvpLog("playback_next", {
-          scope: "global_queue",
-          branch: "queue_advance",
-          nextQueueIdx: nextQueueIdx % s.queue.length,
-          nextSourceId: nextSource?.id,
-          skipPlay,
-        });
-        if (nextSource) {
-          console.log("[SyncBiz Audit] queue advance", {
-            scope: "global_queue",
-            branch: "queue_advance",
-            nextQueueIdx: nextQueueIdx % s.queue.length,
-            nextSourceId: nextSource?.id,
-            currentSourceId: s.currentSource.id,
-            queueIndex: s.queueIndex,
-            queueLength: s.queue.length,
-          });
-          if (nextSource.id === s.currentSource.id && !s.repeat) {
-            console.log("[SyncBiz Audit] Queue advance -> stop", {
-              queueLen: s.queue.length,
-              queueIndex: s.queueIndex,
-              sourceId: s.currentSource.id,
-              repeat: s.repeat,
-            });
-            console.log("[SyncBiz Audit] queue advance result", {
-              phase: "global_queue_stop_same_source",
-              branch: "queue_advance",
-              prevSourceId,
-              nextSourceId: nextSource.id,
-              prevTrackIndex,
-              nextTrackIndex: s.currentTrackIndex,
-              prevQueueIndex,
-              nextQueueIndex: s.queueIndex,
-              queueLength: s.queue.length,
-              skipPlay,
-            });
-            emitScheduledQueueEndedAutoProof(nextSource.id);
-            stop();
-            transportLockRef.current = false;
-            return s;
-          }
-          if (!skipPlay) {
-            emitScheduledQueueEndedAutoProof(nextSource.id);
-            queueMicrotask(() => {
-              try {
-                syncbizAuditTransportTransitionStart({
-                  phase: "next_queue_microtask_before_playSource",
-                  prevSourceId,
-                  nextSourceId: nextSource.id,
-                  prevQueueIndex,
-                  nextQueueIndex: nextQueueIdx % s.queue.length,
-                  queueLength: s.queue.length,
-                  auditTransportCase: auditTransportCase ?? null,
-                });
-                console.log("[SyncBiz Audit] queue advance result", {
-                  phase: "global_queue_advance",
-                  branch: "queue_advance",
-                  prevSourceId,
-                  nextSourceId: nextSource.id,
-                  prevTrackIndex,
-                  nextTrackIndex: 0,
-                  prevQueueIndex,
-                  nextQueueIndex: nextQueueIdx % s.queue.length,
-                  queueLength: s.queue.length,
-                  skipPlay,
-                });
-                playSource(nextSource);
-              } finally {
-                transportLockRef.current = false;
-              }
-            });
-          } else {
-            transportLockRef.current = false;
-            const qi = nextQueueIdx % s.queue.length;
-            syncbizAuditQueueIndexTransition({
-              from: prevQueueIndex,
-              to: qi,
-              via: "next_global_queue_skipPlay_setState",
-              extra: { nextSourceId: nextSource.id, auditTransportCase: auditTransportCase ?? null },
-            });
-            syncbizAuditCurrentSourceTransition({
-              fromId: prevSourceId,
-              toId: nextSource.id,
-              via: "next_global_queue_skipPlay_setState",
-            });
-            emitScheduledQueueEndedAutoProof(nextSource.id);
-            return {
-              ...s,
-              currentSource: nextSource,
-              currentPlaylist: nextSource.playlist ?? s.currentPlaylist,
-              currentTrackIndex: 0,
-              queueIndex: qi,
-              status: "playing" as const,
-            };
-          }
-        }
         emitScheduledQueueEndedAutoProof(null);
         return s;
       }
-      mvpLog("playback_next", { scope: "noop", skipPlay });
+
+      const fbStep = computeSessionNextTrackIndex(
+        tracks.length,
+        s.currentTrackIndex,
+        s.shuffle,
+        s.repeat,
+        getShuffledIndex,
+      );
+      if (fbStep.kind === "exhausted") {
+        transportLockRef.current = false;
+        emitScheduledQueueEndedAutoProof(null);
+        return s;
+      }
+      const nextIdx = fbStep.nextIndex;
+      const branch: "advance" | "restart" = fbStep.kind === "advance" ? "advance" : "restart";
+      const track = tracks[nextIdx];
+      const url = track?.url ?? s.currentSource.url;
+      const embedded = track ? canEmbedInCard(track.type) : false;
+      if (!skipPlay && !embedded && url) {
+        stopAllBeforePlay();
+        playLocal(url);
+      }
+      transportLockRef.current = false;
+      mvpLog("playback_next", { scope: "playlist", branch: `fallback_${branch}`, skipPlay });
       console.log("[SyncBiz Audit] queue advance result", {
-        phase: "after_next_noop",
-        branch: "noop",
+        phase: "playlist_fallback",
+        branch,
         prevSourceId,
-        nextSourceId: s.currentSource?.id ?? null,
+        nextSourceId: s.currentSource.id,
         prevTrackIndex,
-        nextTrackIndex: s.currentTrackIndex,
+        nextTrackIndex: nextIdx,
         prevQueueIndex,
         nextQueueIndex: s.queueIndex,
         queueLength: s.queue.length,
         skipPlay,
       });
-      emitScheduledQueueEndedAutoProof(null);
-      transportLockRef.current = false;
-      return s;
+      emitScheduledQueueEndedAutoProof(s.currentSource.id);
+      return getAdvanceState(s, nextIdx);
     });
   }, [
     stopAllBeforePlay,
@@ -1656,7 +1511,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     playSource,
     getShuffledIndex,
     getAdvanceState,
-    stop,
     logRuntimePlaybackAudit,
     emitPlaylistSessionAudit,
     getPlayUrl,
@@ -1672,16 +1526,15 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         sessionTracks.length > 0 &&
         !preferQueueTransportOverCollapsedSession(s, sessionTracks.length, "next")
       ) {
-        const trackCount = sessionTracks.length;
-        let nextIdx: number;
-        if (trackCount === 1) {
-          nextIdx = 0;
-        } else if (s.currentTrackIndex < trackCount - 1) {
-          nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
-        } else {
-          nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : 0;
-        }
-        const track = sessionTracks[nextIdx];
+        const step = computeSessionNextTrackIndex(
+          sessionTracks.length,
+          s.currentTrackIndex,
+          s.shuffle,
+          s.repeat,
+          getShuffledIndex,
+        );
+        if (step.kind === "exhausted") return null;
+        const track = sessionTracks[step.nextIndex];
         const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
         const embedded = track ? canEmbedInCard(track.type) : false;
         const out = !embedded && url ? url : null;
@@ -1689,7 +1542,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           mvpLog("playback_get_next_stream", {
             scope: "playlist",
             playlistId: getActivePlaylist(s)?.id,
-            nextIdx,
+            nextIdx: step.nextIndex,
           });
         }
         return out;
@@ -1697,42 +1550,20 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
       const playlist = s.currentPlaylist;
       const tracks = playlist ? getPlaylistTracks(playlist) : [];
-      const trackCount = tracks.length || 1;
+      if (tracks.length === 0) return null;
 
-      if (trackCount > 1 && s.currentTrackIndex < trackCount - 1) {
-        const nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
-        const track = tracks[nextIdx];
-        const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
-        const embedded = track ? canEmbedInCard(track.type) : false;
-        return !embedded && url ? url : null;
-      }
-
-      const atLastTrack = s.currentTrackIndex >= trackCount - 1;
-      const atLastInQueue = s.queueIndex >= s.queue.length - 1 || s.queue.length <= 1;
-
-      if (atLastTrack && s.repeat && trackCount >= 1) {
-        const track = tracks[0];
-        const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
-        const embedded = track ? canEmbedInCard(track.type) : false;
-        return !embedded && url ? url : null;
-      }
-
-      if (s.queue.length >= 1 && atLastTrack) {
-        const nextQueueIdx = s.shuffle
-          ? getShuffledIndex(s.queue.length, atLastInQueue ? -1 : s.queueIndex)
-          : atLastInQueue
-            ? 0
-            : s.queueIndex + 1;
-        const nextSource = s.queue[nextQueueIdx % s.queue.length];
-        if (nextSource && nextSource.id !== s.currentSource.id) {
-          const t = unifiedToPlaybackTrack(nextSource, 0);
-          const embedded = t ? canEmbedInCard(t.type) : false;
-          const out = !embedded && t?.url ? t.url : null;
-          if (out) mvpLog("playback_get_next_stream", { scope: "global_queue", nextSourceId: nextSource.id });
-          return out;
-        }
-      }
-      return null;
+      const step = computeSessionNextTrackIndex(
+        tracks.length,
+        s.currentTrackIndex,
+        s.shuffle,
+        s.repeat,
+        getShuffledIndex,
+      );
+      if (step.kind === "exhausted") return null;
+      const track = tracks[step.nextIndex];
+      const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
+      const embedded = track ? canEmbedInCard(track.type) : false;
+      return !embedded && url ? url : null;
     })();
   }, [state, getShuffledIndex]);
 
@@ -1746,16 +1577,15 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       sessionTracks.length > 0 &&
       !preferQueueTransportOverCollapsedSession(s, sessionTracks.length, "next")
     ) {
-      const trackCount = sessionTracks.length;
-      let nextIdx: number;
-      if (trackCount === 1) {
-        nextIdx = 0;
-      } else if (s.currentTrackIndex < trackCount - 1) {
-        nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
-      } else {
-        nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : 0;
-      }
-      const track = sessionTracks[nextIdx];
+      const step = computeSessionNextTrackIndex(
+        sessionTracks.length,
+        s.currentTrackIndex,
+        s.shuffle,
+        s.repeat,
+        getShuffledIndex,
+      );
+      if (step.kind === "exhausted") return null;
+      const track = sessionTracks[step.nextIndex];
       const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
       const embedded = track ? canEmbedInCard(track.type) : false;
       let result: { type: "youtube"; url: string; videoId: string } | null = null;
@@ -1767,7 +1597,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         mvpLog("playback_get_next_embedded", {
           scope: "playlist",
           playlistId: getActivePlaylist(s)?.id,
-          nextIdx,
+          nextIdx: step.nextIndex,
         });
       }
       return result;
@@ -1775,51 +1605,22 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
     const playlist = s.currentPlaylist;
     const tracks = playlist ? getPlaylistTracks(playlist) : [];
-    const trackCount = tracks.length || 1;
+    if (tracks.length === 0) return null;
 
-    if (trackCount > 1 && s.currentTrackIndex < trackCount - 1) {
-      const nextIdx = s.shuffle ? getShuffledIndex(trackCount, s.currentTrackIndex) : s.currentTrackIndex + 1;
-      const track = tracks[nextIdx];
-      const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
-      const embedded = track ? canEmbedInCard(track.type) : false;
-      if (embedded && url && track?.type === "youtube") {
-        const videoId = getYouTubeVideoId(url);
-        return videoId ? { type: "youtube", url, videoId } : null;
-      }
-      return null;
-    }
-
-    const atLastTrack = s.currentTrackIndex >= trackCount - 1;
-    const atLastInQueue = s.queueIndex >= s.queue.length - 1 || s.queue.length <= 1;
-
-    if (atLastTrack && s.repeat && trackCount >= 1) {
-      const track = tracks[0];
-      const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
-      const embedded = track ? canEmbedInCard(track.type) : false;
-      if (embedded && url && track?.type === "youtube") {
-        const videoId = getYouTubeVideoId(url);
-        return videoId ? { type: "youtube", url, videoId } : null;
-      }
-      return null;
-    }
-
-    if (s.queue.length >= 1 && atLastTrack) {
-      const nextQueueIdx = s.shuffle
-        ? getShuffledIndex(s.queue.length, atLastInQueue ? -1 : s.queueIndex)
-        : atLastInQueue
-          ? 0
-          : s.queueIndex + 1;
-      const nextSource = s.queue[nextQueueIdx % s.queue.length];
-      if (nextSource && nextSource.id !== s.currentSource.id) {
-        const t = unifiedToPlaybackTrack(nextSource, 0);
-        const embedded = t ? canEmbedInCard(t.type) : false;
-        if (embedded && t?.url && t.type === "youtube") {
-          const videoId = getYouTubeVideoId(t.url);
-          const y = videoId ? { type: "youtube" as const, url: t.url, videoId } : null;
-          if (y) mvpLog("playback_get_next_embedded", { scope: "global_queue", nextSourceId: nextSource.id });
-          return y;
-        }
-      }
+    const step = computeSessionNextTrackIndex(
+      tracks.length,
+      s.currentTrackIndex,
+      s.shuffle,
+      s.repeat,
+      getShuffledIndex,
+    );
+    if (step.kind === "exhausted") return null;
+    const track = tracks[step.nextIndex];
+    const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
+    const embedded = track ? canEmbedInCard(track.type) : false;
+    if (embedded && url && track?.type === "youtube") {
+      const videoId = getYouTubeVideoId(url);
+      return videoId ? { type: "youtube", url, videoId } : null;
     }
     return null;
   }, [state, getShuffledIndex]);

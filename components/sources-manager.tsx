@@ -21,7 +21,18 @@ import { LibraryInputArea } from "@/components/library-input-area";
 import { GuestLinkButton, guestLinkLedButtonClass } from "@/components/guest-link-button";
 import { getFavorites, addFavorite as addFav, removeFavorite as removeFav } from "@/lib/favorites-store";
 import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal, removePlaylistFromLocal, removeRadioFromLocal } from "@/lib/unified-sources-client";
-import { getPlaylistTracks, type Playlist } from "@/lib/playlist-types";
+import { getPlaylistTracks, type Playlist, type ScheduleContributorBlock } from "@/lib/playlist-types";
+import {
+  appendSourcesToPlaylistTracks,
+  reconcilePlaylistTracksForMerge,
+} from "@/lib/playlist-append-sources";
+import {
+  coalesceScheduleContributorBlocksWithTracks,
+  mergeScheduleContributorBlocksAfterAppend,
+  removeContributorBlockFromPlaylistData,
+  removeTrackFromScheduleContributorBlocks,
+  type ScheduleAppendContributorHint,
+} from "@/lib/schedule-composite-playlist";
 import { canonicalYouTubeWatchUrlForPlayback } from "@/lib/playlist-utils";
 import { detectProvider } from "@/lib/player-utils";
 import {
@@ -46,7 +57,12 @@ import {
   type LibrarySectionId,
 } from "@/lib/library-grouping";
 import { librarySectionLabel } from "@/lib/library-section-i18n";
-import { inferDaypartLabel, resolveDaypartCollectionSources } from "@/lib/daypart-collection";
+import {
+  inferDaypartLabel,
+  normalizeDaypartPlaylistAssignments,
+  normalizeDaypartTileKey,
+  resolveDaypartCollectionSources,
+} from "@/lib/daypart-collection";
 import { ScheduleBlockModal, type ScheduleModalInitialContext } from "@/components/schedule-block-modal";
 import { useLibraryTheme } from "@/lib/library-theme-context";
 import {
@@ -405,6 +421,46 @@ function isUserSyncbizPlaylistSource(source: UnifiedSource): boolean {
   return contract.entityKind === "collection" && contract.collectionSubtype === "syncbiz_playlist";
 }
 
+/** Disk-backed Ready Playlist from mix import (`libraryPlacement: "ready_external"`) — not URL-inferred groupings. */
+function isPersistedReadyPlaylistSource(source: UnifiedSource): boolean {
+  return source.origin === "playlist" && source.playlist?.libraryPlacement === "ready_external";
+}
+
+/** Subtitle for composite contributor rows (playlist vs direct; Ready vs Your by key). */
+function compositeContributorSourceLabel(b: ScheduleContributorBlock): string {
+  if (b.kind === "direct") return "Direct items";
+  if (b.sourcePlaylistKey?.startsWith("external:")) return "Ready playlist";
+  if (b.sourcePlaylistKey?.startsWith("syncbiz:")) return "Your playlist";
+  return "Playlist source";
+}
+
+/** Re-fetch persisted playlist JSON for dropped shells so flatten/append matches disk (avoids stale client tracks). */
+async function refreshPlaylistSourcesForAppend(resolved: UnifiedSource[]): Promise<UnifiedSource[]> {
+  const cache = new Map<string, Playlist | undefined>();
+  const out: UnifiedSource[] = [];
+  for (const s of resolved) {
+    if (s.origin === "playlist" && s.playlist?.id && !s.id.includes(":track:")) {
+      const pid = s.playlist.id;
+      if (!cache.has(pid)) {
+        try {
+          const res = await fetch(`/api/playlists/${encodeURIComponent(pid)}`, {
+            credentials: "include",
+            cache: "no-store",
+          });
+          cache.set(pid, res.ok ? ((await res.json()) as Playlist) : undefined);
+        } catch {
+          cache.set(pid, undefined);
+        }
+      }
+      const fresh = cache.get(pid);
+      out.push(fresh ? { ...s, playlist: fresh } : s);
+    } else {
+      out.push(s);
+    }
+  }
+  return out;
+}
+
 /** Cover for user playlists: playlist/UnifiedSource art, then first track art, then first assigned library item with art. */
 function deriveSyncbizPlaylistCover(
   playlistUnified: UnifiedSource,
@@ -433,7 +489,7 @@ function getPlaylistEntitySubtypeKey(source: UnifiedSource): { subtype: LibraryC
   if (contract.entityKind === "collection" && contract.collectionSubtype === "syncbiz_playlist" && source.origin === "playlist") {
     return { subtype: "syncbiz_playlist", key: `syncbiz:${source.id}` };
   }
-  if (contract.entityKind === "collection" && contract.collectionSubtype === "external_playlist") {
+  if (isPersistedReadyPlaylistSource(source)) {
     return { subtype: "external_playlist", key: `external:${source.id}` };
   }
   return null;
@@ -483,13 +539,14 @@ function makeCollectionContainers(sources: UnifiedSource[]) {
       cover: clientPrev?.cover ?? source.cover,
     });
 
-    if (contract.entityKind === "collection" && contract.collectionSubtype === "external_playlist") {
+    if (isPersistedReadyPlaylistSource(source)) {
       const externalKey = `external:${source.id}`;
+      const trackCount = source.playlist ? getPlaylistTracks(source.playlist).length : 0;
       externalMap.set(externalKey, {
         key: externalKey,
         label: source.title,
         subtype: "external_playlist",
-        itemCount: 1,
+        itemCount: trackCount > 0 ? trackCount : 1,
         cover: source.cover,
       });
     }
@@ -529,6 +586,9 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const [readyCollectionModalOpen, setReadyCollectionModalOpen] = useState(false);
   const [externalPlaylistDeleteKey, setExternalPlaylistDeleteKey] = useState<string | null>(null);
   const [externalPlaylistDeleting, setExternalPlaylistDeleting] = useState(false);
+  const [externalPlaylistDropBusyKey, setExternalPlaylistDropBusyKey] = useState<string | null>(null);
+  const [playlistTileDropMessage, setPlaylistTileDropMessage] = useState<string | null>(null);
+  const playlistTileMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tileSlotModal, setTileSlotModal] = useState<
     | null
     | { key: string; variant: "clearAssignment" | "removeCustomTile" | "empty" }
@@ -574,7 +634,10 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     try {
       const raw = localStorage.getItem(DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY);
       const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-      setDaypartPlaylistAssignments(parsed && typeof parsed === "object" ? parsed : {});
+      const base = parsed && typeof parsed === "object" ? parsed : {};
+      const normalized = normalizeDaypartPlaylistAssignments(base);
+      localStorage.setItem(DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(normalized));
+      setDaypartPlaylistAssignments(normalized);
     } catch {
       setDaypartPlaylistAssignments({});
     }
@@ -603,6 +666,11 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   }, [sources, genreFilter]);
 
   const displaySources = filtered;
+  /** Unfiltered — use for playlist shells, drops, and composite metadata so genre filter cannot hide the active playlist. */
+  const sourcesById = useMemo(
+    () => new Map(sources.map((s) => [s.id, s] as const)),
+    [sources],
+  );
   const displaySourcesById = useMemo(
     () => new Map(displaySources.map((s) => [s.id, s] as const)),
     [displaySources]
@@ -630,10 +698,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         });
       }
       if (selection.id === "external_playlists") {
-        return displaySources.filter((s) => {
-          const contract = classifyLibraryEntityContract(s);
-          return contract.entityKind === "collection" && contract.collectionSubtype === "external_playlist";
-        });
+        return displaySources.filter((s) => isPersistedReadyPlaylistSource(s));
       }
       if (selection.id === "sources") {
         return displaySources.filter((s) => ["youtube", "soundcloud", "spotify"].includes(s.type));
@@ -660,7 +725,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
           : displaySources.filter((s) => `daypart:${inferDaypartLabel(s).toLowerCase().replace(/\s+/g, "_")}` === selection.key);
         const assignedPlaylistKey = daypartPlaylistAssignments[selection.key];
         const assigned = assignedPlaylistKey
-          ? displaySources.filter((s) => s.origin === "playlist" && `syncbiz:${s.id}` === assignedPlaylistKey)
+          ? sources.filter((s) => s.origin === "playlist" && `syncbiz:${s.id}` === assignedPlaylistKey)
           : [];
         const assignedItemIds = playlistItemAssignments[selection.key] ?? [];
         const assignedItems = displaySources.filter((s) => assignedItemIds.includes(s.id));
@@ -679,17 +744,17 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         return [...map.values()];
       }
       if (selection.subtype === "external_playlist") {
-        const source = displaySources.find((s) => `external:${s.id}` === selection.key);
+        const source = sources.find((s) => `external:${s.id}` === selection.key);
         if (!source) return [];
         const expanded = expandPlaylistEntityToItems(source);
         return expanded.length > 0 ? expanded : [source];
       }
       if (selection.subtype === "syncbiz_playlist") {
-        return visibleItemsForSyncbizPlaylistGrid(selection.key, displaySources, playlistItemAssignments);
+        return visibleItemsForSyncbizPlaylistGrid(selection.key, sources, playlistItemAssignments);
       }
     }
     return displaySources;
-  }, [selection, displaySources, favoriteIds, followedSourceKeys, playlistItemAssignments, daypartPlaylistAssignments]);
+  }, [selection, displaySources, sources, favoriteIds, followedSourceKeys, playlistItemAssignments, daypartPlaylistAssignments]);
 
   const shouldDefaultExternalReadyPlaylistToList = useMemo(() => {
     if (selection.type !== "collection_container" || selection.subtype !== "external_playlist") return false;
@@ -736,24 +801,25 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
       .map((s) => {
         const key = `syncbiz:${s.id}`;
         const assignedIds = playlistItemAssignments[key] ?? [];
+        const itemCount = resolveSyncbizPlaylistPlayQueue(key, sources, playlistItemAssignments).length;
         return {
           key,
           label: s.title,
           subtype: "syncbiz_playlist" as const,
-          itemCount: 1 + assignedIds.length,
+          itemCount,
           cover: deriveSyncbizPlaylistCover(s, assignedIds, displaySourcesById),
         };
       })
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [displaySources, displaySourcesById, playlistItemAssignments]);
+  }, [displaySources, displaySourcesById, playlistItemAssignments, sources]);
 
   const playlistSourceByKey = useMemo(() => {
     const map = new Map<string, UnifiedSource>();
-    for (const s of displaySources) {
+    for (const s of sources) {
       if (s.origin === "playlist") map.set(`syncbiz:${s.id}`, s);
     }
     return map;
-  }, [displaySources]);
+  }, [sources]);
 
   const selectedSourceCards = useMemo(() => {
     if (selection.type === "library_view" && selection.id === "sources") return containers.sources;
@@ -775,15 +841,16 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
       if (!isUserSyncbizPlaylistSource(s)) continue;
       const key = `syncbiz:${s.id}`;
       const assignedIds = playlistItemAssignments[key] ?? [];
+      const count = resolveSyncbizPlaylistPlayQueue(key, sources, playlistItemAssignments).length;
       map.set(key, {
         label: s.title,
         meta: "Your playlist",
-        count: 1 + assignedIds.length,
+        count,
         cover: deriveSyncbizPlaylistCover(s, assignedIds, displaySourcesById),
       });
     }
     return map;
-  }, [containers, customPlaylists, displaySources, displaySourcesById, playlistItemAssignments]);
+  }, [containers, customPlaylists, displaySources, displaySourcesById, playlistItemAssignments, sources]);
 
   const collectionOpenContext = useMemo(() => {
     if (selection.type !== "collection_container") return null;
@@ -895,11 +962,11 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         return [...map.values()];
       }
       if (container.subtype === "external_playlist") {
-        return displaySources.filter((s) => `external:${s.id}` === container.key);
+        return sources.filter((s) => `external:${s.id}` === container.key);
       }
-      return displaySources.filter((s) => s.origin === "playlist" && `syncbiz:${s.id}` === container.key);
+      return sources.filter((s) => s.origin === "playlist" && `syncbiz:${s.id}` === container.key);
     },
-    [displaySources, playlistItemAssignments]
+    [displaySources, sources, playlistItemAssignments]
   );
 
   const resolveSourcesForSelection = useCallback(
@@ -926,7 +993,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         return [...map.values()];
       }
       if (subtype === "external_playlist") {
-        const source = displaySources.find((s) => `external:${s.id}` === key);
+        const source = sources.find((s) => `external:${s.id}` === key);
         if (!source) return [];
         const expanded = expandPlaylistEntityToItems(source);
         return expanded.length > 0 ? expanded : [source];
@@ -936,7 +1003,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
       }
       return [];
     },
-    [sources, playlistItemAssignments]
+    [sources, displaySources, playlistItemAssignments]
   );
 
   const playCollectionSelection = useCallback(
@@ -945,10 +1012,29 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
       if (queue.length === 0) return;
       setQueue(queue, { force: true });
       const ti = playlistLeafTrackIndexForQueueItem(queue[0]);
-      if (playSourceOverride) playSourceOverride(queue[0]);
+      if (playSourceOverride) playSourceOverride(queue[0], ti);
       else playSource(queue[0], ti);
     },
     [resolveSourcesForSelection, setQueue, playSourceOverride, playSource]
+  );
+
+  /** Ready external drill-in: expanded rows must set session queue + correct leaf index (same contract as Play All). */
+  const playSourceForLibraryCard = useCallback(
+    (source: UnifiedSource) => {
+      if (selection.type === "collection_container" && selection.subtype === "external_playlist") {
+        const queue = resolveSourcesForSelection("external_playlist", selection.key);
+        if (queue.length > 0) {
+          setQueue(queue, { force: true });
+        }
+        const ti = source.id.includes(":track:") ? playlistLeafTrackIndexForQueueItem(source) : 0;
+        if (playSourceOverride) playSourceOverride(source, ti);
+        else playSource(source, ti);
+        return;
+      }
+      if (playSourceOverride) playSourceOverride(source);
+      else playSource(source);
+    },
+    [selection, resolveSourcesForSelection, setQueue, playSourceOverride, playSource],
   );
 
   const scheduleUserPlaylistRailOpen = useCallback((playlistKey: string) => {
@@ -1017,6 +1103,169 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     return null;
   }, []);
 
+  const resolveDroppedUnifiedSources = useCallback(
+    (e: React.DragEvent): UnifiedSource[] => {
+      const queueSourcesJson = e.dataTransfer.getData("application/syncbiz-queue-sources");
+      if (queueSourcesJson) {
+        try {
+          const arr = JSON.parse(queueSourcesJson) as UnifiedSource[];
+          if (Array.isArray(arr) && arr.length > 0) return arr;
+        } catch {}
+      }
+      const ids = extractDroppedSourceIds(e);
+      const out: UnifiedSource[] = [];
+      for (const id of ids) {
+        const s = sourcesById.get(id);
+        if (s) out.push(s);
+      }
+      return out;
+    },
+    [extractDroppedSourceIds, sourcesById],
+  );
+
+  const handleExternalPlaylistDrop = useCallback(
+    async (e: React.DragEvent, externalKey: string) => {
+      if (!externalKey.startsWith("external:")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const resolved = resolveDroppedUnifiedSources(e);
+      if (resolved.length === 0) return;
+      const unifiedId = externalKey.slice("external:".length);
+      const shell = sourcesById.get(unifiedId);
+      const playlistId = shell?.playlist?.id;
+      if (!shell?.playlist || !playlistId) return;
+
+      setExternalPlaylistDropBusyKey(externalKey);
+      try {
+        const getRes = await fetch(`/api/playlists/${playlistId}`);
+        if (!getRes.ok) return;
+        const current = (await getRes.json()) as Playlist;
+        const resolvedFresh = await refreshPlaylistSourcesForAppend(resolved);
+        const { tracks, order, addedCount } = appendSourcesToPlaylistTracks(current, resolvedFresh);
+        if (addedCount === 0) return;
+
+        const putRes = await fetch(`/api/playlists/${playlistId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tracks, order }),
+        });
+        if (!putRes.ok) {
+          console.error("[external playlist drop] PUT failed", await putRes.text().catch(() => ""));
+          return;
+        }
+        const updated = (await putRes.json()) as Playlist;
+        setSources((prev) =>
+          prev.map((s) =>
+            s.id === unifiedId && s.origin === "playlist" ? { ...s, playlist: updated } : s,
+          ),
+        );
+        savePlaylistToLocal(updated);
+      } catch (err) {
+        console.error("[external playlist drop]", err);
+      } finally {
+        setExternalPlaylistDropBusyKey(null);
+      }
+    },
+    [sourcesById, resolveDroppedUnifiedSources, setSources, savePlaylistToLocal],
+  );
+
+  /** GET → merge → PUT append for user syncbiz playlists (`syncbiz:…` keys). Shared by rail drop and playlist tiles. */
+  const appendUnifiedSourcesToSyncbizPlaylistKey = useCallback(
+    async (playlistKey: string, resolved: UnifiedSource[], hint?: ScheduleAppendContributorHint | null) => {
+      if (resolved.length === 0) return;
+      if (!playlistKey.startsWith("syncbiz:")) return;
+      const unifiedId = playlistKey.slice("syncbiz:".length);
+      const shell = sourcesById.get(unifiedId);
+      const playlistId = shell?.playlist?.id;
+      if (!shell?.playlist || !playlistId) return;
+
+      try {
+        const getRes = await fetch(`/api/playlists/${playlistId}`);
+        if (!getRes.ok) return;
+        const currentRaw = (await getRes.json()) as Playlist;
+        const ordered0 = reconcilePlaylistTracksForMerge(currentRaw);
+        const sanitizedBlocks = coalesceScheduleContributorBlocksWithTracks(currentRaw, ordered0);
+        const current: Playlist = { ...currentRaw, scheduleContributorBlocks: sanitizedBlocks };
+
+        const resolvedFresh = await refreshPlaylistSourcesForAppend(resolved);
+        const prevOrdered = reconcilePlaylistTracksForMerge(current);
+        const prevIdsFull = new Set(prevOrdered.map((t) => t.id));
+        const { tracks, order, addedCount } = appendSourcesToPlaylistTracks(current, resolvedFresh);
+        if (addedCount === 0) return;
+
+        const finalIdSet = new Set(tracks.map((t) => t.id));
+        const prevIdsSurviving = new Set([...prevIdsFull].filter((id) => finalIdSet.has(id)));
+        const newIds = tracks.filter((t) => !prevIdsFull.has(t.id)).map((t) => t.id);
+        const mergedBlocks = mergeScheduleContributorBlocksAfterAppend(
+          current,
+          prevIdsSurviving,
+          newIds,
+          hint ?? null,
+        );
+
+        const putBody: Record<string, unknown> = { tracks, order };
+        if (mergedBlocks !== undefined) {
+          putBody.scheduleContributorBlocks = mergedBlocks;
+        }
+
+        const putRes = await fetch(`/api/playlists/${playlistId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(putBody),
+        });
+        if (!putRes.ok) {
+          console.error("[syncbiz playlist append] PUT failed", await putRes.text().catch(() => ""));
+          return;
+        }
+        const updated = (await putRes.json()) as Playlist;
+        setSources((prev) =>
+          prev.map((s) =>
+            s.id === unifiedId && s.origin === "playlist" ? { ...s, playlist: updated } : s,
+          ),
+        );
+        savePlaylistToLocal(updated);
+      } catch (err) {
+        console.error("[syncbiz playlist append]", err);
+      }
+    },
+    [sourcesById, setSources, savePlaylistToLocal],
+  );
+
+  /** Persist dropped items into real syncbiz playlist tracks (not local assignment-only). */
+  const handleSyncbizPlaylistDrop = useCallback(
+    async (e: React.DragEvent, playlistKey: string) => {
+      if (!playlistKey.startsWith("syncbiz:")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      let resolved = resolveDroppedUnifiedSources(e);
+      const container = extractDroppedPlaylistContainer(e);
+      if (
+        resolved.length === 0 &&
+        container &&
+        (container.subtype === "syncbiz_playlist" || container.subtype === "external_playlist")
+      ) {
+        resolved = resolveSourcesForSelection(
+          container.subtype === "syncbiz_playlist" ? "syncbiz_playlist" : "external_playlist",
+          container.key,
+        );
+      }
+      const hint: ScheduleAppendContributorHint | null =
+        container && (container.subtype === "syncbiz_playlist" || container.subtype === "external_playlist")
+          ? { type: "playlist", label: (container.label ?? "").trim() || "Playlist", sourceKey: container.key }
+          : resolved.length > 0
+            ? {
+                type: "direct",
+                label:
+                  resolved.length === 1
+                    ? ((resolved[0].title ?? "").trim() || "Item")
+                    : `Items (${resolved.length})`,
+              }
+            : null;
+      await appendUnifiedSourcesToSyncbizPlaylistKey(playlistKey, resolved, hint);
+    },
+    [resolveDroppedUnifiedSources, extractDroppedPlaylistContainer, resolveSourcesForSelection, appendUnifiedSourcesToSyncbizPlaylistKey],
+  );
+
   const assignItemsToPlaylist = useCallback((playlistKey: string, sourceIds: string[]) => {
     if (sourceIds.length === 0) return;
     setPlaylistItemAssignments((prev) => {
@@ -1029,12 +1278,101 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   }, []);
 
   const assignPlaylistToDaypart = useCallback((daypartKey: string, playlistKey: string) => {
+    const canonPad = normalizeDaypartTileKey(daypartKey);
     setDaypartPlaylistAssignments((prev) => {
-      const next = { ...prev, [daypartKey]: playlistKey };
+      const next = { ...prev, [canonPad]: playlistKey };
       localStorage.setItem(DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(next));
       return next;
     });
   }, []);
+
+  const flashPlaylistTileMessage = useCallback((msg: string) => {
+    if (playlistTileMessageTimerRef.current) {
+      clearTimeout(playlistTileMessageTimerRef.current);
+    }
+    setPlaylistTileDropMessage(msg);
+    playlistTileMessageTimerRef.current = setTimeout(() => {
+      setPlaylistTileDropMessage(null);
+      playlistTileMessageTimerRef.current = null;
+    }, 6000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (playlistTileMessageTimerRef.current) {
+        clearTimeout(playlistTileMessageTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handlePlaylistTileDrop = useCallback(
+    async (e: React.DragEvent, padKey: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const boundKey = daypartPlaylistAssignments[padKey];
+
+      const droppedPlaylist = extractDroppedPlaylistContainer(e);
+      if (droppedPlaylist) {
+        if (!boundKey) {
+          assignPlaylistToDaypart(padKey, droppedPlaylist.key);
+          openDaypartTile(padKey);
+          return;
+        }
+        if (droppedPlaylist.key === boundKey) return;
+        if (!boundKey.startsWith("syncbiz:")) return;
+        if (droppedPlaylist.subtype !== "syncbiz_playlist" && droppedPlaylist.subtype !== "external_playlist") {
+          flashPlaylistTileMessage(t.playlistTileTrackDropBindingOnly);
+          return;
+        }
+        let resolved = resolveDroppedUnifiedSources(e);
+        if (resolved.length === 0) {
+          resolved = resolveSourcesForSelection(
+            droppedPlaylist.subtype === "syncbiz_playlist" ? "syncbiz_playlist" : "external_playlist",
+            droppedPlaylist.key,
+          );
+        }
+        if (resolved.length === 0) return;
+        const containerHint: ScheduleAppendContributorHint =
+          droppedPlaylist.subtype === "syncbiz_playlist" || droppedPlaylist.subtype === "external_playlist"
+            ? {
+                type: "playlist",
+                label: (droppedPlaylist.label ?? "").trim() || "Playlist",
+                sourceKey: droppedPlaylist.key,
+              }
+            : { type: "direct", label: (droppedPlaylist.label ?? "").trim() || "Added items" };
+        await appendUnifiedSourcesToSyncbizPlaylistKey(boundKey, resolved, containerHint);
+        openDaypartTile(padKey);
+        return;
+      }
+
+      const resolved = resolveDroppedUnifiedSources(e);
+      if (resolved.length === 0) return;
+      if (boundKey && boundKey.startsWith("syncbiz:")) {
+        const directHint: ScheduleAppendContributorHint = {
+          type: "direct",
+          label:
+            resolved.length === 1
+              ? ((resolved[0].title ?? "").trim() || "Item")
+              : `Items (${resolved.length})`,
+        };
+        await appendUnifiedSourcesToSyncbizPlaylistKey(boundKey, resolved, directHint);
+        openDaypartTile(padKey);
+        return;
+      }
+      flashPlaylistTileMessage(t.playlistTileTrackDropBindingOnly);
+    },
+    [
+      daypartPlaylistAssignments,
+      extractDroppedPlaylistContainer,
+      resolveDroppedUnifiedSources,
+      resolveSourcesForSelection,
+      appendUnifiedSourcesToSyncbizPlaylistKey,
+      assignPlaylistToDaypart,
+      openDaypartTile,
+      flashPlaylistTileMessage,
+      t.playlistTileTrackDropBindingOnly,
+    ],
+  );
 
   const handleAdd = useCallback(
     (s: UnifiedSource) => {
@@ -1202,6 +1540,15 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const activePlaylistKey =
     selection.type === "collection_container" && selection.subtype === "syncbiz_playlist" ? selection.key : null;
 
+  const compositeScheduleBlocks = useMemo(() => {
+    if (!activePlaylistKey) return null;
+    const shell = playlistSourceByKey.get(activePlaylistKey);
+    if (!shell?.playlist) return null;
+    const ordered = reconcilePlaylistTracksForMerge(shell.playlist);
+    const blocks = coalesceScheduleContributorBlocksWithTracks(shell.playlist, ordered);
+    return blocks ?? null;
+  }, [activePlaylistKey, playlistSourceByKey]);
+
   /** Play / next / prev must use the full syncbiz queue order, not the stale global queue. */
   const playSyncbizPlaylistExpandedItem = useCallback(
     (item: UnifiedSource) => {
@@ -1233,7 +1580,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     });
   }, []);
 
-  /** Persist track removal for imported Ready (external) playlists — not assignment tiles. */
+  /** Persist track removal for any expanded playlist row (`…:track:…`) — Your Playlists, Ready, tile-opened contexts. */
   const removeExpandedExternalPlaylistTrack = useCallback((item: UnifiedSource) => {
     const marker = ":track:";
     const splitAt = item.id.indexOf(marker);
@@ -1262,6 +1609,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         }
         if (removeAt < 0) return;
 
+        const removedId = tracks[removeAt].id;
         const nextTracks = tracks.filter((_, i) => i !== removeAt);
         const first = nextTracks[0];
         const order = nextTracks.map((t) => t.id).filter((id): id is string => Boolean(id && String(id).trim()));
@@ -1269,6 +1617,10 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
           tracks: nextTracks,
           order,
         };
+        if (playlist.scheduleContributorBlocks?.length) {
+          const nextBlocks = removeTrackFromScheduleContributorBlocks(playlist.scheduleContributorBlocks, removedId);
+          body.scheduleContributorBlocks = nextBlocks ?? [];
+        }
         if (first) {
           body.url = first.url;
           body.thumbnail = (first.cover ?? playlist.thumbnail ?? "").trim();
@@ -1284,12 +1636,76 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
 
         const updated = (await putRes.json()) as Playlist;
         savePlaylistToLocal(updated);
+        setSources((prev) =>
+          prev.map((s) =>
+            s.id === parentUnifiedId && s.origin === "playlist" ? { ...s, playlist: updated } : s,
+          ),
+        );
         window.dispatchEvent(new Event("library-updated"));
       } catch {
         /* ignore */
       }
     })();
-  }, [sources]);
+  }, [sources, setSources]);
+
+  const removeScheduleContributorBlock = useCallback(
+    (playlistKey: string, blockId: string) => {
+      if (!playlistKey.startsWith("syncbiz:")) return;
+      const unifiedId = playlistKey.slice("syncbiz:".length);
+      const shell = sourcesById.get(unifiedId);
+      const playlistId = shell?.playlist?.id;
+      if (!shell?.playlist || !playlistId) return;
+
+      void (async () => {
+        try {
+          const getRes = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}`, {
+            credentials: "include",
+            cache: "no-store",
+          });
+          if (!getRes.ok) return;
+          const playlist = (await getRes.json()) as Playlist;
+          const next = removeContributorBlockFromPlaylistData(playlist, blockId);
+          if (!next) return;
+
+          const first = next.tracks[0];
+          const body: Record<string, unknown> = {
+            tracks: next.tracks,
+            order: next.order,
+            scheduleContributorBlocks: next.scheduleContributorBlocks ?? [],
+          };
+          if (first) {
+            body.url = first.url;
+            body.thumbnail = (first.cover ?? playlist.thumbnail ?? "").trim();
+          }
+
+          const putRes = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}`, {
+            method: "PUT",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (!putRes.ok) return;
+
+          const updated = (await putRes.json()) as Playlist;
+          savePlaylistToLocal(updated);
+          setSources((prev) =>
+            prev.map((s) =>
+              s.id === unifiedId && s.origin === "playlist" ? { ...s, playlist: updated } : s,
+            ),
+          );
+          window.dispatchEvent(new Event("library-updated"));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (msg.includes("Cannot remove last track")) {
+            window.alert(
+              "Cannot remove this contributor while it is the only content. Delete the playlist or add tracks first.",
+            );
+          }
+        }
+      })();
+    },
+    [sourcesById, setSources, savePlaylistToLocal],
+  );
 
   const performDeleteSourceFromLibrary = useCallback(
     async (item: UnifiedSource) => {
@@ -1322,6 +1738,19 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
           return {
             kind: "in_playlist",
             onRemoveFromPlaylist: () => removeExpandedExternalPlaylistTrack(item),
+          };
+        }
+        if (selection.subtype === "syncbiz_playlist") {
+          const trackMarker = ":track:";
+          if (item.id.includes(trackMarker)) {
+            return {
+              kind: "in_playlist",
+              onRemoveFromPlaylist: () => removeExpandedExternalPlaylistTrack(item),
+            };
+          }
+          return {
+            kind: "in_playlist",
+            onRemoveFromPlaylist: () => removeItemFromPlaylistOnly(key, item.id),
           };
         }
         return {
@@ -1439,34 +1868,40 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                 </button>
               </div>
               <div className="library-dark-scroll max-h-64 space-y-2 overflow-y-auto pr-1">
-                {containers.curated.slice(0, 8).map((c) => (
+                {containers.external.length === 0 ? (
+                  <p className="px-1.5 py-2 text-[10px] leading-snug text-[color:var(--lib-text-faint)]">
+                    {t.readyPlaylistsRailEmptyHint}
+                  </p>
+                ) : null}
+                {containers.external.slice(0, 8).map((c) => (
                   <div key={`ready-right:${c.key}`} className="library-source-card flex w-full items-center gap-1 rounded-xl px-1.5 py-1.5">
                     <button
                       type="button"
                       draggable
                       onDragStart={(e) => {
-                        const sourcesForDrop = resolveSourcesForSelection(c.subtype, c.key);
+                        const sourcesForDrop = resolveSourcesForSelection("external_playlist", c.key);
                         const ids = sourcesForDrop.map((s) => s.id);
                         e.dataTransfer.setData(
                           "application/syncbiz-playlist-container",
-                          JSON.stringify({ subtype: c.subtype, key: c.key, label: c.label } satisfies PlaylistContainerPayload)
+                          JSON.stringify({ subtype: "external_playlist", key: c.key, label: c.label } satisfies PlaylistContainerPayload)
                         );
                         if (ids.length === 0) return;
                         e.dataTransfer.setData("application/syncbiz-queue-source-ids", JSON.stringify(ids));
                         e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sourcesForDrop));
                         e.dataTransfer.effectAllowed = "copyMove";
                       }}
-                      onDoubleClick={() => playCollectionSelection(c.subtype, c.key)}
+                      onDoubleClick={() => playCollectionSelection("external_playlist", c.key)}
                       onDragOver={(e) => {
                         e.preventDefault();
+                        e.stopPropagation();
                         e.dataTransfer.dropEffect = "copy";
                       }}
                       onDrop={(e) => {
-                        e.preventDefault();
-                        const ids = extractDroppedSourceIds(e);
-                        assignItemsToPlaylist(c.key, ids);
+                        void handleExternalPlaylistDrop(e, c.key);
                       }}
-                      onClick={() => setSelection({ type: "collection_container", subtype: c.subtype, key: c.key })}
+                      onClick={() =>
+                        setSelection({ type: "collection_container", subtype: "external_playlist", key: c.key })
+                      }
                       className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-0.5 text-left"
                     >
                       <span className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-[color:var(--lib-surface-card-art)]">
@@ -1480,9 +1915,12 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                     <button
                       type="button"
                       className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
-                      onClick={() => setReadyCollectionModalOpen(true)}
-                      title={t.readyCollectionInfoTitle}
-                      aria-label={t.readyCollectionInfoTitle}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openCollectionGridTrash(c);
+                      }}
+                      title={t.deletePlaylist}
+                      aria-label={t.deletePlaylist}
                     >
                       <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
@@ -1510,6 +1948,11 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                   {t.libraryShellAddPlaylistTile}
                 </button>
               </div>
+              {playlistTileDropMessage ? (
+                <p className="mb-2 px-1 text-[10px] leading-snug text-amber-400/95" role="status">
+                  {playlistTileDropMessage}
+                </p>
+              ) : null}
               <div className="space-y-2">
                 {FIXED_DAYPART_PADS.map((pad) => (
                   (() => {
@@ -1539,20 +1982,12 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                       e.dataTransfer.dropEffect = "copy";
                     }}
                     onDrop={(e) => {
-                      e.preventDefault();
-                      const droppedPlaylist = extractDroppedPlaylistContainer(e);
-                      if (droppedPlaylist) {
-                        assignPlaylistToDaypart(pad.key, droppedPlaylist.key);
-                      } else {
-                        const ids = extractDroppedSourceIds(e);
-                        assignItemsToPlaylist(pad.key, ids);
-                      }
-                      openDaypartTile(pad.key);
+                      void handlePlaylistTileDrop(e, pad.key);
                     }}
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
                     className={`rounded-xl border bg-gradient-to-r px-3 py-2.5 ${pad.tone}`}
-                    title="Drop a playlist or library items to assign to this slot"
+                    title={t.playlistTileDropBindPlaylistTitle}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <button
@@ -1642,20 +2077,12 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                       e.dataTransfer.dropEffect = "copy";
                     }}
                     onDrop={(e) => {
-                      e.preventDefault();
-                      const droppedPlaylist = extractDroppedPlaylistContainer(e);
-                      if (droppedPlaylist) {
-                        assignPlaylistToDaypart(pad.key, droppedPlaylist.key);
-                      } else {
-                        const ids = extractDroppedSourceIds(e);
-                        assignItemsToPlaylist(pad.key, ids);
-                      }
-                      openDaypartTile(pad.key);
+                      void handlePlaylistTileDrop(e, pad.key);
                     }}
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
                     className="rounded-xl border border-emerald-300/45 bg-gradient-to-r from-emerald-500/35 to-teal-500/20 px-3 py-2.5"
-                    title="Drop a playlist or library items to assign to this slot"
+                    title={t.playlistTileDropBindPlaylistTitle}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <button
@@ -1891,9 +2318,28 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                         e.dataTransfer.setData("application/syncbiz-queue-sources", JSON.stringify(sourcesForDrop));
                         e.dataTransfer.effectAllowed = "copyMove";
                       }}
+                      onDragOver={
+                        c.subtype === "external_playlist"
+                          ? (e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              e.dataTransfer.dropEffect = "copy";
+                            }
+                          : undefined
+                      }
+                      onDrop={
+                        c.subtype === "external_playlist"
+                          ? (e) => {
+                              void handleExternalPlaylistDrop(e, c.key);
+                            }
+                          : undefined
+                      }
                       onDoubleClick={() => playCollectionSelection(c.subtype, c.key)}
                       onClick={() => setSelection({ type: "collection_container", subtype: c.subtype, key: c.key })}
-                      className="library-source-card flex h-[252px] w-full flex-col overflow-hidden rounded-2xl p-4 text-left"
+                      aria-busy={c.subtype === "external_playlist" && externalPlaylistDropBusyKey === c.key}
+                      className={`library-source-card flex h-[252px] w-full flex-col overflow-hidden rounded-2xl p-4 text-left ${
+                        c.subtype === "external_playlist" && externalPlaylistDropBusyKey === c.key ? "opacity-60" : ""
+                      }`}
                     >
                       <div className="mb-2 aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg bg-[color:var(--lib-surface-card-art)]">
                         {c.cover ? <HydrationSafeImage src={c.cover} alt="" className="h-full w-full object-cover" /> : null}
@@ -2072,9 +2518,77 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                 </div>
               ) : activePlaylistKey ? (
                 <div className="space-y-8">
+                  {compositeScheduleBlocks != null && compositeScheduleBlocks.length > 0 ? (
+                    <section className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="library-section-title text-[11px] font-semibold uppercase tracking-[0.16em]">
+                          Contributors
+                        </h3>
+                        <span className="library-card-meta text-xs tabular-nums">{compositeScheduleBlocks.length}</span>
+                      </div>
+                      <div className="library-list-shell divide-y divide-[color:var(--lib-border-muted)] overflow-hidden rounded-2xl backdrop-blur-sm">
+                        {compositeScheduleBlocks.map((b) => (
+                          <div
+                            key={`contrib:${b.id}`}
+                            className="group/row flex w-full min-w-0 items-start gap-4 px-4 py-3.5 transition-[background,box-shadow] duration-200 ease-out library-row-hover"
+                          >
+                            <div className="library-thumb-frame relative h-14 w-14 shrink-0 overflow-hidden rounded-xl ring-1 ring-[color:var(--lib-border-thumb)]">
+                              {b.kind === "playlist" ? (
+                                <LibraryPlaylistCoverFallback className="h-full w-full" />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center bg-[color:var(--lib-surface-card-art)] text-[color:var(--lib-text-secondary)]">
+                                  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1 flex flex-col gap-0.5 pr-2">
+                              <span className="library-text-title font-medium tracking-tight leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
+                                {b.label}
+                              </span>
+                              <div className="library-card-meta flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
+                                <span>{compositeContributorSourceLabel(b)}</span>
+                                <span className="text-[color:var(--lib-text-faint)]">•</span>
+                                <span className="tabular-nums">
+                                  {b.trackIds.length} {b.trackIds.length === 1 ? "URL" : "URLs"}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="library-row-controls shrink-0 pt-0.5">
+                              <button
+                                type="button"
+                                className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
+                                title="Remove contributor from this scheduled playlist only"
+                                aria-label="Remove contributor from this scheduled playlist only"
+                                onClick={() => removeScheduleContributorBlock(activePlaylistKey, b.id)}
+                              >
+                                <svg
+                                  className="h-4 w-4 shrink-0"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                  <line x1="10" y1="11" x2="10" y2="17" />
+                                  <line x1="14" y1="11" x2="14" y2="17" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
                   <section className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <h3 className="library-section-title text-[11px] font-semibold uppercase tracking-[0.16em]">Playlist Items</h3>
+                      <h3 className="library-section-title text-[11px] font-semibold uppercase tracking-[0.16em]">
+                        {compositeScheduleBlocks != null && compositeScheduleBlocks.length > 0
+                          ? "Effective playback order"
+                          : "Playlist Items"}
+                      </h3>
                       <span className="library-card-meta text-xs tabular-nums">{visibleSources.length}</span>
                     </div>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
@@ -2135,7 +2649,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                                   );
                                 }
                               }}
-                              onPlaySource={playSourceOverride}
+                              onPlaySource={playSourceForLibraryCard}
                               onStop={stopOverride}
                               onPause={pauseOverride}
                               isActive={isMaster ? undefined : masterState?.currentSource?.id === source.id}
@@ -2193,7 +2707,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                                 );
                               }
                             }}
-                            onPlaySource={playSourceOverride}
+                            onPlaySource={playSourceForLibraryCard}
                             onStop={stopOverride}
                             onPause={pauseOverride}
                             isActive={isMaster ? undefined : masterState?.currentSource?.id === source.id}
@@ -2328,9 +2842,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                         e.dataTransfer.dropEffect = "copy";
                       }}
                       onDrop={(e) => {
-                        e.preventDefault();
-                        const ids = extractDroppedSourceIds(e);
-                        assignItemsToPlaylist(p.key, ids);
+                        void handleSyncbizPlaylistDrop(e, p.key);
                       }}
                       onClick={() => scheduleUserPlaylistRailOpen(p.key)}
                       onDoubleClick={(e) => {

@@ -62,6 +62,16 @@ export type PlaylistTrack = {
   catalogItemId?: string;
 };
 
+/** Contributor sections for composite scheduled playlists (persisted JSON). */
+export type ScheduleContributorBlock = {
+  id: string;
+  kind: "playlist" | "direct";
+  label: string;
+  /** When kind === "playlist", the library container key (e.g. syncbiz:uuid). */
+  sourcePlaylistKey?: string;
+  trackIds: string[];
+};
+
 export type Playlist = {
   id: string;
   name: string;
@@ -98,6 +108,11 @@ export type Playlist = {
   energyLevel?: PlaylistEnergyLevelPhase15;
   /** When set, unified library classifies as external_playlist (Ready/external path), not Your Playlists. */
   libraryPlacement?: PlaylistLibraryPlacement;
+  /**
+   * Optional composite “scheduled playlist” metadata: contributor blocks (source playlists or direct adds)
+   * whose leaf `trackIds` partition (or cover) persisted `tracks`. Playback still uses `tracks` + `order` only.
+   */
+  scheduleContributorBlocks?: ScheduleContributorBlock[];
 };
 
 /** Effective use cases: prefer `useCases` when non-empty; else legacy single `useCase`. */

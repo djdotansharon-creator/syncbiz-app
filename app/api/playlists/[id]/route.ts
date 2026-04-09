@@ -16,6 +16,7 @@ import {
   type PlaylistSubGenrePhase15,
   type PlaylistMoodPhase15,
   type PlaylistEnergyLevelPhase15,
+  type ScheduleContributorBlock,
 } from "@/lib/playlist-types";
 
 const VALID_TYPES: PlaylistType[] = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"];
@@ -81,6 +82,7 @@ export async function PUT(
       thumbnail: string;
       tracks?: PlaylistTrack[];
       order?: string[];
+      scheduleContributorBlocks?: ScheduleContributorBlock[] | null;
       adminNotes?: string;
       useCase?: string | null;
       useCases?: unknown;
@@ -106,6 +108,16 @@ export async function PUT(
     if (body.thumbnail != null) updates.thumbnail = String(body.thumbnail).trim();
     if (body.tracks != null) updates.tracks = body.tracks;
     if (body.order != null) updates.order = body.order;
+    if ("scheduleContributorBlocks" in body) {
+      const raw = body.scheduleContributorBlocks;
+      if (raw === null || raw === undefined) {
+        updates.scheduleContributorBlocks = undefined;
+      } else if (!Array.isArray(raw)) {
+        return NextResponse.json({ error: "scheduleContributorBlocks must be an array or null" }, { status: 400 });
+      } else {
+        updates.scheduleContributorBlocks = raw as ScheduleContributorBlock[];
+      }
+    }
 
     if (body.adminNotes !== undefined) {
       updates.adminNotes = String(body.adminNotes ?? "");
