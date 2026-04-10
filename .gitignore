@@ -29,6 +29,19 @@
 /data/
 /server/data/
 
+# --- Phase 0: filesystem-backed runtime data (see lib/data-path.ts) ---
+# Local dev writes JSON here; Railway uses RAILWAY_VOLUME_MOUNT_PATH (/app/data/...).
+# Do not treat bulk JSON as source — avoids accidental `git add .` pollution.
+# Kept versioned on purpose: playlists/.gitkeep, playlists/morning-chill.json,
+# playlists/m3u/AFRO.m3u, radio/.gitkeep (see negation rules below).
+/catalog/*.json
+/playlists/*.json
+!/playlists/morning-chill.json
+/playlists/covers/**
+/radio/radio-*.json
+/playlists/m3u/*
+!/playlists/m3u/AFRO.m3u
+
 # debug
 npm-debug.log*
 yarn-debug.log*
