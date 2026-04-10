@@ -1,0 +1,16 @@
+{
+  "name": "syncbiz-player-desktop",
+  "version": "0.0.0-placeholder",
+  "private": true,
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc && node scripts/copy-assets.cjs",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "electron": "^34.0.0",
+    "typescript": "^5"
+  }
+}

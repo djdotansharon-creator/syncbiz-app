@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // SyncBiz Player Desktop (Electron) — separate package under desktop/
+    "desktop/**",
   ]),
 ]);
 
