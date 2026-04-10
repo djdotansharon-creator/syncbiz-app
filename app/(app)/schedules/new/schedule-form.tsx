@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ScheduleDayLedButton } from "@/components/schedule-block-modal";
+import { ScheduleTimePresets } from "@/components/schedule-time-presets";
 import { useTranslations } from "@/lib/locale-context";
 import type { Playlist } from "@/lib/playlist-types";
 import {
@@ -11,6 +12,7 @@ import {
   parseScheduleTargetKey,
   resolveScheduleTargetBranchId,
   scheduleTargetKey,
+  scheduleTimeToHtmlInputValue,
 } from "@/lib/schedule-target-helpers";
 import type { Device, Source } from "@/lib/types";
 
@@ -181,10 +183,10 @@ export function ScheduleForm({
           <button
             type="button"
             onClick={() => setRecurrence("weekly")}
-            className={`rounded-lg border px-3 py-2 text-xs font-medium ${
+            className={`rounded-lg border px-3 py-2 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${
               recurrence === "weekly"
-                ? "border-amber-500/45 bg-amber-500/10 text-amber-100"
-                : "border-slate-800 bg-slate-900/50 text-slate-300"
+                ? "border-white/35 bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+                : "border-slate-700/80 bg-slate-900/50 text-slate-300 hover:border-slate-600 hover:bg-slate-800/50 hover:text-slate-100"
             }`}
           >
             {t.scheduleWeekly}
@@ -192,10 +194,10 @@ export function ScheduleForm({
           <button
             type="button"
             onClick={() => setRecurrence("one_off")}
-            className={`rounded-lg border px-3 py-2 text-xs font-medium ${
+            className={`rounded-lg border px-3 py-2 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${
               recurrence === "one_off"
-                ? "border-amber-500/45 bg-amber-500/10 text-amber-100"
-                : "border-slate-800 bg-slate-900/50 text-slate-300"
+                ? "border-white/35 bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+                : "border-slate-700/80 bg-slate-900/50 text-slate-300 hover:border-slate-600 hover:bg-slate-800/50 hover:text-slate-100"
             }`}
           >
             {t.scheduleOneOff}
@@ -241,6 +243,11 @@ export function ScheduleForm({
         >
           {t.startTime}
         </label>
+        <ScheduleTimePresets
+          className="mt-1.5 mb-2"
+          value={startTime}
+          onPreset={(hhmmss) => setStartTime(scheduleTimeToHtmlInputValue(hhmmss, "08:00:00"))}
+        />
         <input
           id="startTime"
           type="time"
@@ -248,7 +255,7 @@ export function ScheduleForm({
           required
           value={startTime.length === 5 ? `${startTime}:00` : startTime}
           onChange={(e) => setStartTime(e.target.value)}
-          className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+          className="mt-0 w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
         />
       </div>
 

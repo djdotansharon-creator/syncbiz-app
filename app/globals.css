@@ -26,6 +26,43 @@ body {
   overflow-x: hidden;
 }
 
+/* ─── Global dark scrollbars (SyncBiz) — page, modals, rails, any overflow container ─── */
+:root {
+  --sb-scrollbar-thumb: rgba(100, 116, 139, 0.5);
+  --sb-scrollbar-thumb-hover: rgba(148, 163, 184, 0.72);
+  --sb-scrollbar-track: rgba(2, 6, 23, 0.5);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sb-scrollbar-thumb) var(--sb-scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--sb-scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--sb-scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--sb-scrollbar-thumb-hover);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--sb-scrollbar-track);
+}
+
 /* ─── Neon design tokens ─── */
 :root {
   --neon-green: #1ed760;
@@ -918,33 +955,6 @@ input[type="range"]:not(.player-volume-slider)::-moz-range-track {
   box-shadow: var(--lib-shadow-rail-inset);
   overflow: hidden;
   padding: 1.5rem;
-}
-
-/* Dark scrollbar styling for library panels (avoids bright/white tracks). */
-.library-dark-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--lib-border-strong) 85%, transparent) transparent;
-}
-
-.library-dark-scroll::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-.library-dark-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.library-dark-scroll::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--lib-border-strong) 82%, transparent);
-  border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-
-.library-dark-scroll::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--lib-accent-border-strong) 70%, var(--lib-border-strong));
-  background-clip: content-box;
 }
 
 /*

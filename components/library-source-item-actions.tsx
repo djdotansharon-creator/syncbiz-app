@@ -13,11 +13,23 @@ const LIBRARY_DECK_ADD_TO_LIBRARY_BTN =
 const LIBRARY_DECK_IN_LIBRARY_BTN =
   "inline-flex h-7 w-7 shrink-0 items-center justify-center select-none rounded-lg border-2 border-emerald-500/50 bg-slate-900/95 text-emerald-100 shadow-[0_0_0_1px_rgba(16,185,129,0.18),0_0_16px_rgba(16,185,129,0.14)] transition-all duration-200 hover:border-emerald-400/75 hover:shadow-[0_0_0_2px_rgba(52,211,153,0.28),0_0_22px_rgba(16,185,129,0.18)] hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-emerald-400/45 focus:ring-offset-2 focus:ring-offset-slate-950";
 
+/** Leaf bar: Add to playlist (+) — deck chrome aligned with share row, distinct from legacy amber “add to library”. */
+const LIBRARY_DECK_ADD_TO_PLAYLIST_BTN =
+  "inline-flex h-7 w-7 shrink-0 items-center justify-center select-none rounded-lg border-2 border-slate-500/55 bg-slate-900/95 text-slate-100 shadow-[0_0_0_1px_rgba(148,163,184,0.2),0_0_14px_rgba(34,211,238,0.08)] transition-all duration-200 hover:border-cyan-400/55 hover:text-cyan-100 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.2),0_0_18px_rgba(34,211,238,0.12)] hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-cyan-400/40 focus:ring-offset-2 focus:ring-offset-slate-950 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40";
+
 export function editHrefForLibrarySource(source: UnifiedSource): string | null {
   if (source.origin === "playlist" && source.playlist) return `/playlists/${source.playlist.id}/edit`;
   if (source.origin === "radio" && source.radio) return `/radio/${source.radio.id}/edit`;
   if (source.origin === "source" && source.source) return `/sources/${source.source.id}/edit`;
   return null;
+}
+
+/** Leaf rows: expanded playlist track → parent playlist edit; else same as persisted entity resolution. */
+export function editHrefForLibraryLeaf(source: UnifiedSource): string | null {
+  if (source.id.includes(":track:") && source.playlist?.id) {
+    return `/playlists/${source.playlist.id}/edit`;
+  }
+  return editHrefForLibrarySource(source);
 }
 
 type Props = {
@@ -33,9 +45,16 @@ type Props = {
   compact?: boolean;
   /** When false, reserves space so Play / Edit / Share stay aligned */
   showLibraryDelete?: boolean;
-  /** Manual add to main library (e.g. expanded Ready Playlist track). */
+  /**
+   * Leaf-only: Play → Edit → + (add to playlist) → Share → Delete (no add-to-library chip).
+   * Non-leaf library cards (shells) use `default`.
+   */
+  actionLayout?: "default" | "leaf";
+  /** Required when `actionLayout` is `leaf`. Opens add-to-playlist destination UI. */
+  onAddToPlaylistPress?: () => void;
+  /** @deprecated Leaf bar uses `onAddToPlaylistPress` instead. */
   onAddToLibrary?: () => void | Promise<void>;
-  /** Expanded playlist row already has a matching DB source in All Library (by URL). */
+  /** @deprecated Leaf bar does not show in-library chip. */
   inLibrary?: boolean;
 };
 
@@ -50,12 +69,16 @@ export function LibrarySourceItemActions({
   onDeletePress = () => {},
   compact = false,
   showLibraryDelete = true,
+  actionLayout = "default",
+  onAddToPlaylistPress,
   onAddToLibrary,
   inLibrary = false,
 }: Props) {
   const { t } = useTranslations();
   const [adding, setAdding] = useState(false);
   const editHref = editHrefForLibrarySource(source);
+  const leafEditHref = editHrefForLibraryLeaf(source);
+  const leaf = actionLayout === "leaf";
   const playSize = compact ? "sm" : "md";
   const transportSm = compact ? "sm" : "sm";
   const transportMd = compact ? "md" : "md";
@@ -123,76 +146,116 @@ export function LibrarySourceItemActions({
           </svg>
         </NeonControlButton>
       )}
-      {editHref ? (
-        <ActionButtonEdit
-          href={editHref}
-          variant="player"
-          title={
-            source.origin === "playlist"
-              ? t.editPlaylist
-              : source.origin === "radio"
-                ? t.radioEdit
-                : t.edit
-          }
-          aria-label={
-            source.origin === "playlist"
-              ? t.editPlaylist
-              : source.origin === "radio"
-                ? t.radioEdit
-                : t.edit
-          }
-        />
-      ) : (
-        <span className="inline-flex h-7 w-7 shrink-0" aria-hidden />
-      )}
-      {inLibrary ? (
-        <span className={LIBRARY_DECK_IN_LIBRARY_BTN} title={t.inLibrary} aria-label={t.inLibrary}>
-          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M20 6L9 17l-5-5" />
-          </svg>
-        </span>
-      ) : onAddToLibrary ? (
-        <button
-          type="button"
-          disabled={adding}
-          onPointerDownCapture={() => {
-            if (process.env.NODE_ENV !== "production") {
-              console.log("[SYNC_AUDIT] Add-to-library pointerdown CAPTURE", { listCompact: compact });
-            }
-          }}
-          onMouseDownCapture={() => {
-            if (process.env.NODE_ENV !== "production") {
-              console.log("[SYNC_AUDIT] Add-to-library mousedown CAPTURE", { listCompact: compact });
-            }
-          }}
-          onClick={() => {
-            if (process.env.NODE_ENV !== "production") {
-              console.log("[SYNC_AUDIT] Add-to-library click -> handler running", { listCompact: compact });
-            }
-            void (async () => {
-              setAdding(true);
-              try {
-                await onAddToLibrary();
-              } finally {
-                setAdding(false);
+      {leaf ? (
+        <>
+          {leafEditHref ? (
+            <ActionButtonEdit
+              href={leafEditHref}
+              variant="player"
+              title={
+                source.id.includes(":track:") || (source.origin === "playlist" && source.playlist)
+                  ? t.editPlaylist
+                  : source.origin === "radio"
+                    ? t.radioEdit
+                    : t.edit
               }
-            })();
-          }}
-          className={LIBRARY_DECK_ADD_TO_LIBRARY_BTN}
-          title={t.addToLibrary}
-          aria-label={t.addToLibrary}
-        >
-          {adding ? (
-            <span className="text-[10px] font-bold leading-none text-amber-50/90" aria-hidden>
-              …
-            </span>
+              aria-label={
+                source.id.includes(":track:") || (source.origin === "playlist" && source.playlist)
+                  ? t.editPlaylist
+                  : source.origin === "radio"
+                    ? t.radioEdit
+                    : t.edit
+              }
+            />
           ) : (
-            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <span className="inline-flex h-7 w-7 shrink-0" aria-hidden />
+          )}
+          <button
+            type="button"
+            onClick={() => onAddToPlaylistPress?.()}
+            className={LIBRARY_DECK_ADD_TO_PLAYLIST_BTN}
+            title={t.addToPlaylist}
+            aria-label={t.addToPlaylist}
+          >
+            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" aria-hidden>
               <path d="M12 5v14M5 12h14" />
             </svg>
+          </button>
+        </>
+      ) : (
+        <>
+          {editHref ? (
+            <ActionButtonEdit
+              href={editHref}
+              variant="player"
+              title={
+                source.origin === "playlist"
+                  ? t.editPlaylist
+                  : source.origin === "radio"
+                    ? t.radioEdit
+                    : t.edit
+              }
+              aria-label={
+                source.origin === "playlist"
+                  ? t.editPlaylist
+                  : source.origin === "radio"
+                    ? t.radioEdit
+                    : t.edit
+              }
+            />
+          ) : (
+            <span className="inline-flex h-7 w-7 shrink-0" aria-hidden />
           )}
-        </button>
-      ) : null}
+          {inLibrary ? (
+            <span className={LIBRARY_DECK_IN_LIBRARY_BTN} title={t.inLibrary} aria-label={t.inLibrary}>
+              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+            </span>
+          ) : onAddToLibrary ? (
+            <button
+              type="button"
+              disabled={adding}
+              onPointerDownCapture={() => {
+                if (process.env.NODE_ENV !== "production") {
+                  console.log("[SYNC_AUDIT] Add-to-library pointerdown CAPTURE", { listCompact: compact });
+                }
+              }}
+              onMouseDownCapture={() => {
+                if (process.env.NODE_ENV !== "production") {
+                  console.log("[SYNC_AUDIT] Add-to-library mousedown CAPTURE", { listCompact: compact });
+                }
+              }}
+              onClick={() => {
+                if (process.env.NODE_ENV !== "production") {
+                  console.log("[SYNC_AUDIT] Add-to-library click -> handler running", { listCompact: compact });
+                }
+                void (async () => {
+                  setAdding(true);
+                  try {
+                    await onAddToLibrary();
+                  } finally {
+                    setAdding(false);
+                  }
+                })();
+              }}
+              className={LIBRARY_DECK_ADD_TO_LIBRARY_BTN}
+              title={t.addToLibrary}
+              aria-label={t.addToLibrary}
+            >
+              {adding ? (
+                <span className="text-[10px] font-bold leading-none text-amber-50/90" aria-hidden>
+                  …
+                </span>
+              ) : (
+                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              )}
+            </button>
+          ) : null}
+        </>
+      )}
       <ActionButtonShare variant="player" onClick={onShareOpen} title={t.share} aria-label={t.share} />
       {showLibraryDelete ? (
         <span

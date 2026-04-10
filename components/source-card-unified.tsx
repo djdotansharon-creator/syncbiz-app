@@ -50,14 +50,18 @@ type Props = {
   onPlaylistEntityOpen?: () => void;
   /** When set, double-click plays the full playlist entity queue. */
   onPlaylistEntityPlay?: () => void;
-  /** Add expanded Ready Playlist track to main library (DB source). */
+  /** @deprecated Non–leaf-card paths only; leaf cards use add-to-playlist (`leafUnifiedBar`). */
   onAddToLibrary?: () => void | Promise<void>;
   /** When set, "Delete from library" runs this (e.g. resolves expanded playlist rows to src-*). */
   onLibraryDelete?: (item: UnifiedSource) => void | Promise<void>;
   /** When set, controls whether the modal shows "Delete from library". Omit = only real persisted entities. */
   libraryDeleteEligible?: boolean;
-  /** Expanded imported playlist row whose URL already exists as a main-library source. */
+  /** @deprecated Leaf bar does not show in-library chip. */
   expandedTrackInMainLibrary?: boolean;
+  /** Leaf item card: unified Play / Edit / + / Share / Delete (no add-to-library). */
+  leafUnifiedBar?: boolean;
+  /** Opens add-to-playlist picker (required when `leafUnifiedBar`). */
+  onAddToPlaylistPress?: () => void;
 };
 
 function unifiedSourceHasPersistedLibraryEntity(s: UnifiedSource): boolean {
@@ -155,6 +159,8 @@ export function SourceCard({
   onLibraryDelete,
   libraryDeleteEligible,
   expandedTrackInMainLibrary = false,
+  leafUnifiedBar = false,
+  onAddToPlaylistPress,
 }: Props) {
   const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -342,8 +348,10 @@ export function SourceCard({
           libraryDeckChrome={libraryDeckChrome}
           onShareOpen={() => setShareOpen(true)}
           onDeletePress={() => setDeleteOpen(true)}
-          onAddToLibrary={onAddToLibrary}
-          inLibrary={expandedTrackInMainLibrary}
+          actionLayout={leafUnifiedBar ? "leaf" : "default"}
+          onAddToPlaylistPress={leafUnifiedBar ? onAddToPlaylistPress : undefined}
+          onAddToLibrary={leafUnifiedBar ? undefined : onAddToLibrary}
+          inLibrary={leafUnifiedBar ? false : expandedTrackInMainLibrary}
         />
       </div>
       {shareOpen ? (

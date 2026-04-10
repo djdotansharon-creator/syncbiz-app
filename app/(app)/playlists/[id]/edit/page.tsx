@@ -419,12 +419,12 @@ export default function EditPlaylistPage() {
             <label className="block text-xs font-medium text-slate-400">Tracks (reorder)</label>
             <p className="mt-0.5 text-[11px] text-slate-500 sm:hidden">Use ↑↓ to reorder on mobile</p>
             <div className="mt-2 max-h-[40vh] overflow-y-auto space-y-2 rounded-xl border border-slate-800 bg-slate-900/40 p-2">
-              {order
-                .map((tid) => tracks.find((t) => t.id === tid))
-                .filter(Boolean)
-                .map((track, idx) => (
+              {order.map((tid, idx) => {
+                const track = tracks.find((t) => t.id === tid);
+                if (!track) return null;
+                return (
                   <div
-                    key={track!.id}
+                    key={`${idx}-${tid}`}
                     draggable
                     onDragStart={() => handleDragStart(idx)}
                     onDragOver={handleDragOver}
@@ -460,10 +460,11 @@ export default function EditPlaylistPage() {
                         </svg>
                       </button>
                     </div>
-                    <span className="flex-1 min-w-0 truncate text-sm text-slate-200">{track!.name}</span>
-                    <span className="shrink-0 text-xs text-slate-500">{track!.type}</span>
+                    <span className="flex-1 min-w-0 truncate text-sm text-slate-200">{track.name}</span>
+                    <span className="shrink-0 text-xs text-slate-500">{track.type}</span>
                   </div>
-                ))}
+                );
+              })}
             </div>
           </div>
         )}

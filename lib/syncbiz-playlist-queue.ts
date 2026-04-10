@@ -4,12 +4,30 @@ import type { UnifiedSource } from "@/lib/source-types";
 /** Same storage key as `components/sources-manager.tsx`. */
 export const SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY = "syncbiz-playlist-item-assignments";
 
+/**
+ * User playlists use `syncbiz:pl-*`; Ready (imported) playlists use `external:pl-*`.
+ * Both refer to the same `UnifiedSource` shell (`origin === "playlist"`, same `id`).
+ */
+export function resolvePlaylistShellByEntityKey(
+  key: string,
+  librarySources: UnifiedSource[],
+): UnifiedSource | undefined {
+  let id = "";
+  if (key.startsWith("syncbiz:")) id = key.slice("syncbiz:".length);
+  else if (key.startsWith("external:")) id = key.slice("external:".length);
+  else return undefined;
+  id = id.trim();
+  if (!id) return undefined;
+  return librarySources.find((s) => s.origin === "playlist" && s.id === id);
+}
+
 export function expandPlaylistEntityToItems(source: UnifiedSource): UnifiedSource[] {
   if (!source.playlist) return [];
   const tracks = getPlaylistTracks(source.playlist);
   if (tracks.length === 0) return [];
+  /** `r${index}` disambiguates rows when duplicate `track.id` exists (e.g. two `src-010` refs). */
   return tracks.map((track, index) => ({
-    id: `${source.id}:track:${track.id || index}`,
+    id: `${source.id}:track:r${index}`,
     title: track.name || track.title || source.title,
     genre: source.genre || "Mixed",
     cover: track.cover ?? source.cover ?? null,
@@ -29,6 +47,11 @@ export function playlistLeafTrackIndexForQueueItem(item: UnifiedSource): number 
   const i = item.id.indexOf(marker);
   const tid = item.id.slice(i + marker.length);
   const tracks = getPlaylistTracks(item.playlist);
+  if (/^r\d+$/.test(tid)) {
+    const row = parseInt(tid.slice(1), 10);
+    if (row >= 0 && row < tracks.length) return row;
+    return 0;
+  }
   const idx = tracks.findIndex((t) => String(t.id ?? "") === String(tid));
   return idx >= 0 ? idx : 0;
 }
@@ -49,7 +72,7 @@ export function resolveSyncbizPlaylistPlayQueue(
   librarySources: UnifiedSource[],
   playlistItemAssignments: Record<string, string[]>
 ): UnifiedSource[] {
-  const source = librarySources.find((s) => s.origin === "playlist" && `syncbiz:${s.id}` === key);
+  const source = resolvePlaylistShellByEntityKey(key, librarySources);
   if (!source) return [];
   const assignedIds = playlistItemAssignments[key] ?? [];
   const assignedItems = librarySources.filter((s) => assignedIds.includes(s.id) && s.id !== source.id);
@@ -67,7 +90,7 @@ export function visibleItemsForSyncbizPlaylistGrid(
   librarySources: UnifiedSource[],
   playlistItemAssignments: Record<string, string[]>
 ): UnifiedSource[] {
-  const source = librarySources.find((s) => `syncbiz:${s.id}` === key);
+  const source = resolvePlaylistShellByEntityKey(key, librarySources);
   const assignedIds = playlistItemAssignments[key] ?? [];
   const assignedItems = librarySources.filter(
     (s) => assignedIds.includes(s.id) && (!source || s.id !== source.id)

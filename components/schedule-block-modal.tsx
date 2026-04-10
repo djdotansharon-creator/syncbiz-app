@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslations } from "@/lib/locale-context";
 import { defaultStartTimeForScheduleModalContext } from "@/lib/daypart-schedule-defaults";
@@ -14,6 +14,7 @@ import {
   type ScheduleTargetRadio,
 } from "@/lib/schedule-target-helpers";
 import type { Device, Schedule, ScheduleRecurrence, Source } from "@/lib/types";
+import { ScheduleTimePresets } from "@/components/schedule-time-presets";
 
 export type ScheduleModalInitialContext = {
   daypartLabel?: string;
@@ -33,6 +34,11 @@ type Props = {
   initialScheduleId?: string | null;
   /** Prefill from playlist tile (clock) */
   initialContext?: ScheduleModalInitialContext | null;
+  /**
+   * Daypart tile clock on Sources: target is the bound scheduled playlist only (readonly).
+   * Omit on schedule-card edit — full target picker comes from loaded schedule.
+   */
+  tileClockScheduleMode?: boolean;
 };
 
 function ConsoleSurface({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -52,17 +58,17 @@ export function ScheduleDayLedButton({ label, on, onToggle }: DayLedButtonProps)
     <button
       type="button"
       onClick={onToggle}
-      className={`flex min-w-[3.25rem] items-center justify-center gap-1.5 rounded-xl border px-2.5 py-2 text-[11px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 ${
+      className={`flex min-w-[3.25rem] items-center justify-center gap-1.5 rounded-xl border px-2.5 py-2 text-[11px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${
         on
-          ? "border-amber-500/50 bg-amber-500/10 text-amber-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
-          : "border-slate-800/90 bg-slate-950/50 text-slate-500 hover:border-slate-700 hover:text-slate-400"
+          ? "border-white/35 bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+          : "border-slate-700/80 bg-slate-950/50 text-slate-400 hover:border-slate-600 hover:bg-slate-900/60 hover:text-slate-200"
       }`}
     >
       <span
         className={`h-2 w-2 shrink-0 rounded-full transition ${
           on
-            ? "bg-amber-400 shadow-[0_0_10px_3px_rgba(251,191,36,0.55)]"
-            : "bg-slate-700/90 shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)]"
+            ? "bg-white shadow-[0_0_10px_2px_rgba(255,255,255,0.35)]"
+            : "bg-slate-600/90 shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)]"
         }`}
         aria-hidden
       />
@@ -71,7 +77,14 @@ export function ScheduleDayLedButton({ label, on, onToggle }: DayLedButtonProps)
   );
 }
 
-export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, initialContext }: Props) {
+export function ScheduleBlockModal({
+  open,
+  onClose,
+  onSaved,
+  initialScheduleId,
+  initialContext,
+  tileClockScheduleMode = false,
+}: Props) {
   const { t } = useTranslations();
   const titleId = useId();
   const [mounted, setMounted] = useState(false);
@@ -205,6 +218,18 @@ export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, 
     );
   }
 
+  const fixedPlaylistId = (initialContext?.playlistId ?? "").trim();
+  const hasFixedPlaylistTarget = tileClockScheduleMode && !!fixedPlaylistId;
+  const tileClockNeedsAssignment = tileClockScheduleMode && !fixedPlaylistId;
+
+  const fixedTargetDisplayName = useMemo(() => {
+    if (!hasFixedPlaylistTarget) return "";
+    const fromContext = (initialContext?.playlistName ?? "").trim();
+    if (fromContext) return fromContext;
+    const p = playlists.find((x) => x.id === fixedPlaylistId);
+    return (p?.name ?? "").trim() || fixedPlaylistId;
+  }, [hasFixedPlaylistTarget, initialContext?.playlistName, playlists, fixedPlaylistId]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaveError(null);
@@ -212,6 +237,12 @@ export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, 
     if (!parsed) {
       setSaveError("Select a playback target.");
       return;
+    }
+    if (hasFixedPlaylistTarget) {
+      if (parsed.targetType !== "PLAYLIST" || parsed.targetId !== fixedPlaylistId) {
+        setSaveError("Invalid playback target for this tile.");
+        return;
+      }
     }
     const branchId = resolveScheduleBranchId(parsed, sources, playlists, radios);
     const body: Record<string, unknown> = {
@@ -278,7 +309,15 @@ export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, 
               <h2 id={titleId} className="text-lg font-semibold tracking-tight text-slate-50">
                 {initialScheduleId ? t.scheduleModalTitleEdit : t.scheduleModalTitleNew}
               </h2>
-              <p className="mt-1 text-xs text-slate-500">{t.newScheduleDescription}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                {initialScheduleId
+                  ? t.newScheduleDescription
+                  : hasFixedPlaylistTarget
+                    ? t.scheduleTileClockModalDescription
+                    : tileClockNeedsAssignment
+                      ? t.scheduleTileNoPlaylistBound
+                      : t.newScheduleDescription}
+              </p>
             </div>
             <span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-amber-400/90 shadow-[0_0_12px_rgba(251,191,36,0.35)]" aria-hidden />
           </div>
@@ -320,39 +359,63 @@ export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, 
               </div>
 
               <div>
-                <label htmlFor="sch-target" className="block text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
-                  {t.schedulePlaybackTarget}
-                </label>
-                <select
-                  id="sch-target"
-                  required
-                  value={targetKeyValue}
-                  onChange={(e) => setTargetKeyValue(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-slate-800/90 bg-slate-950/60 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-amber-500/40 focus:ring-2 focus:ring-amber-500/20"
-                >
-                  <option value="">{t.selectSource}</option>
-                  <optgroup label={t.playbackTargetSource}>
-                    {sources.map((s) => (
-                      <option key={s.id} value={targetKey("SOURCE", s.id)}>
-                        {s.name} ({s.type})
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label={t.scheduleTargetPlaylist}>
-                    {playlists.map((p) => (
-                      <option key={p.id} value={targetKey("PLAYLIST", p.id)}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label={t.scheduleTargetRadio}>
-                    {radios.map((r) => (
-                      <option key={r.id} value={targetKey("RADIO", r.id)}>
-                        {r.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
+                <p className="block text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">{t.schedulePlaybackTarget}</p>
+                {hasFixedPlaylistTarget ? (
+                  <>
+                    <div
+                      className="mt-1.5 rounded-xl border border-slate-800/90 bg-slate-950/70 px-3 py-2.5"
+                      role="group"
+                      aria-label={t.schedulePlaybackTarget}
+                    >
+                      <p className="text-sm font-medium text-slate-100">{fixedTargetDisplayName}</p>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        {t.scheduleTargetPlaylist}
+                        {initialContext?.daypartLabel ? (
+                          <>
+                            {" "}
+                            <span className="text-slate-600">·</span> {initialContext.daypartLabel}
+                          </>
+                        ) : null}
+                      </p>
+                    </div>
+                    <p className="mt-2 text-[11px] leading-relaxed text-slate-500">{t.scheduleTileFixedTargetHint}</p>
+                  </>
+                ) : tileClockNeedsAssignment ? (
+                  <p className="mt-2 text-[11px] leading-relaxed text-amber-200/85">{t.scheduleTileNoPlaylistBound}</p>
+                ) : (
+                  <>
+                    <select
+                      id="sch-target"
+                      required
+                      value={targetKeyValue}
+                      onChange={(e) => setTargetKeyValue(e.target.value)}
+                      className="mt-1.5 w-full rounded-xl border border-slate-800/90 bg-slate-950/60 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-amber-500/40 focus:ring-2 focus:ring-amber-500/20"
+                    >
+                      <option value="">{t.selectSource}</option>
+                      <optgroup label={t.playbackTargetSource}>
+                        {sources.map((s) => (
+                          <option key={s.id} value={targetKey("SOURCE", s.id)}>
+                            {s.name} ({s.type})
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label={t.scheduleTargetPlaylist}>
+                        {playlists.map((p) => (
+                          <option key={p.id} value={targetKey("PLAYLIST", p.id)}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label={t.scheduleTargetRadio}>
+                        {radios.map((r) => (
+                          <option key={r.id} value={targetKey("RADIO", r.id)}>
+                            {r.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </>
+                )}
               </div>
 
               <div>
@@ -361,10 +424,10 @@ export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, 
                   <button
                     type="button"
                     onClick={() => setRecurrence("weekly")}
-                    className={`rounded-xl border px-3 py-2 text-xs font-medium transition ${
+                    className={`rounded-xl border px-3 py-2 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${
                       recurrence === "weekly"
-                        ? "border-amber-500/50 bg-amber-500/10 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.12)]"
-                        : "border-slate-800 bg-slate-900/50 text-slate-300 hover:border-slate-700"
+                        ? "border-white/35 bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+                        : "border-slate-700/80 bg-slate-900/50 text-slate-300 hover:border-slate-600 hover:bg-slate-800/50 hover:text-slate-100"
                     }`}
                   >
                     {t.scheduleWeekly}
@@ -372,10 +435,10 @@ export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, 
                   <button
                     type="button"
                     onClick={() => setRecurrence("one_off")}
-                    className={`rounded-xl border px-3 py-2 text-xs font-medium transition ${
+                    className={`rounded-xl border px-3 py-2 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 ${
                       recurrence === "one_off"
-                        ? "border-amber-500/50 bg-amber-500/10 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.12)]"
-                        : "border-slate-800 bg-slate-900/50 text-slate-300 hover:border-slate-700"
+                        ? "border-white/35 bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+                        : "border-slate-700/80 bg-slate-900/50 text-slate-300 hover:border-slate-600 hover:bg-slate-800/50 hover:text-slate-100"
                     }`}
                   >
                     {t.scheduleOneOff}
@@ -418,6 +481,11 @@ export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, 
                 <label htmlFor="sch-start" className="block text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
                   {t.startTime}
                 </label>
+                <ScheduleTimePresets
+                  className="mt-1.5 mb-2"
+                  value={startTime}
+                  onPreset={(hhmmss) => setStartTime(scheduleTimeToHtmlInputValue(hhmmss, "09:00:00"))}
+                />
                 <input
                   id="sch-start"
                   type="time"
@@ -425,7 +493,7 @@ export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, 
                   required
                   value={scheduleTimeToHtmlInputValue(startTime, "09:00:00")}
                   onChange={(e) => setStartTime(scheduleTimeToHtmlInputValue(e.target.value, "09:00:00"))}
-                  className="mt-1.5 w-full rounded-xl border border-slate-800/90 bg-slate-950/60 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-amber-500/40 focus:ring-2 focus:ring-amber-500/20"
+                  className="mt-0 w-full rounded-xl border border-slate-800/90 bg-slate-950/60 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-amber-500/40 focus:ring-2 focus:ring-amber-500/20"
                 />
               </div>
 
@@ -438,7 +506,12 @@ export function ScheduleBlockModal({ open, onClose, onSaved, initialScheduleId, 
               <div className="flex flex-wrap gap-3 pt-1">
                 <button
                   type="submit"
-                  disabled={saving || (recurrence === "weekly" && days.length === 0) || !targetKeyValue}
+                  disabled={
+                    saving ||
+                    (recurrence === "weekly" && days.length === 0) ||
+                    !targetKeyValue ||
+                    tileClockNeedsAssignment
+                  }
                   className="rounded-xl border border-amber-500/45 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-100 shadow-[0_0_24px_rgba(245,158,11,0.12)] transition hover:bg-amber-500/25 disabled:opacity-50"
                 >
                   {saving ? t.saving : t.saveSchedule}

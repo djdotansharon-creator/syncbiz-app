@@ -34,10 +34,10 @@ import {
   type ScheduleAppendContributorHint,
 } from "@/lib/schedule-composite-playlist";
 import { canonicalYouTubeWatchUrlForPlayback } from "@/lib/playlist-utils";
-import { detectProvider } from "@/lib/player-utils";
 import {
   expandPlaylistEntityToItems,
   playlistLeafTrackIndexForQueueItem,
+  resolvePlaylistShellByEntityKey,
   resolveSyncbizPlaylistPlayQueue,
   SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY,
   visibleItemsForSyncbizPlaylistGrid,
@@ -64,6 +64,7 @@ import {
   resolveDaypartCollectionSources,
 } from "@/lib/daypart-collection";
 import { ScheduleBlockModal, type ScheduleModalInitialContext } from "@/components/schedule-block-modal";
+import { AddLeafToPlaylistModal } from "@/components/add-leaf-to-playlist-modal";
 import { useLibraryTheme } from "@/lib/library-theme-context";
 import {
   LIBRARY_PLAYLIST_TILE_SIDE_ACTION_BTN_CLASS,
@@ -99,17 +100,26 @@ type LibrarySelection =
   | { type: "source_channel"; key: string }
   | { type: "single_tracks_view" };
 
-function isExternalPlaylistExpandedTrack(selection: LibrarySelection, source: UnifiedSource): boolean {
-  return (
-    selection.type === "collection_container" &&
-    selection.subtype === "external_playlist" &&
-    source.origin === "source" &&
-    source.id.includes(":track:")
-  );
-}
-
 function isExpandedPlaylistSyntheticRow(item: UnifiedSource): boolean {
   return item.id.includes(":track:");
+}
+
+/** Leaf item cards only: expanded playlist items, source-channel items, single-track rows; not collection shells. */
+function isLeafLibraryUnifiedCard(source: UnifiedSource, selection: LibrarySelection): boolean {
+  if (selection.type === "source_channel") return true;
+  if (selection.type === "single_tracks_view") {
+    return classifyLibraryEntityContract(source).entityKind === "item";
+  }
+  if (selection.type === "collection_container") {
+    if (selection.subtype === "external_playlist" || selection.subtype === "syncbiz_playlist") {
+      return true;
+    }
+    return classifyLibraryEntityContract(source).entityKind === "item";
+  }
+  if (selection.type === "library_view") {
+    return classifyLibraryEntityContract(source).entityKind === "item";
+  }
+  return false;
 }
 
 /** Match playback URL for expanded rows vs unified src-* items (YouTube variants). */
@@ -137,15 +147,6 @@ function playbackUrlsMatchLibraryCrossType(
     playbackUrlsMatchUnifiedLibrary(urlA, urlB, typeA) ||
     playbackUrlsMatchUnifiedLibrary(urlA, urlB, typeB)
   );
-}
-
-function catalogMediaTypeForAddToLibraryPayload(source: UnifiedSource): string {
-  const u = (source.url ?? "").trim();
-  const p = detectProvider(u);
-  if (p === "youtube") return "youtube";
-  if (p === "soundcloud") return "soundcloud";
-  if (u.toLowerCase().includes("spotify")) return "spotify";
-  return source.type;
 }
 
 function canDeleteFromLibrary(item: UnifiedSource): boolean {
@@ -595,8 +596,8 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   >(null);
   const [tileSlotActionLoading, setTileSlotActionLoading] = useState(false);
   const [playlistTileScheduleModal, setPlaylistTileScheduleModal] = useState<ScheduleModalInitialContext | null>(null);
-  /** Inline error for Add to Library (Ready Playlist decomposed rows); cleared on success or next attempt. */
-  const [catalogAddError, setCatalogAddError] = useState<string | null>(null);
+  /** Leaf row: open add-to-playlist destination picker. */
+  const [addToPlaylistLeaf, setAddToPlaylistLeaf] = useState<UnifiedSource | null>(null);
   const sourceBackSelectionRef = useRef<LibrarySelection>({ type: "library_view", id: "sources" });
   const { favoriteIds, toggleFavorite } = useFavoritesState();
   const { followedSourceKeys, toggleFollowedSource } = useFollowedSourcesState();
@@ -724,9 +725,8 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
           ? []
           : displaySources.filter((s) => `daypart:${inferDaypartLabel(s).toLowerCase().replace(/\s+/g, "_")}` === selection.key);
         const assignedPlaylistKey = daypartPlaylistAssignments[selection.key];
-        const assigned = assignedPlaylistKey
-          ? sources.filter((s) => s.origin === "playlist" && `syncbiz:${s.id}` === assignedPlaylistKey)
-          : [];
+        const assignedShell = assignedPlaylistKey ? resolvePlaylistShellByEntityKey(assignedPlaylistKey, sources) : undefined;
+        const assigned = assignedShell ? [assignedShell] : [];
         const assignedItemIds = playlistItemAssignments[selection.key] ?? [];
         const assignedItems = displaySources.filter((s) => assignedItemIds.includes(s.id));
         const map = new Map<string, UnifiedSource>();
@@ -813,10 +813,35 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [displaySources, displaySourcesById, playlistItemAssignments, sources]);
 
+  const addToPlaylistModalYourRows = useMemo(
+    () => userPlaylistContainers.map((p) => ({ key: p.key, label: p.label })),
+    [userPlaylistContainers],
+  );
+  const addToPlaylistModalReadyRows = useMemo(
+    () => containers.external.map((c) => ({ key: c.key, label: c.label })),
+    [containers.external],
+  );
+  const addToPlaylistModalScheduledRows = useMemo(() => {
+    return displaySources
+      .filter(
+        (s) =>
+          isUserSyncbizPlaylistSource(s) &&
+          !!s.playlist?.scheduleContributorBlocks &&
+          s.playlist.scheduleContributorBlocks.length > 0,
+      )
+      .map((s) => ({ key: `syncbiz:${s.id}`, label: s.title }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [displaySources]);
+
   const playlistSourceByKey = useMemo(() => {
     const map = new Map<string, UnifiedSource>();
     for (const s of sources) {
-      if (s.origin === "playlist") map.set(`syncbiz:${s.id}`, s);
+      if (s.origin === "playlist") {
+        map.set(`syncbiz:${s.id}`, s);
+        if (isPersistedReadyPlaylistSource(s)) {
+          map.set(`external:${s.id}`, s);
+        }
+      }
     }
     return map;
   }, [sources]);
@@ -964,7 +989,8 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
       if (container.subtype === "external_playlist") {
         return sources.filter((s) => `external:${s.id}` === container.key);
       }
-      return sources.filter((s) => s.origin === "playlist" && `syncbiz:${s.id}` === container.key);
+      const shell = resolvePlaylistShellByEntityKey(container.key, sources);
+      return shell ? [shell] : [];
     },
     [displaySources, sources, playlistItemAssignments]
   );
@@ -993,10 +1019,10 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         return [...map.values()];
       }
       if (subtype === "external_playlist") {
-        const source = sources.find((s) => `external:${s.id}` === key);
-        if (!source) return [];
-        const expanded = expandPlaylistEntityToItems(source);
-        return expanded.length > 0 ? expanded : [source];
+        const shell = resolvePlaylistShellByEntityKey(key, sources);
+        if (!shell) return [];
+        const expanded = expandPlaylistEntityToItems(shell);
+        return expanded.length > 0 ? expanded : [shell];
       }
       if (subtype === "syncbiz_playlist") {
         return resolveSyncbizPlaylistPlayQueue(key, sources, playlistItemAssignments);
@@ -1096,6 +1122,11 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
       try {
         const source = JSON.parse(sourceJson) as UnifiedSource;
         if (source?.origin === "playlist") {
+          /** Drag JSON often omits nested `playlist.libraryPlacement`; `contentNodeKind` still classifies Ready shells. */
+          const contract = classifyLibraryEntityContract(source);
+          if (contract.entityKind === "collection" && contract.collectionSubtype === "external_playlist") {
+            return { subtype: "external_playlist", key: `external:${source.id}`, label: source.title };
+          }
           return { subtype: "syncbiz_playlist", key: `syncbiz:${source.id}`, label: source.title };
         }
       } catch {}
@@ -1229,6 +1260,50 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
       }
     },
     [sourcesById, setSources, savePlaylistToLocal],
+  );
+
+  /** Add-to-playlist (+) from leaf cards: syncbiz (Your / Scheduled) or Ready (`external:`) shells. */
+  const appendLeafToDestinationPlaylistKey = useCallback(
+    async (leaf: UnifiedSource, playlistKey: string) => {
+      if (playlistKey.startsWith("syncbiz:")) {
+        const hint: ScheduleAppendContributorHint = {
+          type: "direct",
+          label: (leaf.title ?? "").trim() || "Item",
+        };
+        await appendUnifiedSourcesToSyncbizPlaylistKey(playlistKey, [leaf], hint);
+        return;
+      }
+      if (!playlistKey.startsWith("external:")) return;
+      const unifiedId = playlistKey.slice("external:".length);
+      const shell = sourcesById.get(unifiedId);
+      const playlistId = shell?.playlist?.id;
+      if (!shell?.playlist || !playlistId) return;
+      try {
+        const getRes = await fetch(`/api/playlists/${playlistId}`);
+        if (!getRes.ok) return;
+        const current = (await getRes.json()) as Playlist;
+        const resolvedFresh = await refreshPlaylistSourcesForAppend([leaf]);
+        const { tracks, order, addedCount } = appendSourcesToPlaylistTracks(current, resolvedFresh);
+        if (addedCount === 0) return;
+        const putRes = await fetch(`/api/playlists/${playlistId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tracks, order }),
+        });
+        if (!putRes.ok) return;
+        const updated = (await putRes.json()) as Playlist;
+        setSources((prev) =>
+          prev.map((s) =>
+            s.id === unifiedId && s.origin === "playlist" ? { ...s, playlist: updated } : s,
+          ),
+        );
+        savePlaylistToLocal(updated);
+        window.dispatchEvent(new Event("library-updated"));
+      } catch (err) {
+        console.error("[append leaf to ready playlist]", err);
+      }
+    },
+    [appendUnifiedSourcesToSyncbizPlaylistKey, sourcesById, setSources, savePlaylistToLocal],
   );
 
   /** Persist dropped items into real syncbiz playlist tracks (not local assignment-only). */
@@ -1600,7 +1675,14 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         if (!getRes.ok) return;
         const playlist = (await getRes.json()) as Playlist;
         const tracks = getPlaylistTracks(playlist);
-        let removeAt = tracks.findIndex((t) => t.id === trackKey);
+        let removeAt = -1;
+        if (/^r\d+$/.test(trackKey)) {
+          const row = parseInt(trackKey.slice(1), 10);
+          if (row >= 0 && row < tracks.length) removeAt = row;
+        }
+        if (removeAt < 0) {
+          removeAt = tracks.findIndex((t) => t.id === trackKey);
+        }
         if (removeAt < 0) {
           removeAt = tracks.findIndex((t, i) => (t.id || String(i)) === trackKey);
         }
@@ -1763,90 +1845,6 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     [selection, removeItemFromPlaylistOnly, removeExpandedExternalPlaylistTrack]
   );
 
-  const handleAddCatalogTrackToLibrary = useCallback(
-    async (source: UnifiedSource) => {
-      setCatalogAddError(null);
-      const requestBody = {
-        url: source.url,
-        title: source.title,
-        cover: source.cover ?? "",
-        branchId: "default",
-        mediaType: catalogMediaTypeForAddToLibraryPayload(source),
-      };
-      const requestBodyJson = JSON.stringify(requestBody);
-      const selectionSubtype =
-        selection.type === "collection_container" ? selection.subtype : selection.type;
-      try {
-        const res = await fetch("/api/sources/add-from-catalog-track", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: requestBodyJson,
-        });
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        const responseBody = JSON.stringify(data);
-        if (res.status !== 200 && res.status !== 201) {
-          const msg =
-            typeof data.error === "string" && data.error.trim()
-              ? data.error.trim()
-              : `Add to library failed (${res.status})`;
-          setCatalogAddError(msg);
-          console.info("[SyncBiz Audit][add-from-catalog-track]", {
-            rowId: source.id,
-            rowUrl: source.url,
-            rowType: source.type,
-            selectionSubtype,
-            requestStarted: true,
-            requestBody: requestBodyJson,
-            responseStatus: res.status,
-            responseBody,
-            unifiedRefetchRan: false,
-            hasMatchingSrcRowAfterRefetch: false,
-          });
-          return;
-        }
-        const items = await fetchUnifiedSourcesWithFallback();
-        const filtered = items.filter((s) => s.origin !== "radio");
-        const hasMatchingSrcRowAfterRefetch = filtered.some(
-          (s) =>
-            s.origin === "source" &&
-            typeof s.id === "string" &&
-            s.id.startsWith("src-") &&
-            playbackUrlsMatchLibraryCrossType(source.url, source.type, s.url, s.type),
-        );
-        setSources(filtered);
-        window.dispatchEvent(new Event("library-updated"));
-        console.info("[SyncBiz Audit][add-from-catalog-track]", {
-          rowId: source.id,
-          rowUrl: source.url,
-          rowType: source.type,
-          selectionSubtype,
-          requestStarted: true,
-          requestBody: requestBodyJson,
-          responseStatus: res.status,
-          responseBody,
-          unifiedRefetchRan: true,
-          hasMatchingSrcRowAfterRefetch,
-        });
-      } catch (e) {
-        console.info("[SyncBiz Audit][add-from-catalog-track]", {
-          rowId: source.id,
-          rowUrl: source.url,
-          rowType: source.type,
-          selectionSubtype,
-          requestStarted: true,
-          requestBody: requestBodyJson,
-          responseStatus: null,
-          responseBody: String(e),
-          unifiedRefetchRan: false,
-          hasMatchingSrcRowAfterRefetch: false,
-        });
-        setCatalogAddError("Add to library failed (network error)");
-      }
-    },
-    [setSources, selection],
-  );
-
   return (
     <div className="library-theme library-page-shell flex w-full min-w-0 flex-col space-y-0" data-library-theme={libraryTheme}>
       <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:grid-cols-[186px_minmax(0,1fr)_206px] xl:-mx-1 xl:grid-cols-[196px_minmax(0,1fr)_216px]">
@@ -1867,7 +1865,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                   {t.libraryShellBrowseReady}
                 </button>
               </div>
-              <div className="library-dark-scroll max-h-64 space-y-2 overflow-y-auto pr-1">
+              <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
                 {containers.external.length === 0 ? (
                   <p className="px-1.5 py-2 text-[10px] leading-snug text-[color:var(--lib-text-faint)]">
                     {t.readyPlaylistsRailEmptyHint}
@@ -2153,12 +2151,6 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
           <div className="library-sources-input-shell">
             <LibraryInputArea onAdd={handleAdd} playSourceOverride={playSourceOverride} />
           </div>
-          {catalogAddError ? (
-            <p className="mt-2 text-xs text-amber-400/95" role="alert">
-              {catalogAddError}
-            </p>
-          ) : null}
-
           <div className="library-command-rail mt-3.5 flex min-w-0 flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-slate-800/35 bg-slate-950/25 px-3 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md sm:gap-3 lg:overflow-x-auto">
             <div className="library-command-rail-browse flex min-w-0 flex-wrap items-center gap-2 sm:gap-2.5 lg:flex-nowrap lg:min-w-0">
               <div className="library-segment-bar flex h-10 rounded-xl p-0.5" role="tablist">
@@ -2270,7 +2262,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
             </div>
           </div>
 
-          <div className="library-dark-scroll mt-2 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1">
+          <div className="mt-2 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1">
           {displaySources.length === 0 ? (
             <div className="library-empty-state relative overflow-hidden rounded-2xl py-20 text-center">
               <div className="library-empty-icon-plate mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl">
@@ -2511,6 +2503,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           isActive={isMaster ? false : masterState?.currentSource?.id === item.id}
                           onDeleteFromLibrary={deleteLibraryItem}
                           libraryDeleteEligible={libraryRowEligibleForLibraryDelete(item, displaySources)}
+                          onAddToPlaylistPress={() => setAddToPlaylistLeaf(item)}
                         />
                       ))}
                     </div>
@@ -2608,6 +2601,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                           isActive={isMaster ? false : masterState?.currentSource?.id === item.id}
                           onDeleteFromLibrary={deleteLibraryItem}
                           libraryDeleteEligible={libraryRowEligibleForLibraryDelete(item, displaySources)}
+                          onAddToPlaylistPress={() => setAddToPlaylistLeaf(item)}
                         />
                       ))}
                     </div>
@@ -2631,6 +2625,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
                         {sectionItems.map((source) => {
                           const pe = getPlaylistEntitySubtypeKey(source);
+                          const leafBar = isLeafLibraryUnifiedCard(source, selection);
                           return (
                           <div key={source.id} className="w-full max-w-[320px] [&>article]:h-full [&>article]:min-h-[340px] [&>article]:overflow-hidden">
                             <SourceCard
@@ -2670,17 +2665,10 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                                   : undefined
                               }
                               onPlaylistEntityPlay={pe ? () => playCollectionSelection(pe.subtype, pe.key) : undefined}
-                              onAddToLibrary={
-                                isExternalPlaylistExpandedTrack(selection, source)
-                                  ? () => handleAddCatalogTrackToLibrary(source)
-                                  : undefined
-                              }
                               onLibraryDelete={deleteLibraryItem}
                               libraryDeleteEligible={libraryRowEligibleForLibraryDelete(source, displaySources)}
-                              expandedTrackInMainLibrary={
-                                isExternalPlaylistExpandedTrack(selection, source) &&
-                                findMainLibrarySourceForExpandedTrack(source, sources) != null
-                              }
+                              leafUnifiedBar={leafBar}
+                              onAddToPlaylistPress={leafBar ? () => setAddToPlaylistLeaf(source) : undefined}
                             />
                           </div>
                           );
@@ -2690,6 +2678,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                       <div className="library-list-shell divide-y divide-[color:var(--lib-border-muted)] overflow-hidden rounded-2xl backdrop-blur-sm">
                         {sectionItems.map((source) => {
                           const pe = getPlaylistEntitySubtypeKey(source);
+                          const leafBar = isLeafLibraryUnifiedCard(source, selection);
                           return (
                           <SourceRow
                             key={source.id}
@@ -2714,10 +2703,6 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                             itemDeleteContext={getItemDeleteContext(source)}
                             onDeleteFromLibrary={deleteLibraryItem}
                             libraryDeleteEligible={libraryRowEligibleForLibraryDelete(source, displaySources)}
-                            expandedTrackInMainLibrary={
-                              isExternalPlaylistExpandedTrack(selection, source) &&
-                              findMainLibrarySourceForExpandedTrack(source, sources) != null
-                            }
                             explicitArtUrl={
                               isUserSyncbizPlaylistSource(source)
                                 ? deriveSyncbizPlaylistCover(
@@ -2733,11 +2718,8 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                                 : undefined
                             }
                             onPlaylistEntityPlay={pe ? () => playCollectionSelection(pe.subtype, pe.key) : undefined}
-                            onAddToLibrary={
-                              isExternalPlaylistExpandedTrack(selection, source)
-                                ? () => handleAddCatalogTrackToLibrary(source)
-                                : undefined
-                            }
+                            leafUnifiedBar={leafBar}
+                            onAddToPlaylistPress={leafBar ? () => setAddToPlaylistLeaf(source) : undefined}
                           />
                           );
                         })}
@@ -2812,7 +2794,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                 >
                   Add Playlist
                 </button>
-                <div className="library-dark-scroll max-h-48 space-y-1 overflow-y-auto pr-1">
+                <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
                 {userPlaylistContainers.slice(0, 10).map((p) => (
                   <div key={p.key} className="library-source-card flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs">
                     <button
@@ -3023,6 +3005,19 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         onClose={() => setPlaylistTileScheduleModal(null)}
         onSaved={() => setPlaylistTileScheduleModal(null)}
         initialContext={playlistTileScheduleModal}
+        tileClockScheduleMode={playlistTileScheduleModal !== null}
+      />
+      <AddLeafToPlaylistModal
+        isOpen={addToPlaylistLeaf !== null}
+        onClose={() => setAddToPlaylistLeaf(null)}
+        yourPlaylists={addToPlaylistModalYourRows}
+        readyPlaylists={addToPlaylistModalReadyRows}
+        scheduledPlaylists={addToPlaylistModalScheduledRows}
+        onPick={(playlistKey) => {
+          if (!addToPlaylistLeaf) return;
+          void appendLeafToDestinationPlaylistKey(addToPlaylistLeaf, playlistKey);
+          setAddToPlaylistLeaf(null);
+        }}
       />
     </div>
   );
@@ -3059,6 +3054,7 @@ type CenterGridLibraryItemCardProps = {
   isActive: boolean;
   onDeleteFromLibrary: (item: UnifiedSource) => Promise<void>;
   libraryDeleteEligible: boolean;
+  onAddToPlaylistPress: () => void;
 };
 
 function CenterGridLibraryItemCard({
@@ -3075,6 +3071,7 @@ function CenterGridLibraryItemCard({
   isActive,
   onDeleteFromLibrary,
   libraryDeleteEligible,
+  onAddToPlaylistPress,
 }: CenterGridLibraryItemCardProps) {
   const { t } = useTranslations();
   const [shareOpen, setShareOpen] = useState(false);
@@ -3141,6 +3138,8 @@ function CenterGridLibraryItemCard({
           onPause={pauseFn}
           libraryDeckChrome
           compact
+          actionLayout="leaf"
+          onAddToPlaylistPress={onAddToPlaylistPress}
           onShareOpen={() => setShareOpen(true)}
           onDeletePress={() => setDeleteOpen(true)}
           showLibraryDelete={showDeleteControl}
@@ -3180,11 +3179,11 @@ function SourceRow({
   itemDeleteContext,
   onDeleteFromLibrary,
   libraryDeleteEligible,
-  expandedTrackInMainLibrary = false,
   explicitArtUrl,
   onPlaylistEntityOpen,
   onPlaylistEntityPlay,
-  onAddToLibrary,
+  leafUnifiedBar = false,
+  onAddToPlaylistPress,
 }: {
   source: UnifiedSource;
   isFavorite?: boolean;
@@ -3198,11 +3197,11 @@ function SourceRow({
   itemDeleteContext: LibraryItemDeleteContext;
   onDeleteFromLibrary: (item: UnifiedSource) => Promise<void>;
   libraryDeleteEligible?: boolean;
-  expandedTrackInMainLibrary?: boolean;
   explicitArtUrl?: string | null;
   onPlaylistEntityOpen?: () => void;
   onPlaylistEntityPlay?: () => void;
-  onAddToLibrary?: () => void | Promise<void>;
+  leafUnifiedBar?: boolean;
+  onAddToPlaylistPress?: () => void;
 }) {
   const { t } = useTranslations();
   const { playSource, stop, pause, currentSource } = usePlayback();
@@ -3398,11 +3397,11 @@ function SourceRow({
           onPause={pauseFn}
           libraryDeckChrome
           compact
+          actionLayout={leafUnifiedBar ? "leaf" : "default"}
+          onAddToPlaylistPress={leafUnifiedBar ? onAddToPlaylistPress : undefined}
           onShareOpen={() => setShareOpen(true)}
           onDeletePress={() => setDeleteOpen(true)}
           showLibraryDelete={showDeleteControl}
-          onAddToLibrary={onAddToLibrary}
-          inLibrary={expandedTrackInMainLibrary}
         />
       </div>
     </div>

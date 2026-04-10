@@ -1,9 +1,16 @@
 import type { Playlist, PlaylistTrack, ScheduleContributorBlock } from "@/lib/playlist-types";
 import { reconcilePlaylistTracksForMerge } from "@/lib/playlist-append-sources";
 
+function newBlockId(): string {
+  return `sch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /**
  * Returns blocks that are a valid partition of `orderedTracks` (every track id exactly once, no unknown ids),
  * or `undefined` if stored blocks are missing ids, duplicate ids, or empty slices — treat as flat playlist for merge/UI.
+ *
+ * If persisted blocks omit some track ids that `orderedTracks` still contains (orphans), appends one direct block for
+ * those ids so repeated playlist appends keep `hadBlocks` true and merge can append the next contributor block.
  */
 export function coalesceScheduleContributorBlocksWithTracks(
   playlist: Playlist,
@@ -26,17 +33,22 @@ export function coalesceScheduleContributorBlocksWithTracks(
       covered.add(tid);
     }
   }
-  if (covered.size !== tidSet.size) return undefined;
-  return pruned;
+  const missing = [...tidSet].filter((id) => !covered.has(id));
+  if (missing.length === 0) {
+    return pruned;
+  }
+  const orphanBlock: ScheduleContributorBlock = {
+    id: newBlockId(),
+    kind: "direct",
+    label: "Existing tracks",
+    trackIds: missing,
+  };
+  return [...pruned, orphanBlock];
 }
 
 export type ScheduleAppendContributorHint =
   | { type: "playlist"; label: string; sourceKey: string }
   | { type: "direct"; label: string };
-
-function newBlockId(): string {
-  return `sch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
 
 /**
  * After appending new tracks, merge or create `scheduleContributorBlocks`.
