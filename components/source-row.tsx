@@ -12,6 +12,8 @@ import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { supportsEmbedded, getSourceArtworkUrl, getSourceIconType } from "@/lib/player-utils";
 import { SourceIconBadge } from "@/components/source-icon-badge";
+import { DenseDataRowSurface } from "@/components/player-surface/dense-data-row-surface";
+import { DENSE_LEGACY_SOURCE_ROW_GRID_CLASS } from "@/lib/player-surface/dense-data-row-constants";
 import type { Source } from "@/lib/types";
 
 function DefaultMusicArtwork() {
@@ -110,55 +112,54 @@ export function SourceRow({ source }: SourceRowProps) {
   const typeLabel = t[`sourceType_${source.type}`] ?? source.type.replace(/_/g, " ");
 
   return (
-    <div className="grid grid-cols-[auto,1.5fr,1fr,2fr,0.8fr,auto] gap-3 sm:gap-4 items-center px-3 sm:px-4 py-3 text-sm transition hover:bg-slate-900/40">
-      <div className="flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-slate-900">
-        <SourceRowArtwork source={source} />
-      </div>
-      <div className="min-w-0">
-        <p className="font-medium text-slate-100 truncate">{source.name}</p>
-        {source.description && (
-          <p className="text-xs text-slate-500 truncate">{source.description}</p>
-        )}
-      </div>
-      <div>
-        <p className="text-slate-300">{typeLabel}</p>
-      </div>
-      <div className="min-w-0">
-        <p className="truncate text-slate-400 text-xs">
-          {source.target ?? source.uriOrPath}
-        </p>
-      </div>
-      <div className="flex items-center gap-2">
-        <span
-          className={`h-1.5 w-1.5 rounded-full ${
-            source.isLive ? "bg-emerald-400" : "bg-slate-500"
-          }`}
-        />
-        <span className="text-slate-500 text-xs">
-          {source.isLive ? t.available : t.configured}
-        </span>
-      </div>
-      <div className="flex items-center gap-2">
-        <ActionButtonPlayNow
-          onClick={handlePlayNow}
-          loading={playing}
-          disabled={playing}
-          label={t.play}
-          loadingLabel={t.sending}
-        />
-        <ActionButtonEdit
-          href={`/sources/${source.id}/edit`}
-          size="xs"
-          title={t.edit}
-          aria-label={t.edit}
-        />
-        <ActionButtonDelete
-          onClick={() => setDeleteModalOpen(true)}
-          size="xs"
-          title={t.delete}
-          aria-label={t.delete}
-        />
-      </div>
+    <div>
+      <DenseDataRowSurface
+        gridClassName={DENSE_LEGACY_SOURCE_ROW_GRID_CLASS}
+        cells={[
+          <div key="thumb" className="flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-slate-900">
+            <SourceRowArtwork source={source} />
+          </div>,
+          <div key="title" className="min-w-0">
+            <p className="font-medium text-slate-100 truncate">{source.name}</p>
+            {source.description ? (
+              <p className="text-xs text-slate-500 truncate">{source.description}</p>
+            ) : null}
+          </div>,
+          <div key="type">
+            <p className="text-slate-300">{typeLabel}</p>
+          </div>,
+          <div key="target" className="min-w-0">
+            <p className="truncate text-slate-400 text-xs">{source.target ?? source.uriOrPath}</p>
+          </div>,
+          <div key="live" className="flex items-center gap-2">
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${source.isLive ? "bg-emerald-400" : "bg-slate-500"}`}
+            />
+            <span className="text-slate-500 text-xs">{source.isLive ? t.available : t.configured}</span>
+          </div>,
+          <div key="actions" className="flex items-center gap-2">
+            <ActionButtonPlayNow
+              onClick={handlePlayNow}
+              loading={playing}
+              disabled={playing}
+              label={t.play}
+              loadingLabel={t.sending}
+            />
+            <ActionButtonEdit
+              href={`/sources/${source.id}/edit`}
+              size="xs"
+              title={t.edit}
+              aria-label={t.edit}
+            />
+            <ActionButtonDelete
+              onClick={() => setDeleteModalOpen(true)}
+              size="xs"
+              title={t.delete}
+              aria-label={t.delete}
+            />
+          </div>,
+        ]}
+      />
       <DeleteConfirmModal
         isOpen={deleteModalOpen}
         onClose={() => setDeleteModalOpen(false)}

@@ -29,8 +29,8 @@ import {
   safeSeekTo,
   type YTPlayerAPI,
 } from "@/lib/yt-player-utils";
-import { NeonControlButton } from "@/components/ui/neon-control-button";
-import { ActionButtonShare } from "@/components/ui/action-buttons";
+import { PlayerDeckTransportSurface } from "@/components/player-surface/player-deck-transport-surface";
+import { PlayerUnitSurface } from "@/components/player-surface/player-unit-surface";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
 import {
@@ -2087,264 +2087,109 @@ export function AudioPlayer() {
       role="region"
       aria-label={t.playerControllerAria}
     >
-      <div className="mx-auto max-w-6xl flex min-w-0 justify-center">
-        {/* Player unit: [ Circular artwork ] [ Control + Track panel ] */}
-        <div className="flex min-w-0 items-center gap-3 sm:gap-5 sm:gap-6">
-          {/* LEFT: Circular artwork – static cover, playback motion on outer ring only */}
-          <div className="relative flex shrink-0 items-center justify-center">
-            {isSourcesLibraryDeck ? (
-              <div
-                className={`library-deck-art-host flex shrink-0 items-center justify-center ${
-                  displayStatus === "playing" ? "library-deck-art-host--playing" : "library-deck-art-host--idle"
-                }`}
-              >
-                {displayStatus === "playing" ? <div className="library-deck-art-ring" aria-hidden /> : null}
-                <div className="library-deck-art-inner h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 rounded-full overflow-hidden bg-slate-800/90 shadow-[inset_0_0_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]">
-                  <div className="h-full w-full overflow-hidden rounded-full">
-                    {displayThumbnailCover ? (
-                      <HydrationSafeImage src={displayThumbnailCover} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div
-                className={`relative flex shrink-0 items-center justify-center rounded-full border-2 p-[6px] bg-slate-800/80 ${
-                  displayStatus === "playing" ? "playing-active-ring" : "border-slate-600/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_0_1px_rgba(0,0,0,0.2),0_2px_12px_rgba(0,0,0,0.3)]"
-                }`}
-              >
-                <div className="relative h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 rounded-full overflow-hidden bg-slate-800/90 shadow-[inset_0_0_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]">
-                  <div className="h-full w-full overflow-hidden rounded-full">
-                    {displayThumbnailCover ? (
-                      <HydrationSafeImage src={displayThumbnailCover} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Control row | Track title | Timeline – unified width */}
-          <div className="flex min-w-0 flex-1 flex-col gap-2.5 w-full max-w-2xl">
-            {/* Control row: full width, Prev at left edge, Volume at right edge; wraps on narrow screens */}
-            <div className="flex flex-wrap items-center w-full gap-2 gap-y-2 sm:gap-3">
-              <NeonControlButton
-                size="md"
-                variant={isSourcesLibraryDeck ? "cyan" : "green"}
-                libraryDeck={isSourcesLibraryDeck}
-                onClick={() => {
-                  console.log("[SyncBiz Audit] PREV click", {
-                    context: isControlMirror ? "remote_ui_control" : "local_ui",
-                    deviceMode: deviceCtx?.deviceMode ?? null,
-                    currentSourceId: currentSource?.id ?? null,
-                    currentTrackIndex,
-                    queueIndex,
-                    queueLength: queue.length,
-                  });
-                  onPrev();
-                }}
-                disabled={!displayHasPrevNext}
-                aria-label={t.previousTrack}
-                title={t.previousTrack}
-              >
-                <svg className="h-5 w-5 scale-x-[-1] sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
-                </svg>
-              </NeonControlButton>
-              <NeonControlButton
-                size="md"
-                variant={isSourcesLibraryDeck ? "cyan" : "green"}
-                libraryDeck={isSourcesLibraryDeck}
-                onClick={onStop}
-                disabled={!displayHasContent}
-                aria-label={t.stopPlayback}
-                title={t.stopPlayback}
-              >
-                <svg className="h-5 w-5 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 6h12v12H6z" />
-                </svg>
-              </NeonControlButton>
-              <NeonControlButton
-                size="xl"
-                variant={isSourcesLibraryDeck ? "cyan" : "green"}
-                libraryDeck={isSourcesLibraryDeck}
-                libraryDeckHero={isSourcesLibraryDeck}
-                onClick={onPlayPause}
-                disabled={!displayHasContent}
-                active={displayStatus === "playing"}
-                aria-label={displayStatus === "playing" ? t.pausePlayback : t.play}
-                title={displayStatus === "playing" ? t.pausePlayback : t.play}
-                className={`!h-11 !min-w-[90px] !w-auto !px-4 sm:!h-12 sm:!min-w-[110px] sm:!px-6${
-                  isSourcesLibraryDeck && displayStatus === "playing" ? " library-player-play-emerald" : ""
-                }`}
-              >
-                <span className="relative flex h-8 w-8 items-center justify-center sm:h-9 sm:w-9" aria-hidden>
-                  <svg className={`absolute ${displayStatus === "playing" ? "opacity-100" : "pointer-events-none opacity-0"}`} viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                  </svg>
-                  <svg className={`absolute ml-0.5 sm:ml-1 ${displayStatus === "playing" ? "pointer-events-none opacity-0" : "opacity-100"}`} viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M8 5v14l11-7L8 5z" />
-                  </svg>
-                </span>
-              </NeonControlButton>
-              <NeonControlButton
-                size="md"
-                variant={isSourcesLibraryDeck ? "cyan" : "green"}
-                libraryDeck={isSourcesLibraryDeck}
-                onClick={() => {
-                  console.log("[SyncBiz Audit] NEXT click", {
-                    context: isControlMirror ? "remote_ui_control" : "local_ui",
-                    deviceMode: deviceCtx?.deviceMode ?? null,
-                    currentSourceId: currentSource?.id ?? null,
-                    currentTrackIndex,
-                    queueIndex,
-                    queueLength: queue.length,
-                  });
-                  onNext();
-                }}
-                disabled={!displayHasPrevNext}
-                aria-label={t.next}
-                title={t.next}
-              >
-                <svg className="h-5 w-5 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
-                </svg>
-              </NeonControlButton>
-              <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
-              <NeonControlButton
-                size="2xs"
-                variant="cyan"
-                libraryDeck={isSourcesLibraryDeck}
-                onClick={() => {
-                  if (!isControlMirror) setAutoMix((a) => !a);
-                  else deviceCtx?.setAutoMixOrSend?.(!displayAutoMix);
-                }}
-                active={displayAutoMix}
-                disabled={!displayHasContent}
-                aria-label={t.autoMix}
-                title={t.autoMix}
-              >
-                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
-                </svg>
-              </NeonControlButton>
-              <NeonControlButton
-                size="2xs"
-                variant="cyan"
-                libraryDeck={isSourcesLibraryDeck}
-                onClick={() => {
-                  if (!isControlMirror) toggleShuffle();
-                  else deviceCtx?.setShuffleOrSend?.(!displayShuffle);
-                }}
-                active={displayShuffle}
-                disabled={!displayHasContent}
-                aria-label={t.random}
-                title={t.random}
-              >
-                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 4l5 5-5 5M20 4l-5 5 5 5M20 20l-5-5 5-5M4 20l5-5-5-5" />
-                </svg>
-              </NeonControlButton>
-              <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
-              <div
-                className={`flex min-w-[52px] shrink items-center gap-1 rounded-xl border px-1.5 py-1 sm:min-w-[70px] sm:gap-1.5 sm:px-2 md:min-w-[90px] md:gap-2 md:px-2.5 lg:min-w-[120px] ${
-                  isSourcesLibraryDeck
-                    ? "library-player-volume-shell border-[color:var(--lib-accent-border)] bg-[color:var(--lib-surface-segment)] shadow-[var(--lib-shadow-rail-inset)]"
-                    : "rounded-lg border-cyan-500/50 bg-slate-900/80"
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (displayVolume > 0) {
-                      volumeBeforeMuteRef.current = displayVolume;
-                      onVolumeChange(0);
-                    } else {
-                      onVolumeChange(volumeBeforeMuteRef.current);
-                    }
-                  }}
-                  className={
-                    isSourcesLibraryDeck
-                      ? "flex shrink-0 items-center justify-center text-[color:var(--lib-accent)] transition-colors hover:opacity-90"
-                      : "flex shrink-0 items-center justify-center text-cyan-500 hover:text-cyan-400 transition-colors"
-                  }
-                  aria-label={displayVolume === 0 ? t.unmute : t.mute}
-                  title={displayVolume === 0 ? t.unmute : t.mute}
-                >
-                  {displayVolume === 0 ? (
-                    <svg className="h-4 w-4 sm:h-5 sm:w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                      <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
-                    </svg>
+      <PlayerUnitSurface
+        artwork={
+          isSourcesLibraryDeck ? (
+            <div
+              className={`library-deck-art-host flex shrink-0 items-center justify-center ${
+                displayStatus === "playing" ? "library-deck-art-host--playing" : "library-deck-art-host--idle"
+              }`}
+            >
+              {displayStatus === "playing" ? <div className="library-deck-art-ring" aria-hidden /> : null}
+              <div className="library-deck-art-inner h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 rounded-full overflow-hidden bg-slate-800/90 shadow-[inset_0_0_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]">
+                <div className="h-full w-full overflow-hidden rounded-full">
+                  {displayThumbnailCover ? (
+                    <HydrationSafeImage src={displayThumbnailCover} alt="" className="h-full w-full object-cover" />
                   ) : (
-                    <svg className="h-4 w-4 sm:h-5 sm:w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" />
-                    </svg>
+                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
                   )}
-                </button>
-                <div className="relative flex flex-1 min-w-0 items-center py-2">
-                  {/* Track background – 3px */}
-                  <div
-                    className={`absolute inset-x-0 top-1/2 h-[3px] w-full -translate-y-1/2 rounded-full ${isSourcesLibraryDeck ? "bg-[color:var(--lib-border-muted)]" : "bg-slate-700/80"}`}
-                    aria-hidden
-                  />
-                  {/* Fill – 3px, solid strong blue */}
-                  <div
-                    className={`absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full transition-all duration-100 ${
-                      isSourcesLibraryDeck ? "bg-[color:var(--lib-accent)]" : "bg-cyan-500"
-                    }`}
-                    style={{ width: `${displayVolume}%` }}
-                    aria-hidden
-                  />
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={displayVolume}
-                    onChange={(e) => onVolumeChange(Number(e.target.value))}
-                    className="player-volume-slider relative z-10 h-[3px] w-full cursor-pointer"
-                    aria-label={t.volumeAria}
-                  />
                 </div>
-                <span
-                  className={`w-5 shrink-0 text-end text-[10px] font-bold tabular-nums sm:w-6 sm:text-xs ${
-                    isSourcesLibraryDeck ? "text-[color:var(--lib-accent-text)]" : "text-cyan-500"
-                  }`}
-                  style={isSourcesLibraryDeck ? undefined : { color: "#06b6d4" }}
-                >
-                  {displayVolume}
-                </span>
               </div>
-              {isSourcesLibraryDeck ? (
-                <ActionButtonShare
-                  variant="player"
-                  onClick={() => setShareOpen(true)}
-                  disabled={!displayHasContent || isControlMirror}
-                  aria-label={t.share}
-                  title={t.share}
-                />
-              ) : (
-                <NeonControlButton
-                  size="2xs"
-                  variant="white"
-                  onClick={() => setShareOpen(true)}
-                  disabled={!displayHasContent || isControlMirror}
-                  aria-label={t.share}
-                  title={t.share}
-                >
-                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="18" cy="5" r="3" />
-                    <circle cx="6" cy="12" r="3" />
-                    <circle cx="18" cy="19" r="3" />
-                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-                  </svg>
-                </NeonControlButton>
-              )}
             </div>
+          ) : (
+            <div
+              className={`relative flex shrink-0 items-center justify-center rounded-full border-2 p-[6px] bg-slate-800/80 ${
+                displayStatus === "playing" ? "playing-active-ring" : "border-slate-600/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_0_1px_rgba(0,0,0,0.2),0_2px_12px_rgba(0,0,0,0.3)]"
+              }`}
+            >
+              <div className="relative h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 rounded-full overflow-hidden bg-slate-800/90 shadow-[inset_0_0_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]">
+                <div className="h-full w-full overflow-hidden rounded-full">
+                  {displayThumbnailCover ? (
+                    <HydrationSafeImage src={displayThumbnailCover} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        }
+      >
+            <PlayerDeckTransportSurface
+              variant={isSourcesLibraryDeck ? "library-deck" : "default"}
+              onPrev={() => {
+                console.log("[SyncBiz Audit] PREV click", {
+                  context: isControlMirror ? "remote_ui_control" : "local_ui",
+                  deviceMode: deviceCtx?.deviceMode ?? null,
+                  currentSourceId: currentSource?.id ?? null,
+                  currentTrackIndex,
+                  queueIndex,
+                  queueLength: queue.length,
+                });
+                onPrev();
+              }}
+              onStop={onStop}
+              onPlayPause={onPlayPause}
+              onNext={() => {
+                console.log("[SyncBiz Audit] NEXT click", {
+                  context: isControlMirror ? "remote_ui_control" : "local_ui",
+                  deviceMode: deviceCtx?.deviceMode ?? null,
+                  currentSourceId: currentSource?.id ?? null,
+                  currentTrackIndex,
+                  queueIndex,
+                  queueLength: queue.length,
+                });
+                onNext();
+              }}
+              prevNextDisabled={!displayHasPrevNext}
+              contentDisabled={!displayHasContent}
+              isPlaying={displayStatus === "playing"}
+              onAutoMixToggle={() => {
+                if (!isControlMirror) setAutoMix((a) => !a);
+                else deviceCtx?.setAutoMixOrSend?.(!displayAutoMix);
+              }}
+              onShuffleToggle={() => {
+                if (!isControlMirror) toggleShuffle();
+                else deviceCtx?.setShuffleOrSend?.(!displayShuffle);
+              }}
+              displayAutoMix={displayAutoMix}
+              displayShuffle={displayShuffle}
+              displayVolume={displayVolume}
+              onVolumeChange={onVolumeChange}
+              onMuteToggle={() => {
+                if (displayVolume > 0) {
+                  volumeBeforeMuteRef.current = displayVolume;
+                  onVolumeChange(0);
+                } else {
+                  onVolumeChange(volumeBeforeMuteRef.current);
+                }
+              }}
+              onShareClick={() => setShareOpen(true)}
+              shareDisabled={!displayHasContent || Boolean(isControlMirror)}
+              labels={{
+                previousTrack: t.previousTrack,
+                stopPlayback: t.stopPlayback,
+                play: t.play,
+                pausePlayback: t.pausePlayback,
+                next: t.next,
+                autoMix: t.autoMix,
+                random: t.random,
+                unmute: t.unmute,
+                mute: t.mute,
+                volumeAria: t.volumeAria,
+                share: t.share,
+              }}
+            />
 
             {/* ROW 2: Track display panel – source icon + status + title + next (unified deck display) */}
             {(() => {
@@ -2599,10 +2444,7 @@ export function AudioPlayer() {
                 {formatTime(displayDuration)}
               </span>
             </div>
-          </div>
-
-        </div>
-      </div>
+      </PlayerUnitSurface>
 
       {/* Off-screen embeds for YouTube/SoundCloud – always mount both to avoid React removeChild conflict */}
       {/* key by embedType so YT→YT switches don't remount (needed for crossfade handoff) */}

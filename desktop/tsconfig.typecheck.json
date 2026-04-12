@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/renderer/globals.d.ts",
+    "../lib/types.ts",
+    "../lib/player-utils.ts",
+    "../lib/player-surface/**/*.ts",
+    "../lib/player-surface/**/*.tsx",
+    "../components/player-surface/**/*.tsx"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

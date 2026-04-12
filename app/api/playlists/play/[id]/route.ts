@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPlaylist } from "@/lib/playlist-store";
-import { getCurrentUserFromCookies, hasBranchAccess } from "@/lib/auth-helpers";
-import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
+import { gatePlaylistAccess } from "@/lib/playlist-access";
 
 /**
  * POST /api/playlists/play/:id
@@ -13,20 +13,11 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const user = await getCurrentUserFromCookies();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
   const { id } = await params;
   const playlist = await getPlaylist(id);
-  if (!playlist) {
-    return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
+  const g = await gatePlaylistAccess(user ?? null, playlist);
+  if (!g.allow) {
+    return NextResponse.json({ error: g.message }, { status: g.httpStatus });
   }
-  if ((playlist.tenantId && playlist.tenantId !== user.tenantId) || (!playlist.tenantId && user.tenantId !== "tnt-default")) {
-    return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
-  }
-  const branchId = resolveMediaBranchId(playlist);
-  if (!(await hasBranchAccess(user.id, branchId))) {
-    return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
-  }
-  return NextResponse.json({ playlist, playUrl: playlist.url });
+  return NextResponse.json({ playlist: playlist!, playUrl: playlist!.url });
 }

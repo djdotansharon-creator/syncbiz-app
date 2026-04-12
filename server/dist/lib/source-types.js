@@ -4,11 +4,45 @@
  * Normalizes Playlist and db Source into a single display format.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.LIBRARY_CARD_FALLBACK_GENRE = void 0;
+exports.unifiedLibraryIdForDbSourceId = unifiedLibraryIdForDbSourceId;
+exports.libraryCardDisplayGenre = libraryCardDisplayGenre;
+exports.libraryCardEffectiveViewCount = libraryCardEffectiveViewCount;
+exports.libraryCardShouldShowMetaRow = libraryCardShouldShowMetaRow;
 exports.parseUrlFoundationHints = parseUrlFoundationHints;
 exports.unifiedFoundationHints = unifiedFoundationHints;
 exports.pickUnifiedFoundationFields = pickUnifiedFoundationFields;
 exports.classifyLibraryEntityContract = classifyLibraryEntityContract;
 const url_resolve_classify_1 = require("./url-resolve-classify");
+/**
+ * Unified list / playback id for a DB `Source` row. Store-generated ids are already `src-*`;
+ * prefixing again yields `src-src-*` and breaks GET `/api/sources/[id]` and `?sourceId=` flows.
+ */
+function unifiedLibraryIdForDbSourceId(dbSourceId) {
+    return dbSourceId.startsWith("src-") ? dbSourceId : `src-${dbSourceId}`;
+}
+/** Genre line when persisted value is empty — never use `type` (provider slug) as genre. */
+exports.LIBRARY_CARD_FALLBACK_GENRE = "Mixed";
+function libraryCardDisplayGenre(source) {
+    const g = typeof source.genre === "string" ? source.genre.trim() : "";
+    return g || exports.LIBRARY_CARD_FALLBACK_GENRE;
+}
+function libraryCardEffectiveViewCount(source) {
+    const v = source.viewCount ?? source.playlist?.viewCount;
+    if (v == null || typeof v !== "number" || !Number.isFinite(v))
+        return undefined;
+    return v;
+}
+/**
+ * Library card footer meta row: show when there is a real genre, view count, or duration-in-meta rule.
+ * When shown, `libraryCardDisplayGenre` supplies the left label (fallback "Mixed"), not `source.type`.
+ */
+function libraryCardShouldShowMetaRow(source, durationSec, hasCoverArt) {
+    const hasPersistedGenre = Boolean(typeof source.genre === "string" && source.genre.trim());
+    const vc = libraryCardEffectiveViewCount(source);
+    const showDurationInMeta = durationSec > 0 && !hasCoverArt;
+    return hasPersistedGenre || vc != null || showDurationInMeta;
+}
 /**
  * Deterministic hints for URL ingest (matches server parse-url; no I/O).
  * Delegates to `classifyResolveFoundation` — keep client and API aligned.
@@ -79,6 +113,9 @@ function classifyLibraryEntityContract(source) {
         (u.includes("open.spotify.com") && (u.includes("/playlist/") || u.includes("/album/"))) ||
         (u.includes("soundcloud.com") && u.includes("/sets/"));
     if (isExternalPlaylist) {
+        return { entityKind: "collection", collectionSubtype: "external_playlist" };
+    }
+    if (source.origin === "playlist" && source.playlist?.libraryPlacement === "ready_external") {
         return { entityKind: "collection", collectionSubtype: "external_playlist" };
     }
     if (source.origin === "playlist") {

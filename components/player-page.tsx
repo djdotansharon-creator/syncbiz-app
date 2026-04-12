@@ -12,7 +12,10 @@ import {
   getSourceArtworkUrl,
   getSourceIconType,
 } from "@/lib/player-utils";
-import { SourceIconBadge } from "@/components/source-icon-badge";
+import { PlayerHeroSurface } from "@/components/player-surface/player-hero-surface";
+import "@/components/player-surface/player-hero-surface.css";
+import { buildBrowserEmbeddedHeroProps } from "@/lib/player-surface/map-browser-embedded-hero";
+import { invokeDesktopLocalMockPlay } from "@/lib/desktop-local-mock";
 import { usePlaybackOptional } from "@/lib/playback-provider";
 import type { UnifiedSource } from "@/lib/source-types";
 
@@ -44,29 +47,6 @@ interface SCWidget {
   unbind: (event: string) => void;
   getPosition: (cb: (ms: number) => void) => void;
   getDuration: (cb: (ms: number) => void) => void;
-}
-
-function DefaultMusicArtwork() {
-  return (
-    <div
-      className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-700 to-slate-900 text-slate-500"
-      aria-hidden
-    >
-      <svg
-        className="h-16 w-16 opacity-50"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M9 18V5l12-2v13" />
-        <circle cx="6" cy="18" r="3" />
-        <circle cx="18" cy="16" r="3" />
-      </svg>
-    </div>
-  );
 }
 
 /** Convert playlist to source-like object for the player. */
@@ -293,6 +273,7 @@ export function PlayerPage({ devices }: Props) {
   }, [status, provider]);
 
   const handlePlay = () => {
+    invokeDesktopLocalMockPlay();
     if (ytPlayerRef.current && provider === "youtube") {
       ytPlayerRef.current.playVideo();
       setStatus("playing");
@@ -393,105 +374,22 @@ export function PlayerPage({ devices }: Props) {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="rounded-2xl border border-slate-800/80 bg-slate-950/80 p-6 shadow-xl">
-        <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
-          <div className="relative flex-shrink-0">
-            <div className="aspect-square w-48 overflow-hidden rounded-xl bg-slate-900 shadow-lg">
-              {artworkUrl ? (
-                <img
-                  src={artworkUrl}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <DefaultMusicArtwork />
-              )}
-            </div>
-            <div className="absolute bottom-0 right-0 p-2">
-              <SourceIconBadge type={iconType} size="md" />
-            </div>
-          </div>
-          <div className="min-w-0 flex-1 text-center sm:text-left">
-            <h1 className="truncate text-xl font-semibold text-slate-100">{source.name}</h1>
-            <p className="mt-1 text-sm font-medium uppercase tracking-wider text-slate-500">
-              {providerLabel}
-            </p>
-            <p
-              className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                status === "playing"
-                  ? "bg-emerald-500/20 text-emerald-400"
-                  : status === "paused"
-                    ? "bg-amber-500/20 text-amber-400"
-                    : status === "loading"
-                      ? "bg-sky-500/20 text-sky-400"
-                      : "bg-slate-700 text-slate-500"
-              }`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  status === "playing"
-                    ? "bg-emerald-400 animate-pulse"
-                    : status === "paused"
-                      ? "bg-amber-400"
-                      : "bg-slate-500"
-                }`}
-              />
-              {status === "loading" ? "Loading…" : status}
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-          <button
-            onClick={handlePrev}
-            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-700 bg-slate-900/80 text-slate-300 transition hover:bg-slate-800 disabled:opacity-40"
-            title="Previous"
-          >
-            <span className="text-sm font-bold">⏮</span>
-          </button>
-          <button
-            onClick={handleStop}
-            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-700 bg-slate-900/80 text-slate-300 transition hover:bg-slate-800"
-            title="Stop"
-          >
-            <span className="text-sm font-bold">■</span>
-          </button>
-          <button
-            onClick={handlePlay}
-            disabled={status === "loading"}
-            className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#1db954] text-white shadow-lg transition hover:bg-[#1ed760] disabled:opacity-50"
-            title="Play"
-          >
-            <span className="text-xl font-bold">▶</span>
-          </button>
-          <button
-            onClick={handlePause}
-            disabled={status === "loading"}
-            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-700 bg-slate-900/80 text-slate-300 transition hover:bg-slate-800 disabled:opacity-40"
-            title="Pause"
-          >
-            <span className="text-sm font-bold">⏸</span>
-          </button>
-          <button
-            onClick={handleNext}
-            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-700 bg-slate-900/80 text-slate-300 transition hover:bg-slate-800 disabled:opacity-40"
-            title="Next"
-          >
-            <span className="text-sm font-bold">⏭</span>
-          </button>
-        </div>
-
-        <div className="mt-4 flex items-center gap-3">
-          <span className="text-xs font-medium text-slate-500">VOL</span>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={volume}
-            onChange={(e) => handleVolume(Number(e.target.value))}
-            className="h-2 flex-1 rounded-full bg-slate-800 accent-[#1db954]"
-          />
-          <span className="w-8 text-right text-xs text-slate-500">{volume}</span>
-        </div>
+        <PlayerHeroSurface
+          {...buildBrowserEmbeddedHeroProps({
+            source,
+            providerLabel,
+            iconType,
+            artworkUrl,
+            status,
+            volume,
+            onVolumeChange: handleVolume,
+            onPrev: handlePrev,
+            onStop: handleStop,
+            onPlay: handlePlay,
+            onPause: handlePause,
+            onNext: handleNext,
+          })}
+        />
 
         {(provider === "youtube" || provider === "soundcloud") && (
           <div className="mt-4">

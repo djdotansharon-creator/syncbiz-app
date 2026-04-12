@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { findOrCreateCatalogItem, normalizeCatalogUrlKey } from "@/lib/catalog-store";
 import { listPlaylistsForTenant, createPlaylist, isPlaylistPersistError } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
+import { getAccessType } from "@/lib/user-store";
+import {
+  canRequestApiScope,
+  parseApiContentScope,
+  playlistMatchesApiScope,
+  type ApiContentScope,
+} from "@/lib/content-scope-filters";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import {
@@ -14,7 +21,7 @@ import {
 const VALID_TYPES: PlaylistType[] = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"];
 const DEFAULT_BRANCH_ID = "default";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const user = await getCurrentUserFromCookies();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -22,10 +29,16 @@ export async function GET() {
   if (!user.tenantId?.trim()) {
     return NextResponse.json({ error: "Tenant context missing" }, { status: 400 });
   }
+  const scope: ApiContentScope = parseApiContentScope(req.nextUrl.searchParams.get("scope"));
   try {
+    const accessType = await getAccessType(user.id);
+    if (!canRequestApiScope(scope, accessType)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const all = await listPlaylistsForTenant(user.tenantId);
     const filtered = [];
     for (const p of all) {
+      if (!playlistMatchesApiScope(p, scope)) continue;
       const branchId = resolveMediaBranchId(p);
       if (await hasBranchAccess(user.id, branchId)) {
         filtered.push(p);
@@ -54,6 +67,14 @@ export async function POST(req: NextRequest) {
     const genre = (body.genre ?? "").trim();
     const thumbnail = ((body.cover ?? body.thumbnail) ?? "").trim();
     const branchId = (body.branchId ?? DEFAULT_BRANCH_ID).trim() || DEFAULT_BRANCH_ID;
+    const rawScope = (body as { playlistOwnershipScope?: unknown }).playlistOwnershipScope;
+    const playlistOwnershipScope: "branch" | "owner_personal" | undefined =
+      rawScope === "owner_personal" ? "owner_personal" : rawScope === "branch" ? "branch" : undefined;
+    if (playlistOwnershipScope === "owner_personal") {
+      if ((await getAccessType(user.id)) !== "OWNER") {
+        return NextResponse.json({ error: "Forbidden: owner personal scope requires OWNER" }, { status: 403 });
+      }
+    }
     const viewCount = typeof body.viewCount === "number" && body.viewCount >= 0 ? body.viewCount : undefined;
     const durationSeconds = typeof body.durationSeconds === "number" && body.durationSeconds >= 0 ? body.durationSeconds : undefined;
 
@@ -170,6 +191,7 @@ export async function POST(req: NextRequest) {
       ...(catalogItemId ? { catalogItemId } : {}),
       ...(tracks ? { tracks } : {}),
       ...(libraryPlacement ? { libraryPlacement } : {}),
+      ...(playlistOwnershipScope ? { playlistOwnershipScope } : {}),
     });
     const uid = await getUserIdFromSession();
     if (uid) void notifyLibraryUpdated(uid, { branchId, entityType: "playlist", action: "created" });

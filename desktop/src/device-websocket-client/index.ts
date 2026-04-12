@@ -1,6 +1,6 @@
 /**
- * Device WebSocket client — cloud connection and command dispatch (future).
+ * Device WebSocket client — implementation in `device-ws-manager.ts` (main process).
  * @see docs/PLAYER-DESKTOP-INTERNAL-STRUCTURE-v1.md
  */
 
-export const DEVICE_WEBSOCKET_CLIENT_MODULE = "device-websocket-client" as const;
+export { DeviceWsManager } from "./device-ws-manager";

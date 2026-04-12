@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "dev:ws": "cd server && npm run dev",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:ws\"",
     "build": "next build",
+    "build:electron-web": "next build && node desktop/scripts/stage-standalone-for-electron.cjs",
+    "desktop:shell": "npm run build:electron-web && npm run build --prefix desktop && node desktop/scripts/run-electron-with-staged-web.cjs",
     "start": "next start",
     "lint": "eslint"
   },

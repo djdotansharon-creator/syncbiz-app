@@ -1,10 +1,17 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { listPlaylistsForTenant } from "@/lib/playlist-store";
 import { listRadioStationsForTenant } from "@/lib/radio-store";
 import { radioToUnified } from "@/lib/radio-utils";
 import { db } from "@/lib/store";
 import { getDeletedSourceIds } from "@/lib/deleted-sources-store";
-import { getCurrentUserFromCookies, hasBranchAccess } from "@/lib/auth-helpers";
+import { getCurrentUserFromApiRequest, hasBranchAccess } from "@/lib/auth-helpers";
+import { getAccessType } from "@/lib/user-store";
+import {
+  canRequestApiScope,
+  parseApiContentScope,
+  playlistMatchesApiScope,
+  type ApiContentScope,
+} from "@/lib/content-scope-filters";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { type UnifiedSource, type SourceProviderType, unifiedLibraryIdForDbSourceId } from "@/lib/source-types";
 import { unifiedFoundationHints } from "@/lib/source-types";
@@ -72,12 +79,18 @@ function getSourceCreatedAtMs(source: UnifiedSource): number {
   return Number.isFinite(t) ? t : 0;
 }
 
-export async function GET() {
-  const user = await getCurrentUserFromCookies();
+export async function GET(request: NextRequest) {
+  const user = await getCurrentUserFromApiRequest(request);
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const scope: ApiContentScope = parseApiContentScope(request.nextUrl.searchParams.get("scope"));
   try {
+    const accessType = await getAccessType(user.id);
+    if (!canRequestApiScope(scope, accessType)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const [playlists, radioStations, dbSources, deletedIds] = await Promise.all([
       listPlaylistsForTenant(user.tenantId),
       listRadioStationsForTenant(user.tenantId),
@@ -90,21 +103,24 @@ export async function GET() {
     const items: UnifiedSource[] = [];
 
     for (const p of playlists) {
+      if (!playlistMatchesApiScope(p, scope)) continue;
       const branchId = resolveMediaBranchId(p);
       if (await hasBranchAccess(user.id, branchId)) {
         items.push(playlistToUnified(p));
       }
     }
-    for (const r of radioStations) {
-      const branchId = resolveMediaBranchId(r);
-      if (await hasBranchAccess(user.id, branchId)) {
-        items.push(radioToUnified(r));
+    if (scope === "branch") {
+      for (const r of radioStations) {
+        const branchId = resolveMediaBranchId(r);
+        if (await hasBranchAccess(user.id, branchId)) {
+          items.push(radioToUnified(r));
+        }
       }
-    }
-    for (const s of filteredDbSources) {
-      const branchId = (s as Source).branchId ?? "default";
-      if (await hasBranchAccess(user.id, branchId)) {
-        items.push(dbSourceToUnified(s));
+      for (const s of filteredDbSources) {
+        const branchId = (s as Source).branchId ?? "default";
+        if (await hasBranchAccess(user.id, branchId)) {
+          items.push(dbSourceToUnified(s));
+        }
       }
     }
 

@@ -31,7 +31,19 @@ config({ path: join(__dirname, "..", ".env") });
 
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
-import type { ClientMessage, ServerMessage, StationPlaybackState, DeviceMode, GuestRecommendationPayload, BranchSummary } from "../lib/remote-control/types.js";
+import type {
+  ClientMessage,
+  ServerMessage,
+  StationPlaybackState,
+  DeviceMode,
+  GuestRecommendationPayload,
+  BranchSummary,
+  DeviceInfo,
+} from "../lib/remote-control/types.js";
+import syncbizDeviceModel from "../lib/syncbiz-device-model.js";
+import type { SyncBizRegistrationIntent } from "../lib/syncbiz-device-model.js";
+
+const { sanitizeRegistrationIntent } = syncbizDeviceModel;
 import { loadLease, saveLease } from "./master-lease-store.js";
 import { verifyWsToken } from "./ws-token.js";
 
@@ -71,6 +83,8 @@ type DeviceConnection = {
   isMobile?: boolean;
   userId?: string;
   branchId: string;
+  /** Sanitized REGISTER hint from client (optional). */
+  registrationIntent?: SyncBizRegistrationIntent;
 };
 
 const devices = new Map<string, DeviceConnection>();
@@ -224,12 +238,20 @@ function broadcastLibraryUpdated(userId: string, branchId: string, entityType?: 
 
 function broadcastDeviceListForUserAndBranch(userId: string, branchId: string) {
   const now = Date.now();
-  const list: { id: string; connectedAt: string; lastSeen?: string; presence?: "online" | "stale"; mode?: DeviceMode; branchId?: string }[] = [];
+  const list: DeviceInfo[] = [];
   devices.forEach((d) => {
     if (d.role === "device" && (d.userId ?? "") === userId && d.branchId === branchId) {
       const lastSeenMs = d.lastSeen ? new Date(d.lastSeen).getTime() : now;
       const presence = now - lastSeenMs <= PRESENCE_ONLINE_THRESHOLD_MS ? "online" : "stale";
-      list.push({ id: d.id, connectedAt: d.connectedAt, lastSeen: d.lastSeen, presence, mode: d.mode, branchId: d.branchId });
+      list.push({
+        id: d.id,
+        connectedAt: d.connectedAt,
+        lastSeen: d.lastSeen,
+        presence,
+        mode: d.mode,
+        branchId: d.branchId,
+        registrationIntent: d.registrationIntent,
+      });
     }
   });
   const masterDeviceId = getMasterForBranch(userId, branchId);
@@ -457,6 +479,12 @@ wss.on("connection", (ws) => {
       const branchId = validation.branchId;
 
       if (role === "owner_global") {
+        const regIntent = sanitizeRegistrationIntent(
+          (msg as { registrationIntent?: unknown }).registrationIntent
+        );
+        if (process.env.NODE_ENV === "development" && regIntent) {
+          console.info("[SyncBiz WS] register owner_global intent", regIntent);
+        }
         owners.push({ ws, userId });
         ws.send(JSON.stringify({ type: "REGISTERED" } as ServerMessage));
         sendBranchListToOwner(ws, userId);
@@ -467,6 +495,9 @@ wss.on("connection", (ws) => {
       if (role === "device" && validation.deviceId) {
         deviceId = validation.deviceId;
         const isMobile = (msg as { isMobile?: boolean }).isMobile ?? false;
+        const registrationIntent = sanitizeRegistrationIntent(
+          (msg as { registrationIntent?: unknown }).registrationIntent
+        );
 
         clearExpiredGracePeriods(userId, branchId);
         let mode: DeviceMode = "CONTROL";
@@ -526,6 +557,7 @@ wss.on("connection", (ws) => {
           isMobile,
           userId,
           branchId,
+          registrationIntent,
         });
         console.log("[SyncBiz WS] register device", { deviceId, userId, branchId, mode });
         if (process.env.NODE_ENV === "development") {
@@ -559,6 +591,12 @@ wss.on("connection", (ws) => {
         }
         broadcastDeviceList();
       } else if (role === "controller") {
+        const regIntent = sanitizeRegistrationIntent(
+          (msg as { registrationIntent?: unknown }).registrationIntent
+        );
+        if (process.env.NODE_ENV === "development" && regIntent) {
+          console.info("[SyncBiz WS] register controller intent", regIntent);
+        }
         controllers.push({ ws, userId, branchId });
         const sessionCode = getOrCreateSessionCode(userId);
         const reply: ServerMessage = { type: "REGISTERED", sessionCode };

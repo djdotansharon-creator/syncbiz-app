@@ -9,6 +9,8 @@ import { SharePlaylistModal } from "@/components/share-playlist-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { useTranslations } from "@/lib/locale-context";
 import { LIBRARY_SIDE_ACTION_ICON_BTN_CLASS } from "@/lib/library-side-action-styles";
+import { DenseDataRowSurface } from "@/components/player-surface/dense-data-row-surface";
+import { DENSE_PLAYLIST_MANAGER_ROW_GRID_CLASS } from "@/lib/player-surface/dense-data-row-constants";
 import { PlaylistIconBadge } from "@/components/playlist-icon-badge";
 import { PlaylistPlayerProvider, usePlaylistPlayer } from "@/lib/playlist-player-context";
 import type { Playlist } from "@/lib/playlist-types";
@@ -238,115 +240,117 @@ function PlaylistRow({
   }
 
   return (
-    <div
-      className={`grid grid-cols-[auto,1fr,auto] gap-4 items-center px-4 py-4 sm:grid-cols-[auto,1fr,auto,auto] ${
-        active ? "bg-slate-900/40 ring-1 ring-inset ring-slate-500/20" : "hover:bg-slate-900/20"
-      }`}
-    >
-      <div className="relative h-16 w-16 overflow-hidden rounded-xl bg-slate-800">
-        {thumbnail ? (
-          <img src={thumbnail} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-slate-500">
-            <svg className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M9 18V5l12-2v13" />
-              <circle cx="6" cy="18" r="3" />
-              <circle cx="18" cy="16" r="3" />
-            </svg>
-          </div>
-        )}
-        <div className="absolute bottom-0.5 right-0.5">
-          <PlaylistIconBadge type={playlist.type} size="md" />
-        </div>
-      </div>
-
-      <div className="min-w-0">
-        <p className="truncate font-semibold text-slate-100">{playlist.name}</p>
-        {playlist.genre && <p className="text-xs text-slate-500">{playlist.genre}</p>}
-        <p className="text-xs capitalize text-slate-600">{playlist.type.replace(/-/g, " ")}</p>
-      </div>
-
-      <div className="flex items-center justify-center gap-2">
-        {active && (
-          <>
-            <button
-              onClick={embedded ? stop : () => void handleStopLocal()}
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/60 text-slate-400 hover:bg-slate-700/80"
-              title="Stop"
-            >
-              ■
-            </button>
-            <button
-              onClick={() => play(index)}
-              className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#1db954] text-white hover:bg-[#1ed760]"
-            >
-              ▶
-            </button>
-            {embedded && (
+    <div>
+      <DenseDataRowSurface
+        gridClassName={DENSE_PLAYLIST_MANAGER_ROW_GRID_CLASS}
+        className={active ? "bg-slate-900/40 ring-1 ring-inset ring-slate-500/20" : "hover:bg-slate-900/20"}
+        cells={[
+          <div key="thumb" className="relative h-16 w-16 overflow-hidden rounded-xl bg-slate-800">
+            {thumbnail ? (
+              <img src={thumbnail} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-slate-500">
+                <svg className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M9 18V5l12-2v13" />
+                  <circle cx="6" cy="18" r="3" />
+                  <circle cx="18" cy="16" r="3" />
+                </svg>
+              </div>
+            )}
+            <div className="absolute bottom-0.5 right-0.5">
+              <PlaylistIconBadge type={playlist.type} size="md" />
+            </div>
+          </div>,
+          <div key="meta" className="min-w-0">
+            <p className="truncate font-semibold text-slate-100">{playlist.name}</p>
+            {playlist.genre ? <p className="text-xs text-slate-500">{playlist.genre}</p> : null}
+            <p className="text-xs capitalize text-slate-600">{playlist.type.replace(/-/g, " ")}</p>
+          </div>,
+          <div key="transport" className="flex items-center justify-center gap-2">
+            {active ? (
+              <>
+                <button
+                  type="button"
+                  onClick={embedded ? stop : () => void handleStopLocal()}
+                  className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/60 text-slate-400 hover:bg-slate-700/80"
+                  title="Stop"
+                >
+                  ■
+                </button>
+                <button
+                  type="button"
+                  onClick={() => play(index)}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#1db954] text-white hover:bg-[#1ed760]"
+                >
+                  ▶
+                </button>
+                {embedded ? (
+                  <button
+                    type="button"
+                    onClick={pause}
+                    className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/60 text-slate-400 hover:bg-slate-700/80"
+                    title="Pause"
+                  >
+                    ⏸
+                  </button>
+                ) : null}
+              </>
+            ) : (
               <button
-                onClick={pause}
-                className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/60 text-slate-400 hover:bg-slate-700/80"
-                title="Pause"
+                type="button"
+                onClick={() => play(index)}
+                className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#1db954] text-white hover:bg-[#1ed760]"
               >
-                ⏸
+                ▶
               </button>
             )}
-          </>
-        )}
-        {!active && (
-          <button
-            onClick={() => play(index)}
-            className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#1db954] text-white hover:bg-[#1ed760]"
-          >
-            ▶
-          </button>
-        )}
-      </div>
-
-      <div className="flex items-center gap-2">
-        {active && (
-          <div className="hidden items-center gap-2 sm:flex">
-            <span className="text-[10px] text-slate-600">Vol</span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={volume}
-              onChange={(e) => setVolume(Number(e.target.value))}
-              className="h-1.5 w-20 rounded-full bg-slate-800 accent-[#1db954]"
-              aria-label="Volume"
-            />
-          </div>
-        )}
-        <Link
-          href={`/playlists/${playlist.id}/edit`}
-          className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-900/70 text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]"
-          title="Edit"
-        >
-          ✎
-        </Link>
-        <button
-          onClick={() => onShare(playlist)}
-          className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/40 text-slate-400 hover:bg-slate-700/60 hover:text-slate-200"
-          title="Share"
-        >
-          ↗
-        </button>
-        <button
-          type="button"
-          onClick={() => setDeleteOpen(true)}
-          className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
-          title={t.deletePlaylist}
-          aria-label={t.deletePlaylist}
-        >
-          <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            <line x1="10" y1="11" x2="10" y2="17" />
-            <line x1="14" y1="11" x2="14" y2="17" />
-          </svg>
-        </button>
-      </div>
-
+          </div>,
+          <div key="tools" className="flex items-center gap-2">
+            {active ? (
+              <div className="hidden items-center gap-2 sm:flex">
+                <span className="text-[10px] text-slate-600">Vol</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={volume}
+                  onChange={(e) => setVolume(Number(e.target.value))}
+                  className="h-1.5 w-20 rounded-full bg-slate-800 accent-[#1db954]"
+                  aria-label="Volume"
+                />
+              </div>
+            ) : null}
+            <Link
+              href={`/playlists/${playlist.id}/edit`}
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-900/70 text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]"
+              title="Edit"
+            >
+              ✎
+            </Link>
+            <button
+              type="button"
+              onClick={() => onShare(playlist)}
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/40 text-slate-400 hover:bg-slate-700/60 hover:text-slate-200"
+              title="Share"
+            >
+              ↗
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeleteOpen(true)}
+              className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
+              title={t.deletePlaylist}
+              aria-label={t.deletePlaylist}
+            >
+              <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+              </svg>
+            </button>
+          </div>,
+        ]}
+      />
       <DeleteConfirmModal
         isOpen={deleteOpen}
         onClose={() => setDeleteOpen(false)}

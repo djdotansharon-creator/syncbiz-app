@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPlaylist, updatePlaylist, deletePlaylist, isPlaylistPersistError } from "@/lib/playlist-store";
-import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
+import { getCurrentUserFromCookies, getUserIdFromSession } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
+import { gatePlaylistAccess } from "@/lib/playlist-access";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import {
   PLAYLIST_USE_CASES_PHASE1,
@@ -21,36 +22,17 @@ import {
 
 const VALID_TYPES: PlaylistType[] = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"];
 
-async function requirePlaylistAccess(playlist: { branchId?: string; tenantId?: string } | null) {
-  const user = await getCurrentUserFromCookies();
-  if (!user) return { ok: false as const, status: 401 } as const;
-  if (!playlist) return { ok: false as const, status: 404 } as const;
-  if (playlist.tenantId && playlist.tenantId !== user.tenantId) {
-    return { ok: false as const, status: 404 } as const;
-  }
-  if (!playlist.tenantId && user.tenantId !== "tnt-default") {
-    return { ok: false as const, status: 404 } as const;
-  }
-  const branchId = resolveMediaBranchId(playlist);
-  if (!(await hasBranchAccess(user.id, branchId))) {
-    return { ok: false as const, status: 403 } as const;
-  }
-  return { ok: true as const, user } as const;
-}
-
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
+    const user = await getCurrentUserFromCookies();
     const playlist = await getPlaylist(id);
-    const access = await requirePlaylistAccess(playlist);
-    if (!access.ok) {
-      return NextResponse.json(
-        access.status === 401 ? { error: "Unauthorized" } : access.status === 403 ? { error: "Forbidden: no access to this branch" } : { error: "Playlist not found" },
-        { status: access.status },
-      );
+    const g = await gatePlaylistAccess(user ?? null, playlist);
+    if (!g.allow) {
+      return NextResponse.json({ error: g.message }, { status: g.httpStatus });
     }
     return NextResponse.json(playlist!);
   } catch (e) {
@@ -64,17 +46,15 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const user = await getCurrentUserFromCookies();
   const existing = await getPlaylist(id);
-  const access = await requirePlaylistAccess(existing);
-  if (!access.ok) {
-    return NextResponse.json(
-      access.status === 401 ? { error: "Unauthorized" } : access.status === 403 ? { error: "Forbidden: no access to this branch" } : { error: "Playlist not found" },
-      { status: access.status },
-    );
+  const g = await gatePlaylistAccess(user ?? null, existing);
+  if (!g.allow) {
+    return NextResponse.json({ error: g.message }, { status: g.httpStatus });
   }
 
   try {
-    const body = (await req.json()) as Partial<{
+    const body = (await req.json()) as Record<string, unknown> & Partial<{
       name: string;
       genre: string;
       type: PlaylistType;
@@ -91,6 +71,12 @@ export async function PUT(
       mood?: string | null;
       energyLevel?: string | null;
     }>;
+    if ("playlistOwnershipScope" in body) {
+      return NextResponse.json(
+        { error: "playlistOwnershipScope cannot be changed via PUT" },
+        { status: 400 },
+      );
+    }
     const updates: Partial<typeof existing> = {};
 
     if (body.name != null) updates.name = String(body.name).trim();
@@ -263,13 +249,11 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    const user = await getCurrentUserFromCookies();
     const existing = await getPlaylist(id);
-    const access = await requirePlaylistAccess(existing);
-    if (!access.ok) {
-      return NextResponse.json(
-        access.status === 401 ? { error: "Unauthorized" } : access.status === 403 ? { error: "Forbidden: no access to this branch" } : { error: "Playlist not found" },
-        { status: access.status },
-      );
+    const del = await gatePlaylistAccess(user ?? null, existing);
+    if (!del.allow) {
+      return NextResponse.json({ error: del.message }, { status: del.httpStatus });
     }
     const ok = await deletePlaylist(id);
     if (!ok) {

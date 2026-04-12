@@ -1,4 +1,9 @@
 import Link from "next/link";
+import { DenseDataRowSurface } from "@/components/player-surface/dense-data-row-surface";
+import {
+  DENSE_ADMIN_DEVICES_TABLE_HEADER_CLASS,
+  DENSE_ADMIN_DEVICES_TABLE_ROW_GRID_CLASS,
+} from "@/lib/player-surface/dense-data-row-constants";
 import { getApiBase } from "@/lib/api-base";
 import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
@@ -40,7 +45,7 @@ export default async function DevicesPage() {
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/50">
-        <div className="grid grid-cols-[1.4fr,1fr,1fr,0.8fr] gap-4 border-b border-slate-800/80 px-4 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">
+        <div className={DENSE_ADMIN_DEVICES_TABLE_HEADER_CLASS}>
           <div>{t.device}</div>
           <div>{t.playback}</div>
           <div>{t.platformHealth}</div>
@@ -50,48 +55,51 @@ export default async function DevicesPage() {
           {devices.map((device) => {
             const source = sources.find((s) => s.id === device.currentSourceId);
             return (
-              <div
+              <DenseDataRowSurface
                 key={device.id}
-                className="grid grid-cols-[1.4fr,1fr,1fr,0.8fr] gap-4 px-4 py-3 text-sm transition hover:bg-slate-900/40"
-              >
-                <div>
-                  <Link
-                    href={`/devices/${device.id}`}
-                    className="font-medium text-slate-100 hover:text-sky-300"
-                  >
-                    {device.name}
-                  </Link>
-                  <p className="text-xs text-slate-500">
-                    {device.type.replace("-", " ")} · {device.ipAddress}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-slate-200">
-                    {source ? source.name : t.idle}
-                  </p>
-                  <p className="text-xs text-slate-500">{t.vol} {device.volume}</p>
-                </div>
-                <div>
-                  <p className="text-slate-200 capitalize">{device.platform}</p>
-                  <p className="text-xs text-slate-500 capitalize">
-                    {device.health}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`h-2 w-2 rounded-full ${
-                      device.status === "online"
-                        ? "bg-emerald-400"
-                        : device.status === "maintenance"
-                          ? "bg-amber-400"
-                          : "bg-slate-500"
-                    }`}
-                  />
-                  <span className="capitalize text-slate-200">
-                    {device.status === "online" ? t.online : device.status === "offline" ? t.offline : t.maintenance}
-                  </span>
-                </div>
-              </div>
+                gridClassName={DENSE_ADMIN_DEVICES_TABLE_ROW_GRID_CLASS}
+                cells={[
+                  <div key="device">
+                    <Link
+                      href={`/devices/${device.id}`}
+                      className="font-medium text-slate-100 hover:text-sky-300"
+                    >
+                      {device.name}
+                    </Link>
+                    <p className="text-xs text-slate-500">
+                      {device.type.replace("-", " ")} · {device.ipAddress}
+                    </p>
+                  </div>,
+                  <div key="playback">
+                    <p className="text-slate-200">{source ? source.name : t.idle}</p>
+                    <p className="text-xs text-slate-500">
+                      {t.vol} {device.volume}
+                    </p>
+                  </div>,
+                  <div key="health">
+                    <p className="text-slate-200 capitalize">{device.platform}</p>
+                    <p className="text-xs text-slate-500 capitalize">{device.health}</p>
+                  </div>,
+                  <div key="status" className="flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        device.status === "online"
+                          ? "bg-emerald-400"
+                          : device.status === "maintenance"
+                            ? "bg-amber-400"
+                            : "bg-slate-500"
+                      }`}
+                    />
+                    <span className="capitalize text-slate-200">
+                      {device.status === "online"
+                        ? t.online
+                        : device.status === "offline"
+                          ? t.offline
+                          : t.maintenance}
+                    </span>
+                  </div>,
+                ]}
+              />
             );
           })}
         </div>

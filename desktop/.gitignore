@@ -1,3 +1,6 @@
 node_modules/
 dist/
 *.log
+staged-web/
+.snapshot-player-ui-userdata/
+.verify-player-chrome-userdata/

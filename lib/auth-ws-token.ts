@@ -1,31 +1,73 @@
 /**
- * Node-only WS token utilities. Uses Node crypto.
- * For API routes and WS server only. NOT for Edge/middleware.
+ * Node-only signed tokens for WS REGISTER and desktop HTTP API.
+ * Uses Node crypto. For API routes and WS server only. NOT for Edge/middleware.
+ *
+ * Purposes:
+ * - `ws_register` — short-lived (60s), minted by GET /api/auth/ws-token (browser session).
+ * - `desktop_access` — longer-lived, minted by POST /api/auth/desktop/token (Electron email/password).
  */
 
 import { createHmac } from "crypto";
 
-const WS_TOKEN_PURPOSE = "ws_register";
+const PURPOSE_WS_REGISTER = "ws_register";
+const PURPOSE_DESKTOP_ACCESS = "desktop_access";
 
-/** Create short-lived token for WS REGISTER. Server verifies with verifyWsToken. */
-export function createWsToken(userId: string): string {
+/** Default desktop token TTL (seconds). Override with SYNCBIZ_DESKTOP_TOKEN_TTL_SEC. */
+const DEFAULT_DESKTOP_TTL_SEC = 60 * 60 * 24 * 7; // 7 days
+/** Hard cap on desktop token lifetime (seconds). */
+const MAX_DESKTOP_TTL_SEC = 60 * 60 * 24 * 30; // 30 days
+
+function getSecret(): string {
   const secret = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
   if (!secret || secret.length < 16) {
     throw new Error("SYNCBIZ_WS_SECRET or WS_SECRET required (min 16 chars)");
   }
+  return secret;
+}
+
+function signPayload(payloadB64: string): string {
+  return createHmac("sha256", getSecret()).update(payloadB64).digest("base64url");
+}
+
+function mintToken(
+  userId: string,
+  purpose: typeof PURPOSE_WS_REGISTER | typeof PURPOSE_DESKTOP_ACCESS,
+  ttlSec: number,
+): string {
   const now = Math.floor(Date.now() / 1000);
   const payload = {
-    purpose: WS_TOKEN_PURPOSE,
+    purpose,
     userId: userId.trim(),
     iat: now,
-    exp: now + 60,
+    exp: now + ttlSec,
   };
   const payloadB64 = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
-  const sig = createHmac("sha256", secret).update(payloadB64).digest("base64url");
+  const sig = signPayload(payloadB64);
   return `${payloadB64}.${sig}`;
 }
 
-/** Verify WS token. Returns userId or null. */
+/** Create short-lived token for WS REGISTER. Minted by GET /api/auth/ws-token. */
+export function createWsToken(userId: string): string {
+  return mintToken(userId, PURPOSE_WS_REGISTER, 60);
+}
+
+/**
+ * Long-lived token for Electron desktop HTTP + WS (same secret as ws_register).
+ * Minted by POST /api/auth/desktop/token.
+ */
+export function getDesktopTokenTtlSeconds(): number {
+  const raw = Number(process.env.SYNCBIZ_DESKTOP_TOKEN_TTL_SEC);
+  return Number.isFinite(raw) && raw > 60 && raw <= MAX_DESKTOP_TTL_SEC ? Math.floor(raw) : DEFAULT_DESKTOP_TTL_SEC;
+}
+
+export function createDesktopAccessToken(userId: string): string {
+  return mintToken(userId, PURPOSE_DESKTOP_ACCESS, getDesktopTokenTtlSeconds());
+}
+
+/**
+ * Verify signed token for WS server and HTTP Bearer. Accepts `ws_register` or `desktop_access`.
+ * Returns userId or null.
+ */
 export function verifyWsToken(token: string): string | null {
   const secret = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
   if (!secret || secret.length < 16) return null;
@@ -41,10 +83,21 @@ export function verifyWsToken(token: string): string | null {
   } catch {
     return null;
   }
-  if (payload.purpose !== WS_TOKEN_PURPOSE) return null;
   const now = Math.floor(Date.now() / 1000);
   if (typeof payload.exp !== "number" || payload.exp < now) return null;
-  if (typeof payload.iat !== "number" || payload.iat > now + 60) return null;
+  if (typeof payload.iat !== "number" || payload.iat > now + 300) return null;
+
   const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
-  return userId.length > 0 ? userId : null;
+  if (!userId) return null;
+
+  if (payload.purpose === PURPOSE_WS_REGISTER) {
+    if (payload.exp > now + 120) return null;
+    return userId;
+  }
+  if (payload.purpose === PURPOSE_DESKTOP_ACCESS) {
+    if (payload.exp - payload.iat > MAX_DESKTOP_TTL_SEC) return null;
+    if (payload.exp > now + MAX_DESKTOP_TTL_SEC) return null;
+    return userId;
+  }
+  return null;
 }

@@ -6,6 +6,7 @@
 
 import { cookies } from "next/headers";
 import { parseSessionValue } from "@/lib/auth-session";
+import { verifyWsToken } from "@/lib/auth-ws-token";
 import {
   getUserByEmail,
   getOrCreateUserByEmail,
@@ -51,6 +52,26 @@ export async function getCurrentUserFromCookies(): Promise<User | null> {
   }
   logIdentity("session_resolve", { result: "no_user", email });
   return null;
+}
+
+/**
+ * For API route handlers: session cookie first, then `Authorization: Bearer <ws-token>`
+ * (same JWT as WS REGISTER from GET /api/auth/ws-token). Enables Electron desktop HTTP calls.
+ */
+export async function getCurrentUserFromApiRequest(request: Request): Promise<User | null> {
+  const fromCookie = await getCurrentUserFromCookies();
+  if (fromCookie) return fromCookie;
+  const auth = request.headers.get("authorization");
+  if (!auth?.toLowerCase().startsWith("bearer ")) return null;
+  const token = auth.slice(7).trim();
+  if (!token) return null;
+  const userId = verifyWsToken(token);
+  if (!userId) return null;
+  const user = await getUserById(userId);
+  if (user) {
+    logIdentity("session_resolve", { result: "user", userId: user.id, via: "bearer_ws_token" });
+  }
+  return user;
 }
 
 /**

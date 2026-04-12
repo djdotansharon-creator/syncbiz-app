@@ -387,6 +387,11 @@ type PlaybackContextValue = PlaybackState & {
   play: () => void;
   pause: () => void;
   stop: () => void;
+  /**
+   * Clears this tab’s queue/embeds like `stop()` but does not POST `/api/commands/stop-local`.
+   * Used when this tab becomes branch CONTROL so a co-located MASTER’s OS/shell playback is not killed.
+   */
+  stopForControlHandoff: () => void;
   prev: () => void;
   next: (opts?: { skipPlay?: boolean; auditTransportCase?: "ended_auto" } | unknown) => void;
   setVolume: (value: number) => void;
@@ -1118,6 +1123,22 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }));
   }, [stopAllBeforePlay]);
 
+  const stopForControlHandoff = useCallback(() => {
+    try {
+      stopAllPlayersRef.current?.();
+    } catch {
+      /* ignore */
+    }
+    setState((s) => ({
+      ...s,
+      status: "stopped" as const,
+      currentSource: null,
+      currentPlaylist: null,
+      currentTrackIndex: 0,
+      queueIndex: -1,
+    }));
+  }, []);
+
   const getShuffledIndex = useCallback((len: number, current: number): number => {
     if (len <= 1) return 0;
     let next = Math.floor(Math.random() * len);
@@ -1727,6 +1748,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       play,
       pause,
       stop,
+      stopForControlHandoff,
       prev,
       next,
       setVolume,
@@ -1755,6 +1777,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       play,
       pause,
       stop,
+      stopForControlHandoff,
       prev,
       next,
       setVolume,

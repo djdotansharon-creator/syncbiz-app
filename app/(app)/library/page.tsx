@@ -108,6 +108,7 @@ export default function LibraryPage() {
               onRemove={handleRemove}
               isFavorite={favoriteIds.includes(source.id)}
               onToggleFavorite={() => toggleFavorite(source.id)}
+              libraryTilePresentation="branch"
             />
           ))}
         </div>

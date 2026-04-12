@@ -12,6 +12,7 @@ import { RadioIcon } from "@/components/ui/radio-icon";
 import { useTranslations } from "@/lib/locale-context";
 import type { UnifiedSource, RadioStream } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
+import type { ApiContentScope } from "@/lib/content-scope-filters";
 
 type Props = {
   sources: UnifiedSource[];
@@ -25,6 +26,10 @@ type Props = {
   isControllerMode?: boolean;
   /** When set, edit links include return param for redirect after save (e.g. /mobile). */
   editReturnTo?: string;
+  /**
+   * Branch catalog (default) vs OWNER personal bank. Personal scope disables radio discover/add here.
+   */
+  unifiedContentScope?: ApiContentScope;
 };
 
 export function MobileSearchBar({
@@ -36,6 +41,7 @@ export function MobileSearchBar({
   placeholder = "Search library or discover playlists…",
   isControllerMode = false,
   editReturnTo,
+  unifiedContentScope = "branch",
 }: Props) {
   const { t } = useTranslations();
   const [query, setQuery] = useState("");
@@ -68,7 +74,7 @@ export function MobileSearchBar({
       if (queryRef.current === q) {
         setInternalResults(internal);
         setYoutubeResults(external.youtube);
-        setRadioResults(external.radio);
+        setRadioResults(unifiedContentScope === "owner_personal" ? [] : external.radio);
       }
     } catch {
       if (queryRef.current === q) {
@@ -79,7 +85,7 @@ export function MobileSearchBar({
     } finally {
       setSearching(false);
     }
-  }, [query, sources]);
+  }, [query, sources, unifiedContentScope]);
 
   useEffect(() => {
     if (!hasQuery) {
@@ -110,14 +116,20 @@ export function MobileSearchBar({
       const genre = inferGenre(r.title, query);
       const playable =
         r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
-      const created = await createPlaylistFromUrl(playable, {
-        title: r.title,
-        genre,
-        cover: r.cover,
-        type: r.type,
-        viewCount: r.viewCount,
-        durationSeconds: r.durationSeconds,
-      });
+      const created = await createPlaylistFromUrl(
+        playable,
+        {
+          title: r.title,
+          genre,
+          cover: r.cover,
+          type: r.type,
+          viewCount: r.viewCount,
+          durationSeconds: r.durationSeconds,
+        },
+        unifiedContentScope === "owner_personal"
+          ? { playlistOwnershipScope: "owner_personal" }
+          : undefined
+      );
       if (created) {
         savePlaylistToLocal(created);
         const unified: UnifiedSource = {
@@ -135,7 +147,7 @@ export function MobileSearchBar({
         setShowResults(false);
       }
     },
-    [query, onAdd]
+    [query, onAdd, unifiedContentScope]
   );
 
   const handlePlayYoutube = useCallback(
@@ -174,14 +186,20 @@ export function MobileSearchBar({
           setQuery("");
           setShowResults(false);
 
-          const created = await createPlaylistFromUrl(playable, {
-            title: r.title,
-            genre,
-            cover: r.cover,
-            type: r.type,
-            viewCount: r.viewCount,
-            durationSeconds: r.durationSeconds,
-          });
+          const created = await createPlaylistFromUrl(
+            playable,
+            {
+              title: r.title,
+              genre,
+              cover: r.cover,
+              type: r.type,
+              viewCount: r.viewCount,
+              durationSeconds: r.durationSeconds,
+            },
+            unifiedContentScope === "owner_personal"
+              ? { playlistOwnershipScope: "owner_personal" }
+              : undefined
+          );
           if (created) {
             savePlaylistToLocal(created);
             const real: UnifiedSource = {
@@ -205,7 +223,7 @@ export function MobileSearchBar({
         }
       })();
     },
-    [query, onAdd, onPlay, onReplaceSource]
+    [query, onAdd, onPlay, onReplaceSource, unifiedContentScope]
   );
 
   const handleSendYoutube = useCallback(
@@ -213,14 +231,20 @@ export function MobileSearchBar({
       const genre = inferGenre(r.title, query);
       const playable =
         r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
-      const created = await createPlaylistFromUrl(playable, {
-        title: r.title,
-        genre,
-        cover: r.cover,
-        type: r.type,
-        viewCount: r.viewCount,
-        durationSeconds: r.durationSeconds,
-      });
+      const created = await createPlaylistFromUrl(
+        playable,
+        {
+          title: r.title,
+          genre,
+          cover: r.cover,
+          type: r.type,
+          viewCount: r.viewCount,
+          durationSeconds: r.durationSeconds,
+        },
+        unifiedContentScope === "owner_personal"
+          ? { playlistOwnershipScope: "owner_personal" }
+          : undefined
+      );
       if (created) {
         savePlaylistToLocal(created);
         const u: UnifiedSource = {
@@ -239,11 +263,12 @@ export function MobileSearchBar({
         setShowResults(false);
       }
     },
-    [query, onAdd, onSendToPlayer]
+    [query, onAdd, onSendToPlayer, unifiedContentScope]
   );
 
   const handleAddRadio = useCallback(
     async (r: RadioSearchResult) => {
+      if (unifiedContentScope === "owner_personal") return;
       const res = await fetch("/api/radio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -263,11 +288,12 @@ export function MobileSearchBar({
         setShowResults(false);
       }
     },
-    [onAdd]
+    [onAdd, unifiedContentScope]
   );
 
   const handlePlayRadio = useCallback(
     (r: RadioSearchResult) => {
+      if (unifiedContentScope === "owner_personal") return;
       const key = `radio:${r.url}`;
       if (playInFlightRef.current.has(key)) return;
       playInFlightRef.current.add(key);
@@ -313,7 +339,7 @@ export function MobileSearchBar({
           playInFlightRef.current.delete(key);
         });
     },
-    [onAdd, onPlay, onReplaceSource]
+    [onAdd, onPlay, onReplaceSource, unifiedContentScope]
   );
 
   const handleCopyUrl = useCallback((url: string) => {

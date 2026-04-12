@@ -82,6 +82,11 @@ export type Playlist = {
   /** Alias for thumbnail; used in JSON storage format. */
   cover?: string;
   createdAt: string;
+  /**
+   * Branch-shared playlists vs OWNER-only personal bank (mobile personal player).
+   * Omitted/undefined = branch catalog (existing behavior).
+   */
+  playlistOwnershipScope?: "branch" | "owner_personal";
   /** Branch ownership. Legacy records may lack this; resolved as "default". */
   branchId?: string;
   /** Workspace/account ownership. */

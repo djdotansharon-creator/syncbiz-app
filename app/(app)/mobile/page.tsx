@@ -10,6 +10,9 @@ import { MobileSourceCardLocal } from "@/components/mobile-source-card-local";
 import { StationControllerProvider, useStationController } from "@/lib/station-controller-context";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
+import { resolveMobileUnifiedScope } from "@/lib/content-scope-resolution";
+import type { ApiContentScope } from "@/lib/content-scope-filters";
+import type { AccessType } from "@/lib/user-types";
 import { usePlayback } from "@/lib/playback-provider";
 import type { UnifiedSource } from "@/lib/source-types";
 
@@ -81,7 +84,7 @@ function MobileControllerContent() {
     setLoading(true);
     setError(null);
     try {
-      const items = await fetchUnifiedSourcesWithFallback();
+      const items = await fetchUnifiedSourcesWithFallback({ scope: "branch" });
       const playlists = items.filter((s) => s.origin === "playlist");
       setSources(items);
       setQueue(playlists);
@@ -192,6 +195,7 @@ function MobilePlayerContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [section, setSection] = useState<MobilePlayerSection>("library");
+  const [contentScope, setContentScope] = useState<ApiContentScope>("branch");
   const { setQueue, playSource, queue, replaceSource } = usePlayback();
   const handleAddSource = useHandleAddSource(setSources, setQueue, queue);
 
@@ -207,7 +211,13 @@ function MobilePlayerContent() {
     setLoading(true);
     setError(null);
     try {
-      const items = await fetchUnifiedSourcesWithFallback();
+      const me = await fetch("/api/auth/me", { credentials: "include" }).then((r) => r.json());
+      const accessType = (me?.accessType === "OWNER" || me?.accessType === "BRANCH_USER"
+        ? me.accessType
+        : "BRANCH_USER") as AccessType;
+      const scope = resolveMobileUnifiedScope(accessType, "player");
+      setContentScope(scope);
+      const items = await fetchUnifiedSourcesWithFallback({ scope });
       const forQueue = items.filter((s) => s.origin === "playlist" || s.origin === "radio");
       setSources(items);
       setQueue(forQueue);
@@ -257,6 +267,7 @@ function MobilePlayerContent() {
           placeholder="Search library or discover playlists…"
           isControllerMode={false}
           editReturnTo="/mobile"
+          unifiedContentScope={contentScope}
         />
       </section>
 

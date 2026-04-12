@@ -17,6 +17,10 @@ import {
   libraryCardShouldShowMetaRow,
   type UnifiedSource,
 } from "@/lib/source-types";
+import { BranchLibraryBrowseCard } from "@/components/player-surface/branch-library-browse-card";
+import { LibraryBrowseCardSurface } from "@/components/player-surface/library-browse-card-surface";
+import { unifiedSourceToBranchLibraryListItem } from "@/lib/player-surface/unified-to-branch-library-item";
+import "@/components/player-surface/library-browse-card-surface.css";
 
 export type LibraryItemDeleteContext =
   | { kind: "all_library" }
@@ -62,6 +66,11 @@ type Props = {
   leafUnifiedBar?: boolean;
   /** Opens add-to-playlist picker (required when `leafUnifiedBar`). */
   onAddToPlaylistPress?: () => void;
+  /**
+   * `rich` = full web tile (custom art, view counts, duration pills).
+   * `branch` = shared `BranchLibraryBrowseCard` shell (same structure as desktop branch library grid).
+   */
+  libraryTilePresentation?: "rich" | "branch";
 };
 
 function unifiedSourceHasPersistedLibraryEntity(s: UnifiedSource): boolean {
@@ -161,6 +170,7 @@ export function SourceCard({
   expandedTrackInMainLibrary = false,
   leafUnifiedBar = false,
   onAddToPlaylistPress,
+  libraryTilePresentation = "rich",
 }: Props) {
   const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -233,6 +243,49 @@ export function SourceCard({
     onPlaylistEntityPlay();
   }
 
+  const branchListItem =
+    libraryTilePresentation === "branch" ? unifiedSourceToBranchLibraryListItem(source) : null;
+  const useBranchTileShell = libraryTilePresentation === "branch" && branchListItem != null;
+
+  const titleAsideNode = (
+    <>
+      {onToggleFavorite && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite();
+          }}
+          className={`rounded-md p-0.5 transition-colors duration-200 hover:bg-[color:var(--lib-surface-card-hover)] ${isFavorite ? "text-amber-400" : "text-[color:var(--lib-text-secondary)] hover:text-amber-400/80"}`}
+          title={isFavorite ? t.removeFromFavorites : t.addToFavorites}
+          aria-label={isFavorite ? t.removeFromFavorites : t.addToFavorites}
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill={isFavorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+          </svg>
+        </button>
+      )}
+      <SourceLogo type={source.type} origin={source.origin} size="md" />
+    </>
+  );
+
+  const sourceActions = (
+    <LibrarySourceItemActions
+      source={source}
+      onPlay={() => playSourceFn(source)}
+      isActive={active}
+      onStop={stopFn}
+      onPause={pauseFn}
+      libraryDeckChrome={libraryDeckChrome}
+      onShareOpen={() => setShareOpen(true)}
+      onDeletePress={() => setDeleteOpen(true)}
+      actionLayout={leafUnifiedBar ? "leaf" : "default"}
+      onAddToPlaylistPress={leafUnifiedBar ? onAddToPlaylistPress : undefined}
+      onAddToLibrary={leafUnifiedBar ? undefined : onAddToLibrary}
+      inLibrary={leafUnifiedBar ? false : expandedTrackInMainLibrary}
+    />
+  );
+
   return (
     <>
     <article
@@ -244,116 +297,104 @@ export function SourceCard({
         active ? "library-playing-active" : ""
       } ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
     >
-      <div className="library-card-art-bg relative aspect-[4/3] w-full overflow-hidden">
-        {cardCover ? (
-          <>
-            <HydrationSafeImage src={cardCover} alt="" className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]" />
-            <div className="library-card-art-overlay pointer-events-none absolute inset-0" aria-hidden />
-            {source.origin === "radio" && (
-              <span className="library-live-badge absolute right-2 top-2 rounded-md px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-lg backdrop-blur-sm">
-                {t.live}
-              </span>
-            )}
-            {durationSec > 0 && (
-              <span className="library-pill-overlay library-pill-overlay-soft absolute bottom-2 right-2 rounded-md px-2 py-0.5 text-[10px] font-medium tabular-nums shadow-lg backdrop-blur-md">
-                {formatDuration(durationSec)}
-              </span>
-            )}
-          </>
-        ) : null}
-        {hasInvalidUrl && (
-          <div
-            className="absolute top-2 left-2 flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/90 text-slate-900"
-            title={t.invalidStreamUrlTitle}
-          >
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              <line x1="12" y1="9" x2="12" y2="13" />
-            </svg>
-          </div>
-        )}
-        {!cardCover && useExplicitPlaylistArt && (
-          <div className="relative h-full w-full">
-            <PlaylistCardArtFallback className="h-full w-full" />
-            {durationSec > 0 && (
-              <span className="library-pill-overlay library-pill-overlay-soft absolute bottom-2 right-2 rounded-md px-2 py-0.5 text-[10px] font-medium tabular-nums backdrop-blur-md">
-                {formatDuration(durationSec)}
-              </span>
-            )}
-          </div>
-        )}
-        {!cardCover && !useExplicitPlaylistArt && (
-          <div className="library-card-placeholder-bg relative flex h-full w-full items-center justify-center">
-            <svg className="h-14 w-14 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M9 18V5l12-2v13" />
-              <circle cx="6" cy="18" r="3" />
-              <circle cx="18" cy="16" r="3" />
-            </svg>
-            {durationSec > 0 && (
-              <span className="library-pill-overlay library-pill-overlay-soft absolute bottom-2 right-2 rounded-md px-2 py-0.5 text-[10px] font-medium tabular-nums backdrop-blur-md">
-                {formatDuration(durationSec)}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
-      <div className="library-card-footer flex min-w-0 flex-1 flex-col gap-2 p-3.5">
-        <div className="flex items-start justify-between gap-2">
-          <h3 className="library-card-title min-w-0 flex-1 truncate text-[15px] font-semibold leading-snug tracking-tight">
-            {source.title}
-          </h3>
-          <div className="flex items-center gap-1">
-            {onToggleFavorite && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
-                className={`rounded-md p-0.5 transition-colors duration-200 hover:bg-[color:var(--lib-surface-card-hover)] ${isFavorite ? "text-amber-400" : "text-[color:var(--lib-text-secondary)] hover:text-amber-400/80"}`}
-                title={isFavorite ? t.removeFromFavorites : t.addToFavorites}
-                aria-label={isFavorite ? t.removeFromFavorites : t.addToFavorites}
-              >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill={isFavorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
-                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                </svg>
-              </button>
-            )}
-            <SourceLogo type={source.type} origin={source.origin} size="md" />
-          </div>
-        </div>
-        {showMetaRow && (
-          <div className="flex flex-col gap-1">
-            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-              <p className="library-card-meta text-[10px] font-semibold uppercase tracking-[0.14em]">
-                {libraryCardDisplayGenre(source)}
-              </p>
-              <div className="library-card-meta ml-auto flex items-center gap-2 text-[11px] tabular-nums">
-                {effectiveViews != null && (
-                  <span>
-                    {formatViewCount(effectiveViews)} {t.views}
+      {useBranchTileShell ? (
+        <BranchLibraryBrowseCard
+          interaction="embeddedDiv"
+          item={branchListItem!}
+          selected={active}
+          className="min-h-0 flex-1 flex flex-col"
+          titleAside={titleAsideNode}
+        >
+          {sourceActions}
+        </BranchLibraryBrowseCard>
+      ) : (
+      <LibraryBrowseCardSurface
+        as="div"
+        className="min-h-0 flex-1 flex flex-col"
+        artSlot={
+          <div className="library-card-art-bg relative aspect-[4/3] w-full overflow-hidden">
+            {cardCover ? (
+              <>
+                <HydrationSafeImage src={cardCover} alt="" className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]" />
+                <div className="library-card-art-overlay pointer-events-none absolute inset-0" aria-hidden />
+                {source.origin === "radio" && (
+                  <span className="library-live-badge absolute right-2 top-2 rounded-md px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-lg backdrop-blur-sm">
+                    {t.live}
                   </span>
                 )}
-                {effectiveViews != null && durationSec > 0 && !cardCover && (
-                  <span className="library-card-meta-muted">•</span>
+                {durationSec > 0 && (
+                  <span className="library-pill-overlay library-pill-overlay-soft absolute bottom-2 right-2 rounded-md px-2 py-0.5 text-[10px] font-medium tabular-nums shadow-lg backdrop-blur-md">
+                    {formatDuration(durationSec)}
+                  </span>
                 )}
-                {durationSec > 0 && !cardCover && <span>{formatDuration(durationSec)}</span>}
+              </>
+            ) : null}
+            {hasInvalidUrl && (
+              <div
+                className="absolute top-2 left-2 flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/90 text-slate-900"
+                title={t.invalidStreamUrlTitle}
+              >
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                </svg>
+              </div>
+            )}
+            {!cardCover && useExplicitPlaylistArt && (
+              <div className="relative h-full w-full">
+                <PlaylistCardArtFallback className="h-full w-full" />
+                {durationSec > 0 && (
+                  <span className="library-pill-overlay library-pill-overlay-soft absolute bottom-2 right-2 rounded-md px-2 py-0.5 text-[10px] font-medium tabular-nums backdrop-blur-md">
+                    {formatDuration(durationSec)}
+                  </span>
+                )}
+              </div>
+            )}
+            {!cardCover && !useExplicitPlaylistArt && (
+              <div className="library-card-placeholder-bg relative flex h-full w-full items-center justify-center">
+                <svg className="h-14 w-14 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M9 18V5l12-2v13" />
+                  <circle cx="6" cy="18" r="3" />
+                  <circle cx="18" cy="16" r="3" />
+                </svg>
+                {durationSec > 0 && (
+                  <span className="library-pill-overlay library-pill-overlay-soft absolute bottom-2 right-2 rounded-md px-2 py-0.5 text-[10px] font-medium tabular-nums backdrop-blur-md">
+                    {formatDuration(durationSec)}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        }
+        title={source.title}
+        metaLine=""
+        metaSlot={
+          showMetaRow ? (
+            <div className="flex flex-col gap-1">
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                <p className="library-card-meta text-[10px] font-semibold uppercase tracking-[0.14em]">
+                  {libraryCardDisplayGenre(source)}
+                </p>
+                <div className="library-card-meta ml-auto flex items-center gap-2 text-[11px] tabular-nums">
+                  {effectiveViews != null && (
+                    <span>
+                      {formatViewCount(effectiveViews)} {t.views}
+                    </span>
+                  )}
+                  {effectiveViews != null && durationSec > 0 && !cardCover && (
+                    <span className="library-card-meta-muted">•</span>
+                  )}
+                  {durationSec > 0 && !cardCover && <span>{formatDuration(durationSec)}</span>}
+                </div>
               </div>
             </div>
-          </div>
-        )}
-        <LibrarySourceItemActions
-          source={source}
-          onPlay={() => playSourceFn(source)}
-          isActive={active}
-          onStop={stopFn}
-          onPause={pauseFn}
-          libraryDeckChrome={libraryDeckChrome}
-          onShareOpen={() => setShareOpen(true)}
-          onDeletePress={() => setDeleteOpen(true)}
-          actionLayout={leafUnifiedBar ? "leaf" : "default"}
-          onAddToPlaylistPress={leafUnifiedBar ? onAddToPlaylistPress : undefined}
-          onAddToLibrary={leafUnifiedBar ? undefined : onAddToLibrary}
-          inLibrary={leafUnifiedBar ? false : expandedTrackInMainLibrary}
-        />
-      </div>
+          ) : undefined
+        }
+        titleAside={titleAsideNode}
+      >
+        {sourceActions}
+      </LibraryBrowseCardSurface>
+      )}
       {shareOpen ? (
         <ShareModal
           item={unifiedSourceToShareable(source)}

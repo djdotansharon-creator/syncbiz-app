@@ -1,0 +1,216 @@
+/* Shared fixed playback dock — prefix sb-pds- */
+
+.sb-pds-root {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+  pointer-events: none;
+}
+
+.sb-pds-empty-inner {
+  pointer-events: auto;
+  border-radius: 1rem;
+  border: 1px solid rgba(51, 65, 85, 0.6);
+  background: rgba(15, 23, 42, 0.8);
+  padding: 1rem 1.5rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: #64748b;
+}
+
+.sb-pds-card {
+  pointer-events: auto;
+  display: flex;
+  width: 100%;
+  max-width: 48rem;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(51, 65, 85, 0.6);
+  background: rgba(15, 23, 42, 0.8);
+  padding: 1rem 1.5rem;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+    0 4px 24px rgba(0, 0, 0, 0.5),
+    0 0 1px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(24px);
+}
+
+/* Desktop / Electron: slim “now playing” strip — controls are in the in-card deck row above. */
+.sb-pds-card--readout {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.75rem 1.25rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.75rem;
+}
+
+.sb-pds-readout-kicker {
+  margin: 0;
+  flex-shrink: 0;
+  font-size: 0.625rem;
+  line-height: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.sb-pds-card--readout .sb-pds-now {
+  flex: 1 1 12rem;
+  min-width: 0;
+  text-align: left;
+}
+
+.sb-pds-now {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+
+.sb-pds-title {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  color: #e2e8f0;
+}
+
+.sb-pds-sub {
+  margin: 0.15rem 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: #64748b;
+}
+
+.sb-pds-transport {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sb-pds-btn {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 0.75rem;
+  padding: 0;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.sb-pds-btn:focus-visible {
+  outline: 2px solid rgba(148, 163, 184, 0.4);
+  outline-offset: 2px;
+}
+
+.sb-pds-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.sb-pds-btn-sec {
+  height: 3rem;
+  width: 3rem;
+  border: 1px solid rgba(71, 85, 105, 0.85);
+  background: linear-gradient(to bottom, rgba(71, 85, 105, 0.2), rgba(15, 23, 42, 0.95));
+  color: #cbd5e1;
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
+    0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.sb-pds-btn-sec:hover:not(:disabled) {
+  border-color: #64748b;
+  color: #f1f5f9;
+}
+
+.sb-pds-btn-play {
+  height: 4rem;
+  width: 4rem;
+  border: 1px solid rgba(29, 185, 84, 0.5);
+  background: linear-gradient(to bottom, rgba(30, 215, 96, 0.35), rgba(29, 185, 84, 0.25));
+  color: #1ed760;
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.12) inset,
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    0 0 32px rgba(30, 215, 96, 0.25);
+}
+
+.sb-pds-btn-play:hover:not(:disabled) {
+  border-color: rgba(30, 215, 96, 0.7);
+  color: #fff;
+}
+
+.sb-pds-ico {
+  display: block;
+}
+
+.sb-pds-ico-sm {
+  height: 1.5rem;
+  width: 1.5rem;
+}
+
+.sb-pds-ico-lg {
+  margin-left: 0.125rem;
+  height: 2rem;
+  width: 2rem;
+}
+
+.sb-pds-vol {
+  display: flex;
+  width: 100%;
+  max-width: 20rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sb-pds-vol-ico {
+  flex-shrink: 0;
+  height: 1.25rem;
+  width: 1.25rem;
+  color: #94a3b8;
+}
+
+.sb-pds-range {
+  height: 0.5rem;
+  flex: 1;
+  appearance: none;
+  border-radius: 9999px;
+  background: rgba(51, 65, 85, 0.8);
+  accent-color: #1db954;
+}
+
+.sb-pds-range:focus {
+  outline: none;
+}
+
+.sb-pds-vol-num {
+  width: 2rem;
+  text-align: right;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #94a3b8;
+}

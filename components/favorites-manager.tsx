@@ -14,8 +14,11 @@ import { RadioIcon } from "@/components/ui/radio-icon";
 import { SourcesPlaybackProvider, useSourcesPlayback } from "@/lib/sources-playback-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { SourceCard } from "@/components/source-card-unified";
+import { LibraryBrowseRowSurface } from "@/components/player-surface/library-browse-row-surface";
+import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { getFavorites, removeFavorite as removeFav } from "@/lib/favorites-store";
 import type { UnifiedSource } from "@/lib/source-types";
+import { libraryTilePresentationForUnifiedSource } from "@/lib/player-surface/library-tile-presentation";
 
 type ViewMode = "grid" | "list";
 
@@ -186,6 +189,7 @@ function FavoritesManagerInner({
               onRemove={handleRemove}
               isFavorite
               onToggleFavorite={() => { toggleFavorite(source.id); refresh(); }}
+              libraryTilePresentation={libraryTilePresentationForUnifiedSource(source)}
             />
           ))}
         </div>
@@ -222,35 +226,40 @@ function FavoritesSourceRow({
   const [shareOpen, setShareOpen] = useState(false);
   const active = currentSource?.id === source.id;
 
-  return (
-    <div
-      className={`flex items-center gap-4 rounded-xl px-4 py-3 transition-all hover:bg-slate-900/40 ${
-        active ? "playing-active bg-slate-900/60" : ""
-      }`}
-    >
-      {/* Image left */}
-      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-800">
-        {source.cover ? (
-          <img src={source.cover} alt="" className="h-full w-full object-cover" />
+  const thumbInner =
+    source.cover ? (
+      <HydrationSafeImage src={source.cover} alt="" className="h-full w-full object-cover" />
+    ) : (
+      <div
+        className={`flex h-full w-full items-center justify-center ${
+          source.origin === "radio" ? "text-rose-400/70" : "text-slate-500"
+        }`}
+      >
+        {source.origin === "radio" ? (
+          <RadioIcon className="h-7 w-7" />
         ) : (
-          <div className={`flex h-full w-full items-center justify-center ${source.origin === "radio" ? "text-rose-400/70" : "text-slate-500"}`}>
-            {source.origin === "radio" ? (
-              <RadioIcon className="h-7 w-7" />
-            ) : (
-              <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M9 18V5l12-2v13" />
-                <circle cx="6" cy="18" r="3" />
-                <circle cx="18" cy="16" r="3" />
-              </svg>
-            )}
-          </div>
+          <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
+          </svg>
         )}
       </div>
-      {/* Details opposite image */}
-      <div className="min-w-0 flex-1 flex items-center gap-3">
+    );
+
+  return (
+    <LibraryBrowseRowSurface
+      variant="favorites"
+      active={active}
+      controlsGroupAriaLabel={t.sourceControlsAria}
+      thumbSlot={thumbInner}
+      leadingSlot={
         <button
           type="button"
-          onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite();
+          }}
           className={`shrink-0 rounded-lg p-1 transition-colors hover:bg-slate-700/60 ${isFavorite ? "text-amber-400" : "text-slate-500"}`}
           title={t.removeFromFavorites}
           aria-label={t.removeFromFavorites}
@@ -259,68 +268,66 @@ function FavoritesSourceRow({
             <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
           </svg>
         </button>
-        <span className="truncate font-medium text-slate-100">{source.title}</span>
-        {source.genre && <span className="text-xs text-slate-500">{source.genre}</span>}
-      </div>
-      {/* Spacer to center controls */}
-      <div className="flex-1 min-w-0" />
-      {/* Controls centered */}
-      <div className="flex flex-nowrap items-center gap-2 shrink-0">
-        {shareOpen && (
-          <ShareModal
-            item={unifiedSourceToShareable(source)}
-            fallbackPlaylistId={source.origin === "playlist" ? source.id : undefined}
-            fallbackRadioId={source.origin === "radio" && source.radio ? source.radio.id : undefined}
-            onClose={() => setShareOpen(false)}
-          />
-        )}
-        {active ? (
-          <>
-            <NeonControlButton size="sm" onClick={stop} title="Stop" aria-label="Stop">
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M6 6h12v12H6z" />
-              </svg>
-            </NeonControlButton>
-            <NeonControlButton size="md" onClick={() => playSource(source)} active title="Play" aria-label="Play">
+      }
+      titleSlot={<span className="truncate font-medium text-slate-100">{source.title}</span>}
+      metaSlot={source.genre ? <span className="text-xs text-slate-500">{source.genre}</span> : undefined}
+      controlsSlot={
+        <>
+          {shareOpen ? (
+            <ShareModal
+              item={unifiedSourceToShareable(source)}
+              fallbackPlaylistId={source.origin === "playlist" ? source.id : undefined}
+              fallbackRadioId={source.origin === "radio" && source.radio ? source.radio.id : undefined}
+              onClose={() => setShareOpen(false)}
+            />
+          ) : null}
+          {active ? (
+            <>
+              <NeonControlButton size="sm" onClick={stop} title="Stop" aria-label="Stop">
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 6h12v12H6z" />
+                </svg>
+              </NeonControlButton>
+              <NeonControlButton size="md" onClick={() => playSource(source)} active title="Play" aria-label="Play">
+                <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7L8 5z" />
+                </svg>
+              </NeonControlButton>
+              <NeonControlButton size="sm" onClick={pause} active title="Pause" aria-label="Pause">
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                </svg>
+              </NeonControlButton>
+            </>
+          ) : (
+            <NeonControlButton size="md" onClick={() => playSource(source)} title="Play" aria-label="Play">
               <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7L8 5z" />
               </svg>
             </NeonControlButton>
-            <NeonControlButton size="sm" onClick={pause} active title="Pause" aria-label="Pause">
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-              </svg>
-            </NeonControlButton>
-          </>
-        ) : (
-          <NeonControlButton size="md" onClick={() => playSource(source)} title="Play" aria-label="Play">
-            <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M8 5v14l11-7L8 5z" />
+          )}
+          {source.origin === "playlist" && source.playlist ? (
+            <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
+          ) : null}
+          {source.origin === "radio" && source.radio ? (
+            <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
+          ) : null}
+          {source.origin === "source" && source.source ? (
+            <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
+          ) : null}
+          <NeonControlButton size="sm" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share}>
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
             </svg>
           </NeonControlButton>
-        )}
-        {source.origin === "playlist" && source.playlist && (
-          <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
-        )}
-        {source.origin === "radio" && source.radio && (
-          <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
-        )}
-        {source.origin === "source" && source.source && (
-          <ActionButtonEdit href={`/sources/${source.source.id}/edit`} variant="player" title="Edit" aria-label="Edit" />
-        )}
-        <NeonControlButton size="sm" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share}>
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="18" cy="5" r="3" />
-            <circle cx="6" cy="12" r="3" />
-            <circle cx="18" cy="19" r="3" />
-            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-          </svg>
-        </NeonControlButton>
-        <FavoritesRowDeleteButton source={source} onRemove={onRemove} />
-      </div>
-      <div className="flex-1 min-w-0" />
-    </div>
+          <FavoritesRowDeleteButton source={source} onRemove={onRemove} />
+        </>
+      }
+    />
   );
 }
 

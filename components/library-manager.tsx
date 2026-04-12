@@ -10,6 +10,8 @@ import { AddPlaylistForm } from "@/components/add-playlist-form";
 import { SharePlaylistModal } from "@/components/share-playlist-modal";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { DenseDataRowSurface } from "@/components/player-surface/dense-data-row-surface";
+import { DENSE_LIBRARY_ITEM_ROW_GRID_CLASS } from "@/lib/player-surface/dense-data-row-constants";
 
 type ViewMode = "grid" | "list";
 
@@ -164,63 +166,60 @@ function LibraryItemRow({ item, index }: { item: LibraryItem; index: number }) {
   const genre = isPlaylist(item) ? item.data.genre : null;
 
   return (
-    <div
-      className={`grid grid-cols-[auto,1fr,auto] gap-4 items-center px-4 py-3 hover:bg-slate-900/40 ${
-        active ? "bg-slate-900/60 ring-1 ring-[#1db954]/30" : ""
-      }`}
-    >
-      <div className="relative h-14 w-14 overflow-hidden rounded-lg bg-slate-800">
-        {cover ? (
-          <img src={cover} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <DefaultCover />
-        )}
-        <div className="absolute bottom-0 right-0 p-0.5">
-          <SourceIcon type={iconType} size="sm" />
-        </div>
-      </div>
-      <div className="min-w-0">
-        <p className="truncate font-medium text-slate-100">{name}</p>
-        {genre && <p className="text-xs text-slate-500">{genre}</p>}
-      </div>
-      <div className="flex items-center gap-2">
-        {active && (
-          <>
-            <button onClick={stop} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800" title="Stop">
-              ■
-            </button>
+    <DenseDataRowSurface
+      gridClassName={DENSE_LIBRARY_ITEM_ROW_GRID_CLASS}
+      className={active ? "bg-slate-900/60 ring-1 ring-[#1db954]/30" : "hover:bg-slate-900/40"}
+      cells={[
+        <div key="thumb" className="relative h-14 w-14 overflow-hidden rounded-lg bg-slate-800">
+          {cover ? (
+            <img src={cover} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <DefaultCover />
+          )}
+          <div className="absolute bottom-0 right-0 p-0.5">
+            <SourceIcon type={iconType} size="sm" />
+          </div>
+        </div>,
+        <div key="meta" className="min-w-0">
+          <p className="truncate font-medium text-slate-100">{name}</p>
+          {genre ? <p className="text-xs text-slate-500">{genre}</p> : null}
+        </div>,
+        <div key="actions" className="flex items-center gap-2">
+          {active ? (
+            <>
+              <button onClick={stop} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800" title="Stop">
+                ■
+              </button>
+              <button onClick={() => playItem(item)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1db954] text-white hover:bg-[#1ed760]">
+                ▶
+              </button>
+              <button onClick={pause} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800" title="Pause">
+                ⏸
+              </button>
+            </>
+          ) : (
             <button onClick={() => playItem(item)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1db954] text-white hover:bg-[#1ed760]">
               ▶
             </button>
-            <button onClick={pause} className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800" title="Pause">
-              ⏸
-            </button>
-          </>
-        )}
-        {!active && (
-          <button onClick={() => playItem(item)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1db954] text-white hover:bg-[#1ed760]">
-            ▶
-          </button>
-        )}
-        {isPlaylist(item) ? (
-          <>
-            <Link href={`/playlists/${item.data.id}/edit`} className="rounded-lg border border-slate-700/80 bg-slate-900/70 px-2 py-1 text-xs text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]">
+          )}
+          {isPlaylist(item) ? (
+            <>
+              <Link href={`/playlists/${item.data.id}/edit`} className="rounded-lg border border-slate-700/80 bg-slate-900/70 px-2 py-1 text-xs text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]">
+                Edit
+              </Link>
+              <button type="button" onClick={() => setShareOpen(true)} className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:bg-slate-800">
+                Share
+              </button>
+              {shareOpen ? <SharePlaylistModal playlist={item.data} onClose={() => setShareOpen(false)} /> : null}
+            </>
+          ) : (
+            <Link href={`/sources/${item.data.id}/edit`} className="rounded-lg border border-slate-700/80 bg-slate-900/70 px-2 py-1 text-xs text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]">
               Edit
             </Link>
-            <button onClick={() => setShareOpen(true)} className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:bg-slate-800">
-              Share
-            </button>
-            {shareOpen && (
-              <SharePlaylistModal playlist={item.data} onClose={() => setShareOpen(false)} />
-            )}
-          </>
-        ) : (
-          <Link href={`/sources/${item.data.id}/edit`} className="rounded-lg border border-slate-700/80 bg-slate-900/70 px-2 py-1 text-xs text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]">
-            Edit
-          </Link>
-        )}
-      </div>
-    </div>
+          )}
+        </div>,
+      ]}
+    />
   );
 }
 

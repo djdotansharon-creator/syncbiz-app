@@ -20,6 +20,10 @@ export type CreatePlaylistFromSearchMeta = {
   durationSeconds?: number;
 };
 
+export type CreatePlaylistFromUrlOptions = {
+  playlistOwnershipScope?: "branch" | "owner_personal";
+};
+
 /** Resolve search/playlist YouTube URLs to a watch URL with `v=` for embed + persistence. */
 export async function resolveYouTubePlayableUrlForSearch(url: string): Promise<string> {
   if (getYouTubeVideoId(url)) return canonicalYouTubeWatchUrlForPlayback(url);
@@ -41,7 +45,8 @@ export async function resolveYouTubePlayableUrlForSearch(url: string): Promise<s
 
 export async function createPlaylistFromUrl(
   url: string,
-  meta?: CreatePlaylistFromSearchMeta
+  meta?: CreatePlaylistFromSearchMeta,
+  options?: CreatePlaylistFromUrlOptions
 ): Promise<Playlist | null> {
   const type = meta?.type || inferPlaylistType(url);
   const cover = meta?.cover || (type === "youtube" ? getYouTubeThumbnail(url) : null);
@@ -57,6 +62,9 @@ export async function createPlaylistFromUrl(
       thumbnail: cover || "",
       viewCount: meta?.viewCount,
       durationSeconds: meta?.durationSeconds,
+      ...(options?.playlistOwnershipScope
+        ? { playlistOwnershipScope: options.playlistOwnershipScope }
+        : {}),
     }),
   });
   if (!res.ok) return null;

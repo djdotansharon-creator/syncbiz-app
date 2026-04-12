@@ -7,6 +7,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ClientMessage, ServerMessage, StationPlaybackState, DeviceMode, DeviceInfo, RemoteCommand, GuestRecommendationPayload, BranchSummary } from "./types";
+import {
+  registrationIntentBranchController,
+  registrationIntentBranchDevice,
+  registrationIntentOwnerGlobal,
+} from "@/lib/syncbiz-device-model";
 
 export function getWsUrl(): string {
   if (typeof window === "undefined") return "";
@@ -68,6 +73,8 @@ export function useRemoteControlWs(
     if (needsReconnect) setReconnectTrigger((k) => k + 1);
   };
 
+  // Device socket must list `options?.authToken` (JWT string) in deps — not `!!token` alone — so when the parent
+  // refetches after WS auth errors, we reconnect; `!!token` stays true and would otherwise skip reconnection.
   useEffect(() => {
     if (role === "device" && !deviceId) return;
     const authToken = options?.authToken?.trim();
@@ -81,7 +88,7 @@ export function useRemoteControlWs(
     const url = getWsUrl();
     if (!url) return;
 
-    const ws = new WebSocket(url);
+    const ws = new globalThis.WebSocket(url);
     wsRef.current = ws;
     setStatus("connecting");
     if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
@@ -93,8 +100,22 @@ export function useRemoteControlWs(
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Opera Mobi|Silk|Mobile/i.test(ua);
       const msg: ClientMessage =
         role === "device"
-          ? { type: "REGISTER", role: "device", authToken, deviceId: deviceId ?? undefined, isMobile, branchId: "default" }
-          : { type: "REGISTER", role: "controller", authToken, branchId: "default" };
+          ? {
+              type: "REGISTER",
+              role: "device",
+              authToken,
+              deviceId: deviceId ?? undefined,
+              isMobile,
+              branchId: "default",
+              registrationIntent: registrationIntentBranchDevice(isMobile),
+            }
+          : {
+              type: "REGISTER",
+              role: "controller",
+              authToken,
+              branchId: "default",
+              registrationIntent: registrationIntentBranchController(isMobile),
+            };
       ws.send(JSON.stringify(msg));
     };
 
@@ -167,7 +188,7 @@ export function useRemoteControlWs(
       setStatus("disconnected");
       setMasterDeviceId(null);
     };
-  }, [role, deviceId, !!options?.authToken, reconnectTrigger]);
+  }, [role, deviceId, options?.authToken, reconnectTrigger]);
 
   /* Device: parent (DevicePlayerProvider) handles token refresh on visibility. Controller: uses useRemoteController. */
 
@@ -330,7 +351,7 @@ export function useRemoteController(options?: {
       return;
     }
 
-    const ws = new WebSocket(url);
+    const ws = new globalThis.WebSocket(url);
     wsRef.current = ws;
     setStatus("connecting");
     if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
@@ -338,7 +359,17 @@ export function useRemoteController(options?: {
     }
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "REGISTER", role: "controller", authToken, branchId: "default" } as ClientMessage));
+      const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Opera Mobi|Silk|Mobile/i.test(ua);
+      ws.send(
+        JSON.stringify({
+          type: "REGISTER",
+          role: "controller",
+          authToken,
+          branchId: "default",
+          registrationIntent: registrationIntentBranchController(isMobile),
+        } as ClientMessage)
+      );
     };
 
     ws.onmessage = (e) => {
@@ -556,7 +587,7 @@ export function useRemoteOwner() {
       return;
     }
 
-    const ws = new WebSocket(url);
+    const ws = new globalThis.WebSocket(url);
     wsRef.current = ws;
     setStatus("connecting");
     if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
@@ -564,7 +595,14 @@ export function useRemoteOwner() {
     }
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "REGISTER", role: "owner_global", authToken } as ClientMessage));
+      ws.send(
+        JSON.stringify({
+          type: "REGISTER",
+          role: "owner_global",
+          authToken,
+          registrationIntent: registrationIntentOwnerGlobal(),
+        } as ClientMessage)
+      );
     };
 
     ws.onmessage = (e) => {

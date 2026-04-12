@@ -1,17 +1,28 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.unifiedPlaylistSourceId = unifiedPlaylistSourceId;
 exports.isEmbeddedPlaylist = isEmbeddedPlaylist;
 exports.canEmbedInCard = canEmbedInCard;
 exports.getSpotifyId = getSpotifyId;
 exports.getYouTubeVideoId = getYouTubeVideoId;
+exports.canonicalYouTubeWatchUrlForPlayback = canonicalYouTubeWatchUrlForPlayback;
 exports.getYouTubePlaylistId = getYouTubePlaylistId;
 exports.isYouTubeMixUrl = isYouTubeMixUrl;
 exports.getYouTubeSourceKind = getYouTubeSourceKind;
 exports.isYouTubeMultiTrackUrl = isYouTubeMultiTrackUrl;
+exports.effectivePlaybackPlaylistAttachment = effectivePlaybackPlaylistAttachment;
 exports.getYouTubeThumbnail = getYouTubeThumbnail;
 exports.isShazamUrl = isShazamUrl;
 exports.extractShazamSongFromPath = extractShazamSongFromPath;
 exports.inferPlaylistType = inferPlaylistType;
+/**
+ * UnifiedSource / queue ids for playlists: stored `Playlist.id` is already `pl-*`.
+ * Do not prefix again — `pl-${playlist.id}` would yield `pl-pl-...` and breaks lookups.
+ */
+function unifiedPlaylistSourceId(playlistId) {
+    const id = (playlistId ?? "").trim();
+    return id.startsWith("pl-") ? id : `pl-${id}`;
+}
 /** Map playlist type to embedded player support (opens in /player page). */
 function isEmbeddedPlaylist(type) {
     return type === "youtube" || type === "soundcloud" || type === "stream-url";
@@ -36,6 +47,19 @@ function getYouTubeVideoId(url) {
         return m[1];
     m = u.match(/youtube\.com\/live\/([^/?\s]+)/i);
     return m ? m[1] : null;
+}
+/**
+ * Single-video watch URL for SyncBiz playback/embed — strips provider-native continuation
+ * (list=, start_radio=, radio mixes, etc.). Import/resolve may still use full URLs; the player must not.
+ */
+function canonicalYouTubeWatchUrlForPlayback(url) {
+    const vid = getYouTubeVideoId(url);
+    if (!vid)
+        return url;
+    const u = url.trim().toLowerCase();
+    if (!u.includes("youtube.com") && !u.includes("youtu.be"))
+        return url;
+    return `https://www.youtube.com/watch?v=${vid}`;
 }
 /** Get YouTube playlist ID from URL (e.g. list=RDxxx, list=PLxxx). */
 function getYouTubePlaylistId(url) {
@@ -68,6 +92,26 @@ function getYouTubeSourceKind(url) {
 /** True if URL is a YouTube multi-track source (playlist, radio, mix). */
 function isYouTubeMultiTrackUrl(url) {
     return getYouTubeSourceKind(url) === "multi";
+}
+/**
+ * For library `origin: "source"` rows, attached `playlist` metadata must not drive in-app
+ * multi-track sessions (next/prev over tracks) when the URL is a playlist/list context —
+ * that would nest unbounded playlist expansion inside another playlist/schedule.
+ * Real playlist entities use `origin: "playlist"`.
+ */
+function effectivePlaybackPlaylistAttachment(source) {
+    if (!source?.playlist)
+        return null;
+    if (source.origin === "playlist")
+        return source.playlist;
+    const url = source.url ?? "";
+    if (String(source.type) === "playlist_url")
+        return null;
+    if (/youtube\.com\/playlist/i.test(url))
+        return null;
+    if (isYouTubeMultiTrackUrl(url))
+        return null;
+    return source.playlist;
 }
 /** Build YouTube thumbnail URL. */
 function getYouTubeThumbnail(url) {

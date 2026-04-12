@@ -1,3 +1,8 @@
+import { DenseDataRowSurface } from "@/components/player-surface/dense-data-row-surface";
+import {
+  DENSE_ADMIN_ANNOUNCEMENTS_TABLE_HEADER_CLASS,
+  DENSE_ADMIN_ANNOUNCEMENTS_TABLE_ROW_GRID_CLASS,
+} from "@/lib/player-surface/dense-data-row-constants";
 import { getApiBase } from "@/lib/api-base";
 import type { Announcement } from "@/lib/types";
 
@@ -30,7 +35,7 @@ export default async function AnnouncementsPage() {
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/50">
-        <div className="grid grid-cols-[1.4fr,1.2fr,0.8fr] gap-4 border-b border-slate-800/80 px-4 py-3 text-xs font-medium uppercase tracking-wider text-slate-500">
+        <div className={DENSE_ADMIN_ANNOUNCEMENTS_TABLE_HEADER_CLASS}>
           <div>Announcement</div>
           <div>Window</div>
           <div>Status</div>
@@ -40,53 +45,55 @@ export default async function AnnouncementsPage() {
             const start = new Date(a.windowStart);
             const end = new Date(a.windowEnd);
             return (
-              <div
+              <DenseDataRowSurface
                 key={a.id}
-                className="grid grid-cols-[1.4fr,1.2fr,0.8fr] gap-4 px-4 py-3 text-sm transition hover:bg-slate-900/40"
-              >
-                <div>
-                  <p className="font-medium text-slate-100">{a.title}</p>
-                  <p className="line-clamp-2 text-xs text-slate-500">
-                    {a.message}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {a.ttsEnabled ? "TTS" : "Pre-recorded"} ·{" "}
-                    <span className="capitalize">{a.priority}</span>
-                    {a.resumePreviousSource && (
-                      <> · <span className="text-sky-400/90">Resume previous</span></>
-                    )}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-slate-200">
-                    {start.toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    })}{" "}
-                    {start.toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}{" "}
-                    –{" "}
-                    {end.toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`h-2 w-2 rounded-full ${
-                      a.status === "draft"
-                        ? "bg-slate-500"
-                        : a.status === "scheduled"
-                          ? "bg-amber-400"
-                          : "bg-emerald-400"
-                    }`}
-                  />
-                  <span className="capitalize text-slate-200">{a.status}</span>
-                </div>
-              </div>
+                gridClassName={DENSE_ADMIN_ANNOUNCEMENTS_TABLE_ROW_GRID_CLASS}
+                cells={[
+                  <div key="ann">
+                    <p className="font-medium text-slate-100">{a.title}</p>
+                    <p className="line-clamp-2 text-xs text-slate-500">{a.message}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {a.ttsEnabled ? "TTS" : "Pre-recorded"} ·{" "}
+                      <span className="capitalize">{a.priority}</span>
+                      {a.resumePreviousSource ? (
+                        <>
+                          {" "}
+                          · <span className="text-sky-400/90">Resume previous</span>
+                        </>
+                      ) : null}
+                    </p>
+                  </div>,
+                  <div key="window">
+                    <p className="text-slate-200">
+                      {start.toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                      })}{" "}
+                      {start.toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}{" "}
+                      –{" "}
+                      {end.toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </p>
+                  </div>,
+                  <div key="status" className="flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        a.status === "draft"
+                          ? "bg-slate-500"
+                          : a.status === "scheduled"
+                            ? "bg-amber-400"
+                            : "bg-emerald-400"
+                      }`}
+                    />
+                    <span className="capitalize text-slate-200">{a.status}</span>
+                  </div>,
+                ]}
+              />
             );
           })}
         </div>

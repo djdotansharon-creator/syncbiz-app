@@ -5,6 +5,7 @@
 
 import type { UnifiedSourceFoundation } from "@/lib/source-types";
 import type { PlaybackEngineType } from "@/lib/types";
+import type { SyncBizRegistrationIntent } from "@/lib/syncbiz-device-model";
 
 export type RemoteCommand =
   | "PLAY"
@@ -82,6 +83,8 @@ export type DeviceInfo = {
   mode?: DeviceMode;
   branchId?: string;
   deviceType?: DeviceType;
+  /** Client REGISTER hint (sanitized server-side). Controllers are not listed here. */
+  registrationIntent?: SyncBizRegistrationIntent;
 };
 
 /** Branch summary for owner – branches with connected MASTER */
@@ -107,7 +110,17 @@ export type GuestRecommendationPayload = {
 
 /** Message from client to server */
 export type ClientMessage =
-  | { type: "REGISTER"; role: ClientRole; authToken: string; deviceId?: string; isMobile?: boolean; branchId?: string; deviceType?: DeviceType }
+  | {
+      type: "REGISTER";
+      role: ClientRole;
+      authToken: string;
+      deviceId?: string;
+      isMobile?: boolean;
+      branchId?: string;
+      deviceType?: DeviceType;
+      /** Optional client taxonomy for routing/analytics; ignored for auth. */
+      registrationIntent?: SyncBizRegistrationIntent;
+    }
   | { type: "BRANCH_LIST_REQUEST" }
   | { type: "COMMAND"; targetDeviceId?: string; targetBranchId?: string; command: RemoteCommand; payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number } }
   | { type: "STATE_UPDATE"; state: StationPlaybackState }

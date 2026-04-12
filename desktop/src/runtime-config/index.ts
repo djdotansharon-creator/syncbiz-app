@@ -1,7 +1,7 @@
 /**
- * Local storage / config / logs / cache boundaries (future).
- * Phase 1 skeleton: no paths or persistence implementation.
+ * Local storage / config — MVP persistence implemented in main via `runtime-config-service.ts`.
  * @see docs/PLAYER-DESKTOP-INTERNAL-STRUCTURE-v1.md (§7)
  */
 
-export const RUNTIME_CONFIG_BOUNDARY = "runtime-config" as const;
+export type { DesktopRuntimeConfig, MvpConfigPatch } from "../shared/mvp-types";
+export { RUNTIME_CONFIG_BOUNDARY } from "./constants";

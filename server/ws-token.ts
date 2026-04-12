@@ -1,11 +1,12 @@
 /**
- * WS token verification. Shared logic with lib/auth.ts.
- * Server uses this to avoid Next.js module resolution issues.
+ * WS token verification — keep logic aligned with `lib/auth-ws-token.ts` `verifyWsToken`.
  */
 
 import { createHmac } from "crypto";
 
-const WS_TOKEN_PURPOSE = "ws_register";
+const PURPOSE_WS_REGISTER = "ws_register";
+const PURPOSE_DESKTOP_ACCESS = "desktop_access";
+const MAX_DESKTOP_TTL_SEC = 60 * 60 * 24 * 30;
 
 export function verifyWsToken(token: string): string | null {
   const secret = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
@@ -22,10 +23,21 @@ export function verifyWsToken(token: string): string | null {
   } catch {
     return null;
   }
-  if (payload.purpose !== WS_TOKEN_PURPOSE) return null;
   const now = Math.floor(Date.now() / 1000);
   if (typeof payload.exp !== "number" || payload.exp < now) return null;
-  if (typeof payload.iat !== "number" || payload.iat > now + 60) return null;
+  if (typeof payload.iat !== "number" || payload.iat > now + 300) return null;
+
   const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
-  return userId.length > 0 ? userId : null;
+  if (!userId) return null;
+
+  if (payload.purpose === PURPOSE_WS_REGISTER) {
+    if (payload.exp > now + 120) return null;
+    return userId;
+  }
+  if (payload.purpose === PURPOSE_DESKTOP_ACCESS) {
+    if (payload.exp - payload.iat > MAX_DESKTOP_TTL_SEC) return null;
+    if (payload.exp > now + MAX_DESKTOP_TTL_SEC) return null;
+    return userId;
+  }
+  return null;
 }

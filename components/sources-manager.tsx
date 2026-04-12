@@ -14,6 +14,7 @@ import { SourcesPlaybackProvider, useSourcesPlayback } from "@/lib/sources-playb
 import { usePlayback } from "@/lib/playback-provider";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { SourceCard, type LibraryItemDeleteContext } from "@/components/source-card-unified";
+import { LibraryBrowseRowSurface } from "@/components/player-surface/library-browse-row-surface";
 import { LibraryItemContextDeleteModal } from "@/components/library-item-context-delete-modal";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { LibrarySourceItemActions } from "@/components/library-source-item-actions";
@@ -44,9 +45,6 @@ import {
 } from "@/lib/syncbiz-playlist-queue";
 import {
   classifyLibraryEntityContract,
-  libraryCardDisplayGenre,
-  libraryCardEffectiveViewCount,
-  libraryCardShouldShowMetaRow,
   type LibraryCollectionSubtype,
   type UnifiedSource,
   unifiedFoundationHints,
@@ -71,6 +69,7 @@ import {
   LIBRARY_PLAYLIST_TILE_SIDE_ACTION_CLUSTER_CLASS,
   LIBRARY_SIDE_ACTION_ICON_BTN_CLASS,
 } from "@/lib/library-side-action-styles";
+import { libraryTilePresentationForUnifiedSource } from "@/lib/player-surface/library-tile-presentation";
 
 /** Left-rail section headers (Ready Playlists / Playlist Tiles) — shared visual language for shell actions. */
 const LIBRARY_RAIL_SHELL_ACTION_BTN_CLASS =
@@ -2489,22 +2488,28 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                     </div>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
                       {sourceDetailItems.map((item) => (
-                        <CenterGridLibraryItemCard
+                        <div
                           key={`source-item:${item.id}`}
-                          item={item}
-                          itemDeleteContext={getItemDeleteContext(item)}
-                          onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [item])}
-                          playSourceOverride={playSourceOverride}
-                          playSource={playSource}
-                          stopOverride={stopOverride}
-                          pauseOverride={pauseOverride}
-                          stop={stop}
-                          pause={pause}
-                          isActive={isMaster ? false : masterState?.currentSource?.id === item.id}
-                          onDeleteFromLibrary={deleteLibraryItem}
-                          libraryDeleteEligible={libraryRowEligibleForLibraryDelete(item, displaySources)}
-                          onAddToPlaylistPress={() => setAddToPlaylistLeaf(item)}
-                        />
+                          className="w-full max-w-[320px] [&>article]:h-full [&>article]:min-h-[340px] [&>article]:overflow-hidden"
+                        >
+                          <SourceCard
+                            source={item}
+                            onRemove={() => {}}
+                            draggable
+                            onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [item])}
+                            onPlaySource={(s) => (playSourceOverride ?? playSource)(s)}
+                            onStop={stopOverride}
+                            onPause={pauseOverride}
+                            isActive={isMaster ? false : masterState?.currentSource?.id === item.id}
+                            libraryDeckChrome
+                            itemDeleteContext={getItemDeleteContext(item)}
+                            libraryTilePresentation="rich"
+                            leafUnifiedBar
+                            onAddToPlaylistPress={() => setAddToPlaylistLeaf(item)}
+                            onLibraryDelete={deleteLibraryItem}
+                            libraryDeleteEligible={libraryRowEligibleForLibraryDelete(item, displaySources)}
+                          />
+                        </div>
                       ))}
                     </div>
                   </section>
@@ -2521,12 +2526,15 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                       </div>
                       <div className="library-list-shell divide-y divide-[color:var(--lib-border-muted)] overflow-hidden rounded-2xl backdrop-blur-sm">
                         {compositeScheduleBlocks.map((b) => (
-                          <div
+                          <LibraryBrowseRowSurface
                             key={`contrib:${b.id}`}
-                            className="group/row flex w-full min-w-0 items-start gap-4 px-4 py-3.5 transition-[background,box-shadow] duration-200 ease-out library-row-hover"
-                          >
-                            <div className="library-thumb-frame relative h-14 w-14 shrink-0 overflow-hidden rounded-xl ring-1 ring-[color:var(--lib-border-thumb)]">
-                              {b.kind === "playlist" ? (
+                            variant="library"
+                            active={false}
+                            controlsGroupAriaLabel={t.sourceControlsAria}
+                            rowProps={{ className: "w-full min-w-0" }}
+                            controlsWrapperProps={{ className: "pt-0.5" }}
+                            thumbSlot={
+                              b.kind === "playlist" ? (
                                 <LibraryPlaylistCoverFallback className="h-full w-full" />
                               ) : (
                                 <div className="flex h-full w-full items-center justify-center bg-[color:var(--lib-surface-card-art)] text-[color:var(--lib-text-secondary)]">
@@ -2535,12 +2543,14 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                                     <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                                   </svg>
                                 </div>
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1 flex flex-col gap-0.5 pr-2">
+                              )
+                            }
+                            titleSlot={
                               <span className="library-text-title font-medium tracking-tight leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
                                 {b.label}
                               </span>
+                            }
+                            metaSlot={
                               <div className="library-card-meta flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
                                 <span>{compositeContributorSourceLabel(b)}</span>
                                 <span className="text-[color:var(--lib-text-faint)]">•</span>
@@ -2548,8 +2558,8 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                                   {b.trackIds.length} {b.trackIds.length === 1 ? "URL" : "URLs"}
                                 </span>
                               </div>
-                            </div>
-                            <div className="library-row-controls shrink-0 pt-0.5">
+                            }
+                            controlsSlot={
                               <button
                                 type="button"
                                 className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
@@ -2569,8 +2579,8 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                                   <line x1="14" y1="11" x2="14" y2="17" />
                                 </svg>
                               </button>
-                            </div>
-                          </div>
+                            }
+                          />
                         ))}
                       </div>
                     </section>
@@ -2586,23 +2596,28 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                     </div>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start">
                       {visibleSources.map((item) => (
-                        <CenterGridLibraryItemCard
+                        <div
                           key={`playlist-item:${item.id}`}
-                          item={item}
-                          itemDeleteContext={getItemDeleteContext(item)}
-                          onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [item])}
-                          playSourceOverride={playSourceOverride}
-                          playSource={playSource}
-                          onPlayItem={playSyncbizPlaylistExpandedItem}
-                          stopOverride={stopOverride}
-                          pauseOverride={pauseOverride}
-                          stop={stop}
-                          pause={pause}
-                          isActive={isMaster ? false : masterState?.currentSource?.id === item.id}
-                          onDeleteFromLibrary={deleteLibraryItem}
-                          libraryDeleteEligible={libraryRowEligibleForLibraryDelete(item, displaySources)}
-                          onAddToPlaylistPress={() => setAddToPlaylistLeaf(item)}
-                        />
+                          className="w-full max-w-[320px] [&>article]:h-full [&>article]:min-h-[340px] [&>article]:overflow-hidden"
+                        >
+                          <SourceCard
+                            source={item}
+                            onRemove={() => {}}
+                            draggable
+                            onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [item])}
+                            onPlaySource={playSyncbizPlaylistExpandedItem}
+                            onStop={stopOverride}
+                            onPause={pauseOverride}
+                            isActive={isMaster ? false : masterState?.currentSource?.id === item.id}
+                            libraryDeckChrome
+                            itemDeleteContext={getItemDeleteContext(item)}
+                            libraryTilePresentation="rich"
+                            leafUnifiedBar
+                            onAddToPlaylistPress={() => setAddToPlaylistLeaf(item)}
+                            onLibraryDelete={deleteLibraryItem}
+                            libraryDeleteEligible={libraryRowEligibleForLibraryDelete(item, displaySources)}
+                          />
+                        </div>
                       ))}
                     </div>
                   </section>
@@ -2626,6 +2641,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                         {sectionItems.map((source) => {
                           const pe = getPlaylistEntitySubtypeKey(source);
                           const leafBar = isLeafLibraryUnifiedCard(source, selection);
+                          const libraryPresentation = libraryTilePresentationForUnifiedSource(source);
                           return (
                           <div key={source.id} className="w-full max-w-[320px] [&>article]:h-full [&>article]:min-h-[340px] [&>article]:overflow-hidden">
                             <SourceCard
@@ -2650,8 +2666,9 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                               isActive={isMaster ? undefined : masterState?.currentSource?.id === source.id}
                               libraryDeckChrome
                               itemDeleteContext={getItemDeleteContext(source)}
+                              libraryTilePresentation={libraryPresentation}
                               explicitArtUrl={
-                                isUserSyncbizPlaylistSource(source)
+                                libraryPresentation === "rich"
                                   ? deriveSyncbizPlaylistCover(
                                       source,
                                       playlistItemAssignments[`syncbiz:${source.id}`] ?? [],
@@ -2679,6 +2696,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                         {sectionItems.map((source) => {
                           const pe = getPlaylistEntitySubtypeKey(source);
                           const leafBar = isLeafLibraryUnifiedCard(source, selection);
+                          const libraryPresentation = libraryTilePresentationForUnifiedSource(source);
                           return (
                           <SourceRow
                             key={source.id}
@@ -2704,7 +2722,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                             onDeleteFromLibrary={deleteLibraryItem}
                             libraryDeleteEligible={libraryRowEligibleForLibraryDelete(source, displaySources)}
                             explicitArtUrl={
-                              isUserSyncbizPlaylistSource(source)
+                              libraryPresentation === "rich"
                                 ? deriveSyncbizPlaylistCover(
                                     source,
                                     playlistItemAssignments[`syncbiz:${source.id}`] ?? [],
@@ -3039,133 +3057,6 @@ function LibraryPlaylistCoverFallback({ className }: { className?: string }) {
   );
 }
 
-type CenterGridLibraryItemCardProps = {
-  item: UnifiedSource;
-  itemDeleteContext: LibraryItemDeleteContext;
-  onDragStart: (e: DragEvent) => void;
-  playSourceOverride?: (s: UnifiedSource) => void;
-  playSource: (s: UnifiedSource) => void;
-  /** When set (e.g. expanded Your Playlist items), replaces default play — must set full queue + play for correct next/prev order. */
-  onPlayItem?: (item: UnifiedSource) => void;
-  stopOverride?: () => void;
-  pauseOverride?: () => void;
-  stop: () => void;
-  pause: () => void;
-  isActive: boolean;
-  onDeleteFromLibrary: (item: UnifiedSource) => Promise<void>;
-  libraryDeleteEligible: boolean;
-  onAddToPlaylistPress: () => void;
-};
-
-function CenterGridLibraryItemCard({
-  item,
-  itemDeleteContext,
-  onDragStart,
-  playSourceOverride,
-  playSource,
-  onPlayItem,
-  stopOverride,
-  pauseOverride,
-  stop,
-  pause,
-  isActive,
-  onDeleteFromLibrary,
-  libraryDeleteEligible,
-  onAddToPlaylistPress,
-}: CenterGridLibraryItemCardProps) {
-  const { t } = useTranslations();
-  const [shareOpen, setShareOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const playFn = playSourceOverride ?? playSource;
-  const handlePlay = () => (onPlayItem ? onPlayItem(item) : playFn(item));
-  const stopFn = stopOverride ?? stop;
-  const pauseFn = pauseOverride ?? pause;
-  const canDel = libraryDeleteEligible;
-  const showDeleteControl = canDel || itemDeleteContext.kind === "in_playlist";
-  const durationSec = item.playlist?.durationSeconds ?? 0;
-  const hasCoverArt = Boolean(item.cover);
-  const effectiveViews = libraryCardEffectiveViewCount(item);
-  const showMetaRow = libraryCardShouldShowMetaRow(item, durationSec, hasCoverArt);
-
-  async function handleDeleteLibrary() {
-    setDeleting(true);
-    try {
-      await onDeleteFromLibrary(item);
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  return (
-    <>
-      <div
-        draggable
-        onDragStart={onDragStart}
-        className="library-source-card flex h-[252px] w-full max-w-[320px] cursor-grab flex-col overflow-hidden rounded-2xl p-3 active:cursor-grabbing"
-      >
-        <div className="aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg bg-[color:var(--lib-surface-card-art)]">
-          {item.cover ? <HydrationSafeImage src={item.cover} alt="" className="h-full w-full object-cover" /> : null}
-        </div>
-        <div className="min-h-0 flex-1">
-          <p className="library-card-title mt-2 text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
-            {item.title}
-          </p>
-          {showMetaRow ? (
-            <div className="mt-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-              <p className="library-card-meta min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.14em]">
-                {libraryCardDisplayGenre(item)}
-              </p>
-              <div className="library-card-meta flex shrink-0 items-center gap-2 text-[11px] tabular-nums">
-                {effectiveViews != null && (
-                  <span>
-                    {formatViewCount(effectiveViews)} {t.views}
-                  </span>
-                )}
-                {effectiveViews != null && durationSec > 0 && !hasCoverArt && (
-                  <span className="library-card-meta-muted">•</span>
-                )}
-                {durationSec > 0 && !hasCoverArt && <span>{formatDuration(durationSec)}</span>}
-              </div>
-            </div>
-          ) : null}
-        </div>
-        <LibrarySourceItemActions
-          source={item}
-          onPlay={handlePlay}
-          isActive={isActive}
-          onStop={stopFn}
-          onPause={pauseFn}
-          libraryDeckChrome
-          compact
-          actionLayout="leaf"
-          onAddToPlaylistPress={onAddToPlaylistPress}
-          onShareOpen={() => setShareOpen(true)}
-          onDeletePress={() => setDeleteOpen(true)}
-          showLibraryDelete={showDeleteControl}
-        />
-      </div>
-      {shareOpen ? (
-        <ShareModal
-          item={unifiedSourceToShareable(item)}
-          fallbackPlaylistId={item.origin === "playlist" ? item.id : undefined}
-          fallbackRadioId={item.origin === "radio" && item.radio ? item.radio.id : undefined}
-          onClose={() => setShareOpen(false)}
-        />
-      ) : null}
-      <LibraryItemContextDeleteModal
-        isOpen={deleteOpen}
-        onClose={() => setDeleteOpen(false)}
-        variant={itemDeleteContext.kind === "in_playlist" ? "in_playlist" : "all_library"}
-        onRemoveFromPlaylist={itemDeleteContext.kind === "in_playlist" ? itemDeleteContext.onRemoveFromPlaylist : undefined}
-        onDeleteFromLibrary={handleDeleteLibrary}
-        loading={deleting}
-        showDeleteFromLibrary={libraryDeleteEligible}
-      />
-    </>
-  );
-}
-
 function SourceRow({
   source,
   isFavorite,
@@ -3270,76 +3161,86 @@ function SourceRow({
     onDragStart?.(e);
   }
 
+  const thumbInner = (
+    <>
+      {thumbCover ? (
+        <HydrationSafeImage src={thumbCover} alt="" className="h-full w-full object-cover" />
+      ) : useExplicitPlaylistArt ? (
+        <LibraryPlaylistCoverFallback className="h-full w-full" />
+      ) : (
+        <div
+          className={`flex h-full w-full items-center justify-center ${
+            source.origin === "radio" ? "text-rose-400/70" : "text-[color:var(--lib-text-secondary)]"
+          }`}
+        >
+          {source.origin === "radio" ? (
+            <RadioIcon className="h-7 w-7" />
+          ) : (
+            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M9 18V5l12-2v13" />
+              <circle cx="6" cy="18" r="3" />
+              <circle cx="18" cy="16" r="3" />
+            </svg>
+          )}
+        </div>
+      )}
+      <div className="absolute bottom-0 right-0 p-0.5">
+        <SourceLogo type={source.type} origin={source.origin} size="sm" />
+      </div>
+    </>
+  );
+
   return (
     <>
-    <div
+    <LibraryBrowseRowSurface
+      active={active}
       draggable={draggable}
-      onDragStart={draggable ? handleRowDragStart : onDragStart}
-      onPointerDownCapture={(e) => {
-        if (!draggable) return;
-        const t = e.target as HTMLElement | null;
-        if (!t?.closest?.(".library-row-controls")) return;
-        const top = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
-        const hitBtn = t.closest("button");
-        const topBtn = top?.closest("button") ?? null;
-        if (process.env.NODE_ENV !== "production") {
-          console.log("[SYNC_AUDIT] list-row pointerdown CAPTURE (inside .library-row-controls)", {
-            eventTargetTag: t.tagName,
-            elementFromPointTag: top?.tagName ?? null,
-            hitButton: !!hitBtn,
-            topMatchesHitButton: !!(hitBtn && topBtn === hitBtn),
-          });
-        }
-      }}
-      onClick={
-        onPlaylistEntityOpen
+      controlsGroupAriaLabel={t.sourceControlsAria}
+      rowProps={{
+        draggable,
+        onDragStart: draggable ? handleRowDragStart : onDragStart,
+        onPointerDownCapture: (e) => {
+          if (!draggable) return;
+          const tgt = e.target as HTMLElement | null;
+          if (!tgt?.closest?.(".library-row-controls")) return;
+          const top = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+          const hitBtn = tgt.closest("button");
+          const topBtn = top?.closest("button") ?? null;
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[SYNC_AUDIT] list-row pointerdown CAPTURE (inside .library-row-controls)", {
+              eventTargetTag: tgt.tagName,
+              elementFromPointTag: top?.tagName ?? null,
+              hitButton: !!hitBtn,
+              topMatchesHitButton: !!(hitBtn && topBtn === hitBtn),
+            });
+          }
+        },
+        onClick: onPlaylistEntityOpen
           ? (e) => {
-              const t = e.target as HTMLElement | null;
+              const tgt = e.target as HTMLElement | null;
               if (process.env.NODE_ENV !== "production") {
                 console.log("[SYNC_AUDIT] list-row click BUBBLE", {
-                  tag: t?.tagName,
-                  inControls: !!t?.closest?.(".library-row-controls"),
+                  tag: tgt?.tagName,
+                  inControls: !!tgt?.closest?.(".library-row-controls"),
                 });
               }
               handleRowClickForOpen();
             }
-          : undefined
-      }
-      onDoubleClick={onPlaylistEntityPlay ? handleRowDoubleClickPlay : undefined}
-      className={`group/row flex items-start gap-4 px-4 py-3.5 transition-[background,box-shadow] duration-200 ease-out ${
-        active ? "library-playing-row library-row-active-bg" : "library-row-hover"
-      } ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
-    >
-      {/* Image left */}
-      <div className="library-thumb-frame relative h-14 w-14 shrink-0 overflow-hidden rounded-xl ring-1 ring-[color:var(--lib-border-thumb)]">
-        {thumbCover ? (
-          <HydrationSafeImage src={thumbCover} alt="" className="h-full w-full object-cover" />
-        ) : useExplicitPlaylistArt ? (
-          <LibraryPlaylistCoverFallback className="h-full w-full" />
-        ) : (
-          <div className={`flex h-full w-full items-center justify-center ${source.origin === "radio" ? "text-rose-400/70" : "text-[color:var(--lib-text-secondary)]"}`}>
-            {source.origin === "radio" ? (
-              <RadioIcon className="h-7 w-7" />
-            ) : (
-              <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M9 18V5l12-2v13" />
-                <circle cx="6" cy="18" r="3" />
-                <circle cx="18" cy="16" r="3" />
-              </svg>
-            )}
-          </div>
-        )}
-        <div className="absolute bottom-0 right-0 p-0.5">
-          <SourceLogo type={source.type} origin={source.origin} size="sm" />
-        </div>
-      </div>
-      {/* Details opposite image */}
-      <div className="min-w-0 flex-1 flex items-start gap-3">
-        {onToggleFavorite && (
+          : undefined,
+        onDoubleClick: onPlaylistEntityPlay ? handleRowDoubleClickPlay : undefined,
+      }}
+      thumbSlot={thumbInner}
+      leadingSlot={
+        onToggleFavorite ? (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
-            className={`shrink-0 rounded-lg p-1 transition-colors hover:bg-[color:var(--lib-surface-row-hover)] ${isFavorite ? "text-amber-400" : "text-[color:var(--lib-text-secondary)] hover:text-amber-400/80"}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite();
+            }}
+            className={`shrink-0 rounded-lg p-1 transition-colors hover:bg-[color:var(--lib-surface-row-hover)] ${
+              isFavorite ? "text-amber-400" : "text-[color:var(--lib-text-secondary)] hover:text-amber-400/80"
+            }`}
             title={isFavorite ? t.removeFromFavorites : t.addToFavorites}
             aria-label={isFavorite ? t.removeFromFavorites : t.addToFavorites}
           >
@@ -3347,48 +3248,50 @@ function SourceRow({
               <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
             </svg>
           </button>
-        )}
-        <div className="min-w-0 flex flex-col gap-0.5 pr-2">
-          <span className="library-text-title font-medium tracking-tight leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">{source.title}</span>
-          <div className="library-card-meta flex items-center gap-1.5 text-xs">
-            {source.genre && <span>{source.genre}</span>}
-            {(source.viewCount ?? source.playlist?.viewCount) != null && (
-              <>
-                {source.genre && <span>•</span>}
-                <span className="tabular-nums">{formatViewCount(source.viewCount ?? source.playlist?.viewCount ?? 0)} {t.views}</span>
-              </>
-            )}
-            {(source.playlist?.durationSeconds ?? 0) > 0 && (
-              <>
-                <span>•</span>
-                <span className="tabular-nums">{formatDuration(source.playlist?.durationSeconds ?? 0)}</span>
-              </>
-            )}
-          </div>
+        ) : undefined
+      }
+      titleSlot={
+        <span className="library-text-title font-medium tracking-tight leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
+          {source.title}
+        </span>
+      }
+      metaSlot={
+        <div className="library-card-meta flex items-center gap-1.5 text-xs">
+          {source.genre && <span>{source.genre}</span>}
+          {(source.viewCount ?? source.playlist?.viewCount) != null && (
+            <>
+              {source.genre && <span>•</span>}
+              <span className="tabular-nums">
+                {formatViewCount(source.viewCount ?? source.playlist?.viewCount ?? 0)} {t.views}
+              </span>
+            </>
+          )}
+          {(source.playlist?.durationSeconds ?? 0) > 0 && (
+            <>
+              <span>•</span>
+              <span className="tabular-nums">{formatDuration(source.playlist?.durationSeconds ?? 0)}</span>
+            </>
+          )}
         </div>
-        <SourceLogo type={source.type} origin={source.origin} size="md" />
-      </div>
-      <div
-        className="library-row-controls ml-2 flex flex-nowrap items-center gap-2 shrink-0"
-        role="group"
-        aria-label={t.sourceControlsAria}
-        draggable={false}
-        onPointerDownCapture={(e) => {
+      }
+      titleAsideSlot={<SourceLogo type={source.type} origin={source.origin} size="md" />}
+      controlsWrapperProps={{
+        onPointerDownCapture: (e) => {
           if (process.env.NODE_ENV !== "production") {
             console.log("[SYNC_AUDIT] .library-row-controls pointerdown CAPTURE", {
               targetTag: (e.target as HTMLElement | null)?.tagName,
             });
           }
-        }}
-        onClickCapture={(e) => {
+        },
+        onClickCapture: (e) => {
           if (process.env.NODE_ENV !== "production") {
             console.log("[SYNC_AUDIT] .library-row-controls click CAPTURE", {
               targetTag: (e.target as HTMLElement | null)?.tagName,
             });
           }
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
+        },
+      }}
+      controlsSlot={
         <LibrarySourceItemActions
           source={source}
           onPlay={() => playFn(source)}
@@ -3403,8 +3306,8 @@ function SourceRow({
           onDeletePress={() => setDeleteOpen(true)}
           showLibraryDelete={showDeleteControl}
         />
-      </div>
-    </div>
+      }
+    />
     {shareOpen ? (
       <ShareModal
         item={unifiedSourceToShareable(source)}

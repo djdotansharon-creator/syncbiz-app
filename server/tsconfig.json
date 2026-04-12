@@ -13,5 +13,5 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["*.ts", "../lib/remote-control/types.ts"]
+  "include": ["*.ts", "../lib/remote-control/types.ts", "../lib/syncbiz-device-model.ts"]
 }

@@ -100,6 +100,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const [secondaryDesktopModalOpen, setSecondaryDesktopModalOpen] = useState(false);
   const [pendingGuestRecommendation, setPendingGuestRecommendation] = useState<GuestRecommendationPayload | null>(null);
 
+  /** Dev-only: dedupe console noise — log when branch/guest diagnostic snapshot changes. */
+  const branchDiagSnapshotRef = useRef<string>("");
+
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => r.json())
@@ -165,31 +168,6 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [isActive, authLoaded, userId, tokenRefreshTrigger]);
 
-  /** Proactive token refresh: fetch new token before expiry. Does NOT trigger reconnect. */
-  const PROACTIVE_REFRESH_INTERVAL_MS = 45_000;
-
-  useEffect(() => {
-    if (!isActive || !wsToken || !authLoaded) return;
-    if (process.env.NODE_ENV === "development") {
-      const refreshAt = new Date(Date.now() + PROACTIVE_REFRESH_INTERVAL_MS).toISOString();
-      console.info("[SyncBiz WS client] proactive token refresh scheduled", { role: "device", refreshAt });
-    }
-    const id = setInterval(() => {
-      fetch("/api/auth/ws-token")
-        .then((r) => r.ok ? r.json() : null)
-        .then((data: { token?: string } | null) => {
-          if (data?.token) {
-            setWsToken(data.token);
-            if (process.env.NODE_ENV === "development") {
-              console.info("[SyncBiz WS client] token refreshed (no reconnect)", { role: "device" });
-            }
-          }
-        })
-        .catch(() => {});
-    }, PROACTIVE_REFRESH_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [isActive, authLoaded, wsToken]);
-
   useEffect(() => {
     if (!isActive || typeof document === "undefined" || typeof window === "undefined") return;
     const onVisible = () => {
@@ -212,6 +190,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     play,
     pause,
     stop,
+    stopForControlHandoff,
     next,
     prev,
     playSource,
@@ -317,10 +296,10 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     });
     if (mode === "MASTER") setMasterState(null);
     if (mode === "CONTROL") {
-      console.log("[SyncBiz Audit] CONTROL transition -> stop()");
-      stop();
+      console.log("[SyncBiz Audit] CONTROL transition -> stopForControlHandoff (no stop-local)");
+      stopForControlHandoff();
     }
-  }, [stop]);
+  }, [stopForControlHandoff]);
   const onStateUpdate = useCallback((state: StationPlaybackState) => setMasterState(state), []);
   const onSecondaryDesktop = useCallback(() => setSecondaryDesktopModalOpen(true), []);
   const onGuestRecommendation = useCallback((rec: GuestRecommendationPayload) => setPendingGuestRecommendation(rec), []);
@@ -377,6 +356,65 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const effectiveDeviceMode = status === "connected" ? deviceMode : "MASTER";
 
   const isBranchConnected = isActive && authLoaded && !!effectiveUserId && status === "connected";
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+
+    const branchConnectedBlockers: string[] = [];
+    if (!isActive) branchConnectedBlockers.push("isActive=false");
+    if (!authLoaded) branchConnectedBlockers.push("authLoaded=false");
+    if (!effectiveUserId) branchConnectedBlockers.push("effectiveUserId_empty");
+    if (status !== "connected") branchConnectedBlockers.push(`status=${status}`);
+
+    const guestLinkBlockers: string[] = [];
+    if (!isBranchConnected) guestLinkBlockers.push("isBranchConnected=false");
+    if (!sessionCode) guestLinkBlockers.push("sessionCode=null");
+
+    const snapshot = JSON.stringify({
+      pathname,
+      isBranchConnected,
+      status,
+      sessionCode: sessionCode ?? null,
+      guestLinkPresent: Boolean(guestLink),
+    });
+    if (snapshot === branchDiagSnapshotRef.current) return;
+    branchDiagSnapshotRef.current = snapshot;
+
+    const diag = {
+      pathname,
+      isActive,
+      authLoaded,
+      effectiveUserId: effectiveUserId || null,
+      wsTokenLen: (wsToken ?? "").length,
+      deviceIdPresent: Boolean(deviceId && String(deviceId).trim()),
+      status,
+      sessionCode: sessionCode ?? null,
+      guestLink: guestLink ?? null,
+      isBranchConnected,
+      branchConnectedBlockers,
+      guestLinkBlockers,
+      /** Mirrors `components/device-mode-settings-switch.tsx`: toggle only when `ctx.isBranchConnected`. */
+      settingsMasterControlRenders: isBranchConnected ? "MASTER/CONTROL switch" : "stub: Connect to branch…",
+      /** Mirrors `components/guest-link-button.tsx`: button only when `isBranchConnected && guestLink`. */
+      guestLinkButtonRenders: isBranchConnected && guestLink ? "Guest link visible" : "Guest link hidden",
+    };
+
+    console.info("[SyncBiz branch diagnostics]", diag);
+    if (typeof window !== "undefined") {
+      (window as Window & { __syncbizBranchDiag?: typeof diag }).__syncbizBranchDiag = diag;
+    }
+  }, [
+    pathname,
+    isActive,
+    authLoaded,
+    effectiveUserId,
+    wsToken,
+    deviceId,
+    status,
+    sessionCode,
+    guestLink,
+    isBranchConnected,
+  ]);
 
   useEffect(() => {
     if (isActive) initDeviceId();
