@@ -41,10 +41,8 @@ import type {
   BranchSummary,
   DeviceInfo,
 } from "../lib/remote-control/types.js";
-import syncbizDeviceModel from "../lib/syncbiz-device-model.js";
+import { sanitizeRegistrationIntent } from "../lib/syncbiz-device-model.js";
 import type { SyncBizRegistrationIntent } from "../lib/syncbiz-device-model.js";
-
-const { sanitizeRegistrationIntent } = syncbizDeviceModel;
 import { loadLease, saveLease } from "./master-lease-store.js";
 import { verifyWsToken } from "./ws-token.js";
 

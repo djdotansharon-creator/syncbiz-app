@@ -29,8 +29,7 @@ config({ path: join(__dirname, "..", ".env") });
  */
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
-import syncbizDeviceModel from "../lib/syncbiz-device-model.js";
-const { sanitizeRegistrationIntent } = syncbizDeviceModel;
+import { sanitizeRegistrationIntent } from "../lib/syncbiz-device-model.js";
 import { loadLease, saveLease } from "./master-lease-store.js";
 import { verifyWsToken } from "./ws-token.js";
 const WS_SECRET = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
