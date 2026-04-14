@@ -29,12 +29,9 @@ config({ path: join(__dirname, "..", ".env") });
  */
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
-import syncbizDeviceModel from "../lib/syncbiz-device-model.js";
+import { sanitizeRegistrationIntent } from "./syncbiz-device-model.js";
 import { loadLease, saveLease } from "./master-lease-store.js";
 import { verifyWsToken } from "./ws-token.js";
-// `../lib/syncbiz-device-model.ts` is emitted as CommonJS under `server/dist/lib`.
-// `server/dist/server/index.js` is ESM (package type=module), so use CJS interop import form.
-const { sanitizeRegistrationIntent } = syncbizDeviceModel;
 const WS_SECRET = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
 if (!WS_SECRET || WS_SECRET.length < 16) {
     console.error("[SyncBiz WS] SYNCBIZ_WS_SECRET or WS_SECRET required (min 16 chars). Exiting.");
