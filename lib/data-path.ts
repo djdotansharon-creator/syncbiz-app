@@ -20,10 +20,16 @@ function resolvePersistentDir(subdir: "playlists" | "catalog" | "radio"): string
   const preferred = join(vol, subdir);
   const legacy = join(cwd(), subdir);
 
-  // Railway migration safety:
+  // Production safety (Railway):
+  // - When a volume mount is configured, always use <volume>/<subdir>.
+  // - This prevents accidental reads/writes from image-bundled legacy dirs (`./playlists`, etc.)
+  //   that are non-persistent across redeploys.
+  if (process.env.RAILWAY_VOLUME_MOUNT_PATH) return preferred;
+
+  // Non-Railway migration safety:
   // - New layout: <volume>/<subdir>
   // - Legacy layout: <app_root>/<subdir>
-  // Prefer volume when present; if only legacy exists, keep reading it to avoid empty library.
+  // Prefer volume when present; if only legacy exists, keep reading it.
   if (existsSync(preferred)) return preferred;
   if (existsSync(legacy)) return legacy;
   return preferred;
