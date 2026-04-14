@@ -23,6 +23,10 @@ const CACHE_DIR = join(process.cwd(), "node_modules", ".cache", "yt-dlp");
 const isWin = typeof process !== "undefined" && process.platform === "win32";
 const BINARY_NAME = isWin ? "yt-dlp.exe" : "yt-dlp";
 const BINARY_PATH = join(CACHE_DIR, BINARY_NAME);
+const ENV_BINARY_PATH =
+  typeof process !== "undefined" && typeof process.env.YTDLP_BINARY_PATH === "string"
+    ? process.env.YTDLP_BINARY_PATH.trim()
+    : "";
 
 const TIMEOUT_MS = 15000;
 
@@ -104,6 +108,18 @@ async function getYtDlp(): Promise<import("yt-dlp-wrap").default | null> {
   initPromise = (async () => {
     try {
       const YTDlpWrap = (await import("yt-dlp-wrap")).default;
+
+      // 0. Production-safe explicit override (e.g. Railway image path).
+      if (ENV_BINARY_PATH) {
+        try {
+          const wrap = new YTDlpWrap(ENV_BINARY_PATH);
+          await wrap.getVersion();
+          ytDlpInstance = wrap;
+          return wrap;
+        } catch {
+          /* env override invalid/unavailable; continue fallback chain */
+        }
+      }
 
       // 1. Try system yt-dlp first
       try {
@@ -313,6 +329,10 @@ export async function enumerateYouTubeMixPlaylistCandidates(
 ): Promise<EnumerateYouTubeMixPlaylistResult> {
   const wrap = await getYtDlp();
   if (!wrap) {
+    console.warn("[yt-dlp] Enumeration unavailable: init returned null", {
+      hasEnvBinaryPath: Boolean(ENV_BINARY_PATH),
+      isRailway: Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),
+    });
     return {
       candidates: [],
       error: "Track enumeration is unavailable.",
