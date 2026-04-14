@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="./playback-dock-surface.css" />
     <link rel="stylesheet" href="./library-browse-card-surface.css" />
     <link rel="stylesheet" href="./player-deck-meta-strip-surface.css" />
+    <link rel="stylesheet" href="./jingles-control.css" />
     <style>
       :root {
         --bg: #020617;
@@ -350,6 +351,7 @@
 
     <div id="desktopDebugPanelRoot" aria-hidden="true"></div>
 
+    <div class="player-page-layout" id="playerPageLayout">
     <main class="player-shell">
       <div class="player-page-stack">
         <!-- Mirrors web `components/player-page.tsx`: hero includes inline transport + volume; no separate deck transport row (same as `/player`). -->
@@ -458,6 +460,9 @@
         </div>
       </section>
     </main>
+
+    <div id="jinglesShellRoot" class="jc-shell-mount" hidden></div>
+    </div>
 
     <!-- Fixed dock: same full `PlaybackDockSurface` as web `PlaybackBar` (transport + volume + title/subtitle) -->
     <div id="playbackDockRoot"></div>

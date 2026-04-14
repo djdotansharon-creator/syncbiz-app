@@ -27,7 +27,7 @@ import { deviceModeAllowsLocalPlayback } from "@/lib/device-mode-guard";
 import { getAutoMix, setAutoMix, onAutoMixChanged } from "@/lib/mix-preferences";
 
 type DevicePlayerContextValue = {
-  /** Whether we're on a playback route and provider is active (device role visible). */
+  /** True when this tab registers as a branch WS device (see `resolveDeviceRoleActive`). */
   isActive: boolean;
   /** True only when authenticated and connected to branch control. Hide MASTER/CONTROL/Guest UI when false. */
   isBranchConnected: boolean;
@@ -65,22 +65,56 @@ type DevicePlayerContextValue = {
   sessionCode: string | null;
   /** Full guest recommendation link for sharing */
   guestLink: string | null;
+  /**
+   * Plain browser on normal app routes (not /player, /remote-player): observer/controller only —
+   * no branch device socket and no local execution ownership (see `deviceModeAllowsLocalPlayback`).
+   */
+  isObserverOnlyBrowser: boolean;
 };
 
 const DevicePlayerContext = createContext<DevicePlayerContextValue | null>(null);
 
-/** Routes where device registers and shows MASTER/CONTROL – playback + device role visibility. */
-const PLAYBACK_ROUTES = ["/remote-player", "/sources", "/radio", "/library", "/favorites", "/playlists", "/player"] as const;
+/**
+ * Browser-only: dedicated player surfaces that may output branch audio locally when MASTER (see
+ * `deviceModeAllowsLocalPlayback` — gated to these routes only, not `/settings`).
+ */
+const ELIGIBLE_BROWSER_PLAYER_ROUTES = ["/player", "/remote-player", "/sources"] as const;
 
-function isPlaybackRoute(pathname: string): boolean {
-  if (pathname === "/mobile") return false;
-  return PLAYBACK_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
+function isEligibleBrowserPlayerRoute(pathname: string): boolean {
+  return ELIGIBLE_BROWSER_PLAYER_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
 }
 
-/** E: Device role visible across full top nav. Active on all desktop routes except /mobile. */
-/** On /mobile, never active – mobile is either controller (sends commands) or standalone local player (no device role). */
-function isDeviceRoleActive(pathname: string): boolean {
-  return pathname !== "/mobile";
+/**
+ * Browser: operator pages that need a branch `device` socket (MASTER/CONTROL in Settings, MY LINK in
+ * Sources rail, etc.) but must not own local branch audio — gated separately via `isEligibleBrowserPlayerRoute`.
+ */
+function isBrowserBranchControlsOnlyRoute(pathname: string): boolean {
+  if (pathname === "/settings" || pathname.startsWith("/settings/")) return true;
+  if (pathname === "/sources" || pathname.startsWith("/sources/")) return true;
+  if (pathname === "/library" || pathname.startsWith("/library/")) return true;
+  return false;
+}
+
+/** Browser tabs that open a branch device socket (player surfaces + branch-controls pages; not /dashboard, /logs, …). */
+function isBrowserBranchUiDeviceRoute(pathname: string): boolean {
+  return isEligibleBrowserPlayerRoute(pathname) || isBrowserBranchControlsOnlyRoute(pathname);
+}
+
+function readSyncBizElectronRenderer(): boolean {
+  return typeof window !== "undefined" && Boolean((window as Window & { syncbizDesktop?: unknown }).syncbizDesktop);
+}
+
+/**
+ * When `true`, this tab holds the branch device WebSocket (`role: device`) and participates in MASTER/CONTROL.
+ * - Electron (desktop branch player): all routes except /mobile.
+ * - Plain browser: player surfaces + `/settings` (branch controls / MY LINK); other routes stay observer-only (no WS device).
+ */
+function resolveDeviceRoleActive(pathname: string, isElectronShell: boolean | null): boolean {
+  if (pathname === "/mobile") return false;
+  if (isElectronShell === true) return true;
+  if (isElectronShell === false) return isBrowserBranchUiDeviceRoute(pathname);
+  // SSR: no `window` — treat like browser until client mounts (see lazy `isElectronShell` init).
+  return isBrowserBranchUiDeviceRoute(pathname);
 }
 
 export function useDevicePlayer() {
@@ -90,7 +124,16 @@ export function useDevicePlayer() {
 
 export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const isActive = isDeviceRoleActive(pathname);
+  /** Server: unknown. Client: read immediately so Electron is not treated as `null` until after first paint (that hid Settings branch UI). */
+  const [isElectronShell, setIsElectronShell] = useState<boolean | null>(() =>
+    typeof window === "undefined" ? null : readSyncBizElectronRenderer(),
+  );
+
+  useEffect(() => {
+    setIsElectronShell(readSyncBizElectronRenderer());
+  }, []);
+
+  const isActive = resolveDeviceRoleActive(pathname, isElectronShell);
   const deviceId = isActive ? getDeviceId() : null;
 
   const [userId, setUserId] = useState<string | undefined>(undefined);
@@ -208,6 +251,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const [masterConfirmOpen, setMasterConfirmOpen] = useState(false);
   const [masterState, setMasterState] = useState<StationPlaybackState | null>(null);
   const [autoMixState, setAutoMixState] = useState<boolean>(() => getAutoMix());
+  const lastConnectedModeRef = useRef<DeviceMode | null>(null);
+  const prevEffectiveModeRef = useRef<DeviceMode>("MASTER");
+  const pendingMasterAdoptionRef = useRef(false);
   const reportedPositionRef = useRef<{ position: number; duration: number } | null>(null);
 
   const reportPosition = useCallback((position: number, duration: number) => {
@@ -294,7 +340,6 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     console.log("[SyncBiz Audit] Device mode change", {
       mode,
     });
-    if (mode === "MASTER") setMasterState(null);
     if (mode === "CONTROL") {
       console.log("[SyncBiz Audit] CONTROL transition -> stopForControlHandoff (no stop-local)");
       stopForControlHandoff();
@@ -352,10 +397,43 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       ? `${window.location.origin}/guest?code=${sessionCode}`
       : null;
 
-  // Use server truth when connected. When disconnected, act as MASTER for standalone local playback.
-  const effectiveDeviceMode = status === "connected" ? deviceMode : "MASTER";
+  // Use server truth when connected. During reconnect blips, keep last connected mode to avoid
+  // CONTROL<->standalone oscillation during live handoff.
+  const effectiveDeviceMode =
+    status === "connected"
+      ? deviceMode
+      : (lastConnectedModeRef.current ?? "MASTER");
 
   const isBranchConnected = isActive && authLoaded && !!effectiveUserId && status === "connected";
+
+  useEffect(() => {
+    if (status === "connected") {
+      lastConnectedModeRef.current = deviceMode;
+    }
+  }, [status, deviceMode]);
+
+  // Secondary-desktop warning is valid only while this device effectively stays in CONTROL
+  // because another device is currently MASTER. Clear stale modal state after handoff/promotion.
+  useEffect(() => {
+    const isSelfMaster = !!deviceId && masterDeviceId === deviceId;
+    const shouldShowSecondaryDesktopWarning =
+      isBranchConnected &&
+      effectiveDeviceMode === "CONTROL" &&
+      !!masterDeviceId &&
+      !isSelfMaster &&
+      hasExistingMaster;
+
+    if (!shouldShowSecondaryDesktopWarning && secondaryDesktopModalOpen) {
+      setSecondaryDesktopModalOpen(false);
+    }
+  }, [
+    secondaryDesktopModalOpen,
+    isBranchConnected,
+    effectiveDeviceMode,
+    masterDeviceId,
+    deviceId,
+    hasExistingMaster,
+  ]);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
@@ -418,16 +496,73 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (isActive) initDeviceId();
-    return () => {
-      deviceModeAllowsLocalPlayback.current = true;
-    };
+    // Do not reset `deviceModeAllowsLocalPlayback` here. The synchronous block below sets it every
+    // render; resetting to `true` on unmount (e.g. React Strict Mode) left a window where async
+    // playback recovery could see `true` in an observer-only browser tab and POST stop-local,
+    // killing OS playback for the co-located desktop station.
   }, [isActive]);
 
-  // Block local playback only when we know this tab is CONTROL on a live branch connection.
-  // While WS is "connecting" (or any non-connected state), allow local playback so scheduled auto-play
-  // and "Play now" are not no-ops — otherwise stop()+playSource() leaves an empty player and the run still looks "successful".
+  const isBrowserShell = typeof window !== "undefined" && !readSyncBizElectronRenderer();
+  /** Browser on dashboard/settings/etc.: must not run embedded recovery / playSource (which POSTs stop-local and kills station output). */
+  const isObserverOnlyBrowser = isBrowserShell && !isBrowserBranchUiDeviceRoute(pathname);
+
+  // Block local playback whenever effective role is CONTROL (including reconnect windows that
+  // keep the last connected CONTROL role), so demoted side cannot re-enter standalone output.
+  // Plain browser: only real player surfaces may own local branch output; `/settings` stays non-executing.
   deviceModeAllowsLocalPlayback.current =
-    !isActive || status !== "connected" || (status === "connected" && deviceMode === "MASTER");
+    (!isActive || effectiveDeviceMode === "MASTER") &&
+    (!isBrowserShell || isEligibleBrowserPlayerRoute(pathname));
+
+  // Track CONTROL -> MASTER transition so adoption can complete even if mirrored state arrives a
+  // moment later than the mode flip.
+  useEffect(() => {
+    const prevMode = prevEffectiveModeRef.current;
+    const becameMaster = prevMode !== "MASTER" && effectiveDeviceMode === "MASTER";
+    prevEffectiveModeRef.current = effectiveDeviceMode;
+    if (becameMaster) pendingMasterAdoptionRef.current = true;
+  }, [effectiveDeviceMode]);
+
+  // On CONTROL -> MASTER transition, adopt latest mirrored source once so promoted device
+  // actually owns playback instead of showing MASTER while idle.
+  useEffect(() => {
+    if (!pendingMasterAdoptionRef.current || !isBranchConnected) return;
+
+    // User/local runtime already took ownership.
+    if (currentSource?.id) {
+      pendingMasterAdoptionRef.current = false;
+      return;
+    }
+
+    const sourceId = masterState?.currentSource?.id ?? null;
+    if (!sourceId) return;
+
+    pendingMasterAdoptionRef.current = false;
+    let cancelled = false;
+    fetchUnifiedSourcesWithFallback()
+      .then((items) => {
+        if (cancelled) return;
+        const source = items.find((s) => s.id === sourceId);
+        if (!source) return;
+        const trackIndex = typeof masterState?.currentTrackIndex === "number" ? masterState.currentTrackIndex : 0;
+        playSource(source, trackIndex);
+        if (masterState?.status === "paused") {
+          pause();
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isBranchConnected,
+    currentSource?.id,
+    masterState?.currentSource?.id,
+    masterState?.currentTrackIndex,
+    masterState?.status,
+    playSource,
+    pause,
+  ]);
 
   // Publish state when MASTER and connected – include position/duration for CONTROL sync
   useEffect(() => {
@@ -575,6 +710,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       setAutoMixOrSend,
       sessionCode,
       guestLink,
+      isObserverOnlyBrowser,
     }),
     [
       isActive,
@@ -602,6 +738,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       setAutoMixOrSend,
       sessionCode,
       guestLink,
+      isObserverOnlyBrowser,
     ]
   );
 

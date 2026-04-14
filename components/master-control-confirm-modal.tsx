@@ -18,8 +18,13 @@ export function MasterControlConfirmModal({ isOpen, onClose, onConfirm, loading 
 
   useEffect(() => {
     if (!isOpen) return;
+    // Reset fields only when modal opens, not on parent callback identity churn.
     setPassword("");
     setPasswordError(null);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };

@@ -722,6 +722,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   /** Stop all known players: embedded YT/SC, local Winamp. Call before starting new source. */
   const stopAllBeforePlay = useCallback(() => {
+    if (!deviceModeAllowsLocalPlayback.current) return;
     try {
       stopAllPlayersRef.current?.();
     } catch {
@@ -1112,6 +1113,22 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const stop = useCallback(() => {
+    if (!deviceModeAllowsLocalPlayback.current) {
+      try {
+        stopAllPlayersRef.current?.();
+      } catch {
+        /* ignore */
+      }
+      setState((s) => ({
+        ...s,
+        status: "stopped" as const,
+        currentSource: null,
+        currentPlaylist: null,
+        currentTrackIndex: 0,
+        queueIndex: -1,
+      }));
+      return;
+    }
     stopAllBeforePlay();
     setState((s) => ({
       ...s,

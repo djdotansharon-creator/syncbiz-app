@@ -4,6 +4,7 @@
  * Locally: backward compatible with playlists/, catalog/, radio/, data/.
  */
 import { join } from "path";
+import { existsSync } from "fs";
 
 const cwd = () => process.cwd();
 
@@ -12,20 +13,33 @@ function getVolumePath(): string | null {
   return typeof v === "string" && v.trim() ? v.trim().replace(/\/$/, "") : null;
 }
 
-export function getPlaylistsDir(): string {
+function resolvePersistentDir(subdir: "playlists" | "catalog" | "radio"): string {
   const vol = getVolumePath();
-  return vol ? join(vol, "playlists") : join(cwd(), "playlists");
+  if (!vol) return join(cwd(), subdir);
+
+  const preferred = join(vol, subdir);
+  const legacy = join(cwd(), subdir);
+
+  // Railway migration safety:
+  // - New layout: <volume>/<subdir>
+  // - Legacy layout: <app_root>/<subdir>
+  // Prefer volume when present; if only legacy exists, keep reading it to avoid empty library.
+  if (existsSync(preferred)) return preferred;
+  if (existsSync(legacy)) return legacy;
+  return preferred;
+}
+
+export function getPlaylistsDir(): string {
+  return resolvePersistentDir("playlists");
 }
 
 /** Catalog items (Phase 1): one JSON file per item under this directory. */
 export function getCatalogDir(): string {
-  const vol = getVolumePath();
-  return vol ? join(vol, "catalog") : join(cwd(), "catalog");
+  return resolvePersistentDir("catalog");
 }
 
 export function getRadioDir(): string {
-  const vol = getVolumePath();
-  return vol ? join(vol, "radio") : join(cwd(), "radio");
+  return resolvePersistentDir("radio");
 }
 
 export function getDataDir(): string {

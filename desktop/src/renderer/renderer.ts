@@ -19,6 +19,10 @@ import { mountPlayerDeckMetaStrip, renderPlayerDeckMetaStrip } from "./player-de
 import { mvpSnapshotToDeckMetaStripProps } from "./map-desktop-deck-meta-props";
 import { DESKTOP_IDLE_STATUS_SNAPSHOT } from "./desktop-idle-snapshot";
 import { mountDesktopDebugPanel, renderDesktopDebugPanel } from "./debug-panel-bridge";
+import { mountJinglesShell } from "./jingles-control/jingles-shell-bridge";
+
+/** Injected by `scripts/bundle-desktop.cjs` — when false, Jingles UI is not mounted. */
+declare const __DESKTOP_JINGLES_CONTROL_UI__: boolean;
 
 function el<T extends HTMLElement>(id: string): T {
   const n = document.getElementById(id);
@@ -218,6 +222,21 @@ async function bootstrap(): Promise<void> {
   mountBranchLibrary(el<HTMLDivElement>("branchLibList"));
   const debugRoot = document.getElementById("desktopDebugPanelRoot");
   if (debugRoot) mountDesktopDebugPanel(debugRoot);
+
+  const jinglesRoot = document.getElementById("jinglesShellRoot");
+  const pageLayout = document.getElementById("playerPageLayout");
+  // Jingles: isolated root only — does not mount/unmount player hero, dock, or transport.
+  if (
+    typeof __DESKTOP_JINGLES_CONTROL_UI__ !== "undefined" &&
+    __DESKTOP_JINGLES_CONTROL_UI__ &&
+    jinglesRoot &&
+    pageLayout
+  ) {
+    jinglesRoot.removeAttribute("hidden");
+    pageLayout.classList.add("player-page-layout--with-jingles");
+    mountJinglesShell(jinglesRoot);
+  }
+
   flushBranchLibrary();
 
   let volumeDebounce: ReturnType<typeof setTimeout> | null = null;

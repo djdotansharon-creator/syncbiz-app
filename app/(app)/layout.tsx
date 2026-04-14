@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import "@/components/jingles-control/jingles-control.css";
 import { AppShell } from "@/components/app-shell";
 import { AppProviders } from "./providers";
 

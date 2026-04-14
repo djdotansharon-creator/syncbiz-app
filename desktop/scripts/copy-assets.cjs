@@ -10,6 +10,7 @@ const dockCss = path.join(repoRoot, "components", "player-surface", "playback-do
 const libraryCss = path.join(repoRoot, "components", "player-surface", "library-browse-card-surface.css");
 const deckMetaCss = path.join(repoRoot, "components", "player-surface", "player-deck-meta-strip-surface.css");
 const deckTransportCss = path.join(repoRoot, "components", "player-surface", "player-deck-transport-strip-surface.css");
+const jinglesCss = path.join(repoRoot, "components", "jingles-control", "jingles-control.css");
 
 fs.mkdirSync(outDir, { recursive: true });
 fs.copyFileSync(srcFile, path.join(outDir, "index.html"));
@@ -18,3 +19,4 @@ fs.copyFileSync(dockCss, path.join(outDir, "playback-dock-surface.css"));
 fs.copyFileSync(libraryCss, path.join(outDir, "library-browse-card-surface.css"));
 fs.copyFileSync(deckMetaCss, path.join(outDir, "player-deck-meta-strip-surface.css"));
 fs.copyFileSync(deckTransportCss, path.join(outDir, "player-deck-transport-strip-surface.css"));
+fs.copyFileSync(jinglesCss, path.join(outDir, "jingles-control.css"));

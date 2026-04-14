@@ -35,6 +35,10 @@ async function main() {
   });
 
   const devDebugPanel = process.env.NODE_ENV !== "production";
+  /** Opt-in with DESKTOP_JINGLES_CONTROL_UI=1, or dev by default unless DESKTOP_JINGLES_CONTROL_UI=0 */
+  const jinglesControlUi =
+    process.env.DESKTOP_JINGLES_CONTROL_UI === "1" ||
+    (process.env.NODE_ENV !== "production" && process.env.DESKTOP_JINGLES_CONTROL_UI !== "0");
   await esbuild.build({
     entryPoints: [path.join(root, "src", "renderer", "renderer.ts")],
     bundle: true,
@@ -47,6 +51,7 @@ async function main() {
     alias: desktopReactAliases(),
     define: {
       __DESKTOP_DEV_DEBUG_PANEL__: JSON.stringify(devDebugPanel),
+      __DESKTOP_JINGLES_CONTROL_UI__: JSON.stringify(jinglesControlUi),
     },
   });
 }

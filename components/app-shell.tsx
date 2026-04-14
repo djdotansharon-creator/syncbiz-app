@@ -25,6 +25,7 @@ import { searchExternal } from "@/lib/search-service";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { DeviceModeIndicator } from "@/components/device-mode-indicator";
 import { StandaloneIndicator } from "@/components/standalone-indicator";
+import { JinglesControlWebDrawer } from "@/components/jingles-control/JinglesShell";
 
 const categoryKeys = ["dashboard", "sources", "radio", "owner", "schedules", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
@@ -251,6 +252,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { libraryTheme } = useLibraryTheme();
   const { playSource, setQueue } = usePlayback();
   const [playerDropActive, setPlayerDropActive] = useState(false);
+  const [jinglesDrawerOpen, setJinglesDrawerOpen] = useState(false);
 
   const parseDroppedUrl = async (url: string): Promise<ParseUrlJson | null> => {
     const controller = new AbortController();
@@ -653,30 +655,47 @@ export function AppShell({ children }: { children: ReactNode }) {
               <LogoutButton />
             </div>
           </div>
-          {/* Row 3: Player */}
-          {isMediaThemeRoute ? (
-            <div className="library-theme library-player-route-bridge" data-library-theme={libraryTheme}>
-              <div className="grid items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_260px] 2xl:grid-cols-[minmax(0,1fr)_280px]">
-                <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "copy";
-                    setPlayerDropActive(true);
-                  }}
-                  onDragLeave={() => setPlayerDropActive(false)}
-                  onDrop={(e) => void handlePlayerDrop(e)}
-                  className={`relative min-w-0 overflow-hidden rounded-2xl border bg-slate-950/72 p-1.5 shadow-[0_12px_30px_rgba(0,0,0,0.42)] backdrop-blur-md transition-colors ${
-                    playerDropActive ? "border-cyan-400/70" : "border-slate-700/70"
-                  }`}
-                >
-                  {playerDropActive ? (
-                    <div className="pointer-events-none absolute right-3 top-3 z-10 rounded-md border border-cyan-300/45 bg-cyan-500/14 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100">
-                      Drop To Play
-                    </div>
-                  ) : null}
-                  <AudioPlayer />
-                </div>
-                <aside className="library-deck-pads-aside relative hidden xl:block">
+          {/* Row 3: Player — keep a single AudioPlayer instance across routes (media vs non-media); swapping branches remounts embeds */}
+          <div
+            className={isMediaThemeRoute ? "library-theme library-player-route-bridge" : undefined}
+            {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
+          >
+            <div
+              className={
+                isMediaThemeRoute
+                  ? "grid items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_260px] 2xl:grid-cols-[minmax(0,1fr)_280px]"
+                  : "grid grid-cols-1"
+              }
+            >
+              <div
+                {...(isMediaThemeRoute
+                  ? {
+                      onDragOver: (e: React.DragEvent) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "copy";
+                        setPlayerDropActive(true);
+                      },
+                      onDragLeave: () => setPlayerDropActive(false),
+                      onDrop: (e: React.DragEvent) => void handlePlayerDrop(e),
+                    }
+                  : {})}
+                className={
+                  isMediaThemeRoute
+                    ? `relative min-w-0 overflow-hidden rounded-2xl border bg-slate-950/72 p-1.5 shadow-[0_12px_30px_rgba(0,0,0,0.42)] backdrop-blur-md transition-colors ${
+                        playerDropActive ? "border-cyan-400/70" : "border-slate-700/70"
+                      }`
+                    : "relative min-w-0 w-full"
+                }
+              >
+                {isMediaThemeRoute && playerDropActive ? (
+                  <div className="pointer-events-none absolute right-3 top-3 z-10 rounded-md border border-cyan-300/45 bg-cyan-500/14 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100">
+                    Drop To Play
+                  </div>
+                ) : null}
+                <AudioPlayer />
+              </div>
+              {isMediaThemeRoute ? (
+                <aside className="library-deck-pads-aside relative z-[60] isolate hidden xl:block">
                   <div className="h-full rounded-2xl border border-cyan-500/25 bg-slate-950/80 p-3 shadow-[0_10px_24px_rgba(0,0,0,0.45)] backdrop-blur-md">
                     <header className="pb-2">
                       <div className="flex items-center justify-between">
@@ -701,24 +720,24 @@ export function AppShell({ children }: { children: ReactNode }) {
                           key={group.title}
                           type="button"
                           className={`rounded-xl border px-2.5 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition ${group.tone}`}
-                          disabled
-                          aria-disabled
+                          disabled={group.title !== "Jingles"}
+                          aria-disabled={group.title !== "Jingles"}
+                          onClick={group.title === "Jingles" ? () => setJinglesDrawerOpen(true) : undefined}
                         >
                           <p className="text-xs font-semibold tracking-tight">{group.title}</p>
                           <p className="mt-1 flex items-center gap-1 text-[10px] opacity-90">
                             <span className={`h-1.5 w-1.5 rounded-full ${group.dot}`} />
-                            Soon
+                            {group.title === "Jingles" ? "Open console" : "Soon"}
                           </p>
                         </button>
                       ))}
                     </div>
+                    <JinglesControlWebDrawer open={jinglesDrawerOpen} onClose={() => setJinglesDrawerOpen(false)} />
                   </div>
                 </aside>
-              </div>
+              ) : null}
             </div>
-          ) : (
-            <AudioPlayer />
-          )}
+          </div>
         </header>
 
         <main

@@ -8,7 +8,9 @@ export function DeviceModeIndicator() {
 
   if (!ctx) return null;
 
-  const { deviceMode, hasExistingMaster, isBranchConnected } = ctx;
+  const { deviceMode, hasExistingMaster, isBranchConnected, isObserverOnlyBrowser } = ctx;
+
+  if (isObserverOnlyBrowser) return null;
 
   if (!isBranchConnected) {
     return (

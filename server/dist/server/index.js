@@ -24,11 +24,13 @@ config({ path: join(__dirname, "..", ".env") });
  * - Persistence: master lease stored in server/data/master-lease.json; survives server restarts.
  * - Temporary disconnect: primary reconnects within grace → gets MASTER back; secondaries stay CONTROL.
  * - Long offline: after grace expires, first desktop to register gets MASTER.
- * - Manual SET_MASTER: always allowed for desktop; overrides grace reservation.
+ * - Manual SET_MASTER: desktop may take MASTER while another desktop is still connected; demotes
+ *   other MASTERs and updates primary + master maps together (explicit handoff).
  */
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
-import { sanitizeRegistrationIntent } from "../lib/syncbiz-device-model.js";
+import syncbizDeviceModel from "../lib/syncbiz-device-model.js";
+const { sanitizeRegistrationIntent } = syncbizDeviceModel;
 import { loadLease, saveLease } from "./master-lease-store.js";
 import { verifyWsToken } from "./ws-token.js";
 const WS_SECRET = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
@@ -126,6 +128,7 @@ function getMasterForBranch(userId, branchId) {
     if (conn.isMobile) {
         masterByBranch.delete(key);
         masterDisconnectedAt.delete(key);
+        primaryMasterByBranch.delete(key);
         persistMasterLease();
         return null;
     }
@@ -142,6 +145,7 @@ function getReservedMasterForBranch(userId, branchId) {
         if (conn.isMobile) {
             masterByBranch.delete(key);
             masterDisconnectedAt.delete(key);
+            primaryMasterByBranch.delete(key);
             persistMasterLease();
             return null;
         }
@@ -154,6 +158,7 @@ function getReservedMasterForBranch(userId, branchId) {
     if (Date.now() - disconnectedAt > MASTER_GRACE_MS) {
         masterByBranch.delete(key);
         masterDisconnectedAt.delete(key);
+        primaryMasterByBranch.delete(key);
         persistMasterLease();
         return null;
     }
@@ -168,8 +173,65 @@ function clearExpiredGracePeriods(userId, branchId) {
     if (Date.now() - disconnectedAt > MASTER_GRACE_MS) {
         masterByBranch.delete(key);
         masterDisconnectedAt.delete(key);
+        primaryMasterByBranch.delete(key);
         persistMasterLease();
     }
+}
+function isEligibleConnectedPlaybackCandidate(d, userId, branchId) {
+    if (d.role !== "device")
+        return false;
+    if ((d.userId ?? "") !== userId || d.branchId !== branchId)
+        return false;
+    if (d.ws.readyState !== 1)
+        return false;
+    if (d.isMobile)
+        return false;
+    const intent = d.registrationIntent;
+    if (!intent)
+        return true;
+    return (intent.runtimeMode === "branch_playback" &&
+        (intent.devicePurpose === "branch_desktop_station" || intent.devicePurpose === "branch_web_station"));
+}
+function tryPromoteConnectedControlOnMasterLoss(userId, branchId) {
+    let candidate = null;
+    devices.forEach((d) => {
+        if (!isEligibleConnectedPlaybackCandidate(d, userId, branchId))
+            return;
+        if (d.mode !== "CONTROL")
+            return;
+        if (!candidate || d.connectedAt < candidate.connectedAt) {
+            candidate = d;
+        }
+    });
+    if (!candidate)
+        return null;
+    const selected = candidate;
+    const key = branchKey(userId, branchId);
+    devices.forEach((d) => {
+        if (d.role === "device" &&
+            (d.userId ?? "") === userId &&
+            d.branchId === branchId &&
+            d.id !== selected.id &&
+            d.mode === "MASTER" &&
+            d.ws.readyState === 1) {
+            d.mode = "CONTROL";
+            d.ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL", masterDeviceId: selected.id }));
+        }
+    });
+    selected.mode = "MASTER";
+    masterByBranch.set(key, selected.id);
+    primaryMasterByBranch.set(key, selected.id);
+    masterDisconnectedAt.delete(key);
+    persistMasterLease();
+    if (selected.ws.readyState === 1) {
+        selected.ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "MASTER" }));
+    }
+    return selected.id;
+}
+function isTrueMasterLossCloseCode(code) {
+    // Explicit app/tab close, process exit/no close frame, abnormal peer loss, or heartbeat timeout.
+    // These are the close paths we should fail over from when a connected eligible CONTROL already exists.
+    return code === 1000 || code === 1001 || code === 1005 || code === 1006 || code === 4006;
 }
 /** Backward compat: get master for default branch (single-branch mode). */
 function getMasterForUser(userId) {
@@ -469,6 +531,8 @@ wss.on("connection", (ws) => {
                     if (masterByBranch.get(key) === deviceId) {
                         masterByBranch.delete(key);
                         masterDisconnectedAt.delete(key);
+                        if (primaryMasterByBranch.get(key) === deviceId)
+                            primaryMasterByBranch.delete(key);
                         persistMasterLease();
                     }
                     masterDecisionReason = "mobile: never claim primary MASTER lease";
@@ -692,44 +756,6 @@ wss.on("connection", (ws) => {
             // Mobile must NEVER become primary branch MASTER. Reject SET_MASTER from mobile.
             if (isMobile)
                 return;
-            if (primaryId && primaryId !== deviceId) {
-                // Stale-primary recovery:
-                // If the reserved primary is not actually connected (WS not OPEN), we treat it as stale
-                // and allow the current connected desktop device to reclaim MASTER.
-                const reservedConn = devices.get(primaryId);
-                const reservedWsOpen = !!reservedConn && reservedConn.ws.readyState === 1 && !reservedConn.isMobile;
-                if (!reservedWsOpen) {
-                    if (process.env.NODE_ENV === "development") {
-                        console.info("[SyncBiz WS] SET_MASTER stale-primary cleanup", {
-                            userId,
-                            branchId,
-                            currentDeviceId: deviceId,
-                            reservedPrimaryId: primaryId,
-                            reservedExists: !!reservedConn,
-                            reservedWsReadyState: reservedConn?.ws.readyState ?? null,
-                            reservedIsMobile: reservedConn?.isMobile ?? null,
-                        });
-                    }
-                    // Clean reservation + grace tracking for this branch/user.
-                    primaryMasterByBranch.delete(key);
-                    masterDisconnectedAt.delete(key);
-                    if (masterByBranch.get(key) === primaryId) {
-                        masterByBranch.delete(key);
-                    }
-                    persistMasterLease();
-                }
-                else {
-                    if (process.env.NODE_ENV === "development") {
-                        console.info("[SyncBiz WS] SET_MASTER blocked (active reserved primary)", {
-                            userId,
-                            branchId,
-                            currentDeviceId: deviceId,
-                            reservedPrimaryId: primaryId,
-                        });
-                    }
-                    return;
-                }
-            }
             // Demote ALL other desktop devices in this branch that have mode=MASTER (single source of truth)
             devices.forEach((d) => {
                 if (d.role === "device" &&
@@ -744,6 +770,7 @@ wss.on("connection", (ws) => {
                 }
             });
             masterByBranch.set(key, deviceId);
+            primaryMasterByBranch.set(key, deviceId);
             masterDisconnectedAt.delete(key);
             persistMasterLease();
             if (conn)
@@ -761,14 +788,12 @@ wss.on("connection", (ws) => {
             const userId = conn?.userId ?? "";
             const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
             const key = branchKey(userId, branchId);
-            const primaryId = primaryMasterByBranch.get(key);
-            if (primaryId && primaryId === deviceId)
-                return;
             const designatedMasterId = masterByBranch.get(key);
             if (designatedMasterId !== deviceId)
                 return;
             masterByBranch.delete(key);
             masterDisconnectedAt.delete(key);
+            primaryMasterByBranch.delete(key);
             persistMasterLease();
             if (conn)
                 conn.mode = "CONTROL";
@@ -813,12 +838,12 @@ wss.on("connection", (ws) => {
             }
         }
     });
-    ws.on("close", () => {
+    ws.on("close", (code) => {
         clearTimeout(timeout);
         socketLastPongAt.delete(ws);
         const roleLabel = role ?? "unregistered";
         const idLabel = deviceId ?? "-";
-        console.log("[SyncBiz WS] disconnect", { role: roleLabel, deviceId: idLabel });
+        console.log("[SyncBiz WS] disconnect", { role: roleLabel, deviceId: idLabel, code });
         if (deviceId) {
             const conn = devices.get(deviceId);
             if (conn && conn.ws === ws) {
@@ -826,18 +851,26 @@ wss.on("connection", (ws) => {
                 const branchId = conn.branchId ?? DEFAULT_BRANCH_ID;
                 const key = branchKey(userId, branchId);
                 const designatedMasterId = masterByBranch.get(key);
+                let shouldTryAutoPromote = false;
                 if (designatedMasterId === deviceId) {
                     if (conn.isMobile) {
                         masterByBranch.delete(key);
                         masterDisconnectedAt.delete(key);
+                        shouldTryAutoPromote = true;
                     }
                     else {
                         masterDisconnectedAt.set(key, Date.now());
+                        // Immediate failover only for true-loss close paths.
+                        // Keep grace reservation for ambiguous/non-loss conditions.
+                        shouldTryAutoPromote = isTrueMasterLossCloseCode(code);
                     }
                     persistMasterLease();
                 }
                 devices.delete(deviceId);
                 deviceState.delete(deviceId);
+                if (shouldTryAutoPromote && userId) {
+                    tryPromoteConnectedControlOnMasterLoss(userId, branchId);
+                }
             }
         }
         const cIdx = controllers.findIndex((c) => c.ws === ws);
