@@ -407,6 +407,7 @@ export async function enumerateYouTubeMixPlaylistCandidates(
   }
 
   const cap = Math.min(Math.max(1, limit), YOUTUBE_MIX_IMPORT_CANDIDATE_LIMIT);
+  const binaryPath = (wrap as unknown as { binaryPath?: string }).binaryPath ?? "unknown";
   let stdout: string;
   try {
     stdout = await runWithTimeout(
@@ -421,7 +422,14 @@ export async function enumerateYouTubeMixPlaylistCandidates(
       ]),
       MIX_ENUM_TIMEOUT_MS,
     );
-  } catch {
+  } catch (e) {
+    console.error("[yt-dlp] enumerateYouTubeMixPlaylistCandidates exec failed", {
+      url,
+      binaryPath,
+      isRailway,
+      error: String(e),
+      errorStack: e instanceof Error ? e.stack : undefined,
+    });
     return {
       candidates: [],
       error: "Could not load tracks for this link.",
@@ -468,3 +476,65 @@ export async function enumerateYouTubeMixPlaylistCandidates(
   return { candidates };
 }
 
+// ─── DIAGNOSTICS ─────────────────────────────────────────────────────────────
+
+export type YtDlpDiagnostics = {
+  instanceReady: boolean;
+  binaryPath: string | null;
+  version: string | null;
+  versionError: string | null;
+  cachedBinaryExists: boolean;
+  cachedBinaryPath: string;
+  cacheDir: string;
+  isRailway: boolean;
+  envBinaryPath: string;
+  platform: string;
+  python3Available: boolean | null;
+};
+
+/** Probe the current yt-dlp state and return a full diagnostic snapshot. */
+export async function getYtDlpDiagnostics(): Promise<YtDlpDiagnostics> {
+  const wrap = await getYtDlp();
+  const binaryPath = wrap
+    ? ((wrap as unknown as { binaryPath?: string }).binaryPath ?? null)
+    : null;
+
+  let version: string | null = null;
+  let versionError: string | null = null;
+  if (wrap) {
+    try {
+      version = (await wrap.getVersion()).trim();
+    } catch (e) {
+      versionError = String(e);
+    }
+  }
+
+  let python3Available: boolean | null = null;
+  if (!isWin) {
+    try {
+      const { execFile } = await import("child_process");
+      await new Promise<void>((res, rej) =>
+        execFile("python3", ["--version"], { timeout: 3000 }, (err) =>
+          err ? rej(err) : res(),
+        ),
+      );
+      python3Available = true;
+    } catch {
+      python3Available = false;
+    }
+  }
+
+  return {
+    instanceReady: wrap !== null,
+    binaryPath,
+    version,
+    versionError,
+    cachedBinaryExists: existsSync(BINARY_PATH),
+    cachedBinaryPath: BINARY_PATH,
+    cacheDir: CACHE_DIR,
+    isRailway,
+    envBinaryPath: ENV_BINARY_PATH,
+    platform: process.platform,
+    python3Available,
+  };
+}

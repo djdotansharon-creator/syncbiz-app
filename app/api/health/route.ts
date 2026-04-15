@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { existsSync, writeFileSync, unlinkSync } from "fs";
 import { getDataDir } from "@/lib/data-path";
 import { db } from "@/lib/store";
+import { getYtDlpDiagnostics } from "@/lib/yt-dlp-search";
 import { join } from "path";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,15 @@ export async function GET() {
   checks.branches_json = existsSync(join(dataDir, "branches.json")) ? "ok" : "fail";
   checks.devices_json = existsSync(join(dataDir, "devices.json")) ? "ok" : "fail";
 
+  // 4. yt-dlp diagnostics (non-fatal — never blocks health status)
+  let ytdlp = null;
+  try {
+    ytdlp = await getYtDlpDiagnostics();
+    checks.ytdlp = ytdlp.instanceReady && ytdlp.version !== null ? "ok" : "fail";
+  } catch {
+    checks.ytdlp = "fail";
+  }
+
   const allOk = Object.values(checks).every((v) => v === "ok");
 
   return NextResponse.json(
@@ -46,6 +56,7 @@ export async function GET() {
       status: allOk ? "ok" : "degraded",
       checks,
       dataDir,
+      ytdlp,
       ts: new Date().toISOString(),
     },
     { status: allOk ? 200 : 503 },
