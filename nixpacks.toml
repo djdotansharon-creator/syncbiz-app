@@ -1,3 +1,4 @@
 [phases.setup]
-aptPkgs = ["yt-dlp"]
+# yt-dlp from GitHub (and Debian's yt-dlp wrapper) needs a Python interpreter in PATH.
+aptPkgs = ["python3", "yt-dlp"]
 
