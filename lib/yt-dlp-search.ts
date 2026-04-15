@@ -33,7 +33,10 @@ const CACHE_DIR = (() => {
   return DEFAULT_CACHE_DIR;
 })();
 const isWin = typeof process !== "undefined" && process.platform === "win32";
-const BINARY_NAME = isWin ? "yt-dlp.exe" : "yt-dlp";
+const isMac = typeof process !== "undefined" && process.platform === "darwin";
+// "yt-dlp" (no suffix) on Linux is a Python script that requires Python 3.
+// "yt-dlp_linux" is the standalone ELF binary — no Python dependency.
+const BINARY_NAME = isWin ? "yt-dlp.exe" : isMac ? "yt-dlp_macos" : "yt-dlp_linux";
 const BINARY_PATH = join(CACHE_DIR, BINARY_NAME);
 const ENV_BINARY_PATH =
   typeof process !== "undefined" && typeof process.env.YTDLP_BINARY_PATH === "string"
@@ -109,6 +112,7 @@ function mixCandidateFromFlatEntry(obj: Record<string, unknown>): YouTubeMixImpo
 
 let ytDlpInstance: import("yt-dlp-wrap").default | null = null;
 let initPromise: Promise<import("yt-dlp-wrap").default | null> | null = null;
+let lastInitError: string | null = null;
 
 // Pinned fallback version used when GitHub API is rate-limited.
 const YTDLP_FALLBACK_VERSION = "2025.03.31";
@@ -211,6 +215,7 @@ async function getYtDlp(): Promise<import("yt-dlp-wrap").default | null> {
       ytDlpInstance = wrap;
       return wrap;
     } catch (e) {
+      lastInitError = String(e);
       console.warn("[yt-dlp] Init failed — will retry on next request:", e);
       // Clear initPromise so the next request retries instead of getting permanently stuck.
       initPromise = null;
@@ -483,6 +488,7 @@ export type YtDlpDiagnostics = {
   binaryPath: string | null;
   version: string | null;
   versionError: string | null;
+  lastInitError: string | null;
   cachedBinaryExists: boolean;
   cachedBinaryPath: string;
   cacheDir: string;
@@ -529,6 +535,7 @@ export async function getYtDlpDiagnostics(): Promise<YtDlpDiagnostics> {
     binaryPath,
     version,
     versionError,
+    lastInitError,
     cachedBinaryExists: existsSync(BINARY_PATH),
     cachedBinaryPath: BINARY_PATH,
     cacheDir: CACHE_DIR,
