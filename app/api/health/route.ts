@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { existsSync, writeFileSync, unlinkSync } from "fs";
 import { getDataDir } from "@/lib/data-path";
+import { db } from "@/lib/store";
 import { join } from "path";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +21,19 @@ export async function GET() {
     checks.storage = "fail";
   }
 
-  // 2. Verify critical data files are present (written on first run)
+  // 2. Bootstrap all data files (no-op if they already exist)
+  try {
+    await Promise.all([
+      db.ensureSourcesLoaded(),
+      db.ensureDevicesLoaded(),
+      db.ensureBranchesLoaded(),
+      db.ensureAnnouncementsLoaded(),
+    ]);
+  } catch {
+    // non-fatal — storage check above will catch real write failures
+  }
+
+  // 3. Verify all critical data files are present
   checks.users_json = existsSync(join(dataDir, "users.json")) ? "ok" : "fail";
   checks.sources_json = existsSync(join(dataDir, "sources.json")) ? "ok" : "fail";
   checks.branches_json = existsSync(join(dataDir, "branches.json")) ? "ok" : "fail";
