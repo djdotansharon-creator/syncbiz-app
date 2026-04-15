@@ -110,18 +110,47 @@ function mixCandidateFromFlatEntry(obj: Record<string, unknown>): YouTubeMixImpo
 let ytDlpInstance: import("yt-dlp-wrap").default | null = null;
 let initPromise: Promise<import("yt-dlp-wrap").default | null> | null = null;
 
+// Pinned fallback version used when GitHub API is rate-limited.
+const YTDLP_FALLBACK_VERSION = "2025.03.31";
+
 async function downloadYtDlpBinary(): Promise<void> {
-  const res = await fetch("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest");
-  if (!res.ok) throw new Error("Failed to fetch releases");
-  const data = (await res.json()) as { tag_name?: string };
-  const version = data.tag_name || "2024.01.01";
+  // Add GitHub token if available to avoid 60 req/hr rate limit on Railway shared IPs.
+  const githubToken =
+    typeof process.env.GITHUB_TOKEN === "string" ? process.env.GITHUB_TOKEN.trim() : "";
+  const headers: Record<string, string> = { "User-Agent": "syncbiz-app" };
+  if (githubToken) headers["Authorization"] = `Bearer ${githubToken}`;
+
+  let version = YTDLP_FALLBACK_VERSION;
+  try {
+    const relRes = await fetch(
+      "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest",
+      { headers, signal: AbortSignal.timeout(8000) },
+    );
+    if (relRes.ok) {
+      const data = (await relRes.json()) as { tag_name?: string };
+      if (typeof data.tag_name === "string" && data.tag_name.trim()) {
+        version = data.tag_name.trim();
+      }
+    } else {
+      console.warn(`[yt-dlp] GitHub releases API returned ${relRes.status}, using fallback version ${YTDLP_FALLBACK_VERSION}`);
+    }
+  } catch (e) {
+    console.warn(`[yt-dlp] GitHub releases API fetch failed, using fallback version ${YTDLP_FALLBACK_VERSION}:`, e);
+  }
+
   const url = `https://github.com/yt-dlp/yt-dlp/releases/download/${version}/${BINARY_NAME}`;
-  const binRes = await fetch(url);
-  if (!binRes.ok) throw new Error(`Failed to download: ${binRes.status}`);
+  console.log(`[yt-dlp] Downloading binary from ${url}`);
+  const binRes = await fetch(url, { signal: AbortSignal.timeout(60000) });
+  if (!binRes.ok) throw new Error(`Failed to download yt-dlp ${version}: HTTP ${binRes.status}`);
   await mkdir(CACHE_DIR, { recursive: true });
   const buf = await binRes.arrayBuffer();
   await writeFile(BINARY_PATH, Buffer.from(buf));
+  console.log(`[yt-dlp] Binary downloaded: ${BINARY_PATH} (${version})`);
 }
+
+const isRailway = Boolean(
+  typeof process !== "undefined" && process.env.RAILWAY_VOLUME_MOUNT_PATH,
+);
 
 async function getYtDlp(): Promise<import("yt-dlp-wrap").default | null> {
   if (ytDlpInstance) return ytDlpInstance;
@@ -131,47 +160,60 @@ async function getYtDlp(): Promise<import("yt-dlp-wrap").default | null> {
     try {
       const YTDlpWrap = (await import("yt-dlp-wrap")).default;
 
-      // 0. Production-safe explicit override (e.g. Railway image path).
+      // 0. Explicit binary path override (env var or Railway YTDLP_BINARY_PATH).
       if (ENV_BINARY_PATH) {
         try {
           const wrap = new YTDlpWrap(ENV_BINARY_PATH);
           await wrap.getVersion();
+          console.log(`[yt-dlp] Using YTDLP_BINARY_PATH: ${ENV_BINARY_PATH}`);
           ytDlpInstance = wrap;
           return wrap;
         } catch (e) {
           console.warn("[yt-dlp] YTDLP_BINARY_PATH probe failed:", ENV_BINARY_PATH, e);
-          /* continue fallback chain */
         }
       }
 
-      // 1. Try system yt-dlp first
-      try {
-        const wrap = new YTDlpWrap("yt-dlp");
-        await wrap.getVersion();
-        ytDlpInstance = wrap;
-        return wrap;
-      } catch {
-        /* system yt-dlp not found */
+      // 1. On Railway: prefer the cached GitHub-downloaded binary (always latest) over the
+      //    system apt yt-dlp (Debian stable ships 2023.x which YouTube blocks in 2025+).
+      //    Locally: try system binary first (faster, no download needed).
+      if (!isRailway) {
+        try {
+          const wrap = new YTDlpWrap("yt-dlp");
+          await wrap.getVersion();
+          console.log("[yt-dlp] Using system yt-dlp");
+          ytDlpInstance = wrap;
+          return wrap;
+        } catch {
+          /* system yt-dlp not found or too old — fall through */
+        }
       }
 
-      // 2. Try cached binary (repair missing +x from older downloads)
+      // 2. Try cached downloaded binary (latest from GitHub, written on first Railway boot).
       if (existsSync(BINARY_PATH)) {
-        await ensureYtDlpBinaryExecutable(BINARY_PATH);
-        const wrap = new YTDlpWrap(BINARY_PATH);
-        await wrap.getVersion();
-        ytDlpInstance = wrap;
-        return wrap;
+        try {
+          await ensureYtDlpBinaryExecutable(BINARY_PATH);
+          const wrap = new YTDlpWrap(BINARY_PATH);
+          await wrap.getVersion();
+          console.log(`[yt-dlp] Using cached binary: ${BINARY_PATH}`);
+          ytDlpInstance = wrap;
+          return wrap;
+        } catch (e) {
+          console.warn("[yt-dlp] Cached binary probe failed, will re-download:", e);
+        }
       }
 
-      // 3. Download binary from GitHub
+      // 3. Download latest binary from GitHub.
       await downloadYtDlpBinary();
       await ensureYtDlpBinaryExecutable(BINARY_PATH);
       const wrap = new YTDlpWrap(BINARY_PATH);
       await wrap.getVersion();
+      console.log(`[yt-dlp] Using freshly downloaded binary: ${BINARY_PATH}`);
       ytDlpInstance = wrap;
       return wrap;
     } catch (e) {
-      console.warn("[yt-dlp] Init failed:", e);
+      console.warn("[yt-dlp] Init failed — will retry on next request:", e);
+      // Clear initPromise so the next request retries instead of getting permanently stuck.
+      initPromise = null;
       return null;
     }
   })();
