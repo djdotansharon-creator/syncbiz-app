@@ -13,8 +13,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const sources = db.getSources();
-  const devices = db.getDevices();
+  const sources = await db.getSources();
+  const devices = await db.getDevices();
   const source = sources.find((s) => s.id === sourceId);
   const device = deviceId ? devices.find((d) => d.id === deviceId) : null;
 
