@@ -5,7 +5,7 @@
 
 import { canonicalYouTubeWatchUrlForPlayback, getYouTubeVideoId } from "@/lib/playlist-utils";
 import { join } from "path";
-import { mkdir, writeFile } from "fs/promises";
+import { chmod, mkdir, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 
 export type YtDlpResult = {
@@ -19,7 +19,19 @@ export type YtDlpResult = {
 
 export type YouTubeMetadata = { viewCount?: number; durationSeconds?: number };
 
-const CACHE_DIR = join(process.cwd(), "node_modules", ".cache", "yt-dlp");
+const DEFAULT_CACHE_DIR = join(process.cwd(), "node_modules", ".cache", "yt-dlp");
+const CACHE_DIR = (() => {
+  const override =
+    typeof process !== "undefined" && typeof process.env.YTDLP_CACHE_DIR === "string"
+      ? process.env.YTDLP_CACHE_DIR.trim()
+      : "";
+  if (override) return override;
+  // Railway runtime safety: prefer writable tmp cache over app/node_modules path.
+  if (typeof process !== "undefined" && process.env.RAILWAY_VOLUME_MOUNT_PATH) {
+    return "/tmp/yt-dlp";
+  }
+  return DEFAULT_CACHE_DIR;
+})();
 const isWin = typeof process !== "undefined" && process.platform === "win32";
 const BINARY_NAME = isWin ? "yt-dlp.exe" : "yt-dlp";
 const BINARY_PATH = join(CACHE_DIR, BINARY_NAME);
@@ -27,6 +39,16 @@ const ENV_BINARY_PATH =
   typeof process !== "undefined" && typeof process.env.YTDLP_BINARY_PATH === "string"
     ? process.env.YTDLP_BINARY_PATH.trim()
     : "";
+
+/** GitHub download is a plain file write - Linux requires +x or spawn returns EACCES. */
+async function ensureYtDlpBinaryExecutable(filePath: string): Promise<void> {
+  if (isWin) return;
+  try {
+    await chmod(filePath, 0o755);
+  } catch {
+    /* ignore */
+  }
+}
 
 const TIMEOUT_MS = 15000;
 
@@ -116,8 +138,9 @@ async function getYtDlp(): Promise<import("yt-dlp-wrap").default | null> {
           await wrap.getVersion();
           ytDlpInstance = wrap;
           return wrap;
-        } catch {
-          /* env override invalid/unavailable; continue fallback chain */
+        } catch (e) {
+          console.warn("[yt-dlp] YTDLP_BINARY_PATH probe failed:", ENV_BINARY_PATH, e);
+          /* continue fallback chain */
         }
       }
 
@@ -131,8 +154,9 @@ async function getYtDlp(): Promise<import("yt-dlp-wrap").default | null> {
         /* system yt-dlp not found */
       }
 
-      // 2. Try cached binary
+      // 2. Try cached binary (repair missing +x from older downloads)
       if (existsSync(BINARY_PATH)) {
+        await ensureYtDlpBinaryExecutable(BINARY_PATH);
         const wrap = new YTDlpWrap(BINARY_PATH);
         await wrap.getVersion();
         ytDlpInstance = wrap;
@@ -141,6 +165,7 @@ async function getYtDlp(): Promise<import("yt-dlp-wrap").default | null> {
 
       // 3. Download binary from GitHub
       await downloadYtDlpBinary();
+      await ensureYtDlpBinaryExecutable(BINARY_PATH);
       const wrap = new YTDlpWrap(BINARY_PATH);
       await wrap.getVersion();
       ytDlpInstance = wrap;
@@ -400,3 +425,4 @@ export async function enumerateYouTubeMixPlaylistCandidates(
   }
   return { candidates };
 }
+
