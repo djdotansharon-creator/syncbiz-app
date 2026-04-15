@@ -1440,6 +1440,8 @@ export function AudioPlayer() {
                 });
                 const beforeSourceId = currentSource?.id ?? null;
                 const beforeTrackIndex = currentTrackIndex;
+                // Capture URL before next() — used below to detect single-track restart.
+                const urlBeforeNext = currentPlayUrlRef.current;
                 syncbizAuditTransportTransitionStart({
                   phase: "yt_poll_ended_fallback_before_provider_next",
                   auditTransportCase: "ended_auto",
@@ -1458,6 +1460,23 @@ export function AudioPlayer() {
                     queueIndex,
                     queueLength: queue.length,
                   });
+                  // Single-track playlist restart guard:
+                  // When next() performs a same-index restart (sessionTracks.length === 1),
+                  // currentPlayUrl does not change, so the useEffect([currentPlayUrl]) that
+                  // resets endedHandledRef never fires. The YT player stays stuck in ENDED
+                  // state with endedHandledRef=true, preventing any further advance forever.
+                  // Fix: if the URL is still the same after next(), seek to 0 and replay.
+                  if (currentPlayUrlRef.current === urlBeforeNext) {
+                    const p = ytPlayerRef.current;
+                    if (isYtPlayerReady(p)) {
+                      console.log("[SyncBiz Audit] YT single-track restart — replaying from 0", {
+                        url: urlBeforeNext,
+                      });
+                      endedHandledRef.current = false;
+                      safeSeekTo(p, 0, true);
+                      safePlayVideo(p);
+                    }
+                  }
                 }, 0);
               }
             }
