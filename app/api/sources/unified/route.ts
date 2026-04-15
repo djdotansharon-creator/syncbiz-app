@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
     const [playlists, radioStations, dbSources, deletedIds] = await Promise.all([
       listPlaylistsForTenant(user.tenantId),
       listRadioStationsForTenant(user.tenantId),
-      Promise.resolve(db.getSources(resolveAccountScope(user.tenantId))),
+      db.getSources(resolveAccountScope(user.tenantId)),
       getDeletedSourceIds(),
     ]);
 

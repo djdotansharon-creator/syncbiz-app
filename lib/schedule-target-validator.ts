@@ -35,7 +35,7 @@ export async function validateScheduleTarget(
 
   switch (targetType) {
     case "SOURCE": {
-      const sources = db.getSources();
+      const sources = await db.getSources();
       const source = sources.find((s) => s.id === tid);
       if (!source) {
         return { ok: false, error: "Source not found" };

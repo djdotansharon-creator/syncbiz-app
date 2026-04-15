@@ -7,7 +7,7 @@ export async function GET() {
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const accountId = user.tenantId === "tnt-default" ? "acct-demo-001" : user.tenantId;
-  return NextResponse.json(db.getDevices(accountId));
+  return NextResponse.json(await db.getDevices(accountId));
 }
 
 export async function POST(req: NextRequest) {
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const device = db.addDevice({
+  const device = await db.addDevice({
     name: data.name,
     branchId: data.branchId,
     type: data.type,

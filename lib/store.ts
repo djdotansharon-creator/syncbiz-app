@@ -1,7 +1,13 @@
 import { existsSync } from "fs";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { dirname } from "path";
-import { getSchedulesDataPath } from "./data-path";
+import {
+  getSchedulesDataPath,
+  getSourcesDataPath,
+  getDevicesDataPath,
+  getBranchesDataPath,
+  getAnnouncementsDataPath,
+} from "./data-path";
 import type {
   Account,
   Announcement,
@@ -88,6 +94,154 @@ async function persistSchedulesToDisk(): Promise<void> {
   await writeFile(path, JSON.stringify(schedules, null, 2), "utf-8");
 }
 
+// ─── SOURCES ────────────────────────────────────────────────────────────────
+
+async function reloadSourcesFromDisk(): Promise<void> {
+  const path = getSourcesDataPath();
+  await mkdir(dirname(path), { recursive: true });
+  if (existsSync(path)) {
+    try {
+      const raw = await readFile(path, "utf-8");
+      const data = JSON.parse(raw) as unknown;
+      if (Array.isArray(data)) {
+        sources = data.filter(
+          (row): row is Source =>
+            typeof row === "object" && row !== null &&
+            typeof (row as Source).id === "string" &&
+            (row as Source).id.length > 0,
+        );
+      }
+    } catch (e) {
+      console.error("[store] sources.json read failed", e);
+    }
+    return;
+  }
+  const seed = process.env.NODE_ENV === "production" ? [] : sources;
+  try {
+    await writeFile(path, JSON.stringify(seed, null, 2), "utf-8");
+    if (process.env.NODE_ENV === "production") sources = [];
+  } catch (e) {
+    console.error("[store] sources.json bootstrap write failed", e);
+  }
+}
+
+async function persistSourcesToDisk(): Promise<void> {
+  const path = getSourcesDataPath();
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(sources, null, 2), "utf-8");
+}
+
+// ─── DEVICES ────────────────────────────────────────────────────────────────
+
+async function reloadDevicesFromDisk(): Promise<void> {
+  const path = getDevicesDataPath();
+  await mkdir(dirname(path), { recursive: true });
+  if (existsSync(path)) {
+    try {
+      const raw = await readFile(path, "utf-8");
+      const data = JSON.parse(raw) as unknown;
+      if (Array.isArray(data)) {
+        devices = data.filter(
+          (row): row is Device =>
+            typeof row === "object" && row !== null &&
+            typeof (row as Device).id === "string" &&
+            (row as Device).id.length > 0,
+        );
+      }
+    } catch (e) {
+      console.error("[store] devices.json read failed", e);
+    }
+    return;
+  }
+  const seed = process.env.NODE_ENV === "production" ? [] : devices;
+  try {
+    await writeFile(path, JSON.stringify(seed, null, 2), "utf-8");
+    if (process.env.NODE_ENV === "production") devices = [];
+  } catch (e) {
+    console.error("[store] devices.json bootstrap write failed", e);
+  }
+}
+
+async function persistDevicesToDisk(): Promise<void> {
+  const path = getDevicesDataPath();
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(devices, null, 2), "utf-8");
+}
+
+// ─── BRANCHES ───────────────────────────────────────────────────────────────
+
+async function reloadBranchesFromDisk(): Promise<void> {
+  const path = getBranchesDataPath();
+  await mkdir(dirname(path), { recursive: true });
+  if (existsSync(path)) {
+    try {
+      const raw = await readFile(path, "utf-8");
+      const data = JSON.parse(raw) as unknown;
+      if (Array.isArray(data)) {
+        branches = data.filter(
+          (row): row is Branch =>
+            typeof row === "object" && row !== null &&
+            typeof (row as Branch).id === "string" &&
+            (row as Branch).id.length > 0,
+        );
+      }
+    } catch (e) {
+      console.error("[store] branches.json read failed", e);
+    }
+    return;
+  }
+  const seed = process.env.NODE_ENV === "production" ? [] : branches;
+  try {
+    await writeFile(path, JSON.stringify(seed, null, 2), "utf-8");
+    if (process.env.NODE_ENV === "production") branches = [];
+  } catch (e) {
+    console.error("[store] branches.json bootstrap write failed", e);
+  }
+}
+
+async function persistBranchesToDisk(): Promise<void> {
+  const path = getBranchesDataPath();
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(branches, null, 2), "utf-8");
+}
+
+// ─── ANNOUNCEMENTS ──────────────────────────────────────────────────────────
+
+async function reloadAnnouncementsFromDisk(): Promise<void> {
+  const path = getAnnouncementsDataPath();
+  await mkdir(dirname(path), { recursive: true });
+  if (existsSync(path)) {
+    try {
+      const raw = await readFile(path, "utf-8");
+      const data = JSON.parse(raw) as unknown;
+      if (Array.isArray(data)) {
+        announcements = data.filter(
+          (row): row is Announcement =>
+            typeof row === "object" && row !== null &&
+            typeof (row as Announcement).id === "string" &&
+            (row as Announcement).id.length > 0,
+        );
+      }
+    } catch (e) {
+      console.error("[store] announcements.json read failed", e);
+    }
+    return;
+  }
+  const seed = process.env.NODE_ENV === "production" ? [] : announcements;
+  try {
+    await writeFile(path, JSON.stringify(seed, null, 2), "utf-8");
+    if (process.env.NODE_ENV === "production") announcements = [];
+  } catch (e) {
+    console.error("[store] announcements.json bootstrap write failed", e);
+  }
+}
+
+async function persistAnnouncementsToDisk(): Promise<void> {
+  const path = getAnnouncementsDataPath();
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(announcements, null, 2), "utf-8");
+}
+
 let announcements: Announcement[] = seedAnnouncements.map((a) => ({
   ...a,
   accountId: demoAccount.id,
@@ -102,14 +256,19 @@ export const db = {
   getAccount(): Account {
     return demoAccount;
   },
-  getBranches(accountId?: string): Branch[] {
+
+  // ─── BRANCHES ───────────────────────────────────────────────────────────────
+
+  async getBranches(accountId?: string): Promise<Branch[]> {
+    await reloadBranchesFromDisk();
     if (!accountId) return branches;
     return branches.filter((b) => b.accountId === accountId);
   },
-  addBranch(
+  async addBranch(
     input: Pick<Branch, "accountId" | "name"> &
       Partial<Pick<Branch, "id" | "code" | "timezone" | "city" | "country" | "status">>,
-  ): Branch {
+  ): Promise<Branch> {
+    await reloadBranchesFromDisk();
     const normalizedAccountId = input.accountId.trim();
     const normalizedName = input.name.trim();
     const desiredId = (input.id ?? "").trim();
@@ -139,27 +298,25 @@ export const db = {
       devicesTotal: 0,
     };
     branches = [branch, ...branches];
+    await persistBranchesToDisk();
     return branch;
   },
-  getDevices(accountId?: string): Device[] {
+  async ensureBranchesLoaded(): Promise<void> {
+    await reloadBranchesFromDisk();
+  },
+  async persistBranches(): Promise<void> {
+    await persistBranchesToDisk();
+  },
+
+  // ─── DEVICES ────────────────────────────────────────────────────────────────
+
+  async getDevices(accountId?: string): Promise<Device[]> {
+    await reloadDevicesFromDisk();
     if (!accountId) return devices;
     return devices.filter((d) => d.accountId === accountId);
   },
-  getSources(accountId?: string): Source[] {
-    if (!accountId) return sources;
-    return sources.filter((s) => s.accountId === accountId);
-  },
-  getSchedules(accountId?: string): Schedule[] {
-    if (!accountId) return schedules;
-    return schedules.filter((s) => s.accountId === accountId);
-  },
-  getAnnouncements(): Announcement[] {
-    return announcements;
-  },
-  getLogs(): LogEntry[] {
-    return logs;
-  },
-  addDevice(input: Omit<Device, "id" | "accountId" | "lastSeen" | "lastHeartbeat"> & Partial<Pick<Device, "platform" | "health" | "capabilities" | "accountId">>): Device {
+  async addDevice(input: Omit<Device, "id" | "accountId" | "lastSeen" | "lastHeartbeat"> & Partial<Pick<Device, "platform" | "health" | "capabilities" | "accountId">>): Promise<Device> {
+    await reloadDevicesFromDisk();
     const now = new Date().toISOString();
     const device: Device = {
       name: input.name,
@@ -173,15 +330,31 @@ export const db = {
       platform: input.platform ?? "windows",
       health: input.health ?? "ok",
       capabilities: input.capabilities ?? ["supportsPlay", "supportsStop", "supportsVolume", "supportsResume"],
-      id: `dev-${String(devices.length + 1).padStart(3, "0")}`,
+      id: `dev-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       accountId: input.accountId ?? demoAccount.id,
       lastSeen: now,
       lastHeartbeat: now,
     };
     devices = [device, ...devices];
+    await persistDevicesToDisk();
     return device;
   },
-  addSource(input: Omit<Source, "id" | "accountId"> & Partial<Pick<Source, "accountId">>): Source {
+  async ensureDevicesLoaded(): Promise<void> {
+    await reloadDevicesFromDisk();
+  },
+  async persistDevices(): Promise<void> {
+    await persistDevicesToDisk();
+  },
+
+  // ─── SOURCES ────────────────────────────────────────────────────────────────
+
+  async getSources(accountId?: string): Promise<Source[]> {
+    await reloadSourcesFromDisk();
+    if (!accountId) return sources;
+    return sources.filter((s) => s.accountId === accountId);
+  },
+  async addSource(input: Omit<Source, "id" | "accountId"> & Partial<Pick<Source, "accountId">>): Promise<Source> {
+    await reloadSourcesFromDisk();
     const target = input.target ?? (input as Source & { uriOrPath?: string }).uriOrPath ?? "";
     const source: Source = {
       ...input,
@@ -189,22 +362,40 @@ export const db = {
       uriOrPath: target,
       provider: input.provider,
       playerMode: input.playerMode,
-      id: `src-${String(sources.length + 1).padStart(3, "0")}`,
+      id: `src-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       accountId: input.accountId ?? demoAccount.id,
     };
     sources = [source, ...sources];
+    await persistSourcesToDisk();
     return source;
   },
-  deleteSource(id: string): boolean {
+  async deleteSource(id: string): Promise<boolean> {
+    await reloadSourcesFromDisk();
     const before = sources.length;
     sources = sources.filter((s) => s.id !== id);
+    await persistSourcesToDisk();
     return sources.length < before;
   },
-  updateSource(id: string, data: Partial<Source>): Source | null {
+  async updateSource(id: string, data: Partial<Source>): Promise<Source | null> {
+    await reloadSourcesFromDisk();
     const idx = sources.findIndex((s) => s.id === id);
     if (idx < 0) return null;
     sources[idx] = { ...sources[idx], ...data };
+    await persistSourcesToDisk();
     return sources[idx];
+  },
+  async ensureSourcesLoaded(): Promise<void> {
+    await reloadSourcesFromDisk();
+  },
+  async persistSources(): Promise<void> {
+    await persistSourcesToDisk();
+  },
+
+  // ─── SCHEDULES ──────────────────────────────────────────────────────────────
+
+  getSchedules(accountId?: string): Schedule[] {
+    if (!accountId) return schedules;
+    return schedules.filter((s) => s.accountId === accountId);
   },
   /** Lookup by id only (trimmed). Used when URL id must match persisted id regardless of minor encoding/whitespace issues. */
   findScheduleById(id: string): Schedule | null {
@@ -266,8 +457,6 @@ export const db = {
     schedules = schedules.filter((s) => s.id.trim() !== nid);
     return schedules.length < before;
   },
-
-  /** Load or reload `data/schedules.json` before schedule reads/writes. */
   async ensureSchedulesLoaded(): Promise<void> {
     await reloadSchedulesFromDisk();
   },
@@ -275,14 +464,34 @@ export const db = {
     await persistSchedulesToDisk();
   },
 
-  addAnnouncement(input: Omit<Announcement, "id" | "accountId">): Announcement {
+  // ─── ANNOUNCEMENTS ──────────────────────────────────────────────────────────
+
+  async getAnnouncements(): Promise<Announcement[]> {
+    await reloadAnnouncementsFromDisk();
+    return announcements;
+  },
+  async addAnnouncement(input: Omit<Announcement, "id" | "accountId">): Promise<Announcement> {
+    await reloadAnnouncementsFromDisk();
     const announcement: Announcement = {
       ...input,
-      id: `ann-${announcements.length + 1}`.padStart(7, "0"),
+      id: `ann-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       accountId: demoAccount.id,
     };
     announcements = [announcement, ...announcements];
+    await persistAnnouncementsToDisk();
     return announcement;
+  },
+  async ensureAnnouncementsLoaded(): Promise<void> {
+    await reloadAnnouncementsFromDisk();
+  },
+  async persistAnnouncements(): Promise<void> {
+    await persistAnnouncementsToDisk();
+  },
+
+  // ─── LOGS (in-memory only — non-critical for pilot) ─────────────────────────
+
+  getLogs(): LogEntry[] {
+    return logs;
   },
   addLog(entry: Omit<LogEntry, "id" | "accountId">): LogEntry {
     const log: LogEntry = {

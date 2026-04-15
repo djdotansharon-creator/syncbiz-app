@@ -62,3 +62,19 @@ export function getUsersDataPath(): string {
 export function getSchedulesDataPath(): string {
   return join(getDataDir(), "schedules.json");
 }
+
+export function getSourcesDataPath(): string {
+  return join(getDataDir(), "sources.json");
+}
+
+export function getDevicesDataPath(): string {
+  return join(getDataDir(), "devices.json");
+}
+
+export function getBranchesDataPath(): string {
+  return join(getDataDir(), "branches.json");
+}
+
+export function getAnnouncementsDataPath(): string {
+  return join(getDataDir(), "announcements.json");
+}

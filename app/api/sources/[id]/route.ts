@@ -19,7 +19,7 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
-    const source = db.getSources(resolveAccountScope(user.tenantId)).find((s) => s.id === id);
+    const source = (await db.getSources(resolveAccountScope(user.tenantId))).find((s) => s.id === id);
     if (!source) {
       return NextResponse.json({ error: "Source not found" }, { status: 404 });
     }
@@ -44,7 +44,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
-    const source = db.getSources(resolveAccountScope(user.tenantId)).find((s) => s.id === id);
+    const source = (await db.getSources(resolveAccountScope(user.tenantId))).find((s) => s.id === id);
     if (!source) {
       return NextResponse.json({ error: "Source not found" }, { status: 404 });
     }
@@ -53,7 +53,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
     const data = (await req.json()) as Partial<{ name: string; target: string; type: string; description?: string; artworkUrl?: string; browserPreference?: string }>;
-    const updated = db.updateSource(id, {
+    const updated = await db.updateSource(id, {
       ...(data.name != null && { name: data.name }),
       ...(data.target != null && { target: data.target, uriOrPath: data.target }),
       ...(data.type != null && { type: data.type as Source["type"] }),
@@ -80,7 +80,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
-    const source = db.getSources(resolveAccountScope(user.tenantId)).find((s) => s.id === id);
+    const source = (await db.getSources(resolveAccountScope(user.tenantId))).find((s) => s.id === id);
     if (!source) {
       return NextResponse.json({ error: "Source not found" }, { status: 404 });
     }
@@ -89,7 +89,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
     await addDeletedSourceId(id);
-    db.deleteSource(id);
+    await db.deleteSource(id);
     const userId = await getUserIdFromSession();
     if (userId) void notifyLibraryUpdated(userId, { branchId: source.branchId, entityType: "source", action: "deleted" });
     return NextResponse.json({ ok: true });

@@ -3,7 +3,7 @@ import { db } from "@/lib/store";
 import type { Announcement } from "@/lib/types";
 
 export async function GET() {
-  return NextResponse.json(db.getAnnouncements());
+  return NextResponse.json(await db.getAnnouncements());
 }
 
 export async function POST(req: NextRequest) {
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const announcement = db.addAnnouncement({
+  const announcement = await db.addAnnouncement({
     title: data.title,
     message: data.message,
     branchId: data.branchId,

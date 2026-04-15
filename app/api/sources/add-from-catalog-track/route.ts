@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
   }
 
   const accountId = resolveAccountScope(user.tenantId);
-  const existingAll = db.getSources(accountId);
+  const existingAll = await db.getSources(accountId);
   const duplicate = existingAll.find((s) => {
     const k = catalogKeyForExistingSource(s);
     return k != null && k === urlKey;
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     console.warn("[api/sources/add-from-catalog-track] catalog find-or-create skipped:", e);
   }
 
-  const source = db.addSource({
+  const source = await db.addSource({
     name: title,
     branchId,
     type: "web_url",

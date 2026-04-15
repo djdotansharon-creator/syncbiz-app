@@ -11,7 +11,7 @@ export async function GET() {
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const accountId = resolveAccountScope(user.tenantId);
-  const existing = db.getBranches(accountId);
+  const existing = await db.getBranches(accountId);
   if (existing.length > 0) {
     return NextResponse.json(existing);
   }
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
     if (!name) {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
-    const branch = db.addBranch({
+    const branch = await db.addBranch({
       accountId: resolveAccountScope(user.tenantId),
       id: (body.id ?? "").trim() || undefined,
       name,

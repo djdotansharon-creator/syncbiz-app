@@ -16,7 +16,7 @@ export async function GET() {
   if (!user.tenantId?.trim()) {
     return NextResponse.json({ error: "Tenant context missing" }, { status: 400 });
   }
-  const all = db.getSources(resolveAccountScope(user.tenantId));
+  const all = await db.getSources(resolveAccountScope(user.tenantId));
   const filtered: Source[] = [];
   for (const s of all) {
     const branchId = s.branchId ?? "default";
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
   }
 
-  const source = db.addSource({
+  const source = await db.addSource({
     name: data.name,
     branchId: data.branchId,
     type: data.type,

@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
     // For backward compatibility, we always allow the synthetic "default" branchId.
     if (accessType === "BRANCH_USER") {
       const accountId = resolveAccountScope(admin.tenantId.trim());
-      const tenantBranches = db.getBranches(accountId);
+      const tenantBranches = await db.getBranches(accountId);
       const allowed = new Set(tenantBranches.map((b) => b.id));
       const invalid = branchAssignments
         .map((a) => a.branchId)
@@ -189,7 +189,7 @@ export async function PATCH(req: NextRequest) {
     // Validate branch IDs for BRANCH_USER edits.
     if (accessType === "BRANCH_USER") {
       const accountId = resolveAccountScope(admin.tenantId.trim());
-      const tenantBranches = db.getBranches(accountId);
+      const tenantBranches = await db.getBranches(accountId);
       const allowed = new Set(tenantBranches.map((b) => b.id));
       const invalid = branchAssignments
         .map((a) => a.branchId)
