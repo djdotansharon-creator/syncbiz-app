@@ -132,6 +132,12 @@ export async function runSchedulePlayback(
     setLastMessage("Failed: No target path");
     return false;
   }
+  // Browser schedule playback for HTTP/HTTPS targets is already handled by playSource()
+  // (embedded / in-app transport). Avoid forcing server-side play-local here, which is
+  // Windows-only and causes repeated retry loops on Linux runtimes (e.g. Railway).
+  if (target.startsWith("http://") || target.startsWith("https://")) {
+    return true;
+  }
   const res = await fetch("/api/commands/play-local", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
