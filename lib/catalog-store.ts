@@ -51,8 +51,8 @@ export async function findOrCreateCatalogItem(input: {
     select: { id: true, genres: true },
   });
 
-  // Backfill genres on existing rows that have none yet
-  if (row.genres.length === 0 && genres.length > 0) {
+  // Backfill genres on existing rows that have none yet (NULL or [])
+  if ((row.genres ?? []).length === 0 && genres.length > 0) {
     await prisma.catalogItem.update({
       where: { id: row.id },
       data: { genres },
@@ -68,17 +68,20 @@ export async function findOrCreateCatalogItem(input: {
  * Returns the number of items updated.
  */
 export async function backfillCatalogGenres(): Promise<number> {
+  // Fetch all items — NULL arrays are returned as [] by Prisma so we can
+  // filter in JS. Using isEmpty:true in WHERE misses NULL-stored arrays.
   const items = await prisma.catalogItem.findMany({
-    where: { genres: { isEmpty: true } },
-    select: { id: true, title: true },
+    select: { id: true, title: true, genres: true },
   });
 
   let updated = 0;
   for (const item of items) {
-    const genres = genresFromTitle(item.title);
-    if (genres.length > 0) {
-      await prisma.catalogItem.update({ where: { id: item.id }, data: { genres } });
-      updated++;
+    if ((item.genres ?? []).length === 0) {
+      const genres = genresFromTitle(item.title);
+      if (genres.length > 0) {
+        await prisma.catalogItem.update({ where: { id: item.id }, data: { genres } });
+        updated++;
+      }
     }
   }
   return updated;

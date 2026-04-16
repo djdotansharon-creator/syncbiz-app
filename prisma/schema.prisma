@@ -370,7 +370,7 @@ model CatalogItem {
   artist        String?
   durationSec   Int?
   thumbnail     String?
-  genres        String[]
+  genres        String[]  @default([])
   businessTypes BusinessType[]
   addedById     String?
   createdAt     DateTime       @default(now())
