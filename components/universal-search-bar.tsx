@@ -6,7 +6,7 @@ import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { useSourcesPlayback } from "@/lib/sources-playback-context";
 import { ActionButtonPlay, ActionButtonEdit } from "@/components/ui/action-buttons";
-import { searchAll, type YouTubeSearchResult, type RadioSearchResult } from "@/lib/search-service";
+import { searchAll, type YouTubeSearchResult, type RadioSearchResult, type CatalogSearchResult } from "@/lib/search-service";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { formatViewCount } from "@/lib/format-utils";
 import { inferGenre } from "@/lib/infer-genre";
@@ -68,6 +68,7 @@ export function UniversalSearchBar({ onAddSource }: Props) {
   const [localResults, setLocalResults] = useState<UnifiedSource[]>([]);
   const [youtubeResults, setYoutubeResults] = useState<YouTubeSearchResult[]>([]);
   const [radioResults, setRadioResults] = useState<RadioSearchResult[]>([]);
+  const [catalogResults, setCatalogResults] = useState<CatalogSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [listening, setListening] = useState(false);
   const [showResults, setShowResults] = useState(false);
@@ -78,7 +79,8 @@ export function UniversalSearchBar({ onAddSource }: Props) {
   const hasLocal = localResults.length > 0;
   const hasYoutube = youtubeResults.length > 0;
   const hasRadio = radioResults.length > 0;
-  const hasResults = hasLocal || hasYoutube || hasRadio;
+  const hasCatalog = catalogResults.length > 0;
+  const hasResults = hasLocal || hasYoutube || hasRadio || hasCatalog;
 
   const runSearch = useCallback(async () => {
     const q = query.trim();
@@ -86,6 +88,7 @@ export function UniversalSearchBar({ onAddSource }: Props) {
       setLocalResults([]);
       setYoutubeResults([]);
       setRadioResults([]);
+      setCatalogResults([]);
       return;
     }
     setSearching(true);
@@ -94,6 +97,7 @@ export function UniversalSearchBar({ onAddSource }: Props) {
       setLocalResults(internal);
       setYoutubeResults(external.youtube);
       setRadioResults(external.radio);
+      setCatalogResults(external.catalog);
     } finally {
       setSearching(false);
     }
@@ -104,6 +108,7 @@ export function UniversalSearchBar({ onAddSource }: Props) {
       setLocalResults([]);
       setYoutubeResults([]);
       setRadioResults([]);
+      setCatalogResults([]);
       setShowResults(false);
       return;
     }
@@ -256,11 +261,77 @@ export function UniversalSearchBar({ onAddSource }: Props) {
         router.refresh();
         setQuery("");
         setYoutubeResults([]);
+        setCatalogResults([]);
         setLocalResults([]);
         setShowResults(false);
       }
     },
     [playSource, router, onAddSource, query]
+  );
+
+  const handleAddCatalog = useCallback(
+    async (r: CatalogSearchResult) => {
+      const genre = inferGenre(r.title, query);
+      const playable = await resolveYouTubePlayableUrlForSearch(r.url);
+      const created = await createPlaylistFromUrl(playable, {
+        title: r.title,
+        genre,
+        cover: r.thumbnail,
+        type: "youtube",
+      });
+      if (created) {
+        const u: UnifiedSource = {
+          id: `pl-${created.id}`,
+          title: created.name,
+          genre: created.genre || genre,
+          cover: created.thumbnail || null,
+          type: "youtube",
+          url: created.url,
+          origin: "playlist",
+          playlist: created,
+        };
+        onAddSource(u);
+        router.refresh();
+        setQuery("");
+        setCatalogResults([]);
+        setLocalResults([]);
+        setShowResults(false);
+      }
+    },
+    [onAddSource, router, query]
+  );
+
+  const handlePlayCatalog = useCallback(
+    async (r: CatalogSearchResult) => {
+      const genre = inferGenre(r.title, query);
+      const playable = await resolveYouTubePlayableUrlForSearch(r.url);
+      const created = await createPlaylistFromUrl(playable, {
+        title: r.title,
+        genre,
+        cover: r.thumbnail,
+        type: "youtube",
+      });
+      if (created) {
+        const u: UnifiedSource = {
+          id: `pl-${created.id}`,
+          title: created.name,
+          genre: created.genre || genre,
+          cover: created.thumbnail || null,
+          type: "youtube",
+          url: created.url,
+          origin: "playlist",
+          playlist: created,
+        };
+        onAddSource(u);
+        playSource(u);
+        router.refresh();
+        setQuery("");
+        setCatalogResults([]);
+        setLocalResults([]);
+        setShowResults(false);
+      }
+    },
+    [onAddSource, playSource, router, query]
   );
 
   return (
@@ -325,6 +396,7 @@ export function UniversalSearchBar({ onAddSource }: Props) {
               setLocalResults([]);
               setYoutubeResults([]);
               setRadioResults([]);
+              setCatalogResults([]);
               setShowResults(false);
               inputRef.current?.focus();
             }}
@@ -390,6 +462,55 @@ export function UniversalSearchBar({ onAddSource }: Props) {
                           {source.origin === "radio" && source.radio && (
                             <ActionButtonEdit href={`/radio/${source.radio.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
                           )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {hasCatalog && (
+                <div className="border-b border-slate-800/60 p-3">
+                  <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-400">
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                    </svg>
+                    From Catalog
+                  </p>
+                  <div className="space-y-1">
+                    {catalogResults.map((r) => (
+                      <div key={r.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-slate-800/80">
+                        <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                          {r.thumbnail ? (
+                            <img src={r.thumbnail} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-violet-400">
+                              <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                              </svg>
+                            </div>
+                          )}
+                          <span className="absolute bottom-0 right-0 rounded bg-violet-600/90 px-1 py-0.5 text-[10px] font-medium text-white">CAT</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium text-slate-100">{r.title}</p>
+                          <p className="text-xs text-violet-400/80">Global Catalog</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void handleAddCatalog(r)}
+                            className="inline-flex h-9 items-center justify-center rounded-xl border border-slate-600 bg-slate-800/90 px-3 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+                          >
+                            {t.addToLibrary}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handlePlayCatalog(r)}
+                            className="inline-flex h-9 items-center justify-center rounded-xl bg-violet-600 px-3 text-xs font-semibold text-white transition hover:bg-violet-500"
+                          >
+                            {t.playNow}
+                          </button>
                         </div>
                       </div>
                     ))}

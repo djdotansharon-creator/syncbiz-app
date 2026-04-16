@@ -1,7 +1,7 @@
 /**
  * Search service – two-layer architecture:
  * 1. Internal: existing library content (playlists, radio, sources, favorites)
- * 2. External: discovery from YouTube, Radio Browser, future providers
+ * 2. External: discovery from YouTube, Radio Browser, global catalog
  *
  * Extensible for additional external providers.
  */
@@ -26,9 +26,17 @@ export type RadioSearchResult = {
   genre: string;
 };
 
+export type CatalogSearchResult = {
+  id: string;
+  url: string;
+  title: string;
+  thumbnail: string | null;
+};
+
 export type ExternalSearchResults = {
   youtube: YouTubeSearchResult[];
   radio: RadioSearchResult[];
+  catalog: CatalogSearchResult[];
 };
 
 /** Internal search – filters existing library content. No API calls. */
@@ -56,13 +64,21 @@ export function searchInternal(sources: UnifiedSource[], query: string): Unified
 /** External discovery – calls API. Extensible: add more providers to the response. */
 export async function searchExternal(query: string): Promise<ExternalSearchResults> {
   if (!query.trim() || query.trim().length < 2) {
-    return { youtube: [], radio: [] };
+    return { youtube: [], radio: [], catalog: [] };
   }
-  const res = await fetch(`/api/sources/search?q=${encodeURIComponent(query.trim())}`);
-  const data = await res.json();
+  const q = encodeURIComponent(query.trim());
+  const [externalRes, catalogRes] = await Promise.allSettled([
+    fetch(`/api/sources/search?q=${q}`).then((r) => r.json()),
+    fetch(`/api/catalog/search?q=${q}`).then((r) => r.json()),
+  ]);
+
+  const externalData = externalRes.status === "fulfilled" ? externalRes.value : {};
+  const catalogData = catalogRes.status === "fulfilled" ? catalogRes.value : {};
+
   return {
-    youtube: data.results || [],
-    radio: data.radioResults || [],
+    youtube: externalData.results || [],
+    radio: externalData.radioResults || [],
+    catalog: catalogData.items || [],
   };
 }
 
@@ -76,7 +92,7 @@ export async function searchAll(
 }> {
   const q = query.trim();
   if (!q || q.length < 2) {
-    return { internal: [], external: { youtube: [], radio: [] } };
+    return { internal: [], external: { youtube: [], radio: [], catalog: [] } };
   }
   const [internal, external] = await Promise.all([
     Promise.resolve(searchInternal(sources, q)),
