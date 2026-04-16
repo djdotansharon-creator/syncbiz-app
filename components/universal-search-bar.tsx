@@ -69,6 +69,7 @@ export function UniversalSearchBar({ onAddSource }: Props) {
   const [youtubeResults, setYoutubeResults] = useState<YouTubeSearchResult[]>([]);
   const [radioResults, setRadioResults] = useState<RadioSearchResult[]>([]);
   const [catalogResults, setCatalogResults] = useState<CatalogSearchResult[]>([]);
+  const [selectedGenre, setSelectedGenre] = useState<string>("");
   const [searching, setSearching] = useState(false);
   const [listening, setListening] = useState(false);
   const [showResults, setShowResults] = useState(false);
@@ -79,8 +80,16 @@ export function UniversalSearchBar({ onAddSource }: Props) {
   const hasLocal = localResults.length > 0;
   const hasYoutube = youtubeResults.length > 0;
   const hasRadio = radioResults.length > 0;
-  const hasCatalog = catalogResults.length > 0;
-  const hasResults = hasLocal || hasYoutube || hasRadio || hasCatalog;
+
+  // Derive unique genres from all catalog results for filter pills
+  const catalogGenres = Array.from(
+    new Set(catalogResults.flatMap((r) => r.genres ?? []))
+  ).sort();
+  const filteredCatalogResults = selectedGenre
+    ? catalogResults.filter((r) => (r.genres ?? []).includes(selectedGenre))
+    : catalogResults;
+  const hasCatalog = filteredCatalogResults.length > 0;
+  const hasResults = hasLocal || hasYoutube || hasRadio || hasCatalog || catalogResults.length > 0;
 
   const runSearch = useCallback(async () => {
     const q = query.trim();
@@ -109,6 +118,7 @@ export function UniversalSearchBar({ onAddSource }: Props) {
       setYoutubeResults([]);
       setRadioResults([]);
       setCatalogResults([]);
+      setSelectedGenre("");
       setShowResults(false);
       return;
     }
@@ -397,6 +407,7 @@ export function UniversalSearchBar({ onAddSource }: Props) {
               setYoutubeResults([]);
               setRadioResults([]);
               setCatalogResults([]);
+              setSelectedGenre("");
               setShowResults(false);
               inputRef.current?.focus();
             }}
@@ -468,17 +479,37 @@ export function UniversalSearchBar({ onAddSource }: Props) {
                   </div>
                 </div>
               )}
-              {hasCatalog && (
+              {catalogResults.length > 0 && (
                 <div className="border-b border-slate-800/60 p-3">
-                  <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-400">
-                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                    </svg>
-                    From Catalog
-                  </p>
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-violet-400">
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                      </svg>
+                      From Catalog
+                    </p>
+                    {catalogGenres.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {catalogGenres.map((g) => (
+                          <button
+                            key={g}
+                            type="button"
+                            onClick={() => setSelectedGenre(selectedGenre === g ? "" : g)}
+                            className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition ${
+                              selectedGenre === g
+                                ? "bg-violet-600 text-white"
+                                : "bg-slate-700/80 text-slate-300 hover:bg-violet-700/60 hover:text-violet-200"
+                            }`}
+                          >
+                            {g}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <div className="space-y-1">
-                    {catalogResults.map((r) => (
+                    {filteredCatalogResults.map((r) => (
                       <div key={r.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-slate-800/80">
                         <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-slate-800">
                           {r.thumbnail ? (
@@ -494,7 +525,12 @@ export function UniversalSearchBar({ onAddSource }: Props) {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium text-slate-100">{r.title}</p>
-                          <p className="text-xs text-violet-400/80">Global Catalog</p>
+                          <p className="text-xs text-violet-400/80">
+                            Global Catalog
+                            {r.genres && r.genres.length > 0 && (
+                              <span className="ml-1.5 text-slate-400">• {r.genres[0]}</span>
+                            )}
+                          </p>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
                           <button
@@ -514,6 +550,9 @@ export function UniversalSearchBar({ onAddSource }: Props) {
                         </div>
                       </div>
                     ))}
+                    {filteredCatalogResults.length === 0 && selectedGenre && (
+                      <p className="py-2 text-center text-xs text-slate-500">No catalog results for &quot;{selectedGenre}&quot;</p>
+                    )}
                   </div>
                 </div>
               )}

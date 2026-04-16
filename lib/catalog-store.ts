@@ -7,6 +7,7 @@
 import { prisma } from "./prisma";
 import type { PlaylistType } from "./playlist-types";
 import { canonicalYouTubeWatchUrlForPlayback } from "./playlist-utils";
+import { inferGenre } from "./infer-genre";
 
 export function normalizeCatalogUrlKey(url: string, type: PlaylistType): string {
   const u = (url ?? "").trim();
@@ -15,10 +16,16 @@ export function normalizeCatalogUrlKey(url: string, type: PlaylistType): string 
   return u;
 }
 
+/** Derive a genres array from a title. Returns [] if genre is "Mixed" (unrecognised). */
+function genresFromTitle(title: string): string[] {
+  const g = inferGenre(title);
+  return g !== "Mixed" ? [g] : [];
+}
+
 /**
  * Find or create a catalog item by its normalized URL.
  * tenantId is accepted for API compatibility but ignored — catalog is global.
- * Returns at minimum `{ id }` — callers that only need the id continue to work.
+ * Automatically populates genres from the title on every create/update.
  */
 export async function findOrCreateCatalogItem(input: {
   tenantId: string;   // kept for drop-in compat; not stored
@@ -32,15 +39,47 @@ export async function findOrCreateCatalogItem(input: {
 
   const title = (input.title ?? "").trim() || "Untitled";
   const thumbnail = (input.thumbnailUrl ?? "").trim() || null;
+  const genres = genresFromTitle(title);
 
   const row = await prisma.catalogItem.upsert({
     where: { url },
-    create: { url, title, thumbnail },
+    create: { url, title, thumbnail, genres },
     update: {
       ...(title !== "Untitled" ? { title } : {}),
       ...(thumbnail ? { thumbnail } : {}),
     },
+    select: { id: true, genres: true },
   });
 
+  // Backfill genres on existing rows that have none yet
+  if (row.genres.length === 0 && genres.length > 0) {
+    await prisma.catalogItem.update({
+      where: { id: row.id },
+      data: { genres },
+    });
+  }
+
   return { id: row.id };
+}
+
+/**
+ * Populate genres for every CatalogItem whose genres array is currently empty.
+ * Safe to call multiple times — skips items that already have genres.
+ * Returns the number of items updated.
+ */
+export async function backfillCatalogGenres(): Promise<number> {
+  const items = await prisma.catalogItem.findMany({
+    where: { genres: { isEmpty: true } },
+    select: { id: true, title: true },
+  });
+
+  let updated = 0;
+  for (const item of items) {
+    const genres = genresFromTitle(item.title);
+    if (genres.length > 0) {
+      await prisma.catalogItem.update({ where: { id: item.id }, data: { genres } });
+      updated++;
+    }
+  }
+  return updated;
 }

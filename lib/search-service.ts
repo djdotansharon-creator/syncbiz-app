@@ -31,6 +31,7 @@ export type CatalogSearchResult = {
   url: string;
   title: string;
   thumbnail: string | null;
+  genres: string[];
 };
 
 export type ExternalSearchResults = {
@@ -62,14 +63,17 @@ export function searchInternal(sources: UnifiedSource[], query: string): Unified
 }
 
 /** External discovery – calls API. Extensible: add more providers to the response. */
-export async function searchExternal(query: string): Promise<ExternalSearchResults> {
+export async function searchExternal(query: string, genreFilter?: string): Promise<ExternalSearchResults> {
   if (!query.trim() || query.trim().length < 2) {
     return { youtube: [], radio: [], catalog: [] };
   }
   const q = encodeURIComponent(query.trim());
+  const catalogUrl = genreFilter
+    ? `/api/catalog/search?q=${q}&genre=${encodeURIComponent(genreFilter)}`
+    : `/api/catalog/search?q=${q}`;
   const [externalRes, catalogRes] = await Promise.allSettled([
     fetch(`/api/sources/search?q=${q}`).then((r) => r.json()),
-    fetch(`/api/catalog/search?q=${q}`).then((r) => r.json()),
+    fetch(catalogUrl).then((r) => r.json()),
   ]);
 
   const externalData = externalRes.status === "fulfilled" ? externalRes.value : {};
@@ -85,7 +89,8 @@ export async function searchExternal(query: string): Promise<ExternalSearchResul
 /** Run both internal and external search in parallel. */
 export async function searchAll(
   sources: UnifiedSource[],
-  query: string
+  query: string,
+  genreFilter?: string
 ): Promise<{
   internal: UnifiedSource[];
   external: ExternalSearchResults;
@@ -96,7 +101,7 @@ export async function searchAll(
   }
   const [internal, external] = await Promise.all([
     Promise.resolve(searchInternal(sources, q)),
-    searchExternal(q),
+    searchExternal(q, genreFilter),
   ]);
   return { internal, external };
 }

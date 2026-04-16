@@ -11,16 +11,19 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   if (q.length < 2) return NextResponse.json({ items: [] });
 
+  const genre = req.nextUrl.searchParams.get("genre")?.trim() ?? "";
+
   // Match any word in the query against the title (case-insensitive)
   const words = q.split(/\s+/).filter((w) => w.length > 1);
 
   const items = await prisma.catalogItem.findMany({
     where: {
-      OR: words.map((w) => ({
-        title: { contains: w, mode: "insensitive" as const },
-      })),
+      AND: [
+        { OR: words.map((w) => ({ title: { contains: w, mode: "insensitive" as const } })) },
+        ...(genre ? [{ genres: { has: genre } }] : []),
+      ],
     },
-    select: { id: true, url: true, title: true, thumbnail: true },
+    select: { id: true, url: true, title: true, thumbnail: true, genres: true },
     orderBy: [{ analytics: { playCount: "desc" } }, { createdAt: "desc" }],
     take: LIMIT,
   });
