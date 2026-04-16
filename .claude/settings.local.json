@@ -31,7 +31,10 @@
       "Bash(node --env-file=.env scripts/migrate-json-to-db.mjs)",
       "Bash(npm run *)",
       "Bash(echo \"Server PID: $!\")",
-      "Bash(python -m json.tool)"
+      "Bash(python -m json.tool)",
+      "Bash(start \"\" cmd /c \"npx prisma studio\")",
+      "Bash(npx --prefix \"D:\\\\APP Project\\\\syncbiz-app\" prisma studio --browser none)",
+      "Bash(echo \"Studio PID: $!\")"
     ]
   }
 }
