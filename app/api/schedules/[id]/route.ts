@@ -45,7 +45,7 @@ export async function GET(
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await db.ensureSchedulesLoaded();
-  const schedule = db.findScheduleById(id);
+  const schedule = await db.findScheduleById(id);
   const access = await requireScheduleAccess(schedule);
   if (!access.ok) {
     return NextResponse.json(
@@ -66,7 +66,7 @@ export async function PATCH(
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await db.ensureSchedulesLoaded();
-  const existing = db.findScheduleById(id);
+  const existing = await db.findScheduleById(id);
   const access = await requireScheduleAccess(existing);
   if (!access.ok) {
     return NextResponse.json(
@@ -120,7 +120,7 @@ export async function PATCH(
   const uid = await getUserIdFromSession();
   if (uid) updates.updatedBy = uid;
 
-  const updated = db.updateSchedule(id, updates);
+  const updated = await db.updateSchedule(id, updates);
   await db.persistSchedules();
   revalidatePath("/schedules");
   return NextResponse.json(updated);
@@ -136,7 +136,7 @@ export async function DELETE(
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await db.ensureSchedulesLoaded();
-  const schedule = db.findScheduleById(id);
+  const schedule = await db.findScheduleById(id);
   const access = await requireScheduleAccess(schedule);
   if (!access.ok) {
     return NextResponse.json(
@@ -144,7 +144,7 @@ export async function DELETE(
       { status: access.status },
     );
   }
-  const deleted = db.deleteSchedule(id);
+  const deleted = await db.deleteSchedule(id);
   if (!deleted) {
     return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
   }

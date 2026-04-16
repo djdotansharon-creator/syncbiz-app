@@ -13,6 +13,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@prisma/client": "^5.22.0",
     "hls.js": "^1.6.15",
     "next": "16.1.6",
     "react": "19.2.3",
@@ -30,6 +31,7 @@
     "concurrently": "^9.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "prisma": "^5.22.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

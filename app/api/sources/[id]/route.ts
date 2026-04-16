@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/store";
-import { addDeletedSourceId } from "@/lib/deleted-sources-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import type { Source } from "@/lib/types";
@@ -88,7 +87,6 @@ export async function DELETE(
     if (!(await hasBranchAccess(user.id, branchId))) {
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
-    await addDeletedSourceId(id);
     await db.deleteSource(id);
     const userId = await getUserIdFromSession();
     if (userId) void notifyLibraryUpdated(userId, { branchId: source.branchId, entityType: "source", action: "deleted" });

@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(xargs grep:*)",
+      "Bash(railway:*)",
+      "Bash(npm install:*)",
+      "Bash(RAILWAY_TOKEN=d7f26ef6-b22d-462e-92d6-135aee156d3c railway whoami:*)",
+      "Bash(RAILWAY_TOKEN=d7f26ef6-b22d-462e-92d6-135aee156d3c railway status)",
+      "Bash(RAILWAY_TOKEN=d7f26ef6-b22d-462e-92d6-135aee156d3c railway projects)",
+      "Bash(RAILWAY_TOKEN=d7f26ef6-b22d-462e-92d6-135aee156d3c railway service)",
+      "Bash(RAILWAY_TOKEN=d7f26ef6-b22d-462e-92d6-135aee156d3c railway link)",
+      "Bash(RAILWAY_TOKEN=d7f26ef6-b22d-462e-92d6-135aee156d3c railway:*)",
+      "Bash(curl:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx playwright:*)",
+      "Bash(where yt-dlp *)",
+      "Bash(\"d:/APP Project/syncbiz-app/node_modules/.cache/yt-dlp/yt-dlp.exe\" --version)",
+      "Bash(\"d:/APP Project/syncbiz-app/node_modules/.cache/yt-dlp/yt-dlp.exe\" \"https://www.youtube.com/watch?v=pmMHCUfiTuI&list=RDpmMHCUfiTuI&start_radio=1\" --dump-json --no-warnings --no-download --flat-playlist --playlist-items \"1-5\")",
+      "Bash(node -e ' *)",
+      "Bash(cat nixpacks.toml)",
+      "Bash(cat Dockerfile)",
+      "Bash(cat railway.json)",
+      "Bash(cat railway.toml)",
+      "Bash(npm show *)",
+      "Bash(node -e \"const p=require\\('./node_modules/yt-dlp-wrap/dist/index.js'\\); console.log\\('wrap loaded'\\)\")",
+      "Bash(npx prisma *)",
+      "Bash(npm uninstall *)",
+      "Bash(2>&1)",
+      "Bash(node scripts/migrate-json-to-db.mjs)",
+      "Bash(node --env-file=.env scripts/migrate-json-to-db.mjs)",
+      "Bash(npm run *)",
+      "Bash(echo \"Server PID: $!\")",
+      "Bash(python -m json.tool)"
+    ]
+  }
+}

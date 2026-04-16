@@ -1,146 +1,216 @@
 /**
- * File-based playlist storage.
- * Stores each playlist as a JSON file in playlists/ folder.
- * JSON structure: { name, genre, cover, tracks: [{ title, type, url, cover }] }
- * Auto-creates playlists/covers/ and playlists/m3u/ for media assets.
+ * Playlist storage — backed by PostgreSQL via Prisma.
+ * Replaces the previous file-based (JSON) implementation.
+ * All function signatures are preserved for drop-in compatibility.
  */
 
-import { mkdir, readdir, readFile, writeFile, unlink } from "fs/promises";
-import { join } from "path";
-import { getPlaylistsDir } from "./data-path";
+import type { Prisma } from "@prisma/client";
+import { prisma } from "./prisma";
 import { normalizePlaylistForPersist, PlaylistPersistError } from "./playlist-persist-rules";
 import type { Playlist, PlaylistCreateInput, PlaylistTrack } from "./playlist-types";
 
+type PlaylistRow = Prisma.PlaylistGetPayload<{ include: { items: true } }>;
+
 export { PlaylistPersistError, isPlaylistPersistError } from "./playlist-persist-rules";
 
-async function ensurePlaylistsDir(): Promise<void> {
-  const dir = getPlaylistsDir();
-  const coversDir = join(dir, "covers");
-  const m3uDir = join(dir, "m3u");
-  try {
-    await mkdir(dir, { recursive: true });
-    await mkdir(coversDir, { recursive: true });
-    await mkdir(m3uDir, { recursive: true });
-  } catch (e) {
-    console.error("[playlist-store] Failed to create Playlists dir:", e);
-    throw e;
-  }
+// ─── Workspace resolution ────────────────────────────────────────────────────
+
+async function resolveWorkspaceId(id: string | undefined): Promise<string | null> {
+  if (!id) return null;
+  const byId = await prisma.workspace.findUnique({ where: { id } });
+  if (byId) return byId.id;
+  const bySlug = await prisma.workspace.findUnique({ where: { slug: id } });
+  return bySlug?.id ?? null;
 }
 
-function playlistPath(id: string): string {
-  return join(getPlaylistsDir(), `${id}.json`);
+// ─── Mapping helpers ─────────────────────────────────────────────────────────
+
+function rowToPlaylist(row: PlaylistRow): Playlist {
+  const tracks: PlaylistTrack[] = row.items
+    .slice()
+    .sort((a, b) => a.position - b.position)
+    .map((item) => ({
+      id: item.trackId || item.catalogId || "",
+      name: item.name,
+      type: item.trackType as Playlist["type"],
+      url: item.url,
+      cover: item.cover ?? undefined,
+    }));
+
+  return {
+    id: row.id,
+    name: row.name,
+    genre: row.genre,
+    type: row.playlistType as Playlist["type"],
+    url: row.url,
+    thumbnail: row.thumbnail,
+    cover: row.thumbnail || undefined,
+    createdAt: row.createdAt.toISOString(),
+    branchId: row.branchId ?? undefined,
+    tenantId: row.workspaceId,
+    catalogItemId: row.catalogItemId ?? undefined,
+    viewCount: row.viewCount ?? undefined,
+    durationSeconds: row.durationSeconds ?? undefined,
+    tracks: tracks.length > 0 ? tracks : undefined,
+    order: row.trackOrder.length > 0 ? row.trackOrder : undefined,
+    adminNotes: row.adminNotes ?? undefined,
+    useCase: (row.useCase as Playlist["useCase"]) ?? undefined,
+    useCases: row.useCases.length > 0 ? (row.useCases as Playlist["useCases"]) : undefined,
+    primaryGenre: (row.primaryGenre as Playlist["primaryGenre"]) ?? undefined,
+    subGenres: row.subGenres.length > 0 ? (row.subGenres as Playlist["subGenres"]) : undefined,
+    mood: (row.mood as Playlist["mood"]) ?? undefined,
+    energyLevel: (row.energyLevel as Playlist["energyLevel"]) ?? undefined,
+    libraryPlacement: (row.libraryPlacement as Playlist["libraryPlacement"]) ?? undefined,
+    playlistOwnershipScope: (row.playlistOwnershipScope as Playlist["playlistOwnershipScope"]) ?? undefined,
+    scheduleContributorBlocks: row.scheduleContributorBlocks
+      ? (row.scheduleContributorBlocks as Playlist["scheduleContributorBlocks"])
+      : undefined,
+    isShared: row.isShared,
+    sharedById: row.sharedById ?? undefined,
+  } as Playlist;
 }
 
-function generateId(): string {
-  return `pl-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
+const INCLUDE_ITEMS = { items: true } as const;
+
+// ─── Public API ──────────────────────────────────────────────────────────────
 
 export async function listPlaylists(): Promise<Playlist[]> {
-  await ensurePlaylistsDir();
-  const dir = getPlaylistsDir();
-  const files = await readdir(dir);
-  const jsonFiles = files.filter((f) => f.endsWith(".json"));
-  const playlists: Playlist[] = [];
-
-  for (const file of jsonFiles) {
-    try {
-      const content = await readFile(join(dir, file), "utf-8");
-      const data = JSON.parse(content) as Playlist & { cover?: string };
-      if (data.id && data.name) {
-        if (!data.thumbnail && data.cover) data.thumbnail = data.cover;
-        playlists.push(data);
-      }
-    } catch (e) {
-      console.warn("[playlist-store] Skipped invalid file:", file, e);
-    }
-  }
-
-  return playlists.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  const rows = await prisma.playlist.findMany({
+    include: INCLUDE_ITEMS,
+    orderBy: { createdAt: "desc" },
+  });
+  return rows.map(rowToPlaylist);
 }
 
 export async function listPlaylistsForTenant(tenantId: string): Promise<Playlist[]> {
-  const all = await listPlaylists();
-  const tid = (tenantId ?? "").trim();
-  if (!tid) return [];
-  if (tid === "tnt-default") {
-    // Backward compatibility: legacy records without tenantId belong to demo tenant.
-    return all.filter((p) => !p.tenantId || p.tenantId === tid);
-  }
-  return all.filter((p) => p.tenantId === tid);
+  const wsId = await resolveWorkspaceId(tenantId);
+  if (!wsId) return [];
+  const rows = await prisma.playlist.findMany({
+    where: { workspaceId: wsId },
+    include: INCLUDE_ITEMS,
+    orderBy: { createdAt: "desc" },
+  });
+  return rows.map(rowToPlaylist);
 }
 
 export async function getPlaylist(id: string): Promise<Playlist | null> {
-  await ensurePlaylistsDir();
-  try {
-    const content = await readFile(playlistPath(id), "utf-8");
-    const data = JSON.parse(content) as Playlist & { cover?: string };
-    if (!data.thumbnail && data.cover) data.thumbnail = data.cover;
-    return data;
-  } catch {
-    return null;
-  }
+  const row = await prisma.playlist.findUnique({
+    where: { id },
+    include: INCLUDE_ITEMS,
+  });
+  if (!row) return null;
+  return rowToPlaylist(row);
 }
 
-const DEFAULT_BRANCH_ID = "default";
-
 export async function createPlaylist(input: PlaylistCreateInput): Promise<Playlist> {
-  await ensurePlaylistsDir();
-  const id = input.id ?? generateId();
-  const thumbnail = (input.thumbnail ?? "").trim();
-  const branchId = typeof input.branchId === "string" && input.branchId.trim()
-    ? input.branchId.trim()
-    : DEFAULT_BRANCH_ID;
-  /** Persist at least one row so GET /api/playlists/[id] exposes tracks[] (not shell-only JSON). Mirrors getPlaylistTracks legacy single-URL shape. */
-  const tracks: PlaylistTrack[] =
-    input.tracks && input.tracks.length > 0
-      ? input.tracks
-      : [
-          {
-            id,
-            name: input.name,
-            type: input.type,
-            url: input.url,
-            cover: thumbnail || undefined,
-          },
-        ];
-  const playlist: Playlist = {
-    ...input,
-    id,
-    thumbnail,
-    branchId,
-    tenantId: input.tenantId?.trim() || undefined,
-    createdAt: new Date().toISOString(),
-    tracks,
-  };
-  const normalized = normalizePlaylistForPersist(playlist);
-  const toWrite = {
-    ...normalized,
-    cover: normalized.thumbnail || normalized.cover || undefined,
-  };
-  await writeFile(playlistPath(id), JSON.stringify(toWrite, null, 2), "utf-8");
-  return normalized;
+  const normalized = normalizePlaylistForPersist({ ...input, id: input.id ?? crypto.randomUUID(), createdAt: new Date().toISOString() } as Playlist);
+  const wsId = await resolveWorkspaceId(normalized.tenantId);
+  if (!wsId) throw new Error("Workspace not found for tenantId: " + normalized.tenantId);
+
+  const tracks = normalized.tracks ?? [];
+  const order = normalized.order ?? tracks.map((t) => t.id);
+
+  const row = await prisma.playlist.create({
+    data: {
+      id: normalized.id,
+      workspaceId: wsId,
+      name: normalized.name,
+      genre: normalized.genre ?? "",
+      playlistType: normalized.type ?? "youtube",
+      url: normalized.url ?? "",
+      thumbnail: normalized.thumbnail ?? "",
+      branchId: normalized.branchId ?? null,
+      catalogItemId: normalized.catalogItemId ?? null,
+      viewCount: normalized.viewCount ?? null,
+      durationSeconds: normalized.durationSeconds ?? null,
+      adminNotes: normalized.adminNotes ?? null,
+      useCase: normalized.useCase ?? null,
+      useCases: normalized.useCases ?? [],
+      primaryGenre: normalized.primaryGenre ?? null,
+      subGenres: normalized.subGenres ?? [],
+      mood: normalized.mood ?? null,
+      energyLevel: normalized.energyLevel ?? null,
+      libraryPlacement: normalized.libraryPlacement ?? null,
+      playlistOwnershipScope: normalized.playlistOwnershipScope ?? null,
+      trackOrder: order,
+      scheduleContributorBlocks: normalized.scheduleContributorBlocks
+        ? (normalized.scheduleContributorBlocks as object)
+        : undefined,
+      isShared: false,
+      items: {
+        create: tracks.map((t, idx) => ({
+          trackId: t.id,
+          name: t.name,
+          trackType: t.type,
+          url: t.url,
+          cover: t.cover ?? null,
+          position: idx,
+        })),
+      },
+    },
+    include: INCLUDE_ITEMS,
+  });
+  return rowToPlaylist(row);
 }
 
 export async function updatePlaylist(id: string, data: Partial<Playlist>): Promise<Playlist | null> {
-  const existing = await getPlaylist(id);
+  const existing = await prisma.playlist.findUnique({ where: { id } });
   if (!existing) return null;
   if (data.tracks !== undefined && data.tracks.length === 0) {
     throw new PlaylistPersistError("TRACKS_EMPTY", "tracks cannot be empty.");
   }
-  const merged: Playlist = { ...existing, ...data, id };
-  const normalized = normalizePlaylistForPersist(merged);
-  const toWrite = {
-    ...normalized,
-    cover: normalized.thumbnail || normalized.cover || undefined,
-  };
-  await writeFile(playlistPath(id), JSON.stringify(toWrite, null, 2), "utf-8");
-  return normalized;
+
+  const updateData: Parameters<typeof prisma.playlist.update>[0]["data"] = {};
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.genre !== undefined) updateData.genre = data.genre;
+  if (data.type !== undefined) updateData.playlistType = data.type;
+  if (data.url !== undefined) updateData.url = data.url;
+  if (data.thumbnail !== undefined) updateData.thumbnail = data.thumbnail;
+  if (data.viewCount !== undefined) updateData.viewCount = data.viewCount;
+  if (data.durationSeconds !== undefined) updateData.durationSeconds = data.durationSeconds;
+  if (data.adminNotes !== undefined) updateData.adminNotes = data.adminNotes;
+  if (data.useCase !== undefined) updateData.useCase = data.useCase ?? null;
+  if (data.useCases !== undefined) updateData.useCases = data.useCases ?? [];
+  if (data.primaryGenre !== undefined) updateData.primaryGenre = data.primaryGenre ?? null;
+  if (data.subGenres !== undefined) updateData.subGenres = data.subGenres ?? [];
+  if (data.mood !== undefined) updateData.mood = data.mood ?? null;
+  if (data.energyLevel !== undefined) updateData.energyLevel = data.energyLevel ?? null;
+  if ("scheduleContributorBlocks" in data) {
+    updateData.scheduleContributorBlocks = data.scheduleContributorBlocks
+      ? (data.scheduleContributorBlocks as object)
+      : undefined;
+  }
+
+  if (data.tracks !== undefined) {
+    const tracks = data.tracks;
+    const order = data.order ?? tracks.map((t) => t.id);
+    updateData.trackOrder = order;
+    updateData.items = {
+      deleteMany: {},
+      create: tracks.map((t, idx) => ({
+        trackId: t.id,
+        name: t.name,
+        trackType: t.type,
+        url: t.url,
+        cover: t.cover ?? null,
+        position: idx,
+      })),
+    };
+  } else if (data.order !== undefined) {
+    updateData.trackOrder = data.order;
+  }
+
+  const row = await prisma.playlist.update({
+    where: { id },
+    data: updateData,
+    include: INCLUDE_ITEMS,
+  });
+  return rowToPlaylist(row);
 }
 
 export async function deletePlaylist(id: string): Promise<boolean> {
-  await ensurePlaylistsDir();
   try {
-    await unlink(playlistPath(id));
+    await prisma.playlist.delete({ where: { id } });
     return true;
   } catch {
     return false;

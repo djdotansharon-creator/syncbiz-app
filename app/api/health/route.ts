@@ -1,46 +1,30 @@
 import { NextResponse } from "next/server";
-import { existsSync, writeFileSync, unlinkSync } from "fs";
-import { getDataDir } from "@/lib/data-path";
-import { db } from "@/lib/store";
+import { prisma } from "@/lib/prisma";
 import { getYtDlpDiagnostics } from "@/lib/yt-dlp-search";
-import { join } from "path";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   const checks: Record<string, "ok" | "fail"> = {};
+  const meta: Record<string, unknown> = {};
 
-  const dataDir = getDataDir();
-
-  // 1. Verify data directory is writable
-  const probe = join(dataDir, ".health-probe");
+  // 1. PostgreSQL connectivity + basic row counts
   try {
-    writeFileSync(probe, "ok");
-    unlinkSync(probe);
-    checks.storage = "ok";
-  } catch {
-    checks.storage = "fail";
-  }
-
-  // 2. Bootstrap all data files (no-op if they already exist)
-  try {
-    await Promise.all([
-      db.ensureSourcesLoaded(),
-      db.ensureDevicesLoaded(),
-      db.ensureBranchesLoaded(),
-      db.ensureAnnouncementsLoaded(),
+    const [users, workspaces, playlists, schedules, catalog] = await Promise.all([
+      prisma.user.count(),
+      prisma.workspace.count(),
+      prisma.playlist.count(),
+      prisma.schedule.count(),
+      prisma.catalogItem.count(),
     ]);
-  } catch {
-    // non-fatal — storage check above will catch real write failures
+    checks.database = "ok";
+    meta.db = { users, workspaces, playlists, schedules, catalog };
+  } catch (err) {
+    checks.database = "fail";
+    meta.db_error = err instanceof Error ? err.message : String(err);
   }
 
-  // 3. Verify all critical data files are present
-  checks.users_json = existsSync(join(dataDir, "users.json")) ? "ok" : "fail";
-  checks.sources_json = existsSync(join(dataDir, "sources.json")) ? "ok" : "fail";
-  checks.branches_json = existsSync(join(dataDir, "branches.json")) ? "ok" : "fail";
-  checks.devices_json = existsSync(join(dataDir, "devices.json")) ? "ok" : "fail";
-
-  // 4. yt-dlp diagnostics (non-fatal — never blocks health status)
+  // 2. yt-dlp diagnostics (non-fatal — never blocks health status)
   let ytdlp = null;
   try {
     ytdlp = await getYtDlpDiagnostics();
@@ -55,7 +39,7 @@ export async function GET() {
     {
       status: allOk ? "ok" : "degraded",
       checks,
-      dataDir,
+      ...meta,
       ytdlp,
       ts: new Date().toISOString(),
     },

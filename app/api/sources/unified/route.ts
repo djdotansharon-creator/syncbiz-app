@@ -3,7 +3,6 @@ import { listPlaylistsForTenant } from "@/lib/playlist-store";
 import { listRadioStationsForTenant } from "@/lib/radio-store";
 import { radioToUnified } from "@/lib/radio-utils";
 import { db } from "@/lib/store";
-import { getDeletedSourceIds } from "@/lib/deleted-sources-store";
 import { getCurrentUserFromApiRequest, hasBranchAccess } from "@/lib/auth-helpers";
 import { getAccessType } from "@/lib/user-store";
 import {
@@ -91,14 +90,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const [playlists, radioStations, dbSources, deletedIds] = await Promise.all([
+    const [playlists, radioStations, dbSources] = await Promise.all([
       listPlaylistsForTenant(user.tenantId),
       listRadioStationsForTenant(user.tenantId),
       db.getSources(resolveAccountScope(user.tenantId)),
-      getDeletedSourceIds(),
     ]);
 
-    const filteredDbSources = dbSources.filter((s) => !deletedIds.has(s.id));
+    const filteredDbSources = dbSources.filter((s) => (s.type as string) !== "radio");
 
     const items: UnifiedSource[] = [];
 

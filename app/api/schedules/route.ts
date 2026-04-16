@@ -19,7 +19,7 @@ export async function GET() {
     return NextResponse.json({ error: "Tenant context missing" }, { status: 400 });
   }
   await db.ensureSchedulesLoaded();
-  const all = db.getSchedules(resolveAccountScope(user.tenantId));
+  const all = await db.getSchedules(resolveAccountScope(user.tenantId));
   const filtered = [];
   for (const s of all) {
     const branchId = (s.branchId ?? "default").trim() || "default";
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
     typeof endRaw === "string" && endRaw.trim().length > 0 ? normalizeScheduleTimeLocal(endRaw) : "23:59";
   const uid = await getUserIdFromSession();
 
-  const schedule = db.addSchedule({
+  const schedule = await db.addSchedule({
     name: data.name,
     branchId,
     targetType,

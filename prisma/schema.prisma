@@ -1,0 +1,574 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum Plan {
+  FREE
+  PREMIUM
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  WORKSPACE_ADMIN
+  MANAGER
+  CONTROLLER
+  VIEWER
+}
+
+enum DeviceType {
+  ELECTRON
+  BROWSER
+  MPV
+}
+
+enum ScheduleStatus {
+  ACTIVE
+  PAUSED
+  EXPIRED
+}
+
+enum AiDjStatus {
+  IN_PROGRESS
+  CONFIRMED
+  CANCELLED
+}
+
+enum GuestPermission {
+  VIEW_ONLY
+  ADD_URL
+  VOTE
+  REQUEST_SONG
+}
+
+enum BusinessType {
+  RESTAURANT
+  GYM
+  HOTEL
+  BAR
+  CAFE
+  RETAIL
+  OFFICE
+  OTHER
+}
+
+enum AddonType {
+  AI_ANNOUNCEMENTS
+  MULTI_ZONE
+  VIDEO_SCREENS
+  EXTRA_USERS
+}
+
+enum TimeSlot {
+  MORNING
+  AFTERNOON
+  EVENING
+  NIGHT
+}
+
+// ─────────────────────────────────────────────
+// IDENTITY & TENANCY
+// ─────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String?
+  firstName    String?
+  lastName     String?
+  passwordHash String?
+  role         UserRole  @default(CONTROLLER)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  ownedWorkspaces      Workspace[]           @relation("WorkspaceOwner")
+  memberships          WorkspaceMember[]
+  branchAssignments    UserBranchAssignment[]
+  passwordResetTokens  PasswordResetToken[]
+  auditLogs            AuditLog[]
+  createdGuestSessions GuestSession[]
+  aiDjSessions         AiDjSession[]
+}
+
+model Workspace {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner               User                   @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members             WorkspaceMember[]
+  branchAssignments   UserBranchAssignment[]
+  branches            Branch[]
+  sources             Source[]
+  playlists           Playlist[]
+  schedules           Schedule[]
+  announcements       Announcement[]
+  guestSessions       GuestSession[]
+  auditLogs           AuditLog[]
+  aiDjSessions        AiDjSession[]
+  billing             WorkspaceBilling?
+  addons              WorkspaceAddon[]
+  announcementChannel AnnouncementChannel?
+
+  @@index([ownerId])
+}
+
+model WorkspaceMember {
+  id          String   @id @default(uuid())
+  workspaceId String
+  userId      String
+  role        UserRole @default(CONTROLLER)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+}
+
+/// User-to-branch access assignment (granular branch scoping for non-owner users).
+/// branchId is a plain string (not a FK) to support legacy IDs like "default".
+model UserBranchAssignment {
+  id          String   @id @default(uuid())
+  workspaceId String
+  userId      String
+  branchId    String
+  role        String   @default("BRANCH_CONTROLLER")
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId, branchId])
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
+  userId    String
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────
+// LOCATIONS & DEVICES
+// ─────────────────────────────────────────────
+
+model Branch {
+  id            String       @id @default(uuid())
+  workspaceId   String
+  name          String
+  code          String       @default("")
+  timezone      String       @default("UTC")
+  city          String       @default("")
+  country       String       @default("")
+  status        String       @default("active")
+  businessType  BusinessType @default(OTHER)
+  devicesOnline Int          @default(0)
+  devicesTotal  Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  devices   Device[]
+  schedules Schedule[]
+
+  @@index([workspaceId])
+}
+
+model Device {
+  id             String     @id @default(uuid())
+  workspaceId    String
+  branchId       String
+  name           String
+  type           DeviceType @default(ELECTRON)
+  deviceKind     String     @default("audio-player")
+  token          String     @unique
+  isOnline       Boolean    @default(false)
+  platform       String     @default("windows")
+  deviceStatus   String     @default("offline")
+  health         String     @default("ok")
+  capabilities   String[]
+  lastHeartbeat  String?
+  ipAddress      String     @default("")
+  agentVersion   String     @default("1.0.0")
+  volume         Int        @default(50)
+  currentSourceId String?
+  lastSeenAt     DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([branchId])
+  @@index([token])
+}
+
+// ─────────────────────────────────────────────
+// MEDIA — WORKSPACE-SCOPED
+// ─────────────────────────────────────────────
+
+model Source {
+  id                String   @id @default(uuid())
+  workspaceId       String
+  name              String
+  url               String
+  type              String
+  branchId          String   @default("default")
+  description       String?
+  capabilities      String[]
+  artworkUrl        String?
+  isLive            Boolean  @default(false)
+  provider          String?
+  playerMode        String?
+  tags              String[]
+  browserPreference String?
+  fallbackUriOrPath String?
+  taxonomyTags      Json?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  playlistItems PlaylistItem[]
+
+  @@index([workspaceId])
+  @@index([branchId])
+}
+
+model Playlist {
+  id                        String   @id @default(uuid())
+  workspaceId               String
+  name                      String
+  description               String?
+  genre                     String   @default("")
+  playlistType              String   @default("youtube")
+  url                       String   @default("")
+  thumbnail                 String   @default("")
+  branchId                  String?
+  catalogItemId             String?
+  viewCount                 Int?
+  durationSeconds           Int?
+  adminNotes                String?
+  useCase                   String?
+  useCases                  String[]
+  primaryGenre              String?
+  subGenres                 String[]
+  mood                      String?
+  energyLevel               String?
+  libraryPlacement          String?
+  playlistOwnershipScope    String?
+  trackOrder                String[]
+  scheduleContributorBlocks Json?
+  isShared                  Boolean  @default(false)
+  sharedById                String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  items         PlaylistItem[]
+  schedules     Schedule[]
+  aiDjPlaylists AiDjPlaylist[]
+
+  @@index([workspaceId])
+  @@index([isShared])
+  @@index([branchId])
+}
+
+model PlaylistItem {
+  id         String   @id @default(uuid())
+  playlistId String
+  sourceId   String?
+  catalogId  String?
+  trackId    String   @default("")
+  name       String   @default("")
+  trackType  String   @default("youtube")
+  url        String   @default("")
+  cover      String?
+  position   Int
+  addedAt    DateTime @default(now())
+
+  playlist Playlist     @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  source   Source?      @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  catalog  CatalogItem? @relation(fields: [catalogId], references: [id], onDelete: SetNull)
+
+  @@index([playlistId])
+  @@index([sourceId])
+  @@index([catalogId])
+}
+
+model Schedule {
+  id                     String         @id @default(uuid())
+  workspaceId            String
+  branchId               String
+  playlistId             String?
+  name                   String?
+  cronExpr               String?
+  timezone               String         @default("UTC")
+  status                 ScheduleStatus @default(ACTIVE)
+  targetType             String         @default("SOURCE")
+  targetId               String         @default("")
+  sourceId               String?
+  deviceId               String?
+  recurrence             String         @default("weekly")
+  oneOffDateLocal        String?
+  daysOfWeek             Int[]
+  startTimeLocal         String         @default("09:00")
+  endTimeLocal           String         @default("23:59")
+  enabled                Boolean        @default(true)
+  priority               Int            @default(1)
+  requestedStartPosition Int?
+  requestedEndPosition   Int?
+  createdBy              String?
+  updatedBy              String?
+  taxonomyTags           Json?
+  startDate              DateTime?
+  endDate                DateTime?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  playlist  Playlist? @relation(fields: [playlistId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([branchId])
+}
+
+// ─────────────────────────────────────────────
+// GLOBAL CATALOG — NO workspaceId
+// ─────────────────────────────────────────────
+
+model CatalogItem {
+  id            String         @id @default(uuid())
+  url           String         @unique
+  title         String
+  artist        String?
+  durationSec   Int?
+  thumbnail     String?
+  genres        String[]
+  businessTypes BusinessType[]
+  addedById     String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  playlistItems       PlaylistItem[]
+  analytics           CatalogAnalytics?
+  playsByBusinessType CatalogPlayByBusiness[]
+}
+
+model CatalogAnalytics {
+  id            String    @id @default(uuid())
+  catalogItemId String    @unique
+  playCount     Int       @default(0)
+  lastPlayedAt  DateTime?
+  sharedCount   Int       @default(0)
+  aiDjCount     Int       @default(0)
+  trendingScore Float     @default(0)
+  updatedAt     DateTime  @updatedAt
+
+  catalogItem CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+
+  @@index([trendingScore])
+  @@index([playCount])
+}
+
+model CatalogPlayByBusiness {
+  id            String       @id @default(uuid())
+  catalogItemId String
+  businessType  BusinessType
+  playCount     Int          @default(0)
+  updatedAt     DateTime     @updatedAt
+
+  catalogItem CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+
+  @@unique([catalogItemId, businessType])
+  @@index([catalogItemId])
+  @@index([businessType])
+}
+
+// ─────────────────────────────────────────────
+// BILLING
+// ─────────────────────────────────────────────
+
+model WorkspaceBilling {
+  id                String    @id @default(uuid())
+  workspaceId       String    @unique
+  plan              Plan      @default(FREE)
+  expiresAt         DateTime?
+  maxUrls           Int       @default(10)
+  maxBranches       Int       @default(1)
+  maxDevices        Int       @default(1)
+  maxControllers    Int       @default(2)
+  maxPlaylists      Int       @default(5)
+  schedulingEnabled Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model WorkspaceAddon {
+  id          String    @id @default(uuid())
+  workspaceId String
+  addon       AddonType
+  quantity    Int       @default(1)
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, addon])
+  @@index([workspaceId])
+}
+
+// ─────────────────────────────────────────────
+// AUDIT LOG
+// ─────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  workspaceId String
+  action      String
+  entity      String
+  entityId    String?
+  ipAddress   String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  // Restrict: audit logs must survive user/workspace deletion
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+// ─────────────────────────────────────────────
+// GUEST SESSIONS
+// ─────────────────────────────────────────────
+
+model GuestSession {
+  id          String            @id @default(uuid())
+  workspaceId String
+  createdById String
+  token       String            @unique
+  permissions GuestPermission[]
+  expiresAt   DateTime
+  usedCount   Int               @default(0)
+  maxUses     Int?
+  createdAt   DateTime          @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+// ─────────────────────────────────────────────
+// ANNOUNCEMENTS & AUDIO DUCKING
+// ─────────────────────────────────────────────
+
+model Announcement {
+  id                   String   @id @default(uuid())
+  workspaceId          String
+  name                 String   @default("")
+  text                 String   @default("")
+  audioUrl             String?
+  voiceId              String?
+  durationSec          Int?
+  branchId             String   @default("default")
+  announcementType     String?
+  scheduleId           String?
+  announcementStatus   String   @default("draft")
+  priority             String   @default("normal")
+  ttsEnabled           Boolean  @default(false)
+  resumePreviousSource Boolean  @default(false)
+  windowStart          String   @default("")
+  windowEnd            String   @default("")
+  createdAt            DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model AnnouncementChannel {
+  id             String   @id @default(uuid())
+  workspaceId    String   @unique
+  defaultVolume  Int      @default(80)
+  musicDuckLevel Int      @default(17)
+  jingleVolume   Int      @default(90)
+  fadeDurationMs Int      @default(500)
+  updatedAt      DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────
+// AI DJ CREATOR
+// ─────────────────────────────────────────────
+
+model AiDjSession {
+  id           String       @id @default(uuid())
+  workspaceId  String
+  userId       String
+  businessType BusinessType
+  hours        Json
+  style        String[]
+  demographics Json?
+  messages     Json
+  status       AiDjStatus   @default(IN_PROGRESS)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  playlists AiDjPlaylist[]
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model AiDjPlaylist {
+  id         String   @id @default(uuid())
+  sessionId  String
+  playlistId String?
+  slot       TimeSlot
+  createdAt  DateTime @default(now())
+
+  session  AiDjSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  playlist Playlist?   @relation(fields: [playlistId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+}

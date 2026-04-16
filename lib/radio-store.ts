@@ -1,31 +1,12 @@
 /**
- * File-based radio stream storage.
- * Stores each station as a JSON file in radio/ folder.
+ * Radio stream storage — backed by PostgreSQL via Prisma.
+ * Radio stations are stored as Source rows with type = "radio".
+ * Replaces the previous file-per-station JSON implementation.
+ * All function signatures are preserved for drop-in compatibility.
  */
 
-import { mkdir, readdir, readFile, writeFile, unlink } from "fs/promises";
-import { join } from "path";
-import { getRadioDir } from "./data-path";
+import { prisma } from "./prisma";
 import type { RadioStream } from "./source-types";
-
-async function ensureRadioDir(): Promise<void> {
-  try {
-    await mkdir(getRadioDir(), { recursive: true });
-  } catch (e) {
-    console.error("[radio-store] Failed to create radio dir:", e);
-    throw e;
-  }
-}
-
-function radioPath(id: string): string {
-  return join(getRadioDir(), `${id}.json`);
-}
-
-function generateId(): string {
-  return `radio-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-const DEFAULT_BRANCH_ID = "default";
 
 export type RadioCreateInput = {
   id?: string;
@@ -37,82 +18,124 @@ export type RadioCreateInput = {
   tenantId?: string;
 };
 
+// ─── Workspace resolution ────────────────────────────────────────────────────
+
+async function resolveWorkspaceId(id: string | undefined): Promise<string | null> {
+  if (!id) return null;
+  const byId = await prisma.workspace.findUnique({ where: { id } });
+  if (byId) return byId.id;
+  const bySlug = await prisma.workspace.findUnique({ where: { slug: id } });
+  return bySlug?.id ?? null;
+}
+
+// ─── Mapping helper ──────────────────────────────────────────────────────────
+
+function rowToRadioStream(row: {
+  id: string;
+  name: string;
+  url: string;
+  artworkUrl: string | null;
+  tags: string[];
+  branchId: string;
+  workspaceId: string;
+  createdAt: Date;
+}): RadioStream {
+  return {
+    id: row.id,
+    name: row.name,
+    url: row.url,
+    genre: row.tags[0] || "Radio",
+    cover: row.artworkUrl ?? null,
+    branchId: row.branchId,
+    tenantId: row.workspaceId,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
 export async function listRadioStations(): Promise<RadioStream[]> {
-  await ensureRadioDir();
-  const dir = getRadioDir();
-  const files = await readdir(dir);
-  const jsonFiles = files.filter((f) => f.endsWith(".json"));
-  const stations: RadioStream[] = [];
-
-  for (const file of jsonFiles) {
-    try {
-      const content = await readFile(join(dir, file), "utf-8");
-      const data = JSON.parse(content) as RadioStream & { title?: string };
-      if (data.id && (data.name || data.title) && data.url) {
-        stations.push({ ...data, name: data.name || data.title || "Unknown" });
-      }
-    } catch (e) {
-      console.warn("[radio-store] Skipped invalid file:", file, e);
-    }
-  }
-
-  return stations.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  const rows = await prisma.source.findMany({
+    where: { type: "radio" },
+    orderBy: { createdAt: "desc" },
+  });
+  return rows.map(rowToRadioStream);
 }
 
 export async function listRadioStationsForTenant(tenantId: string): Promise<RadioStream[]> {
-  const all = await listRadioStations();
-  const tid = (tenantId ?? "").trim();
-  if (!tid) return [];
-  if (tid === "tnt-default") {
-    return all.filter((s) => !s.tenantId || s.tenantId === tid);
-  }
-  return all.filter((s) => s.tenantId === tid);
+  const wsId = await resolveWorkspaceId(tenantId);
+  if (!wsId) return [];
+  const rows = await prisma.source.findMany({
+    where: { workspaceId: wsId, type: "radio" },
+    orderBy: { createdAt: "desc" },
+  });
+  return rows.map(rowToRadioStream);
 }
 
 export async function getRadioStation(id: string): Promise<RadioStream | null> {
-  await ensureRadioDir();
-  try {
-    const content = await readFile(radioPath(id), "utf-8");
-    const data = JSON.parse(content) as RadioStream & { title?: string };
-    return { ...data, name: data.name || data.title || "Unknown" };
-  } catch {
-    return null;
-  }
+  const row = await prisma.source.findFirst({ where: { id, type: "radio" } });
+  return row ? rowToRadioStream(row) : null;
 }
 
 export async function createRadioStation(input: RadioCreateInput): Promise<RadioStream> {
-  await ensureRadioDir();
-  const id = input.id ?? generateId();
-  const branchId = typeof input.branchId === "string" && input.branchId.trim()
-    ? input.branchId.trim()
-    : DEFAULT_BRANCH_ID;
-  const station: RadioStream = {
-    id,
-    name: input.name.trim(),
-    url: input.url.trim(),
-    genre: (input.genre ?? "Radio").trim(),
-    cover: input.cover ?? null,
-    branchId,
-    tenantId: input.tenantId?.trim() || undefined,
-    createdAt: new Date().toISOString(),
-  };
-  const toWrite = { ...station, title: station.name, type: "radio" as const };
-  await writeFile(radioPath(id), JSON.stringify(toWrite, null, 2), "utf-8");
-  return station;
+  const wsId = await resolveWorkspaceId(input.tenantId);
+  if (!wsId) throw new Error("Workspace not found for tenantId: " + input.tenantId);
+
+  const branchId = (input.branchId ?? "default").trim() || "default";
+
+  // Ensure branch stub exists (same pattern as store.ts)
+  await prisma.branch.upsert({
+    where: { id: branchId },
+    update: {},
+    create: {
+      id: branchId,
+      workspaceId: wsId,
+      name: branchId === "default" ? "Default Branch" : branchId,
+      code: branchId.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24) || "BRANCH",
+    },
+  });
+
+  const id = input.id ?? `radio-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  const row = await prisma.source.create({
+    data: {
+      id,
+      workspaceId: wsId,
+      name: input.name.trim(),
+      url: input.url.trim(),
+      type: "radio",
+      branchId,
+      artworkUrl: input.cover ?? null,
+      tags: input.genre?.trim() ? [input.genre.trim()] : ["Radio"],
+      isLive: true,
+      capabilities: [],
+    },
+  });
+  return rowToRadioStream(row);
 }
 
-export async function updateRadioStation(id: string, data: Partial<RadioStream>): Promise<RadioStream | null> {
+export async function updateRadioStation(
+  id: string,
+  data: Partial<RadioStream>,
+): Promise<RadioStream | null> {
   const existing = await getRadioStation(id);
   if (!existing) return null;
-  const updated: RadioStream = { ...existing, ...data, id };
-  await writeFile(radioPath(id), JSON.stringify(updated, null, 2), "utf-8");
-  return updated;
+
+  const row = await prisma.source.update({
+    where: { id },
+    data: {
+      ...(data.name != null && { name: data.name }),
+      ...(data.url != null && { url: data.url }),
+      ...(data.genre != null && { tags: [data.genre] }),
+      ...(data.cover !== undefined && { artworkUrl: data.cover ?? null }),
+    },
+  });
+  return rowToRadioStream(row);
 }
 
 export async function deleteRadioStation(id: string): Promise<boolean> {
-  await ensureRadioDir();
   try {
-    await unlink(radioPath(id));
+    await prisma.source.delete({ where: { id } });
     return true;
   } catch {
     return false;
