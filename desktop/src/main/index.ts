@@ -4,9 +4,11 @@ import { app, BrowserWindow } from "electron";
 
 import { registerMvpIpc } from "./ipc-mvp";
 import { startEmbeddedNextServer, type EmbeddedNextHandle } from "./embedded-next-server";
+import { PlaybackOrchestrator } from "./playback-orchestrator";
 
 let mainWindow: BrowserWindow | null = null;
 let embeddedNext: EmbeddedNextHandle | null = null;
+let orchestrator: PlaybackOrchestrator | undefined;
 
 function getMainWindow(): BrowserWindow | null {
   return mainWindow;
@@ -99,12 +101,17 @@ function createBrowserWindow(): BrowserWindow {
 async function openMainWindow(): Promise<void> {
   const resolved = await resolveMainWindowUrl();
   const win = createBrowserWindow();
+  // Mute all Chromium audio output — in desktop mode every sound goes through MPV.
+  win.webContents.setAudioMuted(true);
+  console.log("[SyncBiz desktop] Chromium audio muted — all playback routes through MPV");
   applyMainWindowContent(win, resolved);
   mainWindow = win;
 }
 
 app.whenReady().then(() => {
-  registerMvpIpc(getMainWindow);
+  orchestrator = new PlaybackOrchestrator();
+  orchestrator.start();
+  registerMvpIpc(getMainWindow, orchestrator);
   void openMainWindow().catch((err) => {
     console.error("[SyncBiz desktop] failed to open main window:", err);
     shutdownEmbeddedNext();
@@ -121,6 +128,7 @@ app.whenReady().then(() => {
 });
 
 app.on("before-quit", () => {
+  orchestrator?.kill();
   shutdownEmbeddedNext();
 });
 

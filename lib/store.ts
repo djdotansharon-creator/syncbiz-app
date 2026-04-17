@@ -452,12 +452,11 @@ export const db = {
   },
 
   async deleteSchedule(id: string): Promise<boolean> {
-    try {
-      await prisma.schedule.delete({ where: { id: id.trim() } });
-      return true;
-    } catch {
-      return false;
-    }
+    const trimmed = id.trim();
+    const existing = await prisma.schedule.findUnique({ where: { id: trimmed } });
+    if (!existing) return false;
+    await prisma.schedule.delete({ where: { id: trimmed } });
+    return true;
   },
 
   async ensureSchedulesLoaded(): Promise<void> { /* no-op */ },

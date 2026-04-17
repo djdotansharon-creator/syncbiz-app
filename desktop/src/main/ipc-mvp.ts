@@ -12,9 +12,11 @@ import { MVP_IPC } from "../shared/mvp-types";
 import { DeviceWsManager } from "../device-websocket-client/device-ws-manager";
 import { fetchBranchLibrarySummary } from "./branch-library-fetch";
 import { loadRuntimeConfig, patchRuntimeConfig } from "./runtime-config-service";
+import type { PlaybackOrchestrator } from "./playback-orchestrator";
 
 let manager: DeviceWsManager | null = null;
 let cachedConfig: DesktopRuntimeConfig | null = null;
+let orchestratorInstance: PlaybackOrchestrator | undefined;
 
 function getUserData(): string {
   return app.getPath("userData");
@@ -83,9 +85,10 @@ function broadcast(win: BrowserWindow | null, payload: MvpStatusSnapshot): void 
   }
 }
 
-export function registerMvpIpc(getWindow: () => BrowserWindow | null): void {
+export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrator?: PlaybackOrchestrator): void {
+  orchestratorInstance = orchestrator;
   cachedConfig = loadRuntimeConfig(getUserData());
-  manager = new DeviceWsManager(cachedConfig);
+  manager = new DeviceWsManager(cachedConfig, orchestratorInstance);
   manager.onStatus((s) => {
     broadcast(getWindow(), s);
   });
@@ -114,7 +117,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle(MVP_IPC.WS_CONNECT, (): MvpStatusSnapshot => {
     cachedConfig = loadRuntimeConfig(getUserData());
     if (!manager) {
-      manager = new DeviceWsManager(cachedConfig);
+      manager = new DeviceWsManager(cachedConfig, orchestratorInstance);
       manager.onStatus((s) => broadcast(getWindow(), s));
     } else {
       manager.setConfig(cachedConfig);
@@ -132,7 +135,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null): void {
     const c = loadRuntimeConfig(getUserData());
     const sum = await fetchBranchLibrarySummary(c);
     if (!manager) {
-      manager = new DeviceWsManager(c);
+      manager = new DeviceWsManager(c, orchestratorInstance);
       manager.onStatus((s) => broadcast(getWindow(), s));
     } else {
       manager.setConfig(c);
@@ -145,7 +148,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle(MVP_IPC.SELECT_STATION_SOURCE, (_e, item: BranchLibraryItem): MvpStatusSnapshot => {
     if (!manager) {
-      manager = new DeviceWsManager(loadRuntimeConfig(getUserData()));
+      manager = new DeviceWsManager(loadRuntimeConfig(getUserData()), orchestratorInstance);
       manager.onStatus((s) => broadcast(getWindow(), s));
     }
     if (!item?.id?.trim() || !item.origin) {
@@ -157,7 +160,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle(MVP_IPC.LOCAL_MOCK_TRANSPORT, (_e, payload: LocalMockTransportPayload): MvpStatusSnapshot => {
     if (!manager) {
-      manager = new DeviceWsManager(loadRuntimeConfig(getUserData()));
+      manager = new DeviceWsManager(loadRuntimeConfig(getUserData()), orchestratorInstance);
       manager.onStatus((s) => broadcast(getWindow(), s));
     }
     manager.applyLocalMockTransport(payload);
@@ -170,6 +173,30 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null): void {
       return desktopSignInWithPassword(getWindow, creds.email ?? "", creds.password ?? "");
     },
   );
+
+  ipcMain.handle(MVP_IPC.MPV_PLAY_URL, (_e, url: string): void => {
+    const u = typeof url === "string" ? url.trim() : "";
+    if (!u) return;
+    orchestratorInstance?.playMusic(u);
+  });
+
+  ipcMain.handle(MVP_IPC.MPV_PLAY_INTERRUPT, (_e, url: string): void => {
+    const u = typeof url === "string" ? url.trim() : "";
+    if (!u) return;
+    orchestratorInstance?.playInterrupt(u);
+  });
+
+  ipcMain.handle(MVP_IPC.SET_DUCK_PERCENT, (_e, n: number): void => {
+    if (typeof n === "number" && Number.isFinite(n)) {
+      orchestratorInstance?.setDuckPercent(n);
+    }
+  });
+
+  ipcMain.handle(MVP_IPC.MPV_SEEK_TO, (_e, seconds: number): void => {
+    if (typeof seconds === "number" && Number.isFinite(seconds)) {
+      orchestratorInstance?.seekMusic(seconds);
+    }
+  });
 }
 
 function fallbackSnapshot(): MvpStatusSnapshot {
@@ -201,5 +228,10 @@ function fallbackSnapshotFromConfig(c: DesktopRuntimeConfig): MvpStatusSnapshot 
     lastServerMessageType: null,
     lastCommandSummary: null,
     lastError: null,
+    isDucked: false,
+    duckTargetVolume: 0,
+    duckPercent: 40,
+    mpvPosition: 0,
+    mpvDuration: 0,
   };
 }

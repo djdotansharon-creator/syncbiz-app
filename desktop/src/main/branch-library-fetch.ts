@@ -13,6 +13,8 @@ type UnifiedApiItem = {
   type?: string;
   cover?: string | null;
   origin?: string;
+  /** Direct playback URL (stream URL, YouTube URL, etc.) — present on all source types from /api/sources/unified. */
+  url?: string;
   playlist?: {
     branchId?: string;
     name?: string;
@@ -64,6 +66,7 @@ function toBranchLibraryItem(raw: UnifiedApiItem): BranchLibraryItem | null {
     branchId: resolveItemBranchId(raw),
     genre,
     cover,
+    url: typeof raw.url === "string" ? raw.url.trim() : "",
   };
 }
 

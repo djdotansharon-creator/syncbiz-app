@@ -3,16 +3,18 @@
  * - Lives in its own React root (`jingles-shell-bridge`); open/close/tab changes are local state only.
  * - Does not call transport, WS, MPV, or main-process playback — hero/dock/library roots are unrelated.
  */
-import React, { useReducer, useCallback, type Dispatch } from "react";
+import React, { useReducer, useCallback, useState, useEffect, type Dispatch } from "react";
 import { createPortal } from "react-dom";
 import type {
   AnnouncementDraft,
+  JingleAsset,
   JinglesOperatorMode,
   JinglesTabId,
   MockBranchLinkStatus,
   MockEngineStatus,
   MockHistoryEvent,
   MockHistoryEventKind,
+  SamplerPadItem,
 } from "./types";
 import {
   INITIAL_MOCK_HISTORY,
@@ -200,6 +202,33 @@ function Chip({
   variant: "ok" | "warn" | "err" | "neutral" | "accent";
 }): React.ReactElement {
   return <span className={`jc-chip jc-chip--${variant}`}>{children}</span>;
+}
+
+/** Visible segmented button group — replaces all <select> elements. */
+function SegBtn({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly { value: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}): React.ReactElement {
+  return (
+    <div className="jc-seg" role="group">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          aria-pressed={value === opt.value}
+          className={`jc-seg-btn ${value === opt.value ? "jc-seg-btn--active" : ""}`}
+          onClick={() => onChange(opt.value)}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 type DrawerChromeProps = {
@@ -596,6 +625,902 @@ export function JinglesShell(): React.ReactElement {
         </div>
       ) : null}
     </>
+  );
+}
+
+// ─── Workspace persistence helpers ───────────────────────────────────────────
+
+const PAD_STORAGE_KEY = "syncbiz:jingle-pads";
+
+/**
+ * Loads pad assignments from localStorage.
+ * In Electron, localStorage is stored in the Chromium profile directory
+ * (%APPDATA%/<app>/Default/Local Storage) and survives app restarts.
+ * Merges saved url/scheduledAt onto the canonical seed IDs so new seed pads
+ * added by future releases are always visible.
+ */
+function loadPads(): SamplerPadItem[] {
+  if (typeof localStorage === "undefined") return SAMPLER_PADS.map((p) => ({ ...p }));
+  try {
+    const raw = localStorage.getItem(PAD_STORAGE_KEY);
+    if (!raw) return SAMPLER_PADS.map((p) => ({ ...p }));
+    const saved = JSON.parse(raw) as SamplerPadItem[];
+    return SAMPLER_PADS.map((seed) => {
+      const match = saved.find((s) => s.id === seed.id);
+      return match ? { ...seed, label: match.label ?? seed.label, url: match.url ?? "", scheduledAt: match.scheduledAt } : { ...seed };
+    });
+  } catch {
+    return SAMPLER_PADS.map((p) => ({ ...p }));
+  }
+}
+
+function persistPads(pads: SamplerPadItem[]): void {
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem(PAD_STORAGE_KEY, JSON.stringify(pads));
+  }
+}
+
+function triggerPlayInterrupt(url: string): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const api = typeof window !== "undefined" ? (window as any).syncbizDesktop : null;
+  if (api?.mpvPlayInterrupt) {
+    api.mpvPlayInterrupt(url);
+  }
+}
+
+// ─── TriggerPadSection ───────────────────────────────────────────────────────
+// Each pad IS the trigger. Assigned → click = Play. Unassigned → click = Edit.
+// One small ✎ overlay button for settings; never clutters the pad face.
+
+function TriggerPadSection({
+  pads,
+  flashPadId,
+  editingPadId,
+  onPlay,
+  onEditToggle,
+}: {
+  pads: SamplerPadItem[];
+  flashPadId: string | null;
+  editingPadId: string | null;
+  onPlay: (pad: SamplerPadItem) => void;
+  onEditToggle: (padId: string) => void;
+}): React.ReactElement {
+  return (
+    <section className="jc-trigger-section" aria-label="Jingle trigger pads">
+      <p className="jc-rail-head" style={{ marginBottom: "0.5rem" }}>Trigger Pads</p>
+      <div className="jc-trigger-grid">
+        {pads.map((p) => {
+          const assigned = Boolean(p.url);
+          const isEditing = editingPadId === p.id;
+          const isFlashing = flashPadId === p.id;
+          return (
+            // Wrapper holds the pad button + floating edit button as siblings
+            <div key={p.id} className="jc-trigger-pad-wrap">
+
+              {/* ── Pad face: the entire surface is the action ── */}
+              <button
+                type="button"
+                className={[
+                  "jc-rail-card jc-trigger-pad",
+                  assigned ? "jc-trigger-pad--assigned" : "jc-trigger-pad--empty",
+                  isEditing ? "jc-trigger-pad--editing" : "",
+                  isFlashing ? "jc-trigger-pad--playing" : "",
+                ].filter(Boolean).join(" ")}
+                onClick={() => (assigned ? onPlay(p) : onEditToggle(p.id))}
+                title={assigned ? `Play: ${p.label}` : "Click to assign a source"}
+                aria-label={assigned ? `Play ${p.label}` : `Assign source to ${p.label}`}
+              >
+                <span className="jc-rail-card-kicker">
+                  <span
+                    className={`jc-pad-led ${isFlashing ? "jc-pad-led--playing" : assigned ? "jc-pad-led--ready" : "jc-pad-led--empty"}`}
+                    aria-hidden
+                  />
+                  <span style={{ color: assigned ? "#6ee7b7" : "#475569" }}>
+                    {assigned ? "Ready" : "Unassigned"}
+                  </span>
+                </span>
+                <span className="jc-rail-card-title">{p.label}</span>
+                {assigned ? (
+                  <span className="jc-rail-card-hint" title={p.url}>
+                    {p.url.length > 28 ? "\u2026" + p.url.slice(-24) : p.url}
+                  </span>
+                ) : null}
+                {p.scheduledAt ? (
+                  <span
+                    className="jc-trigger-sched-badge"
+                    title={new Date(p.scheduledAt).toLocaleString()}
+                  >
+                    {new Date(p.scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                ) : null}
+              </button>
+
+              {/* ── Single settings control — floats top-right, never the primary action ── */}
+              <button
+                type="button"
+                className={`jc-trigger-pad-edit ${isEditing ? "jc-trigger-pad-edit--on" : ""}`}
+                title="Edit pad"
+                aria-label={`Edit ${p.label}`}
+                onClick={(e) => { e.stopPropagation(); onEditToggle(p.id); }}
+              >
+                ✎
+              </button>
+
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+// ─── PadEditForm ──────────────────────────────────────────────────────────────
+
+function PadEditForm({
+  pad,
+  onSave,
+  onCancel,
+}: {
+  pad: SamplerPadItem;
+  onSave: (patch: Pick<SamplerPadItem, "label" | "url" | "scheduledAt">) => void;
+  onCancel: () => void;
+}): React.ReactElement {
+  const [label, setLabel] = useState(pad.label);
+  const [url, setUrl] = useState(pad.url);
+  const [scheduledAt, setScheduledAt] = useState(pad.scheduledAt ?? "");
+
+  useEffect(() => {
+    setLabel(pad.label);
+    setUrl(pad.url);
+    setScheduledAt(pad.scheduledAt ?? "");
+  }, [pad.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="jc-form jc-rail-edit-form">
+      <div className="jc-rail-edit-head">
+        <span className="jc-rail-head">Editing: {pad.label}</span>
+        <button type="button" className="jc-icon-btn" onClick={onCancel} aria-label="Cancel edit">✕</button>
+      </div>
+      <label className="jc-field">
+        <span>Label</span>
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Pad label" />
+      </label>
+      <label className="jc-field">
+        <span>Audio URL or local path</span>
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://... or /path/to/file.mp3"
+          spellCheck={false}
+        />
+      </label>
+      <label className="jc-field">
+        <span>Schedule at (optional)</span>
+        <input
+          type="datetime-local"
+          value={scheduledAt}
+          onChange={(e) => setScheduledAt(e.target.value)}
+        />
+      </label>
+      <div className="jc-actions">
+        <button
+          type="button"
+          className="jc-btn jc-btn--primary jc-btn--small"
+          onClick={() => onSave({ label: label.trim() || pad.label, url: url.trim(), scheduledAt: scheduledAt || undefined })}
+        >
+          Save
+        </button>
+        <button type="button" className="jc-btn jc-btn--ghost jc-btn--small" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── PadPicker ────────────────────────────────────────────────────────────────
+
+function PadPicker({
+  pads,
+  onPick,
+  onClose,
+}: {
+  pads: SamplerPadItem[];
+  onPick: (padId: string) => void;
+  onClose: () => void;
+}): React.ReactElement {
+  return (
+    <div className="jc-pad-picker">
+      <div className="jc-pad-picker-head">
+        <span className="jc-rail-head">Choose pad</span>
+        <button type="button" className="jc-icon-btn" onClick={onClose} aria-label="Close picker">✕</button>
+      </div>
+      <div className="jc-pad-picker-grid">
+        {pads.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className={`jc-pad-picker-btn ${p.url ? "jc-pad-picker-btn--has" : ""}`}
+            onClick={() => onPick(p.id)}
+            title={p.url ? "Currently assigned — will overwrite" : "Empty"}
+          >
+            <span>{p.label}</span>
+            <span className={`jc-pad-picker-dot ${p.url ? "jc-pad-picker-dot--on" : ""}`} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── ResultCard ───────────────────────────────────────────────────────────────
+
+function ResultCard({
+  asset,
+  pads,
+  onPlay,
+  onAssignToPad,
+  onSchedule,
+  onSaveToLibrary,
+  onDismiss,
+}: {
+  asset: JingleAsset;
+  pads: SamplerPadItem[];
+  onPlay: () => void;
+  onAssignToPad: (padId: string) => void;
+  onSchedule: (scheduledAt: string, repeat: string) => void;
+  onSaveToLibrary: () => void;
+  onDismiss: () => void;
+}): React.ReactElement {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [schedOpen, setSchedOpen] = useState(false);
+  const [schedAt, setSchedAt] = useState("");
+  const [schedRepeat, setSchedRepeat] = useState("once");
+
+  return (
+    <div className="jc-result-card">
+      <div className="jc-result-card-header">
+        <div className="jc-result-card-title-row">
+          <span className="jc-result-card-title">{asset.title || "(untitled)"}</span>
+          <span className="jc-result-card-meta">{asset.kind} · {asset.durationLabel || "—"}</span>
+        </div>
+        <button type="button" className="jc-icon-btn" onClick={onDismiss} aria-label="Dismiss result">✕</button>
+      </div>
+
+      {asset.script ? (
+        <p className="jc-result-card-script">&ldquo;{asset.script}&rdquo;</p>
+      ) : null}
+
+      {asset.url ? (
+        <p className="jc-result-card-url" title={asset.url}>{asset.url}</p>
+      ) : (
+        <p className="jc-result-card-url jc-result-card-url--empty">
+          No audio asset yet — paste a URL above or generate via AI to attach one
+        </p>
+      )}
+
+      <div className="jc-actions jc-result-card-actions">
+        <button
+          type="button"
+          className="jc-btn jc-btn--primary"
+          disabled={!asset.url}
+          title={asset.url ? undefined : "No URL to play"}
+          onClick={onPlay}
+        >
+          ▶ Play Now
+        </button>
+        <button
+          type="button"
+          className={`jc-btn ${pickerOpen ? "jc-btn--secondary" : "jc-btn--ghost"}`}
+          onClick={() => { setPickerOpen((v) => !v); setSchedOpen(false); }}
+        >
+          Assign to pad {pickerOpen ? "▲" : "▾"}
+        </button>
+        <button
+          type="button"
+          className={`jc-btn ${schedOpen ? "jc-btn--secondary" : "jc-btn--ghost"}`}
+          onClick={() => { setSchedOpen((v) => !v); setPickerOpen(false); }}
+        >
+          Schedule {schedOpen ? "▲" : "▾"}
+        </button>
+        <button type="button" className="jc-btn jc-btn--ghost" onClick={onSaveToLibrary}>
+          Save to library
+        </button>
+      </div>
+
+      {pickerOpen ? (
+        <PadPicker
+          pads={pads}
+          onPick={(id) => { onAssignToPad(id); setPickerOpen(false); }}
+          onClose={() => setPickerOpen(false)}
+        />
+      ) : null}
+
+      {schedOpen ? (
+        <div className="jc-result-sched">
+          <div className="jc-field-row">
+            <label className="jc-field">
+              <span>When</span>
+              <input
+                type="datetime-local"
+                value={schedAt}
+                onChange={(e) => setSchedAt(e.target.value)}
+              />
+            </label>
+            <div className="jc-field">
+              <span>Repeat</span>
+              <SegBtn
+                options={[
+                  { value: "once", label: "Once" },
+                  { value: "daily", label: "Daily" },
+                  { value: "weekly", label: "Weekly" },
+                ]}
+                value={schedRepeat}
+                onChange={(v) => setSchedRepeat(v)}
+              />
+            </div>
+          </div>
+          <div className="jc-actions">
+            <button
+              type="button"
+              className="jc-btn jc-btn--primary jc-btn--small"
+              disabled={!schedAt}
+              onClick={() => { onSchedule(schedAt, schedRepeat); setSchedOpen(false); }}
+            >
+              Confirm schedule
+            </button>
+            <button type="button" className="jc-btn jc-btn--ghost jc-btn--small" onClick={() => setSchedOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── JinglesWorkspacePanel ────────────────────────────────────────────────────
+
+/** Center-area workspace — full management surface with persistent pad rail. */
+export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): React.ReactElement {
+  // Pads: persisted to localStorage — survives Electron restarts
+  const [pads, setPads] = useState<SamplerPadItem[]>(() => loadPads());
+  const [editingPadId, setEditingPadId] = useState<string | null>(null);
+  const [flashPadId, setFlashPadId] = useState<string | null>(null);
+
+  // Shared result card — visible regardless of active tab
+  const [resultCard, setResultCard] = useState<JingleAsset | null>(null);
+
+  // Tab state
+  const [activeTab, setActiveTab] = useState<JinglesTabId>("create");
+
+  // Create-tab draft
+  const [draft, setDraft] = useState<AnnouncementDraft>({ ...initialDraft });
+
+  // AI-tab
+  const [aiIntent, setAiIntent] = useState("");
+
+  // Library: saved assets from this session
+  const [savedAssets, setSavedAssets] = useState<JingleAsset[]>([]);
+  // Which library item has its pad-picker open
+  const [libPickerFor, setLibPickerFor] = useState<string | null>(null);
+
+  // Schedule tab
+  const [schedMode, setSchedMode] = useState<"now" | "later" | "recurring">("later");
+  const [schedTarget, setSchedTarget] = useState("default");
+  const [schedRepeat, setSchedRepeat] = useState("weekly");
+  const [schedItems, setSchedItems] = useState([...MOCK_SCHEDULE_ITEMS]);
+
+  // History
+  const [history, setHistory] = useState<MockHistoryEvent[]>([...INITIAL_MOCK_HISTORY]);
+
+  // Status (mock)
+  const [branchStatus, setBranchStatus] = useState<MockBranchLinkStatus>("online");
+  const [engineStatus, setEngineStatus] = useState<MockEngineStatus>("ready");
+  const [operatorMode, setOperatorMode] = useState<JinglesOperatorMode>("safe");
+
+  const addHistory = useCallback((kind: MockHistoryEvent["kind"], message: string) => {
+    const ev: MockHistoryEvent = { id: hid(), atIso: nowIso(), kind, message };
+    setHistory((prev) => [ev, ...prev].slice(0, 80));
+  }, []);
+
+  // ── Pad operations ──────────────────────────────────────────────────────────
+
+  const handlePadPlay = useCallback((pad: SamplerPadItem) => {
+    if (!pad.url) return;
+    triggerPlayInterrupt(pad.url);
+    setFlashPadId(pad.id);
+    addHistory("pad", `Pad "${pad.label}" triggered`);
+    setTimeout(() => setFlashPadId(null), 650);
+  }, [addHistory]);
+
+  const handlePadEditToggle = useCallback((padId: string) => {
+    setEditingPadId((prev) => (prev === padId ? null : padId));
+  }, []);
+
+  const handlePadSave = useCallback(
+    (patch: Pick<SamplerPadItem, "label" | "url" | "scheduledAt">) => {
+      if (!editingPadId) return;
+      setPads((prev) => {
+        const next = prev.map((p) => (p.id === editingPadId ? { ...p, ...patch } : p));
+        persistPads(next);
+        return next;
+      });
+      addHistory("pad", `Pad "${patch.label}" saved`);
+      setEditingPadId(null);
+    },
+    [editingPadId, addHistory],
+  );
+
+  const handleAssignToPad = useCallback(
+    (padId: string, asset: JingleAsset) => {
+      setPads((prev) => {
+        const next = prev.map((p) =>
+          p.id === padId
+            ? { ...p, url: asset.url, label: (asset.title || p.label).slice(0, 20) }
+            : p
+        );
+        persistPads(next);
+        return next;
+      });
+      const pad = pads.find((p) => p.id === padId);
+      addHistory("pad", `Assigned "${asset.title}" to pad "${pad?.label ?? padId}"`);
+    },
+    [pads, addHistory],
+  );
+
+  // ── Create-tab operations ───────────────────────────────────────────────────
+
+  const handleGenerate = useCallback(() => {
+    const asset: JingleAsset = {
+      id: hid(),
+      title: draft.title || "Untitled jingle",
+      script: draft.body,
+      url: "",
+      kind: draft.kind,
+      durationLabel: "—",
+    };
+    setResultCard(asset);
+    addHistory("created", `Generated: "${asset.title}" (mock — no asset yet)`);
+  }, [draft, addHistory]);
+
+  // ── AI-tab operations ────────────────────────────────────────────────────────
+
+  const handleAiApprove = useCallback((index: number) => {
+    const text = MOCK_AI_SUGGESTIONS[index] ?? "";
+    const asset: JingleAsset = {
+      id: hid(),
+      title: `AI suggestion ${index + 1}`,
+      script: text,
+      url: "",
+      kind: "announcement",
+      durationLabel: "—",
+    };
+    setResultCard(asset);
+    addHistory("created", `AI suggestion ${index + 1} approved → result card`);
+  }, [addHistory]);
+
+  // ── Result-card operations ──────────────────────────────────────────────────
+
+  const handleResultPlay = useCallback(() => {
+    if (!resultCard?.url) return;
+    triggerPlayInterrupt(resultCard.url);
+    addHistory("previewed", `Played result: "${resultCard.title}"`);
+  }, [resultCard, addHistory]);
+
+  const handleResultAssignToPad = useCallback((padId: string) => {
+    if (!resultCard) return;
+    handleAssignToPad(padId, resultCard);
+  }, [resultCard, handleAssignToPad]);
+
+  const handleResultSchedule = useCallback((scheduledAt: string, repeat: string) => {
+    if (!resultCard) return;
+    setSchedItems((prev) => [
+      {
+        id: hid(),
+        label: resultCard.title,
+        whenLabel: new Date(scheduledAt).toLocaleString(),
+        repeatLabel: repeat.charAt(0).toUpperCase() + repeat.slice(1),
+        targetLabel: schedTarget,
+      },
+      ...prev,
+    ]);
+    addHistory("scheduled", `Scheduled "${resultCard.title}" at ${scheduledAt}`);
+  }, [resultCard, schedTarget, addHistory]);
+
+  const handleResultSaveToLibrary = useCallback(() => {
+    if (!resultCard) return;
+    setSavedAssets((prev) => prev.some((a) => a.id === resultCard.id) ? prev : [resultCard, ...prev]);
+    addHistory("saved", `Saved to library: "${resultCard.title}"`);
+  }, [resultCard, addHistory]);
+
+  const editingPad = pads.find((p) => p.id === editingPadId) ?? null;
+
+  return (
+    <div className="jc-workspace-panel">
+
+      {/* ── Header ───────────────────────────────────────────────────────── */}
+      <header className="jc-ws-header">
+        <div className="jc-ws-header-title">
+          <h2 className="jc-drawer-title">JINGLES CONTROL</h2>
+          <p className="jc-drawer-sub">Operator console</p>
+        </div>
+        <div className="jc-ws-header-status">
+          <div className="jc-status-cluster">
+            <span className="jc-status-label">Branch</span>
+            <Chip variant={branchStatus === "online" ? "ok" : "err"}>{branchStatus}</Chip>
+            <button
+              type="button"
+              className="jc-linkish"
+              onClick={() => setBranchStatus((s) => (s === "online" ? "offline" : "online"))}
+            >
+              toggle
+            </button>
+          </div>
+          <div className="jc-status-cluster">
+            <span className="jc-status-label">Engine</span>
+            <Chip variant={engineStatus === "ready" ? "ok" : engineStatus === "busy" ? "warn" : "err"}>
+              {engineStatus}
+            </Chip>
+            <SegBtn
+              options={[
+                { value: "ready", label: "Ready" },
+                { value: "busy", label: "Busy" },
+                { value: "offline", label: "Offline" },
+              ]}
+              value={engineStatus}
+              onChange={(v) => setEngineStatus(v as MockEngineStatus)}
+            />
+          </div>
+          <div className="jc-status-cluster">
+            <span className="jc-status-label">Mode</span>
+            <SegBtn
+              options={[
+                { value: "safe", label: "Safe" },
+                { value: "preview", label: "Preview" },
+                { value: "live", label: "Live" },
+              ]}
+              value={operatorMode}
+              onChange={(v) => setOperatorMode(v as JinglesOperatorMode)}
+            />
+          </div>
+        </div>
+        <button type="button" className="jc-icon-btn" onClick={onClose} aria-label="Close Jingles Control">
+          ✕
+        </button>
+      </header>
+
+      {/* ── Two-zone body ─────────────────────────────────────────────────── */}
+      <div className="jc-ws-body">
+
+        {/* ── Content area (tabs) ─────────────────────────────────────── */}
+        <div className="jc-ws-content">
+
+          {/* Tab bar */}
+          <nav className="jc-ws-tabs" role="tablist">
+            {(
+              [
+                ["create", "Create"],
+                ["ai", "AI Compose"],
+                ["library", "Library"],
+                ["schedule", "Schedule"],
+                ["history", "History"],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === id}
+                className={`jc-ws-tab ${activeTab === id ? "jc-ws-tab--active" : ""}`}
+                onClick={() => setActiveTab(id as JinglesTabId)}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+
+          {/* ── CREATE ────────────────────────────────────────────────── */}
+          {activeTab === "create" ? (
+            <div className="jc-ws-panel jc-form">
+              <div className="jc-field-row">
+                <label className="jc-field" style={{ flex: 2 }}>
+                  <span>Title</span>
+                  <input
+                    value={draft.title}
+                    onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
+                    placeholder="e.g. Weekend fresh produce"
+                  />
+                </label>
+                <div className="jc-field">
+                  <span>Type</span>
+                  <SegBtn
+                    options={[
+                      { value: "jingle", label: "Jingle" },
+                      { value: "announcement", label: "Announcement" },
+                      { value: "broadcast", label: "Broadcast" },
+                    ]}
+                    value={draft.kind}
+                    onChange={(v) => setDraft((d) => ({ ...d, kind: v as AnnouncementDraft["kind"] }))}
+                  />
+                </div>
+              </div>
+              <label className="jc-field">
+                <span>Script</span>
+                <textarea
+                  rows={4}
+                  value={draft.body}
+                  onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
+                  placeholder="What should the announcer say?"
+                />
+              </label>
+              <div className="jc-field-row">
+                <label className="jc-field">
+                  <span>Voice</span>
+                  <input value={draft.voice} onChange={(e) => setDraft((d) => ({ ...d, voice: e.target.value }))} />
+                </label>
+                <label className="jc-field">
+                  <span>Tone</span>
+                  <input value={draft.tone} onChange={(e) => setDraft((d) => ({ ...d, tone: e.target.value }))} />
+                </label>
+                <label className="jc-field">
+                  <span>Pacing</span>
+                  <input value={draft.pacing} onChange={(e) => setDraft((d) => ({ ...d, pacing: e.target.value }))} />
+                </label>
+              </div>
+              <div className="jc-actions">
+                <button
+                  type="button"
+                  className="jc-btn jc-btn--ghost"
+                  onClick={() => addHistory("previewed", `Preview: "${draft.title || "(untitled)"}"`)}>
+                  Preview
+                </button>
+                <button type="button" className="jc-btn jc-btn--secondary" onClick={handleGenerate}>
+                  Generate
+                </button>
+                <button
+                  type="button"
+                  className="jc-btn jc-btn--primary"
+                  onClick={() => { handleGenerate(); addHistory("saved", `Draft saved: "${draft.title || "(untitled)"}"`) }}
+                >
+                  Save &amp; Generate
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {/* ── AI COMPOSE ──────────────────────────────────────────── */}
+          {activeTab === "ai" ? (
+            <div className="jc-ws-panel">
+              <label className="jc-field">
+                <span>What should the announcer say?</span>
+                <textarea
+                  rows={3}
+                  value={aiIntent}
+                  onChange={(e) => setAiIntent(e.target.value)}
+                  placeholder="e.g. remind customers about closing in 15 minutes, warm and friendly tone"
+                />
+              </label>
+              <p className="jc-hint">Mock suggestions — AI API not yet connected.</p>
+              <ul className="jc-ai-cards">
+                {MOCK_AI_SUGGESTIONS.map((text, i) => (
+                  <li key={i} className="jc-ai-card">
+                    <p>{text}</p>
+                    <div className="jc-ai-card-actions">
+                      <button
+                        type="button"
+                        className="jc-btn jc-btn--small"
+                        onClick={() => {
+                          setDraft((d) => ({ ...d, body: text }));
+                          setActiveTab("create");
+                          addHistory("draft_action", `AI suggestion ${i + 1} copied to draft`);
+                        }}
+                      >
+                        Use in draft
+                      </button>
+                      <button
+                        type="button"
+                        className="jc-btn jc-btn--small jc-btn--secondary"
+                        onClick={() => handleAiApprove(i)}
+                      >
+                        Approve &amp; generate
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* ── LIBRARY ─────────────────────────────────────────────── */}
+          {activeTab === "library" ? (
+            <div className="jc-ws-panel">
+              {savedAssets.length > 0 ? (
+                <>
+                  <p className="jc-ws-section-label" style={{ color: "#60a5fa" }}>Saved this session</p>
+                  <ul className="jc-lib">
+                    {savedAssets.map((a) => (
+                      <li key={a.id} className="jc-lib-row">
+                        <div>
+                          <div className="jc-lib-title">{a.title}</div>
+                          <div className="jc-lib-meta">{a.kind} · {a.durationLabel} · {a.url || "no URL"}</div>
+                        </div>
+                        <div className="jc-lib-actions">
+                          <button
+                            type="button"
+                            className="jc-btn jc-btn--small jc-btn--primary"
+                            disabled={!a.url}
+                            onClick={() => { triggerPlayInterrupt(a.url); addHistory("previewed", `Played: "${a.title}"`); }}
+                          >
+                            ▶
+                          </button>
+                          <button
+                            type="button"
+                            className="jc-btn jc-btn--small jc-btn--ghost"
+                            onClick={() => setResultCard(a)}
+                          >
+                            Open
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="jc-ws-divider" />
+                </>
+              ) : null}
+              <p className="jc-ws-section-label">Mock library</p>
+              <ul className="jc-lib">
+                {MOCK_LIBRARY_ITEMS.map((item) => (
+                  <li key={item.id} className="jc-lib-row jc-lib-row--stacked">
+                    <div>
+                      <div className="jc-lib-title">
+                        {item.favorite ? <span className="jc-star" aria-hidden>★</span> : null}
+                        {item.title}
+                      </div>
+                      <div className="jc-lib-meta">{item.kind} · {item.durationLabel} · {item.tags.join(", ")}</div>
+                    </div>
+                    <div className="jc-lib-actions">
+                      <button
+                        type="button"
+                        className="jc-btn jc-btn--small"
+                        onClick={() => addHistory("previewed", `Library play (mock): "${item.title}"`)}
+                      >
+                        ▶ Play
+                      </button>
+                      <button
+                        type="button"
+                        className={`jc-btn jc-btn--small ${libPickerFor === item.id ? "jc-btn--secondary" : "jc-btn--ghost"}`}
+                        onClick={() => setLibPickerFor((v) => (v === item.id ? null : item.id))}
+                      >
+                        Assign to pad {libPickerFor === item.id ? "▲" : "▾"}
+                      </button>
+                      <button
+                        type="button"
+                        className="jc-btn jc-btn--small jc-btn--ghost"
+                        onClick={() => addHistory("scheduled", `Scheduled from library: "${item.title}" (mock)`)}
+                      >
+                        Schedule
+                      </button>
+                    </div>
+                    {libPickerFor === item.id ? (
+                      <PadPicker
+                        pads={pads}
+                        onPick={(padId) => {
+                          handleAssignToPad(padId, {
+                            id: item.id, title: item.title, script: "", url: "",
+                            kind: item.kind, durationLabel: item.durationLabel,
+                          });
+                          setLibPickerFor(null);
+                        }}
+                        onClose={() => setLibPickerFor(null)}
+                      />
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* ── SCHEDULE ────────────────────────────────────────────── */}
+          {activeTab === "schedule" ? (
+            <div className="jc-ws-panel jc-form">
+              <div className="jc-field-row">
+                <div className="jc-field">
+                  <span>When</span>
+                  <SegBtn
+                    options={[
+                      { value: "now", label: "Now" },
+                      { value: "later", label: "Later" },
+                      { value: "recurring", label: "Recurring" },
+                    ]}
+                    value={schedMode}
+                    onChange={(v) => setSchedMode(v as typeof schedMode)}
+                  />
+                </div>
+                <label className="jc-field">
+                  <span>Target branch / device</span>
+                  <input value={schedTarget} onChange={(e) => setSchedTarget(e.target.value)} />
+                </label>
+                <div className="jc-field">
+                  <span>Repeat</span>
+                  <SegBtn
+                    options={[
+                      { value: "once", label: "Once" },
+                      { value: "daily", label: "Daily" },
+                      { value: "weekly", label: "Weekly" },
+                    ]}
+                    value={schedRepeat}
+                    onChange={(v) => setSchedRepeat(v)}
+                  />
+                </div>
+              </div>
+              <p className="jc-hint">Scheduled items</p>
+              <ul className="jc-sched-list">
+                {schedItems.map((s) => (
+                  <li key={s.id}>
+                    <strong>{s.label}</strong> — {s.whenLabel} · {s.repeatLabel} · {s.targetLabel}
+                  </li>
+                ))}
+                {schedItems.length === 0 ? (
+                  <li style={{ color: "#475569" }}>No scheduled items yet.</li>
+                ) : null}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* ── HISTORY ─────────────────────────────────────────────── */}
+          {activeTab === "history" ? (
+            <div className="jc-ws-panel">
+              <ul className="jc-history">
+                {history.length === 0 ? (
+                  <li className="jc-history-empty">No events yet.</li>
+                ) : (
+                  history.map((h) => (
+                    <li key={h.id} className="jc-history-row">
+                      <span className="jc-history-time">{new Date(h.atIso).toLocaleTimeString()}</span>
+                      <Chip variant="neutral">{h.kind}</Chip>
+                      <span>{h.message}</span>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* ── Result card — persists across all tabs ─────────────── */}
+          {resultCard ? (
+            <ResultCard
+              asset={resultCard}
+              pads={pads}
+              onPlay={handleResultPlay}
+              onAssignToPad={handleResultAssignToPad}
+              onSchedule={handleResultSchedule}
+              onSaveToLibrary={handleResultSaveToLibrary}
+              onDismiss={() => setResultCard(null)}
+            />
+          ) : null}
+        </div>
+
+        {/* ── Pad edit form — appears above trigger row when editing ─── */}
+        {editingPad ? (
+          <PadEditForm
+            pad={editingPad}
+            onSave={handlePadSave}
+            onCancel={() => setEditingPadId(null)}
+          />
+        ) : null}
+
+        {/* ── Trigger pads — bottom row, always visible ──────────────── */}
+        <TriggerPadSection
+          pads={pads}
+          flashPadId={flashPadId}
+          editingPadId={editingPadId}
+          onPlay={handlePadPlay}
+          onEditToggle={handlePadEditToggle}
+        />
+
+      </div>
+    </div>
   );
 }
 

@@ -400,6 +400,27 @@ async function bootstrap(): Promise<void> {
     }
   });
 
+  el<HTMLButtonElement>("btnMpvPlay").addEventListener("click", async () => {
+    const url = el<HTMLInputElement>("mpvTestUrl").value.trim();
+    const fb = el<HTMLParagraphElement>("mpvTestFeedback");
+    if (!url) {
+      fb.textContent = "Enter a URL or file path first.";
+      fb.className = "hint feedback-warn";
+      return;
+    }
+    try {
+      fb.textContent = "Sending to MPV…";
+      fb.className = "hint";
+      await api.mpvPlayUrl(url);
+      fb.textContent = `Sent: ${url}`;
+      fb.className = "hint feedback-ok";
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      fb.textContent = `Error: ${msg}`;
+      fb.className = "hint feedback-err";
+    }
+  });
+
   console.log("[SyncBiz desktop] renderer: handlers attached");
 }
 

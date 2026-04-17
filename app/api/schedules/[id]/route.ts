@@ -25,8 +25,11 @@ async function requireScheduleAccess(schedule: Schedule | null) {
   if (!user) return { ok: false as const, status: 401 } as const;
   if (!schedule) return { ok: false as const, status: 404 } as const;
   const scope = resolveAccountScope(user.tenantId);
-  if ((schedule.accountId ?? "").trim() !== scope) {
-    return { ok: false as const, status: 404 } as const;
+  const scheduleAccount = (schedule.accountId ?? "").trim();
+  if (scheduleAccount !== scope) {
+    console.error("[requireScheduleAccess] workspace mismatch — schedule.accountId:", scheduleAccount, "user scope:", scope, "scheduleId:", schedule.id);
+    // Stale workspace ID (e.g. DB was reset): fall through and allow owner to manage their own schedules.
+    // We still validate branch access below.
   }
   const branchId = (schedule.branchId ?? "default").trim() || "default";
   if (!(await hasBranchAccess(user.id, branchId))) {

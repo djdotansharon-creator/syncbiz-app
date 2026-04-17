@@ -1,5 +1,7 @@
 /**
- * MPV bridge — process-adjacent translation to MPV (future).
+ * MPV bridge — real IPC implementation via MpvManager.
+ * Replaces the Phase 1 placeholder.
  */
 
-export type { MpvBridgeNotImplemented } from "./contract";
+export { MpvManager } from "../main/mpv-manager";
+export type { MpvStatus, MpvPlaybackStatus } from "../main/mpv-manager";

@@ -85,14 +85,14 @@ export const MOCK_SCHEDULE_ITEMS: MockScheduleItem[] = [
 ];
 
 export const SAMPLER_PADS: SamplerPadItem[] = [
-  { id: "pad-promo", label: "Promo" },
-  { id: "pad-closing", label: "Closing Soon" },
-  { id: "pad-birthday", label: "Birthday" },
-  { id: "pad-bread", label: "Fresh Bread" },
-  { id: "pad-meat", label: "Meat Sale" },
-  { id: "pad-store", label: "Store Message" },
-  { id: "pad-weekend", label: "Weekend Sale" },
-  { id: "pad-custom", label: "Custom" },
+  { id: "pad-promo", label: "Promo", url: "" },
+  { id: "pad-closing", label: "Closing Soon", url: "" },
+  { id: "pad-birthday", label: "Birthday", url: "" },
+  { id: "pad-bread", label: "Fresh Bread", url: "" },
+  { id: "pad-meat", label: "Meat Sale", url: "" },
+  { id: "pad-store", label: "Store Message", url: "" },
+  { id: "pad-weekend", label: "Weekend Sale", url: "" },
+  { id: "pad-custom", label: "Custom", url: "" },
 ];
 
 export const MOCK_AI_SUGGESTIONS = [

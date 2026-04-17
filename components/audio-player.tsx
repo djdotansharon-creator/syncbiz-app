@@ -337,6 +337,26 @@ export function AudioPlayer() {
 
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
+
+  // ── Desktop mode: MPV Orchestrator is the single source of truth for display ──
+  // The React playback state drives commands (intent). MPV state drives what the UI shows (truth).
+  type DesktopMpvSnap = { status: "idle" | "playing" | "paused" | "stopped"; volume: number; position: number; duration: number; catalogCount: number };
+  const [desktopMpvSnap, setDesktopMpvSnap] = useState<DesktopMpvSnap | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const unsub = (window as any).syncbizDesktop.onStatus((s: any) => {
+      setDesktopMpvSnap({
+        status: (s.mockPlaybackStatus as DesktopMpvSnap["status"]) ?? "idle",
+        volume: typeof s.mockVolume === "number" ? s.mockVolume : 80,
+        position: typeof s.mpvPosition === "number" ? s.mpvPosition : 0,
+        duration: typeof s.mpvDuration === "number" ? s.mpvDuration : 0,
+        catalogCount: typeof s.branchCatalogCount === "number" ? s.branchCatalogCount : 0,
+      });
+    });
+    return () => { if (typeof unsub === "function") unsub(); };
+  }, []);
+  // ── End desktop source-of-truth sync ─────────────────────────────────────
   const [bufferedPercent, setBufferedPercent] = useState(0);
   const [isHoveringTimeline, setIsHoveringTimeline] = useState(false);
   const [hoverPercent, setHoverPercent] = useState(0);
@@ -1770,23 +1790,115 @@ export function AudioPlayer() {
     return () => audio.removeEventListener("pause", onPause);
   }, [isStreamUrl, currentPlayUrl]);
 
+  // ── Desktop mode: route web UI playback through MPV Channel A ──────────────
+  // Chromium audio is muted at the Electron level (setAudioMuted). These effects
+  // mirror every play/pause/stop/URL change to the Orchestrator → MPV Ch-A.
+
+  const mpvLastUrlRef = useRef<string | null>(null);
+  // Tracks Ch-A MPV status from onStatus broadcasts (no re-render — refs only).
+  const mpvChAStatusRef = useRef<string>("idle");
+  const mpvRecoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Subscribe to desktop status once. When Ch-A unexpectedly goes idle while
+  // the web player is still "playing" (test panel hijacked Ch-A), schedule a
+  // 1.5 s reload of the library URL. If Ch-A recovers on its own (loadfile replace
+  // transition) within that window, the timer is cancelled.
+  useEffect(() => {
+    if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const desktop = (window as any).syncbizDesktop;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const unsub = desktop.onStatus((s: any) => {
+      const prev = mpvChAStatusRef.current;
+      const next: string = s.mockPlaybackStatus ?? "idle";
+      mpvChAStatusRef.current = next;
+
+      if (prev !== "idle" && next === "idle" &&
+          statusRef.current === "playing" && currentPlayUrlRef.current) {
+        // Ch-A just went idle while web player is still playing — could be test
+        // panel hijack ending, or natural end of clip. Schedule reload.
+        if (mpvRecoverTimerRef.current) clearTimeout(mpvRecoverTimerRef.current);
+        mpvRecoverTimerRef.current = setTimeout(() => {
+          mpvRecoverTimerRef.current = null;
+          // Re-check: still playing, still idle (didn't recover on its own via replace)
+          if (statusRef.current === "playing" &&
+              currentPlayUrlRef.current &&
+              mpvChAStatusRef.current === "idle") {
+            mpvLastUrlRef.current = null; // force routing effect to treat as new
+            void desktop.mpvPlayUrl(currentPlayUrlRef.current);
+          }
+        }, 1500);
+      } else if (next !== "idle" && mpvRecoverTimerRef.current) {
+        // Ch-A is active again — loadfile replace transition settled; cancel reload
+        clearTimeout(mpvRecoverTimerRef.current);
+        mpvRecoverTimerRef.current = null;
+      }
+    });
+    return () => {
+      if (typeof unsub === "function") unsub();
+      if (mpvRecoverTimerRef.current) { clearTimeout(mpvRecoverTimerRef.current); mpvRecoverTimerRef.current = null; }
+    };
+  }, []); // mount-only — uses refs for all runtime values
+
+  // Route play/pause/stop transport and new URLs to Ch-A.
+  // Deps: only [status, currentPlayUrl] — extra deps cause spurious re-fires.
+  useEffect(() => {
+    if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const desktop = (window as any).syncbizDesktop;
+    if (status === "playing" && currentPlayUrl) {
+      if (currentPlayUrl !== mpvLastUrlRef.current) {
+        // New URL — load and play on Channel A
+        mpvLastUrlRef.current = currentPlayUrl;
+        void desktop.mpvPlayUrl(currentPlayUrl as string);
+      } else {
+        // Same URL, resumed after pause — don't restart
+        void desktop.localMockTransport({ command: "PLAY" });
+      }
+    } else if (status === "paused") {
+      void desktop.localMockTransport({ command: "PAUSE" });
+    } else if (status === "stopped") {
+      mpvLastUrlRef.current = null;
+      void desktop.localMockTransport({ command: "STOP" });
+    }
+  }, [status, currentPlayUrl]);
+
+  // Sync volume slider → MPV master volume
+  useEffect(() => {
+    if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    void (window as any).syncbizDesktop.localMockTransport({ command: "SET_VOLUME", volume });
+  }, [volume]);
+  // ── End desktop routing ───────────────────────────────────────────────────
+
   const hasPrevNext = (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1);
   const thumbnailCover = ytMultiTrackState?.currentThumbnail ?? currentTrack?.cover ?? currentSource?.cover ?? null;
 
-  /** Unified display values: MASTER uses local state, CONTROL uses masterState – exact parity. */
+  /** Unified display values: desktop MPV > CONTROL mirror > local React state. */
   const ms = deviceCtx?.masterState;
-  const displayStatus = isControlMirror ? (ms?.status ?? "idle") : status;
+  // In desktop mode the Orchestrator/MPV state is the single source of truth for all playback display.
+  // React state still drives commands (intent → engine), but the UI must reflect what MPV is actually doing.
+  const isDesktopMode = desktopMpvSnap !== null;
+  const displayStatus = isDesktopMode
+    ? desktopMpvSnap.status
+    : isControlMirror ? (ms?.status ?? "idle") : status;
   const displayTrack = isControlMirror ? ms?.currentTrack : currentTrack;
   const displaySource = isControlMirror ? ms?.currentSource : currentSource;
-  const displayPosition = isControlMirror
-    ? (typeof ms?.position === "number" && Number.isFinite(ms.position) ? ms.position : Number.NaN)
-    : position;
-  const displayDuration = isControlMirror
-    ? (typeof ms?.duration === "number" && Number.isFinite(ms.duration) ? ms.duration : Number.NaN)
-    : duration;
-  const displayVolume = isControlMirror
-    ? (typeof ms?.volume === "number" && Number.isFinite(ms.volume) ? ms.volume : 80)
-    : volume;
+  const displayPosition = isDesktopMode
+    ? desktopMpvSnap.position
+    : isControlMirror
+      ? (typeof ms?.position === "number" && Number.isFinite(ms.position) ? ms.position : Number.NaN)
+      : position;
+  const displayDuration = isDesktopMode
+    ? desktopMpvSnap.duration
+    : isControlMirror
+      ? (typeof ms?.duration === "number" && Number.isFinite(ms.duration) ? ms.duration : Number.NaN)
+      : duration;
+  const displayVolume = isDesktopMode
+    ? desktopMpvSnap.volume
+    : isControlMirror
+      ? (typeof ms?.volume === "number" && Number.isFinite(ms.volume) ? ms.volume : 80)
+      : volume;
   const displayShuffle =
     isControlMirror ? (typeof ms?.shuffle === "boolean" ? ms?.shuffle : shuffle) : shuffle;
   const displayAutoMix =
@@ -1809,15 +1921,21 @@ export function AudioPlayer() {
         return ytMultiTrackState?.nextTitle ?? nextTrack?.name ?? nextSrc?.title ?? null;
       })();
   const displayHasContent = isControlMirror ? !!(ms?.currentSource || ms?.currentTrack) : !!currentSource;
-  const displayHasPrevNext = isControlMirror
-    ? ((ms?.queue?.length ?? 0) > 1)
-    : (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1);
-  const displayCanSeek = isControlMirror
-    ? (displayDuration > 0)
-    : (!!currentSource &&
-        ((isYouTube && isYtPlayerReady(ytPlayerRef.current)) ||
-          (!!scWidgetRef.current && isSoundCloud) ||
-          (isStreamUrl && Number.isFinite(duration) && duration > 0)));
+  const displayHasPrevNext = isDesktopMode
+    // Desktop: catalog navigation — enabled when library has > 1 item, OR local playlist/queue also covers the case
+    ? (desktopMpvSnap.catalogCount > 1 || (currentSource && queue.length > 1) || !!(currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1))
+    : isControlMirror
+      ? ((ms?.queue?.length ?? 0) > 1)
+      : (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1);
+  const displayCanSeek = isDesktopMode
+    // Desktop: MPV reports duration when a file is loaded — that is the only condition needed.
+    ? displayDuration > 0
+    : isControlMirror
+      ? (displayDuration > 0)
+      : (!!currentSource &&
+          ((isYouTube && isYtPlayerReady(ytPlayerRef.current)) ||
+            (!!scWidgetRef.current && isSoundCloud) ||
+            (isStreamUrl && Number.isFinite(duration) && duration > 0)));
   const displayBufferedPercent = isControlMirror ? 0 : bufferedPercent;
   const displayProgressPercent =
     Number.isFinite(displayPosition) &&
@@ -1862,58 +1980,97 @@ export function AudioPlayer() {
         local: t.deckBadgeLocal,
       });
 
-  const onPrev = isControlMirror
+  // Desktop PREV/NEXT strategy:
+  //  - Multi-track playlist or queued items → provider prev()/next() changes currentPlayUrl
+  //    → routing effect fires → mpvPlayUrl(newUrl). This is the only correct path for
+  //    within-playlist track navigation.
+  //  - Single station with a populated catalog → catalog PREV/NEXT + PLAY via localMockTransport.
+  const desktopHasProviderNav =
+    isDesktopMode &&
+    ((currentSource?.playlist?.tracks?.length ?? 0) > 1 || queue.length > 1);
+
+  const onPrev = isDesktopMode
     ? () => {
-        console.log("[SyncBiz Audit] PREV path resolved", {
-          context: "remote_ui_control",
-          deviceMode: deviceCtx?.deviceMode,
-          isControlMirror,
-          currentUrl: currentPlayUrl,
-          trackType: currentTrack?.type,
-          currentTrackIndex,
-          intendedPrevIndex: currentTrackIndex - 1,
-          queueIndex,
-          queueLength: queue.length,
-        });
-        endedHandledRef.current = true;
-        deviceCtx!.prevOrSend();
+        if (desktopHasProviderNav) {
+          endedHandledRef.current = true;
+          prev();
+        } else {
+          // Catalog navigation: PREV advances the station, PLAY loads the new URL into MPV.
+          const desktop = (window as any).syncbizDesktop;
+          void desktop.localMockTransport({ command: "PREV" }).then(() =>
+            desktop.localMockTransport({ command: "PLAY" })
+          );
+        }
       }
-    : () => {
-        console.log("[SyncBiz Audit] PREV path resolved", {
-          context: "local_ui",
-          deviceMode: deviceCtx?.deviceMode,
-          isControlMirror,
-          currentUrl: currentPlayUrl,
-          trackType: currentTrack?.type,
-          currentTrackIndex,
-          intendedPrevIndex: currentTrackIndex - 1,
-          queueIndex,
-          queueLength: queue.length,
-        });
-        endedHandledRef.current = true;
-        prev();
-      };
-  const onNext = isControlMirror
+    : isControlMirror
+      ? () => {
+          console.log("[SyncBiz Audit] PREV path resolved", {
+            context: "remote_ui_control",
+            deviceMode: deviceCtx?.deviceMode,
+            isControlMirror,
+            currentUrl: currentPlayUrl,
+            trackType: currentTrack?.type,
+            currentTrackIndex,
+            intendedPrevIndex: currentTrackIndex - 1,
+            queueIndex,
+            queueLength: queue.length,
+          });
+          endedHandledRef.current = true;
+          deviceCtx!.prevOrSend();
+        }
+      : () => {
+          console.log("[SyncBiz Audit] PREV path resolved", {
+            context: "local_ui",
+            deviceMode: deviceCtx?.deviceMode,
+            isControlMirror,
+            currentUrl: currentPlayUrl,
+            trackType: currentTrack?.type,
+            currentTrackIndex,
+            intendedPrevIndex: currentTrackIndex - 1,
+            queueIndex,
+            queueLength: queue.length,
+          });
+          endedHandledRef.current = true;
+          prev();
+        };
+  const onNext = isDesktopMode
     ? () => {
-        console.log("[SyncBiz Audit] NEXT path resolved", {
-          context: "remote_ui_control",
-          deviceMode: deviceCtx?.deviceMode,
-          isControlMirror,
-          currentUrl: currentPlayUrl,
-          trackType: currentTrack?.type,
-          currentTrackIndex,
-          intendedNextIndex: currentTrackIndex + 1,
-          queueIndex,
-          queueLength: queue.length,
-        });
-        crossfadeAbortRef.current = true;
-        crossfadeCleanupRef.current?.();
-        ytCrossfadeAbortRef.current = true;
-        ytCrossfadeCleanupRef.current?.();
-        endedHandledRef.current = true;
-        deviceCtx!.nextOrSend();
+        if (desktopHasProviderNav) {
+          crossfadeAbortRef.current = true;
+          crossfadeCleanupRef.current?.();
+          ytCrossfadeAbortRef.current = true;
+          ytCrossfadeCleanupRef.current?.();
+          endedHandledRef.current = true;
+          next();
+        } else {
+          // Catalog navigation: NEXT advances the station, PLAY loads the new URL into MPV.
+          const desktop = (window as any).syncbizDesktop;
+          void desktop.localMockTransport({ command: "NEXT" }).then(() =>
+            desktop.localMockTransport({ command: "PLAY" })
+          );
+        }
       }
-    : () => {
+    : isControlMirror
+      ? () => {
+          console.log("[SyncBiz Audit] NEXT path resolved", {
+            context: "remote_ui_control",
+            deviceMode: deviceCtx?.deviceMode,
+            isControlMirror,
+            currentUrl: currentPlayUrl,
+            trackType: currentTrack?.type,
+            currentTrackIndex,
+            intendedNextIndex: currentTrackIndex + 1,
+            queueIndex,
+            queueLength: queue.length,
+          });
+          crossfadeAbortRef.current = true;
+          crossfadeCleanupRef.current?.();
+          ytCrossfadeAbortRef.current = true;
+          ytCrossfadeCleanupRef.current?.();
+          endedHandledRef.current = true;
+          deviceCtx!.nextOrSend();
+        }
+      : () => {
         console.log("[SyncBiz Audit] NEXT path resolved", {
           context: "local_ui",
           deviceMode: deviceCtx?.deviceMode,
@@ -1982,7 +2139,10 @@ export function AudioPlayer() {
 
   const onSeekChange = useCallback(
     (pct: number) => {
-      if (isControlMirror) {
+      if (isDesktopMode) {
+        if (displayDuration <= 0) return;
+        void (window as any).syncbizDesktop.mpvSeekTo((pct / 100) * displayDuration);
+      } else if (isControlMirror) {
         if (displayDuration <= 0) return;
         deviceCtx!.seekOrSend((pct / 100) * displayDuration);
       } else {
@@ -1990,7 +2150,7 @@ export function AudioPlayer() {
         seekTo((pct / 100) * duration);
       }
     },
-    [isControlMirror, deviceCtx, displayDuration, canSeek, duration, seekTo]
+    [isDesktopMode, isControlMirror, deviceCtx, displayDuration, canSeek, duration, seekTo]
   );
 
   const getPercentFromClientX = useCallback((clientX: number): number => {

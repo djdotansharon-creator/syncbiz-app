@@ -26,4 +26,8 @@ export const DESKTOP_IDLE_STATUS_SNAPSHOT: MvpStatusSnapshot = {
   lastServerMessageType: null,
   lastCommandSummary: null,
   lastError: null,
+  isDucked: false,
+  duckTargetVolume: 0,
+  mpvPosition: 0,
+  mpvDuration: 0,
 };

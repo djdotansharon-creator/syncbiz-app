@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect, useRef, startTransition, type DragEvent, type MouseEvent } from "react";
+import { useCenterModule } from "@/lib/center-module-context";
+import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ShareModal } from "@/components/share-modal";
@@ -571,6 +573,7 @@ function makeCollectionContainers(sources: UnifiedSource[]) {
 }
 
 function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; pageSubtitle?: string }) {
+  const { active: activeCenterModule, setActive: setActiveCenterModule } = useCenterModule();
   const searchParams = useSearchParams();
   const { locale } = useLocale();
   const { t } = useTranslations();
@@ -2147,6 +2150,9 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         </aside>
 
         <div className="library-list-shell row-start-1 min-w-0 self-start overflow-hidden rounded-2xl p-2.5 lg:col-start-2 lg:row-start-1 lg:px-3 xl:px-3">
+          {activeCenterModule === "jingles" ? (
+            <JinglesWorkspacePanel onClose={() => setActiveCenterModule(null)} />
+          ) : (<>
           <div className="library-sources-input-shell">
             <LibraryInputArea onAdd={handleAdd} playSourceOverride={playSourceOverride} />
           </div>
@@ -2749,6 +2755,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
             </div>
           )}
           </div>
+          </>)}
         </div>
 
         <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl p-2.5 lg:col-start-3 lg:row-start-1 lg:justify-self-stretch">

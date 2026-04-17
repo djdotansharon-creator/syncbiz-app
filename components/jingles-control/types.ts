@@ -56,9 +56,21 @@ export type MockHistoryEvent = {
   message: string;
 };
 
+/** Shared output surface produced by Create and AI Compose flows. */
+export type JingleAsset = {
+  id: string;
+  title: string;
+  script: string;
+  url: string;
+  kind: AnnouncementKind;
+  durationLabel: string;
+};
+
 export type SamplerPadItem = {
   id: string;
   label: string;
+  url: string;
+  scheduledAt?: string; // ISO datetime string — Phase 1: stored/displayed, no daemon
 };
 
 /** Aggregated mock UI state for the operator console (phase 1). */

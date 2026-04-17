@@ -1,7 +1,10 @@
 /**
- * Mock playback session — local state only until MPV is integrated.
+ * Mock playback session — local state holder.
+ * Real playback is handled by MpvManager; this class tracks the authoritative
+ * in-memory state that is broadcast in STATE_UPDATE messages.
  */
 import { createInitialStationState, type StationPlaybackState } from "../shared/station-state";
+import type { MpvStatus } from "../main/mpv-manager";
 
 const MVP_COMMANDS = new Set(["PLAY", "PAUSE", "STOP", "SET_VOLUME"]);
 
@@ -23,15 +26,18 @@ export class MockPlaybackSession {
     cover: string | null;
     origin: "playlist" | "radio" | "source";
     sourceType?: string;
+    url?: string;
   }): void {
     const now = Date.now();
     const st = typeof sel.sourceType === "string" && sel.sourceType.trim() ? sel.sourceType.trim() : undefined;
+    const u = typeof sel.url === "string" ? sel.url.trim() : undefined;
     this.state.currentSource = {
       id: sel.id.trim(),
       title: sel.title.trim() || "Untitled",
       cover: sel.cover,
       origin: sel.origin,
       ...(st ? { sourceType: st } : {}),
+      ...(u ? { url: u } : {}),
     };
     this.state.positionAt = now;
   }
@@ -50,6 +56,18 @@ export class MockPlaybackSession {
 
   get sourceLabel(): string {
     return this.state.currentSource?.title ?? "—";
+  }
+
+  /**
+   * Sync real MPV playback state into the tracked state.
+   * Called whenever MpvManager fires a status event.
+   */
+  syncMpvStatus(mpv: MpvStatus): void {
+    this.state.status = mpv.status;
+    this.state.volume = mpv.volume;
+    this.state.position = mpv.position;
+    this.state.duration = mpv.duration;
+    this.state.positionAt = Date.now();
   }
 
   /**

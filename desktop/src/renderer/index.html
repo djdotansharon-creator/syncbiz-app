@@ -371,6 +371,20 @@
         </div>
       </div>
 
+      <!-- MPV direct-play test panel (dev only — no WS required) -->
+      <section class="surface station-panel" aria-labelledby="mpv-test-heading">
+        <h2 id="mpv-test-heading">MPV test</h2>
+        <p class="hint" style="margin-top: 0">
+          Paste a direct audio URL or local file path and press Play to verify real MPV playback without WS.
+        </p>
+        <label for="mpvTestUrl">URL or file path</label>
+        <input id="mpvTestUrl" type="text" placeholder="https://… or C:\music\test.mp3" spellcheck="false" />
+        <div class="row">
+          <button type="button" class="primary" id="btnMpvPlay">Play</button>
+        </div>
+        <p id="mpvTestFeedback" class="hint" role="status" aria-live="polite"></p>
+      </section>
+
       <!-- Mirrors web /library: branch-scoped catalog (card grid like SourceCard) -->
       <section class="surface library-section" aria-labelledby="library-heading">
         <h2 id="library-heading" class="sr-only">Library</h2>

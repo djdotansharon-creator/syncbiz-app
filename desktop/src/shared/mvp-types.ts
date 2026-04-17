@@ -13,6 +13,10 @@ export const MVP_IPC = {
   LOCAL_MOCK_TRANSPORT: "mvp:local-mock-transport",
   DESKTOP_SIGN_IN: "mvp:desktop-sign-in",
   STATUS: "mvp:status",
+  MPV_PLAY_URL: "mvp:mpv-play-url",
+  MPV_PLAY_INTERRUPT: "mvp:mpv-play-interrupt",
+  SET_DUCK_PERCENT: "mvp:set-duck-percent",
+  MPV_SEEK_TO: "mvp:mpv-seek-to",
 } as const;
 
 /** Local mock console — same commands as remote WS COMMAND (no MPV). */
@@ -63,6 +67,8 @@ export type BranchLibraryItem = {
   branchId: string;
   genre: string;
   cover: string | null;
+  /** Direct playback URL passed to MPV Channel A. Empty string when unavailable (e.g. multi-track playlist with no root URL). */
+  url: string;
 };
 
 /** Read-only branch catalog snapshot (filtered by config branchId). */
@@ -114,6 +120,16 @@ export type MvpStatusSnapshot = {
   lastServerMessageType: string | null;
   lastCommandSummary: string | null;
   lastError: string | null;
+  /** true while Channel A is ducked by an active interrupt. */
+  isDucked: boolean;
+  /** Volume Channel A is held at while ducked (debug). */
+  duckTargetVolume: number;
+  /** Configurable duck depth 0–100 (% of masterVolume). */
+  duckPercent: number;
+  /** MPV Channel A playback position in seconds — single source of truth for desktop player UI. */
+  mpvPosition: number;
+  /** MPV Channel A track duration in seconds — 0 when no file is loaded. */
+  mpvDuration: number;
 };
 
 export type MvpConfigPatch = Partial<Omit<DesktopRuntimeConfig, "deviceId">> & {

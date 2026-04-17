@@ -5,6 +5,7 @@
 
 import WebSocket from "ws";
 import { MockPlaybackSession } from "../playback-agent";
+import type { PlaybackOrchestrator } from "../main/playback-orchestrator";
 import type {
   BranchLibraryItem,
   DesktopRuntimeConfig,
@@ -54,6 +55,7 @@ export class DeviceWsManager {
   private registered = false;
   private deviceRole: MvpDeviceRole = "unknown";
   private readonly mock = new MockPlaybackSession();
+  private readonly orchestrator: PlaybackOrchestrator | null;
   /** Order matches branch library fetch; used for PREV/NEXT station selection (mock only). */
   private branchCatalog: BranchLibraryItem[] = [];
   private lastServerMessageType: string | null = null;
@@ -61,8 +63,17 @@ export class DeviceWsManager {
   private lastError: string | null = null;
   private listener: StatusListener | null = null;
 
-  constructor(initialConfig: DesktopRuntimeConfig) {
+  constructor(initialConfig: DesktopRuntimeConfig, orchestrator?: PlaybackOrchestrator) {
     this.config = initialConfig;
+    this.orchestrator = orchestrator ?? null;
+    if (this.orchestrator) {
+      // Sync real playback events (music channel) into tracked state and re-broadcast.
+      this.orchestrator.onStatus((s) => {
+        this.mock.syncMpvStatus(s.music);
+        this.push();
+        this.sendStateUpdateIfMaster();
+      });
+    }
   }
 
   setConfig(c: DesktopRuntimeConfig): void {
@@ -96,6 +107,7 @@ export class DeviceWsManager {
       const bi = this.branchCatalog.findIndex((i) => i.id === src.id);
       branchCatalogIndex = bi >= 0 ? bi : null;
     }
+    const orchState = this.orchestrator?.getState();
     return {
       appReady: true,
       deviceId: c.deviceId,
@@ -119,6 +131,11 @@ export class DeviceWsManager {
       lastServerMessageType: this.lastServerMessageType,
       lastCommandSummary: this.lastCommandSummary,
       lastError: this.lastError,
+      isDucked: orchState?.isDucked ?? false,
+      duckTargetVolume: orchState?.duckTargetVolume ?? 0,
+      duckPercent: orchState?.duckPercent ?? 40,
+      mpvPosition: st.position ?? 0,
+      mpvDuration: st.duration ?? 0,
     };
   }
 
@@ -141,6 +158,7 @@ export class DeviceWsManager {
       cover: item.cover,
       origin: item.origin,
       sourceType: item.type,
+      url: item.url,
     });
     this.push();
     this.sendStateUpdateIfMaster();
@@ -164,8 +182,72 @@ export class DeviceWsManager {
       cover: next.cover,
       origin: next.origin,
       sourceType: next.type,
+      url: next.url,
     });
     return true;
+  }
+
+  /**
+   * Route a command to the Playback Orchestrator.
+   * Called alongside mock.applyCommand so both state and audio stay in sync.
+   * The Orchestrator is the only caller of MpvManager — this class never touches MPV directly.
+   */
+  private routeToOrchestrator(cmd: string, payload: unknown): void {
+    const orch = this.orchestrator;
+    if (!orch) {
+      console.warn("[DeviceWsManager] routeToOrchestrator: no orchestrator for cmd", cmd);
+      return;
+    }
+    type P = { url?: string; volume?: number; source?: { url?: string } };
+    const p = payload as P | null | undefined;
+
+    switch (cmd) {
+      case "PLAY": {
+        const url = (p?.url ?? "").trim();
+        if (url) {
+          // Explicit URL in command payload (e.g. remote WS COMMAND with url).
+          orch.playMusic(url);
+        } else {
+          const mpvStatus = orch.getState().music.status;
+          if (mpvStatus === "paused") {
+            // MPV has a file loaded and is paused — resume in-place.
+            orch.resumeMusic();
+          } else {
+            // MPV is idle or stopped — load from the currently selected source URL.
+            const srcUrl = (this.mock.getState().currentSource?.url ?? "").trim();
+            if (srcUrl) {
+              console.log("[DeviceWsManager] PLAY → loadfile on Channel A:", srcUrl.slice(0, 100));
+              orch.playMusic(srcUrl);
+            } else {
+              // No URL available — best-effort resume (no-op on idle MPV but safe to call).
+              orch.resumeMusic();
+            }
+          }
+        }
+        break;
+      }
+      case "PLAY_SOURCE": {
+        const url = (p?.source?.url ?? "").trim();
+        if (url) orch.playMusic(url);
+        break;
+      }
+      case "PAUSE":
+        orch.pauseMusic();
+        break;
+      case "STOP":
+        orch.stopMusic();
+        orch.stopInterrupt();
+        break;
+      case "SET_VOLUME": {
+        const vol = p?.volume;
+        if (typeof vol === "number" && Number.isFinite(vol)) {
+          orch.setVolume(vol);
+        }
+        break;
+      }
+      default:
+        break;
+    }
   }
 
   /**
@@ -193,6 +275,7 @@ export class DeviceWsManager {
     if (applied) {
       this.lastCommandSummary = command;
     }
+    this.routeToOrchestrator(command, transportPayload);
     this.push();
     this.sendStateUpdateIfMaster();
   }
@@ -298,7 +381,8 @@ export class DeviceWsManager {
             this.sendStateUpdateIfMaster();
           } else {
             const applied = this.mock.applyCommand(cmd, p.payload);
-            this.lastCommandSummary = applied ? cmd : `${cmd} (not handled in MVP mock)`;
+            this.lastCommandSummary = applied ? cmd : `${cmd} (not handled in mock)`;
+            this.routeToOrchestrator(cmd, p.payload);
             this.sendStateUpdateIfMaster();
           }
         } else {

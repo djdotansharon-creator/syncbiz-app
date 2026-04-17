@@ -13,6 +13,8 @@ export type StationPlaybackState = {
     origin?: "playlist" | "radio" | "source";
     /** Provider hint from unified API (`BranchLibraryItem.type`). */
     sourceType?: string;
+    /** Direct playback URL — forwarded to MPV Channel A when PLAY has no explicit URL in its command payload. */
+    url?: string;
   } | null;
   currentTrackIndex: number;
   queue: Array<{ id: string; title: string; cover: string | null }>;

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
@@ -25,7 +25,7 @@ import { searchExternal } from "@/lib/search-service";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { DeviceModeIndicator } from "@/components/device-mode-indicator";
 import { StandaloneIndicator } from "@/components/standalone-indicator";
-import { JinglesControlWebDrawer } from "@/components/jingles-control/JinglesShell";
+import { CenterModuleContext } from "@/lib/center-module-context";
 
 const categoryKeys = ["dashboard", "sources", "radio", "owner", "schedules", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
@@ -209,7 +209,15 @@ function LogoutButton() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
+  // Read ?return= from window.location.search instead of useSearchParams() to avoid
+  // the Suspense boundary that Next.js injects around useSearchParams() in layout-level
+  // Client Components. That boundary briefly shows an empty fallback on navigation,
+  // which unmounts AudioPlayer and destroys the YouTube iframe, stopping playback.
+  const [isMobileReturn, setIsMobileReturn] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setIsMobileReturn(new URLSearchParams(window.location.search).get("return") === "/mobile");
+  }, [pathname]);
   const { locale } = useLocale();
   const { t } = useTranslations();
   const [now, setNow] = useState(() => new Date());
@@ -252,7 +260,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { libraryTheme } = useLibraryTheme();
   const { playSource, setQueue } = usePlayback();
   const [playerDropActive, setPlayerDropActive] = useState(false);
-  const [jinglesDrawerOpen, setJinglesDrawerOpen] = useState(false);
+  const [activeCenterModule, setActiveCenterModule] = useState<"jingles" | null>(null);
 
   const parseDroppedUrl = async (url: string): Promise<ParseUrlJson | null> => {
     const controller = new AbortController();
@@ -486,7 +494,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Mobile: minimal layout. AudioPlayer must be in-viewport for mobile browsers to load/play
   // (off-screen -left-[9999px] causes iOS Safari etc. to skip loading iframes/audio)
   // Also use minimal layout for edit pages when return=/mobile (user came from mobile player)
-  const isMobileReturn = searchParams.get("return") === "/mobile";
   const isMobileOrEditFromMobile =
     pathname === "/mobile" || (pathname?.includes("/edit") && isMobileReturn);
   if (isMobileOrEditFromMobile) {
@@ -505,6 +512,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
+    <CenterModuleContext.Provider value={{ active: activeCenterModule, setActive: setActiveCenterModule }}>
     <div className="flex min-h-screen bg-slate-950 text-slate-50">
       <aside
         className={`hidden w-56 flex-col border-r border-slate-800/60 bg-slate-950/95 px-4 py-5 lg:flex sticky top-0 self-start h-screen overflow-y-auto${
@@ -711,28 +719,31 @@ export function AppShell({ children }: { children: ReactNode }) {
                     </header>
                     <div className="grid grid-cols-2 gap-2">
                       {[
-                        { title: "Jingles", tone: "border-sky-400/30 bg-sky-500/10 text-sky-100", dot: "bg-sky-300" },
-                        { title: "Birthdays", tone: "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100", dot: "bg-fuchsia-300" },
-                        { title: "Broadcasts", tone: "border-amber-400/30 bg-amber-500/10 text-amber-100", dot: "bg-amber-300" },
-                        { title: "Announcements", tone: "border-rose-400/30 bg-rose-500/10 text-rose-100", dot: "bg-rose-300" },
-                      ].map((group) => (
-                        <button
-                          key={group.title}
-                          type="button"
-                          className={`rounded-xl border px-2.5 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition ${group.tone}`}
-                          disabled={group.title !== "Jingles"}
-                          aria-disabled={group.title !== "Jingles"}
-                          onClick={group.title === "Jingles" ? () => setJinglesDrawerOpen(true) : undefined}
-                        >
-                          <p className="text-xs font-semibold tracking-tight">{group.title}</p>
-                          <p className="mt-1 flex items-center gap-1 text-[10px] opacity-90">
-                            <span className={`h-1.5 w-1.5 rounded-full ${group.dot}`} />
-                            {group.title === "Jingles" ? "Open console" : "Soon"}
-                          </p>
-                        </button>
-                      ))}
+                        { key: "jingles" as const, title: "Jingles", tone: "border-sky-400/30 bg-sky-500/10 text-sky-100", activeTone: "border-sky-400/70 bg-sky-500/25 text-sky-100 ring-1 ring-sky-400/40", dot: "bg-sky-300" },
+                        { key: null, title: "Birthdays", tone: "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100", activeTone: "", dot: "bg-fuchsia-300" },
+                        { key: null, title: "Broadcasts", tone: "border-amber-400/30 bg-amber-500/10 text-amber-100", activeTone: "", dot: "bg-amber-300" },
+                        { key: null, title: "Announcements", tone: "border-rose-400/30 bg-rose-500/10 text-rose-100", activeTone: "", dot: "bg-rose-300" },
+                      ].map((group) => {
+                        const isActive = group.key !== null && activeCenterModule === group.key;
+                        return (
+                          <button
+                            key={group.title}
+                            type="button"
+                            className={`rounded-xl border px-2.5 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition ${isActive ? group.activeTone : group.tone}`}
+                            disabled={group.key === null}
+                            aria-disabled={group.key === null}
+                            aria-pressed={group.key !== null ? isActive : undefined}
+                            onClick={group.key !== null ? () => setActiveCenterModule((v) => (v === group.key ? null : group.key)) : undefined}
+                          >
+                            <p className="text-xs font-semibold tracking-tight">{group.title}</p>
+                            <p className="mt-1 flex items-center gap-1 text-[10px] opacity-90">
+                              <span className={`h-1.5 w-1.5 rounded-full ${group.dot}`} />
+                              {group.key !== null ? (isActive ? "Close console" : "Open console") : "Soon"}
+                            </p>
+                          </button>
+                        );
+                      })}
                     </div>
-                    <JinglesControlWebDrawer open={jinglesDrawerOpen} onClose={() => setJinglesDrawerOpen(false)} />
                   </div>
                 </aside>
               ) : null}
@@ -754,5 +765,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </main>
       </div>
     </div>
+    </CenterModuleContext.Provider>
   );
 }
