@@ -50,13 +50,25 @@ function hid(): string {
   return `jc-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+// ─── Voice presets ────────────────────────────────────────────────────────────
+// All four confirmed 200 on free tier (probed directly against the TTS endpoint).
+const VOICE_PRESETS = [
+  { label: "Announcer Male",    voiceId: "JBFqnCBsd6RMkjVDRZzb" }, // George
+  { label: "Announcer Female",  voiceId: "EXAVITQu4vr4xnSDxMaL" }, // Sarah
+  { label: "Energetic Male",    voiceId: "TX3LPaxmHKxFdv7VOQHJ" }, // Liam
+  { label: "Energetic Female",  voiceId: "cgSgspJ2msm6clMCkdW9" }, // Jessica
+] as const;
+
+const BELL_URL = "/sounds/bell.wav";
+
 const initialDraft: AnnouncementDraft = {
   title: "",
   body: "",
   kind: "announcement",
   tone: "Warm, clear",
-  voice: "Announcer A (mock)",
+  voice: VOICE_PRESETS[0].voiceId,
   pacing: "Normal",
+  preRoll: false,
 };
 
 const initialState: State = {
@@ -647,7 +659,7 @@ function loadPads(): SamplerPadItem[] {
     const saved = JSON.parse(raw) as SamplerPadItem[];
     return SAMPLER_PADS.map((seed) => {
       const match = saved.find((s) => s.id === seed.id);
-      return match ? { ...seed, label: match.label ?? seed.label, url: match.url ?? "", scheduledAt: match.scheduledAt } : { ...seed };
+      return match ? { ...seed, label: match.label ?? seed.label, url: match.url ?? "", scheduledAt: match.scheduledAt, preRoll: match.preRoll ?? false } : { ...seed };
     });
   } catch {
     return SAMPLER_PADS.map((p) => ({ ...p }));
@@ -664,7 +676,10 @@ function triggerPlayInterrupt(url: string): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const api = typeof window !== "undefined" ? (window as any).syncbizDesktop : null;
   if (api?.mpvPlayInterrupt) {
-    api.mpvPlayInterrupt(url);
+    // MPV needs an absolute URL. Relative paths (e.g. /api/jingles/audio/id) must be
+    // resolved against the current origin so MPV can fetch the audio over HTTP.
+    const absolute = url.startsWith("/") ? `${window.location.origin}${url}` : url;
+    api.mpvPlayInterrupt(absolute);
   }
 }
 
@@ -697,34 +712,24 @@ function TriggerPadSection({
             // Wrapper holds the pad button + floating edit button as siblings
             <div key={p.id} className="jc-trigger-pad-wrap">
 
-              {/* ── Pad face: the entire surface is the action ── */}
+              {/* ── Pad face: square trigger — label centered, LED corner dot ── */}
               <button
                 type="button"
                 className={[
-                  "jc-rail-card jc-trigger-pad",
+                  "jc-trigger-pad",
                   assigned ? "jc-trigger-pad--assigned" : "jc-trigger-pad--empty",
                   isEditing ? "jc-trigger-pad--editing" : "",
                   isFlashing ? "jc-trigger-pad--playing" : "",
                 ].filter(Boolean).join(" ")}
                 onClick={() => (assigned ? onPlay(p) : onEditToggle(p.id))}
-                title={assigned ? `Play: ${p.label}` : "Click to assign a source"}
+                title={assigned ? `Play: ${p.label}` : "Click to assign"}
                 aria-label={assigned ? `Play ${p.label}` : `Assign source to ${p.label}`}
               >
-                <span className="jc-rail-card-kicker">
-                  <span
-                    className={`jc-pad-led ${isFlashing ? "jc-pad-led--playing" : assigned ? "jc-pad-led--ready" : "jc-pad-led--empty"}`}
-                    aria-hidden
-                  />
-                  <span style={{ color: assigned ? "#6ee7b7" : "#475569" }}>
-                    {assigned ? "Ready" : "Unassigned"}
-                  </span>
-                </span>
-                <span className="jc-rail-card-title">{p.label}</span>
-                {assigned ? (
-                  <span className="jc-rail-card-hint" title={p.url}>
-                    {p.url.length > 28 ? "\u2026" + p.url.slice(-24) : p.url}
-                  </span>
-                ) : null}
+                <span
+                  className={`jc-pad-led ${isFlashing ? "jc-pad-led--playing" : assigned ? "jc-pad-led--ready" : "jc-pad-led--empty"}`}
+                  aria-hidden
+                />
+                <span className="jc-trigger-pad-label">{p.label}</span>
                 {p.scheduledAt ? (
                   <span
                     className="jc-trigger-sched-badge"
@@ -997,6 +1002,10 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
   // Create-tab draft
   const [draft, setDraft] = useState<AnnouncementDraft>({ ...initialDraft });
 
+  // Generation state
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+
   // AI-tab
   const [aiIntent, setAiIntent] = useState("");
 
@@ -1028,6 +1037,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
 
   const handlePadPlay = useCallback((pad: SamplerPadItem) => {
     if (!pad.url) return;
+    if (pad.preRoll) triggerPlayInterrupt(BELL_URL);
     triggerPlayInterrupt(pad.url);
     setFlashPadId(pad.id);
     addHistory("pad", `Pad "${pad.label}" triggered`);
@@ -1057,7 +1067,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
       setPads((prev) => {
         const next = prev.map((p) =>
           p.id === padId
-            ? { ...p, url: asset.url, label: (asset.title || p.label).slice(0, 20) }
+            ? { ...p, url: asset.url, label: (asset.title || p.label).slice(0, 20), preRoll: asset.preRoll }
             : p
         );
         persistPads(next);
@@ -1071,17 +1081,53 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
 
   // ── Create-tab operations ───────────────────────────────────────────────────
 
-  const handleGenerate = useCallback(() => {
-    const asset: JingleAsset = {
-      id: hid(),
-      title: draft.title || "Untitled jingle",
-      script: draft.body,
-      url: "",
-      kind: draft.kind,
-      durationLabel: "—",
-    };
-    setResultCard(asset);
-    addHistory("created", `Generated: "${asset.title}" (mock — no asset yet)`);
+  const handleGenerate = useCallback(async (opts?: { save?: boolean }) => {
+    const text = draft.body.trim();
+    if (!text) {
+      setGenerateError("Script body is required — type what the announcer should say.");
+      addHistory("failed", "Generate failed: script body is empty");
+      return;
+    }
+    setGenerateError(null);
+    setGenerating(true);
+    const title = draft.title || "Untitled jingle";
+    try {
+      const res = await fetch("/api/jingles/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voiceId: draft.voice }),
+      });
+      const data = (await res.json()) as { url?: string; durationLabel?: string; error?: string };
+      if (!res.ok || !data.url) {
+        const msg = data.error ?? `HTTP ${res.status}`;
+        setGenerateError(msg);
+        addHistory("failed", `Generate failed: ${msg}`);
+        return;
+      }
+      const asset: JingleAsset = {
+        id: hid(),
+        title,
+        script: draft.body,
+        url: data.url,
+        kind: draft.kind,
+        durationLabel: data.durationLabel ?? "—",
+        voiceId: draft.voice,
+        preRoll: draft.preRoll,
+      };
+      setResultCard(asset);
+      addHistory(
+        opts?.save ? "saved" : "created",
+        opts?.save
+          ? `Saved & generated: "${title}" → ${data.url}`
+          : `Generated: "${title}" → ${data.url}`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setGenerateError(msg);
+      addHistory("failed", `Generate failed: ${msg}`);
+    } finally {
+      setGenerating(false);
+    }
   }, [draft, addHistory]);
 
   // ── AI-tab operations ────────────────────────────────────────────────────────
@@ -1095,15 +1141,18 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
       url: "",
       kind: "announcement",
       durationLabel: "—",
+      voiceId: draft.voice,
+      preRoll: false,
     };
     setResultCard(asset);
     addHistory("created", `AI suggestion ${index + 1} approved → result card`);
-  }, [addHistory]);
+  }, [draft.voice, addHistory]);
 
   // ── Result-card operations ──────────────────────────────────────────────────
 
   const handleResultPlay = useCallback(() => {
     if (!resultCard?.url) return;
+    if (resultCard.preRoll) triggerPlayInterrupt(BELL_URL);
     triggerPlayInterrupt(resultCard.url);
     addHistory("previewed", `Played result: "${resultCard.title}"`);
   }, [resultCard, addHistory]);
@@ -1146,32 +1195,24 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
           <p className="jc-drawer-sub">Operator console</p>
         </div>
         <div className="jc-ws-header-status">
+          {/* Branch — LED + chip, no inline editor */}
           <div className="jc-status-cluster">
+            <span className={`jc-status-led jc-status-led--${branchStatus === "online" ? "ok" : "err"}`} aria-hidden />
             <span className="jc-status-label">Branch</span>
             <Chip variant={branchStatus === "online" ? "ok" : "err"}>{branchStatus}</Chip>
-            <button
-              type="button"
-              className="jc-linkish"
-              onClick={() => setBranchStatus((s) => (s === "online" ? "offline" : "online"))}
-            >
-              toggle
-            </button>
           </div>
+          {/* Engine — LED + chip */}
           <div className="jc-status-cluster">
+            <span
+              className={`jc-status-led jc-status-led--${engineStatus === "ready" ? "ok" : engineStatus === "busy" ? "warn" : "err"}`}
+              aria-hidden
+            />
             <span className="jc-status-label">Engine</span>
             <Chip variant={engineStatus === "ready" ? "ok" : engineStatus === "busy" ? "warn" : "err"}>
               {engineStatus}
             </Chip>
-            <SegBtn
-              options={[
-                { value: "ready", label: "Ready" },
-                { value: "busy", label: "Busy" },
-                { value: "offline", label: "Offline" },
-              ]}
-              value={engineStatus}
-              onChange={(v) => setEngineStatus(v as MockEngineStatus)}
-            />
           </div>
+          {/* Mode — segmented control (has real operator value) */}
           <div className="jc-status-cluster">
             <span className="jc-status-label">Mode</span>
             <SegBtn
@@ -1224,7 +1265,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
           {activeTab === "create" ? (
             <div className="jc-ws-panel jc-form">
               <div className="jc-field-row">
-                <label className="jc-field" style={{ flex: 2 }}>
+                <label className="jc-field jc-field--stretch">
                   <span>Title</span>
                   <input
                     value={draft.title}
@@ -1248,16 +1289,23 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
               <label className="jc-field">
                 <span>Script</span>
                 <textarea
-                  rows={4}
+                  rows={3}
                   value={draft.body}
                   onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
                   placeholder="What should the announcer say?"
                 />
               </label>
-              <div className="jc-field-row">
+              <div className="jc-field-row jc-field-row--voice">
                 <label className="jc-field">
                   <span>Voice</span>
-                  <input value={draft.voice} onChange={(e) => setDraft((d) => ({ ...d, voice: e.target.value }))} />
+                  <select
+                    value={draft.voice}
+                    onChange={(e) => setDraft((d) => ({ ...d, voice: e.target.value }))}
+                  >
+                    {VOICE_PRESETS.map((v) => (
+                      <option key={v.voiceId} value={v.voiceId}>{v.label}</option>
+                    ))}
+                  </select>
                 </label>
                 <label className="jc-field">
                   <span>Tone</span>
@@ -1267,7 +1315,21 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                   <span>Pacing</span>
                   <input value={draft.pacing} onChange={(e) => setDraft((d) => ({ ...d, pacing: e.target.value }))} />
                 </label>
+                <div className="jc-field jc-field--pre-roll">
+                  <span>Bell</span>
+                  <button
+                    type="button"
+                    className={`jc-toggle-chip${draft.preRoll ? " jc-toggle-chip--on" : ""}`}
+                    onClick={() => setDraft((d) => ({ ...d, preRoll: !d.preRoll }))}
+                    aria-pressed={draft.preRoll}
+                  >
+                    {draft.preRoll ? "ON" : "OFF"}
+                  </button>
+                </div>
               </div>
+              {generateError ? (
+                <div className="jc-err-msg" role="alert">{generateError}</div>
+              ) : null}
               <div className="jc-actions">
                 <button
                   type="button"
@@ -1275,15 +1337,21 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                   onClick={() => addHistory("previewed", `Preview: "${draft.title || "(untitled)"}"`)}>
                   Preview
                 </button>
-                <button type="button" className="jc-btn jc-btn--secondary" onClick={handleGenerate}>
-                  Generate
+                <button
+                  type="button"
+                  className="jc-btn jc-btn--secondary"
+                  disabled={generating}
+                  onClick={() => void handleGenerate()}
+                >
+                  {generating ? "Generating…" : "Generate"}
                 </button>
                 <button
                   type="button"
                   className="jc-btn jc-btn--primary"
-                  onClick={() => { handleGenerate(); addHistory("saved", `Draft saved: "${draft.title || "(untitled)"}"`) }}
+                  disabled={generating}
+                  onClick={() => void handleGenerate({ save: true })}
                 >
-                  Save &amp; Generate
+                  {generating ? "Generating…" : "Save & Generate"}
                 </button>
               </div>
             </div>
@@ -1291,7 +1359,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
 
           {/* ── AI COMPOSE ──────────────────────────────────────────── */}
           {activeTab === "ai" ? (
-            <div className="jc-ws-panel">
+            <div className="jc-ws-panel jc-form">
               <label className="jc-field">
                 <span>What should the announcer say?</span>
                 <textarea
@@ -1337,7 +1405,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
             <div className="jc-ws-panel">
               {savedAssets.length > 0 ? (
                 <>
-                  <p className="jc-ws-section-label" style={{ color: "#60a5fa" }}>Saved this session</p>
+                  <p className="jc-ws-section-label jc-ws-section-label--accent">Saved this session</p>
                   <ul className="jc-lib">
                     {savedAssets.map((a) => (
                       <li key={a.id} className="jc-lib-row">
@@ -1409,6 +1477,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                           handleAssignToPad(padId, {
                             id: item.id, title: item.title, script: "", url: "",
                             kind: item.kind, durationLabel: item.durationLabel,
+                            voiceId: "", preRoll: false,
                           });
                           setLibPickerFor(null);
                         }}
@@ -1462,7 +1531,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                   </li>
                 ))}
                 {schedItems.length === 0 ? (
-                  <li style={{ color: "#475569" }}>No scheduled items yet.</li>
+                  <li className="jc-history-empty">No scheduled items yet.</li>
                 ) : null}
               </ul>
             </div>
@@ -1487,19 +1556,20 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
             </div>
           ) : null}
 
-          {/* ── Result card — persists across all tabs ─────────────── */}
-          {resultCard ? (
-            <ResultCard
-              asset={resultCard}
-              pads={pads}
-              onPlay={handleResultPlay}
-              onAssignToPad={handleResultAssignToPad}
-              onSchedule={handleResultSchedule}
-              onSaveToLibrary={handleResultSaveToLibrary}
-              onDismiss={() => setResultCard(null)}
-            />
-          ) : null}
         </div>
+
+        {/* ── Result card — outside scroll zone, between tabs and pads ── */}
+        {resultCard ? (
+          <ResultCard
+            asset={resultCard}
+            pads={pads}
+            onPlay={handleResultPlay}
+            onAssignToPad={handleResultAssignToPad}
+            onSchedule={handleResultSchedule}
+            onSaveToLibrary={handleResultSaveToLibrary}
+            onDismiss={() => setResultCard(null)}
+          />
+        ) : null}
 
         {/* ── Pad edit form — appears above trigger row when editing ─── */}
         {editingPad ? (

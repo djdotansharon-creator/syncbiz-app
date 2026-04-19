@@ -18,8 +18,9 @@ export type AnnouncementDraft = {
   body: string;
   kind: AnnouncementKind;
   tone: string;
-  voice: string;
+  voice: string;   // ElevenLabs voiceId
   pacing: string;
+  preRoll: boolean;
 };
 
 export type MockLibraryItem = {
@@ -64,6 +65,8 @@ export type JingleAsset = {
   url: string;
   kind: AnnouncementKind;
   durationLabel: string;
+  voiceId: string;
+  preRoll: boolean;
 };
 
 export type SamplerPadItem = {
@@ -71,6 +74,7 @@ export type SamplerPadItem = {
   label: string;
   url: string;
   scheduledAt?: string; // ISO datetime string — Phase 1: stored/displayed, no daemon
+  preRoll?: boolean;
 };
 
 /** Aggregated mock UI state for the operator console (phase 1). */
