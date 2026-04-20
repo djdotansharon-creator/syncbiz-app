@@ -57,3 +57,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local claude settings (per-machine)
+.claude/settings.local.json
+
+# desktop runtime binaries (mpv.exe, yt-dlp.exe) — too large for git (100+ MB)
+# these are fetched/vendored outside of version control
+desktop/resources/
