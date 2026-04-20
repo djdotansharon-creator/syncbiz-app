@@ -366,6 +366,9 @@ model Schedule {
 model CatalogItem {
   id            String         @id @default(uuid())
   url           String         @unique
+  canonicalUrl  String?        @unique
+  videoId       String?
+  provider      String?
   title         String
   artist        String?
   durationSec   Int?
@@ -379,6 +382,8 @@ model CatalogItem {
   playlistItems       PlaylistItem[]
   analytics           CatalogAnalytics?
   playsByBusinessType CatalogPlayByBusiness[]
+
+  @@index([videoId])
 }
 
 model CatalogAnalytics {

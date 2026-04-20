@@ -6,14 +6,23 @@
 
 import { prisma } from "./prisma";
 import type { PlaylistType } from "./playlist-types";
-import { canonicalYouTubeWatchUrlForPlayback } from "./playlist-utils";
+import { getYouTubeVideoId } from "./playlist-utils";
 import { inferGenre } from "./infer-genre";
 
 export function normalizeCatalogUrlKey(url: string, type: PlaylistType): string {
   const u = (url ?? "").trim();
   if (!u) return "";
-  if (type === "youtube") return canonicalYouTubeWatchUrlForPlayback(u).trim();
+  if (type === "youtube") {
+    const vid = getYouTubeVideoId(u);
+    return vid ? `https://www.youtube.com/watch?v=${vid}` : u;
+  }
   return u;
+}
+
+function deriveProvider(url: string, videoId: string | null): string {
+  if (videoId) return "youtube";
+  if (/soundcloud\.com/i.test(url)) return "soundcloud";
+  return "direct";
 }
 
 /** Derive a genres array from a title. Returns [] if genre is "Mixed" (unrecognised). */
@@ -23,43 +32,74 @@ function genresFromTitle(title: string): string[] {
 }
 
 /**
- * Find or create a catalog item by its normalized URL.
+ * Find or create a catalog item, deduplicating by videoId first (YouTube),
+ * then by canonicalUrl, then by legacy url field.
  * tenantId is accepted for API compatibility but ignored — catalog is global.
- * Automatically populates genres from the title on every create/update.
  */
 export async function findOrCreateCatalogItem(input: {
   tenantId: string;   // kept for drop-in compat; not stored
   urlKey: string;
-  type: PlaylistType; // kept for drop-in compat; not stored (URL is globally unique)
+  type: PlaylistType; // kept for drop-in compat; not stored
   title: string;
   thumbnailUrl: string;
 }): Promise<{ id: string }> {
-  const url = input.urlKey.trim();
-  if (!url) throw new Error("urlKey is required");
+  const raw = input.urlKey.trim();
+  if (!raw) throw new Error("urlKey is required");
+
+  // Derive all dedup keys server-side — callers may pass any URL variant
+  const videoId = getYouTubeVideoId(raw) ?? null;
+  const canonicalUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : raw;
+  const provider = deriveProvider(raw, videoId);
 
   const title = (input.title ?? "").trim() || "Untitled";
   const thumbnail = (input.thumbnailUrl ?? "").trim() || null;
   const genres = genresFromTitle(title);
 
-  const row = await prisma.catalogItem.upsert({
-    where: { url },
-    create: { url, title, thumbnail, genres },
-    update: {
-      ...(title !== "Untitled" ? { title } : {}),
-      ...(thumbnail ? { thumbnail } : {}),
-    },
-    select: { id: true, genres: true },
-  });
+  return prisma.$transaction(async (tx) => {
+    // 1. YouTube dedup: videoId catches all URL variants for the same video
+    if (videoId) {
+      const byVideoId = await tx.catalogItem.findFirst({
+        where: { videoId },
+        select: { id: true, canonicalUrl: true, provider: true, genres: true },
+      });
+      if (byVideoId) {
+        await tx.catalogItem.update({
+          where: { id: byVideoId.id },
+          data: {
+            ...(byVideoId.canonicalUrl ? {} : { canonicalUrl }),
+            ...(byVideoId.provider ? {} : { provider }),
+            ...((byVideoId.genres ?? []).length === 0 && genres.length > 0 ? { genres } : {}),
+          },
+        });
+        return { id: byVideoId.id };
+      }
+    }
 
-  // Backfill genres on existing rows that have none yet (NULL or [])
-  if ((row.genres ?? []).length === 0 && genres.length > 0) {
-    await prisma.catalogItem.update({
-      where: { id: row.id },
-      data: { genres },
+    // 2. Check by canonicalUrl or legacy url (handles rows from before this migration)
+    const existing = await tx.catalogItem.findFirst({
+      where: { OR: [{ canonicalUrl }, { url: canonicalUrl }] },
+      select: { id: true, canonicalUrl: true, provider: true, videoId: true, genres: true },
     });
-  }
+    if (existing) {
+      await tx.catalogItem.update({
+        where: { id: existing.id },
+        data: {
+          ...(existing.canonicalUrl ? {} : { canonicalUrl }),
+          ...(existing.provider ? {} : { provider }),
+          ...(existing.videoId ? {} : videoId ? { videoId } : {}),
+          ...((existing.genres ?? []).length === 0 && genres.length > 0 ? { genres } : {}),
+        },
+      });
+      return { id: existing.id };
+    }
 
-  return { id: row.id };
+    // 3. Create new
+    const created = await tx.catalogItem.create({
+      data: { url: canonicalUrl, canonicalUrl, videoId, provider, title, thumbnail, genres },
+      select: { id: true },
+    });
+    return { id: created.id };
+  });
 }
 
 /**
