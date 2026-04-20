@@ -1,14 +1,22 @@
 import { Suspense } from "react";
+import { headers } from "next/headers";
 import { getApiBase } from "@/lib/api-base";
 import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
 import { RadioStreamsManager } from "@/components/radio-streams-manager";
 import type { RadioStream } from "@/lib/source-types";
 
+export const dynamic = "force-dynamic";
+
 async function getRadioStations(): Promise<RadioStream[]> {
   try {
     const base = getApiBase();
-    const res = await fetch(`${base}/api/radio`, { cache: "no-store" });
+    const h = await headers();
+    const cookie = h.get("cookie");
+    const res = await fetch(`${base}/api/radio`, {
+      cache: "no-store",
+      ...(cookie ? { headers: { cookie } } : {}),
+    });
     if (!res.ok) {
       console.error("[radio] API error:", res.status, await res.text());
       return [];

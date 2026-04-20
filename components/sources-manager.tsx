@@ -3,6 +3,8 @@
 import { useState, useCallback, useMemo, useEffect, useRef, startTransition, type DragEvent, type MouseEvent } from "react";
 import { useCenterModule } from "@/lib/center-module-context";
 import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
+import { EditCurrentWorkspacePanel } from "@/components/edit-current-workspace-panel";
+import { isJinglesModule, isEditCurrentModule } from "@/lib/center-module-context";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ShareModal } from "@/components/share-modal";
@@ -1849,7 +1851,15 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
 
   return (
     <div className="library-theme library-page-shell flex w-full min-w-0 flex-col space-y-0" data-library-theme={libraryTheme}>
-      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:grid-cols-[186px_minmax(0,1fr)_206px] xl:-mx-1 xl:grid-cols-[196px_minmax(0,1fr)_216px]">
+      {/*
+       * Bottom row column widths mirror the top deck row (see app-shell
+       * `library-player-route-bridge` grid) so the left Ready-Playlists
+       * column sits directly under the top-left Reserved slot, and the
+       * right Library column sits under Command Pads. Sizes match 1:1
+       * at `xl` (260) and `2xl` (280). `lg` keeps the older compact
+       * widths because the top deck collapses to a single column there.
+       */}
+      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:grid-cols-[186px_minmax(0,1fr)_206px] xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)_260px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px]">
         <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl border-cyan-500/35 p-2.5 shadow-[0_10px_28px_rgba(0,0,0,0.34)] lg:col-start-1 lg:row-start-1 lg:justify-self-stretch">
           <div className="space-y-4">
             <section>
@@ -2150,8 +2160,13 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         </aside>
 
         <div className="library-list-shell row-start-1 min-w-0 self-start overflow-hidden rounded-2xl p-2.5 lg:col-start-2 lg:row-start-1 lg:px-3 xl:px-3">
-          {activeCenterModule === "jingles" ? (
+          {isJinglesModule(activeCenterModule) ? (
             <JinglesWorkspacePanel onClose={() => setActiveCenterModule(null)} />
+          ) : isEditCurrentModule(activeCenterModule) ? (
+            <EditCurrentWorkspacePanel
+              target={activeCenterModule.target}
+              onClose={() => setActiveCenterModule(null)}
+            />
           ) : (<>
           <div className="library-sources-input-shell">
             <LibraryInputArea onAdd={handleAdd} playSourceOverride={playSourceOverride} />

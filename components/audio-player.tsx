@@ -8,6 +8,8 @@ import { useLocale, useTranslations, labels } from "@/lib/locale-context";
 import { getTranslations } from "@/lib/translations";
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
+import { editHrefForLibrarySource } from "@/components/library-source-item-actions";
+import { useCenterModule } from "@/lib/center-module-context";
 import { getYouTubeVideoId, getYouTubePlaylistId, getYouTubeThumbnail, isYouTubeMixUrl, isYouTubeMultiTrackUrl } from "@/lib/playlist-utils";
 import { getSoundCloudEmbedUrl, isSoundCloudUrl } from "@/lib/player-utils";
 import {
@@ -261,8 +263,23 @@ function SourceIcon({ type, origin, size = "md" }: { type: TrackSource; origin?:
 
 export function AudioPlayer() {
   const pathname = usePathname();
-  /** Visual deck mode on /sources – unified with library theme tokens (no playback changes). */
-  const isSourcesLibraryDeck = pathname?.startsWith("/sources") ?? false;
+  /**
+   * Unified visual deck mode: every desktop route gets the library-theme
+   * treatment — spinning-record artwork ring + cyan neon transport buttons +
+   * library-theme surface tokens — so the player looks identical on
+   * /library, /sources, /radio, /favorites, /remote, /owner, /schedules,
+   * /logs, etc. `pathname` is still tracked for any future per-route
+   * tweaks. No playback behavior changes.
+   */
+  const isSourcesLibraryDeck = true;
+  /**
+   * `setActive` is provided by `CenterModuleContext` when the current
+   * route mounts a center workspace panel (library / sources). On routes
+   * without a panel host, the default no-op is returned and the Edit
+   * action gracefully falls back to URL navigation.
+   */
+  const { setActive: setCenterModule } = useCenterModule();
+  const isLibraryRoute = pathname?.startsWith("/sources") ?? false;
 
   const { locale } = useLocale();
   const { t } = useTranslations();
@@ -2395,6 +2412,46 @@ export function AudioPlayer() {
               }}
               onShareClick={() => setShareOpen(true)}
               shareDisabled={!displayHasContent || Boolean(isControlMirror)}
+              /**
+               * Edit deep-link for the currently-playing track — routes to
+               * the correct editor based on the source origin:
+               *   playlist → /playlists/[id]/edit
+               *   radio    → /radio/[id]/edit
+               *   source   → /sources/[id]/edit
+               * Used as the fallback when we can't open the editor inline
+               * (non-library route, or radio which has its own full-page
+               * editor). Hidden in control-mirror mode or when nothing
+               * is playing.
+               */
+              editHref={
+                !isControlMirror && displayHasContent && currentSource
+                  ? editHrefForLibrarySource(currentSource)
+                  : null
+              }
+              /**
+               * Inline edit: on library routes (which host the center
+               * workspace panel), playlist/source items open their
+               * editor inline in the center column — matching the
+               * Jingles workspace UX. Radio stays URL-based; there's no
+               * in-panel radio editor yet.
+               */
+              onEditClick={
+                !isControlMirror && displayHasContent && currentSource && isLibraryRoute
+                  ? currentSource.origin === "playlist" && currentSource.playlist
+                    ? () =>
+                        setCenterModule({
+                          kind: "edit-current",
+                          target: { kind: "playlist", id: currentSource.playlist!.id },
+                        })
+                    : currentSource.origin === "source" && currentSource.source
+                      ? () =>
+                          setCenterModule({
+                            kind: "edit-current",
+                            target: { kind: "source", id: currentSource.source!.id },
+                          })
+                      : null
+                  : null
+              }
               labels={{
                 previousTrack: t.previousTrack,
                 stopPlayback: t.stopPlayback,
@@ -2407,6 +2464,7 @@ export function AudioPlayer() {
                 mute: t.mute,
                 volumeAria: t.volumeAria,
                 share: t.share,
+                edit: t.edit,
               }}
             />
 

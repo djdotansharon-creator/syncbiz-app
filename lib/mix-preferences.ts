@@ -31,7 +31,16 @@ export function setMixDuration(seconds: MixDuration): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY_MIX, String(seconds));
-    window.dispatchEvent(new CustomEvent(MIX_DURATION_CHANGED, { detail: seconds }));
+    // Defer the cross-component event so that if setMixDuration is called
+    // from inside a React state updater, listeners don't trigger setState
+    // on other components while the current render is still in flight.
+    queueMicrotask(() => {
+      try {
+        window.dispatchEvent(new CustomEvent(MIX_DURATION_CHANGED, { detail: seconds }));
+      } catch {
+        /* ignore */
+      }
+    });
   } catch {
     /* ignore */
   }
@@ -61,7 +70,16 @@ export function setAutoMix(value: boolean): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY_AUTOMIX, value ? "1" : "0");
-    window.dispatchEvent(new CustomEvent(AUTOMIX_CHANGED, { detail: value }));
+    // Defer the cross-component event so that if setAutoMix is called from
+    // inside a React state updater, listeners don't trigger setState on
+    // other components while the current render is still in flight.
+    queueMicrotask(() => {
+      try {
+        window.dispatchEvent(new CustomEvent(AUTOMIX_CHANGED, { detail: value }));
+      } catch {
+        /* ignore */
+      }
+    });
   } catch {
     /* ignore */
   }

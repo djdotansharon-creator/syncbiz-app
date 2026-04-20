@@ -1,7 +1,7 @@
 "use client";
 
 import { NeonControlButton } from "@/components/ui/neon-control-button";
-import { ActionButtonShare } from "@/components/ui/action-buttons";
+import { ActionButtonShare, ActionButtonEdit } from "@/components/ui/action-buttons";
 import {
   PlaybackTransportIconNext,
   PlaybackTransportIconPause,
@@ -36,6 +36,8 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
     onMuteToggle,
     onShareClick,
     shareDisabled,
+    editHref,
+    onEditClick,
     labels,
   } = props;
 
@@ -130,8 +132,14 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
         </svg>
       </NeonControlButton>
       <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
+      {/*
+        Volume rail is capped with max-w so the native <input type="range">
+        doesn't stretch to its intrinsic ~250px and push the Edit/Share
+        action pair onto a second row on narrower decks. `shrink` still
+        lets it collapse gracefully on very tight containers.
+      */}
       <div
-        className={`flex min-w-[52px] shrink items-center gap-1 rounded-xl border px-1.5 py-1 sm:min-w-[70px] sm:gap-1.5 sm:px-2 md:min-w-[90px] md:gap-2 md:px-2.5 lg:min-w-[120px] ${
+        className={`flex min-w-[52px] max-w-[140px] shrink items-center gap-1 rounded-xl border px-1.5 py-1 sm:min-w-[70px] sm:max-w-[160px] sm:gap-1.5 sm:px-2 md:min-w-[90px] md:max-w-[180px] md:gap-2 md:px-2.5 lg:min-w-[110px] lg:max-w-[200px] ${
           libDeck
             ? "library-player-volume-shell border-[color:var(--lib-accent-border)] bg-[color:var(--lib-surface-segment)] shadow-[var(--lib-shadow-rail-inset)]"
             : "rounded-lg border-cyan-500/50 bg-slate-900/80"
@@ -185,26 +193,39 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
           {displayVolume}
         </span>
       </div>
-      {libDeck ? (
-        <ActionButtonShare variant="player" onClick={onShareClick} disabled={shareDisabled} aria-label={labels.share} title={labels.share} />
-      ) : (
-        <NeonControlButton
-          size="2xs"
-          variant="white"
-          onClick={onShareClick}
-          disabled={shareDisabled}
-          aria-label={labels.share}
-          title={labels.share}
-        >
-          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="18" cy="5" r="3" />
-            <circle cx="6" cy="12" r="3" />
-            <circle cx="18" cy="19" r="3" />
-            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-          </svg>
-        </NeonControlButton>
-      )}
+      {/*
+        Track-level action pair (Edit + Share) sit together in a shrink-0
+        flex group — prevents the two square icon buttons from wrapping
+        individually onto separate rows (a narrower volume rail already
+        leaves room for them on the main transport row).
+      */}
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        {onEditClick ? (
+          <ActionButtonEdit onClick={onEditClick} variant="player" aria-label={labels.edit} title={labels.edit} />
+        ) : editHref ? (
+          <ActionButtonEdit href={editHref} variant="player" aria-label={labels.edit} title={labels.edit} />
+        ) : null}
+        {libDeck ? (
+          <ActionButtonShare variant="player" onClick={onShareClick} disabled={shareDisabled} aria-label={labels.share} title={labels.share} />
+        ) : (
+          <NeonControlButton
+            size="2xs"
+            variant="white"
+            onClick={onShareClick}
+            disabled={shareDisabled}
+            aria-label={labels.share}
+            title={labels.share}
+          >
+            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+            </svg>
+          </NeonControlButton>
+        )}
+      </div>
     </div>
   );
 }

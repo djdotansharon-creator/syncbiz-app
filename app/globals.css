@@ -344,6 +344,100 @@ input[type="range"]:not(.player-volume-slider)::-moz-range-track {
     0 10px 28px -12px rgba(0, 0, 0, 0.42) !important;
 }
 
+/*
+ * Player-deck transport pills: Radio-style "bold pill + neon glow" visual,
+ * scoped ONLY to the main transport buttons (size md/xl — h-11 & h-14).
+ * Uses vivid cyan tokens (cyan-300 text, cyan-400 border/glow) to match the
+ * vibrancy of the `source-nav-pill-active` "Library" pill. Source cards &
+ * row controls keep their premium gradient rail look above.
+ *
+ * The `:not(.h-7)` selector intentionally EXCLUDES size="2xs" toggles
+ * (shuffle / automix) — those keep their compact square look from the base
+ * `.library-deck-neon-btn` rule and get an extra radius override below.
+ */
+.library-theme.library-player-route-bridge .audio-player-library-deck button.library-deck-neon-btn:not(.h-7) {
+  border-radius: 1rem !important;
+  border-width: 2px !important;
+  border-color: rgba(34, 211, 238, 0.65) !important;
+  background-color: rgba(15, 23, 42, 0.97) !important;
+  background-image: none !important;
+  color: #67e8f9 !important;
+  text-shadow: 0 0 8px rgba(34, 211, 238, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.28),
+    0 0 28px -2px rgba(34, 211, 238, 0.42) !important;
+}
+
+.library-theme.library-player-route-bridge .audio-player-library-deck button.library-deck-neon-btn:not(.h-7):hover:not(:disabled) {
+  border-color: #22d3ee !important;
+  filter: none;
+  transform: scale(1.04);
+  color: #a5f3fc !important;
+  box-shadow:
+    0 0 0 2px rgba(34, 211, 238, 0.55),
+    0 0 38px -2px rgba(34, 211, 238, 0.55) !important;
+}
+
+.library-theme.library-player-route-bridge .audio-player-library-deck button.library-deck-neon-btn:not(.h-7):active:not(:disabled) {
+  transform: scale(0.96);
+  filter: brightness(0.95);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.32),
+    0 0 16px -4px rgba(34, 211, 238, 0.3) !important;
+}
+
+.library-theme.library-player-route-bridge .audio-player-library-deck button.library-deck-neon-btn--hero {
+  border-radius: 1rem !important;
+  box-shadow:
+    0 0 0 2px rgba(34, 211, 238, 0.5),
+    0 0 32px -2px rgba(34, 211, 238, 0.55),
+    0 0 60px -8px rgba(34, 211, 238, 0.35) !important;
+}
+
+.library-theme.library-player-route-bridge .audio-player-library-deck button.library-deck-neon-btn--hero:hover:not(:disabled) {
+  box-shadow:
+    0 0 0 2px rgba(34, 211, 238, 0.78),
+    0 0 44px -2px rgba(34, 211, 238, 0.7),
+    0 0 78px -8px rgba(34, 211, 238, 0.45) !important;
+}
+
+/*
+ * Small toggle buttons (shuffle / automix — size="2xs" → h-7 w-7): keep
+ * compact square feel like the Share action button, not round pills.
+ * Inherits the rest of the premium-rail look from `.library-deck-neon-btn`.
+ */
+.library-theme.library-player-route-bridge .audio-player-library-deck button.library-deck-neon-btn.h-7 {
+  border-radius: 0.5rem !important;
+}
+
+/*
+ * Active state for small toggles (AutoMix / Random when ON): bright lit
+ * cyan outline + inner glow, matching the "Share-button-pressed" feel the
+ * user asked for. Overrides the gradient active look above for h-7 only.
+ */
+.library-theme.library-player-route-bridge .audio-player-library-deck button.library-deck-neon-btn.h-7.library-deck-neon-btn-active {
+  border-radius: 0.5rem !important;
+  border-width: 2px !important;
+  border-color: #22d3ee !important;
+  background-color: rgba(15, 23, 42, 0.95) !important;
+  background-image: none !important;
+  color: #a5f3fc !important;
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.45),
+    0 0 18px -2px rgba(34, 211, 238, 0.55),
+    inset 0 0 10px -2px rgba(34, 211, 238, 0.35) !important;
+}
+
+.library-theme.library-player-route-bridge .audio-player-library-deck button.library-deck-neon-btn.h-7.library-deck-neon-btn-active:hover:not(:disabled) {
+  border-color: #67e8f9 !important;
+  color: #cffafe !important;
+  box-shadow:
+    0 0 0 2px rgba(34, 211, 238, 0.6),
+    0 0 26px -2px rgba(34, 211, 238, 0.7),
+    inset 0 0 14px -2px rgba(34, 211, 238, 0.45) !important;
+  transform: scale(1.03);
+}
+
 /* On = shuffle / automix / toggles: same luminous family as transport, clearly “lit” */
 .library-theme.library-player-route-bridge .audio-player-library-deck button.library-deck-neon-btn-active,
 .library-theme .library-source-card button.library-deck-neon-btn-active,

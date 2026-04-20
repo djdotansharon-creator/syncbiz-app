@@ -25,7 +25,7 @@ import { searchExternal } from "@/lib/search-service";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { DeviceModeIndicator } from "@/components/device-mode-indicator";
 import { StandaloneIndicator } from "@/components/standalone-indicator";
-import { CenterModuleContext } from "@/lib/center-module-context";
+import { CenterModuleContext, type CenterModule, isJinglesModule } from "@/lib/center-module-context";
 
 const categoryKeys = ["dashboard", "sources", "radio", "owner", "schedules", "logs"] as const;
 const categoryItems = categoryKeys.map((key) => ({
@@ -252,15 +252,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   });
 
   const isSourcesLibraryRoute = pathname?.startsWith("/sources") ?? false;
-  const isMediaThemeRoute =
-    pathname?.startsWith("/sources") ||
-    pathname?.startsWith("/radio") ||
-    pathname?.startsWith("/favorites") ||
-    false;
+  // Unified deck treatment: every desktop (app) route gets the media-theme
+  // player shell — hero card + Command Pads aside + library-theme tokens —
+  // so the top bar looks identical on /library, /radio, /owner, /schedules,
+  // /logs, /remote, etc. The mobile layout short-circuits above (see
+  // `isMobileOrEditFromMobile` branch), so this flag is only read on
+  // desktop routes.
+  const isMediaThemeRoute = true;
   const { libraryTheme } = useLibraryTheme();
   const { playSource, setQueue } = usePlayback();
   const [playerDropActive, setPlayerDropActive] = useState(false);
-  const [activeCenterModule, setActiveCenterModule] = useState<"jingles" | null>(null);
+  const [activeCenterModule, setActiveCenterModule] = useState<CenterModule>(null);
 
   const parseDroppedUrl = async (url: string): Promise<ParseUrlJson | null> => {
     const controller = new AbortController();
@@ -665,16 +667,53 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           {/* Row 3: Player — keep a single AudioPlayer instance across routes (media vs non-media); swapping branches remounts embeds */}
           <div
-            className={isMediaThemeRoute ? "library-theme library-player-route-bridge" : undefined}
+            className={isMediaThemeRoute ? "library-theme library-player-route-bridge px-3 sm:px-4" : undefined}
             {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
           >
+            {/*
+             * Deck row: [Left slot] [Player] [Command Pads].
+             * Left + right aside columns share the same fixed width so
+             * the player shell stays centered and both sides sit away
+             * from the viewport edges (matching the `px-3 sm:px-4` inset
+             * we just added to the theme wrapper). The left slot is a
+             * placeholder today — reserved for an upcoming operator
+             * module (see TODO comment on the aside).
+             */}
             <div
               className={
                 isMediaThemeRoute
-                  ? "grid items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_260px] 2xl:grid-cols-[minmax(0,1fr)_280px]"
+                  ? "grid items-stretch gap-3 xl:grid-cols-[260px_minmax(0,1fr)_260px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px]"
                   : "grid grid-cols-1"
               }
             >
+              {isMediaThemeRoute ? (
+                <aside className="library-deck-slot-aside relative z-[60] isolate hidden xl:block">
+                  {/* TODO: wire this slot once the user decides on its
+                      module (they mentioned a future purpose). Keep the
+                      outer shape identical to `library-deck-pads-aside`
+                      so the row stays symmetric. */}
+                  <div className="h-full rounded-2xl border border-slate-700/45 bg-slate-950/65 p-3 shadow-[0_10px_24px_rgba(0,0,0,0.38)] backdrop-blur-md">
+                    <header className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400/75">
+                          Reserved
+                        </p>
+                        <span className="inline-flex items-center gap-1 rounded-full border border-slate-600/35 bg-slate-800/50 px-2 py-0.5 text-[10px] text-slate-400/80">
+                          <span className="h-1.5 w-1.5 rounded-full bg-slate-500" />
+                          Soon
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-500/80">Placeholder slot</p>
+                    </header>
+                    <div className="grid grid-cols-2 gap-2" aria-hidden>
+                      <div className="h-[58px] rounded-xl border border-dashed border-slate-700/45 bg-slate-900/35" />
+                      <div className="h-[58px] rounded-xl border border-dashed border-slate-700/45 bg-slate-900/35" />
+                      <div className="h-[58px] rounded-xl border border-dashed border-slate-700/45 bg-slate-900/35" />
+                      <div className="h-[58px] rounded-xl border border-dashed border-slate-700/45 bg-slate-900/35" />
+                    </div>
+                  </div>
+                </aside>
+              ) : null}
               <div
                 {...(isMediaThemeRoute
                   ? {
@@ -724,7 +763,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                         { key: null, title: "Broadcasts", tone: "border-amber-400/30 bg-amber-500/10 text-amber-100", activeTone: "", dot: "bg-amber-300" },
                         { key: null, title: "Announcements", tone: "border-rose-400/30 bg-rose-500/10 text-rose-100", activeTone: "", dot: "bg-rose-300" },
                       ].map((group) => {
-                        const isActive = group.key !== null && activeCenterModule === group.key;
+                        // Only the jingles pad uses this button — equality
+                        // compare against the string literal keeps the
+                        // check narrow and side-steps the richer object
+                        // shapes that `CenterModule` now supports (e.g.
+                        // the player's edit-current target).
+                        const isActive = group.key === "jingles" && isJinglesModule(activeCenterModule);
                         return (
                           <button
                             key={group.title}
@@ -733,7 +777,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                             disabled={group.key === null}
                             aria-disabled={group.key === null}
                             aria-pressed={group.key !== null ? isActive : undefined}
-                            onClick={group.key !== null ? () => setActiveCenterModule((v) => (v === group.key ? null : group.key)) : undefined}
+                            onClick={
+                              group.key === "jingles"
+                                ? () =>
+                                    setActiveCenterModule((v) =>
+                                      isJinglesModule(v) ? null : "jingles",
+                                    )
+                                : undefined
+                            }
                           >
                             <p className="text-xs font-semibold tracking-tight">{group.title}</p>
                             <p className="mt-1 flex items-center gap-1 text-[10px] opacity-90">

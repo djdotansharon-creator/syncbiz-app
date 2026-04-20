@@ -258,21 +258,29 @@ const playerStyleBtn =
  * variant="subtle" = Tesla-style: softer border, less glow, neutral
  * variant="player" = matches Share in audio player (white glowing)
  * ───────────────────────────────────────────────────────────────────────────── */
-export function ActionButtonEdit({
-  href,
-  size = "md",
-  variant = "default",
-  "aria-label": ariaLabel = "Edit playlist",
-  title = "Edit playlist",
-  className = "",
-}: {
-  href: string;
+/**
+ * ActionButtonEdit accepts either `href` (renders a Next `<Link>`) or
+ * `onClick` (renders a `<button>`). Prefer `onClick` when the action is
+ * a local state change — e.g. opening the edit form inline in the
+ * library center workspace panel — so navigation chrome isn't touched.
+ */
+type ActionButtonEditProps = {
   size?: Size;
   variant?: "default" | "subtle" | "player";
   "aria-label"?: string;
   title?: string;
   className?: string;
-}) {
+} & ({ href: string; onClick?: never } | { href?: never; onClick: () => void });
+
+export function ActionButtonEdit({
+  href,
+  onClick,
+  size = "md",
+  variant = "default",
+  "aria-label": ariaLabel = "Edit playlist",
+  title = "Edit playlist",
+  className = "",
+}: ActionButtonEditProps) {
   const iconSize = variant === "player" ? "h-3 w-3" : size === "xs" ? "h-4 w-4" : "h-5 w-5";
   const btnSize = variant === "player" ? "" : size === "xs" ? "h-9 w-9 rounded-xl" : "h-11 w-11 rounded-xl";
   const style =
@@ -281,20 +289,26 @@ export function ActionButtonEdit({
       : variant === "subtle"
         ? "border border-slate-700/80 bg-slate-900/70 text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_12px_rgba(100,116,139,0.06)]"
         : "border border-slate-600/80 bg-gradient-to-b from-slate-800/90 to-slate-900/90 text-slate-300 shadow-[0_2px_6px_rgba(0,0,0,0.25)] hover:border-slate-500 hover:from-slate-700 hover:to-slate-800 hover:text-slate-100 hover:shadow-[0_0_0_1px_rgba(148,163,184,0.3),0_4px_14px_rgba(0,0,0,0.35)]";
-  return (
-    <Link
-      href={href}
-      aria-label={ariaLabel}
-      title={title}
-      className={`${baseStyles} inline-flex items-center justify-center ${btnSize || ""}
+  const classes = `${baseStyles} inline-flex items-center justify-center ${btnSize || ""}
         ${style}
         focus:ring-slate-400/40 focus:ring-2
-        ${className}`}
-    >
-      <svg className={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-      </svg>
+        ${className}`;
+  const iconSvg = (
+    <svg className={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+  );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} aria-label={ariaLabel} title={title} className={classes}>
+        {iconSvg}
+      </button>
+    );
+  }
+  return (
+    <Link href={href!} aria-label={ariaLabel} title={title} className={classes}>
+      {iconSvg}
     </Link>
   );
 }
