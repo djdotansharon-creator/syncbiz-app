@@ -53,6 +53,13 @@ export function MobileSourceCardLocal({ source, onRemove, editReturnTo }: Props)
           {source.genre && source.genre !== "Mixed" && (
             <p className="truncate text-xs text-slate-400">{source.genre}</p>
           )}
+          <p className="truncate text-[10px] text-slate-500">
+            {source.origin === "radio"
+              ? "Radio"
+              : source.playlist?.tracks && source.playlist.tracks.length > 1
+                ? `${source.playlist.tracks.length} tracks`
+                : "Stream"}
+          </p>
         </div>
         <div className="shrink-0">
           {active ? (

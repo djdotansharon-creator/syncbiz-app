@@ -1798,6 +1798,19 @@ export function AudioPlayer() {
   // Tracks Ch-A MPV status from onStatus broadcasts (no re-render — refs only).
   const mpvChAStatusRef = useRef<string>("idle");
   const mpvRecoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Coalesce rapid `currentPlayUrl` changes during startup/restore/adoption into
+   * a SINGLE MPV `loadfile`. On cold launch multiple React effects (persistence
+   * restore, URL-driven page load, WS master-state adoption, playlist hydration)
+   * can each commit a different `currentSource` within the first ~1s, which
+   * previously caused MPV to walk through each URL in turn before settling.
+   * We debounce the actual `mpvPlayUrl(...)` dispatch by a short idle window so
+   * that only the final URL is ever loaded — imperceptible during normal use
+   * (user-initiated plays see a ~200ms delay at most) but decisive at startup.
+   */
+  const mpvPendingUrlRef = useRef<string | null>(null);
+  const mpvCoalesceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const MPV_LOADFILE_COALESCE_MS = 250;
 
   // Subscribe to desktop status once. When Ch-A unexpectedly goes idle while
   // the web player is still "playing" (test panel hijacked Ch-A), schedule a
@@ -1846,18 +1859,45 @@ export function AudioPlayer() {
     if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const desktop = (window as any).syncbizDesktop;
+
+    const cancelPendingLoadfile = () => {
+      if (mpvCoalesceTimerRef.current) {
+        clearTimeout(mpvCoalesceTimerRef.current);
+        mpvCoalesceTimerRef.current = null;
+      }
+      mpvPendingUrlRef.current = null;
+    };
+
     if (status === "playing" && currentPlayUrl) {
       if (currentPlayUrl !== mpvLastUrlRef.current) {
-        // New URL — load and play on Channel A
-        mpvLastUrlRef.current = currentPlayUrl;
-        void desktop.mpvPlayUrl(currentPlayUrl as string);
+        // New URL — schedule/refresh a debounced loadfile. Any further URL
+        // change within the coalesce window cancels and reschedules, so only
+        // the FINAL currentPlayUrl in a burst actually reaches MPV.
+        mpvPendingUrlRef.current = currentPlayUrl;
+        if (mpvCoalesceTimerRef.current) clearTimeout(mpvCoalesceTimerRef.current);
+        mpvCoalesceTimerRef.current = setTimeout(() => {
+          mpvCoalesceTimerRef.current = null;
+          const latest = mpvPendingUrlRef.current;
+          mpvPendingUrlRef.current = null;
+          if (!latest) return;
+          // Re-validate at timer fire: still playing, still same latest URL,
+          // and not already loaded.
+          if (statusRef.current !== "playing") return;
+          if (currentPlayUrlRef.current !== latest) return;
+          if (latest === mpvLastUrlRef.current) return;
+          mpvLastUrlRef.current = latest;
+          void desktop.mpvPlayUrl(latest);
+        }, MPV_LOADFILE_COALESCE_MS);
       } else {
-        // Same URL, resumed after pause — don't restart
+        // Same URL, resumed after pause — don't restart.
+        cancelPendingLoadfile();
         void desktop.localMockTransport({ command: "PLAY" });
       }
     } else if (status === "paused") {
+      cancelPendingLoadfile();
       void desktop.localMockTransport({ command: "PAUSE" });
     } else if (status === "stopped") {
+      cancelPendingLoadfile();
       mpvLastUrlRef.current = null;
       void desktop.localMockTransport({ command: "STOP" });
     }

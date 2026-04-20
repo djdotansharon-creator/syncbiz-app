@@ -73,26 +73,26 @@ export const MOCK_SCHEDULE_ITEMS: MockScheduleItem[] = [
     label: "Fresh bread — morning",
     whenLabel: "Tomorrow 08:00",
     repeatLabel: "Daily",
-    targetLabel: "This branch (mock)",
+    targetLabel: "This branch",
   },
   {
     id: "sch-2",
     label: "Weekend sale teaser",
     whenLabel: "Fri 17:30",
     repeatLabel: "Weekly",
-    targetLabel: "This branch (mock)",
+    targetLabel: "This branch",
   },
 ];
 
 export const SAMPLER_PADS: SamplerPadItem[] = [
-  { id: "pad-promo", label: "Promo", url: "" },
-  { id: "pad-closing", label: "Closing Soon", url: "" },
-  { id: "pad-birthday", label: "Birthday", url: "" },
-  { id: "pad-bread", label: "Fresh Bread", url: "" },
-  { id: "pad-meat", label: "Meat Sale", url: "" },
-  { id: "pad-store", label: "Store Message", url: "" },
-  { id: "pad-weekend", label: "Weekend Sale", url: "" },
-  { id: "pad-custom", label: "Custom", url: "" },
+  { id: "pad-promo",    label: "Promo",         url: "", color: "sky" },
+  { id: "pad-closing",  label: "Closing Soon",  url: "", color: "rose" },
+  { id: "pad-birthday", label: "Birthday",      url: "", color: "pink" },
+  { id: "pad-bread",    label: "Fresh Bread",   url: "", color: "amber" },
+  { id: "pad-meat",     label: "Meat Sale",     url: "", color: "rose" },
+  { id: "pad-store",    label: "Store Message", url: "", color: "teal" },
+  { id: "pad-weekend",  label: "Weekend Sale",  url: "", color: "violet" },
+  { id: "pad-custom",   label: "Custom",        url: "", color: "lime" },
 ];
 
 export const MOCK_AI_SUGGESTIONS = [

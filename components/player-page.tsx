@@ -154,8 +154,15 @@ export function PlayerPage({ devices }: Props) {
     }
   }, []);
 
-  /** URL-driven load: only when no live playback and URL has sourceId/playlistId. */
+  /** URL-driven load: only when no live playback and URL has sourceId/playlistId.
+   *  While the playback provider is restoring a persisted session, skip the
+   *  URL-driven fetch entirely — otherwise the hero flashes whichever
+   *  `?sourceId` / `?playlistId` happens to be in the URL before recovery
+   *  lands on the real last-played item. When `isRestoring` flips to `false`
+   *  this effect re-runs and, if recovery populated `currentSource`, the
+   *  early-return below keeps the URL fetch suppressed. */
   useEffect(() => {
+    if (playback?.isRestoring) return;
     if (playback?.currentSource) return;
     if (sourceId) void fetchSource(sourceId);
     else if (playlistId) void fetchPlaylist(playlistId);
@@ -163,7 +170,7 @@ export function PlayerPage({ devices }: Props) {
       setUrlSource(null);
       setStatus("idle");
     }
-  }, [sourceId, playlistId, fetchSource, fetchPlaylist, playback?.currentSource]);
+  }, [sourceId, playlistId, fetchSource, fetchPlaylist, playback?.currentSource, playback?.isRestoring]);
 
   /** When live playback provides source (or source changes), trigger embed load so iframe loads. */
   const prevDisplaySourceIdRef = useRef<string | null>(null);

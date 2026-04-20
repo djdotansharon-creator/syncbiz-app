@@ -49,7 +49,7 @@ There is also an **Electron desktop wrapper** (`desktop/`) with its own build pi
 ```
 UI (React/Next.js)
   → /api/player/commands, /api/play-now  (HTTP)
-  → lib/store.ts  (read/write JSON files on disk)
+  → lib/store.ts  (PostgreSQL via Prisma — no JSON files)
   → server/index.ts  (WebSocket message dispatch)
   → Device client  (browser tab, Electron, or remote agent)
 ```
@@ -57,7 +57,7 @@ UI (React/Next.js)
 ### Key Patterns
 
 **Store (lib/store.ts)**  
-Reads/writes persistent state from JSON files on disk (`data/schedules.json`, `data/sources.json`, etc.). **Reloads from disk on every API call** — this is intentional to handle Next.js multi-process isolation on Railway where different request handlers may run in different isolates with no shared in-memory state.
+Reads/writes persistent state via **PostgreSQL (Prisma)**. JSON files under `data/` are stale orphans — no longer read or written by any store. All stores (`store.ts`, `user-store.ts`, `playlist-store.ts`, `radio-store.ts`, `catalog-store.ts`) use `lib/prisma.ts` directly.
 
 **WebSocket Device Registry (server/index.ts)**  
 Devices register with a `REGISTER` message. A per-branch **MASTER lease** controls which device is active; only one device per branch can hold the lease at a time. The lease has a 90-second grace period for failover and is persisted to `server/data/master-lease.json`. Heartbeat: ping every 30s, disconnect at 90s timeout.

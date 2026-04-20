@@ -413,6 +413,20 @@
   border-color: rgba(71, 85, 105, 0.9);
 }
 
+/* Danger variant — used for destructive actions like "delete from library". */
+.jc-btn--danger {
+  background: transparent;
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.jc-btn--danger:hover:not(:disabled) {
+  color: #fee2e2;
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.6);
+  box-shadow: 0 0 18px rgba(248, 113, 113, 0.18);
+}
+
 .jc-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
@@ -421,6 +435,19 @@
 .jc-btn--small {
   padding: 0.26rem 0.5rem;
   font-size: 0.68rem;
+}
+
+.jc-btn--lg {
+  padding: 0.65rem 1.4rem;
+  font-size: 0.88rem;
+  letter-spacing: 0.01em;
+}
+
+.jc-icon-btn--inline {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.4rem;
+  font-size: 0.78rem;
 }
 
 /* ─── Error / warning banner ─────────────────────────────────────────────── */
@@ -539,6 +566,13 @@
   }
 }
 
+/* Language + Speed side by side. Each cell houses a SegBtn. */
+.jc-field-row--lang-speed {
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+  align-items: end;
+}
+
 /* Compact pre-roll container — aligns toggle with input bottom edge */
 .jc-field--pre-roll {
   align-self: end;
@@ -621,10 +655,32 @@
 
 .jc-sched-list {
   margin: 0.5rem 0 0;
-  padding-left: 1.1rem;
+  padding: 0;
+  list-style: none;
   font-size: 0.78rem;
   color: #94a3b8;
   line-height: 1.5;
+}
+
+.jc-sched-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.1rem;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.35);
+}
+
+.jc-sched-row:last-of-type {
+  border-bottom: 0;
+}
+
+.jc-sched-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .jc-history {
@@ -1095,36 +1151,66 @@
   flex-shrink: 0;
 }
 
-/* LED status dot — absolute top-left corner of square pad */
+/* LED status dot — absolute top-left corner of pad.
+   Styled like a real hardware indicator: bright center, tight outer glow.
+   Even in the empty state the dot reads as "alive but idle" (not dead) so
+   each pad invites a press. */
 .jc-pad-led {
   position: absolute;
-  top: 0.38rem;
-  left: 0.38rem;
+  top: 0.5rem;
+  left: 0.55rem;
   width: 0.42rem;
   height: 0.42rem;
   border-radius: 50%;
   flex-shrink: 0;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Empty: faint color-tinted "standby" pilot — uses the pad's per-color
+   variable so each slot carries a ghost of its identity before assignment. */
+.jc-pad-led--empty {
+  background: rgba(var(--pad-lit, 148, 163, 184), 0.35);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+    0 0 4px rgba(var(--pad-lit, 148, 163, 184), 0.18);
+}
+
+/* On hover of an empty pad the pilot LED brightens — tangible affordance. */
+.jc-trigger-pad--empty:hover .jc-pad-led--empty {
+  background: rgba(var(--pad-lit, 148, 163, 184), 0.7);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 0 6px rgba(var(--pad-lit, 148, 163, 184), 0.45);
 }
 
 .jc-pad-led--ready {
   background: #34d399;
-  box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
-}
-
-.jc-pad-led--empty {
-  background: rgba(71, 85, 105, 0.5);
+  box-shadow:
+    0 0 4px rgba(52, 211, 153, 0.9),
+    0 0 10px rgba(52, 211, 153, 0.45),
+    inset 0 0 2px rgba(255, 255, 255, 0.45);
 }
 
 .jc-pad-led--playing {
-  background: #34d399;
-  box-shadow: 0 0 18px rgba(52, 211, 153, 0.7), 0 0 6px rgba(52, 211, 153, 0.9);
+  background: #6ee7b7;
+  box-shadow:
+    0 0 6px rgba(52, 211, 153, 1),
+    0 0 16px rgba(52, 211, 153, 0.75),
+    0 0 28px rgba(52, 211, 153, 0.4),
+    inset 0 0 3px rgba(255, 255, 255, 0.7);
+  animation: jc-pad-led-pulse 1s ease-in-out infinite;
 }
 
-/* 4+4 Pioneer bank: two rows of 4. Always 4 cols — stable at any panel width. */
+@keyframes jc-pad-led-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* 4+4 Pioneer-style bank: two compact rows of 4. Horizontal format — not squares. */
 .jc-trigger-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.35rem;
+  gap: 0.45rem;
 }
 
 /* Wrapper: holds pad button + floating edit button as siblings */
@@ -1132,83 +1218,346 @@
   position: relative;
 }
 
-/* The pad face IS the button — standalone square trigger, no jc-rail-card dependency */
+/* Pad face — compact horizontal LED button, inviting to press.
+   Tesla-style physical affordance: crisp border, subtle top sheen, a soft
+   bottom fade that looks like a backlit key cap. */
 .jc-trigger-pad {
   width: 100%;
-  aspect-ratio: 1;
+  min-height: 4.2rem;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
   position: relative;
-  padding: 0.4rem;
-  border-radius: 0.6rem;
-  border: 1px solid rgba(51, 65, 85, 0.7);
-  background: linear-gradient(145deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 1));
+  padding: 0.55rem 0.9rem 0.55rem 0.9rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(71, 85, 105, 0.85);
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(255, 255, 255, 0.04) 0%, transparent 55%),
+    linear-gradient(180deg, rgba(30, 41, 59, 0.85) 0%, rgba(2, 6, 23, 1) 100%);
   color: #e2e8f0;
   cursor: pointer;
-  transition: border-color 0.12s, box-shadow 0.12s, background 0.12s, transform 0.08s;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
-.jc-trigger-pad:hover {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 16px rgba(56, 189, 248, 0.08);
+  overflow: hidden;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease,
+    transform 0.08s ease,
+    color 0.18s ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+    0 4px 14px rgba(0, 0, 0, 0.5);
 }
 
 .jc-trigger-pad:active {
-  transform: scale(0.96);
+  transform: translateY(1px) scale(0.985);
+  box-shadow:
+    inset 0 1px 4px rgba(0, 0, 0, 0.55),
+    0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
-/* Pad label — centered, 2-line clamp */
+/* Pad label — centered, 2-line clamp, readable at compact height.
+   Subtle text shadow adds depth (feels like a hardware keycap label). */
 .jc-trigger-pad-label {
-  font-size: 0.63rem;
-  font-weight: 700;
-  line-height: 1.25;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: 0.02em;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   max-width: 100%;
-  letter-spacing: 0.01em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.55);
 }
 
-/* Unassigned: restrained solid border — no dashed utility look */
+/* Unassigned — standby: the pad is IDLE but never "dead". Label reads crisp,
+   border shows a faint tint of the pad's own colorway, and a soft top sheen
+   mimics a backlit key cap. Hover lifts and glows in the pad's color,
+   clearly announcing "I am pressable". */
 .jc-trigger-pad--empty {
-  border-color: rgba(51, 65, 85, 0.6);
-  background: rgba(15, 23, 42, 0.25);
+  border-color: rgba(var(--pad-lit, 148, 163, 184), 0.22);
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(255, 255, 255, 0.05) 0%, transparent 55%),
+    linear-gradient(180deg,
+      rgba(var(--pad-lit, 148, 163, 184), 0.05) 0%,
+      rgba(15, 23, 42, 0.9) 65%,
+      rgba(2, 6, 23, 1) 100%
+    );
+  color: #cbd5e1;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 3px 10px rgba(0, 0, 0, 0.45);
 }
 
 .jc-trigger-pad--empty:hover {
-  border-color: rgba(56, 189, 248, 0.3);
-  background: rgba(56, 189, 248, 0.04);
+  border-color: rgba(var(--pad-lit, 148, 163, 184), 0.55);
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(255, 255, 255, 0.09) 0%, transparent 55%),
+    linear-gradient(180deg,
+      rgba(var(--pad-lit, 148, 163, 184), 0.12) 0%,
+      rgba(15, 23, 42, 0.92) 65%,
+      rgba(2, 6, 23, 1) 100%
+    );
+  color: #f1f5f9;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 6px 16px rgba(0, 0, 0, 0.55),
+    0 0 18px rgba(var(--pad-lit, 148, 163, 184), 0.18);
 }
 
-/* Assigned: emerald accent — signals "ready to trigger" */
+/* Assigned — LIT: emerald-tinted LED face, soft inner glow, ready to trigger */
 .jc-trigger-pad--assigned {
-  border-color: rgba(52, 211, 153, 0.32);
-  background: rgba(52, 211, 153, 0.04);
+  border-color: rgba(52, 211, 153, 0.5);
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.18) 0%, rgba(2, 6, 23, 1) 75%);
+  color: #d1fae5;
+  box-shadow:
+    inset 0 1px 0 rgba(110, 231, 183, 0.32),
+    inset 0 0 18px rgba(52, 211, 153, 0.1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 3px 10px rgba(0, 0, 0, 0.45),
+    0 0 14px rgba(52, 211, 153, 0.08);
 }
 
 .jc-trigger-pad--assigned:hover {
-  border-color: rgba(52, 211, 153, 0.55);
-  background: rgba(52, 211, 153, 0.07);
-  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.12), 0 6px 20px rgba(0, 0, 0, 0.3);
+  border-color: rgba(52, 211, 153, 0.78);
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.28) 0%, rgba(6, 40, 30, 1) 75%);
+  color: #a7f3d0;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(110, 231, 183, 0.42),
+    inset 0 0 24px rgba(52, 211, 153, 0.18),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 6px 18px rgba(0, 0, 0, 0.5),
+    0 0 22px rgba(52, 211, 153, 0.22);
 }
 
-/* Editing: sky ring — active configuration state */
-.jc-trigger-pad--editing {
-  border-color: rgba(56, 189, 248, 0.7) !important;
-  background: rgba(56, 189, 248, 0.05) !important;
-  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15);
-}
-
-/* Playing: green glow flash */
+/* Playing — BRIGHT: strong pulse using each pad's own color. */
 .jc-trigger-pad--playing {
-  border-color: rgba(52, 211, 153, 0.9) !important;
-  background: rgba(52, 211, 153, 0.08) !important;
-  box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.25), 0 0 28px rgba(52, 211, 153, 0.18);
-  transition: border-color 0.06s, box-shadow 0.06s;
+  transition: border-color 0.06s, box-shadow 0.06s, background 0.06s;
+}
+
+/* ─── Per-pad color variants ─────────────────────────────────────────────── *
+ * Each pad can opt into a colorway via `.jc-trigger-pad--color-<name>`.
+ * Variables (`--pad-lit`, `--pad-lit-soft`, `--pad-face`, `--pad-text`, `--pad-text-bright`)
+ * drive border / glow / gradient of the assigned + hover + playing states,
+ * so one unified template covers all 9 colors.
+ */
+.jc-trigger-pad--color-default {
+  --pad-lit: 52, 211, 153;     /* emerald-400 */
+  --pad-lit-soft: 16, 185, 129;
+  --pad-face-tail: 2, 6, 23;
+  --pad-text: #d1fae5;
+  --pad-text-bright: #ecfdf5;
+}
+.jc-trigger-pad--color-sky {
+  --pad-lit: 56, 189, 248;     /* sky-400 */
+  --pad-lit-soft: 14, 165, 233;
+  --pad-face-tail: 4, 17, 37;
+  --pad-text: #e0f2fe;
+  --pad-text-bright: #f0f9ff;
+}
+.jc-trigger-pad--color-violet {
+  --pad-lit: 167, 139, 250;    /* violet-400 */
+  --pad-lit-soft: 139, 92, 246;
+  --pad-face-tail: 13, 8, 35;
+  --pad-text: #ede9fe;
+  --pad-text-bright: #f5f3ff;
+}
+.jc-trigger-pad--color-indigo {
+  --pad-lit: 129, 140, 248;    /* indigo-400 */
+  --pad-lit-soft: 99, 102, 241;
+  --pad-face-tail: 10, 12, 38;
+  --pad-text: #e0e7ff;
+  --pad-text-bright: #eef2ff;
+}
+.jc-trigger-pad--color-pink {
+  --pad-lit: 244, 114, 182;    /* pink-400 */
+  --pad-lit-soft: 236, 72, 153;
+  --pad-face-tail: 31, 8, 22;
+  --pad-text: #fce7f3;
+  --pad-text-bright: #fdf2f8;
+}
+.jc-trigger-pad--color-rose {
+  --pad-lit: 251, 113, 133;    /* rose-400 */
+  --pad-lit-soft: 244, 63, 94;
+  --pad-face-tail: 35, 8, 12;
+  --pad-text: #ffe4e6;
+  --pad-text-bright: #fff1f2;
+}
+.jc-trigger-pad--color-amber {
+  --pad-lit: 251, 191, 36;     /* amber-400 */
+  --pad-lit-soft: 245, 158, 11;
+  --pad-face-tail: 35, 20, 4;
+  --pad-text: #fef3c7;
+  --pad-text-bright: #fffbeb;
+}
+.jc-trigger-pad--color-lime {
+  --pad-lit: 163, 230, 53;     /* lime-400 */
+  --pad-lit-soft: 132, 204, 22;
+  --pad-face-tail: 14, 24, 4;
+  --pad-text: #ecfccb;
+  --pad-text-bright: #f7fee7;
+}
+.jc-trigger-pad--color-teal {
+  --pad-lit: 45, 212, 191;     /* teal-400 */
+  --pad-lit-soft: 20, 184, 166;
+  --pad-face-tail: 4, 29, 28;
+  --pad-text: #ccfbf1;
+  --pad-text-bright: #f0fdfa;
+}
+
+/* Override generic assigned look with per-color tokens. */
+.jc-trigger-pad--assigned {
+  border-color: rgba(var(--pad-lit, 52, 211, 153), 0.5);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--pad-lit-soft, 16, 185, 129), 0.22) 0%,
+    rgb(var(--pad-face-tail, 2, 6, 23)) 75%
+  );
+  color: var(--pad-text, #d1fae5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 0 18px rgba(var(--pad-lit, 52, 211, 153), 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 3px 10px rgba(0, 0, 0, 0.45),
+    0 0 14px rgba(var(--pad-lit, 52, 211, 153), 0.1);
+}
+
+.jc-trigger-pad--assigned:hover {
+  border-color: rgba(var(--pad-lit, 52, 211, 153), 0.82);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--pad-lit-soft, 16, 185, 129), 0.32) 0%,
+    rgb(var(--pad-face-tail, 6, 40, 30)) 75%
+  );
+  color: var(--pad-text-bright, #a7f3d0);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    inset 0 0 24px rgba(var(--pad-lit, 52, 211, 153), 0.22),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 6px 18px rgba(0, 0, 0, 0.5),
+    0 0 22px rgba(var(--pad-lit, 52, 211, 153), 0.28);
+}
+
+.jc-trigger-pad--assigned.jc-trigger-pad--playing {
+  border-color: rgba(var(--pad-lit, 52, 211, 153), 0.98) !important;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--pad-lit-soft, 16, 185, 129), 0.45) 0%,
+    rgb(var(--pad-face-tail, 6, 78, 59)) 75%
+  ) !important;
+  color: var(--pad-text-bright, #ecfdf5) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 0 26px rgba(var(--pad-lit, 52, 211, 153), 0.3),
+    0 0 0 2px rgba(var(--pad-lit, 52, 211, 153), 0.4),
+    0 0 32px rgba(var(--pad-lit, 52, 211, 153), 0.38) !important;
+}
+
+/* The LED dot on assigned/playing pads picks up the pad color too. */
+.jc-trigger-pad--assigned .jc-pad-led--ready {
+  background: rgb(var(--pad-lit, 52, 211, 153));
+  box-shadow:
+    0 0 4px rgba(var(--pad-lit, 52, 211, 153), 0.9),
+    0 0 10px rgba(var(--pad-lit, 52, 211, 153), 0.45),
+    inset 0 0 2px rgba(255, 255, 255, 0.45);
+}
+
+.jc-trigger-pad--playing .jc-pad-led--playing {
+  background: rgb(var(--pad-lit, 52, 211, 153));
+  box-shadow:
+    0 0 6px rgba(var(--pad-lit, 52, 211, 153), 1),
+    0 0 16px rgba(var(--pad-lit, 52, 211, 153), 0.75),
+    0 0 28px rgba(var(--pad-lit, 52, 211, 153), 0.4),
+    inset 0 0 3px rgba(255, 255, 255, 0.7);
+}
+
+/* ─── Date/time inputs — dark-native calendar popup ──────────────────────── */
+
+/* `color-scheme: dark` tells Chromium/Electron to render the native calendar
+   popup in dark mode so it matches the surrounding modal. */
+.jc-datetime,
+.jc-form input[type="datetime-local"],
+.jc-form input[type="date"],
+.jc-form input[type="time"] {
+  color-scheme: dark;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  letter-spacing: 0.02em;
+}
+
+/* Recolor the native calendar/clock trigger icon. */
+.jc-datetime::-webkit-calendar-picker-indicator,
+.jc-form input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+.jc-form input[type="date"]::-webkit-calendar-picker-indicator,
+.jc-form input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.85) hue-rotate(180deg) saturate(1.1);
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 0.12s;
+}
+
+.jc-datetime::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+/* ─── Color swatch grid (PadEdit modal) ──────────────────────────────────── */
+
+.jc-color-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(5.2rem, 1fr));
+  gap: 0.35rem;
+}
+
+.jc-color-swatch {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.38rem 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(51, 65, 85, 0.8);
+  background: rgba(15, 23, 42, 0.4);
+  color: #94a3b8;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s, transform 0.08s;
+}
+
+.jc-color-swatch:hover {
+  border-color: rgba(148, 163, 184, 0.5);
+  background: rgba(30, 41, 59, 0.6);
+  color: #e2e8f0;
+  transform: translateY(-1px);
+}
+
+.jc-color-swatch--selected {
+  border-color: rgba(56, 189, 248, 0.7);
+  background: rgba(56, 189, 248, 0.1);
+  color: #e0f2fe;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.3), 0 0 12px rgba(56, 189, 248, 0.12);
+}
+
+.jc-color-swatch-dot {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor, inset 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+.jc-color-swatch-label {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Scheduled time badge */
@@ -1272,16 +1621,20 @@
 
 .jc-seg {
   display: inline-flex;
-  border-radius: 0.55rem;
+  /* Don't stretch across the field column — stay pill-sized to content. */
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 0.5rem;
   overflow: hidden;
   border: 1px solid rgba(51, 65, 85, 0.8);
   background: rgba(15, 23, 42, 0.35);
 }
 
 .jc-seg-btn {
-  flex: 1;
-  padding: 0.3rem 0.68rem;
-  font-size: 0.69rem;
+  flex: 0 0 auto;
+  padding: 0.26rem 0.62rem;
+  font-size: 0.68rem;
   font-weight: 600;
   background: transparent;
   color: #475569;
@@ -1290,7 +1643,7 @@
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.1s, color 0.1s;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
 .jc-seg-btn:last-child {
@@ -1305,4 +1658,220 @@
 .jc-seg-btn--active {
   background: rgba(56, 189, 248, 0.12);
   color: #7dd3fc;
+}
+
+/* ─── Workspace header: tiny status LED cluster ──────────────────────────── */
+
+.jc-ws-header-status-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 2rem;
+  border: 1px solid rgba(30, 41, 59, 0.8);
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.jc-status-mini-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.jc-status-mini-sep {
+  width: 1px;
+  height: 0.9rem;
+  background: rgba(51, 65, 85, 0.8);
+  margin: 0 0.15rem;
+}
+
+/* ─── Script field with floating AI chip ────────────────────────────────── */
+
+.jc-script-wrap {
+  position: relative;
+}
+
+/* Reserve right-padding inside the textarea so long scripts don't slide under
+   the floating AI button. */
+.jc-script-wrap textarea {
+  padding-right: 4.2rem;
+}
+
+.jc-script-ai-btn {
+  position: absolute;
+  bottom: 0.55rem;
+  right: 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.2) 0%, rgba(15, 23, 42, 0.7) 100%);
+  color: #bae6fd;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.08s ease;
+  z-index: 2;
+  box-shadow:
+    inset 0 1px 0 rgba(186, 230, 253, 0.2),
+    0 4px 10px rgba(0, 0, 0, 0.35),
+    0 0 12px rgba(56, 189, 248, 0.1);
+}
+
+.jc-script-ai-btn-spark {
+  font-size: 0.78rem;
+  color: #7dd3fc;
+  text-shadow: 0 0 6px rgba(56, 189, 248, 0.7);
+}
+
+.jc-script-ai-btn:hover {
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.34) 0%, rgba(15, 23, 42, 0.85) 100%);
+  border-color: rgba(56, 189, 248, 0.7);
+  color: #e0f2fe;
+  box-shadow:
+    inset 0 1px 0 rgba(186, 230, 253, 0.28),
+    0 6px 14px rgba(0, 0, 0, 0.45),
+    0 0 22px rgba(56, 189, 248, 0.28);
+  transform: translateY(-1px);
+}
+
+.jc-script-ai-btn:active {
+  transform: translateY(0);
+}
+
+/* ─── Result strip — single-line output row ─────────────────────────────── */
+
+.jc-result-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.9rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(16px);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+    0 4px 16px rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
+}
+
+.jc-result-strip-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.jc-result-strip-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jc-result-strip-meta {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.jc-result-strip-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+/* ─── Modal (popup) — shared primitive ──────────────────────────────────── */
+
+.jc-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.jc-modal {
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+  border-radius: 1rem;
+  border: 1px solid rgba(51, 65, 85, 0.9);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.96) 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 24px 64px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.jc-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid rgba(30, 41, 59, 0.75);
+}
+
+.jc-modal-title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #f1f5f9;
+}
+
+.jc-modal-body {
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(51, 65, 85, 0.6) transparent;
+}
+
+.jc-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  padding: 0.7rem 1rem;
+  border-top: 1px solid rgba(30, 41, 59, 0.75);
+  background: rgba(2, 6, 23, 0.5);
+}
+
+/* Scheduled-time indicator on pads — tiny amber dot instead of inline badge */
+.jc-pad-sched-dot {
+  position: absolute;
+  top: 0.38rem;
+  right: 2rem;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: #fbbf24;
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.6);
 }

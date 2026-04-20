@@ -8,6 +8,7 @@ import { MobileRoleProvider } from "@/lib/mobile-role-context";
 import { DevicePlayerProvider } from "@/lib/device-player-context";
 import { ScheduleEngineProvider } from "@/lib/schedule-engine-context";
 import { ScheduleAutoPlayer } from "@/components/schedule-auto-player";
+import { JingleScheduleAutoPlayer } from "@/components/jingles-control/JingleScheduleAutoPlayer";
 
 /**
  * Single client boundary for all app providers.
@@ -24,6 +25,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
               <DevicePlayerProvider>
                 {children}
                 <ScheduleAutoPlayer />
+                <JingleScheduleAutoPlayer />
               </DevicePlayerProvider>
             </MobileRoleProvider>
           </LibraryThemeProvider>

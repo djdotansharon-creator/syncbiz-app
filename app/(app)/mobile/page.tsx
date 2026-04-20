@@ -217,7 +217,28 @@ function MobilePlayerContent() {
         : "BRANCH_USER") as AccessType;
       const scope = resolveMobileUnifiedScope(accessType, "player");
       setContentScope(scope);
-      const items = await fetchUnifiedSourcesWithFallback({ scope });
+
+      let items: UnifiedSource[];
+      if (accessType === "OWNER") {
+        // OWNER gets both banks: personal (owner_personal) + branch catalog.
+        // owner_personal is the special personal player bank; branch is the shared station catalog.
+        // We must merge both because the API correctly returns [] for owner_personal when
+        // no playlists have been tagged with that scope — falling back to branch alone restores
+        // the library the owner actually has.
+        const [personal, branch] = await Promise.all([
+          fetchUnifiedSourcesWithFallback({ scope: "owner_personal" }),
+          fetchUnifiedSourcesWithFallback({ scope: "branch" }),
+        ]);
+        const seen = new Set<string>();
+        items = [...personal, ...branch].filter((s) => {
+          if (seen.has(s.id)) return false;
+          seen.add(s.id);
+          return true;
+        });
+      } else {
+        items = await fetchUnifiedSourcesWithFallback({ scope });
+      }
+
       const forQueue = items.filter((s) => s.origin === "playlist" || s.origin === "radio");
       setSources(items);
       setQueue(forQueue);

@@ -416,6 +416,15 @@ type PlaybackContextValue = PlaybackState & {
   getNextStreamUrl: () => string | null;
   /** Next embedded source for YouTube AutoMix crossfade. Null if no next YouTube. YouTube only in Phase 1. */
   getNextEmbeddedSource: () => { type: "youtube"; url: string; videoId: string } | null;
+  /**
+   * True from provider mount until the persisted session has been restored
+   * (or declined because there was no valid snapshot). Consumers that would
+   * otherwise perform URL-driven or auto-bootstrapping fetches on mount —
+   * e.g. `components/player-page.tsx` reading `?playlistId=` / `?sourceId=`
+   * from the URL — should bail out while this is true so we don't show
+   * transient metadata flashing before recovery completes.
+   */
+  isRestoring: boolean;
 };
 
 const PlaybackContext = createContext<PlaybackContextValue | null>(null);
@@ -513,6 +522,24 @@ function savePersistedPlaybackV2(payload: PersistedPlaybackV2) {
   }
 }
 
+/**
+ * Synchronous pre-render probe: does a valid persisted snapshot exist?
+ * Used to seed `isRestoring` so the provider starts out in "restoring" state
+ * whenever the first paint might otherwise show transient non-restored content.
+ */
+function hasRecoverableSnapshot(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    if (loadPersistedPlaybackV2()) return true;
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { sourceId?: string; status?: string };
+    return !!parsed?.sourceId && (parsed.status === "playing" || parsed.status === "paused");
+  } catch {
+    return false;
+  }
+}
+
 export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<PlaybackState>({
     currentPlaylist: null,
@@ -526,6 +553,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     queue: [],
     queueIndex: -1,
   });
+  /**
+   * True while the mount-time restore path is in flight. Seeded SYNCHRONOUSLY
+   * from the presence of a valid recovery snapshot so consumers see the
+   * "restoring" state already on the very first render. Flipped to `false`:
+   *   - immediately when there is nothing to restore,
+   *   - at the end of the restore `useEffect` otherwise (successful or not).
+   */
+  const [isRestoring, setIsRestoring] = useState<boolean>(() => hasRecoverableSnapshot());
 
   useEffect(() => {
     initDeviceId();
@@ -1049,84 +1084,127 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     [stopAllBeforePlay, playLocal],
   );
 
-  // Restore playback state from sessionStorage after refresh (e.g. Radio station)
+  // Keep refs to the latest `playSource` / `seekTo` so the restore effect below
+  // can run EXACTLY ONCE on mount without being re-registered every time those
+  // callbacks' identities change (which would otherwise cause its cleanup to
+  // cancel the in-flight restore fetch and potentially leak transient states).
+  const playSourceRef = useRef<typeof playSource>(playSource);
+  const seekToRef = useRef<typeof seekTo>(seekTo);
   useEffect(() => {
-    if (hasRestoredRef.current || state.currentSource) return;
+    playSourceRef.current = playSource;
+  }, [playSource]);
+  useEffect(() => {
+    seekToRef.current = seekTo;
+  }, [seekTo]);
+
+  // Restore playback state from storage after refresh (e.g. Radio station).
+  // Runs once per mount. While in flight, `isRestoring === true` so URL-driven
+  // consumers (player-page) don't flash transient sources before recovery.
+  useEffect(() => {
+    if (hasRestoredRef.current || state.currentSource) {
+      // Nothing to do (already restored, or something else populated state).
+      if (isRestoring) setIsRestoring(false);
+      return;
+    }
     const persistedV2 = loadPersistedPlaybackV2();
     const persistedV1 = loadPersistedPlayback();
-    if (!persistedV2 && !persistedV1) return;
+    if (!persistedV2 && !persistedV1) {
+      setIsRestoring(false);
+      return;
+    }
     hasRestoredRef.current = true;
     let cancelled = false;
-    fetchUnifiedSourcesWithFallback().then((items) => {
-      if (cancelled) return;
-      if (!deviceModeAllowsLocalPlayback.current) return;
-      const byId = new Map(items.map((i) => [i.id, i] as const));
-      console.log("[SyncBiz Audit] hydration source map", {
-        count: items.length,
-        idsSample: items.slice(0, 10).map((i) => i.id),
-      });
-      if (persistedV2) {
-        const restoredQueue = persistedV2.queueIds.map((id) => byId.get(id)).filter((s): s is UnifiedSource => !!s);
-        const source =
-          byId.get(persistedV2.currentSourceId) ??
-          (persistedV2.queueIndex >= 0 ? restoredQueue[persistedV2.queueIndex] : undefined) ??
-          restoredQueue[0];
-        console.log("[SyncBiz Audit] current source lookup", {
-          phase: "persistedV2",
-          persistedCurrentSourceId: persistedV2.currentSourceId,
-          persistedQueueIds: persistedV2.queueIds,
-          restoredQueueLen: restoredQueue.length,
-          foundSourceId: source?.id ?? null,
-        });
-        if (!source) {
-          clearPersistedPlaybackV2();
+    const done = () => {
+      if (!cancelled) setIsRestoring(false);
+    };
+    fetchUnifiedSourcesWithFallback()
+      .then((items) => {
+        if (cancelled) return;
+        if (!deviceModeAllowsLocalPlayback.current) {
+          done();
           return;
         }
-        recoveryPositionRef.current = persistedV2.positionSeconds;
-        pendingSeekOnRestoreRef.current = persistedV2.positionSeconds;
-        setState((s) => ({
-          ...s,
-          volume: persistedV2.volume,
-          queue: restoredQueue.length > 0 ? restoredQueue : [source],
-          queueIndex: restoredQueue.findIndex((q) => q.id === source.id),
-          currentSource: source,
-          currentPlaylist: source.playlist ?? null,
-          currentTrackIndex: persistedV2.trackIndex,
-          status: "paused",
-        }));
-        const shouldAutoplay =
-          persistedV2.status === "playing" && Date.now() - persistedV2.updatedAt <= RECOVERY_AUTOPLAY_WINDOW_MS;
-        if (shouldAutoplay) {
-          setTimeout(() => {
-            if (cancelled) return;
-            playSource(source, persistedV2.trackIndex);
+        const byId = new Map(items.map((i) => [i.id, i] as const));
+        console.log("[SyncBiz Audit] hydration source map", {
+          count: items.length,
+          idsSample: items.slice(0, 10).map((i) => i.id),
+        });
+        if (persistedV2) {
+          const restoredQueue = persistedV2.queueIds.map((id) => byId.get(id)).filter((s): s is UnifiedSource => !!s);
+          const source =
+            byId.get(persistedV2.currentSourceId) ??
+            (persistedV2.queueIndex >= 0 ? restoredQueue[persistedV2.queueIndex] : undefined) ??
+            restoredQueue[0];
+          console.log("[SyncBiz Audit] current source lookup", {
+            phase: "persistedV2",
+            persistedCurrentSourceId: persistedV2.currentSourceId,
+            persistedQueueIds: persistedV2.queueIds,
+            restoredQueueLen: restoredQueue.length,
+            foundSourceId: source?.id ?? null,
+          });
+          if (!source) {
+            clearPersistedPlaybackV2();
+            done();
+            return;
+          }
+          recoveryPositionRef.current = persistedV2.positionSeconds;
+          pendingSeekOnRestoreRef.current = persistedV2.positionSeconds;
+          setState((s) => ({
+            ...s,
+            volume: persistedV2.volume,
+            queue: restoredQueue.length > 0 ? restoredQueue : [source],
+            queueIndex: restoredQueue.findIndex((q) => q.id === source.id),
+            currentSource: source,
+            currentPlaylist: source.playlist ?? null,
+            currentTrackIndex: persistedV2.trackIndex,
+            status: "paused",
+          }));
+          const shouldAutoplay =
+            persistedV2.status === "playing" && Date.now() - persistedV2.updatedAt <= RECOVERY_AUTOPLAY_WINDOW_MS;
+          if (shouldAutoplay) {
             setTimeout(() => {
               if (cancelled) return;
-              const pending = pendingSeekOnRestoreRef.current;
-              if (pending != null) {
-                seekTo(pending);
-                pendingSeekOnRestoreRef.current = null;
-              }
-            }, 350);
-          }, 0);
+              playSourceRef.current(source, persistedV2.trackIndex);
+              done();
+              setTimeout(() => {
+                if (cancelled) return;
+                const pending = pendingSeekOnRestoreRef.current;
+                if (pending != null) {
+                  seekToRef.current(pending);
+                  pendingSeekOnRestoreRef.current = null;
+                }
+              }, 350);
+            }, 0);
+          } else {
+            done();
+          }
+          return;
         }
-        return;
-      }
 
-      const source = items.find((s) => s.id === persistedV1!.sourceId);
-      if (source) {
-        setState((s) => ({ ...s, volume: persistedV1!.volume }));
-        playSource(source, persistedV1!.trackIndex);
-      } else if (typeof window !== "undefined") {
-        try {
-          sessionStorage.removeItem(STORAGE_KEY);
-        } catch {
-          /* ignore */
+        const source = items.find((s) => s.id === persistedV1!.sourceId);
+        if (source) {
+          setState((s) => ({ ...s, volume: persistedV1!.volume }));
+          playSourceRef.current(source, persistedV1!.trackIndex);
+        } else if (typeof window !== "undefined") {
+          try {
+            sessionStorage.removeItem(STORAGE_KEY);
+          } catch {
+            /* ignore */
+          }
         }
-      }
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [playSource, seekTo, state.currentSource]);
+        done();
+      })
+      .catch(() => {
+        done();
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally empty deps: runs once on mount. `playSource` / `seekTo` are
+    // accessed via refs above; `isRestoring` / `state.currentSource` are read
+    // on mount only and should not retrigger this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const playPlaylist = useCallback(
     (playlist: Playlist, trackIndex = 0) => {
@@ -1829,6 +1907,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       isEmbedded,
       getNextStreamUrl,
       getNextEmbeddedSource,
+      isRestoring,
     }),
     [
       state,
@@ -1858,6 +1937,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       isEmbedded,
       getNextStreamUrl,
       getNextEmbeddedSource,
+      isRestoring,
     ],
   );
 

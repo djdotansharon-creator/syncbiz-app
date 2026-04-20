@@ -10,7 +10,8 @@
     "build:electron-web": "next build && node desktop/scripts/stage-standalone-for-electron.cjs",
     "desktop:shell": "npm run build:electron-web && npm run build --prefix desktop && node desktop/scripts/run-electron-with-staged-web.cjs",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

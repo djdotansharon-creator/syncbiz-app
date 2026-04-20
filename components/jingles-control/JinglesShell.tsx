@@ -8,12 +8,16 @@ import { createPortal } from "react-dom";
 import type {
   AnnouncementDraft,
   JingleAsset,
+  JingleBellStyle,
+  JingleLanguage,
+  JingleSpeed,
   JinglesOperatorMode,
   JinglesTabId,
   MockBranchLinkStatus,
   MockEngineStatus,
   MockHistoryEvent,
   MockHistoryEventKind,
+  PadColor,
   SamplerPadItem,
 } from "./types";
 import {
@@ -23,6 +27,7 @@ import {
   MOCK_SCHEDULE_ITEMS,
   SAMPLER_PADS,
 } from "./seed-data";
+import { loadJingleSchedule, persistJingleSchedule } from "./schedule-storage";
 
 type State = {
   drawerOpen: boolean;
@@ -51,24 +56,47 @@ function hid(): string {
 }
 
 // ─── Voice presets ────────────────────────────────────────────────────────────
-// All four confirmed 200 on free tier (probed directly against the TTS endpoint).
-const VOICE_PRESETS = [
-  { label: "Announcer Male",    voiceId: "JBFqnCBsd6RMkjVDRZzb" }, // George
-  { label: "Announcer Female",  voiceId: "EXAVITQu4vr4xnSDxMaL" }, // Sarah
-  { label: "Energetic Male",    voiceId: "TX3LPaxmHKxFdv7VOQHJ" }, // Liam
-  { label: "Energetic Female",  voiceId: "cgSgspJ2msm6clMCkdW9" }, // Jessica
-] as const;
+// Curated per language. All IDs confirmed on ElevenLabs' shared library.
+// The multilingual model `eleven_multilingual_v2` handles Hebrew via these voices.
+const VOICE_PRESETS_BY_LANG: Record<JingleLanguage, readonly { label: string; voiceId: string }[]> = {
+  en: [
+    { label: "Announcer Male",   voiceId: "JBFqnCBsd6RMkjVDRZzb" }, // George
+    { label: "Announcer Female", voiceId: "EXAVITQu4vr4xnSDxMaL" }, // Sarah
+    { label: "Energetic Male",   voiceId: "TX3LPaxmHKxFdv7VOQHJ" }, // Liam
+    { label: "Energetic Female", voiceId: "cgSgspJ2msm6clMCkdW9" }, // Jessica
+  ],
+  he: [
+    { label: "Host M",    voiceId: "pNInz6obpgDQGcFmaJgB" }, // Adam (multilingual)
+    { label: "Host F",    voiceId: "XrExE9yKIg1WjnnlVkGX" }, // Matilda
+    { label: "Energetic", voiceId: "ErXwobaYiN019PkySvjV" }, // Antoni
+    { label: "Warm",      voiceId: "21m00Tcm4TlvDq8ikWAM" }, // Rachel
+  ],
+};
 
-const BELL_URL = "/sounds/bell.wav";
+/** Synthesized bell presets served from /api/jingles/bell/[style]. `off` = no pre-roll. */
+const BELL_PRESETS: readonly { value: JingleBellStyle; label: string }[] = [
+  { value: "off",   label: "Off" },
+  { value: "ding",  label: "Ding" },
+  { value: "chime", label: "Chime" },
+  { value: "soft",  label: "Soft" },
+];
+
+function bellUrlFor(style: JingleBellStyle | undefined): string | null {
+  if (!style || style === "off") return null;
+  return `/api/jingles/bell/${style}`;
+}
 
 const initialDraft: AnnouncementDraft = {
   title: "",
   body: "",
   kind: "announcement",
   tone: "Warm, clear",
-  voice: VOICE_PRESETS[0].voiceId,
+  voice: VOICE_PRESETS_BY_LANG.en[0].voiceId,
   pacing: "Normal",
-  preRoll: false,
+  preRoll: true,
+  language: "en",
+  speed: "normal",
+  bellStyle: "ding",
 };
 
 const initialState: State = {
@@ -643,6 +671,9 @@ export function JinglesShell(): React.ReactElement {
 // ─── Workspace persistence helpers ───────────────────────────────────────────
 
 const PAD_STORAGE_KEY = "syncbiz:jingle-pads";
+const LIBRARY_STORAGE_KEY = "syncbiz:jingle-library";
+/** Hard cap so localStorage doesn't balloon across hundreds of generations. */
+const LIBRARY_MAX_ITEMS = 50;
 
 /**
  * Loads pad assignments from localStorage.
@@ -659,7 +690,17 @@ function loadPads(): SamplerPadItem[] {
     const saved = JSON.parse(raw) as SamplerPadItem[];
     return SAMPLER_PADS.map((seed) => {
       const match = saved.find((s) => s.id === seed.id);
-      return match ? { ...seed, label: match.label ?? seed.label, url: match.url ?? "", scheduledAt: match.scheduledAt, preRoll: match.preRoll ?? false } : { ...seed };
+      return match
+        ? {
+            ...seed,
+            label: match.label ?? seed.label,
+            url: match.url ?? "",
+            scheduledAt: match.scheduledAt,
+            preRoll: match.preRoll ?? seed.preRoll ?? false,
+            color: match.color ?? seed.color ?? "default",
+            bellStyle: match.bellStyle ?? seed.bellStyle ?? "ding",
+          }
+        : { ...seed };
     });
   } catch {
     return SAMPLER_PADS.map((p) => ({ ...p }));
@@ -669,6 +710,47 @@ function loadPads(): SamplerPadItem[] {
 function persistPads(pads: SamplerPadItem[]): void {
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(PAD_STORAGE_KEY, JSON.stringify(pads));
+  }
+}
+
+/**
+ * Loads the persisted jingle library (generated assets) from localStorage.
+ * The underlying audio files live on the server at `/api/jingles/audio/<id>`
+ * (written to `data/jingles/<id>.mp3`), so we only need to remember the
+ * metadata (title, script, voice, language, bell, url) here. Unknown/legacy
+ * shapes are filtered defensively.
+ */
+function loadLibrary(): JingleAsset[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(LIBRARY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (a): a is JingleAsset =>
+          !!a &&
+          typeof a === "object" &&
+          typeof (a as JingleAsset).id === "string" &&
+          typeof (a as JingleAsset).url === "string" &&
+          typeof (a as JingleAsset).title === "string",
+      )
+      .slice(0, LIBRARY_MAX_ITEMS);
+  } catch {
+    return [];
+  }
+}
+
+function persistLibrary(assets: JingleAsset[]): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(
+      LIBRARY_STORAGE_KEY,
+      JSON.stringify(assets.slice(0, LIBRARY_MAX_ITEMS)),
+    );
+  } catch {
+    /* quota / unavailable — ignore */
   }
 }
 
@@ -683,22 +765,76 @@ function triggerPlayInterrupt(url: string): void {
   }
 }
 
-// ─── TriggerPadSection ───────────────────────────────────────────────────────
-// Each pad IS the trigger. Assigned → click = Play. Unassigned → click = Edit.
-// One small ✎ overlay button for settings; never clutters the pad face.
+// ─── JcModal — shared popup primitive (portal, backdrop, ESC, centered) ─────
 
-function TriggerPadSection({
+function JcModal({
+  open,
+  title,
+  onClose,
+  children,
+  footer,
+  width = "28rem",
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  width?: string;
+}): React.ReactElement | null {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const body = (
+    <div className="jc-modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="jc-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        style={{ width: `min(${width}, calc(100vw - 2rem))` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="jc-modal-header">
+          <h3 className="jc-modal-title">{title}</h3>
+          <button type="button" className="jc-icon-btn" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </header>
+        <div className="jc-modal-body">{children}</div>
+        {footer ? <footer className="jc-modal-footer">{footer}</footer> : null}
+      </div>
+    </div>
+  );
+
+  if (typeof document !== "undefined") {
+    return createPortal(body, document.body);
+  }
+  return body;
+}
+
+// ─── TriggerPads — bottom row, controller-style ─────────────────────────────
+// Click assigned pad → play. Click empty pad → open edit modal.
+// Pencil overlay (top-right) always opens edit modal.
+
+function TriggerPads({
   pads,
   flashPadId,
-  editingPadId,
   onPlay,
-  onEditToggle,
+  onEdit,
 }: {
   pads: SamplerPadItem[];
   flashPadId: string | null;
-  editingPadId: string | null;
   onPlay: (pad: SamplerPadItem) => void;
-  onEditToggle: (padId: string) => void;
+  onEdit: (padId: string) => void;
 }): React.ReactElement {
   return (
     <section className="jc-trigger-section" aria-label="Jingle trigger pads">
@@ -706,51 +842,50 @@ function TriggerPadSection({
       <div className="jc-trigger-grid">
         {pads.map((p) => {
           const assigned = Boolean(p.url);
-          const isEditing = editingPadId === p.id;
           const isFlashing = flashPadId === p.id;
+          const schedTooltip = p.scheduledAt
+            ? ` · scheduled ${new Date(p.scheduledAt).toLocaleString()}`
+            : "";
+          const colorClass = `jc-trigger-pad--color-${p.color ?? "default"}`;
           return (
-            // Wrapper holds the pad button + floating edit button as siblings
             <div key={p.id} className="jc-trigger-pad-wrap">
-
-              {/* ── Pad face: square trigger — label centered, LED corner dot ── */}
               <button
                 type="button"
                 className={[
                   "jc-trigger-pad",
                   assigned ? "jc-trigger-pad--assigned" : "jc-trigger-pad--empty",
-                  isEditing ? "jc-trigger-pad--editing" : "",
+                  colorClass,
                   isFlashing ? "jc-trigger-pad--playing" : "",
                 ].filter(Boolean).join(" ")}
-                onClick={() => (assigned ? onPlay(p) : onEditToggle(p.id))}
-                title={assigned ? `Play: ${p.label}` : "Click to assign"}
+                onClick={() => (assigned ? onPlay(p) : onEdit(p.id))}
+                title={assigned ? `Play: ${p.label}${schedTooltip}` : "Click to assign"}
                 aria-label={assigned ? `Play ${p.label}` : `Assign source to ${p.label}`}
               >
                 <span
-                  className={`jc-pad-led ${isFlashing ? "jc-pad-led--playing" : assigned ? "jc-pad-led--ready" : "jc-pad-led--empty"}`}
+                  className={`jc-pad-led ${
+                    isFlashing
+                      ? "jc-pad-led--playing"
+                      : assigned
+                        ? "jc-pad-led--ready"
+                        : "jc-pad-led--empty"
+                  }`}
                   aria-hidden
                 />
                 <span className="jc-trigger-pad-label">{p.label}</span>
-                {p.scheduledAt ? (
-                  <span
-                    className="jc-trigger-sched-badge"
-                    title={new Date(p.scheduledAt).toLocaleString()}
-                  >
-                    {new Date(p.scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </span>
-                ) : null}
+                {p.scheduledAt ? <span className="jc-pad-sched-dot" aria-hidden /> : null}
               </button>
-
-              {/* ── Single settings control — floats top-right, never the primary action ── */}
               <button
                 type="button"
-                className={`jc-trigger-pad-edit ${isEditing ? "jc-trigger-pad-edit--on" : ""}`}
+                className="jc-trigger-pad-edit"
                 title="Edit pad"
                 aria-label={`Edit ${p.label}`}
-                onClick={(e) => { e.stopPropagation(); onEditToggle(p.id); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(p.id);
+                }}
               >
                 ✎
               </button>
-
             </div>
           );
         })}
@@ -759,307 +894,147 @@ function TriggerPadSection({
   );
 }
 
-// ─── PadEditForm ──────────────────────────────────────────────────────────────
+// ─── ResultStrip — single-line output bar between content and pads ──────────
 
-function PadEditForm({
-  pad,
-  onSave,
-  onCancel,
-}: {
-  pad: SamplerPadItem;
-  onSave: (patch: Pick<SamplerPadItem, "label" | "url" | "scheduledAt">) => void;
-  onCancel: () => void;
-}): React.ReactElement {
-  const [label, setLabel] = useState(pad.label);
-  const [url, setUrl] = useState(pad.url);
-  const [scheduledAt, setScheduledAt] = useState(pad.scheduledAt ?? "");
-
-  useEffect(() => {
-    setLabel(pad.label);
-    setUrl(pad.url);
-    setScheduledAt(pad.scheduledAt ?? "");
-  }, [pad.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <div className="jc-form jc-rail-edit-form">
-      <div className="jc-rail-edit-head">
-        <span className="jc-rail-head">Editing: {pad.label}</span>
-        <button type="button" className="jc-icon-btn" onClick={onCancel} aria-label="Cancel edit">✕</button>
-      </div>
-      <label className="jc-field">
-        <span>Label</span>
-        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Pad label" />
-      </label>
-      <label className="jc-field">
-        <span>Audio URL or local path</span>
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://... or /path/to/file.mp3"
-          spellCheck={false}
-        />
-      </label>
-      <label className="jc-field">
-        <span>Schedule at (optional)</span>
-        <input
-          type="datetime-local"
-          value={scheduledAt}
-          onChange={(e) => setScheduledAt(e.target.value)}
-        />
-      </label>
-      <div className="jc-actions">
-        <button
-          type="button"
-          className="jc-btn jc-btn--primary jc-btn--small"
-          onClick={() => onSave({ label: label.trim() || pad.label, url: url.trim(), scheduledAt: scheduledAt || undefined })}
-        >
-          Save
-        </button>
-        <button type="button" className="jc-btn jc-btn--ghost jc-btn--small" onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── PadPicker ────────────────────────────────────────────────────────────────
-
-function PadPicker({
-  pads,
-  onPick,
-  onClose,
-}: {
-  pads: SamplerPadItem[];
-  onPick: (padId: string) => void;
-  onClose: () => void;
-}): React.ReactElement {
-  return (
-    <div className="jc-pad-picker">
-      <div className="jc-pad-picker-head">
-        <span className="jc-rail-head">Choose pad</span>
-        <button type="button" className="jc-icon-btn" onClick={onClose} aria-label="Close picker">✕</button>
-      </div>
-      <div className="jc-pad-picker-grid">
-        {pads.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            className={`jc-pad-picker-btn ${p.url ? "jc-pad-picker-btn--has" : ""}`}
-            onClick={() => onPick(p.id)}
-            title={p.url ? "Currently assigned — will overwrite" : "Empty"}
-          >
-            <span>{p.label}</span>
-            <span className={`jc-pad-picker-dot ${p.url ? "jc-pad-picker-dot--on" : ""}`} />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── ResultCard ───────────────────────────────────────────────────────────────
-
-function ResultCard({
+function ResultStrip({
   asset,
-  pads,
   onPlay,
-  onAssignToPad,
+  onAssign,
   onSchedule,
-  onSaveToLibrary,
+  onSave,
   onDismiss,
 }: {
   asset: JingleAsset;
-  pads: SamplerPadItem[];
   onPlay: () => void;
-  onAssignToPad: (padId: string) => void;
-  onSchedule: (scheduledAt: string, repeat: string) => void;
-  onSaveToLibrary: () => void;
+  onAssign: () => void;
+  onSchedule: () => void;
+  onSave: () => void;
   onDismiss: () => void;
 }): React.ReactElement {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [schedOpen, setSchedOpen] = useState(false);
-  const [schedAt, setSchedAt] = useState("");
-  const [schedRepeat, setSchedRepeat] = useState("once");
-
   return (
-    <div className="jc-result-card">
-      <div className="jc-result-card-header">
-        <div className="jc-result-card-title-row">
-          <span className="jc-result-card-title">{asset.title || "(untitled)"}</span>
-          <span className="jc-result-card-meta">{asset.kind} · {asset.durationLabel || "—"}</span>
-        </div>
-        <button type="button" className="jc-icon-btn" onClick={onDismiss} aria-label="Dismiss result">✕</button>
+    <div className="jc-result-strip">
+      <div className="jc-result-strip-info">
+        <span className="jc-result-strip-title">{asset.title || "Untitled"}</span>
+        <span className="jc-result-strip-meta">
+          {asset.kind} · {asset.durationLabel || "—"}
+        </span>
       </div>
-
-      {asset.script ? (
-        <p className="jc-result-card-script">&ldquo;{asset.script}&rdquo;</p>
-      ) : null}
-
-      {asset.url ? (
-        <p className="jc-result-card-url" title={asset.url}>{asset.url}</p>
-      ) : (
-        <p className="jc-result-card-url jc-result-card-url--empty">
-          No audio asset yet — paste a URL above or generate via AI to attach one
-        </p>
-      )}
-
-      <div className="jc-actions jc-result-card-actions">
+      <div className="jc-result-strip-actions">
         <button
           type="button"
-          className="jc-btn jc-btn--primary"
+          className="jc-btn jc-btn--primary jc-btn--small"
           disabled={!asset.url}
-          title={asset.url ? undefined : "No URL to play"}
+          title={asset.url ? "Play now" : "No URL to play"}
           onClick={onPlay}
         >
-          ▶ Play Now
+          ▶ Play
         </button>
         <button
           type="button"
-          className={`jc-btn ${pickerOpen ? "jc-btn--secondary" : "jc-btn--ghost"}`}
-          onClick={() => { setPickerOpen((v) => !v); setSchedOpen(false); }}
+          className="jc-btn jc-btn--ghost jc-btn--small"
+          disabled={!asset.url}
+          onClick={onAssign}
         >
-          Assign to pad {pickerOpen ? "▲" : "▾"}
+          Assign
         </button>
         <button
           type="button"
-          className={`jc-btn ${schedOpen ? "jc-btn--secondary" : "jc-btn--ghost"}`}
-          onClick={() => { setSchedOpen((v) => !v); setPickerOpen(false); }}
+          className="jc-btn jc-btn--ghost jc-btn--small"
+          disabled={!asset.url}
+          onClick={onSchedule}
         >
-          Schedule {schedOpen ? "▲" : "▾"}
+          Schedule
         </button>
-        <button type="button" className="jc-btn jc-btn--ghost" onClick={onSaveToLibrary}>
-          Save to library
+        <button
+          type="button"
+          className="jc-btn jc-btn--ghost jc-btn--small"
+          onClick={onSave}
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          className="jc-icon-btn jc-icon-btn--inline"
+          onClick={onDismiss}
+          aria-label="Dismiss result"
+          title="Dismiss"
+        >
+          ✕
         </button>
       </div>
-
-      {pickerOpen ? (
-        <PadPicker
-          pads={pads}
-          onPick={(id) => { onAssignToPad(id); setPickerOpen(false); }}
-          onClose={() => setPickerOpen(false)}
-        />
-      ) : null}
-
-      {schedOpen ? (
-        <div className="jc-result-sched">
-          <div className="jc-field-row">
-            <label className="jc-field">
-              <span>When</span>
-              <input
-                type="datetime-local"
-                value={schedAt}
-                onChange={(e) => setSchedAt(e.target.value)}
-              />
-            </label>
-            <div className="jc-field">
-              <span>Repeat</span>
-              <SegBtn
-                options={[
-                  { value: "once", label: "Once" },
-                  { value: "daily", label: "Daily" },
-                  { value: "weekly", label: "Weekly" },
-                ]}
-                value={schedRepeat}
-                onChange={(v) => setSchedRepeat(v)}
-              />
-            </div>
-          </div>
-          <div className="jc-actions">
-            <button
-              type="button"
-              className="jc-btn jc-btn--primary jc-btn--small"
-              disabled={!schedAt}
-              onClick={() => { onSchedule(schedAt, schedRepeat); setSchedOpen(false); }}
-            >
-              Confirm schedule
-            </button>
-            <button type="button" className="jc-btn jc-btn--ghost jc-btn--small" onClick={() => setSchedOpen(false)}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
 
-// ─── JinglesWorkspacePanel ────────────────────────────────────────────────────
+// ─── JinglesWorkspacePanel — center-area workspace ──────────────────────────
 
-/** Center-area workspace — full management surface with persistent pad rail. */
+/** Controller-style workspace: 3 tabs, persistent trigger pads, popups for detail actions. */
 export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): React.ReactElement {
-  // Pads: persisted to localStorage — survives Electron restarts
+  // Core state
   const [pads, setPads] = useState<SamplerPadItem[]>(() => loadPads());
-  const [editingPadId, setEditingPadId] = useState<string | null>(null);
   const [flashPadId, setFlashPadId] = useState<string | null>(null);
-
-  // Shared result card — visible regardless of active tab
   const [resultCard, setResultCard] = useState<JingleAsset | null>(null);
-
-  // Tab state
-  const [activeTab, setActiveTab] = useState<JinglesTabId>("create");
-
-  // Create-tab draft
+  const [activeTab, setActiveTab] = useState<"create" | "library" | "schedule">("create");
   const [draft, setDraft] = useState<AnnouncementDraft>({ ...initialDraft });
-
-  // Generation state
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [savedAssets, setSavedAssets] = useState<JingleAsset[]>(() => loadLibrary());
+  const [schedItems, setSchedItems] = useState(() => {
+    const persisted = loadJingleSchedule();
+    // Seed with mock rows only on first run (when no persisted items exist).
+    return persisted.length > 0 ? persisted : [...MOCK_SCHEDULE_ITEMS];
+  });
 
-  // AI-tab
+  // Status (display-only; no selector)
+  const branchStatus: MockBranchLinkStatus = "online";
+  const engineStatus: MockEngineStatus = "ready";
+
+  // Persist library to localStorage whenever it changes. The MP3 files
+  // themselves are server-owned, so this only stores metadata — cheap and
+  // resilient to reloads (including Electron app restarts).
+  useEffect(() => {
+    persistLibrary(savedAssets);
+  }, [savedAssets]);
+
+  // Persist jingle schedule items (payload + timing) so the root-level
+  // auto-player can fire them even when this drawer is closed.
+  useEffect(() => {
+    persistJingleSchedule(schedItems);
+  }, [schedItems]);
+
+  // Modal state — only one open at a time in practice
+  const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiIntent, setAiIntent] = useState("");
+  const [editPadId, setEditPadId] = useState<string | null>(null);
+  const [assignForAsset, setAssignForAsset] = useState<JingleAsset | null>(null);
+  const [scheduleForAsset, setScheduleForAsset] = useState<JingleAsset | null>(null);
 
-  // Library: saved assets from this session
-  const [savedAssets, setSavedAssets] = useState<JingleAsset[]>([]);
-  // Which library item has its pad-picker open
-  const [libPickerFor, setLibPickerFor] = useState<string | null>(null);
-
-  // Schedule tab
-  const [schedMode, setSchedMode] = useState<"now" | "later" | "recurring">("later");
-  const [schedTarget, setSchedTarget] = useState("default");
-  const [schedRepeat, setSchedRepeat] = useState("weekly");
-  const [schedItems, setSchedItems] = useState([...MOCK_SCHEDULE_ITEMS]);
-
-  // History
-  const [history, setHistory] = useState<MockHistoryEvent[]>([...INITIAL_MOCK_HISTORY]);
-
-  // Status (mock)
-  const [branchStatus, setBranchStatus] = useState<MockBranchLinkStatus>("online");
-  const [engineStatus, setEngineStatus] = useState<MockEngineStatus>("ready");
-  const [operatorMode, setOperatorMode] = useState<JinglesOperatorMode>("safe");
-
-  const addHistory = useCallback((kind: MockHistoryEvent["kind"], message: string) => {
-    const ev: MockHistoryEvent = { id: hid(), atIso: nowIso(), kind, message };
-    setHistory((prev) => [ev, ...prev].slice(0, 80));
-  }, []);
-
-  // ── Pad operations ──────────────────────────────────────────────────────────
+  // ── Pad operations ─────────────────────────────────────────────────────────
 
   const handlePadPlay = useCallback((pad: SamplerPadItem) => {
     if (!pad.url) return;
-    if (pad.preRoll) triggerPlayInterrupt(BELL_URL);
+    if (pad.preRoll) {
+      const bell = bellUrlFor(pad.bellStyle ?? "ding");
+      if (bell) triggerPlayInterrupt(bell);
+    }
     triggerPlayInterrupt(pad.url);
     setFlashPadId(pad.id);
-    addHistory("pad", `Pad "${pad.label}" triggered`);
     setTimeout(() => setFlashPadId(null), 650);
-  }, [addHistory]);
-
-  const handlePadEditToggle = useCallback((padId: string) => {
-    setEditingPadId((prev) => (prev === padId ? null : padId));
   }, []);
 
   const handlePadSave = useCallback(
-    (patch: Pick<SamplerPadItem, "label" | "url" | "scheduledAt">) => {
-      if (!editingPadId) return;
+    (
+      padId: string,
+      patch: Pick<SamplerPadItem, "label" | "url" | "scheduledAt" | "color" | "bellStyle" | "preRoll">,
+    ) => {
       setPads((prev) => {
-        const next = prev.map((p) => (p.id === editingPadId ? { ...p, ...patch } : p));
+        const next = prev.map((p) => (p.id === padId ? { ...p, ...patch } : p));
         persistPads(next);
         return next;
       });
-      addHistory("pad", `Pad "${patch.label}" saved`);
-      setEditingPadId(null);
+      setEditPadId(null);
     },
-    [editingPadId, addHistory],
+    [],
   );
 
   const handleAssignToPad = useCallback(
@@ -1067,25 +1042,28 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
       setPads((prev) => {
         const next = prev.map((p) =>
           p.id === padId
-            ? { ...p, url: asset.url, label: (asset.title || p.label).slice(0, 20), preRoll: asset.preRoll }
-            : p
+            ? {
+                ...p,
+                url: asset.url,
+                label: (asset.title || p.label).slice(0, 20),
+                preRoll: asset.preRoll,
+                bellStyle: asset.bellStyle ?? p.bellStyle ?? "ding",
+              }
+            : p,
         );
         persistPads(next);
         return next;
       });
-      const pad = pads.find((p) => p.id === padId);
-      addHistory("pad", `Assigned "${asset.title}" to pad "${pad?.label ?? padId}"`);
     },
-    [pads, addHistory],
+    [],
   );
 
-  // ── Create-tab operations ───────────────────────────────────────────────────
+  // ── Create / Generate ──────────────────────────────────────────────────────
 
-  const handleGenerate = useCallback(async (opts?: { save?: boolean }) => {
+  const handleGenerate = useCallback(async () => {
     const text = draft.body.trim();
     if (!text) {
-      setGenerateError("Script body is required — type what the announcer should say.");
-      addHistory("failed", "Generate failed: script body is empty");
+      setGenerateError("Script is required — type what the announcer should say.");
       return;
     }
     setGenerateError(null);
@@ -1095,13 +1073,16 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
       const res = await fetch("/api/jingles/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voiceId: draft.voice }),
+        body: JSON.stringify({
+          text,
+          voiceId: draft.voice,
+          language: draft.language,
+          speed: draft.speed,
+        }),
       });
       const data = (await res.json()) as { url?: string; durationLabel?: string; error?: string };
       if (!res.ok || !data.url) {
-        const msg = data.error ?? `HTTP ${res.status}`;
-        setGenerateError(msg);
-        addHistory("failed", `Generate failed: ${msg}`);
+        setGenerateError(data.error ?? `HTTP ${res.status}`);
         return;
       }
       const asset: JingleAsset = {
@@ -1113,139 +1094,90 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
         durationLabel: data.durationLabel ?? "—",
         voiceId: draft.voice,
         preRoll: draft.preRoll,
+        bellStyle: draft.bellStyle,
+        language: draft.language,
+        speed: draft.speed,
       };
       setResultCard(asset);
-      addHistory(
-        opts?.save ? "saved" : "created",
-        opts?.save
-          ? `Saved & generated: "${title}" → ${data.url}`
-          : `Generated: "${title}" → ${data.url}`,
+      // Auto-save every successful generation to the persistent library so
+      // a reload of the player doesn't lose the jingle. The audio MP3 already
+      // lives on the server (data/jingles/<id>.mp3); we only need to persist
+      // the metadata (title, script, voice, language, bell, url) so it can be
+      // re-listed and re-played after restart.
+      setSavedAssets((prev) =>
+        prev.some((a) => a.id === asset.id) ? prev : [asset, ...prev],
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setGenerateError(msg);
-      addHistory("failed", `Generate failed: ${msg}`);
+      setGenerateError(err instanceof Error ? err.message : String(err));
     } finally {
       setGenerating(false);
     }
-  }, [draft, addHistory]);
+  }, [draft]);
 
-  // ── AI-tab operations ────────────────────────────────────────────────────────
-
-  const handleAiApprove = useCallback((index: number) => {
-    const text = MOCK_AI_SUGGESTIONS[index] ?? "";
-    const asset: JingleAsset = {
-      id: hid(),
-      title: `AI suggestion ${index + 1}`,
-      script: text,
-      url: "",
-      kind: "announcement",
-      durationLabel: "—",
-      voiceId: draft.voice,
-      preRoll: false,
-    };
-    setResultCard(asset);
-    addHistory("created", `AI suggestion ${index + 1} approved → result card`);
-  }, [draft.voice, addHistory]);
-
-  // ── Result-card operations ──────────────────────────────────────────────────
+  // ── Result strip actions ───────────────────────────────────────────────────
 
   const handleResultPlay = useCallback(() => {
     if (!resultCard?.url) return;
-    if (resultCard.preRoll) triggerPlayInterrupt(BELL_URL);
+    if (resultCard.preRoll) {
+      const bell = bellUrlFor(resultCard.bellStyle ?? "ding");
+      if (bell) triggerPlayInterrupt(bell);
+    }
     triggerPlayInterrupt(resultCard.url);
-    addHistory("previewed", `Played result: "${resultCard.title}"`);
-  }, [resultCard, addHistory]);
-
-  const handleResultAssignToPad = useCallback((padId: string) => {
-    if (!resultCard) return;
-    handleAssignToPad(padId, resultCard);
-  }, [resultCard, handleAssignToPad]);
-
-  const handleResultSchedule = useCallback((scheduledAt: string, repeat: string) => {
-    if (!resultCard) return;
-    setSchedItems((prev) => [
-      {
-        id: hid(),
-        label: resultCard.title,
-        whenLabel: new Date(scheduledAt).toLocaleString(),
-        repeatLabel: repeat.charAt(0).toUpperCase() + repeat.slice(1),
-        targetLabel: schedTarget,
-      },
-      ...prev,
-    ]);
-    addHistory("scheduled", `Scheduled "${resultCard.title}" at ${scheduledAt}`);
-  }, [resultCard, schedTarget, addHistory]);
+  }, [resultCard]);
 
   const handleResultSaveToLibrary = useCallback(() => {
     if (!resultCard) return;
-    setSavedAssets((prev) => prev.some((a) => a.id === resultCard.id) ? prev : [resultCard, ...prev]);
-    addHistory("saved", `Saved to library: "${resultCard.title}"`);
-  }, [resultCard, addHistory]);
+    setSavedAssets((prev) =>
+      prev.some((a) => a.id === resultCard.id) ? prev : [resultCard, ...prev],
+    );
+  }, [resultCard]);
 
-  const editingPad = pads.find((p) => p.id === editingPadId) ?? null;
+  const editingPad = editPadId ? pads.find((p) => p.id === editPadId) ?? null : null;
 
   return (
     <div className="jc-workspace-panel">
-
-      {/* ── Header ───────────────────────────────────────────────────────── */}
+      {/* ── Header: title + tiny status LEDs + close ───────────────────── */}
       <header className="jc-ws-header">
         <div className="jc-ws-header-title">
-          <h2 className="jc-drawer-title">JINGLES CONTROL</h2>
-          <p className="jc-drawer-sub">Operator console</p>
+          <h2 className="jc-drawer-title">Jingles</h2>
         </div>
-        <div className="jc-ws-header-status">
-          {/* Branch — LED + chip, no inline editor */}
-          <div className="jc-status-cluster">
-            <span className={`jc-status-led jc-status-led--${branchStatus === "online" ? "ok" : "err"}`} aria-hidden />
-            <span className="jc-status-label">Branch</span>
-            <Chip variant={branchStatus === "online" ? "ok" : "err"}>{branchStatus}</Chip>
-          </div>
-          {/* Engine — LED + chip */}
-          <div className="jc-status-cluster">
-            <span
-              className={`jc-status-led jc-status-led--${engineStatus === "ready" ? "ok" : engineStatus === "busy" ? "warn" : "err"}`}
-              aria-hidden
-            />
-            <span className="jc-status-label">Engine</span>
-            <Chip variant={engineStatus === "ready" ? "ok" : engineStatus === "busy" ? "warn" : "err"}>
-              {engineStatus}
-            </Chip>
-          </div>
-          {/* Mode — segmented control (has real operator value) */}
-          <div className="jc-status-cluster">
-            <span className="jc-status-label">Mode</span>
-            <SegBtn
-              options={[
-                { value: "safe", label: "Safe" },
-                { value: "preview", label: "Preview" },
-                { value: "live", label: "Live" },
-              ]}
-              value={operatorMode}
-              onChange={(v) => setOperatorMode(v as JinglesOperatorMode)}
-            />
-          </div>
+        <div className="jc-ws-header-status-mini" aria-label="System status">
+          <span
+            className={`jc-status-led jc-status-led--${branchStatus === "online" ? "ok" : "err"}`}
+            title={`Branch: ${branchStatus}`}
+            aria-hidden
+          />
+          <span className="jc-status-mini-label">Branch</span>
+          <span className="jc-status-mini-sep" aria-hidden />
+          <span
+            className={`jc-status-led jc-status-led--${
+              engineStatus === "ready" ? "ok" : engineStatus === "busy" ? "warn" : "err"
+            }`}
+            title={`Engine: ${engineStatus}`}
+            aria-hidden
+          />
+          <span className="jc-status-mini-label">Engine</span>
         </div>
-        <button type="button" className="jc-icon-btn" onClick={onClose} aria-label="Close Jingles Control">
+        <button
+          type="button"
+          className="jc-icon-btn"
+          onClick={onClose}
+          aria-label="Close Jingles Control"
+        >
           ✕
         </button>
       </header>
 
-      {/* ── Two-zone body ─────────────────────────────────────────────────── */}
+      {/* ── Body ────────────────────────────────────────────────────────── */}
       <div className="jc-ws-body">
-
-        {/* ── Content area (tabs) ─────────────────────────────────────── */}
+        {/* Content scroll area: tabs + panels */}
         <div className="jc-ws-content">
-
-          {/* Tab bar */}
           <nav className="jc-ws-tabs" role="tablist">
             {(
               [
                 ["create", "Create"],
-                ["ai", "AI Compose"],
                 ["library", "Library"],
                 ["schedule", "Schedule"],
-                ["history", "History"],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -1254,14 +1186,14 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                 role="tab"
                 aria-selected={activeTab === id}
                 className={`jc-ws-tab ${activeTab === id ? "jc-ws-tab--active" : ""}`}
-                onClick={() => setActiveTab(id as JinglesTabId)}
+                onClick={() => setActiveTab(id)}
               >
                 {label}
               </button>
             ))}
           </nav>
 
-          {/* ── CREATE ────────────────────────────────────────────────── */}
+          {/* ── CREATE ─────────────────────────────────────────────── */}
           {activeTab === "create" ? (
             <div className="jc-ws-panel jc-form">
               <div className="jc-field-row">
@@ -1282,152 +1214,169 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                       { value: "broadcast", label: "Broadcast" },
                     ]}
                     value={draft.kind}
-                    onChange={(v) => setDraft((d) => ({ ...d, kind: v as AnnouncementDraft["kind"] }))}
+                    onChange={(v) =>
+                      setDraft((d) => ({ ...d, kind: v as AnnouncementDraft["kind"] }))
+                    }
                   />
                 </div>
               </div>
-              <label className="jc-field">
+
+              <div className="jc-field jc-script-wrap">
                 <span>Script</span>
                 <textarea
                   rows={3}
                   value={draft.body}
                   onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
-                  placeholder="What should the announcer say?"
+                  placeholder={
+                    draft.language === "he"
+                      ? "מה על הקריין להגיד?"
+                      : "What should the announcer say?"
+                  }
+                  dir={draft.language === "he" ? "rtl" : "ltr"}
                 />
-              </label>
-              <div className="jc-field-row jc-field-row--voice">
-                <label className="jc-field">
-                  <span>Voice</span>
-                  <select
-                    value={draft.voice}
-                    onChange={(e) => setDraft((d) => ({ ...d, voice: e.target.value }))}
-                  >
-                    {VOICE_PRESETS.map((v) => (
-                      <option key={v.voiceId} value={v.voiceId}>{v.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="jc-field">
-                  <span>Tone</span>
-                  <input value={draft.tone} onChange={(e) => setDraft((d) => ({ ...d, tone: e.target.value }))} />
-                </label>
-                <label className="jc-field">
-                  <span>Pacing</span>
-                  <input value={draft.pacing} onChange={(e) => setDraft((d) => ({ ...d, pacing: e.target.value }))} />
-                </label>
-                <div className="jc-field jc-field--pre-roll">
-                  <span>Bell</span>
-                  <button
-                    type="button"
-                    className={`jc-toggle-chip${draft.preRoll ? " jc-toggle-chip--on" : ""}`}
-                    onClick={() => setDraft((d) => ({ ...d, preRoll: !d.preRoll }))}
-                    aria-pressed={draft.preRoll}
-                  >
-                    {draft.preRoll ? "ON" : "OFF"}
-                  </button>
+                <button
+                  type="button"
+                  className="jc-script-ai-btn"
+                  onClick={() => setAiModalOpen(true)}
+                  title="Let AI write this"
+                  aria-label="Open AI compose"
+                >
+                  <span className="jc-script-ai-btn-spark" aria-hidden>✦</span>
+                  <span>AI</span>
+                </button>
+              </div>
+
+              <div className="jc-field-row jc-field-row--lang-speed">
+                <div className="jc-field">
+                  <span>Language</span>
+                  <SegBtn
+                    options={[
+                      { value: "en", label: "English" },
+                      { value: "he", label: "עברית" },
+                    ]}
+                    value={draft.language}
+                    onChange={(v) =>
+                      setDraft((d) => ({
+                        ...d,
+                        language: v as JingleLanguage,
+                        voice: VOICE_PRESETS_BY_LANG[v as JingleLanguage][0].voiceId,
+                      }))
+                    }
+                  />
+                </div>
+                <div className="jc-field">
+                  <span>Speed</span>
+                  <SegBtn
+                    options={[
+                      { value: "slow", label: "Slow" },
+                      { value: "normal", label: "Normal" },
+                      { value: "fast", label: "Fast" },
+                    ]}
+                    value={draft.speed}
+                    onChange={(v) => setDraft((d) => ({ ...d, speed: v as JingleSpeed }))}
+                  />
                 </div>
               </div>
+
+              <div className="jc-field">
+                <span>Voice</span>
+                <SegBtn
+                  options={VOICE_PRESETS_BY_LANG[draft.language].map((v) => ({
+                    value: v.voiceId,
+                    label: v.label,
+                  }))}
+                  value={draft.voice}
+                  onChange={(v) => setDraft((d) => ({ ...d, voice: v }))}
+                />
+              </div>
+
+              <div className="jc-field">
+                <span>Bell (pre-roll)</span>
+                <SegBtn
+                  options={BELL_PRESETS.map((b) => ({ value: b.value, label: b.label }))}
+                  value={draft.preRoll ? draft.bellStyle : "off"}
+                  onChange={(v) =>
+                    setDraft((d) => ({
+                      ...d,
+                      preRoll: v !== "off",
+                      bellStyle: v === "off" ? d.bellStyle : (v as JingleBellStyle),
+                    }))
+                  }
+                />
+              </div>
+
               {generateError ? (
-                <div className="jc-err-msg" role="alert">{generateError}</div>
+                <div className="jc-err-msg" role="alert">
+                  {generateError}
+                </div>
               ) : null}
+
               <div className="jc-actions">
                 <button
                   type="button"
-                  className="jc-btn jc-btn--ghost"
-                  onClick={() => addHistory("previewed", `Preview: "${draft.title || "(untitled)"}"`)}>
-                  Preview
-                </button>
-                <button
-                  type="button"
-                  className="jc-btn jc-btn--secondary"
+                  className="jc-btn jc-btn--primary jc-btn--lg"
                   disabled={generating}
                   onClick={() => void handleGenerate()}
                 >
                   {generating ? "Generating…" : "Generate"}
                 </button>
-                <button
-                  type="button"
-                  className="jc-btn jc-btn--primary"
-                  disabled={generating}
-                  onClick={() => void handleGenerate({ save: true })}
-                >
-                  {generating ? "Generating…" : "Save & Generate"}
-                </button>
               </div>
             </div>
           ) : null}
 
-          {/* ── AI COMPOSE ──────────────────────────────────────────── */}
-          {activeTab === "ai" ? (
-            <div className="jc-ws-panel jc-form">
-              <label className="jc-field">
-                <span>What should the announcer say?</span>
-                <textarea
-                  rows={3}
-                  value={aiIntent}
-                  onChange={(e) => setAiIntent(e.target.value)}
-                  placeholder="e.g. remind customers about closing in 15 minutes, warm and friendly tone"
-                />
-              </label>
-              <p className="jc-hint">Mock suggestions — AI API not yet connected.</p>
-              <ul className="jc-ai-cards">
-                {MOCK_AI_SUGGESTIONS.map((text, i) => (
-                  <li key={i} className="jc-ai-card">
-                    <p>{text}</p>
-                    <div className="jc-ai-card-actions">
-                      <button
-                        type="button"
-                        className="jc-btn jc-btn--small"
-                        onClick={() => {
-                          setDraft((d) => ({ ...d, body: text }));
-                          setActiveTab("create");
-                          addHistory("draft_action", `AI suggestion ${i + 1} copied to draft`);
-                        }}
-                      >
-                        Use in draft
-                      </button>
-                      <button
-                        type="button"
-                        className="jc-btn jc-btn--small jc-btn--secondary"
-                        onClick={() => handleAiApprove(i)}
-                      >
-                        Approve &amp; generate
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
-          {/* ── LIBRARY ─────────────────────────────────────────────── */}
+          {/* ── LIBRARY ────────────────────────────────────────────── */}
           {activeTab === "library" ? (
             <div className="jc-ws-panel">
               {savedAssets.length > 0 ? (
                 <>
-                  <p className="jc-ws-section-label jc-ws-section-label--accent">Saved this session</p>
+                  <p className="jc-ws-section-label jc-ws-section-label--accent">
+                    Saved this session
+                  </p>
                   <ul className="jc-lib">
                     {savedAssets.map((a) => (
                       <li key={a.id} className="jc-lib-row">
                         <div>
                           <div className="jc-lib-title">{a.title}</div>
-                          <div className="jc-lib-meta">{a.kind} · {a.durationLabel} · {a.url || "no URL"}</div>
+                          <div className="jc-lib-meta">
+                            {a.kind} · {a.durationLabel} · {a.url || "no URL"}
+                          </div>
                         </div>
                         <div className="jc-lib-actions">
                           <button
                             type="button"
                             className="jc-btn jc-btn--small jc-btn--primary"
                             disabled={!a.url}
-                            onClick={() => { triggerPlayInterrupt(a.url); addHistory("previewed", `Played: "${a.title}"`); }}
+                            onClick={() => triggerPlayInterrupt(a.url)}
+                            title="Play"
                           >
                             ▶
                           </button>
                           <button
                             type="button"
                             className="jc-btn jc-btn--small jc-btn--ghost"
-                            onClick={() => setResultCard(a)}
+                            disabled={!a.url}
+                            onClick={() => setAssignForAsset(a)}
                           >
-                            Open
+                            Assign
+                          </button>
+                          <button
+                            type="button"
+                            className="jc-btn jc-btn--small jc-btn--ghost"
+                            disabled={!a.url}
+                            onClick={() => setScheduleForAsset(a)}
+                          >
+                            Schedule
+                          </button>
+                          <button
+                            type="button"
+                            className="jc-btn jc-btn--small jc-btn--danger"
+                            onClick={() =>
+                              setSavedAssets((prev) => prev.filter((x) => x.id !== a.id))
+                            }
+                            title="Delete from library"
+                            aria-label={`Delete ${a.title}`}
+                          >
+                            ✕
                           </button>
                         </div>
                       </li>
@@ -1436,98 +1385,81 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                   <div className="jc-ws-divider" />
                 </>
               ) : null}
-              <p className="jc-ws-section-label">Mock library</p>
+
+              <p className="jc-ws-section-label">Sample library</p>
               <ul className="jc-lib">
-                {MOCK_LIBRARY_ITEMS.map((item) => (
-                  <li key={item.id} className="jc-lib-row jc-lib-row--stacked">
-                    <div>
-                      <div className="jc-lib-title">
-                        {item.favorite ? <span className="jc-star" aria-hidden>★</span> : null}
-                        {item.title}
+                {MOCK_LIBRARY_ITEMS.map((item) => {
+                  const itemAsset: JingleAsset = {
+                    id: item.id,
+                    title: item.title,
+                    script: "",
+                    url: "",
+                    kind: item.kind,
+                    durationLabel: item.durationLabel,
+                    voiceId: "",
+                    preRoll: false,
+                  };
+                  return (
+                    <li key={item.id} className="jc-lib-row">
+                      <div>
+                        <div className="jc-lib-title">
+                          {item.favorite ? (
+                            <span className="jc-star" aria-hidden>
+                              ★
+                            </span>
+                          ) : null}
+                          {item.title}
+                        </div>
+                        <div className="jc-lib-meta">
+                          {item.kind} · {item.durationLabel} · {item.tags.join(", ")}
+                        </div>
                       </div>
-                      <div className="jc-lib-meta">{item.kind} · {item.durationLabel} · {item.tags.join(", ")}</div>
-                    </div>
-                    <div className="jc-lib-actions">
-                      <button
-                        type="button"
-                        className="jc-btn jc-btn--small"
-                        onClick={() => addHistory("previewed", `Library play (mock): "${item.title}"`)}
-                      >
-                        ▶ Play
-                      </button>
-                      <button
-                        type="button"
-                        className={`jc-btn jc-btn--small ${libPickerFor === item.id ? "jc-btn--secondary" : "jc-btn--ghost"}`}
-                        onClick={() => setLibPickerFor((v) => (v === item.id ? null : item.id))}
-                      >
-                        Assign to pad {libPickerFor === item.id ? "▲" : "▾"}
-                      </button>
-                      <button
-                        type="button"
-                        className="jc-btn jc-btn--small jc-btn--ghost"
-                        onClick={() => addHistory("scheduled", `Scheduled from library: "${item.title}" (mock)`)}
-                      >
-                        Schedule
-                      </button>
-                    </div>
-                    {libPickerFor === item.id ? (
-                      <PadPicker
-                        pads={pads}
-                        onPick={(padId) => {
-                          handleAssignToPad(padId, {
-                            id: item.id, title: item.title, script: "", url: "",
-                            kind: item.kind, durationLabel: item.durationLabel,
-                            voiceId: "", preRoll: false,
-                          });
-                          setLibPickerFor(null);
-                        }}
-                        onClose={() => setLibPickerFor(null)}
-                      />
-                    ) : null}
-                  </li>
-                ))}
+                      <div className="jc-lib-actions">
+                        <button
+                          type="button"
+                          className="jc-btn jc-btn--small jc-btn--ghost"
+                          onClick={() => setAssignForAsset(itemAsset)}
+                        >
+                          Assign
+                        </button>
+                        <button
+                          type="button"
+                          className="jc-btn jc-btn--small jc-btn--ghost"
+                          onClick={() => setScheduleForAsset(itemAsset)}
+                        >
+                          Schedule
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ) : null}
 
-          {/* ── SCHEDULE ────────────────────────────────────────────── */}
+          {/* ── SCHEDULE ───────────────────────────────────────────── */}
           {activeTab === "schedule" ? (
-            <div className="jc-ws-panel jc-form">
-              <div className="jc-field-row">
-                <div className="jc-field">
-                  <span>When</span>
-                  <SegBtn
-                    options={[
-                      { value: "now", label: "Now" },
-                      { value: "later", label: "Later" },
-                      { value: "recurring", label: "Recurring" },
-                    ]}
-                    value={schedMode}
-                    onChange={(v) => setSchedMode(v as typeof schedMode)}
-                  />
-                </div>
-                <label className="jc-field">
-                  <span>Target branch / device</span>
-                  <input value={schedTarget} onChange={(e) => setSchedTarget(e.target.value)} />
-                </label>
-                <div className="jc-field">
-                  <span>Repeat</span>
-                  <SegBtn
-                    options={[
-                      { value: "once", label: "Once" },
-                      { value: "daily", label: "Daily" },
-                      { value: "weekly", label: "Weekly" },
-                    ]}
-                    value={schedRepeat}
-                    onChange={(v) => setSchedRepeat(v)}
-                  />
-                </div>
-              </div>
-              <p className="jc-hint">Scheduled items</p>
+            <div className="jc-ws-panel">
+              <p className="jc-hint">
+                Scheduled items appear here. Use <strong>Schedule</strong> from the Library or
+                Result to add one.
+              </p>
               <ul className="jc-sched-list">
                 {schedItems.map((s) => (
-                  <li key={s.id}>
-                    <strong>{s.label}</strong> — {s.whenLabel} · {s.repeatLabel} · {s.targetLabel}
+                  <li key={s.id} className="jc-sched-row">
+                    <span className="jc-sched-text">
+                      <strong>{s.label}</strong> — {s.whenLabel} · {s.repeatLabel} ·{" "}
+                      {s.targetLabel}
+                    </span>
+                    <button
+                      type="button"
+                      className="jc-btn jc-btn--small jc-btn--danger"
+                      onClick={() => setSchedItems((prev) => prev.filter((x) => x.id !== s.id))}
+                      title="Remove scheduled item"
+                      aria-label={`Remove scheduled ${s.label}`}
+                    >
+                      ✕
+                    </button>
                   </li>
                 ))}
                 {schedItems.length === 0 ? (
@@ -1536,61 +1468,418 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
               </ul>
             </div>
           ) : null}
-
-          {/* ── HISTORY ─────────────────────────────────────────────── */}
-          {activeTab === "history" ? (
-            <div className="jc-ws-panel">
-              <ul className="jc-history">
-                {history.length === 0 ? (
-                  <li className="jc-history-empty">No events yet.</li>
-                ) : (
-                  history.map((h) => (
-                    <li key={h.id} className="jc-history-row">
-                      <span className="jc-history-time">{new Date(h.atIso).toLocaleTimeString()}</span>
-                      <Chip variant="neutral">{h.kind}</Chip>
-                      <span>{h.message}</span>
-                    </li>
-                  ))
-                )}
-              </ul>
-            </div>
-          ) : null}
-
         </div>
 
-        {/* ── Result card — outside scroll zone, between tabs and pads ── */}
+        {/* ── Result strip — between content and pads ─────────────── */}
         {resultCard ? (
-          <ResultCard
+          <ResultStrip
             asset={resultCard}
-            pads={pads}
             onPlay={handleResultPlay}
-            onAssignToPad={handleResultAssignToPad}
-            onSchedule={handleResultSchedule}
-            onSaveToLibrary={handleResultSaveToLibrary}
+            onAssign={() => setAssignForAsset(resultCard)}
+            onSchedule={() => setScheduleForAsset(resultCard)}
+            onSave={handleResultSaveToLibrary}
             onDismiss={() => setResultCard(null)}
           />
         ) : null}
 
-        {/* ── Pad edit form — appears above trigger row when editing ─── */}
-        {editingPad ? (
-          <PadEditForm
-            pad={editingPad}
-            onSave={handlePadSave}
-            onCancel={() => setEditingPadId(null)}
-          />
-        ) : null}
-
-        {/* ── Trigger pads — bottom row, always visible ──────────────── */}
-        <TriggerPadSection
+        {/* ── Trigger pads ────────────────────────────────────────── */}
+        <TriggerPads
           pads={pads}
           flashPadId={flashPadId}
-          editingPadId={editingPadId}
           onPlay={handlePadPlay}
-          onEditToggle={handlePadEditToggle}
+          onEdit={(id) => setEditPadId(id)}
         />
-
       </div>
+
+      {/* ── Modals ────────────────────────────────────────────────── */}
+      <AIComposeModal
+        open={aiModalOpen}
+        intent={aiIntent}
+        onIntentChange={setAiIntent}
+        onUse={(text) => {
+          setDraft((d) => ({ ...d, body: text }));
+          setAiModalOpen(false);
+          setActiveTab("create");
+        }}
+        onClose={() => setAiModalOpen(false)}
+      />
+
+      <PadEditModal
+        pad={editingPad}
+        onSave={(patch) => {
+          if (!editPadId) return;
+          handlePadSave(editPadId, patch);
+        }}
+        onClose={() => setEditPadId(null)}
+      />
+
+      <AssignToPadModal
+        asset={assignForAsset}
+        pads={pads}
+        onPick={(padId) => {
+          if (!assignForAsset) return;
+          handleAssignToPad(padId, assignForAsset);
+          setAssignForAsset(null);
+        }}
+        onClose={() => setAssignForAsset(null)}
+      />
+
+      <ScheduleAssetModal
+        asset={scheduleForAsset}
+        onConfirm={(scheduledAt, repeat, target) => {
+          if (!scheduleForAsset) return;
+          // `datetime-local` produces a wall-clock string ("2026-04-21T09:00") which
+          // `new Date(...)` interprets in the browser's local zone — exactly what we
+          // want for "play at 9 AM locally".
+          const iso = new Date(scheduledAt).toISOString();
+          const rep = repeat === "daily" || repeat === "weekly" ? repeat : "once";
+          setSchedItems((prev) => [
+            {
+              id: hid(),
+              label: scheduleForAsset.title,
+              whenLabel: new Date(scheduledAt).toLocaleString(),
+              repeatLabel: repeat.charAt(0).toUpperCase() + repeat.slice(1),
+              targetLabel: target,
+              url: scheduleForAsset.url,
+              preRoll: scheduleForAsset.preRoll,
+              bellStyle: scheduleForAsset.bellStyle ?? "ding",
+              scheduledAtIso: iso,
+              repeat: rep,
+            },
+            ...prev,
+          ]);
+          setScheduleForAsset(null);
+        }}
+        onClose={() => setScheduleForAsset(null)}
+      />
     </div>
+  );
+}
+
+// ─── AIComposeModal ─────────────────────────────────────────────────────────
+
+function AIComposeModal({
+  open,
+  intent,
+  onIntentChange,
+  onUse,
+  onClose,
+}: {
+  open: boolean;
+  intent: string;
+  onIntentChange: (v: string) => void;
+  onUse: (text: string) => void;
+  onClose: () => void;
+}): React.ReactElement | null {
+  return (
+    <JcModal open={open} title="Let AI write the script" onClose={onClose} width="32rem">
+      <label className="jc-field">
+        <span>What should the announcer say?</span>
+        <textarea
+          rows={3}
+          value={intent}
+          onChange={(e) => onIntentChange(e.target.value)}
+          placeholder="e.g. remind customers about closing in 15 minutes, warm and friendly tone"
+        />
+      </label>
+      <p className="jc-hint">Sample suggestions — AI API not yet connected.</p>
+      <ul className="jc-ai-cards">
+        {MOCK_AI_SUGGESTIONS.map((text, i) => (
+          <li key={i} className="jc-ai-card">
+            <p>{text}</p>
+            <div className="jc-ai-card-actions">
+              <button
+                type="button"
+                className="jc-btn jc-btn--small jc-btn--primary"
+                onClick={() => onUse(text)}
+              >
+                Use this
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </JcModal>
+  );
+}
+
+// ─── PadEditModal ───────────────────────────────────────────────────────────
+
+type PadEditPatch = Pick<
+  SamplerPadItem,
+  "label" | "url" | "scheduledAt" | "color" | "bellStyle" | "preRoll"
+>;
+
+const PAD_COLOR_OPTIONS: readonly { value: PadColor; label: string; swatch: string }[] = [
+  { value: "default", label: "Emerald", swatch: "#34d399" },
+  { value: "sky",     label: "Sky",     swatch: "#38bdf8" },
+  { value: "violet",  label: "Violet",  swatch: "#a78bfa" },
+  { value: "indigo",  label: "Indigo",  swatch: "#6366f1" },
+  { value: "pink",    label: "Pink",    swatch: "#f472b6" },
+  { value: "rose",    label: "Rose",    swatch: "#fb7185" },
+  { value: "amber",   label: "Amber",   swatch: "#fbbf24" },
+  { value: "lime",    label: "Lime",    swatch: "#a3e635" },
+  { value: "teal",    label: "Teal",    swatch: "#2dd4bf" },
+];
+
+function PadEditModal({
+  pad,
+  onSave,
+  onClose,
+}: {
+  pad: SamplerPadItem | null;
+  onSave: (patch: PadEditPatch) => void;
+  onClose: () => void;
+}): React.ReactElement {
+  if (!pad) {
+    return (
+      <JcModal open={false} title="" onClose={onClose}>
+        {null}
+      </JcModal>
+    );
+  }
+  return <PadEditModalBody key={pad.id} pad={pad} onSave={onSave} onClose={onClose} />;
+}
+
+function PadEditModalBody({
+  pad,
+  onSave,
+  onClose,
+}: {
+  pad: SamplerPadItem;
+  onSave: (patch: PadEditPatch) => void;
+  onClose: () => void;
+}): React.ReactElement {
+  const [label, setLabel] = useState(pad.label);
+  const [url, setUrl] = useState(pad.url);
+  const [scheduledAt, setScheduledAt] = useState(pad.scheduledAt ?? "");
+  const [color, setColor] = useState<PadColor>(pad.color ?? "default");
+  const [bellStyle, setBellStyle] = useState<JingleBellStyle>(pad.bellStyle ?? "ding");
+  const [preRoll, setPreRoll] = useState<boolean>(pad.preRoll ?? true);
+
+  return (
+    <JcModal
+      open={true}
+      title={`Edit pad: ${pad.label}`}
+      onClose={onClose}
+      width="30rem"
+      footer={
+        <>
+          <button type="button" className="jc-btn jc-btn--ghost jc-btn--small" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="jc-btn jc-btn--primary jc-btn--small"
+            onClick={() =>
+              onSave({
+                label: label.trim() || pad.label,
+                url: url.trim(),
+                scheduledAt: scheduledAt || undefined,
+                color,
+                bellStyle,
+                preRoll,
+              })
+            }
+          >
+            Save
+          </button>
+        </>
+      }
+    >
+      <label className="jc-field">
+        <span>Name</span>
+        <input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Pad name"
+          maxLength={24}
+        />
+      </label>
+
+      <div className="jc-field">
+        <span>Color</span>
+        <div className="jc-color-grid" role="radiogroup" aria-label="Pad color">
+          {PAD_COLOR_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={color === opt.value}
+              title={opt.label}
+              className={`jc-color-swatch jc-color-swatch--${opt.value}${
+                color === opt.value ? " jc-color-swatch--selected" : ""
+              }`}
+              onClick={() => setColor(opt.value)}
+            >
+              <span className="jc-color-swatch-dot" style={{ background: opt.swatch }} aria-hidden />
+              <span className="jc-color-swatch-label">{opt.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <label className="jc-field">
+        <span>Audio URL or local path</span>
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://… or /api/jingles/audio/…"
+          spellCheck={false}
+        />
+      </label>
+
+      <div className="jc-field">
+        <span>Bell (pre-roll)</span>
+        <SegBtn
+          options={BELL_PRESETS.map((b) => ({ value: b.value, label: b.label }))}
+          value={preRoll ? bellStyle : "off"}
+          onChange={(v) => {
+            if (v === "off") {
+              setPreRoll(false);
+            } else {
+              setPreRoll(true);
+              setBellStyle(v as JingleBellStyle);
+            }
+          }}
+        />
+      </div>
+
+      <label className="jc-field">
+        <span>Schedule at (optional)</span>
+        <input
+          type="datetime-local"
+          className="jc-datetime"
+          value={scheduledAt}
+          onChange={(e) => setScheduledAt(e.target.value)}
+        />
+      </label>
+    </JcModal>
+  );
+}
+
+// ─── AssignToPadModal ───────────────────────────────────────────────────────
+
+function AssignToPadModal({
+  asset,
+  pads,
+  onPick,
+  onClose,
+}: {
+  asset: JingleAsset | null;
+  pads: SamplerPadItem[];
+  onPick: (padId: string) => void;
+  onClose: () => void;
+}): React.ReactElement | null {
+  const open = asset !== null;
+  return (
+    <JcModal
+      open={open}
+      title={asset ? `Assign "${asset.title}" to pad` : ""}
+      onClose={onClose}
+      width="28rem"
+    >
+      <p className="jc-hint">Pick a pad. Assigned pads will be overwritten.</p>
+      <div className="jc-pad-picker-grid">
+        {pads.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className={`jc-pad-picker-btn ${p.url ? "jc-pad-picker-btn--has" : ""}`}
+            onClick={() => onPick(p.id)}
+            title={p.url ? "Currently assigned — will overwrite" : "Empty"}
+          >
+            <span>{p.label}</span>
+            <span className={`jc-pad-picker-dot ${p.url ? "jc-pad-picker-dot--on" : ""}`} />
+          </button>
+        ))}
+      </div>
+    </JcModal>
+  );
+}
+
+// ─── ScheduleAssetModal ─────────────────────────────────────────────────────
+
+function ScheduleAssetModal({
+  asset,
+  onConfirm,
+  onClose,
+}: {
+  asset: JingleAsset | null;
+  onConfirm: (scheduledAt: string, repeat: string, target: string) => void;
+  onClose: () => void;
+}): React.ReactElement {
+  if (!asset) {
+    return (
+      <JcModal open={false} title="" onClose={onClose}>
+        {null}
+      </JcModal>
+    );
+  }
+  return <ScheduleAssetModalBody key={asset.id} asset={asset} onConfirm={onConfirm} onClose={onClose} />;
+}
+
+function ScheduleAssetModalBody({
+  asset,
+  onConfirm,
+  onClose,
+}: {
+  asset: JingleAsset;
+  onConfirm: (scheduledAt: string, repeat: string, target: string) => void;
+  onClose: () => void;
+}): React.ReactElement {
+  const [when, setWhen] = useState("");
+  const [repeat, setRepeat] = useState("once");
+  const [target, setTarget] = useState("default");
+
+  return (
+    <JcModal
+      open={true}
+      title={`Schedule "${asset.title}"`}
+      onClose={onClose}
+      width="28rem"
+      footer={
+        <>
+          <button type="button" className="jc-btn jc-btn--ghost jc-btn--small" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="jc-btn jc-btn--primary jc-btn--small"
+            disabled={!when}
+            onClick={() => onConfirm(when, repeat, target)}
+          >
+            Confirm
+          </button>
+        </>
+      }
+    >
+      <label className="jc-field">
+        <span>When</span>
+        <input
+          type="datetime-local"
+          className="jc-datetime"
+          value={when}
+          onChange={(e) => setWhen(e.target.value)}
+        />
+      </label>
+      <div className="jc-field">
+        <span>Repeat</span>
+        <SegBtn
+          options={[
+            { value: "once", label: "Once" },
+            { value: "daily", label: "Daily" },
+            { value: "weekly", label: "Weekly" },
+          ]}
+          value={repeat}
+          onChange={(v) => setRepeat(v)}
+        />
+      </div>
+      <label className="jc-field">
+        <span>Target branch / device</span>
+        <input value={target} onChange={(e) => setTarget(e.target.value)} />
+      </label>
+    </JcModal>
   );
 }
 

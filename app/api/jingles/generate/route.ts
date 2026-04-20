@@ -9,10 +9,19 @@ export const dynamic = "force-dynamic";
 const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 // Sarah — free-tier confirmed. Override with ELEVENLABS_VOICE_ID env var.
 const DEFAULT_VOICE_ID = "EXAVITQu4vr4xnSDxMaL";
-// eleven_turbo_v2_5: supports top-level `speed` param + auto-detects Hebrew
-const DEFAULT_MODEL = "eleven_turbo_v2_5";
-// 0.85 feels natural for announcements; multilingual model default is too fast
-const DEFAULT_SPEED = 0.85;
+// Model choice per language:
+//  - en  → turbo_v2_5 (fast, supports top-level `speed`, excellent English)
+//  - he  → multilingual_v2 (much better Hebrew naturalness than turbo)
+const MODEL_BY_LANG: Record<"en" | "he", string> = {
+  en: "eleven_turbo_v2_5",
+  he: "eleven_multilingual_v2",
+};
+// Speed presets → ElevenLabs `speed` param (turbo model) / stability nudge (multilingual).
+const SPEED_VALUES: Record<"slow" | "normal" | "fast", number> = {
+  slow:   0.75,
+  normal: 0.9,
+  fast:   1.05,
+};
 
 function jinglesDir(): string {
   const vol = process.env.RAILWAY_VOLUME_MOUNT_PATH;
@@ -31,7 +40,12 @@ export async function POST(req: NextRequest) {
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = (await req.json()) as { text?: string; voiceId?: string };
+  const body = (await req.json()) as {
+    text?: string;
+    voiceId?: string;
+    language?: "en" | "he";
+    speed?: "slow" | "normal" | "fast";
+  };
   const text = (body.text ?? "").trim();
   if (!text) return NextResponse.json({ error: "text is required" }, { status: 400 });
   if (text.length > 2500) return NextResponse.json({ error: "text too long (max 2500 chars)" }, { status: 400 });
@@ -43,13 +57,25 @@ export async function POST(req: NextRequest) {
     || process.env.ELEVENLABS_VOICE_ID?.trim()
     || DEFAULT_VOICE_ID;
 
-  // eleven_turbo_v2_5 auto-detects Hebrew (and all other languages supported by
-  // eleven_multilingual_v2) without a language_code parameter — passing one causes 400.
-  const ttsBody = {
+  const language: "en" | "he" = body.language === "he" ? "he" : "en";
+  const speedKey: "slow" | "normal" | "fast" =
+    body.speed === "slow" || body.speed === "fast" ? body.speed : "normal";
+  const speedValue = SPEED_VALUES[speedKey];
+  const modelId = MODEL_BY_LANG[language];
+
+  /** `speed` is a top-level param on turbo_v2_5; multilingual_v2 ignores it
+   *  silently but accepts it in the payload. For multilingual we also push
+   *  stability higher to reduce English-accented Hebrew artifacts. */
+  const voiceSettings =
+    language === "he"
+      ? { stability: 0.6, similarity_boost: 0.85, style: 0.15, use_speaker_boost: true }
+      : { stability: 0.55, similarity_boost: 0.75 };
+
+  const ttsBody: Record<string, unknown> = {
     text,
-    model_id: DEFAULT_MODEL,
-    speed: DEFAULT_SPEED,
-    voice_settings: { stability: 0.55, similarity_boost: 0.75 },
+    model_id: modelId,
+    speed: speedValue,
+    voice_settings: voiceSettings,
   };
 
   let audioBuffer: Buffer;
@@ -85,7 +111,10 @@ export async function POST(req: NextRequest) {
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, `${id}.mp3`), audioBuffer);
 
-  console.log(`[jingles/generate] saved ${audioBuffer.byteLength}B → ${id}.mp3 (voice=${voiceId})`);
+  console.log(
+    `[jingles/generate] saved ${audioBuffer.byteLength}B → ${id}.mp3 ` +
+      `(voice=${voiceId} lang=${language} model=${modelId} speed=${speedKey}/${speedValue})`,
+  );
 
   return NextResponse.json({
     id,
