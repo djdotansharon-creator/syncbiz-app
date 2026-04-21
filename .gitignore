@@ -50,6 +50,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# Exception: production WS URL baked into the desktop installer. Public value,
+# no secrets — MUST be committed so CI builds pick it up.
+!desktop/.env.electron-web
 
 # vercel
 .vercel
