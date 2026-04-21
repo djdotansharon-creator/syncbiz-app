@@ -1,6 +1,7 @@
 {
   "name": "syncbiz-player-desktop",
-  "version": "0.0.0-placeholder",
+  "productName": "SyncBiz Player",
+  "version": "0.1.0",
   "private": true,
   "main": "dist/main/index.js",
   "scripts": {
@@ -8,7 +9,12 @@
     "start": "npm run build && electron .",
     "start:web-bundle": "npm run build && node scripts/run-electron-with-staged-web.cjs",
     "verify:player-chrome": "electron scripts/verify-player-chrome.cjs",
-    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "dist:publish": "npm run build && electron-builder --publish always"
   },
   "dependencies": {
     "react": "18.3.1",
@@ -16,12 +22,114 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "@types/node": "^20",
     "@types/ws": "^8.5.13",
     "electron": "^34.0.0",
+    "electron-builder": "^25.1.8",
     "esbuild": "^0.25.0",
     "typescript": "^5"
+  },
+  "build": {
+    "appId": "com.syncbiz.player",
+    "productName": "SyncBiz Player",
+    "copyright": "Copyright (c) 2026 SyncBiz",
+    "directories": {
+      "output": "dist-installer",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "src/renderer/index.html",
+      "package.json",
+      "!dist/**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "staged-web",
+        "to": "syncbiz-web",
+        "filter": [
+          "**/*",
+          "!**/*.map",
+          "!**/node_modules/.cache/**",
+          "!**/node_modules/yt-dlp-wrap/bin/**",
+          "!**/*.ts",
+          "!**/*.tsx",
+          "!**/*.md",
+          "!**/README*",
+          "!**/LICENSE*",
+          "!**/CHANGELOG*",
+          "!**/.bin/**",
+          "!**/test/**",
+          "!**/tests/**",
+          "!**/__tests__/**",
+          "!**/*.test.js"
+        ]
+      }
+    ],
+    "asar": true,
+    "compression": "maximum",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "SyncBiz-Player-Setup-${version}-${arch}.${ext}",
+      "extraResources": [
+        {
+          "from": "resources/7zr.exe",
+          "to": "7zr.exe"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SyncBiz Player",
+      "uninstallDisplayName": "SyncBiz Player"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "SyncBiz-Player-${version}-${arch}.${ext}",
+      "category": "public.app-category.music",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "SyncBiz-Player-${version}-${arch}.${ext}",
+      "category": "AudioVideo"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "djdotansharon-creator",
+        "repo": "syncbiz-app",
+        "releaseType": "release"
+      }
+    ]
   }
 }

@@ -389,6 +389,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       onSecondaryDesktop,
       onGuestRecommendation,
       onAuthError,
+      isDesktopApp: isElectronShell === true,
     }
   );
 

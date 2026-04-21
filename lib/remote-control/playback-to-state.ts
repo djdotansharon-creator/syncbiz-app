@@ -31,7 +31,23 @@ export function playbackToStationState(
         ? { title: currentSource.title, cover: currentSource.cover ?? null }
         : null,
     currentSource: currentSource
-      ? { id: currentSource.id, title: currentSource.title, cover: currentSource.cover ?? null }
+      ? {
+          id: currentSource.id,
+          title: currentSource.title,
+          cover: currentSource.cover ?? null,
+          // Deep-link to the source's editor so a CONTROL mirror (browser tab
+          // on same user) can render an Edit button that opens the correct
+          // entity editor. Catalog editing is not playback-scoped, so we
+          // allow it regardless of device role.
+          editHref:
+            currentSource.origin === "playlist" && currentSource.playlist
+              ? `/playlists/${currentSource.playlist.id}/edit`
+              : currentSource.origin === "radio" && currentSource.radio
+                ? `/radio/${currentSource.radio.id}/edit`
+                : currentSource.origin === "source" && currentSource.source
+                  ? `/sources/${currentSource.source.id}/edit`
+                  : null,
+        }
       : null,
     currentTrackIndex,
     queue: queue.map((s) => ({ id: s.id, title: s.title, cover: s.cover ?? null })),

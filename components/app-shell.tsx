@@ -25,14 +25,11 @@ import { searchExternal } from "@/lib/search-service";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { DeviceModeIndicator } from "@/components/device-mode-indicator";
 import { StandaloneIndicator } from "@/components/standalone-indicator";
+import { DesktopDownloadButton } from "@/components/desktop-download-button";
 import { CenterModuleContext, type CenterModule, isJinglesModule } from "@/lib/center-module-context";
+import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
+import { useTopNavPins } from "@/lib/use-top-nav-pins";
 
-const categoryKeys = ["dashboard", "sources", "radio", "owner", "schedules", "logs"] as const;
-const categoryItems = categoryKeys.map((key) => ({
-  href: key === "dashboard" ? "/dashboard" : key === "owner" ? "/owner" : `/${key}`,
-  labelKey: key === "sources" ? "library" : key,
-  iconKey: key,
-}));
 const pillLink =
   "rounded-xl border border-slate-700/80 bg-slate-900/90 px-3.5 py-2 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] transition-all duration-100 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950";
 
@@ -129,13 +126,72 @@ function IconRadio() {
     </svg>
   );
 }
-const categoryIcons: Record<(typeof categoryKeys)[number], () => React.ReactElement> = {
+function IconFavorites() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </svg>
+  );
+}
+function IconRemote() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="2" width="14" height="20" rx="2" />
+      <line x1="12" y1="18" x2="12.01" y2="18" />
+    </svg>
+  );
+}
+function IconSettings() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+function IconAccess() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
+function IconArchitecture() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <path d="M14 17.5a3.5 3.5 0 1 0 7 0 3.5 3.5 0 0 0-7 0z" />
+    </svg>
+  );
+}
+function IconGear() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+/**
+ * Icons for every main-menu entry. Library/Radio are intentionally never shown
+ * in the floating menu (they are permanent top-bar pins), but we still include
+ * them here so other consumers (e.g. future "customize" UI) can reuse the map.
+ */
+const mainMenuIconMap: Record<string, () => React.ReactElement> = {
   dashboard: IconDashboard,
   sources: IconSources,
   radio: IconRadio,
+  favorites: IconFavorites,
+  remote: IconRemote,
   owner: IconOwner,
   schedules: IconSchedules,
   logs: IconLogs,
+  settings: IconSettings,
+  "access-control": IconAccess,
+  architecture: IconArchitecture,
 };
 const pillBase = "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05),0_2px_8px_rgba(0,0,0,0.25)] transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-slate-400/40 focus:ring-offset-2 focus:ring-offset-slate-950";
 const pillInactive = "border-slate-700/80 bg-slate-900/70 text-slate-400 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_20px_rgba(100,116,139,0.08)]";
@@ -188,8 +244,9 @@ function LogoutButton() {
         type="button"
         onClick={() => setConfirmOpen(true)}
         disabled={loading}
-        className="rounded-lg border border-slate-700/80 bg-slate-900/60 px-2.5 py-1.5 text-xs font-medium text-slate-400 transition hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 disabled:opacity-50"
+        className="logout-led-button inline-flex items-center gap-1.5 rounded-full border border-sky-400/70 bg-sky-500/12 px-2.5 py-1 text-[11px] font-medium text-sky-100 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.18),0_0_14px_rgba(56,189,248,0.3)] transition hover:border-sky-300/90 hover:bg-sky-500/20 hover:shadow-[inset_0_0_0_1px_rgba(56,189,248,0.3),0_0_22px_rgba(56,189,248,0.48)] focus:outline-none focus:ring-2 focus:ring-sky-400/40 disabled:opacity-50"
       >
+        <span aria-hidden className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-300 shadow-[0_0_6px_rgba(56,189,248,0.95)]" />
         {loading ? "…" : "Logout"}
       </button>
       <DeleteConfirmModal
@@ -263,6 +320,36 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { playSource, setQueue } = usePlayback();
   const [playerDropActive, setPlayerDropActive] = useState(false);
   const [activeCenterModule, setActiveCenterModule] = useState<CenterModule>(null);
+  const [mainMenuOpen, setMainMenuOpen] = useState(false);
+  const mainMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const { isPinned: isCategoryPinned, togglePin: toggleCategoryPin } = useTopNavPins();
+  // The floating main menu exposes every nav entry *except* Library and Radio
+  // (permanent pins to the top bar) and Favorites (surfaced via library
+  // filters, per user request). Each remaining item carries a Pin toggle so
+  // the user can promote it to the top bar at any time.
+  const mainMenuItems: MainMenuItem[] = navItems
+    .filter(
+      (item) =>
+        item.labelKey !== "library" &&
+        item.labelKey !== "radio" &&
+        item.labelKey !== "favorites",
+    )
+    .map((item) => {
+      const Icon = mainMenuIconMap[item.labelKey] ?? mainMenuIconMap.dashboard;
+      const isActive =
+        item.href === "/dashboard"
+          ? pathname === "/dashboard"
+          : pathname.startsWith(item.href);
+      return {
+        key: item.href,
+        href: item.href,
+        label: labels[item.labelKey]?.[locale] ?? item.labelKey,
+        icon: <Icon />,
+        isActive,
+        isPinned: isCategoryPinned(item.labelKey),
+        onTogglePin: () => toggleCategoryPin(item.labelKey),
+      };
+    });
 
   const parseDroppedUrl = async (url: string): Promise<ParseUrlJson | null> => {
     const controller = new AbortController();
@@ -516,64 +603,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <CenterModuleContext.Provider value={{ active: activeCenterModule, setActive: setActiveCenterModule }}>
     <div className="flex min-h-screen bg-slate-950 text-slate-50">
-      <aside
-        className={`hidden w-56 flex-col border-r border-slate-800/60 bg-slate-950/95 px-4 py-5 lg:flex sticky top-0 self-start h-screen overflow-y-auto${
-          isMediaThemeRoute ? " media-theme-sidebar" : ""
-        }`}
-        {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
-      >
-        <Link href="/library" className="flex items-center gap-2.5 px-1">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-base font-semibold text-sky-400 ring-1 ring-sky-500/30">
-            SB
-          </span>
-          <div>
-            <p className="text-sm font-semibold tracking-tight text-slate-50">
-              SyncBiz
-            </p>
-            <p className="text-[11px] text-slate-500">Audio scheduling</p>
-          </div>
-        </Link>
-        <nav className="mt-8 flex-1 space-y-0.5 text-sm">
-          {navItems.map((item) => {
-            const isActive =
-              item.href === "/dashboard"
-                ? pathname === "/dashboard"
-                : pathname.startsWith(item.href);
-            const label = labels[item.labelKey]?.[locale] ?? item.labelKey;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-2.5 rounded-lg px-3 py-2 transition ${
-                  isMediaThemeRoute
-                    ? isActive
-                      ? "media-sidebar-link media-sidebar-link-active"
-                      : "media-sidebar-link media-sidebar-link-idle"
-                    : isActive
-                      ? "bg-slate-800/80 text-sky-100"
-                      : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
-                }`}
-              >
-                <span
-                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                    isMediaThemeRoute
-                      ? isActive
-                        ? "media-sidebar-dot-active"
-                        : "media-sidebar-dot-idle"
-                      : isActive
-                        ? "bg-sky-400"
-                        : "bg-slate-600"
-                  }`}
-                />
-                {label}
-              </Link>
-            );
-          })}
-        </nav>
-        <div className="mt-6 border-t border-slate-800/60 pt-4 text-[11px] text-slate-500">
-          {t.sidebarFooter}
-        </div>
-      </aside>
+      {/*
+       * Desktop sidebar intentionally removed. All its navigation entries now
+       * live in the top bar (Library + Radio pinned) and in the floating
+       * "Main menu" gear popover (everything else). Mobile gets its own layout
+       * earlier in the component (isMobileOrEditFromMobile branch) so this
+       * change does not affect the mobile experience.
+       */}
 
       <div
         className={`flex min-h-screen flex-1 flex-col${isMediaThemeRoute ? " app-sources-theme-scope" : ""}`}
@@ -585,52 +621,93 @@ export function AppShell({ children }: { children: ReactNode }) {
           }`}
           role="banner"
         >
-          {/* Row 1: Title, greeting, time */}
+          {/* Row 1: Left (logo + title) · Center (time/user/station chip) · Right (indicators + gear) */}
           <div
-            className={`flex min-w-0 flex-nowrap items-center justify-between gap-2 border-b border-slate-800/60 px-3 py-3 sm:gap-3 sm:px-6${
+            className={`flex min-w-0 flex-nowrap items-center gap-2 border-b border-slate-800/60 px-3 py-3 sm:gap-3 sm:px-6${
               isMediaThemeRoute ? " sources-app-header-row1" : ""
             }`}
           >
-            <div className="min-w-0 flex-1">
-              <h1 className="text-base font-bold tracking-tight text-slate-50">
-                {t.businessMediaScheduler ?? "Business Media Scheduler"}
-              </h1>
-              <p className="mt-0.5 text-xs text-slate-500">
-                {headerSubtitle}
-              </p>
-            </div>
-            <div className="flex min-w-0 shrink items-center gap-2">
-              <div
-                className={`flex min-w-0 shrink items-center gap-1.5 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] sm:gap-2.5 sm:px-3${
-                  isSourcesLibraryRoute ? " sources-header-meta-plate" : ""
-                }`}
-                dir={locale === "he" ? "rtl" : "ltr"}
-              >
-                <span className="shrink-0 text-base font-semibold tabular-nums text-slate-200" suppressHydrationWarning>
-                  {timeStr}
+            <div className="flex min-w-0 flex-1 basis-0 items-center gap-3">
+              <Link href="/library" className="flex shrink-0 items-center gap-2.5" aria-label="SyncBiz">
+                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-base font-semibold text-sky-400 ring-1 ring-sky-500/30">
+                  SB
                 </span>
-                <span className="h-4 w-px shrink-0 bg-slate-700/60" aria-hidden />
-                <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
-                  <span className="shrink-0 text-slate-500">{greeting}</span>
-                  <span className="h-3 w-px shrink-0 bg-slate-700/50" aria-hidden />
-                  <span className="truncate font-medium text-slate-100">
-                    {sessionName ?? t.subscriberName ?? "Subscriber"}
-                  </span>
-                  <span className="h-3 w-px shrink-0 bg-slate-700/50" aria-hidden />
-                  <span className="truncate text-slate-300">
-                    {sessionAccountName ?? t.companyName ?? "Company"}
-                  </span>
+                <div className="hidden min-w-0 sm:block">
+                  <p className="text-sm font-semibold leading-tight tracking-tight text-slate-50">
+                    SyncBiz
+                  </p>
+                  <p className="text-[11px] leading-tight text-slate-500">Audio scheduling</p>
                 </div>
+              </Link>
+              <span className="hidden h-8 w-px shrink-0 bg-slate-800/80 sm:block" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate text-base font-bold tracking-tight text-slate-50">
+                  {t.businessMediaScheduler ?? "Business Media Scheduler"}
+                </h1>
+                <p className="mt-0.5 truncate text-xs text-slate-500">
+                  {headerSubtitle}
+                </p>
               </div>
+            </div>
+            {/* Centered meta chip — gentle cyan frame + soft outer glow so it
+                reads as "alive" without stealing attention from the Master LED. */}
+            <div
+              className={`flex min-w-0 shrink items-center gap-1.5 rounded-xl border border-cyan-400/40 bg-slate-900/85 px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),inset_0_0_0_1px_rgba(56,189,248,0.12),0_0_22px_rgba(56,189,248,0.14),0_2px_6px_rgba(0,0,0,0.3)] sm:gap-2.5 sm:px-3${
+                isSourcesLibraryRoute ? " sources-header-meta-plate" : ""
+              }`}
+              dir={locale === "he" ? "rtl" : "ltr"}
+            >
+              <span className="shrink-0 text-base font-semibold tabular-nums text-slate-200" suppressHydrationWarning>
+                {timeStr}
+              </span>
+              <span className="h-4 w-px shrink-0 bg-slate-700/60" aria-hidden />
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
+                <span className="shrink-0 text-slate-500">{greeting}</span>
+                <span className="h-3 w-px shrink-0 bg-slate-700/50" aria-hidden />
+                <span className="truncate font-medium text-slate-100">
+                  {sessionName ?? t.subscriberName ?? "Subscriber"}
+                </span>
+                <span className="h-3 w-px shrink-0 bg-slate-700/50" aria-hidden />
+                <span className="truncate text-slate-300">
+                  {sessionAccountName ?? t.companyName ?? "Company"}
+                </span>
+              </div>
+            </div>
+            <div className="flex min-w-0 flex-1 basis-0 items-center justify-end gap-2">
+              <DesktopDownloadButton />
               <StandaloneIndicator />
               <DeviceModeIndicator />
               <span className="hidden items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/80 px-2.5 py-1 text-xs text-slate-400 sm:flex">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 {t.agentsHealthy}
               </span>
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-800 bg-slate-900/80 text-xs font-medium text-slate-400">
-                SB
-              </span>
+              <div className="relative">
+                <button
+                  ref={mainMenuTriggerRef}
+                  type="button"
+                  aria-label={t.mainMenu ?? "Main menu"}
+                  title={t.mainMenu ?? "Main menu"}
+                  aria-haspopup="menu"
+                  aria-expanded={mainMenuOpen}
+                  onClick={() => setMainMenuOpen((v) => !v)}
+                  className={`main-menu-gear inline-flex h-8 w-8 items-center justify-center rounded-full border text-slate-300 transition ${
+                    mainMenuOpen
+                      ? "border-sky-500/50 bg-sky-500/15 text-sky-200 shadow-[0_0_18px_rgba(56,189,248,0.25)]"
+                      : "border-slate-800 bg-slate-900/80 hover:border-slate-700 hover:bg-slate-800 hover:text-slate-100"
+                  }`}
+                >
+                  <IconGear />
+                </button>
+                <MainMenuPopover
+                  open={mainMenuOpen}
+                  onClose={() => setMainMenuOpen(false)}
+                  anchorRef={mainMenuTriggerRef}
+                  items={mainMenuItems}
+                  title={t.mainMenu ?? "Main menu"}
+                  pinLabel={t.pinToTop ?? "Pin to top"}
+                  dir={locale === "he" ? "rtl" : "ltr"}
+                />
+              </div>
             </div>
           </div>
           {/* Row 2: Nav pills + language */}
@@ -640,26 +717,32 @@ export function AppShell({ children }: { children: ReactNode }) {
             }`}
           >
             <nav className="flex flex-wrap items-center gap-1.5" aria-label="Main">
-              {categoryItems.map((item) => {
-                const isActive =
-                  item.href === "/dashboard"
-                    ? pathname === "/dashboard"
-                    : pathname.startsWith(item.href);
-                const label = labels[item.labelKey]?.[locale] ?? item.labelKey;
-                const Icon = categoryIcons[item.iconKey];
-                const pillClass = isMediaThemeRoute
-                  ? `inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05),0_2px_8px_rgba(0,0,0,0.25)] transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-slate-400/40 focus:ring-offset-0 source-nav-pill ${
-                      isActive ? "source-nav-pill-active" : "source-nav-pill-idle"
-                    }`
-                  : `${pillBase} ${isActive ? pillActive : pillInactive}`;
-                const focusRing = isMediaThemeRoute ? "" : " focus:ring-offset-2 focus:ring-offset-slate-950";
-                return (
-                  <Link key={item.href} href={item.href} className={`${pillClass}${focusRing}`}>
-                    {Icon && <Icon />}
-                    {label}
-                  </Link>
-                );
-              })}
+              {/* Pill order is the canonical navKeys order so the pins stay in
+                  a stable, predictable sequence regardless of the order the
+                  user toggled them on. Library + Radio are always first (and
+                  non-removable); every other pill appears only if pinned. */}
+              {navItems
+                .filter((item) => isCategoryPinned(item.labelKey))
+                .map((item) => {
+                  const isActive =
+                    item.href === "/dashboard"
+                      ? pathname === "/dashboard"
+                      : pathname.startsWith(item.href);
+                  const label = labels[item.labelKey]?.[locale] ?? item.labelKey;
+                  const Icon = mainMenuIconMap[item.labelKey];
+                  const pillClass = isMediaThemeRoute
+                    ? `inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05),0_2px_8px_rgba(0,0,0,0.25)] transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-slate-400/40 focus:ring-offset-0 source-nav-pill ${
+                        isActive ? "source-nav-pill-active" : "source-nav-pill-idle"
+                      }`
+                    : `${pillBase} ${isActive ? pillActive : pillInactive}`;
+                  const focusRing = isMediaThemeRoute ? "" : " focus:ring-offset-2 focus:ring-offset-slate-950";
+                  return (
+                    <Link key={item.href} href={item.href} className={`${pillClass}${focusRing}`}>
+                      {Icon && <Icon />}
+                      {label}
+                    </Link>
+                  );
+                })}
             </nav>
             <div className="sources-system-cluster ms-auto flex shrink-0 items-center gap-2">
               <LogoutButton />

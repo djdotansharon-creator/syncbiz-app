@@ -7,15 +7,25 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import path from "node:path";
 import net from "node:net";
-import { app } from "electron";
 
 function resolvePipePath(pipeName: string): string {
   return process.platform === "win32"
     ? `\\\\.\\pipe\\${pipeName}`
     : `/tmp/${pipeName}.sock`;
 }
+
+/**
+ * Absolute binary paths provided by the runtime-binaries layer.
+ * MpvManager does NOT look up binaries itself any more — the runtime-binaries
+ * module is the single place that knows how to find/install mpv + yt-dlp.
+ */
+export type MpvBinaries = {
+  /** Absolute path to `mpv` / `mpv.exe`. */
+  mpvBin: string;
+  /** Absolute path to `yt-dlp` / `yt-dlp.exe`, or `null` if not available. */
+  ytDlpBin: string | null;
+};
 
 export type MpvPlaybackStatus = "idle" | "playing" | "paused" | "stopped";
 
@@ -27,15 +37,6 @@ export type MpvStatus = {
 };
 
 type MpvStatusCallback = (status: MpvStatus) => void;
-
-function getMpvBinaryPath(): string {
-  const exe = process.platform === "win32" ? "mpv.exe" : "mpv";
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, "mpv", exe);
-  }
-  // Dev: compiled to desktop/dist/main/ — walk up two dirs to desktop/resources/mpv/
-  return path.join(__dirname, "../../resources/mpv", exe);
-}
 
 export class MpvManager {
   private readonly pipePath: string;
@@ -69,30 +70,33 @@ export class MpvManager {
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────────
 
-  start(): void {
-    const bin = getMpvBinaryPath();
+  /**
+   * Start MPV. Binary paths must be resolved and passed in by the caller
+   * (`PlaybackOrchestrator`, which obtains them from
+   * `runtime-binaries/ensureRuntimeBinaries`).
+   */
+  start(binaries: MpvBinaries): void {
+    const bin = binaries.mpvBin;
     if (!existsSync(bin)) {
       console.warn(
         "[MpvManager] binary not found at",
         bin,
-        "— audio commands will be no-ops. Place mpv.exe in desktop/resources/mpv/",
+        "— audio commands will be no-ops. runtime-binaries should have resolved this.",
       );
       return;
     }
 
-    // yt-dlp: if present alongside mpv.exe, tell MPV's ytdl_hook.lua where to
-    // find it via --script-opts (no env override — env override breaks MPV on Windows).
-    const mpvDir = path.dirname(bin);
-    const ytDlpExe = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
-    const ytDlpBin = path.join(mpvDir, ytDlpExe);
-    const hasYtDlp = existsSync(ytDlpBin);
+    // yt-dlp: tell MPV's ytdl_hook.lua where to find it via --script-opts
+    // (no env override — env override breaks MPV on Windows).
+    const ytDlpBin = binaries.ytDlpBin;
+    const hasYtDlp = !!ytDlpBin && existsSync(ytDlpBin);
     // Forward slashes: MPV script-opts path must use / not \ on Windows
-    const ytDlpFwdSlash = ytDlpBin.replace(/\\/g, "/");
+    const ytDlpFwdSlash = hasYtDlp ? ytDlpBin!.replace(/\\/g, "/") : "";
     const ytDlpArgs = hasYtDlp ? [`--script-opts=ytdl_hook-ytdl_path=${ytDlpFwdSlash}`] : [];
     if (hasYtDlp) {
-      console.log("[MpvManager]", this.pipePath, "yt-dlp found →", ytDlpBin, "— YouTube playback enabled");
+      console.log("[MpvManager]", this.pipePath, "yt-dlp resolved →", ytDlpBin, "— YouTube playback enabled");
     } else {
-      console.log("[MpvManager]", this.pipePath, "yt-dlp NOT found in", mpvDir, "— YouTube URLs will fail; place yt-dlp.exe there to enable");
+      console.log("[MpvManager]", this.pipePath, "yt-dlp unavailable — YouTube URLs will fail");
     }
 
     // stdio: stderr piped so MPV errors are visible in main-process console.

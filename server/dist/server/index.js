@@ -191,6 +191,18 @@ function isEligibleConnectedPlaybackCandidate(d, userId, branchId) {
     return (intent.runtimeMode === "branch_playback" &&
         (intent.devicePurpose === "branch_desktop_station" || intent.devicePurpose === "branch_web_station"));
 }
+function demoteOtherMasters(userId, branchId, exceptDeviceId, newMasterId) {
+    devices.forEach((d) => {
+        if (d.id === exceptDeviceId)
+            return;
+        if (!isEligibleConnectedPlaybackCandidate(d, userId, branchId))
+            return;
+        if (d.mode !== "MASTER")
+            return;
+        d.mode = "CONTROL";
+        d.ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL", masterDeviceId: newMasterId }));
+    });
+}
 function tryPromoteConnectedControlOnMasterLoss(userId, branchId) {
     let candidate = null;
     devices.forEach((d) => {
@@ -219,7 +231,11 @@ function tryPromoteConnectedControlOnMasterLoss(userId, branchId) {
     });
     selected.mode = "MASTER";
     masterByBranch.set(key, selected.id);
-    primaryMasterByBranch.set(key, selected.id);
+    // NOTE: primaryMasterByBranch intentionally NOT overwritten here.
+    // This promotion is a TEMPORARY takeover after the designated primary dropped.
+    // Keeping `primaryMasterByBranch` pointing at the original primary lets it
+    // reclaim MASTER when it reconnects (see REGISTER "device matches primary
+    // reservation" branch). Explicit transfer still goes through SET_MASTER.
     masterDisconnectedAt.delete(key);
     persistMasterLease();
     if (selected.ws.readyState === 1) {
@@ -228,9 +244,14 @@ function tryPromoteConnectedControlOnMasterLoss(userId, branchId) {
     return selected.id;
 }
 function isTrueMasterLossCloseCode(code) {
-    // Explicit app/tab close, process exit/no close frame, abnormal peer loss, or heartbeat timeout.
-    // These are the close paths we should fail over from when a connected eligible CONTROL already exists.
-    return code === 1000 || code === 1001 || code === 1005 || code === 1006 || code === 4006;
+    // Only *unambiguous* master-loss codes trigger immediate takeover promotion:
+    //   1001 = Going Away (tab/app closed explicitly, user intent clear).
+    //   4006 = Heartbeat timeout (90s of silence — master is truly gone).
+    // All other codes (1000 clean close from transient reload/navigation, 1005 no
+    // status, 1006 abnormal loss on network blip) are ambiguous and the master
+    // may return momentarily. Those fall back to the normal grace window and
+    // avoid the "master ping-pong" between desktop and browser on every blip.
+    return code === 1001 || code === 4006;
 }
 /** Backward compat: get master for default branch (single-branch mode). */
 function getMasterForUser(userId) {
@@ -540,12 +561,16 @@ wss.on("connection", (ws) => {
                     if (deviceId === primaryId) {
                         mode = "MASTER";
                         masterDisconnectedAt.delete(key);
+                        // Demote any takeover holder before this primary reclaims the lease.
+                        demoteOtherMasters(userId, branchId, deviceId, deviceId);
                         masterByBranch.set(key, deviceId);
                         persistMasterLease();
-                        masterDecisionReason = "desktop: device matches primary reservation -> MASTER";
+                        masterDecisionReason = "desktop: device matches primary reservation -> MASTER (demoted any takeover holder)";
                     }
                     else {
-                        secondaryDesktop = devices.has(primaryId);
+                        secondaryDesktop =
+                            (registrationIntent?.devicePurpose === "branch_desktop_station") &&
+                            devices.has(primaryId);
                         masterDecisionReason = "desktop: different device than primary reservation -> CONTROL";
                     }
                 }
@@ -560,7 +585,7 @@ wss.on("connection", (ws) => {
                         masterDecisionReason = "desktop: reserved master within grace -> MASTER";
                     }
                     else if (reservedMasterId) {
-                        secondaryDesktop = true;
+                        secondaryDesktop = registrationIntent?.devicePurpose === "branch_desktop_station";
                         masterDecisionReason = "desktop: reserved master within grace (other device) -> CONTROL";
                     }
                     else {
@@ -755,19 +780,7 @@ wss.on("connection", (ws) => {
             // Mobile must NEVER become primary branch MASTER. Reject SET_MASTER from mobile.
             if (isMobile)
                 return;
-            // Demote ALL other desktop devices in this branch that have mode=MASTER (single source of truth)
-            devices.forEach((d) => {
-                if (d.role === "device" &&
-                    (d.userId ?? "") === userId &&
-                    d.branchId === branchId &&
-                    d.id !== deviceId &&
-                    d.mode === "MASTER" &&
-                    !d.isMobile &&
-                    d.ws.readyState === 1) {
-                    d.mode = "CONTROL";
-                    d.ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL", masterDeviceId: deviceId }));
-                }
-            });
+            demoteOtherMasters(userId, branchId, deviceId, deviceId);
             masterByBranch.set(key, deviceId);
             primaryMasterByBranch.set(key, deviceId);
             masterDisconnectedAt.delete(key);
@@ -859,9 +872,50 @@ wss.on("connection", (ws) => {
                     }
                     else {
                         masterDisconnectedAt.set(key, Date.now());
-                        // Immediate failover only for true-loss close paths.
-                        // Keep grace reservation for ambiguous/non-loss conditions.
-                        shouldTryAutoPromote = isTrueMasterLossCloseCode(code);
+                        // Asymmetric failover policy (fixes desktop<->browser ping-pong):
+                        //
+                        //   - Dying master was a WEB_STATION (browser): a true-loss close
+                        //     (1001 "going away" / 4006 heartbeat timeout) hands control
+                        //     over immediately. A connected desktop CONTROL will reclaim
+                        //     MASTER without a delay.
+                        //
+                        //   - Dying master was a DESKTOP_STATION (Electron): do NOT promote
+                        //     a web-station CONTROL on any transient close. Electron may
+                        //     reload its renderer / refresh the WS token and reconnect
+                        //     within 1-2s; promoting the browser only to demote it again
+                        //     when Electron reclaims primary is exactly the "flipping"
+                        //     behavior the user is hitting. We let the 90s grace window
+                        //     handle true abandonment instead.
+                        //
+                        //     Exception: if another DESKTOP_STATION is connected as CONTROL
+                        //     (rare two-desktop scenario), promote that desktop immediately.
+                        //
+                        //   - Unknown purpose: fall back to the previous code-based rule.
+                        if (isTrueMasterLossCloseCode(code)) {
+                            const diedPurpose = conn.registrationIntent?.devicePurpose;
+                            if (diedPurpose === "branch_web_station") {
+                                shouldTryAutoPromote = true;
+                            }
+                            else if (diedPurpose === "branch_desktop_station") {
+                                let hasOtherDesktopControl = false;
+                                for (const d of devices.values()) {
+                                    if (d.id === deviceId)
+                                        continue;
+                                    if (!isEligibleConnectedPlaybackCandidate(d, userId, branchId))
+                                        continue;
+                                    if (d.mode !== "CONTROL")
+                                        continue;
+                                    if (d.registrationIntent?.devicePurpose === "branch_desktop_station") {
+                                        hasOtherDesktopControl = true;
+                                        break;
+                                    }
+                                }
+                                shouldTryAutoPromote = hasOtherDesktopControl;
+                            }
+                            else {
+                                shouldTryAutoPromote = true;
+                            }
+                        }
                     }
                     persistMasterLease();
                 }

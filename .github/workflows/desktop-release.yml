@@ -1,0 +1,89 @@
+name: Desktop Release
+
+# Trigger on tags like `desktop-v0.1.0`, `desktop-v1.2.3`.
+# Creates a GitHub Release and attaches the Windows/macOS/Linux installers.
+on:
+  push:
+    tags:
+      - "desktop-v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build installers but do NOT publish to GitHub Release"
+        required: false
+        default: "false"
+
+# electron-builder's `publish: github` provider needs an authenticated GITHUB_TOKEN
+# with `contents: write` so it can create the draft release and upload assets.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # One matrix entry per target OS. Each runner builds only its native installer.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+            artifact: "SyncBiz-Player-Setup-*-x64.exe"
+          - os: macos-latest
+            target: mac
+            artifact: "SyncBiz-Player-*.dmg"
+          - os: ubuntu-latest
+            target: linux
+            artifact: "SyncBiz-Player-*-x64.AppImage"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+
+      # Prisma's postinstall runs during `npm ci`; it needs the schema present.
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build Next.js standalone + stage for Electron
+        run: npm run build:electron-web
+
+      # mpv + yt-dlp are NOT bundled any more. They're fetched on first run
+      # by the runtime-binaries module (see desktop/src/main/runtime-binaries).
+      # The only binary we bundle is 7zr.exe (~480KB) on Windows, used to
+      # extract shinchiro's mpv .7z archive on first launch.
+      - name: Fetch 7zr.exe for runtime extraction (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          New-Item -ItemType Directory -Force -Path resources | Out-Null
+          if (-not (Test-Path resources/7zr.exe)) {
+            Invoke-WebRequest -Uri "https://www.7-zip.org/a/7zr.exe" -OutFile resources/7zr.exe
+          }
+
+      - name: Build and package (${{ matrix.target }})
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm run build
+          npx electron-builder --${{ matrix.target }} --publish ${{ github.event_name == 'push' && 'always' || 'never' }}
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: syncbiz-${{ matrix.target }}
+          path: desktop/dist-installer/${{ matrix.artifact }}
+          if-no-files-found: warn
+          retention-days: 14

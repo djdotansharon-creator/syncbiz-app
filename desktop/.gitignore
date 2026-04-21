@@ -1,6 +1,15 @@
 node_modules/
 dist/
+dist-installer/
 *.log
 staged-web/
 .snapshot-player-ui-userdata/
 .verify-player-chrome-userdata/
+
+# Runtime binaries are fetched on first launch into userData/ — never shipped.
+# The legacy `resources/mpv/` tree is kept as a dev fallback only; CI does NOT
+# populate it. 7zr.exe is downloaded into resources/ during CI for Windows
+# prod builds and at dev-bootstrap time (if the dev wants mpv .7z extraction
+# to work without a hand-placed binary).
+resources/mpv/
+resources/7zr.exe

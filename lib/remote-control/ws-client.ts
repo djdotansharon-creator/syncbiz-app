@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ClientMessage, ServerMessage, StationPlaybackState, DeviceMode, DeviceInfo, RemoteCommand, GuestRecommendationPayload, BranchSummary } from "./types";
 import {
   registrationIntentBranchController,
+  registrationIntentBranchDesktopApp,
   registrationIntentBranchDevice,
   registrationIntentOwnerGlobal,
 } from "@/lib/syncbiz-device-model";
@@ -37,6 +38,8 @@ export function useRemoteControlWs(
     onGuestRecommendation?: (recommendation: GuestRecommendationPayload) => void;
     /** Called when server returns auth error (e.g. 4005). Parent should refetch token. */
     onAuthError?: () => void;
+    /** True when running inside the Electron desktop shell. Sends branch_desktop_station intent so the server can prefer this device as MASTER over browser tabs. */
+    isDesktopApp?: boolean;
   }
 ) {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
@@ -73,8 +76,12 @@ export function useRemoteControlWs(
     if (needsReconnect) setReconnectTrigger((k) => k + 1);
   };
 
-  // Device socket must list `options?.authToken` (JWT string) in deps — not `!!token` alone — so when the parent
-  // refetches after WS auth errors, we reconnect; `!!token` stays true and would otherwise skip reconnection.
+  // Device socket deps use `!!options?.authToken` (presence-only) — same pattern
+  // as the controller/owner hooks below — to avoid tearing down a live socket
+  // every time DevicePlayerProvider refreshes the token on window focus (which
+  // is what caused MASTER/CONTROL churn with both desktop and browser open).
+  // Auth error recovery still works: parent bumps `reconnectTrigger` after an
+  // auth error, which is listed in deps explicitly.
   useEffect(() => {
     if (role === "device" && !deviceId) return;
     const authToken = options?.authToken?.trim();
@@ -107,7 +114,9 @@ export function useRemoteControlWs(
               deviceId: deviceId ?? undefined,
               isMobile,
               branchId: "default",
-              registrationIntent: registrationIntentBranchDevice(isMobile),
+              registrationIntent: options?.isDesktopApp
+                ? registrationIntentBranchDesktopApp()
+                : registrationIntentBranchDevice(isMobile),
             }
           : {
               type: "REGISTER",
@@ -188,6 +197,12 @@ export function useRemoteControlWs(
       setStatus("disconnected");
       setMasterDeviceId(null);
     };
+    // `options?.authToken` (full JWT string) is intentionally in deps so that
+    // after an auth error the parent refetches a new token and this effect
+    // re-runs with the fresh value. Focus-triggered token refreshes are
+    // harmless: the OPEN guard above returns early when the socket is already
+    // healthy, so no reconnect churn occurs on window-focus switches between
+    // the desktop app and a browser tab.
   }, [role, deviceId, options?.authToken, reconnectTrigger]);
 
   /* Device: parent (DevicePlayerProvider) handles token refresh on visibility. Controller: uses useRemoteController. */

@@ -2424,8 +2424,17 @@ export function AudioPlayer() {
                * is playing.
                */
               editHref={
-                !isControlMirror && displayHasContent && currentSource
-                  ? editHrefForLibrarySource(currentSource)
+                displayHasContent
+                  ? isControlMirror
+                    // CONTROL mirror: master broadcasts a precomputed editHref
+                    // so the Edit button opens the correct editor on the
+                    // browser tab even though the browser isn't the playing
+                    // device. Catalog editing is data, not playback, so it
+                    // should not be gated by device role.
+                    ? (ms?.currentSource?.editHref ?? null)
+                    : currentSource
+                      ? editHrefForLibrarySource(currentSource)
+                      : null
                   : null
               }
               /**
@@ -2434,6 +2443,11 @@ export function AudioPlayer() {
                * editor inline in the center column — matching the
                * Jingles workspace UX. Radio stays URL-based; there's no
                * in-panel radio editor yet.
+               *
+               * Only available on the MASTER device — inline editing
+               * requires the full UnifiedSource, which the CONTROL
+               * mirror does not carry. CONTROL falls back to `editHref`
+               * above and opens the editor as a full page.
                */
               onEditClick={
                 !isControlMirror && displayHasContent && currentSource && isLibraryRoute

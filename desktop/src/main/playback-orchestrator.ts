@@ -9,7 +9,7 @@
  *    and back up when Channel B ends.
  */
 
-import { MpvManager, type MpvStatus } from "./mpv-manager";
+import { MpvManager, type MpvBinaries, type MpvStatus } from "./mpv-manager";
 
 // ─── Ducking constants ────────────────────────────────────────────────────────
 /** Default duck depth: Channel A falls to this % of masterVolume while Channel B plays.
@@ -104,9 +104,14 @@ export class PlaybackOrchestrator {
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
-  start(): void {
-    this.musicMpv.start();
-    this.interruptMpv.start();
+  /**
+   * Start both MPV channels. Binary paths must have been resolved by the
+   * runtime-binaries module (see `ensureRuntimeBinaries` in `index.ts`)
+   * and passed through to here.
+   */
+  start(binaries: MpvBinaries): void {
+    this.musicMpv.start(binaries);
+    this.interruptMpv.start(binaries);
   }
 
   kill(): void {

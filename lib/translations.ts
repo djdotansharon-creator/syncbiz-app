@@ -196,6 +196,8 @@ const TRANSLATIONS = {
     error: "error",
 
     agentsHealthy: "Agents healthy",
+    mainMenu: "Main menu",
+    pinToTop: "Pin to top",
     sidebarFooter: "Controller and scheduler. Does not store or host media.",
     newBreadcrumb: "New",
 
@@ -554,6 +556,8 @@ const TRANSLATIONS = {
     error: "שגיאה",
 
     agentsHealthy: "סוכנים תקינים",
+    mainMenu: "תפריט ראשי",
+    pinToTop: "נעץ לסרגל העליון",
     sidebarFooter: "בקר ומתזמן. לא מאחסן ולא מארח מדיה.",
     newBreadcrumb: "חדש",
 

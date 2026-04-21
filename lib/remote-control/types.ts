@@ -34,7 +34,13 @@ export type DeviceType =
 export type StationPlaybackState = {
   status: "idle" | "playing" | "paused" | "stopped";
   currentTrack: { title: string; cover: string | null } | null;
-  currentSource: { id: string; title: string; cover: string | null } | null;
+  /**
+   * Minimal mirror of the MASTER's current source.
+   * `editHref` is the deep-link to the source's editor (e.g. `/sources/[id]/edit`)
+   * so a CONTROL client can show an Edit button that opens the right form
+   * without having to reconstruct the full UnifiedSource on the wire.
+   */
+  currentSource: { id: string; title: string; cover: string | null; editHref?: string | null } | null;
   currentTrackIndex: number;
   queue: Array<{ id: string; title: string; cover: string | null }>;
   queueIndex: number;

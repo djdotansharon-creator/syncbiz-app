@@ -67,3 +67,6 @@ next-env.d.ts
 # desktop runtime binaries (mpv.exe, yt-dlp.exe) — too large for git (100+ MB)
 # these are fetched/vendored outside of version control
 desktop/resources/
+
+# build logs (local only)
+build-web.log
