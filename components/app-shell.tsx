@@ -582,9 +582,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // Mobile: minimal layout. AudioPlayer must be in-viewport for mobile browsers to load/play
   // (off-screen -left-[9999px] causes iOS Safari etc. to skip loading iframes/audio)
-  // Also use minimal layout for edit pages when return=/mobile (user came from mobile player)
+  // Also use minimal layout for edit pages when return=/mobile (user came from mobile player).
+  //
+  // The check uses a prefix match so every mobile tab route (/mobile/home, /mobile/search, …)
+  // gets the same minimal chrome. The mobile layout at `app/(app)/mobile/layout.tsx` provides
+  // its own header, mini player, and bottom nav.
+  const isMobilePath = pathname === "/mobile" || pathname?.startsWith("/mobile/");
   const isMobileOrEditFromMobile =
-    pathname === "/mobile" || (pathname?.includes("/edit") && isMobileReturn);
+    isMobilePath || (pathname?.includes("/edit") && isMobileReturn);
   if (isMobileOrEditFromMobile) {
     return (
       <>

@@ -43,25 +43,42 @@ function isMobileUserAgent(req: NextRequest): boolean {
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Opera Mobi|Silk|Mobile/i.test(ua);
 }
 
+/**
+ * Maps a desktop-oriented protected route to its mobile tab equivalent so phone users
+ * landing on saved/shared desktop URLs get the right mobile surface instead of a blank
+ * redirect to the home tab.
+ */
+function mobileRouteFor(pathname: string): string {
+  if (pathname === "/sources" || pathname.startsWith("/sources/")) return "/mobile/library";
+  if (pathname === "/library" || pathname.startsWith("/library/")) return "/mobile/library";
+  if (pathname === "/playlists" || pathname.startsWith("/playlists/")) return "/mobile/library";
+  if (pathname === "/radio" || pathname.startsWith("/radio/")) return "/mobile/library?filter=radio";
+  if (pathname === "/remote" || pathname.startsWith("/remote/")) return "/mobile/remote";
+  if (pathname === "/remote-player" || pathname.startsWith("/remote-player/")) return "/mobile/remote";
+  return "/mobile/home";
+}
+
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const cookie = req.cookies.get(COOKIE_NAME)?.value;
   const email = cookie ? parseSessionValue(cookie) : null;
 
   if (pathname === "/" && email) {
+    if (isMobileUserAgent(req)) {
+      return NextResponse.redirect(new URL("/mobile/home", req.url));
+    }
     return NextResponse.redirect(new URL("/sources", req.url));
   }
 
   const isEditRoute = /^\/(playlists|sources|radio)\/[^/]+\/edit(\/|$)/.test(pathname);
   if (
     isMobileUserAgent(req) &&
-    pathname !== "/mobile" &&
     !pathname.startsWith("/mobile") &&
     !isEditRoute &&
     isProtected(pathname) &&
     email
   ) {
-    return NextResponse.redirect(new URL("/mobile", req.url));
+    return NextResponse.redirect(new URL(mobileRouteFor(pathname), req.url));
   }
 
   if (!isProtected(pathname)) {
