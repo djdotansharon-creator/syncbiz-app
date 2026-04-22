@@ -77,6 +77,89 @@ enum TimeSlot {
 }
 
 // ─────────────────────────────────────────────
+// STAGE 0 — DISCOVERY / REVIEW (scaffolding)
+// ─────────────────────────────────────────────
+//
+// These enums + `DiscoverySubmission` are scaffolding for the DB-first
+// ingestion pipeline (see docs/plan: Stage 0 of the Source/Canonical
+// refactor). Nothing reads from these yet — they exist so Stage 1+ can
+// land without schema churn. No existing model references them, so this
+// migration is purely additive and safe to deploy.
+
+/// Lifecycle state shared by canonical-bound entities (submissions, tags,
+/// channels, edit suggestions). Never DELETE — transition through
+/// DEPRECATED or REJECTED instead, to keep audit trails intact.
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  DEPRECATED
+  MERGED
+  DUPLICATE
+}
+
+/// Where a submission originated. Owner auto-approval rules key off this.
+enum SubmissionSource {
+  USER
+  AI_AGENT
+  INTERNET_SEARCH
+  IMPORT
+}
+
+/// A URL proposed for canonicalization. Every new URL — from a user form,
+/// an AI web search, or a bulk import — enters here first. Owner review
+/// converts an approved submission into a canonical entry (Stage 2).
+///
+/// Today this model is write-only for users and read-only for the /admin
+/// review-queue UI (Stage 5). No production code path reads/mutates it
+/// yet; enforcing that keeps Stage 0 a pure scaffolding migration.
+model DiscoverySubmission {
+  id                 String           @id @default(uuid())
+
+  /// `null` when the submission came from an autonomous agent (AI search,
+  /// scheduled import). Owner reviewers can still trace it via
+  /// `submissionSource`.
+  submittedById      String?
+  submissionSource   SubmissionSource
+
+  /// The raw URL as received. We keep both `rawUrl` and (later) the
+  /// canonicalized form so we can deduplicate across link shorteners and
+  /// tracking params without losing the original user intent.
+  rawUrl             String
+  resolvedProvider   String?
+  resolvedExternalId String?
+  /// Snapshot of metadata fetched at ingestion time (title, thumbnail,
+  /// durationSec, channel info, etc.). Intentionally `Json` — Stage 2
+  /// will formalize fields on the canonical model, this is just a
+  /// capture-everything bucket.
+  resolvedMetadata   Json?
+
+  suggestedTags      String[]
+  suggestedTitle     String?
+  submitterNote      String?
+
+  status             ReviewStatus     @default(PENDING)
+  reviewedById       String?
+  reviewedAt         DateTime?
+  reviewNote         String?
+
+  /// When status transitions to MERGED / APPROVED, points to the canonical
+  /// record that owns this URL going forward. String-typed (not FK) for
+  /// Stage 0 because the canonical table doesn't exist yet; Stage 2 will
+  /// convert this to a proper relation in the same migration that adds
+  /// `CanonicalUrl`.
+  mergedIntoId       String?
+  duplicateOfId      String?
+
+  createdAt          DateTime         @default(now())
+
+  @@index([status])
+  @@index([submittedById])
+  @@index([submissionSource])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────
 // IDENTITY & TENANCY
 // ─────────────────────────────────────────────
 

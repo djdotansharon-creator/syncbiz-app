@@ -20,6 +20,35 @@ export const ALL_BRANCHES_SENTINEL_EXPORT = ALL_BRANCHES_SENTINEL;
 /** Emails that receive a seeded owner account on first login. */
 const LEGACY_SEED_EMAILS = ["test@syncbiz.com", "djdotansharon@gmail.com"];
 
+/**
+ * Comma-separated list of emails (from `SYNCBIZ_OWNER_EMAILS`) that are
+ * platform owners — i.e. get `UserRole.SUPER_ADMIN` on login, which unlocks
+ * the `/admin` owner CRM. Empty/unset → no automatic promotions.
+ *
+ * Intentionally env-driven so DB resets / new environments don't lose
+ * ownership, and so we never need to hand-edit `User.role` again.
+ */
+function ownerEmailSet(): Set<string> {
+  const raw = process.env.SYNCBIZ_OWNER_EMAILS;
+  if (!raw) return new Set();
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+async function ensurePlatformOwnerRole(userId: string, email: string): Promise<void> {
+  if (!ownerEmailSet().has(email)) return;
+  const row = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+  if (!row || row.role === "SUPER_ADMIN") return;
+  await prisma.user.update({
+    where: { id: userId },
+    data: { role: "SUPER_ADMIN" as import("@prisma/client").UserRole },
+  });
+}
+
 // ─── Role mapping helpers ─────────────────────────────────────────────────────
 
 function prismaRoleToTenantRole(role: string): TenantRole {
@@ -136,11 +165,15 @@ export async function getOrCreateUserByEmail(email: string): Promise<User> {
   const norm = email?.trim().toLowerCase();
   if (!norm) throw new Error("Email required");
   const existing = await getUserByEmail(norm);
-  if (existing) return existing;
+  if (existing) {
+    await ensurePlatformOwnerRole(existing.id, norm);
+    return existing;
+  }
   if (!LEGACY_SEED_EMAILS.includes(norm)) throw new Error("User not found");
   const { workspace, userId } = await ensureSeedWorkspace(norm);
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new Error("User seed failed");
+  await ensurePlatformOwnerRole(user.id, norm);
   return rowToUser(user, workspace.id);
 }
 
