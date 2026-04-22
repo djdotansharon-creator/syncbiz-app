@@ -56,6 +56,11 @@ function ytXfadeLog(phase: string, data?: Record<string, unknown>) {
 /** Seconds before mix window to start preloading next YT player. YT iframe load typically takes 3–10s. */
 const YT_PRELOAD_BUFFER_SEC = 12;
 import { useDevicePlayer } from "@/lib/device-player-context";
+import {
+  setLocalPlaybackPosition,
+  setLocalPlaybackDuration,
+  resetLocalPlaybackTime,
+} from "@/lib/playback-time-store";
 import { getMixDuration, getAutoMix, setAutoMix as persistAutoMix, onMixDurationChanged, onAutoMixChanged } from "@/lib/mix-preferences";
 import type { SCWidget } from "@/types/yt-sc";
 
@@ -526,6 +531,9 @@ export function AudioPlayer() {
     if (Math.abs(next - lastUiPositionRef.current) < 0.2) return;
     lastUiPositionRef.current = next;
     setPosition(next);
+    // Mirror to the local playback time store so mobile mini-player /
+    // Now Playing surfaces can subscribe without coupling to AudioPlayer.
+    setLocalPlaybackPosition(next);
   }, []);
 
   const updateDurationIfChanged = useCallback((next: number) => {
@@ -533,6 +541,7 @@ export function AudioPlayer() {
     if (Math.abs(next - lastUiDurationRef.current) < 0.2) return;
     lastUiDurationRef.current = next;
     setDuration(next);
+    setLocalPlaybackDuration(next);
   }, []);
 
   const updateBufferedIfChanged = useCallback((next: number) => {
@@ -963,6 +972,7 @@ export function AudioPlayer() {
     setPosition(0);
     setDuration(0);
     setBufferedPercent(0);
+    resetLocalPlaybackTime();
   }, [currentPlayUrl, isYouTube]);
 
   const handlePlaybackError = useCallback(

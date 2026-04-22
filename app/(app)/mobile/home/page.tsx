@@ -81,18 +81,31 @@ export default function MobileHomePage() {
               <div className="grid grid-cols-2 gap-3">
                 <MobileBrowseTile
                   label="Your Library"
+                  subtitle="Playlists & tracks"
                   href="/mobile/library"
                   gradient="from-sky-600 to-cyan-700"
+                  icon={<LibraryIcon />}
                 />
                 <MobileBrowseTile
-                  label="Search & Discover"
+                  label="Search"
+                  subtitle="Add new sources"
                   href="/mobile/search"
                   gradient="from-fuchsia-600 to-purple-700"
+                  icon={<SearchIcon />}
                 />
                 <MobileBrowseTile
-                  label="Remote Control"
+                  label="Scheduling"
+                  subtitle="Upcoming plays"
+                  href="/mobile/scheduling"
+                  gradient="from-emerald-600 to-teal-700"
+                  icon={<CalendarIcon />}
+                />
+                <MobileBrowseTile
+                  label="Remote"
+                  subtitle="Control the player"
                   href="/mobile/remote"
                   gradient="from-amber-500 to-orange-700"
+                  icon={<RemoteIcon />}
                 />
               </div>
             </section>
@@ -100,5 +113,41 @@ export default function MobileHomePage() {
         )}
       </div>
     </>
+  );
+}
+
+function LibraryIcon() {
+  return (
+    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <path d="M5 4v16M10 4v16M16 5l4 14" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <rect x="3" y="5" width="18" height="16" rx="2.5" />
+      <path d="M3 10h18M8 3v4M16 3v4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function RemoteIcon() {
+  return (
+    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <rect x="6" y="3" width="12" height="18" rx="3" />
+      <circle cx="12" cy="8" r="1.2" fill="currentColor" stroke="none" />
+      <path d="M9 12h6M9 15h6M10 18h4" strokeLinecap="round" />
+    </svg>
   );
 }

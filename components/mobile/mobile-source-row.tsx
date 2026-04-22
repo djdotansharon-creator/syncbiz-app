@@ -2,6 +2,7 @@
 
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { MobileSourceCardActions } from "@/components/mobile-source-card-actions";
+import { MobileTypeBadge } from "@/components/mobile/mobile-type-badge";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { useStationController } from "@/lib/station-controller-context";
 import { usePlayback } from "@/lib/playback-provider";
@@ -44,11 +45,17 @@ export function MobileSourceRow({ source, onRemove, editReturnTo, compact = fals
     playSource(source);
   };
 
+  const isPlaylist = source.origin === "playlist";
+  const trackCount = isPlaylist ? source.playlist?.tracks?.length ?? 0 : 0;
+
+  // Meta line: playlist track count, or provider name for a single track.
+  // The `MobileTypeBadge` below always handles the "Playlist vs Track" label
+  // itself, so the meta line only adds secondary info (count, genre, provider).
   const metaLine = (() => {
-    if (source.origin === "playlist") {
-      const count = source.playlist?.tracks?.length ?? 0;
-      if (count > 0) return `Playlist · ${count} track${count === 1 ? "" : "s"}`;
-      return "Playlist";
+    if (isPlaylist) {
+      return trackCount > 0
+        ? `${trackCount} track${trackCount === 1 ? "" : "s"}`
+        : "Empty playlist";
     }
     // Radio is intentionally omitted here — it's not part of the mobile IA. Any radio row
     // that leaks through (e.g. stale cache) falls through to the generic genre label.
@@ -80,26 +87,45 @@ export function MobileSourceRow({ source, onRemove, editReturnTo, compact = fals
         disabled={!canController}
         className="flex min-w-0 flex-1 items-center gap-3 text-left transition active:scale-[0.99] disabled:opacity-50 disabled:active:scale-100"
       >
-        <div className={`${compact ? "h-11 w-11" : "h-12 w-12"} shrink-0 overflow-hidden rounded-lg bg-slate-800/80`}>
+        <div
+          className={`${compact ? "h-11 w-11" : "h-12 w-12"} relative shrink-0 overflow-hidden rounded-lg bg-slate-800/80`}
+        >
           {source.cover ? (
             <HydrationSafeImage src={source.cover} alt="" className="h-full w-full object-cover" />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-slate-500">
-              <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M9 18V5l12-2v13" />
-                <circle cx="6" cy="18" r="3" />
-                <circle cx="18" cy="16" r="3" />
-              </svg>
+              {isPlaylist ? (
+                // Stacked-rows icon for playlists (multi-track container).
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+                  <path d="M4 6h12M4 12h12M4 18h8" strokeLinecap="round" />
+                  <circle cx="19" cy="18" r="2" fill="currentColor" stroke="none" />
+                </svg>
+              ) : (
+                // Single-note icon for tracks / single URLs.
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+                  <path d="M9 18V5l12-2v13" />
+                  <circle cx="6" cy="18" r="3" />
+                  <circle cx="18" cy="16" r="3" />
+                </svg>
+              )}
             </div>
+          )}
+          {isPlaylist && trackCount > 0 && (
+            <span className="pointer-events-none absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[9px] font-semibold leading-[14px] text-slate-200">
+              {trackCount}
+            </span>
           )}
         </div>
         <div className="min-w-0 flex-1">
           <p className={`truncate text-sm font-medium ${active ? "text-slate-50" : "text-slate-100"}`}>
             {source.title}
           </p>
-          {metaLine && (
-            <p className="truncate text-xs text-slate-400">{metaLine}</p>
-          )}
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <MobileTypeBadge source={source} />
+            {metaLine && (
+              <span className="truncate text-xs text-slate-400">{metaLine}</span>
+            )}
+          </div>
         </div>
         <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${playIconRingClass}`}>
           {active ? (
