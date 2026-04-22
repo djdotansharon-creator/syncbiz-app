@@ -50,7 +50,8 @@ export function MobileSourceRow({ source, onRemove, editReturnTo, compact = fals
       if (count > 0) return `Playlist · ${count} track${count === 1 ? "" : "s"}`;
       return "Playlist";
     }
-    if (source.origin === "radio") return "Radio stream";
+    // Radio is intentionally omitted here — it's not part of the mobile IA. Any radio row
+    // that leaks through (e.g. stale cache) falls through to the generic genre label.
     if (source.genre && source.genre !== "Mixed") return source.genre;
     return null;
   })();

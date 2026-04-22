@@ -96,7 +96,9 @@ export function MobileSourcesProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         setContentScope(scope);
         setSources(items);
-        const forQueue = items.filter((s) => s.origin === "playlist" || s.origin === "radio");
+        // Mobile queue intentionally excludes radio: radio is not part of the mobile IA.
+        // Desktop still queues radio separately via its own library code paths.
+        const forQueue = items.filter((s) => s.origin === "playlist");
         setQueue(forQueue);
         setStatus("ready");
       } catch {

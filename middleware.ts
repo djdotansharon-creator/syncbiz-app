@@ -52,7 +52,8 @@ function mobileRouteFor(pathname: string): string {
   if (pathname === "/sources" || pathname.startsWith("/sources/")) return "/mobile/library";
   if (pathname === "/library" || pathname.startsWith("/library/")) return "/mobile/library";
   if (pathname === "/playlists" || pathname.startsWith("/playlists/")) return "/mobile/library";
-  if (pathname === "/radio" || pathname.startsWith("/radio/")) return "/mobile/library?filter=radio";
+  // Radio is intentionally excluded from the mobile IA. Desktop /radio still works; a phone
+  // that hits it gets funneled to the generic mobile home instead of a radio surface.
   if (pathname === "/remote" || pathname.startsWith("/remote/")) return "/mobile/remote";
   if (pathname === "/remote-player" || pathname.startsWith("/remote-player/")) return "/mobile/remote";
   return "/mobile/home";

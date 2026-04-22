@@ -38,6 +38,7 @@ export default function MobileSearchPage() {
           isControllerMode={isController}
           editReturnTo="/mobile/search"
           unifiedContentScope={contentScope}
+          hideRadio
         />
       </div>
     </>

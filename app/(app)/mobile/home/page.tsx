@@ -90,11 +90,6 @@ export default function MobileHomePage() {
                   gradient="from-fuchsia-600 to-purple-700"
                 />
                 <MobileBrowseTile
-                  label="Radio Stations"
-                  href="/mobile/library?filter=radio"
-                  gradient="from-rose-500 to-red-700"
-                />
-                <MobileBrowseTile
                   label="Remote Control"
                   href="/mobile/remote"
                   gradient="from-amber-500 to-orange-700"

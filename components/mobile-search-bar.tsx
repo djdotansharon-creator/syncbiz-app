@@ -30,6 +30,12 @@ type Props = {
    * Branch catalog (default) vs OWNER personal bank. Personal scope disables radio discover/add here.
    */
   unifiedContentScope?: ApiContentScope;
+  /**
+   * When true, radio stations are completely excluded from search results (no fetch side-effects,
+   * no UI section). Used by the mobile surfaces where radio is intentionally not part of the IA.
+   * Desktop callers leave this undefined/false to keep the existing behavior.
+   */
+  hideRadio?: boolean;
 };
 
 export function MobileSearchBar({
@@ -42,6 +48,7 @@ export function MobileSearchBar({
   isControllerMode = false,
   editReturnTo,
   unifiedContentScope = "branch",
+  hideRadio = false,
 }: Props) {
   const { t } = useTranslations();
   const [query, setQuery] = useState("");
@@ -56,7 +63,7 @@ export function MobileSearchBar({
 
   const hasQuery = query.trim().length >= 2;
   const hasInternal = internalResults.length > 0;
-  const hasExternal = youtubeResults.length > 0 || radioResults.length > 0;
+  const hasExternal = youtubeResults.length > 0 || (!hideRadio && radioResults.length > 0);
   const hasResults = hasInternal || hasExternal;
 
   const runSearch = useCallback(async () => {
@@ -74,7 +81,10 @@ export function MobileSearchBar({
       if (queryRef.current === q) {
         setInternalResults(internal);
         setYoutubeResults(external.youtube);
-        setRadioResults(unifiedContentScope === "owner_personal" ? [] : external.radio);
+        // Suppress radio results when the caller opts out (mobile IA excludes radio) or when
+        // the personal-bank scope is active (radios don't exist there).
+        const suppressRadio = hideRadio || unifiedContentScope === "owner_personal";
+        setRadioResults(suppressRadio ? [] : external.radio);
       }
     } catch {
       if (queryRef.current === q) {
@@ -85,7 +95,7 @@ export function MobileSearchBar({
     } finally {
       setSearching(false);
     }
-  }, [query, sources, unifiedContentScope]);
+  }, [query, sources, unifiedContentScope, hideRadio]);
 
   useEffect(() => {
     if (!hasQuery) {
@@ -524,7 +534,7 @@ export function MobileSearchBar({
                       ))}
                     </div>
                   )}
-                  {radioResults.length > 0 && (
+                  {!hideRadio && radioResults.length > 0 && (
                     <div className="mt-3 space-y-1">
                       <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                         {t.radioResults ?? "Radio stations"}
