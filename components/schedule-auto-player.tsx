@@ -37,9 +37,21 @@ export function ScheduleAutoPlayer() {
 
       busyRef.current = true;
       try {
-        const res = await fetch("/api/schedules", { credentials: "include", cache: "no-store" });
-        if (!res.ok || cancelled) return;
-        const schedules = (await res.json()) as Schedule[];
+        // Network calls can throw (offline, tab nav, slow 5G on mobile, dev
+        // reload). We intentionally swallow transient failures — the next
+        // poll tick will retry. Surfacing them would produce noisy red
+        // "Failed to fetch" overlays on mobile for a recoverable condition.
+        let schedules: Schedule[] | null = null;
+        try {
+          const res = await fetch("/api/schedules", {
+            credentials: "include",
+            cache: "no-store",
+          });
+          if (!res.ok || cancelled) return;
+          schedules = (await res.json()) as Schedule[];
+        } catch {
+          return;
+        }
         if (!Array.isArray(schedules) || schedules.length === 0) return;
 
         const now = new Date();
@@ -53,20 +65,36 @@ export function ScheduleAutoPlayer() {
         const winner = pickWinningScheduleForNow(pending, now);
         if (!winner) return;
 
-        const sourcesRes = await fetch("/api/sources", { credentials: "include", cache: "no-store" });
-        const sources = sourcesRes.ok ? ((await sourcesRes.json()) as Source[]) : [];
-        const list = Array.isArray(sources) ? sources : [];
+        let list: Source[] = [];
+        try {
+          const sourcesRes = await fetch("/api/sources", {
+            credentials: "include",
+            cache: "no-store",
+          });
+          if (cancelled) return;
+          if (sourcesRes.ok) {
+            const parsed = (await sourcesRes.json()) as Source[];
+            list = Array.isArray(parsed) ? parsed : [];
+          }
+        } catch {
+          return;
+        }
         const sourceId =
           winner.targetType === "SOURCE" ? winner.targetId : winner.sourceId;
         const source =
           list.find((s) => s.id === (sourceId ?? "").trim()) ?? null;
 
-        const ok = await runSchedulePlayback(
-          winner,
-          source,
-          { stop, setQueue, playSource, setLastMessage },
-          router,
-        );
+        let ok = false;
+        try {
+          ok = await runSchedulePlayback(
+            winner,
+            source,
+            { stop, setQueue, playSource, setLastMessage },
+            router,
+          );
+        } catch {
+          return;
+        }
         if (!ok) return;
 
         const fireKey = scheduleAutoFireStorageKey(winner, now);

@@ -6,6 +6,14 @@ import { useMobileRole } from "@/lib/mobile-role-context";
 import { useStationController } from "@/lib/station-controller-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { useLocalPlaybackTime } from "@/lib/playback-time-store";
+import {
+  PlaybackTransportIconNext,
+  PlaybackTransportIconPause,
+  PlaybackTransportIconPlay,
+  PlaybackTransportIconPrev,
+  PlaybackTransportIconStop,
+  PlaybackTransportIconVolume,
+} from "@/components/player-surface/playback-transport-icons";
 
 type Props = {
   open: boolean;
@@ -24,8 +32,8 @@ type Derived = {
   position: number;
   duration: number;
   volume: number;
-  accent: "sky" | "emerald";
   onPlayPause: () => void;
+  onStop: () => void;
   onNext: () => void;
   onPrev: () => void;
   onSeek: (seconds: number) => void;
@@ -35,10 +43,11 @@ type Derived = {
 /**
  * Shared derivation used by both the mini-player and the Now Playing sheet.
  *
- * Design rule (see user requirement for Commit B): transport + volume must be
- * ALWAYS accessible. The hook therefore always returns a non-throwing
- * handler for every action; the UI layer uses `canControl` / `hasSource` to
- * disable buttons visually, never to hide them.
+ * Visual language rule (mobile+remote alignment pass): Controller mode and
+ * Player mode share ONE SyncBiz visual language — slate chrome with emerald
+ * accents that match `playback-dock-surface.css`. The mode is communicated
+ * through the mode pill and the volume label, never through different accent
+ * colors.
  */
 function useDerivedPlayer(): Derived {
   const { mobileRole } = useMobileRole();
@@ -69,11 +78,13 @@ function useDerivedPlayer(): Derived {
       position: rs?.position ?? 0,
       duration: rs?.duration ?? 0,
       volume: typeof rs?.volume === "number" ? rs.volume : 80,
-      accent: "sky",
       onPlayPause: () => {
         if (!canControl) return;
         if (isPlaying) station.sendPause();
         else station.sendPlay();
+      },
+      onStop: () => {
+        if (canControl) station.sendStop();
       },
       onNext: () => {
         if (canControl) station.sendNext();
@@ -104,11 +115,13 @@ function useDerivedPlayer(): Derived {
     position: localTime.position,
     duration: localTime.duration,
     volume: playback.volume,
-    accent: "emerald",
     onPlayPause: () => {
       if (!src) return;
       if (isPlaying) playback.pause();
       else playback.play();
+    },
+    onStop: () => {
+      if (src) playback.stop();
     },
     onNext: () => {
       if (src) playback.next();
@@ -140,16 +153,27 @@ function formatTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+// Visual tokens — mirror `playback-dock-surface.css` so mobile reads as a
+// direct extension of the desktop SyncBiz player. Kept as constants rather
+// than utility classes to keep the button bodies compact below.
+const SECONDARY_BTN =
+  "flex shrink-0 items-center justify-center rounded-xl border border-slate-700/80 bg-gradient-to-b from-slate-700/20 to-slate-900/95 text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_2px_6px_rgba(0,0,0,0.4)] transition hover:border-slate-500 hover:text-slate-100 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400/40";
+
+const PRIMARY_BTN =
+  "flex shrink-0 items-center justify-center rounded-xl border border-emerald-500/50 bg-gradient-to-b from-emerald-400/35 to-emerald-600/25 text-emerald-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_4px_16px_rgba(0,0,0,0.4),0_0_32px_rgba(30,215,96,0.25)] transition hover:border-emerald-400/70 hover:text-white disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400/40";
+
 /**
  * Full-screen bottom sheet shown when the user taps the mini-player.
  *
- * Design contract for Commit B:
- *   - transport buttons (prev / play-pause / next) are ALWAYS rendered; they
- *     disable themselves via opacity + pointer-events when `canControl` is
- *     false (e.g. controller mode without a connected MASTER) — never hidden.
+ * Design contract (same as Commit B + alignment pass):
+ *   - transport buttons (prev / stop / play-pause / next) are ALWAYS rendered;
+ *     they disable via opacity + pointer-events when `canControl` / `hasSource`
+ *     is false — never hidden.
  *   - volume slider is ALWAYS rendered with a mode-specific label:
  *       Controller → "MASTER · desktop volume"
  *       Player     → "This phone · local player volume"
+ *   - visual language matches `playback-dock-surface` (slate chrome, emerald
+ *     play glow, rounded-xl buttons, rounded-full volume track).
  *   - closes via: X button, backdrop tap, or ESC key. No swipe gestures yet.
  */
 export function MobileNowPlayingSheet({ open, onClose }: Props) {
@@ -161,7 +185,6 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    // Lock background scroll while the sheet is open.
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
@@ -169,10 +192,6 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
       document.body.style.overflow = prevOverflow;
     };
   }, [open, onClose]);
-
-  const accentBg = d.accent === "sky" ? "bg-sky-500" : "bg-emerald-500";
-  const accentText = d.accent === "sky" ? "text-sky-300" : "text-emerald-300";
-  const accentRing = d.accent === "sky" ? "ring-sky-500/40" : "ring-emerald-500/40";
 
   const progressPct = useMemo(() => {
     if (!d.duration || d.duration <= 0) return 0;
@@ -183,6 +202,8 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
     d.mode === "controller"
       ? "MASTER · desktop volume"
       : "This phone · local player volume";
+
+  const transportDisabled = !d.canControl || !d.hasSource;
 
   return (
     <div
@@ -207,13 +228,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
         }`}
       >
         <div className="flex items-center justify-between px-4 pt-3 pb-1">
-          <span
-            className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ${
-              d.mode === "controller"
-                ? "bg-sky-500/15 text-sky-200 ring-sky-500/40"
-                : "bg-amber-500/15 text-amber-200 ring-amber-500/40"
-            }`}
-          >
+          <span className="rounded-full border border-slate-700/70 bg-slate-900/70 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-200">
             {d.mode === "controller" ? "Controller" : "Player"}
           </span>
           <button
@@ -242,7 +257,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
           </div>
 
           <div className="mt-6 text-center">
-            <p className={`text-xl font-semibold tracking-tight ${d.hasSource ? "text-slate-50" : accentText}`}>
+            <p className={`text-xl font-semibold tracking-tight ${d.hasSource ? "text-slate-50" : "text-slate-400"}`}>
               {d.title}
             </p>
             {d.subtitle && (
@@ -260,14 +275,14 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               onChange={(e) => d.onSeek(Number(e.target.value))}
               disabled={!d.hasSource || d.duration <= 0}
               aria-label="Seek"
-              className={`w-full accent-current ${accentText} disabled:opacity-40`}
+              className="h-2 w-full appearance-none rounded-full bg-slate-700/80 accent-emerald-500 disabled:opacity-40"
             />
             <div className="mt-1 flex items-center justify-between text-[11px] tabular-nums text-slate-400">
               <span>{formatTime(d.position)}</span>
               <div className="flex-1 px-2">
                 <div className="mx-auto h-[2px] w-full overflow-hidden rounded-full bg-slate-800">
                   <div
-                    className={`h-full ${accentBg}`}
+                    className="h-full bg-emerald-500"
                     style={{ width: `${progressPct}%` }}
                   />
                 </div>
@@ -276,52 +291,61 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
             </div>
           </div>
 
-          <div className="mt-6 flex items-center justify-center gap-6">
-            <TransportButton
-              label="Previous"
+          {/* Transport — desktop parity: Prev · Stop · Play/Pause · Next */}
+          <div className="mt-8 flex items-center justify-center gap-3">
+            <button
+              type="button"
               onClick={d.onPrev}
-              disabled={!d.canControl}
-              size="md"
+              disabled={transportDisabled}
+              aria-label="Previous"
+              className={`${SECONDARY_BTN} h-12 w-12 active:scale-95`}
             >
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className="h-6 w-6">
-                <path d="M7 6v12h2V6H7zm3 6l8 6V6l-8 6z" />
-              </svg>
-            </TransportButton>
+              <PlaybackTransportIconPrev className="h-6 w-6" />
+            </button>
+            <button
+              type="button"
+              onClick={d.onStop}
+              disabled={transportDisabled}
+              aria-label="Stop"
+              className={`${SECONDARY_BTN} h-12 w-12 active:scale-95`}
+            >
+              <PlaybackTransportIconStop className="h-6 w-6" />
+            </button>
             <button
               type="button"
               onClick={d.onPlayPause}
-              disabled={!d.canControl}
+              disabled={!d.canControl || !d.hasSource}
               aria-label={d.isPlaying ? "Pause" : "Play"}
-              className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-full ring-2 ${accentRing} ${accentBg} text-slate-950 shadow-[0_10px_30px_rgba(0,0,0,0.45)] transition active:scale-95 disabled:opacity-40`}
+              className={`${PRIMARY_BTN} h-16 w-16 active:scale-95`}
             >
               {d.isPlaying ? (
-                <svg className="h-7 w-7" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                  <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                </svg>
+                <PlaybackTransportIconPause className="h-8 w-8" />
               ) : (
-                <svg className="ml-1 h-7 w-7" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                  <path d="M8 5v14l11-7z" />
-                </svg>
+                <PlaybackTransportIconPlay className="ml-0.5 h-8 w-8" />
               )}
             </button>
-            <TransportButton label="Next" onClick={d.onNext} disabled={!d.canControl} size="md">
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className="h-6 w-6">
-                <path d="M6 18l8-6-8-6v12zm9-12v12h2V6h-2z" />
-              </svg>
-            </TransportButton>
+            <button
+              type="button"
+              onClick={d.onNext}
+              disabled={transportDisabled}
+              aria-label="Next"
+              className={`${SECONDARY_BTN} h-12 w-12 active:scale-95`}
+            >
+              <PlaybackTransportIconNext className="h-6 w-6" />
+            </button>
           </div>
 
-          <div className="mt-8">
+          <div className="mt-8 rounded-2xl border border-slate-700/60 bg-slate-900/60 px-4 py-3">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
+              <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-300">
                 {volumeLabel}
               </span>
-              <span className="text-[11px] tabular-nums text-slate-500">
-                {Math.round(d.volume)}%
+              <span className="text-[11px] font-semibold tabular-nums text-slate-300">
+                {Math.round(d.volume)}
               </span>
             </div>
             <div className="flex items-center gap-3">
-              <VolumeIcon level={d.volume} />
+              <PlaybackTransportIconVolume className="h-5 w-5 shrink-0 text-slate-400" />
               <input
                 type="range"
                 min={0}
@@ -331,7 +355,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
                 onChange={(e) => d.onVolume(Number(e.target.value))}
                 disabled={!d.canControl}
                 aria-label={volumeLabel}
-                className={`flex-1 accent-current ${accentText} disabled:opacity-40`}
+                className="h-2 flex-1 appearance-none rounded-full bg-slate-700/80 accent-emerald-500 disabled:opacity-40"
               />
             </div>
           </div>
@@ -345,51 +369,5 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
         </div>
       </div>
     </div>
-  );
-}
-
-function TransportButton({
-  children,
-  label,
-  onClick,
-  disabled,
-  size,
-}: {
-  children: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  size: "sm" | "md";
-}) {
-  const dim = size === "md" ? "h-12 w-12" : "h-10 w-10";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      className={`flex ${dim} shrink-0 items-center justify-center rounded-full text-slate-200 transition hover:text-white active:scale-95 disabled:opacity-40`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function VolumeIcon({ level }: { level: number }) {
-  // Three distinct icons — muted (0), low (<=50), high (>50). No copy of
-  // Spotify glyphs; these are plain speaker+wave primitives.
-  const muted = level <= 0;
-  const low = !muted && level <= 50;
-  return (
-    <svg className="h-4 w-4 shrink-0 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path d="M4 10v4h3l5 4V6l-5 4H4z" fill="currentColor" stroke="none" />
-      {!muted && (
-        <>
-          <path d="M16 9c1.2 1.2 1.2 4.8 0 6" strokeLinecap="round" />
-          {!low && <path d="M18.5 6.5c2.5 2.5 2.5 8.5 0 11" strokeLinecap="round" />}
-        </>
-      )}
-      {muted && <path d="M17 10l5 4m0-4l-5 4" strokeLinecap="round" />}
-    </svg>
   );
 }

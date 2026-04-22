@@ -3,6 +3,12 @@
 import { useMemo } from "react";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { useMobilePlayer } from "@/components/mobile/mobile-now-playing-sheet";
+import {
+  PlaybackTransportIconNext,
+  PlaybackTransportIconPause,
+  PlaybackTransportIconPlay,
+  PlaybackTransportIconPrev,
+} from "@/components/player-surface/playback-transport-icons";
 
 type Props = {
   /** Called when the user taps the artwork / title area to open the full Now Playing sheet. */
@@ -12,12 +18,14 @@ type Props = {
 /**
  * Persistent mini player that sits above the bottom nav on every mobile tab.
  *
- * Core-control contract (see Commit B requirement): transport buttons —
- * previous, play/pause, next — are ALWAYS rendered here. They disable
- * visually (opacity + aria) when there is nothing to control, but are never
- * hidden behind menus or extra taps. Volume is kept off the mini-player to
- * keep it compact; it lives in the full Now Playing sheet with an explicit
- * mode label (MASTER volume vs. this phone volume).
+ * Visual contract (mobile+remote alignment pass):
+ *   - transport buttons — previous, play/pause, next — are ALWAYS rendered.
+ *     They dim via opacity when disabled, never hide behind menus.
+ *   - volume stays OFF the mini-player so it remains a compact extension of
+ *     the main SyncBiz dock. Volume lives in the Now Playing sheet, labelled
+ *     per mode (MASTER vs this phone).
+ *   - button chrome mirrors `playback-dock-surface.css`: slate gradient
+ *     secondary buttons, emerald-glow primary button, rounded-xl corners.
  *
  * Tap rules:
  *   - tapping the artwork / title block opens the Now Playing sheet
@@ -26,18 +34,12 @@ type Props = {
 export function MobileMiniPlayer({ onOpen }: Props) {
   const d = useMobilePlayer();
 
-  const playBg = d.isPlaying
-    ? d.accent === "sky"
-      ? "bg-sky-500 text-slate-950"
-      : "bg-emerald-500 text-slate-950"
-    : "bg-slate-100 text-slate-950";
-
   const progressPct = useMemo(() => {
     if (!d.duration || d.duration <= 0) return 0;
     return Math.max(0, Math.min(100, (d.position / d.duration) * 100));
   }, [d.position, d.duration]);
 
-  const progressBar = d.accent === "sky" ? "bg-sky-400" : "bg-emerald-400";
+  const transportDisabled = !d.canControl || !d.hasSource;
 
   return (
     <div
@@ -50,7 +52,7 @@ export function MobileMiniPlayer({ onOpen }: Props) {
         className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-slate-800/60"
       >
         <div
-          className={`h-full transition-[width] duration-200 ${progressBar}`}
+          className="h-full bg-emerald-500 transition-[width] duration-200"
           style={{ width: d.hasSource ? `${progressPct}%` : "0%" }}
         />
       </div>
@@ -64,7 +66,9 @@ export function MobileMiniPlayer({ onOpen }: Props) {
         >
           <div
             className={`relative h-11 w-11 shrink-0 overflow-hidden rounded-md bg-slate-800 ring-1 ring-slate-700/60 ${
-              d.hasSource && d.isPlaying ? "shadow-[0_0_0_1px_rgba(56,189,248,0.35)]" : ""
+              d.hasSource && d.isPlaying
+                ? "shadow-[0_0_0_1px_rgba(30,215,96,0.35),0_0_14px_rgba(30,215,96,0.2)]"
+                : ""
             }`}
             aria-hidden
           >
@@ -81,11 +85,7 @@ export function MobileMiniPlayer({ onOpen }: Props) {
           <div className="flex min-w-0 flex-1 flex-col">
             <p
               className={`truncate text-[13px] font-semibold leading-tight ${
-                d.hasSource
-                  ? "text-slate-100"
-                  : d.accent === "sky"
-                    ? "text-sky-300"
-                    : "text-emerald-300"
+                d.hasSource ? "text-slate-100" : "text-slate-400"
               }`}
             >
               {d.title}
@@ -98,21 +98,19 @@ export function MobileMiniPlayer({ onOpen }: Props) {
           </div>
         </button>
 
-        {/* Transport cluster — always visible, disabled (not hidden) when idle. */}
-        <div className="flex shrink-0 items-center gap-0.5">
+        {/* Transport cluster — always visible. Chrome mirrors desktop dock. */}
+        <div className="flex shrink-0 items-center gap-1.5">
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               d.onPrev();
             }}
-            disabled={!d.canControl}
+            disabled={transportDisabled}
             aria-label="Previous"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-300 transition hover:text-slate-100 disabled:opacity-40"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-700/80 bg-gradient-to-b from-slate-700/20 to-slate-900/95 text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_2px_6px_rgba(0,0,0,0.4)] transition hover:border-slate-500 hover:text-slate-100 disabled:opacity-40 disabled:pointer-events-none"
           >
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              <path d="M7 6v12h2V6H7zm3 6l8 6V6l-8 6z" />
-            </svg>
+            <PlaybackTransportIconPrev className="h-5 w-5" />
           </button>
 
           <button
@@ -121,18 +119,14 @@ export function MobileMiniPlayer({ onOpen }: Props) {
               e.stopPropagation();
               d.onPlayPause();
             }}
-            disabled={!d.canControl}
+            disabled={!d.canControl || !d.hasSource}
             aria-label={d.isPlaying ? "Pause" : "Play"}
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition active:scale-95 disabled:opacity-40 ${playBg}`}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-emerald-500/50 bg-gradient-to-b from-emerald-400/35 to-emerald-600/25 text-emerald-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_2px_10px_rgba(0,0,0,0.4),0_0_18px_rgba(30,215,96,0.22)] transition hover:border-emerald-400/70 hover:text-white active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
           >
             {d.isPlaying ? (
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-              </svg>
+              <PlaybackTransportIconPause className="h-5 w-5" />
             ) : (
-              <svg className="ml-0.5 h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <path d="M8 5v14l11-7z" />
-              </svg>
+              <PlaybackTransportIconPlay className="ml-0.5 h-5 w-5" />
             )}
           </button>
 
@@ -142,13 +136,11 @@ export function MobileMiniPlayer({ onOpen }: Props) {
               e.stopPropagation();
               d.onNext();
             }}
-            disabled={!d.canControl}
+            disabled={transportDisabled}
             aria-label="Next"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-300 transition hover:text-slate-100 disabled:opacity-40"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-700/80 bg-gradient-to-b from-slate-700/20 to-slate-900/95 text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_2px_6px_rgba(0,0,0,0.4)] transition hover:border-slate-500 hover:text-slate-100 disabled:opacity-40 disabled:pointer-events-none"
           >
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              <path d="M6 18l8-6-8-6v12zm9-12v12h2V6h-2z" />
-            </svg>
+            <PlaybackTransportIconNext className="h-5 w-5" />
           </button>
         </div>
       </div>
