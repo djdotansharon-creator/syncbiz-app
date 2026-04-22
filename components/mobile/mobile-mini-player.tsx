@@ -1,160 +1,157 @@
 "use client";
 
-import { useMobileRole } from "@/lib/mobile-role-context";
-import { useStationController } from "@/lib/station-controller-context";
-import { usePlayback } from "@/lib/playback-provider";
+import { useMemo } from "react";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
+import { useMobilePlayer } from "@/components/mobile/mobile-now-playing-sheet";
 
-type Derived = {
-  hasSource: boolean;
-  isPlaying: boolean;
-  title: string;
-  subtitle: string | null;
-  cover: string | null;
-  accent: "sky" | "emerald";
-  onPlayPause: () => void;
-  onNext: () => void;
+type Props = {
+  /** Called when the user taps the artwork / title area to open the full Now Playing sheet. */
+  onOpen: () => void;
 };
-
-function useDerivedPlayerState(): Derived {
-  const { mobileRole } = useMobileRole();
-  const station = useStationController();
-  const playback = usePlayback();
-
-  if (mobileRole === "controller") {
-    const rs = station.remoteState;
-    const isCross = station.isCrossDevice;
-    const src = rs?.currentSource ?? null;
-    const trk = rs?.currentTrack ?? null;
-    const status = rs?.status ?? "idle";
-    const isPlaying = isCross && status === "playing";
-    return {
-      hasSource: isCross && !!src,
-      isPlaying,
-      title: isCross ? (trk?.title ?? src?.title ?? "No playback") : "Connect a player",
-      subtitle: isCross
-        ? src?.title && trk?.title !== src.title
-          ? src.title
-          : null
-        : "Go to Remote tab",
-      cover: isCross ? (trk?.cover ?? src?.cover ?? null) : null,
-      accent: "sky",
-      onPlayPause: () => {
-        if (!isCross) return;
-        if (isPlaying) station.sendPause();
-        else station.sendPlay();
-      },
-      onNext: () => {
-        if (isCross) station.sendNext();
-      },
-    };
-  }
-
-  const src = playback.currentSource;
-  const trk = playback.currentTrack;
-  const isPlaying = playback.status === "playing";
-  return {
-    hasSource: !!src,
-    isPlaying,
-    title: trk?.title ?? src?.title ?? "Nothing playing",
-    subtitle: src?.title && trk?.title !== src.title ? src.title : null,
-    cover: trk?.cover ?? src?.cover ?? null,
-    accent: "emerald",
-    onPlayPause: () => {
-      if (isPlaying) playback.pause();
-      else playback.play();
-    },
-    onNext: () => playback.next(),
-  };
-}
 
 /**
  * Persistent mini player that sits above the bottom nav on every mobile tab.
- * Height: 64px. Tap the artwork+text area to open the Now Playing sheet (wired in Commit 3).
- * Controller mode reflects the remote station state; Player mode reflects local playback.
+ *
+ * Core-control contract (see Commit B requirement): transport buttons —
+ * previous, play/pause, next — are ALWAYS rendered here. They disable
+ * visually (opacity + aria) when there is nothing to control, but are never
+ * hidden behind menus or extra taps. Volume is kept off the mini-player to
+ * keep it compact; it lives in the full Now Playing sheet with an explicit
+ * mode label (MASTER volume vs. this phone volume).
+ *
+ * Tap rules:
+ *   - tapping the artwork / title block opens the Now Playing sheet
+ *   - tapping any transport button does NOT open the sheet (event stops)
  */
-export function MobileMiniPlayer() {
-  const {
-    hasSource,
-    isPlaying,
-    title,
-    subtitle,
-    cover,
-    accent,
-    onPlayPause,
-    onNext,
-  } = useDerivedPlayerState();
+export function MobileMiniPlayer({ onOpen }: Props) {
+  const d = useMobilePlayer();
 
-  const accentClass =
-    accent === "sky"
-      ? "text-sky-300"
-      : "text-emerald-300";
+  const playBg = d.isPlaying
+    ? d.accent === "sky"
+      ? "bg-sky-500 text-slate-950"
+      : "bg-emerald-500 text-slate-950"
+    : "bg-slate-100 text-slate-950";
+
+  const progressPct = useMemo(() => {
+    if (!d.duration || d.duration <= 0) return 0;
+    return Math.max(0, Math.min(100, (d.position / d.duration) * 100));
+  }, [d.position, d.duration]);
+
+  const progressBar = d.accent === "sky" ? "bg-sky-400" : "bg-emerald-400";
 
   return (
     <div
-      className="flex items-center gap-3 border-t border-slate-800/80 bg-slate-950/96 px-3 py-2.5 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur"
+      className="relative border-t border-slate-800/80 bg-slate-950/96 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur"
       role="region"
       aria-label="Mini player"
     >
       <div
-        className={`relative h-11 w-11 shrink-0 overflow-hidden rounded-md bg-slate-800 ring-1 ring-slate-700/60 ${hasSource && isPlaying ? "shadow-[0_0_0_1px_rgba(56,189,248,0.35)]" : ""}`}
         aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-slate-800/60"
       >
-        {cover ? (
-          <HydrationSafeImage src={cover} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            <svg className="h-5 w-5 text-slate-500" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-            </svg>
+        <div
+          className={`h-full transition-[width] duration-200 ${progressBar}`}
+          style={{ width: d.hasSource ? `${progressPct}%` : "0%" }}
+        />
+      </div>
+
+      <div className="flex items-center gap-2 px-2.5 py-2.5">
+        <button
+          type="button"
+          onClick={onOpen}
+          aria-label={d.hasSource ? "Open Now Playing" : "Open player"}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left transition active:scale-[0.99]"
+        >
+          <div
+            className={`relative h-11 w-11 shrink-0 overflow-hidden rounded-md bg-slate-800 ring-1 ring-slate-700/60 ${
+              d.hasSource && d.isPlaying ? "shadow-[0_0_0_1px_rgba(56,189,248,0.35)]" : ""
+            }`}
+            aria-hidden
+          >
+            {d.cover ? (
+              <HydrationSafeImage src={d.cover} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <svg className="h-5 w-5 text-slate-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+                </svg>
+              </div>
+            )}
           </div>
-        )}
+          <div className="flex min-w-0 flex-1 flex-col">
+            <p
+              className={`truncate text-[13px] font-semibold leading-tight ${
+                d.hasSource
+                  ? "text-slate-100"
+                  : d.accent === "sky"
+                    ? "text-sky-300"
+                    : "text-emerald-300"
+              }`}
+            >
+              {d.title}
+            </p>
+            {d.subtitle && (
+              <p className="truncate text-[11px] font-medium leading-tight text-slate-400">
+                {d.subtitle}
+              </p>
+            )}
+          </div>
+        </button>
+
+        {/* Transport cluster — always visible, disabled (not hidden) when idle. */}
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              d.onPrev();
+            }}
+            disabled={!d.canControl}
+            aria-label="Previous"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-300 transition hover:text-slate-100 disabled:opacity-40"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M7 6v12h2V6H7zm3 6l8 6V6l-8 6z" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              d.onPlayPause();
+            }}
+            disabled={!d.canControl}
+            aria-label={d.isPlaying ? "Pause" : "Play"}
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition active:scale-95 disabled:opacity-40 ${playBg}`}
+          >
+            {d.isPlaying ? (
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+              </svg>
+            ) : (
+              <svg className="ml-0.5 h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              d.onNext();
+            }}
+            disabled={!d.canControl}
+            aria-label="Next"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-300 transition hover:text-slate-100 disabled:opacity-40"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M6 18l8-6-8-6v12zm9-12v12h2V6h-2z" />
+            </svg>
+          </button>
+        </div>
       </div>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <p className={`truncate text-[13px] font-semibold leading-tight ${hasSource ? "text-slate-100" : accentClass}`}>
-          {title}
-        </p>
-        {subtitle && (
-          <p className="truncate text-[11px] font-medium leading-tight text-slate-400">{subtitle}</p>
-        )}
-      </div>
-
-      <button
-        type="button"
-        onClick={onNext}
-        disabled={!hasSource}
-        aria-label="Next"
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-300 transition hover:text-slate-100 disabled:opacity-40"
-      >
-        <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-          <path d="M6 18V6h2v12H6zm11-6l-7 6V6l7 6z" />
-        </svg>
-      </button>
-
-      <button
-        type="button"
-        onClick={onPlayPause}
-        disabled={!hasSource}
-        aria-label={isPlaying ? "Pause" : "Play"}
-        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition active:scale-95 disabled:opacity-40 ${
-          isPlaying
-            ? accent === "sky"
-              ? "bg-sky-500 text-slate-950"
-              : "bg-emerald-500 text-slate-950"
-            : "bg-slate-100 text-slate-950"
-        }`}
-      >
-        {isPlaying ? (
-          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-          </svg>
-        ) : (
-          <svg className="ml-0.5 h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-            <path d="M8 5v14l11-7z" />
-          </svg>
-        )}
-      </button>
     </div>
   );
 }

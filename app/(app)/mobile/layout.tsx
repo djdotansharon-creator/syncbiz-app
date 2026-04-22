@@ -1,31 +1,38 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { StationControllerProvider } from "@/lib/station-controller-context";
 import { MobileSourcesProvider } from "@/lib/mobile-sources-context";
 import { MobileBottomNav } from "@/components/mobile/mobile-bottom-nav";
 import { MobileMiniPlayer } from "@/components/mobile/mobile-mini-player";
+import { MobileNowPlayingSheet } from "@/components/mobile/mobile-now-playing-sheet";
 
 /**
  * Persistent mobile shell. Every mobile tab mounts inside this layout, which:
  *   - mounts `StationControllerProvider` once (single controller WS across tab nav)
  *   - mounts `MobileSourcesProvider` once (library loaded once, reused on every tab)
  *   - pins a mini-player + 4-tab bottom nav to the viewport
+ *   - owns the Now Playing sheet and its open/close state
  *
  * The scrollable page content is the `children` slot in the middle column. Pages should NOT
  * render their own fixed footer/nav — the layout owns that.
  */
 export default function MobileLayout({ children }: { children: ReactNode }) {
+  const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
+  const openNowPlaying = useCallback(() => setNowPlayingOpen(true), []);
+  const closeNowPlaying = useCallback(() => setNowPlayingOpen(false), []);
+
   return (
     <StationControllerProvider>
       <MobileSourcesProvider>
         <div className="flex h-[100dvh] flex-col overflow-hidden bg-slate-950 text-slate-100">
           <main className="flex-1 overflow-y-auto overscroll-contain">{children}</main>
           <div className="shrink-0">
-            <MobileMiniPlayer />
+            <MobileMiniPlayer onOpen={openNowPlaying} />
             <MobileBottomNav />
           </div>
         </div>
+        <MobileNowPlayingSheet open={nowPlayingOpen} onClose={closeNowPlaying} />
       </MobileSourcesProvider>
     </StationControllerProvider>
   );
