@@ -768,9 +768,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const playLocal = useCallback((url: string, browserPreference?: string) => {
     const target = canonicalYouTubeWatchUrlForPlayback(url);
-    // play-local runs on server and opens URL there – useless on mobile
-    if (typeof window !== "undefined" && window.location.pathname === "/mobile") {
-      window.open(target, "_blank");
+    // `/api/commands/play-local` is a desktop-only integration (opens the URL in the host OS
+    // default browser / media player via the Electron bridge). On a phone there is no OS-level
+    // player surface we can hand off to, and opening a new tab is disruptive — the mobile
+    // surface plays URLs through the in-app embedded iframe / <audio> pipeline instead.
+    // Return silently so non-embedded sources (radio, HLS) still advance via the state update
+    // above that fed AudioPlayer; they just don't get the OS-app handoff.
+    if (
+      typeof window !== "undefined" &&
+      window.location.pathname.startsWith("/mobile")
+    ) {
       return;
     }
     fetch("/api/commands/play-local", {

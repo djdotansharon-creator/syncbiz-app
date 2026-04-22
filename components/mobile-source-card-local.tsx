@@ -77,7 +77,7 @@ export function MobileSourceCardLocal({ source, onRemove, editReturnTo }: Props)
           )}
         </div>
       </button>
-      <MobileSourceCardActions source={source} onRemove={onRemove} isControllerMode={false} editReturnTo={editReturnTo} />
+      <MobileSourceCardActions source={source} onRemove={onRemove} editReturnTo={editReturnTo} />
     </div>
   );
 }

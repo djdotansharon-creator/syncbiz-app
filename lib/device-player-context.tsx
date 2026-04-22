@@ -77,8 +77,13 @@ const DevicePlayerContext = createContext<DevicePlayerContextValue | null>(null)
 /**
  * Browser-only: dedicated player surfaces that may output branch audio locally when MASTER (see
  * `deviceModeAllowsLocalPlayback` — gated to these routes only, not `/settings`).
+ *
+ * `/mobile` is eligible because the mobile surface has an explicit Player mode where the phone
+ * itself owns playback. The mobile role context (`lib/mobile-role-context.tsx`) gates whether
+ * the user is in Controller vs Player mode; eligibility here is only about whether local
+ * playback is physically allowed on this route, not about which mode is active.
  */
-const ELIGIBLE_BROWSER_PLAYER_ROUTES = ["/player", "/remote-player", "/sources"] as const;
+const ELIGIBLE_BROWSER_PLAYER_ROUTES = ["/player", "/remote-player", "/sources", "/mobile"] as const;
 
 function isEligibleBrowserPlayerRoute(pathname: string): boolean {
   return ELIGIBLE_BROWSER_PLAYER_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));

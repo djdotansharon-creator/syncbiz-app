@@ -11,14 +11,12 @@ import type { UnifiedSource } from "@/lib/source-types";
 type Props = {
   source: UnifiedSource;
   onRemove?: (id: string, origin?: UnifiedSource["origin"]) => void;
-  /** Controller mode: Edit/Delete affect remote library. Player mode: affect local. */
-  isControllerMode?: boolean;
   /** When set, edit links include return param for redirect after save (e.g. /mobile). */
   editReturnTo?: string;
 };
 
 /** Overflow menu with Edit, Delete, Share for mobile source cards. */
-export function MobileSourceCardActions({ source, onRemove, isControllerMode = false, editReturnTo }: Props) {
+export function MobileSourceCardActions({ source, onRemove, editReturnTo }: Props) {
   const { t } = useTranslations();
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
