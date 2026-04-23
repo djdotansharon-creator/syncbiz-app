@@ -197,13 +197,40 @@ export function useRemoteControlWs(
       setStatus("disconnected");
       setMasterDeviceId(null);
     };
-    // `options?.authToken` (full JWT string) is intentionally in deps so that
-    // after an auth error the parent refetches a new token and this effect
-    // re-runs with the fresh value. Focus-triggered token refreshes are
-    // harmless: the OPEN guard above returns early when the socket is already
-    // healthy, so no reconnect churn occurs on window-focus switches between
-    // the desktop app and a browser tab.
-  }, [role, deviceId, options?.authToken, reconnectTrigger]);
+  // DO NOT include `options?.authToken` (the full JWT string) in deps —
+  // DevicePlayerProvider refreshes the token on every `window.focus`
+  // event, which would tear down and rebuild the WS on every focus switch
+  // between the desktop app and a browser tab. Using `!!authToken` (a
+  // boolean presence check) means the effect only re-runs when the token
+  // transitions present ↔ absent (e.g. real auth error + `setWsToken(null)`
+  // in `onAuthError` + refetch) or `reconnectTrigger` below.
+  // The latest JWT is read from `options?.authToken` when this effect body runs.
+  }, [role, deviceId, !!options?.authToken, reconnectTrigger]);
+
+  // Branch device: reconnect when the user returns to the app (also mirrors
+  // `useRemoteController` / owner).
+  // Without this, a mid-session socket close (server deploy, network blip) left
+  // `!!authToken` true so the main effect never re-opened, and `isBranchConnected`
+  // stayed false until something else toggled token presence.
+  useEffect(() => {
+    if (role !== "device") return;
+    if (typeof document === "undefined" || typeof window === "undefined") return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") tryReconnect();
+    };
+    const onFocus = () => tryReconnect();
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) tryReconnect();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [role]);
 
   /* Device: parent (DevicePlayerProvider) handles token refresh on visibility. Controller: uses useRemoteController. */
 

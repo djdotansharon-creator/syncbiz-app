@@ -368,6 +368,11 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     if (process.env.NODE_ENV === "development") {
       console.info("[SyncBiz WS client] reconnect due to auth expiry", { role: "device" });
     }
+    // Force the device WebSocket effect to re-run. It depends on
+    // `!!options?.authToken` only, so if we only refetch a new JWT the boolean
+    // stays true, the old socket (already closed by the ERROR path) is never
+    // replaced, and the user is stuck in Standalone with no branch controls.
+    setWsToken(null);
     setTokenRefreshTrigger((k) => k + 1);
   }, []);
 
