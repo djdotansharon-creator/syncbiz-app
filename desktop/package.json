@@ -11,7 +11,8 @@
     "verify:player-chrome": "electron scripts/verify-player-chrome.cjs",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win",
+    "build-icons": "node scripts/build-icons.cjs",
+    "dist:win": "npm run build-icons && npm run build && electron-builder --win",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux",
     "dist:publish": "npm run build && electron-builder --publish always"
@@ -35,6 +36,7 @@
     "appId": "com.syncbiz.player",
     "productName": "SyncBiz Player",
     "copyright": "Copyright (c) 2026 SyncBiz",
+    "icon": "build/icon.png",
     "directories": {
       "output": "dist-installer",
       "buildResources": "build"

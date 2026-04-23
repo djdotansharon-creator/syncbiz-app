@@ -197,6 +197,23 @@ const TRANSLATIONS = {
 
     agentsHealthy: "Agents healthy",
     mainMenu: "Main menu",
+    downloadDesktopApp: "Desktop",
+    downloadDesktopAppTitle: "Download SyncBiz Player",
+    downloadDesktopFromGitHub: "All installers on GitHub",
+    /** Prominent CTA in the app header (browser only). */
+    downloadDesktopCta: "Get the desktop player",
+    downloadDesktopCtaSub: "Install on Windows, Mac, or Linux",
+    downloadDesktopCtaSubFallback: "Get the installer from GitHub",
+    /** Interpolate {v} in the component. */
+    downloadDesktopCtaSubWithVersion: "Version {v} · for desktop",
+    downloadDesktopModalTitle: "SyncBiz Player for desktop",
+    downloadDesktopModalBody:
+      "The desktop player syncs with your library and is built for long sessions. Install on Windows, macOS, or Linux when a build is available.",
+    downloadDesktopModalDownload: "Download installer",
+    downloadDesktopModalNoBuild:
+      "No published build yet. You can follow GitHub for the first release, or check back after we publish a desktop-v tag.",
+    downloadDesktopModalGitHubLink: "View releases on GitHub",
+    downloadDesktopClose: "Close",
     pinToTop: "Pin to top",
     sidebarFooter: "Controller and scheduler. Does not store or host media.",
     newBreadcrumb: "New",
@@ -557,6 +574,21 @@ const TRANSLATIONS = {
 
     agentsHealthy: "סוכנים תקינים",
     mainMenu: "תפריט ראשי",
+    downloadDesktopApp: "דסקטופ",
+    downloadDesktopAppTitle: "הורדת SyncBiz Player",
+    downloadDesktopFromGitHub: "כל קבצי ההתקנה ב-GitHub",
+    downloadDesktopCta: "הורד את נגן SyncBiz",
+    downloadDesktopCtaSub: "התקנה ב-Windows, Mac או Linux",
+    downloadDesktopCtaSubFallback: "קבל את קובץ ההתקנה ב-GitHub",
+    downloadDesktopCtaSubWithVersion: "גרסה {v} · לנגן שולחני",
+    downloadDesktopModalTitle: "נגן SyncBiz למחשב",
+    downloadDesktopModalBody:
+      "הנגן שולחני מסתנכרן עם הספרייה ובנוי לשימוש ממושך. אפשר להתקין ב-Windows, macOS או Linux כשיהיה build זמין.",
+    downloadDesktopModalDownload: "הורדת קובץ התקנה",
+    downloadDesktopModalNoBuild:
+      "אין עדיין גרסה מפורסמת. אפשר לעקוב ב-GitHub או לחזור אחרי שיעלה release עם תג desktop-v.",
+    downloadDesktopModalGitHubLink: "לעמוד ה-Releases ב-GitHub",
+    downloadDesktopClose: "סגור",
     pinToTop: "נעץ לסרגל העליון",
     sidebarFooter: "בקר ומתזמן. לא מאחסן ולא מארח מדיה.",
     newBreadcrumb: "חדש",

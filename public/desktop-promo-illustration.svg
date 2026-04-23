@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 220" fill="none" role="img" aria-label="">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="480" y2="220" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0a1628"/>
+      <stop offset="0.5" stop-color="#0c2744"/>
+      <stop offset="1" stop-color="#0a1929"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="200" y1="40" x2="420" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38bdf8" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#0284c7" stop-opacity="0.02"/>
+    </linearGradient>
+  </defs>
+  <rect width="480" height="220" rx="20" fill="url(#bg)"/>
+  <rect x="8" y="8" width="464" height="204" rx="16" fill="url(#glow)"/>
+  <!-- laptop frame -->
+  <rect x="48" y="32" width="320" height="150" rx="8" fill="#0f172a" stroke="#1e3a5f" stroke-width="1.5"/>
+  <rect x="56" y="44" width="100" height="8" rx="2" fill="#1d4ed8" opacity="0.6"/>
+  <rect x="56" y="60" width="80" height="4" rx="1" fill="#334155" opacity="0.8"/>
+  <rect x="56" y="80" width="300" height="6" rx="1" fill="#0ea5e9" opacity="0.35"/>
+  <rect x="56" y="92" width="220" height="6" rx="1" fill="#334155" opacity="0.5"/>
+  <rect x="56" y="110" width="180" height="6" rx="1" fill="#334155" opacity="0.35"/>
+  <rect x="168" y="44" width="40" height="8" rx="2" fill="#38bdf8" opacity="0.5"/>
+  <rect x="48" y="190" width="320" height="6" rx="1" fill="#1e3a5f"/>
+  <!-- right column (abstract UI) -->
+  <rect x="380" y="40" width="60" height="8" rx="2" fill="#0ea5e9" opacity="0.4"/>
+  <rect x="380" y="58" width="50" height="4" rx="1" fill="#64748b"/>
+  <rect x="380" y="78" width="60" height="6" rx="1" fill="#1e3a5f"/>
+  <rect x="380" y="92" width="40" height="6" rx="1" fill="#1e3a5f" opacity="0.7"/>
+  <rect x="380" y="120" width="70" height="32" rx="4" fill="#1d4ed8" opacity="0.45"/>
+</svg>

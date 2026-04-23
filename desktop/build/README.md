@@ -12,8 +12,8 @@ Drop platform icons here before running `npm run dist` so they get baked into th
 | `icon.png`      | Linux    | 512x512 PNG for AppImage/deb.                                                           |
 | `background.png`| macOS    | Optional DMG background (540x380). Ignored if absent.                                   |
 
-Until real artwork lands, electron-builder falls back to its generic Electron icon —
-the installer still builds, it just isn't branded.
+`icon.png` (512×512 or larger) is the master; `npm run build-icons` in `desktop/`
+regenerates `icon.ico` and `icon.icns` for Windows and macOS.
 
 ## Where installers land
 

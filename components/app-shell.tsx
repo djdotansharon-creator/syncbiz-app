@@ -678,8 +678,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </span>
               </div>
             </div>
-            <div className="flex min-w-0 flex-1 basis-0 items-center justify-end gap-2">
-              <DesktopDownloadButton />
+            <div className="flex min-w-0 flex-1 basis-0 items-center justify-end gap-1.5 sm:gap-2">
+              <div className="me-0.5 min-w-0 shrink-0 border-e border-slate-600/60 pe-2 sm:pe-3">
+                <DesktopDownloadButton />
+              </div>
               <StandaloneIndicator />
               <DeviceModeIndicator />
               <span className="hidden items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/80 px-2.5 py-1 text-xs text-slate-400 sm:flex">

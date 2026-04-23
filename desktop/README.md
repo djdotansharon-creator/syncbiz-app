@@ -50,3 +50,40 @@ The workflow downloads platform MPV + yt-dlp binaries during the run (they are n
 - Drop `icon.ico` / `icon.icns` / `icon.png` into `desktop/build/` (see `desktop/build/README.md`).
 - Bump `desktop/package.json` version.
 - Create the matching `desktop-v*` tag.
+
+### Web app download button (browser) — “הורדה” ל־.exe
+
+The Next route `GET /api/desktop/download` picks a **direct** installer URL. Best option: a **public GitHub Release** whose tag starts with `desktop-v` and includes the Windows `.exe` as an upload.
+
+1. In GitHub: **Releases** → **Create a new release**.
+2. **Tag**: `desktop-v0.1.0` (must match `TAG_PREFIX` + SemVer, same as `desktop/package.json` version).
+3. **Attach** the file built locally:  
+   `desktop/dist-installer/SyncBiz-Player-Setup-0.1.0-x64.exe` (name must match `artifactName` in `package.json` for that version).
+4. Publish the release.  
+   The API will return `browser_download_url` from the GitHub API — **no extra env** is required for that path.
+
+**Stable direct link format** (for docs or for `DESKTOP_WIN_INSTALLER_URL` on Railway if you want a fixed URL without relying on the API):
+
+`https://github.com/djdotansharon-creator/syncbiz-app/releases/download/desktop-v0.1.0/SyncBiz-Player-Setup-0.1.0-x64.exe`
+
+**On Railway (optional):** if you set these, they act as a fallback when there is no matching release yet, or in addition to your deploy workflow:
+
+- `DESKTOP_WIN_INSTALLER_URL` — the `https://github.com/.../releases/download/.../....exe` URL above
+- `DESKTOP_WIN_INSTALLER_FILE_NAME=SyncBiz-Player-Setup-0.1.0-x64.exe`
+- `DESKTOP_WIN_INSTALLER_VERSION=0.1.0`
+
+**Do not set** `DESKTOP_INSTALLER_BUNDLE_PATH` in production (that is only for the same server streaming the file from disk — local dev or a volume path).
+
+### Upload via CLI (optional)
+
+With [GitHub CLI](https://cli.github.com/) and the installer already built:
+
+```bash
+gh release create desktop-v0.1.0 ^
+  "desktop/dist-installer/SyncBiz-Player-Setup-0.1.0-x64.exe" ^
+  --repo djdotansharon-creator/syncbiz-app ^
+  --title "SyncBiz Player 0.1.0" ^
+  --notes "Windows x64 NSIS installer."
+```
+
+(Use `^` line continuation on Windows `cmd`, or a single line in PowerShell.)
