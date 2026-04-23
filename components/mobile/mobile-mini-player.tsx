@@ -105,7 +105,7 @@ export function MobileMiniPlayer({ onOpen }: Props) {
             }}
             disabled={transportDisabled}
             aria-label="Previous"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-950/80 text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-slate-700 bg-slate-950/80 text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
           >
             <PlaybackTransportIconPrev className="h-5 w-5" />
           </button>
@@ -118,7 +118,7 @@ export function MobileMiniPlayer({ onOpen }: Props) {
             }}
             disabled={!d.canControl || !d.hasSource}
             aria-label={d.isPlaying ? "Pause" : "Play"}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#1db954] text-white shadow-[0_6px_12px_-3px_rgba(0,0,0,0.35)] transition hover:bg-[#1ed760] active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#1db954] text-white shadow-[0_6px_12px_-3px_rgba(0,0,0,0.35)] transition hover:bg-[#1ed760] active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
           >
             {d.isPlaying ? (
               <PlaybackTransportIconPause className="h-5 w-5" />
@@ -135,7 +135,7 @@ export function MobileMiniPlayer({ onOpen }: Props) {
             }}
             disabled={transportDisabled}
             aria-label="Next"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-950/80 text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-slate-700 bg-slate-950/80 text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
           >
             <PlaybackTransportIconNext className="h-5 w-5" />
           </button>

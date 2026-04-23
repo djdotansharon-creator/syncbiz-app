@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { useStationController } from "@/lib/station-controller-context";
@@ -197,11 +197,6 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
     };
   }, [open, onClose]);
 
-  const progressPct = useMemo(() => {
-    if (!d.duration || d.duration <= 0) return 0;
-    return Math.max(0, Math.min(100, (d.position / d.duration) * 100));
-  }, [d.position, d.duration]);
-
   const volumeLabel =
     d.mode === "controller"
       ? "MASTER · desktop volume"
@@ -247,13 +242,14 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
           </button>
         </div>
 
-        <div className="flex flex-1 flex-col overflow-y-auto px-6 pb-8">
-          <div className="mx-auto mt-4 aspect-square w-full max-w-[320px] overflow-hidden rounded-2xl bg-slate-800/80 shadow-[0_10px_15px_-3px_rgba(0,0,0,0.25)] ring-1 ring-slate-700/60">
+        <div className="flex flex-1 flex-col overflow-y-auto px-6 pb-6">
+          {/* Artwork — sized to keep transport above the fold on short phones. */}
+          <div className="mx-auto mt-2 aspect-square w-full max-w-[220px] overflow-hidden rounded-2xl bg-slate-800/80 shadow-[0_10px_15px_-3px_rgba(0,0,0,0.25)] ring-1 ring-slate-700/60">
             {d.cover ? (
               <HydrationSafeImage src={d.cover} alt="" className="h-full w-full object-cover" />
             ) : (
               <div className="flex h-full w-full items-center justify-center text-slate-600">
-                <svg className="h-20 w-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+                <svg className="h-16 w-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
                   <path d="M9 18V5l12-2v13" />
                   <circle cx="6" cy="18" r="3" />
                   <circle cx="18" cy="16" r="3" />
@@ -262,17 +258,64 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
             )}
           </div>
 
-          <div className="mt-6 text-center">
+          <div className="mt-5 text-center">
             <p className={`truncate text-xl font-semibold tracking-tight ${d.hasSource ? "text-slate-50" : "text-slate-400"}`}>
               {d.title}
             </p>
             {d.subtitle && (
-              <p className="mt-1 line-clamp-2 text-sm uppercase tracking-wide text-slate-500">
+              <p className="mt-1 line-clamp-2 text-xs uppercase tracking-wide text-slate-500">
                 {d.subtitle}
               </p>
             )}
           </div>
 
+          {/* Transport — hero order & hierarchy: Prev · Stop · [dominant Play/Pause] · Next.
+              Placed directly under meta (same position as the main player hero)
+              so it sits high in the viewport and reads as the primary action. */}
+          <div className="mt-6 flex items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={d.onPrev}
+              disabled={transportDisabled}
+              aria-label="Previous"
+              className={`${TRANSPORT_SEC} h-[3.25rem] w-[3.25rem]`}
+            >
+              <PlaybackTransportIconPrev className="h-6 w-6" />
+            </button>
+            <button
+              type="button"
+              onClick={d.onStop}
+              disabled={transportDisabled}
+              aria-label="Stop"
+              className={`${TRANSPORT_SEC} h-[3.25rem] w-[3.25rem]`}
+            >
+              <PlaybackTransportIconStop className="h-6 w-6" />
+            </button>
+            <button
+              type="button"
+              onClick={d.onPlayPause}
+              disabled={!d.canControl || !d.hasSource}
+              aria-label={d.isPlaying ? "Pause" : "Play"}
+              className={`${TRANSPORT_PRIMARY} h-[4.5rem] w-[4.5rem]`}
+            >
+              {d.isPlaying ? (
+                <PlaybackTransportIconPause className="h-9 w-9" />
+              ) : (
+                <PlaybackTransportIconPlay className="ml-0.5 h-9 w-9" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={d.onNext}
+              disabled={transportDisabled}
+              aria-label="Next"
+              className={`${TRANSPORT_SEC} h-[3.25rem] w-[3.25rem]`}
+            >
+              <PlaybackTransportIconNext className="h-6 w-6" />
+            </button>
+          </div>
+
+          {/* Seek — slim row under the transport so it reads as detail, not a primary control. */}
           <div className="mt-6">
             <input
               type="range"
@@ -290,56 +333,11 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
             />
             <div className="mt-1 flex items-center justify-between text-[11px] tabular-nums text-slate-500">
               <span>{formatTime(d.position)}</span>
-              <span aria-hidden>{progressPct > 0 ? `${Math.round(progressPct)}%` : "–"}</span>
               <span>{d.duration > 0 ? formatTime(d.duration) : "--:--"}</span>
             </div>
           </div>
 
-          {/* Transport — hero order: Prev · Stop · Play/Pause · Next. Same chrome as desktop main player. */}
-          <div className="mt-8 flex items-center justify-center gap-3">
-            <button
-              type="button"
-              onClick={d.onPrev}
-              disabled={transportDisabled}
-              aria-label="Previous"
-              className={`${TRANSPORT_SEC} h-11 w-11`}
-            >
-              <PlaybackTransportIconPrev className="h-5 w-5" />
-            </button>
-            <button
-              type="button"
-              onClick={d.onStop}
-              disabled={transportDisabled}
-              aria-label="Stop"
-              className={`${TRANSPORT_SEC} h-11 w-11`}
-            >
-              <PlaybackTransportIconStop className="h-5 w-5" />
-            </button>
-            <button
-              type="button"
-              onClick={d.onPlayPause}
-              disabled={!d.canControl || !d.hasSource}
-              aria-label={d.isPlaying ? "Pause" : "Play"}
-              className={`${TRANSPORT_PRIMARY} h-14 w-14`}
-            >
-              {d.isPlaying ? (
-                <PlaybackTransportIconPause className="h-7 w-7" />
-              ) : (
-                <PlaybackTransportIconPlay className="ml-0.5 h-7 w-7" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={d.onNext}
-              disabled={transportDisabled}
-              aria-label="Next"
-              className={`${TRANSPORT_SEC} h-11 w-11`}
-            >
-              <PlaybackTransportIconNext className="h-5 w-5" />
-            </button>
-          </div>
-
-          <div className="mt-8">
+          <div className="mt-5">
             <div className="mb-1.5 flex items-center justify-between">
               <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                 {volumeLabel}
@@ -365,7 +363,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
           </div>
 
           {!d.canControl && d.mode === "controller" && (
-            <p className="mt-6 rounded-lg border border-slate-700/60 bg-slate-900/60 px-3 py-2 text-center text-xs text-slate-400">
+            <p className="mt-5 rounded-lg border border-slate-700/60 bg-slate-900/60 px-3 py-2 text-center text-xs text-slate-400">
               No MASTER player connected. Controls are disabled until a device
               joins the station.
             </p>
