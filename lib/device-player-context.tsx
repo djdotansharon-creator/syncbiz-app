@@ -25,6 +25,7 @@ import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode
 import type { UnifiedSource } from "@/lib/source-types";
 import { deviceModeAllowsLocalPlayback } from "@/lib/device-mode-guard";
 import { getAutoMix, setAutoMix, onAutoMixChanged } from "@/lib/mix-preferences";
+import { useMobileRole } from "@/lib/mobile-role-context";
 
 type DevicePlayerContextValue = {
   /** True when this tab registers as a branch WS device (see `resolveDeviceRoleActive`). */
@@ -70,6 +71,11 @@ type DevicePlayerContextValue = {
    * no branch device socket and no local execution ownership (see `deviceModeAllowsLocalPlayback`).
    */
   isObserverOnlyBrowser: boolean;
+  /**
+   * `/mobile/...` + role "player": this tab should play through the in-app engine on the phone even
+   * if the branch device is CONTROL (station MASTER elsewhere). Not the same as `deviceMode === "MASTER"`.
+   */
+  isMobileLocalPlayback: boolean;
 };
 
 const DevicePlayerContext = createContext<DevicePlayerContextValue | null>(null);
@@ -129,6 +135,9 @@ export function useDevicePlayer() {
 
 export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const { mobileRole } = useMobileRole();
+  const isMobileLocalPlayback =
+    (pathname === "/mobile" || pathname?.startsWith("/mobile/")) && mobileRole === "player";
   /** Server: unknown. Client: read immediately so Electron is not treated as `null` until after first paint (that hid Settings branch UI). */
   const [isElectronShell, setIsElectronShell] = useState<boolean | null>(() =>
     typeof window === "undefined" ? null : readSyncBizElectronRenderer(),
@@ -342,15 +351,18 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   );
 
   const effectiveUserId = (userId ?? "").trim();
-  const onDeviceMode = useCallback((mode: DeviceMode) => {
-    console.log("[SyncBiz Audit] Device mode change", {
-      mode,
-    });
-    if (mode === "CONTROL") {
-      console.log("[SyncBiz Audit] CONTROL transition -> stopForControlHandoff (no stop-local)");
-      stopForControlHandoff();
-    }
-  }, [stopForControlHandoff]);
+  const onDeviceMode = useCallback(
+    (mode: DeviceMode) => {
+      console.log("[SyncBiz Audit] Device mode change", {
+        mode,
+      });
+      if (mode === "CONTROL" && !isMobileLocalPlayback) {
+        console.log("[SyncBiz Audit] CONTROL transition -> stopForControlHandoff (no stop-local)");
+        stopForControlHandoff();
+      }
+    },
+    [stopForControlHandoff, isMobileLocalPlayback],
+  );
   const onStateUpdate = useCallback((state: StationPlaybackState) => setMasterState(state), []);
   const onSecondaryDesktop = useCallback(() => setSecondaryDesktopModalOpen(true), []);
   const onGuestRecommendation = useCallback((rec: GuestRecommendationPayload) => setPendingGuestRecommendation(rec), []);
@@ -520,9 +532,10 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
 
   // Block local playback whenever effective role is CONTROL (including reconnect windows that
   // keep the last connected CONTROL role), so demoted side cannot re-enter standalone output.
+  // Exception: /mobile in "Player" mode — the phone is supposed to play locally (see isMobileLocalPlayback).
   // Plain browser: only real player surfaces may own local branch output; `/settings` stays non-executing.
   deviceModeAllowsLocalPlayback.current =
-    (!isActive || effectiveDeviceMode === "MASTER") &&
+    (isMobileLocalPlayback || !isActive || effectiveDeviceMode === "MASTER") &&
     (!isBrowserShell || isEligibleBrowserPlayerRoute(pathname));
 
   // Track CONTROL -> MASTER transition so adoption can complete even if mirrored state arrives a
@@ -625,9 +638,11 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     [masterDeviceId, sendCommand]
   );
 
+  const useLocalDeviceTransport = effectiveDeviceMode === "MASTER" || isMobileLocalPlayback;
+
   const playSourceOrSend = useCallback(
     (source: UnifiedSource, trackIndex = 0) => {
-      if (effectiveDeviceMode === "MASTER") {
+      if (useLocalDeviceTransport) {
         playSource(source, trackIndex);
       } else {
         sendCommandToMaster("PLAY_SOURCE", {
@@ -636,64 +651,64 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [effectiveDeviceMode, playSource, sendCommandToMaster]
+    [useLocalDeviceTransport, playSource, sendCommandToMaster]
   );
 
   const playOrSend = useCallback(() => {
-    if (effectiveDeviceMode === "MASTER") play();
+    if (useLocalDeviceTransport) play();
     else sendCommandToMaster("PLAY");
-  }, [effectiveDeviceMode, play, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, play, sendCommandToMaster]);
 
   const pauseOrSend = useCallback(() => {
-    if (effectiveDeviceMode === "MASTER") pause();
+    if (useLocalDeviceTransport) pause();
     else sendCommandToMaster("PAUSE");
-  }, [effectiveDeviceMode, pause, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, pause, sendCommandToMaster]);
 
   const stopOrSend = useCallback(() => {
-    if (effectiveDeviceMode === "MASTER") stop();
+    if (useLocalDeviceTransport) stop();
     else sendCommandToMaster("STOP");
-  }, [effectiveDeviceMode, stop, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, stop, sendCommandToMaster]);
 
   const nextOrSend = useCallback(() => {
-    if (effectiveDeviceMode === "MASTER") next();
+    if (useLocalDeviceTransport) next();
     else sendCommandToMaster("NEXT");
-  }, [effectiveDeviceMode, next, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, next, sendCommandToMaster]);
 
   const prevOrSend = useCallback(() => {
-    if (effectiveDeviceMode === "MASTER") prev();
+    if (useLocalDeviceTransport) prev();
     else sendCommandToMaster("PREV");
-  }, [effectiveDeviceMode, prev, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, prev, sendCommandToMaster]);
 
   const seekOrSend = useCallback(
     (seconds: number) => {
-      if (effectiveDeviceMode === "MASTER") seekTo(seconds);
+      if (useLocalDeviceTransport) seekTo(seconds);
       else sendCommandToMaster("SEEK", { position: seconds });
     },
-    [effectiveDeviceMode, seekTo, sendCommandToMaster]
+    [useLocalDeviceTransport, seekTo, sendCommandToMaster]
   );
 
   const setVolumeOrSend = useCallback(
     (value: number) => {
-      if (effectiveDeviceMode === "MASTER") setVolume(value);
+      if (useLocalDeviceTransport) setVolume(value);
       else sendCommandToMaster("SET_VOLUME", { volume: value });
     },
-    [effectiveDeviceMode, setVolume, sendCommandToMaster]
+    [useLocalDeviceTransport, setVolume, sendCommandToMaster]
   );
 
   const setShuffleOrSend = useCallback(
     (value: boolean) => {
-      if (effectiveDeviceMode === "MASTER") setShuffle(value);
+      if (useLocalDeviceTransport) setShuffle(value);
       else sendCommandToMaster("SET_SHUFFLE", { value });
     },
-    [effectiveDeviceMode, setShuffle, sendCommandToMaster]
+    [useLocalDeviceTransport, setShuffle, sendCommandToMaster]
   );
 
   const setAutoMixOrSend = useCallback(
     (value: boolean) => {
-      if (effectiveDeviceMode === "MASTER") setAutoMix(value);
+      if (useLocalDeviceTransport) setAutoMix(value);
       else sendCommandToMaster("SET_AUTOMIX", { value });
     },
-    [effectiveDeviceMode, sendCommandToMaster]
+    [useLocalDeviceTransport, sendCommandToMaster]
   );
 
   const value = useMemo<DevicePlayerContextValue>(
@@ -725,6 +740,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       sessionCode,
       guestLink,
       isObserverOnlyBrowser,
+      isMobileLocalPlayback,
     }),
     [
       isActive,
@@ -753,6 +769,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       sessionCode,
       guestLink,
       isObserverOnlyBrowser,
+      isMobileLocalPlayback,
     ]
   );
 

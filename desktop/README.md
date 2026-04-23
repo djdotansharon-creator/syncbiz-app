@@ -66,6 +66,8 @@ The Next route `GET /api/desktop/download` picks a **direct** installer URL. Bes
 
 `https://github.com/djdotansharon-creator/syncbiz-app/releases/download/desktop-v0.1.0/SyncBiz-Player-Setup-0.1.0-x64.exe`
 
+**GitHub `DESKTOP_GITHUB_*` (optional):** use the full user/org name `djdotansharon-creator` — not `creator` alone, or all `github.com/.../releases` links 404.
+
 **On Railway (optional):** if you set these, they act as a fallback when there is no matching release yet, or in addition to your deploy workflow:
 
 - `DESKTOP_WIN_INSTALLER_URL` — the `https://github.com/.../releases/download/.../....exe` URL above

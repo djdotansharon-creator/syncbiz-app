@@ -55,14 +55,15 @@ export type UseTopNavPinsReturn = {
 };
 
 export function useTopNavPins(): UseTopNavPinsReturn {
-  // Optional user-chosen pins (does NOT include library/radio).
-  const [userPins, setUserPins] = useState<string[]>(() => {
-    const stored = readStoredPins();
-    return stored ?? [...DEFAULT_PINS];
-  });
+  // Same initial state on server and on the client's first paint — never read
+  // localStorage in the useState initializer (server has no localStorage, so
+  // pins would differ and cause hydration mismatches in the nav <Link> list).
+  const [userPins, setUserPins] = useState<string[]>([...DEFAULT_PINS]);
 
-  // Cross-tab sync: when another tab changes the pins, update this tab too.
+  // Hydrate from localStorage after mount and keep cross-tab sync.
   useEffect(() => {
+    const stored = readStoredPins();
+    if (stored) setUserPins(stored);
     const onStorage = (e: StorageEvent) => {
       if (e.key !== TOP_NAV_PINS_STORAGE_KEY) return;
       const next = readStoredPins();

@@ -23,7 +23,7 @@ export type DownloadInfo = {
   releasesPageUrl?: string;
   downloads?: Array<{ name: string; url: string; sizeBytes: number }>;
   error?: string;
-  source?: "github" | "env" | "bundle";
+  source?: "github" | "env" | "bundle" | "default";
 };
 
 type ButtonView =

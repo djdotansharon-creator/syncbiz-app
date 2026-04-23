@@ -290,7 +290,11 @@ export function AudioPlayer() {
   const { t } = useTranslations();
   const [shareOpen, setShareOpen] = useState(false);
   const deviceCtx = useDevicePlayer();
-  const isControlMirror = deviceCtx?.isBranchConnected && deviceCtx.deviceMode === "CONTROL";
+  const isControlMirror = Boolean(
+    deviceCtx?.isBranchConnected &&
+      deviceCtx.deviceMode === "CONTROL" &&
+      !deviceCtx.isMobileLocalPlayback,
+  );
   const {
     currentTrack,
     currentSource,

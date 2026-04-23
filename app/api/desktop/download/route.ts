@@ -1,16 +1,30 @@
-import { existsSync, statSync } from "fs";
+import { existsSync, readFileSync, statSync } from "fs";
 import path from "path";
 import { NextResponse } from "next/server";
 
 /**
  * Returns JSON with a direct `url` to the Windows installer (.exe) when available.
  * See `DESKTOP_INSTALLER_BUNDLE_PATH`, `DESKTOP_WIN_INSTALLER_URL`, and GitHub
- * `desktop-v*` release assets in the module comment at the top of `route.ts` (source).
+ * `desktop-v*` or semver `v*` (e.g. `v0.1.0`) release assets.
  */
 
 const DEFAULT_OWNER = "djdotansharon-creator";
 const DEFAULT_REPO = "syncbiz-app";
 const TAG_PREFIX = "desktop-v";
+/** e.g. `v0.1.0` from electron-builder on main; matches GitHub's tag when not using `desktop-v*`. */
+const SEMVER_V_TAG = /^v(\d+)\.(\d+)\.(\d+)/i;
+
+function isDesktopReleaseTag(tag: string): boolean {
+  if (tag.startsWith(TAG_PREFIX)) return true;
+  return SEMVER_V_TAG.test(tag);
+}
+
+function versionFromReleaseTag(tag: string): string {
+  if (tag.startsWith(TAG_PREFIX)) return tag.slice(TAG_PREFIX.length);
+  const m = tag.match(SEMVER_V_TAG);
+  if (m) return [m[1], m[2], m[3]].join(".");
+  return tag;
+}
 
 type GHAsset = { name: string; browser_download_url: string; size: number };
 type GHRelease = {
@@ -23,7 +37,13 @@ type GHRelease = {
 };
 
 function getOwnerRepo(): { owner: string; repo: string } {
-  const owner = (process.env.DESKTOP_GITHUB_OWNER ?? DEFAULT_OWNER).trim() || DEFAULT_OWNER;
+  const raw = (process.env.DESKTOP_GITHUB_OWNER ?? DEFAULT_OWNER).trim() || DEFAULT_OWNER;
+  /**
+   * Common misconfig in env dashboards: "creator" (short) instead of
+   * `djdotansharon-creator` → all GitHub URLs 404. Map only this mistaken slug
+   * back to the repo’s default; override with full slug if you use another org.
+   */
+  const owner = raw === "creator" ? DEFAULT_OWNER : raw;
   const repo = (process.env.DESKTOP_GITHUB_REPO ?? DEFAULT_REPO).trim() || DEFAULT_REPO;
   return { owner, repo };
 }
@@ -73,8 +93,8 @@ function matchAssetForPlatform(
 }
 
 function desktopTagSortKey(tag: string): number {
-  const without = tag.startsWith(TAG_PREFIX) ? tag.slice(TAG_PREFIX.length) : tag;
-  const m = without.match(/^(\d+)\.(\d+)\.(\d+)/);
+  const semver = versionFromReleaseTag(tag);
+  const m = semver.match(/^(\d+)\.(\d+)\.(\d+)/);
   if (!m) return -1;
   return parseInt(m[1]!, 10) * 1_000_000 + parseInt(m[2]!, 10) * 1_000 + parseInt(m[3]!, 10);
 }
@@ -97,6 +117,89 @@ function publicOrigin(req: Request): string {
   const rawProto = h("x-forwarded-proto")?.split(",")[0]?.trim();
   const proto = rawProto && rawProto.length > 0 ? rawProto : u.protocol.replace(":", "") || "https";
   return `${proto}://${host}`;
+}
+
+/** Version from `desktop/package.json` so the default release URL matches CI artifact names. */
+function getDesktopPackageVersion(): string {
+  try {
+    const pkgPath = path.join(process.cwd(), "desktop", "package.json");
+    const j = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+    const v = (j.version ?? "0.1.0").trim();
+    return v || "0.1.0";
+  } catch {
+    return "0.1.0";
+  }
+}
+
+/**
+ * When GitHub has no matching release in the list yet (or no .exe in the release) we
+ * still return a direct `releases/download/v<ver>/...exe` URL so the web UI can show a
+ * download link; the file appears once a release is published. Uses `v` tag to match
+ * electron-builder's common semver tags (and `dist:win` in this repo).
+ * Only for Windows / unknown UA.
+ */
+function defaultWinInstallerPart(
+  owner: string,
+  repo: string,
+  platform: "win" | "mac-intel" | "mac-arm" | "linux" | "unknown",
+):
+  | {
+      version: string;
+      releasedAt: null;
+      url: string;
+      fileName: string;
+      sizeBytes: null;
+      downloads: Array<{ name: string; url: string; sizeBytes: number }>;
+      source: "default";
+    }
+  | null {
+  if (platform !== "win" && platform !== "unknown") return null;
+  const version = getDesktopPackageVersion();
+  const fileName = `SyncBiz-Player-Setup-${version}-x64.exe`;
+  const url = `https://github.com/${owner}/${repo}/releases/download/v${version}/${fileName}`;
+  return {
+    version,
+    releasedAt: null,
+    url,
+    fileName,
+    sizeBytes: null,
+    downloads: [{ name: fileName, url, sizeBytes: 0 }],
+    source: "default",
+  };
+}
+
+/** Same as default URL pattern but pinned to an existing `desktop-v*` or `v*` tag (e.g. .exe not uploaded yet). */
+function defaultWinInstallerFromTag(
+  owner: string,
+  repo: string,
+  platform: "win" | "mac-intel" | "mac-arm" | "linux" | "unknown",
+  tagName: string,
+  releasedAt: string | null,
+):
+  | {
+      version: string;
+      releasedAt: string | null;
+      url: string;
+      fileName: string;
+      sizeBytes: null;
+      downloads: Array<{ name: string; url: string; sizeBytes: number }>;
+      source: "default";
+    }
+  | null {
+  if (platform !== "win" && platform !== "unknown") return null;
+  if (!isDesktopReleaseTag(tagName)) return null;
+  const version = versionFromReleaseTag(tagName);
+  const fileName = `SyncBiz-Player-Setup-${version}-x64.exe`;
+  const url = `https://github.com/${owner}/${repo}/releases/download/${tagName}/${fileName}`;
+  return {
+    version,
+    releasedAt,
+    url,
+    fileName,
+    sizeBytes: null,
+    downloads: [{ name: fileName, url, sizeBytes: 0 }],
+    source: "default",
+  };
 }
 
 /** `DESKTOP_WIN_INSTALLER_URL` — public URL to the .exe (or localhost http in dev). */
@@ -161,7 +264,7 @@ type SuccessBody = {
   sizeBytes: number | null;
   downloads: Array<{ name: string; url: string; sizeBytes: number }>;
   releasesPageUrl: string;
-  source: "github" | "env" | "bundle";
+  source: "github" | "env" | "bundle" | "default";
 };
 
 function successJson(
@@ -174,7 +277,7 @@ function successJson(
     fileName: string;
     sizeBytes: number | null;
     downloads: Array<{ name: string; url: string; sizeBytes: number }>;
-    source: "github" | "env" | "bundle";
+    source: "github" | "env" | "bundle" | "default";
   },
 ) {
   const body: SuccessBody = {
@@ -231,6 +334,10 @@ export async function GET(req: Request) {
       if (envPayload) {
         return successJson(platform, releasesUrl, envPayload);
       }
+      const def = defaultWinInstallerPart(owner, repo, platform);
+      if (def) {
+        return successJson(platform, releasesUrl, def);
+      }
       return NextResponse.json(
         { ok: false, error: `GitHub API returned ${resp.status}`, platform, releasesPageUrl: releasesUrl },
         { status: 502 },
@@ -239,13 +346,17 @@ export async function GET(req: Request) {
 
     const releases = (await resp.json()) as GHRelease[];
     const published = releases
-      .filter((r) => !r.draft && !r.prerelease && r.tag_name.startsWith(TAG_PREFIX))
+      .filter((r) => !r.draft && !r.prerelease && isDesktopReleaseTag(r.tag_name))
       .sort((a, b) => desktopTagSortKey(b.tag_name) - desktopTagSortKey(a.tag_name));
 
     if (published.length === 0) {
       const envPayload = fromEnvForWin();
       if (envPayload) {
         return successJson(platform, releasesUrl, envPayload);
+      }
+      const def = defaultWinInstallerPart(owner, repo, platform);
+      if (def) {
+        return successJson(platform, releasesUrl, def);
       }
       return NextResponse.json(
         { ok: false, error: "No desktop release has been published yet.", platform, releasesPageUrl: releasesUrl },
@@ -263,7 +374,7 @@ export async function GET(req: Request) {
 
     if (asset?.browser_download_url) {
       return successJson(platform, releasesUrl, {
-        version: latest.tag_name.replace(TAG_PREFIX, ""),
+        version: versionFromReleaseTag(latest.tag_name),
         releasedAt: latest.published_at,
         url: asset.browser_download_url,
         fileName: asset.name,
@@ -278,15 +389,20 @@ export async function GET(req: Request) {
       return successJson(platform, releasesUrl, {
         ...envPayload,
         releasedAt: latest.published_at,
-        version: winEnv?.version && winEnv.version !== "0.0.0" ? winEnv.version : latest.tag_name.replace(TAG_PREFIX, ""),
+        version: winEnv?.version && winEnv.version !== "0.0.0" ? winEnv.version : versionFromReleaseTag(latest.tag_name),
         downloads: downloads.length > 0 ? downloads : envPayload.downloads,
       });
+    }
+
+    const fromTag = defaultWinInstallerFromTag(owner, repo, platform, latest.tag_name, latest.published_at);
+    if (fromTag) {
+      return successJson(platform, releasesUrl, fromTag);
     }
 
     return NextResponse.json({
       ok: true,
       platform,
-      version: latest.tag_name.replace(TAG_PREFIX, ""),
+      version: versionFromReleaseTag(latest.tag_name),
       releasedAt: latest.published_at,
       url: null,
       fileName: null,
@@ -298,6 +414,10 @@ export async function GET(req: Request) {
     const envPayload = fromEnvForWin();
     if (envPayload) {
       return successJson(platform, releasesUrl, envPayload);
+    }
+    const def = defaultWinInstallerPart(owner, repo, platform);
+    if (def) {
+      return successJson(platform, releasesUrl, def);
     }
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : "unknown", platform, releasesPageUrl: releasesUrl },
