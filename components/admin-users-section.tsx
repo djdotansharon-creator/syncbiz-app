@@ -38,6 +38,8 @@ export function AdminUsersSection() {
   const [editSelectedBranchIds, setEditSelectedBranchIds] = useState<string[]>([]);
   const [editStatus, setEditStatus] = useState<"idle" | "saving" | "error" | "ok">("idle");
   const [editErrorMsg, setEditErrorMsg] = useState<string>("");
+  /** Optional: set a new password for the user (never shown back; stored as hash only). */
+  const [editNewPassword, setEditNewPassword] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -204,6 +206,7 @@ export function AdminUsersSection() {
           name: editName,
           accessType: editAccessType,
           branchIds: editAccessType === "BRANCH_USER" ? editSelectedBranchIds : undefined,
+          ...(editNewPassword.trim().length > 0 ? { newPassword: editNewPassword } : {}),
         }),
       });
       const data = (await res.json()) as { error?: string };
@@ -214,6 +217,7 @@ export function AdminUsersSection() {
       }
       await reloadUsers();
       setEditStatus("ok");
+      setEditNewPassword("");
       setTimeout(() => {
         setEditEmail(null);
         setEditName("");
@@ -373,6 +377,7 @@ export function AdminUsersSection() {
                 setEditName("");
                 setEditAccessType("BRANCH_USER");
                 setEditSelectedBranchIds([]);
+                setEditNewPassword("");
                 setEditStatus("idle");
                 setEditErrorMsg("");
               }}
@@ -391,6 +396,22 @@ export function AdminUsersSection() {
                 className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder-slate-500"
                 placeholder="Display name"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-500">New password (optional)</label>
+              <input
+                type="password"
+                value={editNewPassword}
+                onChange={(e) => setEditNewPassword(e.target.value)}
+                minLength={6}
+                autoComplete="new-password"
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder-slate-500"
+                placeholder="Leave blank to keep current"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                You cannot view a user&apos;s current password — only set a new one (min. 6 characters).
+              </p>
             </div>
 
             <div>
@@ -477,6 +498,7 @@ export function AdminUsersSection() {
                       setEditName(u.name ?? "");
                       setEditAccessType(u.accessType);
                       setEditSelectedBranchIds(u.branchIds?.length ? u.branchIds : []);
+                      setEditNewPassword("");
                       setEditStatus("idle");
                       setEditErrorMsg("");
                     }}

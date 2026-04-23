@@ -294,6 +294,8 @@ export async function updateUser(params: {
   tenantId: string;
   tenantRole: TenantRole;
   name?: string;
+  /** If set and length ≥ 6, replaces password hash (admin / account maintenance). */
+  newPassword?: string;
   branchAssignments: Array<{ branchId: string; role: BranchRole }>;
 }): Promise<User> {
   const norm = params.email?.trim().toLowerCase();
@@ -312,10 +314,16 @@ export async function updateUser(params: {
   if (!membership) throw new Error("Forbidden: user not in this tenant");
 
   const prismaRole = tenantRoleToPrismaRole(params.tenantRole);
+  const pw = typeof params.newPassword === "string" ? params.newPassword : "";
+  const updatePassword = pw.length >= 6;
+  if (pw.length > 0 && !updatePassword) {
+    throw new Error("Password must be at least 6 characters");
+  }
   await prisma.user.update({
     where: { id: user.id },
     data: {
       name: typeof params.name === "string" ? (params.name.trim() || null) : undefined,
+      ...(updatePassword ? { passwordHash: hashPassword(pw) } : {}),
     },
   });
   await prisma.workspaceMember.update({

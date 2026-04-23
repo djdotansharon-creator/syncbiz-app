@@ -154,10 +154,15 @@ export async function PATCH(req: NextRequest) {
       name?: string;
       accessType?: string;
       branchIds?: string[];
+      newPassword?: string;
     };
 
     const email = typeof body.email === "string" ? body.email.trim() : "";
     const name = typeof body.name === "string" ? body.name : undefined;
+    const newPassword =
+      typeof body.newPassword === "string" && body.newPassword.length > 0
+        ? body.newPassword
+        : undefined;
     const accessType = (body.accessType ?? "BRANCH_USER") as "OWNER" | "BRANCH_USER";
 
     if (!email || !email.includes("@")) {
@@ -211,6 +216,7 @@ export async function PATCH(req: NextRequest) {
     const updated = await updateUser({
       email,
       name,
+      newPassword,
       tenantId: admin.tenantId.trim(),
       tenantRole,
       branchAssignments,
