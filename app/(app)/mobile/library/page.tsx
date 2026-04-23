@@ -1,97 +1,89 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
-import { MobilePlaylistCard } from "@/components/mobile/mobile-playlist-card";
-import { GuestLinkButton, guestLinkLedButtonClass } from "@/components/guest-link-button";
+import { MobileLibraryCategoryTile } from "@/components/mobile/mobile-library-category-tile";
 import { useMobileSources } from "@/lib/mobile-sources-context";
-import type { UnifiedSource } from "@/lib/source-types";
+import { useDevicePlayer } from "@/lib/device-player-context";
 
 /**
- * Mobile Library — music-first visual hub.
+ * Mobile Library — category-first landing page.
  *
- * Content classification (matches desktop `components/sources-manager.tsx`):
- *   • our        = playlist, `playlistOwnershipScope !== "branch"`, not
- *                   imported / not scheduled (owner's personal bank or
- *                   legacy rows with no ownership scope)
- *   • imported   = `playlist.libraryPlacement === "ready_external"`
- *                   (YouTube Mix imports and other "Ready Playlists")
- *   • scheduled  = playlist with `scheduleContributorBlocks[]` non-empty
- *                   (composite scheduled playlists — the desktop
- *                   "scheduled" / curated lane)
- *   • shared     = `playlist.playlistOwnershipScope === "branch"` — branch
- *                   catalog items shared with the organization
- *   • urls       = `origin === "source"` — single URLs / single tracks
+ * Top-level IA (the user sees ONLY category tiles here, never a mixed grid):
+ *   Collections
+ *     1. Ready Playlists    → /mobile/library/ready
+ *     2. Playlist Tiles     → /mobile/library/tiles
+ *     3. Your Playlists     → /mobile/library/yours
+ *   Share
+ *     4. My link            → inline action (placeholder, future endpoint)
+ *     5. Guest link         → inline action (copy to clipboard)
  *
- * Classification priority (when a row matches multiple flags):
- *   scheduled > imported > shared > our
- *
- * Two branch-scoped action pills — "My link" and "Guest link" — sit above
- * the filters, mirroring the amber LED pair from the desktop sources rail.
- * `GuestLinkButton` auto-hides when the session is not connected.
+ * Category → playlist mapping mirrors `components/sources-manager.tsx`:
+ *   • Ready Playlists   = playlist.libraryPlacement === "ready_external"
+ *   • Playlist Tiles    = playlist.scheduleContributorBlocks[] non-empty
+ *                         (the desktop daypart/tile lane)
+ *   • Your Playlists    = everything else (personal bank, branch-shared,
+ *                         and `origin === "source"` single URLs — all the
+ *                         user-curated content that isn't Ready or Tiles)
  *
  * Radio is intentionally excluded from the mobile IA (no tile, no filter,
  * no deep-link flow). Desktop Radio remains untouched.
  */
-type FilterKey = "all" | "our" | "imported" | "scheduled" | "shared" | "urls";
-
-const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "our", label: "Our" },
-  { key: "imported", label: "Imported" },
-  { key: "scheduled", label: "Scheduled" },
-  { key: "shared", label: "Shared" },
-  { key: "urls", label: "URLs" },
-];
-
-const SECTIONS: { key: Exclude<FilterKey, "all">; title: string; subtitle: string }[] = [
-  { key: "our", title: "Our Playlists", subtitle: "Your personal collection" },
-  { key: "imported", title: "Imported", subtitle: "Ready-to-use playlists you imported" },
-  { key: "scheduled", title: "Scheduled", subtitle: "Composite scheduled playlists" },
-  { key: "shared", title: "Shared", subtitle: "Branch-shared playlists" },
-  { key: "urls", title: "URLs", subtitle: "Single tracks & direct links" },
-];
-
 export default function MobileLibraryPage() {
-  const { sources, status, error, removeSource, reload } = useMobileSources();
-  const [filter, setFilter] = useState<FilterKey>("all");
+  const { sources, status, error, reload } = useMobileSources();
+  const deviceCtx = useDevicePlayer();
+  const guestLink = deviceCtx?.guestLink ?? null;
+  const isBranchConnected = deviceCtx?.isBranchConnected ?? false;
 
-  const buckets = useMemo(() => {
-    const our: UnifiedSource[] = [];
-    const imported: UnifiedSource[] = [];
-    const scheduled: UnifiedSource[] = [];
-    const shared: UnifiedSource[] = [];
-    const urls: UnifiedSource[] = [];
-
+  const counts = useMemo(() => {
+    let ready = 0;
+    let tiles = 0;
+    let yours = 0;
     for (const s of sources) {
       if (s.origin === "source") {
-        urls.push(s);
+        yours += 1;
         continue;
       }
       if (s.origin !== "playlist") continue;
       const pl = s.playlist;
       if (pl?.scheduleContributorBlocks && pl.scheduleContributorBlocks.length > 0) {
-        scheduled.push(s);
+        tiles += 1;
       } else if (pl?.libraryPlacement === "ready_external") {
-        imported.push(s);
-      } else if (pl?.playlistOwnershipScope === "branch") {
-        shared.push(s);
+        ready += 1;
       } else {
-        our.push(s);
+        yours += 1;
       }
-      // Radio intentionally dropped.
     }
-
-    return { our, imported, scheduled, shared, urls };
+    return { ready, tiles, yours };
   }, [sources]);
 
-  const total =
-    buckets.our.length +
-    buckets.imported.length +
-    buckets.scheduled.length +
-    buckets.shared.length +
-    buckets.urls.length;
+  const [myLinkNote, setMyLinkNote] = useState<string | null>(null);
+  const [guestLinkNote, setGuestLinkNote] = useState<string | null>(null);
+
+  async function handleCopyGuestLink() {
+    if (!guestLink) return;
+    try {
+      await navigator.clipboard.writeText(guestLink);
+      setGuestLinkNote("Copied");
+      setTimeout(() => setGuestLinkNote(null), 2000);
+    } catch {
+      setGuestLinkNote("Copy failed");
+      setTimeout(() => setGuestLinkNote(null), 2000);
+    }
+  }
+
+  function handleMyLink() {
+    // Placeholder — desktop side still has this as a placeholder button.
+    setMyLinkNote("Coming soon");
+    setTimeout(() => setMyLinkNote(null), 1800);
+  }
+
+  const guestDisabled = !isBranchConnected || !guestLink;
+  const guestSubtitle = guestDisabled
+    ? "Connect a branch session first"
+    : guestLinkNote === "Copied"
+    ? "Link copied to clipboard"
+    : "Share a recommendation link";
 
   return (
     <>
@@ -116,199 +108,143 @@ export default function MobileLibraryPage() {
       />
 
       <div className="px-4 pb-10 pt-3">
-        {/* Branch-action row — My link + Guest link (mirrors desktop rail). */}
-        <div className="mb-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            className={guestLinkLedButtonClass}
-            aria-label="My link (placeholder)"
-            title="My link"
-          >
-            <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
-              <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
-            </svg>
-            <span>My link</span>
-          </button>
-          <GuestLinkButton />
-        </div>
-
-        {/* Filter pills — horizontal scroll so extra filters don't break layout on narrow phones. */}
-        <div className="-mx-4 mb-5 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {FILTERS.map((f) => {
-            const isActive = filter === f.key;
-            return (
-              <button
-                key={f.key}
-                type="button"
-                onClick={() => setFilter(f.key)}
-                className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
-                  isActive
-                    ? "border-cyan-400/70 bg-cyan-500/15 text-cyan-100 shadow-[0_0_0_1px_rgba(34,211,238,0.35),0_0_18px_-6px_rgba(34,211,238,0.5)]"
-                    : "border-slate-700/70 bg-slate-900/60 text-slate-300 hover:border-slate-500/70 hover:text-slate-100"
-                }`}
-                aria-pressed={isActive}
-              >
-                {f.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {status === "loading" && total === 0 ? (
+        {status === "loading" && sources.length === 0 ? (
           <div className="py-12 text-center text-sm text-slate-500">Loading library…</div>
         ) : status === "error" ? (
           <div className="py-12 text-center text-sm text-rose-400">{error}</div>
-        ) : total === 0 ? (
-          <EmptyState />
-        ) : filter === "all" ? (
-          <AllView buckets={buckets} removeSource={removeSource} />
         ) : (
-          <FilteredView
-            items={bucketFor(buckets, filter)}
-            removeSource={removeSource}
-          />
+          <>
+            <SectionLabel>Collections</SectionLabel>
+
+            {/* Hero tile — Your Playlists is the primary destination. */}
+            <div className="mb-3">
+              <MobileLibraryCategoryTile
+                label="Your Playlists"
+                subtitle="Your personal collection & saved URLs"
+                href="/mobile/library/yours"
+                gradient="from-sky-500 to-cyan-700"
+                count={counts.yours}
+                variant="hero"
+                icon={<YoursIcon />}
+              />
+            </div>
+
+            {/* Secondary row: Ready + Tiles. */}
+            <div className="mb-7 grid grid-cols-2 gap-3">
+              <MobileLibraryCategoryTile
+                label="Ready Playlists"
+                subtitle="Imported, ready-to-use mixes"
+                href="/mobile/library/ready"
+                gradient="from-emerald-500 to-teal-700"
+                count={counts.ready}
+                icon={<ReadyIcon />}
+              />
+              <MobileLibraryCategoryTile
+                label="Playlist Tiles"
+                subtitle="Composite scheduled pads"
+                href="/mobile/library/tiles"
+                gradient="from-amber-500 to-orange-700"
+                count={counts.tiles}
+                icon={<TilesIcon />}
+              />
+            </div>
+
+            <SectionLabel>Share</SectionLabel>
+
+            <div className="grid grid-cols-2 gap-3">
+              <MobileLibraryCategoryTile
+                label="My link"
+                subtitle={myLinkNote === "Coming soon" ? "Coming soon" : "Your personal branch link"}
+                onClick={handleMyLink}
+                gradient="from-rose-500 to-pink-700"
+                statusNote={myLinkNote}
+                icon={<LinkIcon />}
+                ariaLabel="My link (placeholder)"
+              />
+              <MobileLibraryCategoryTile
+                label="Guest link"
+                subtitle={guestSubtitle}
+                onClick={handleCopyGuestLink}
+                gradient="from-violet-500 to-fuchsia-700"
+                statusNote={guestLinkNote}
+                icon={<GuestIcon />}
+                disabled={guestDisabled}
+                ariaLabel="Copy guest recommendation link"
+              />
+            </div>
+          </>
         )}
       </div>
     </>
   );
 }
 
-type Buckets = {
-  our: UnifiedSource[];
-  imported: UnifiedSource[];
-  scheduled: UnifiedSource[];
-  shared: UnifiedSource[];
-  urls: UnifiedSource[];
-};
-
-function bucketFor(buckets: Buckets, filter: FilterKey): UnifiedSource[] {
-  switch (filter) {
-    case "our":
-      return buckets.our;
-    case "imported":
-      return buckets.imported;
-    case "scheduled":
-      return buckets.scheduled;
-    case "shared":
-      return buckets.shared;
-    case "urls":
-      return buckets.urls;
-    default:
-      return [];
-  }
-}
-
-function AllView({
-  buckets,
-  removeSource,
-}: {
-  buckets: Buckets;
-  removeSource: (id: string, origin?: UnifiedSource["origin"]) => void;
-}) {
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-8">
-      {SECTIONS.map((s) => (
-        <Section
-          key={s.key}
-          title={s.title}
-          subtitle={s.subtitle}
-          items={buckets[s.key]}
-          removeSource={removeSource}
-        />
-      ))}
-    </div>
+    <p className="mb-2.5 px-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+      {children}
+    </p>
   );
 }
 
-function Section({
-  title,
-  subtitle,
-  items,
-  removeSource,
-}: {
-  title: string;
-  subtitle: string;
-  items: UnifiedSource[];
-  removeSource: (id: string, origin?: UnifiedSource["origin"]) => void;
-}) {
-  if (items.length === 0) return null;
+/* ── Tile icons ──
+   Uniform 1.7 stroke weight; shared rotation is applied by the tile
+   wrapper itself (rotate-[20deg]). */
+
+function YoursIcon() {
   return (
-    <section>
-      {/* Premium section header: title + count chip + subtitle. Slightly larger
-          than the prior MobileSectionHeader so sections read as the primary
-          navigational element on the page. */}
-      <div className="mb-3.5 flex items-end justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h2 className="truncate text-[17px] font-semibold tracking-tight text-slate-50">
-              {title}
-            </h2>
-            <span className="shrink-0 rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] font-semibold text-slate-300 ring-1 ring-slate-700/60">
-              {items.length}
-            </span>
-          </div>
-          <p className="mt-0.5 truncate text-[11px] text-slate-400">{subtitle}</p>
-        </div>
-      </div>
-      <Grid items={items} removeSource={removeSource} />
-    </section>
+    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="9" y="4.5" width="10.5" height="14" rx="1.6" />
+      <path d="M12 9.2h5M12 12h3.5" />
+      <path d="M9 6.6 A 5.4 5.4 0 0 0 9 17.4" />
+      <path d="M9 9.3 A 2.7 2.7 0 0 0 9 14.7" />
+      <circle cx="9" cy="12" r="0.8" fill="currentColor" stroke="none" />
+    </svg>
   );
 }
 
-function FilteredView({
-  items,
-  removeSource,
-}: {
-  items: UnifiedSource[];
-  removeSource: (id: string, origin?: UnifiedSource["origin"]) => void;
-}) {
-  if (items.length === 0) {
-    return (
-      <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 px-4 py-10 text-center text-sm text-slate-400">
-        Nothing here yet.
-      </div>
-    );
-  }
-  return <Grid items={items} removeSource={removeSource} />;
-}
-
-function Grid({
-  items,
-  removeSource,
-}: {
-  items: UnifiedSource[];
-  removeSource: (id: string, origin?: UnifiedSource["origin"]) => void;
-}) {
+function ReadyIcon() {
+  // Stacked discs / ready-to-use mixes.
   return (
-    <div className="grid grid-cols-2 gap-4">
-      {items.map((source) => (
-        <MobilePlaylistCard
-          key={source.id}
-          source={source}
-          onRemove={removeSource}
-          editReturnTo="/mobile/library"
-        />
-      ))}
-    </div>
+    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="6.5" />
+      <circle cx="12" cy="12" r="2.2" />
+      <circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none" />
+      <path d="M4 7.5 A 7 7 0 0 0 4 16.5" strokeOpacity="1" />
+      <path d="M20 7.5 A 7 7 0 0 1 20 16.5" strokeOpacity="1" />
+    </svg>
   );
 }
 
-function EmptyState() {
+function TilesIcon() {
+  // 2x2 tile grid — matches the desktop daypart pad language.
   return (
-    <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 px-4 py-10 text-center text-sm text-slate-400">
-      <p className="mb-1 text-base font-semibold text-slate-200">Your library is empty</p>
-      <p className="mb-4">Add your first playlist or URL from Search.</p>
-      <Link
-        href="/mobile/search"
-        className="inline-flex items-center gap-1.5 rounded-full border border-cyan-400/70 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-100 shadow-[0_0_0_1px_rgba(34,211,238,0.35),0_0_18px_-6px_rgba(34,211,238,0.5)] transition hover:border-cyan-300"
-      >
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <circle cx="11" cy="11" r="7" />
-          <path d="m20 20-3.5-3.5" strokeLinecap="round" />
-        </svg>
-        Open Search
-      </Link>
-    </div>
+    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.4" />
+      <rect x="13" y="3.5" width="7.5" height="7.5" rx="1.4" />
+      <rect x="3.5" y="13" width="7.5" height="7.5" rx="1.4" />
+      <rect x="13" y="13" width="7.5" height="7.5" rx="1.4" />
+    </svg>
+  );
+}
+
+function LinkIcon() {
+  return (
+    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
+      <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />
+    </svg>
+  );
+}
+
+function GuestIcon() {
+  // Two figures — the "share with a guest" metaphor from the desktop rail.
+  return (
+    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
   );
 }

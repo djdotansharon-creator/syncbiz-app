@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { MobileSourceCardActions } from "@/components/mobile-source-card-actions";
 import { MobileTypeBadge } from "@/components/mobile/mobile-type-badge";
@@ -61,6 +62,9 @@ export function MobilePlaylistCard({ source, onRemove, editReturnTo }: Props) {
 
   const isPlaylist = source.origin === "playlist";
   const trackCount = isPlaylist ? source.playlist?.tracks?.length ?? 0 : 0;
+  // Navigation target: playlist cards open the URL-row detail page; single
+  // URLs have no detail view, so they stay non-navigational.
+  const detailHref = isPlaylist ? `/mobile/library/playlist/${source.id}` : null;
 
   const metaLine = (() => {
     if (isPlaylist) {
@@ -129,8 +133,19 @@ export function MobilePlaylistCard({ source, onRemove, editReturnTo }: Props) {
             </span>
           )}
 
+          {/* Navigation overlay — playlists open the URL-row detail page.
+              Positioned below the Play button and actions menu (lower z-index)
+              so those controls always win pointer events. */}
+          {detailHref && (
+            <Link
+              href={detailHref}
+              aria-label={`Open ${source.title}`}
+              className="absolute inset-0 z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60"
+            />
+          )}
+
           {/* Overflow actions — top-right, always reachable. */}
-          <div className="absolute right-1.5 top-1.5">
+          <div className="absolute right-1.5 top-1.5 z-20">
             <MobileSourceCardActions source={source} onRemove={onRemove} editReturnTo={editReturnTo} />
           </div>
 
@@ -143,7 +158,7 @@ export function MobilePlaylistCard({ source, onRemove, editReturnTo }: Props) {
             type="button"
             onClick={handlePlay}
             aria-label={active ? "Pause" : "Play"}
-            className="absolute bottom-2 right-2 flex h-8 w-14 items-center justify-center rounded-xl border border-cyan-400/70 bg-slate-900/92 text-cyan-200 shadow-[0_0_0_1px_rgba(34,211,238,0.35),0_0_20px_-4px_rgba(34,211,238,0.55)] transition hover:border-cyan-300 hover:text-cyan-100 active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60"
+            className="absolute bottom-2 right-2 z-20 flex h-8 w-14 items-center justify-center rounded-xl border border-cyan-400/70 bg-slate-900/92 text-cyan-200 shadow-[0_0_0_1px_rgba(34,211,238,0.35),0_0_20px_-4px_rgba(34,211,238,0.55)] transition hover:border-cyan-300 hover:text-cyan-100 active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60"
           >
             {active ? (
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -158,19 +173,35 @@ export function MobilePlaylistCard({ source, onRemove, editReturnTo }: Props) {
         </div>
       </div>
 
-      <div className="mt-2.5 min-w-0">
-        <p
-          className={`line-clamp-2 text-[13px] font-semibold leading-snug tracking-tight ${
-            active ? "text-slate-50" : "text-slate-100"
-          }`}
-        >
-          {source.title}
-        </p>
-        <div className="mt-1 flex items-center gap-1.5">
-          <MobileTypeBadge source={source} />
-          {metaLine && <span className="truncate text-[11px] text-slate-400">{metaLine}</span>}
+      {detailHref ? (
+        <Link href={detailHref} className="mt-2.5 block min-w-0">
+          <p
+            className={`line-clamp-2 text-[13px] font-semibold leading-snug tracking-tight ${
+              active ? "text-slate-50" : "text-slate-100"
+            }`}
+          >
+            {source.title}
+          </p>
+          <div className="mt-1 flex items-center gap-1.5">
+            <MobileTypeBadge source={source} />
+            {metaLine && <span className="truncate text-[11px] text-slate-400">{metaLine}</span>}
+          </div>
+        </Link>
+      ) : (
+        <div className="mt-2.5 min-w-0">
+          <p
+            className={`line-clamp-2 text-[13px] font-semibold leading-snug tracking-tight ${
+              active ? "text-slate-50" : "text-slate-100"
+            }`}
+          >
+            {source.title}
+          </p>
+          <div className="mt-1 flex items-center gap-1.5">
+            <MobileTypeBadge source={source} />
+            {metaLine && <span className="truncate text-[11px] text-slate-400">{metaLine}</span>}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
