@@ -252,6 +252,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     queue,
     queueIndex,
     volume,
+    isRestoring,
   } = usePlayback();
   const [masterConfirmOpen, setMasterConfirmOpen] = useState(false);
   const [masterState, setMasterState] = useState<StationPlaybackState | null>(null);
@@ -536,6 +537,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // On CONTROL -> MASTER transition, adopt latest mirrored source once so promoted device
   // actually owns playback instead of showing MASTER while idle.
   useEffect(() => {
+    if (isRestoring) return;
     if (!pendingMasterAdoptionRef.current || !isBranchConnected) return;
 
     // User/local runtime already took ownership.
@@ -566,6 +568,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [
+    isRestoring,
     isBranchConnected,
     currentSource?.id,
     masterState?.currentSource?.id,

@@ -513,6 +513,32 @@ function clearPersistedPlaybackV2() {
   }
 }
 
+/**
+ * Mount-time recovery: the unified-sources list may still carry a playlist
+ * "shell" (0–1 tracks) while /api/playlists/:id has the full list. If we
+ * `playSource` that shell, `playSource` triggers async shell hydration and
+ * `runPlay` can fire twice (thin → merged), which looks like the player
+ * "jumping" through several URLs. Pre-fetch the full playlist here so restore
+ * calls `playSource` at most once on the full object.
+ */
+async function resolveSourceForRestore(s: UnifiedSource): Promise<UnifiedSource> {
+  if (s.origin !== "playlist" || !s.playlist?.id) return s;
+  const t = s.playlist.tracks;
+  if (Array.isArray(t) && t.length > 1) return s;
+  try {
+    const res = await fetch(`/api/playlists/${encodeURIComponent(s.playlist.id)}`, {
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (!res.ok) return s;
+    const full = (await res.json()) as Playlist;
+    if (full?.id) return { ...s, playlist: full };
+  } catch {
+    /* ignore */
+  }
+  return s;
+}
+
 function savePersistedPlaybackV2(payload: PersistedPlaybackV2) {
   if (typeof window === "undefined") return;
   try {
@@ -1125,7 +1151,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       if (!cancelled) setIsRestoring(false);
     };
     fetchUnifiedSourcesWithFallback()
-      .then((items) => {
+      .then(async (items) => {
         if (cancelled) return;
         if (!deviceModeAllowsLocalPlayback.current) {
           done();
@@ -1138,7 +1164,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         });
         if (persistedV2) {
           const restoredQueue = persistedV2.queueIds.map((id) => byId.get(id)).filter((s): s is UnifiedSource => !!s);
-          const source =
+          const sourceRaw =
             byId.get(persistedV2.currentSourceId) ??
             (persistedV2.queueIndex >= 0 ? restoredQueue[persistedV2.queueIndex] : undefined) ??
             restoredQueue[0];
@@ -1147,20 +1173,23 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             persistedCurrentSourceId: persistedV2.currentSourceId,
             persistedQueueIds: persistedV2.queueIds,
             restoredQueueLen: restoredQueue.length,
-            foundSourceId: source?.id ?? null,
+            foundSourceId: sourceRaw?.id ?? null,
           });
-          if (!source) {
+          if (!sourceRaw) {
             clearPersistedPlaybackV2();
             done();
             return;
           }
+          const source = await resolveSourceForRestore(sourceRaw);
+          if (cancelled) return;
+          const restoredQueueMerged = restoredQueue.map((q) => (q.id === source.id ? source : q));
           recoveryPositionRef.current = persistedV2.positionSeconds;
           pendingSeekOnRestoreRef.current = persistedV2.positionSeconds;
           setState((s) => ({
             ...s,
             volume: persistedV2.volume,
-            queue: restoredQueue.length > 0 ? restoredQueue : [source],
-            queueIndex: restoredQueue.findIndex((q) => q.id === source.id),
+            queue: restoredQueueMerged.length > 0 ? restoredQueueMerged : [source],
+            queueIndex: restoredQueueMerged.findIndex((q) => q.id === source.id),
             currentSource: source,
             currentPlaylist: source.playlist ?? null,
             currentTrackIndex: persistedV2.trackIndex,
@@ -1169,7 +1198,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           const shouldAutoplay =
             persistedV2.status === "playing" && Date.now() - persistedV2.updatedAt <= RECOVERY_AUTOPLAY_WINDOW_MS;
           if (shouldAutoplay) {
-            setTimeout(() => {
+            if (cancelled) return;
+            queueMicrotask(() => {
               if (cancelled) return;
               playSourceRef.current(source, persistedV2.trackIndex);
               done();
@@ -1181,17 +1211,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
                   pendingSeekOnRestoreRef.current = null;
                 }
               }, 350);
-            }, 0);
+            });
           } else {
             done();
           }
           return;
         }
 
-        const source = items.find((s) => s.id === persistedV1!.sourceId);
-        if (source) {
+        const v1s = items.find((s) => s.id === persistedV1!.sourceId);
+        if (v1s) {
           setState((s) => ({ ...s, volume: persistedV1!.volume }));
-          playSourceRef.current(source, persistedV1!.trackIndex);
+          const resolvedV1 = await resolveSourceForRestore(v1s);
+          if (cancelled) return;
+          playSourceRef.current(resolvedV1, persistedV1!.trackIndex);
         } else if (typeof window !== "undefined") {
           try {
             sessionStorage.removeItem(STORAGE_KEY);

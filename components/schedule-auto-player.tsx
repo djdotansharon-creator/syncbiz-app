@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { runSchedulePlayback } from "@/lib/schedule-playback-client";
 import { useSchedulePlaybackHandlers } from "@/lib/use-schedule-playback-handlers";
+import { usePlayback } from "@/lib/playback-provider";
 import { useScheduleEngine } from "@/lib/schedule-engine-context";
 import {
   getScheduleAutoOptOutIds,
@@ -26,6 +27,7 @@ const POLL_MS = 8_000;
 export function ScheduleAutoPlayer() {
   const router = useRouter();
   const { engineEnabled } = useScheduleEngine();
+  const { isRestoring } = usePlayback();
   const { stop, setQueue, playSource, setLastMessage } = useSchedulePlaybackHandlers();
   const busyRef = useRef(false);
 
@@ -34,6 +36,7 @@ export function ScheduleAutoPlayer() {
 
     async function tick() {
       if (!engineEnabled || cancelled || busyRef.current) return;
+      if (isRestoring) return;
 
       busyRef.current = true;
       try {
@@ -124,7 +127,7 @@ export function ScheduleAutoPlayer() {
       window.removeEventListener(SCHEDULE_AUTO_PREFS_EVENT, onPrefs);
       window.removeEventListener("storage", onPrefs);
     };
-  }, [engineEnabled, router, stop, setQueue, playSource, setLastMessage]);
+  }, [engineEnabled, isRestoring, router, stop, setQueue, playSource, setLastMessage]);
 
   return null;
 }
