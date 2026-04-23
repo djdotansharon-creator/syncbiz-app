@@ -5,6 +5,7 @@ import { MobileSourceCardActions } from "@/components/mobile-source-card-actions
 import { MobileTypeBadge } from "@/components/mobile/mobile-type-badge";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { useStationController } from "@/lib/station-controller-context";
+import { useDevicePlayer } from "@/lib/device-player-context";
 import { usePlayback } from "@/lib/playback-provider";
 import type { UnifiedSource } from "@/lib/source-types";
 
@@ -18,31 +19,50 @@ type Props = {
 
 /**
  * Unified mobile list row – the single replacement for the legacy
- * MobileSourceCard / MobileSourceCardLocal pair. Tapping the play area:
- *   - mobileRole === "controller" → sends PLAY_SOURCE via the station controller WS
- *   - mobileRole === "player"     → starts local playback via PlaybackProvider
+ * MobileSourceCard / MobileSourceCardLocal pair.
+ *
+ * Play routing (fixed): we delegate to `DevicePlayerContext.playSourceOrSend`
+ * which is the single source-of-truth router used by the main sources
+ * manager. It auto-selects between:
+ *   - MASTER (effectiveDeviceMode === "MASTER") → `playSource(...)` locally
+ *   - CONTROL → `sendCommandToMaster("PLAY_SOURCE", ...)` over the WS
+ *
+ * Previously we routed ourselves based on the `mobileRole` toggle and called
+ * `usePlayback().playSource` directly, which is silently gated by
+ * `deviceModeAllowsLocalPlayback` (only true when `effectiveDeviceMode`
+ * is `MASTER` on an eligible route). That caused taps in Player mode to do
+ * nothing whenever the branch socket hadn't been promoted to MASTER. Using
+ * `playSourceOrSend` removes the mismatch and makes the row reliable in
+ * both Controller and Player modes.
+ *
+ * The `mobileRole` toggle is still consulted for the active-ring color and
+ * the disabled-state hint, but the action itself is no longer gated by it.
  *
  * The overflow menu (edit / share / delete) is identical in both modes.
  */
 export function MobileSourceRow({ source, onRemove, editReturnTo, compact = false }: Props) {
   const { mobileRole } = useMobileRole();
   const station = useStationController();
-  const { playSource, currentSource, status } = usePlayback();
+  const deviceCtx = useDevicePlayer();
+  const playbackCtx = usePlayback();
 
   const isController = mobileRole === "controller";
-  const remoteActive = isController && station.remoteState?.currentSource?.id === source.id;
-  const localActive = !isController && currentSource?.id === source.id && status !== "idle";
-  const active = remoteActive || localActive;
-
-  const canController = isController ? station.isCrossDevice : true;
+  const remoteActive = station.remoteState?.currentSource?.id === source.id;
+  const localActive =
+    playbackCtx.currentSource?.id === source.id && playbackCtx.status !== "idle";
+  const active = (isController ? remoteActive : localActive) || (!isController && remoteActive);
 
   const handlePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isController) {
-      if (station.isCrossDevice) station.sendPlaySource(source);
+    if (deviceCtx?.playSourceOrSend) {
+      deviceCtx.playSourceOrSend(source);
       return;
     }
-    playSource(source);
+    if (isController && station.isCrossDevice) {
+      station.sendPlaySource(source);
+      return;
+    }
+    playbackCtx.playSource(source);
   };
 
   const isPlaylist = source.origin === "playlist";
@@ -84,8 +104,7 @@ export function MobileSourceRow({ source, onRemove, editReturnTo, compact = fals
       <button
         type="button"
         onClick={handlePlay}
-        disabled={!canController}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left transition active:scale-[0.99] disabled:opacity-50 disabled:active:scale-100"
+        className="flex min-w-0 flex-1 items-center gap-3 text-left transition active:scale-[0.99]"
       >
         <div
           className={`${compact ? "h-11 w-11" : "h-12 w-12"} relative shrink-0 overflow-hidden rounded-lg bg-slate-800/80`}

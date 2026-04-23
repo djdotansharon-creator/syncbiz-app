@@ -4,8 +4,6 @@ import Link from "next/link";
 import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
 import { MobileBrowseTile } from "@/components/mobile/mobile-browse-tile";
 import { MobileSourceRow } from "@/components/mobile/mobile-source-row";
-import { MobileMiniPlayer } from "@/components/mobile/mobile-mini-player";
-import { useMobileNowPlaying } from "@/lib/mobile-now-playing-context";
 import { useMobileSources } from "@/lib/mobile-sources-context";
 import type { UnifiedSource } from "@/lib/source-types";
 
@@ -21,7 +19,6 @@ import type { UnifiedSource } from "@/lib/source-types";
  */
 export default function MobileHomePage() {
   const { sources, status, error, removeSource } = useMobileSources();
-  const { openNowPlaying } = useMobileNowPlaying();
 
   const playlists = sources.filter((s: UnifiedSource) => s.origin === "playlist").slice(0, 4);
   const hasAny = sources.length > 0;
@@ -44,15 +41,6 @@ export default function MobileHomePage() {
           </Link>
         }
       />
-
-      {/* Now Playing hero — moved to the TOP of Home as part of the page
-          design. On every other tab the mini-player stays pinned above the
-          bottom nav; on Home it lives here so the current/next track is the
-          first thing the user sees. See `MobileLayout` for the pathname
-          check that hides the pinned dock on this route. */}
-      <div className="px-4 pt-3">
-        <MobileMiniPlayer onOpen={openNowPlaying} variant="top-card" />
-      </div>
 
       <div className="px-4 py-4 pb-8">
         {status === "loading" && !hasAny ? (

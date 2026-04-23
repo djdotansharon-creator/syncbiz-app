@@ -119,6 +119,9 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
         {/* Transport cluster — always visible, same cyan-neon language as the
             Now Playing sheet. Compact sizes so the bar stays mini-height. */}
         <div className="flex shrink-0 items-center gap-1.5">
+          {/* Same language as the Now Playing sheet: 2.0x Play-width ratio,
+              same icon hierarchy (Play icon 1 step larger than secondaries),
+              same cyan-neon tokens. Compact sizes so the bar stays mini. */}
           <button
             type="button"
             onClick={(e) => {
@@ -140,12 +143,12 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
             }}
             disabled={!d.canControl || !d.hasSource}
             aria-label={d.isPlaying ? "Pause" : "Play"}
-            className={`${MOBILE_TRANSPORT_PRIMARY} h-9 w-[3.75rem]`}
+            className={`${MOBILE_TRANSPORT_PRIMARY} h-9 w-[4.5rem]`}
           >
             {d.isPlaying ? (
-              <PlaybackTransportIconPause className="h-4 w-4" />
+              <PlaybackTransportIconPause className="h-5 w-5" />
             ) : (
-              <PlaybackTransportIconPlay className="ml-0.5 h-4 w-4" />
+              <PlaybackTransportIconPlay className="ml-0.5 h-5 w-5" />
             )}
           </button>
 

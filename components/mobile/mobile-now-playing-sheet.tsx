@@ -282,15 +282,19 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
           </div>
 
           {/* Transport — hero hierarchy: Prev · Stop · [wider Play pill] · Next.
-              Matches the main SyncBiz player: same height across all buttons,
-              Play is a WIDER stadium pill, all share the cyan-neon chrome. */}
+              Identical language to the mini-player, just scaled up:
+                - secondaries are squares (rounded-2xl), mini is 36px, sheet 52px
+                - Play is a 2.0x-wide pill at the same height (both variants)
+                - Play icon is 1 step larger than secondary icons
+              This keeps "one unified control language" across mobile while
+              letting the sheet breathe. */}
           <div className="mt-7 flex items-center justify-center gap-2.5">
             <button
               type="button"
               onClick={d.onPrev}
               disabled={transportDisabled}
               aria-label="Previous"
-              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.5rem]`}
+              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.25rem]`}
             >
               <PlaybackTransportIconPrev className="h-6 w-6" />
             </button>
@@ -299,7 +303,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               onClick={d.onStop}
               disabled={transportDisabled}
               aria-label="Stop"
-              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.5rem]`}
+              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.25rem]`}
             >
               <PlaybackTransportIconStop className="h-6 w-6" />
             </button>
@@ -308,7 +312,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               onClick={d.onPlayPause}
               disabled={!d.canControl || !d.hasSource}
               aria-label={d.isPlaying ? "Pause" : "Play"}
-              className={`${MOBILE_TRANSPORT_PRIMARY} h-[3.25rem] w-[7rem]`}
+              className={`${MOBILE_TRANSPORT_PRIMARY} h-[3.25rem] w-[6.5rem]`}
             >
               {d.isPlaying ? (
                 <PlaybackTransportIconPause className="h-7 w-7" />
@@ -321,7 +325,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               onClick={d.onNext}
               disabled={transportDisabled}
               aria-label="Next"
-              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.5rem]`}
+              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.25rem]`}
             >
               <PlaybackTransportIconNext className="h-6 w-6" />
             </button>
@@ -341,7 +345,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               aria-valuenow={Math.floor(d.position)}
               aria-valuemin={0}
               aria-valuemax={Math.max(1, Math.floor(d.duration))}
-              className="h-2 w-full appearance-none rounded-full bg-slate-700/80 accent-cyan-400 disabled:opacity-40"
+              className="syncbiz-mobile-range"
             />
             <div className="mt-1 flex items-center justify-between text-[11px] tabular-nums text-slate-500">
               <span>{formatTime(d.position)}</span>
@@ -369,7 +373,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
                 onChange={(e) => d.onVolume(Number(e.target.value))}
                 disabled={!d.canControl}
                 aria-label={volumeLabel}
-                className="h-2 flex-1 appearance-none rounded-full bg-slate-700/80 accent-cyan-400 disabled:opacity-40"
+                className="syncbiz-mobile-range syncbiz-mobile-range--slim flex-1"
               />
             </div>
           </div>

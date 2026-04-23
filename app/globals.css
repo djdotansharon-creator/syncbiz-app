@@ -73,13 +73,14 @@ body {
   --neon-red-glow: rgba(255, 76, 76, 0.5);
 }
 
-/* Volume & progress – neon green thumb (exclude player volume slider) */
-input[type="range"]:not(.player-volume-slider) {
+/* Volume & progress – neon green thumb (exclude player volume slider + the
+   mobile player sliders, which have their own cyan-neon language). */
+input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range) {
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
 }
-input[type="range"]:not(.player-volume-slider)::-webkit-slider-thumb {
+input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 18px;
@@ -92,12 +93,12 @@ input[type="range"]:not(.player-volume-slider)::-webkit-slider-thumb {
               0 0 24px rgba(30, 215, 96, 0.2);
   transition: box-shadow 0.2s ease;
 }
-input[type="range"]:not(.player-volume-slider)::-webkit-slider-thumb:hover {
+input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-webkit-slider-thumb:hover {
   box-shadow: 0 0 0 2px rgba(30, 215, 96, 0.5),
               0 0 16px var(--neon-green-glow),
               0 0 32px rgba(30, 215, 96, 0.3);
 }
-input[type="range"]:not(.player-volume-slider)::-moz-range-thumb {
+input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-range-thumb {
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -107,15 +108,101 @@ input[type="range"]:not(.player-volume-slider)::-moz-range-thumb {
   box-shadow: 0 0 0 2px rgba(30, 215, 96, 0.3),
               0 0 12px var(--neon-green-glow);
 }
-input[type="range"]:not(.player-volume-slider)::-webkit-slider-runnable-track {
+input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-webkit-slider-runnable-track {
   height: 8px;
   border-radius: 4px;
   background: rgba(30, 41, 59, 0.8);
 }
-input[type="range"]:not(.player-volume-slider)::-moz-range-track {
+input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-range-track {
   height: 8px;
   border-radius: 4px;
   background: rgba(30, 41, 59, 0.8);
+}
+
+/*
+ * Mobile player sliders (seek + volume) — unified cyan-neon language that
+ * matches the main SyncBiz player's deck transport look (cyan border + cyan
+ * glow from `.library-deck-neon-btn:not(.h-7)` in this file). One class,
+ * one visual language across the mini-player, the Now Playing sheet, seek,
+ * and volume. `--slim` is a volume-only modifier that uses a thinner track
+ * and a smaller thumb, mirroring `.player-volume-slider` on desktop.
+ */
+.syncbiz-mobile-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  background: transparent;
+  accent-color: #22d3ee;
+}
+.syncbiz-mobile-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(30, 41, 59, 0.85);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.syncbiz-mobile-range::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(30, 41, 59, 0.85);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.syncbiz-mobile-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #22d3ee;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.35),
+              0 0 10px rgba(34, 211, 238, 0.55),
+              0 0 20px rgba(34, 211, 238, 0.25);
+  transition: box-shadow 0.2s ease, transform 0.1s ease;
+}
+.syncbiz-mobile-range::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.5),
+              0 0 14px rgba(34, 211, 238, 0.65),
+              0 0 28px rgba(34, 211, 238, 0.35);
+}
+.syncbiz-mobile-range::-webkit-slider-thumb:active {
+  transform: scale(1.08);
+}
+.syncbiz-mobile-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #22d3ee;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.35),
+              0 0 10px rgba(34, 211, 238, 0.55);
+}
+.syncbiz-mobile-range:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* Slim modifier for the volume slider — thinner track, smaller thumb. */
+.syncbiz-mobile-range--slim::-webkit-slider-runnable-track {
+  height: 4px;
+}
+.syncbiz-mobile-range--slim::-moz-range-track {
+  height: 4px;
+}
+.syncbiz-mobile-range--slim::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.4),
+              0 0 8px rgba(34, 211, 238, 0.45);
+}
+.syncbiz-mobile-range--slim::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.4),
+              0 0 8px rgba(34, 211, 238, 0.45);
 }
 
 /* Player volume slider only – 3px track, solid cyan, no glow */
