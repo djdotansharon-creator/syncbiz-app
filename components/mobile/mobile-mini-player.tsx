@@ -121,7 +121,11 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
         <div className="flex shrink-0 items-center gap-1.5">
           {/* Same language as the Now Playing sheet: 2.0x Play-width ratio,
               same icon hierarchy (Play icon 1 step larger than secondaries),
-              same cyan-neon tokens. Compact sizes so the bar stays mini. */}
+              same cyan-neon tokens. `rounded-xl` here (12px on h-9 = 33%)
+              is the visual match of the sheet's `rounded-2xl` on h-[3.25rem]
+              (16px on 52px = 31%) — without this adjustment, the tiny mini
+              buttons read as full pills instead of rounded squares, making
+              Home look "more rounded" than the player. */}
           <button
             type="button"
             onClick={(e) => {
@@ -130,7 +134,7 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
             }}
             disabled={transportDisabled}
             aria-label="Previous"
-            className={`${MOBILE_TRANSPORT_SEC} h-9 w-9`}
+            className={`${MOBILE_TRANSPORT_SEC} h-9 w-9 rounded-xl`}
           >
             <PlaybackTransportIconPrev className="h-4 w-4" />
           </button>
@@ -143,7 +147,7 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
             }}
             disabled={!d.canControl || !d.hasSource}
             aria-label={d.isPlaying ? "Pause" : "Play"}
-            className={`${MOBILE_TRANSPORT_PRIMARY} h-9 w-[4.5rem]`}
+            className={`${MOBILE_TRANSPORT_PRIMARY} h-9 w-[4.5rem] rounded-xl`}
           >
             {d.isPlaying ? (
               <PlaybackTransportIconPause className="h-5 w-5" />
@@ -160,7 +164,7 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
             }}
             disabled={transportDisabled}
             aria-label="Next"
-            className={`${MOBILE_TRANSPORT_SEC} h-9 w-9`}
+            className={`${MOBILE_TRANSPORT_SEC} h-9 w-9 rounded-xl`}
           >
             <PlaybackTransportIconNext className="h-4 w-4" />
           </button>

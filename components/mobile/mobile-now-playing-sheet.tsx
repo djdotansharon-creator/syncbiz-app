@@ -160,15 +160,24 @@ function formatTime(seconds: number): string {
 // look; mode is communicated only through the mode pill and volume label,
 // never through different accent colors.
 //
-// Secondary: rounded-2xl `border-2` cyan stroke, dark slate fill, cyan-300
-//            glyph, subtle cyan glow.
-// Primary:   same chrome but WIDER (stadium pill) and a stronger cyan glow
-//            — this is the "hero" play control.
+// IMPORTANT — corner radius is NOT baked in here. A fixed radius like
+// `rounded-2xl` (16px) reads as a soft rectangle on the sheet's 52px
+// buttons (31% of height) but as a near-full pill on the mini-player's
+// 36px buttons (44% of height) — making the mini look "more rounded" than
+// the sheet even though the CSS class is identical. Each caller sets its
+// own radius so the *visual proportion* matches across sizes (mini uses
+// `rounded-xl` / 12px = 33% on h-9, sheet uses `rounded-2xl` / 16px = 31%
+// on h-[3.25rem]).
+//
+// Secondary: `border-2` cyan stroke, dark slate fill, cyan-300 glyph,
+//            subtle cyan glow.
+// Primary:   same chrome but WIDER (stadium pill) and a stronger cyan
+//            glow — this is the "hero" play control.
 export const MOBILE_TRANSPORT_SEC =
-  "flex shrink-0 items-center justify-center rounded-2xl border-2 border-cyan-400/65 bg-slate-900/95 text-cyan-300 transition shadow-[0_0_0_1px_rgba(34,211,238,0.28),0_0_24px_-4px_rgba(34,211,238,0.42)] hover:border-cyan-300 hover:text-cyan-100 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.55),0_0_32px_-4px_rgba(34,211,238,0.55)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60";
+  "flex shrink-0 items-center justify-center border-2 border-cyan-400/65 bg-slate-900/95 text-cyan-300 transition shadow-[0_0_0_1px_rgba(34,211,238,0.28),0_0_24px_-4px_rgba(34,211,238,0.42)] hover:border-cyan-300 hover:text-cyan-100 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.55),0_0_32px_-4px_rgba(34,211,238,0.55)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60";
 
 export const MOBILE_TRANSPORT_PRIMARY =
-  "flex shrink-0 items-center justify-center rounded-2xl border-2 border-cyan-400/75 bg-slate-900/95 text-cyan-200 transition shadow-[0_0_0_2px_rgba(34,211,238,0.5),0_0_32px_-2px_rgba(34,211,238,0.55),0_0_60px_-10px_rgba(34,211,238,0.35)] hover:border-cyan-300 hover:text-cyan-100 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.75),0_0_40px_-2px_rgba(34,211,238,0.7),0_0_72px_-10px_rgba(34,211,238,0.45)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/70";
+  "flex shrink-0 items-center justify-center border-2 border-cyan-400/75 bg-slate-900/95 text-cyan-200 transition shadow-[0_0_0_2px_rgba(34,211,238,0.5),0_0_32px_-2px_rgba(34,211,238,0.55),0_0_60px_-10px_rgba(34,211,238,0.35)] hover:border-cyan-300 hover:text-cyan-100 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.75),0_0_40px_-2px_rgba(34,211,238,0.7),0_0_72px_-10px_rgba(34,211,238,0.45)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/70";
 
 /**
  * Full-screen bottom sheet shown when the user taps the mini-player.
@@ -294,7 +303,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               onClick={d.onPrev}
               disabled={transportDisabled}
               aria-label="Previous"
-              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.25rem]`}
+              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.25rem] rounded-2xl`}
             >
               <PlaybackTransportIconPrev className="h-6 w-6" />
             </button>
@@ -303,7 +312,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               onClick={d.onStop}
               disabled={transportDisabled}
               aria-label="Stop"
-              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.25rem]`}
+              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.25rem] rounded-2xl`}
             >
               <PlaybackTransportIconStop className="h-6 w-6" />
             </button>
@@ -312,7 +321,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               onClick={d.onPlayPause}
               disabled={!d.canControl || !d.hasSource}
               aria-label={d.isPlaying ? "Pause" : "Play"}
-              className={`${MOBILE_TRANSPORT_PRIMARY} h-[3.25rem] w-[6.5rem]`}
+              className={`${MOBILE_TRANSPORT_PRIMARY} h-[3.25rem] w-[6.5rem] rounded-2xl`}
             >
               {d.isPlaying ? (
                 <PlaybackTransportIconPause className="h-7 w-7" />
@@ -325,7 +334,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               onClick={d.onNext}
               disabled={transportDisabled}
               aria-label="Next"
-              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.25rem]`}
+              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.25rem] rounded-2xl`}
             >
               <PlaybackTransportIconNext className="h-6 w-6" />
             </button>
