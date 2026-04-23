@@ -35,26 +35,50 @@ export default function MobileLibraryPage() {
   const guestLink = deviceCtx?.guestLink ?? null;
   const isBranchConnected = deviceCtx?.isBranchConnected ?? false;
 
-  const counts = useMemo(() => {
-    let ready = 0;
-    let tiles = 0;
-    let yours = 0;
+  const { counts, covers } = useMemo(() => {
+    let rReady = 0;
+    let rTiles = 0;
+    let rYours = 0;
+    // Cover picks — first item in each bucket that has a usable cover URL.
+    // We prefer the playlist-level cover (source.cover); when missing,
+    // fall back to the first track inside the playlist that has one.
+    let cReady: string | null = null;
+    let cTiles: string | null = null;
+    let cYours: string | null = null;
+
+    const pickCover = (s: (typeof sources)[number]): string | null => {
+      if (s.cover) return s.cover;
+      const tracks = s.playlist?.tracks;
+      if (tracks && tracks.length) {
+        const t = tracks.find((t) => t.cover);
+        return t?.cover ?? null;
+      }
+      return null;
+    };
+
     for (const s of sources) {
       if (s.origin === "source") {
-        yours += 1;
+        rYours += 1;
+        if (!cYours) cYours = pickCover(s);
         continue;
       }
       if (s.origin !== "playlist") continue;
       const pl = s.playlist;
       if (pl?.scheduleContributorBlocks && pl.scheduleContributorBlocks.length > 0) {
-        tiles += 1;
+        rTiles += 1;
+        if (!cTiles) cTiles = pickCover(s);
       } else if (pl?.libraryPlacement === "ready_external") {
-        ready += 1;
+        rReady += 1;
+        if (!cReady) cReady = pickCover(s);
       } else {
-        yours += 1;
+        rYours += 1;
+        if (!cYours) cYours = pickCover(s);
       }
     }
-    return { ready, tiles, yours };
+    return {
+      counts: { ready: rReady, tiles: rTiles, yours: rYours },
+      covers: { ready: cReady, tiles: cTiles, yours: cYours },
+    };
   }, [sources]);
 
   const [myLinkNote, setMyLinkNote] = useState<string | null>(null);
@@ -126,6 +150,7 @@ export default function MobileLibraryPage() {
                 count={counts.yours}
                 variant="hero"
                 icon={<YoursIcon />}
+                coverUrl={covers.yours}
               />
             </div>
 
@@ -138,6 +163,7 @@ export default function MobileLibraryPage() {
                 gradient="from-emerald-500 to-teal-700"
                 count={counts.ready}
                 icon={<ReadyIcon />}
+                coverUrl={covers.ready}
               />
               <MobileLibraryCategoryTile
                 label="Playlist Tiles"
@@ -146,6 +172,7 @@ export default function MobileLibraryPage() {
                 gradient="from-amber-500 to-orange-700"
                 count={counts.tiles}
                 icon={<TilesIcon />}
+                coverUrl={covers.tiles}
               />
             </div>
 
