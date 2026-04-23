@@ -117,15 +117,17 @@ export default function MobileHomePage() {
 }
 
 function LibraryIcon() {
-  // Clean album sleeve + vinyl glyph — uniform stroke weight, no faded
-  // lines. Matches the visual weight of the Calendar / Remote / Search
-  // tile icons after the Home tile's rotate-[20deg] is applied.
+  // Album sleeve on the RIGHT with a vinyl disc whose LEFT half is visible
+  // (the right half tucks behind the sleeve). Uniform 1.7 stroke with no
+  // faded auxiliary strokes — matches the weight of the Calendar / Remote /
+  // Search tile icons after the Home tile's rotate-[20deg].
   return (
     <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="16.5" cy="15" r="5.5" />
-      <circle cx="16.5" cy="15" r="1" fill="currentColor" stroke="none" />
-      <rect x="3.5" y="4.5" width="11" height="14" rx="1.6" />
-      <path d="M6.5 9h5M6.5 12h3.5" />
+      <rect x="9" y="4.5" width="10.5" height="14" rx="1.6" />
+      <path d="M12 9.2h5M12 12h3.5" />
+      <path d="M9 6.6 A 5.4 5.4 0 0 0 9 17.4" />
+      <path d="M9 9.3 A 2.7 2.7 0 0 0 9 14.7" />
+      <circle cx="9" cy="12" r="0.8" fill="currentColor" stroke="none" />
     </svg>
   );
 }

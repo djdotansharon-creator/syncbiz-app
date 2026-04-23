@@ -3,41 +3,54 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
-import { MobileSectionHeader } from "@/components/mobile/mobile-section-header";
 import { MobilePlaylistCard } from "@/components/mobile/mobile-playlist-card";
 import { GuestLinkButton, guestLinkLedButtonClass } from "@/components/guest-link-button";
 import { useMobileSources } from "@/lib/mobile-sources-context";
 import type { UnifiedSource } from "@/lib/source-types";
 
 /**
- * Mobile Library — the single hub for every collection or URL the branch
- * owns, laid out as big 2-col cover tiles (inspired by the user's image-3
- * reference) with a filter-pill bar at the top (image-2 reference).
+ * Mobile Library — music-first visual hub.
  *
- * Content classification (matches desktop sources-manager rails):
- *   • Our Playlists    = playlist, not ready_external, not composite-scheduled
- *   • Imported         = playlist with `libraryPlacement === "ready_external"`
- *                        (YouTube Mix imports and other "Ready Playlists")
- *   • Curated          = playlist that carries `scheduleContributorBlocks`
- *                        (composite scheduled playlist — the desktop
- *                        "scheduled/curated" lane)
- *   • URLs             = `origin === "source"` single-URL tracks
+ * Content classification (matches desktop `components/sources-manager.tsx`):
+ *   • our        = playlist, `playlistOwnershipScope !== "branch"`, not
+ *                   imported / not scheduled (owner's personal bank or
+ *                   legacy rows with no ownership scope)
+ *   • imported   = `playlist.libraryPlacement === "ready_external"`
+ *                   (YouTube Mix imports and other "Ready Playlists")
+ *   • scheduled  = playlist with `scheduleContributorBlocks[]` non-empty
+ *                   (composite scheduled playlists — the desktop
+ *                   "scheduled" / curated lane)
+ *   • shared     = `playlist.playlistOwnershipScope === "branch"` — branch
+ *                   catalog items shared with the organization
+ *   • urls       = `origin === "source"` — single URLs / single tracks
  *
- * Two branch-scoped actions — "My link" and "Guest link" — live on top of
- * the list, mirroring the amber LED pills from the desktop sources rail.
+ * Classification priority (when a row matches multiple flags):
+ *   scheduled > imported > shared > our
+ *
+ * Two branch-scoped action pills — "My link" and "Guest link" — sit above
+ * the filters, mirroring the amber LED pair from the desktop sources rail.
  * `GuestLinkButton` auto-hides when the session is not connected.
  *
  * Radio is intentionally excluded from the mobile IA (no tile, no filter,
  * no deep-link flow). Desktop Radio remains untouched.
  */
-type FilterKey = "all" | "playlists" | "imported" | "curated" | "urls";
+type FilterKey = "all" | "our" | "imported" | "scheduled" | "shared" | "urls";
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "All" },
-  { key: "playlists", label: "Playlists" },
+  { key: "our", label: "Our" },
   { key: "imported", label: "Imported" },
-  { key: "curated", label: "Curated" },
+  { key: "scheduled", label: "Scheduled" },
+  { key: "shared", label: "Shared" },
   { key: "urls", label: "URLs" },
+];
+
+const SECTIONS: { key: Exclude<FilterKey, "all">; title: string; subtitle: string }[] = [
+  { key: "our", title: "Our Playlists", subtitle: "Your personal collection" },
+  { key: "imported", title: "Imported", subtitle: "Ready-to-use playlists you imported" },
+  { key: "scheduled", title: "Scheduled", subtitle: "Composite scheduled playlists" },
+  { key: "shared", title: "Shared", subtitle: "Branch-shared playlists" },
+  { key: "urls", title: "URLs", subtitle: "Single tracks & direct links" },
 ];
 
 export default function MobileLibraryPage() {
@@ -45,32 +58,40 @@ export default function MobileLibraryPage() {
   const [filter, setFilter] = useState<FilterKey>("all");
 
   const buckets = useMemo(() => {
-    const playlists: UnifiedSource[] = [];
+    const our: UnifiedSource[] = [];
     const imported: UnifiedSource[] = [];
-    const curated: UnifiedSource[] = [];
+    const scheduled: UnifiedSource[] = [];
+    const shared: UnifiedSource[] = [];
     const urls: UnifiedSource[] = [];
 
     for (const s of sources) {
-      if (s.origin === "playlist") {
-        const pl = s.playlist;
-        if (pl?.libraryPlacement === "ready_external") {
-          imported.push(s);
-        } else if (pl?.scheduleContributorBlocks && pl.scheduleContributorBlocks.length > 0) {
-          curated.push(s);
-        } else {
-          playlists.push(s);
-        }
-      } else if (s.origin === "source") {
+      if (s.origin === "source") {
         urls.push(s);
+        continue;
+      }
+      if (s.origin !== "playlist") continue;
+      const pl = s.playlist;
+      if (pl?.scheduleContributorBlocks && pl.scheduleContributorBlocks.length > 0) {
+        scheduled.push(s);
+      } else if (pl?.libraryPlacement === "ready_external") {
+        imported.push(s);
+      } else if (pl?.playlistOwnershipScope === "branch") {
+        shared.push(s);
+      } else {
+        our.push(s);
       }
       // Radio intentionally dropped.
     }
 
-    return { playlists, imported, curated, urls };
+    return { our, imported, scheduled, shared, urls };
   }, [sources]);
 
   const total =
-    buckets.playlists.length + buckets.imported.length + buckets.curated.length + buckets.urls.length;
+    buckets.our.length +
+    buckets.imported.length +
+    buckets.scheduled.length +
+    buckets.shared.length +
+    buckets.urls.length;
 
   return (
     <>
@@ -94,7 +115,7 @@ export default function MobileLibraryPage() {
         }
       />
 
-      <div className="px-4 pb-8 pt-3">
+      <div className="px-4 pb-10 pt-3">
         {/* Branch-action row — My link + Guest link (mirrors desktop rail). */}
         <div className="mb-4 flex flex-wrap gap-2">
           <button
@@ -113,7 +134,7 @@ export default function MobileLibraryPage() {
         </div>
 
         {/* Filter pills — horizontal scroll so extra filters don't break layout on narrow phones. */}
-        <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="-mx-4 mb-5 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {FILTERS.map((f) => {
             const isActive = filter === f.key;
             return (
@@ -135,9 +156,9 @@ export default function MobileLibraryPage() {
         </div>
 
         {status === "loading" && total === 0 ? (
-          <div className="py-10 text-center text-sm text-slate-500">Loading library…</div>
+          <div className="py-12 text-center text-sm text-slate-500">Loading library…</div>
         ) : status === "error" ? (
-          <div className="py-10 text-center text-sm text-rose-400">{error}</div>
+          <div className="py-12 text-center text-sm text-rose-400">{error}</div>
         ) : total === 0 ? (
           <EmptyState />
         ) : filter === "all" ? (
@@ -154,20 +175,23 @@ export default function MobileLibraryPage() {
 }
 
 type Buckets = {
-  playlists: UnifiedSource[];
+  our: UnifiedSource[];
   imported: UnifiedSource[];
-  curated: UnifiedSource[];
+  scheduled: UnifiedSource[];
+  shared: UnifiedSource[];
   urls: UnifiedSource[];
 };
 
 function bucketFor(buckets: Buckets, filter: FilterKey): UnifiedSource[] {
   switch (filter) {
-    case "playlists":
-      return buckets.playlists;
+    case "our":
+      return buckets.our;
     case "imported":
       return buckets.imported;
-    case "curated":
-      return buckets.curated;
+    case "scheduled":
+      return buckets.scheduled;
+    case "shared":
+      return buckets.shared;
     case "urls":
       return buckets.urls;
     default:
@@ -183,31 +207,16 @@ function AllView({
   removeSource: (id: string, origin?: UnifiedSource["origin"]) => void;
 }) {
   return (
-    <div className="flex flex-col gap-7">
-      <Section
-        title="Your Playlists"
-        subtitle={`${buckets.playlists.length} playlist${buckets.playlists.length === 1 ? "" : "s"}`}
-        items={buckets.playlists}
-        removeSource={removeSource}
-      />
-      <Section
-        title="Imported"
-        subtitle="Ready-to-use playlists you imported"
-        items={buckets.imported}
-        removeSource={removeSource}
-      />
-      <Section
-        title="Curated"
-        subtitle="Composite scheduled playlists"
-        items={buckets.curated}
-        removeSource={removeSource}
-      />
-      <Section
-        title="URLs"
-        subtitle="Single tracks & direct links"
-        items={buckets.urls}
-        removeSource={removeSource}
-      />
+    <div className="flex flex-col gap-8">
+      {SECTIONS.map((s) => (
+        <Section
+          key={s.key}
+          title={s.title}
+          subtitle={s.subtitle}
+          items={buckets[s.key]}
+          removeSource={removeSource}
+        />
+      ))}
     </div>
   );
 }
@@ -226,7 +235,22 @@ function Section({
   if (items.length === 0) return null;
   return (
     <section>
-      <MobileSectionHeader title={title} subtitle={subtitle} />
+      {/* Premium section header: title + count chip + subtitle. Slightly larger
+          than the prior MobileSectionHeader so sections read as the primary
+          navigational element on the page. */}
+      <div className="mb-3.5 flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h2 className="truncate text-[17px] font-semibold tracking-tight text-slate-50">
+              {title}
+            </h2>
+            <span className="shrink-0 rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] font-semibold text-slate-300 ring-1 ring-slate-700/60">
+              {items.length}
+            </span>
+          </div>
+          <p className="mt-0.5 truncate text-[11px] text-slate-400">{subtitle}</p>
+        </div>
+      </div>
       <Grid items={items} removeSource={removeSource} />
     </section>
   );
@@ -241,7 +265,7 @@ function FilteredView({
 }) {
   if (items.length === 0) {
     return (
-      <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 px-4 py-8 text-center text-sm text-slate-400">
+      <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 px-4 py-10 text-center text-sm text-slate-400">
         Nothing here yet.
       </div>
     );
@@ -257,7 +281,7 @@ function Grid({
   removeSource: (id: string, origin?: UnifiedSource["origin"]) => void;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-3.5">
+    <div className="grid grid-cols-2 gap-4">
       {items.map((source) => (
         <MobilePlaylistCard
           key={source.id}
