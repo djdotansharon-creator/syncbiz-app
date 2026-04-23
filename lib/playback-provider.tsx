@@ -513,6 +513,17 @@ function clearPersistedPlaybackV2() {
   }
 }
 
+/** Public: one-shot clear of the same keys documented for manual DevTools cleanup. */
+export function clearClientPlaybackCache(): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(RECOVERY_STORAGE_KEY);
+    sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Mount-time recovery: the unified-sources list may still carry a playlist
  * "shell" (0–1 tracks) while /api/playlists/:id has the full list. If we

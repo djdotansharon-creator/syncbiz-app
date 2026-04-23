@@ -1,3 +1,4 @@
+import { ClearPlaybackCacheButton } from "@/components/clear-playback-cache-button";
 import { DeviceModeSettingsSwitch } from "@/components/device-mode-settings-switch";
 import { MixDurationSetting } from "@/components/mix-duration-setting";
 import { SettingsPreferencesControls } from "@/components/settings-preferences-controls";
@@ -91,6 +92,7 @@ export default function SettingsPage() {
             Log TTS playback events
           </li>
         </ul>
+        <ClearPlaybackCacheButton />
       </section>
     </div>
   );
