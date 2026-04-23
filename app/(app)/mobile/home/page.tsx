@@ -117,9 +117,17 @@ export default function MobileHomePage() {
 }
 
 function LibraryIcon() {
+  // Album sleeve + vinyl disc: the disc peeks out from behind the right edge
+  // of the sleeve. Mirrors the physical-object language of the other tile
+  // icons (calendar, remote, magnifier) so Library reads as "record cover"
+  // rather than a generic list.
   return (
-    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path d="M5 4v16M10 4v16M16 5l4 14" strokeLinecap="round" />
+    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
+      <circle cx="15" cy="12" r="6.5" />
+      <circle cx="15" cy="12" r="1.8" fill="currentColor" stroke="none" />
+      <rect x="3" y="4.5" width="12" height="15" rx="1.4" fill="currentColor" fillOpacity="0.12" />
+      <rect x="3" y="4.5" width="12" height="15" rx="1.4" />
+      <path d="M6 8.5h6M6 11.5h4" strokeLinecap="round" strokeOpacity="0.65" />
     </svg>
   );
 }
