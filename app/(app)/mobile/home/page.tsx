@@ -117,17 +117,27 @@ export default function MobileHomePage() {
 }
 
 function LibraryIcon() {
-  // Album sleeve + vinyl disc: the disc peeks out from behind the right edge
-  // of the sleeve. Mirrors the physical-object language of the other tile
-  // icons (calendar, remote, magnifier) so Library reads as "record cover"
-  // rather than a generic list.
+  // Album sleeve + vinyl disc, tuned for the Home tile's rotate-[20deg]
+  // presentation. Composition choices after visual review:
+  //   1. Vinyl sits behind and below-right of the sleeve so the disc edge
+  //      and the center label are both clearly visible once the tile rotates.
+  //   2. Vinyl has a visible groove ring (outer stroke + inner label circle
+  //      + pin-dot hole) — that's what makes it read as a record instead of
+  //      a generic circle.
+  //   3. Sleeve carries two short list lines = "track list", anchoring the
+  //      Library meaning without a separate icon.
+  //   4. A thin spine stroke on the sleeve's left edge hints at stacked
+  //      records for the "library = many" reading.
   return (
-    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
-      <circle cx="15" cy="12" r="6.5" />
-      <circle cx="15" cy="12" r="1.8" fill="currentColor" stroke="none" />
-      <rect x="3" y="4.5" width="12" height="15" rx="1.4" fill="currentColor" fillOpacity="0.12" />
-      <rect x="3" y="4.5" width="12" height="15" rx="1.4" />
-      <path d="M6 8.5h6M6 11.5h4" strokeLinecap="round" strokeOpacity="0.65" />
+    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="16" cy="15" r="5.8" />
+      <circle cx="16" cy="15" r="2.3" strokeOpacity="0.55" />
+      <circle cx="16" cy="15" r="0.85" fill="currentColor" stroke="none" />
+
+      <rect x="3.5" y="4.5" width="11.5" height="14" rx="1.4" fill="currentColor" fillOpacity="0.14" />
+      <rect x="3.5" y="4.5" width="11.5" height="14" rx="1.4" />
+      <path d="M6.2 9h6.2M6.2 11.8h4.4" strokeOpacity="0.7" />
+      <path d="M5.2 5.5v12" strokeOpacity="0.45" />
     </svg>
   );
 }
