@@ -2,7 +2,11 @@
 
 import { useMemo } from "react";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
-import { useMobilePlayer } from "@/components/mobile/mobile-now-playing-sheet";
+import {
+  MOBILE_TRANSPORT_PRIMARY,
+  MOBILE_TRANSPORT_SEC,
+  useMobilePlayer,
+} from "@/components/mobile/mobile-now-playing-sheet";
 import {
   PlaybackTransportIconNext,
   PlaybackTransportIconPause,
@@ -10,25 +14,34 @@ import {
   PlaybackTransportIconPrev,
 } from "@/components/player-surface/playback-transport-icons";
 
+type Variant = "bottom-dock" | "top-card";
+
 type Props = {
   /** Called when the user taps the artwork / title area to open the full Now Playing sheet. */
   onOpen: () => void;
+  /**
+   * Where this instance is rendered:
+   *   - `bottom-dock` (default): pinned above the bottom nav, top border + up-shadow.
+   *   - `top-card`: inline at the top of a page (e.g. `/mobile/home`). Full
+   *     rounded card, shadow pointing down, reads as part of the page design.
+   */
+  variant?: Variant;
 };
 
 /**
- * Persistent mini player pinned above the bottom nav on every mobile tab.
+ * Compact mobile player bar.
  *
- * Visual contract: speaks the same language as `PlayerHeroSurface` (the main
- * SyncBiz player on `/player`) — `rounded-2xl` chrome, solid `#1db954`
- * primary with a white glyph, plain slate secondary. Transport stays always
- * visible; volume lives in the full Now Playing sheet to keep this bar
- * compact.
+ * Visual language (shared with the Now Playing sheet): cyan "neon pill"
+ * transport buttons, circular artwork with a cyan ring when playing, slim
+ * cyan progress bar. Mirrors the main SyncBiz player's deck transport
+ * (`.library-deck-neon-btn:not(.h-7)` + `.library-deck-art-host` in
+ * `app/globals.css`) so both devices feel like one product.
  *
  * Tap rules:
  *   - tapping artwork / title opens the Now Playing sheet
  *   - tapping a transport button does NOT open the sheet (event stops)
  */
-export function MobileMiniPlayer({ onOpen }: Props) {
+export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
   const d = useMobilePlayer();
 
   const progressPct = useMemo(() => {
@@ -38,18 +51,22 @@ export function MobileMiniPlayer({ onOpen }: Props) {
 
   const transportDisabled = !d.canControl || !d.hasSource;
 
+  const containerCls =
+    variant === "top-card"
+      ? "relative rounded-2xl border border-cyan-400/25 bg-slate-950/80 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.55),0_0_24px_-12px_rgba(34,211,238,0.35)] backdrop-blur"
+      : "relative border-t border-slate-800/80 bg-slate-950/96 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur";
+
+  // Progress bar: slim cyan, pinned to the top edge of the bar in both variants.
+  const progressTrackCls =
+    variant === "top-card"
+      ? "pointer-events-none absolute inset-x-3 top-0 h-[2px] overflow-hidden rounded-full bg-slate-800/60"
+      : "pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-slate-800/60";
+
   return (
-    <div
-      className="relative border-t border-slate-800/80 bg-slate-950/96 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur"
-      role="region"
-      aria-label="Mini player"
-    >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-slate-800/60"
-      >
+    <div className={containerCls} role="region" aria-label="Mini player">
+      <div aria-hidden className={progressTrackCls}>
         <div
-          className="h-full bg-[#1db954] transition-[width] duration-200"
+          className="h-full bg-cyan-400/90 shadow-[0_0_8px_rgba(34,211,238,0.55)] transition-[width] duration-200"
           style={{ width: d.hasSource ? `${progressPct}%` : "0%" }}
         />
       </div>
@@ -61,9 +78,13 @@ export function MobileMiniPlayer({ onOpen }: Props) {
           aria-label={d.hasSource ? "Open Now Playing" : "Open player"}
           className="flex min-w-0 flex-1 items-center gap-3 text-left transition active:scale-[0.99]"
         >
+          {/* Circular artwork with a cyan ring when playing — matches the
+              main SyncBiz player's `.library-deck-art-host`. */}
           <div
-            className={`relative h-11 w-11 shrink-0 overflow-hidden rounded-xl bg-slate-800 ring-1 ring-slate-700/60 ${
-              d.hasSource && d.isPlaying ? "ring-[#1db954]/50" : ""
+            className={`relative h-11 w-11 shrink-0 overflow-hidden rounded-full bg-slate-800 ${
+              d.hasSource && d.isPlaying
+                ? "ring-2 ring-cyan-400/70 shadow-[0_0_16px_-2px_rgba(34,211,238,0.45)]"
+                : "ring-2 ring-slate-700/70"
             }`}
             aria-hidden
           >
@@ -95,7 +116,8 @@ export function MobileMiniPlayer({ onOpen }: Props) {
           </div>
         </button>
 
-        {/* Transport cluster — always visible. Same language as `/player` hero. */}
+        {/* Transport cluster — always visible, same cyan-neon language as the
+            Now Playing sheet. Compact sizes so the bar stays mini-height. */}
         <div className="flex shrink-0 items-center gap-1.5">
           <button
             type="button"
@@ -105,9 +127,9 @@ export function MobileMiniPlayer({ onOpen }: Props) {
             }}
             disabled={transportDisabled}
             aria-label="Previous"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-slate-700 bg-slate-950/80 text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+            className={`${MOBILE_TRANSPORT_SEC} h-9 w-9`}
           >
-            <PlaybackTransportIconPrev className="h-5 w-5" />
+            <PlaybackTransportIconPrev className="h-4 w-4" />
           </button>
 
           <button
@@ -118,12 +140,12 @@ export function MobileMiniPlayer({ onOpen }: Props) {
             }}
             disabled={!d.canControl || !d.hasSource}
             aria-label={d.isPlaying ? "Pause" : "Play"}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#1db954] text-white shadow-[0_6px_12px_-3px_rgba(0,0,0,0.35)] transition hover:bg-[#1ed760] active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+            className={`${MOBILE_TRANSPORT_PRIMARY} h-9 w-[3.75rem]`}
           >
             {d.isPlaying ? (
-              <PlaybackTransportIconPause className="h-5 w-5" />
+              <PlaybackTransportIconPause className="h-4 w-4" />
             ) : (
-              <PlaybackTransportIconPlay className="ml-0.5 h-5 w-5" />
+              <PlaybackTransportIconPlay className="ml-0.5 h-4 w-4" />
             )}
           </button>
 
@@ -135,9 +157,9 @@ export function MobileMiniPlayer({ onOpen }: Props) {
             }}
             disabled={transportDisabled}
             aria-label="Next"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-slate-700 bg-slate-950/80 text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+            className={`${MOBILE_TRANSPORT_SEC} h-9 w-9`}
           >
-            <PlaybackTransportIconNext className="h-5 w-5" />
+            <PlaybackTransportIconNext className="h-4 w-4" />
           </button>
         </div>
       </div>

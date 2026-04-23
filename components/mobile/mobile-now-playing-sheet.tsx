@@ -42,11 +42,13 @@ type Derived = {
 /**
  * Shared derivation used by both the mini-player and the Now Playing sheet.
  *
- * Visual language rule (aligned to `PlayerHeroSurface` — the main SyncBiz
- * player on `/player`): Controller and Player modes share ONE look — slate
- * chrome with the brand green `#1db954` primary. Mode is communicated only
- * through the mode pill and the volume label, never through different
- * accent colors.
+ * Visual language rule (aligned to the main SyncBiz player's deck transport —
+ * the cyan "neon pill" look defined by `.library-deck-neon-btn:not(.h-7)` in
+ * `app/globals.css`, with circular art from `.library-deck-art-host`):
+ * Controller and Player modes share ONE look — dark slate chrome with a
+ * cyan-400 stroke + cyan-200/300 glyphs and cyan-accented sliders. Mode is
+ * communicated only through the mode pill and the volume label, never
+ * through different accent colors.
  */
 function useDerivedPlayer(): Derived {
   const { mobileRole } = useMobileRole();
@@ -152,19 +154,21 @@ function formatTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-// Visual tokens — mirror `PlayerHeroSurface` (`.sb-phs-tbtn` / `.sb-phs-vol-*`),
-// which is the main `/player` surface the user wants mobile to feel like a
-// direct extension of.
+// Visual tokens — mirror the main SyncBiz player's deck transport (the cyan
+// "neon pill" language from `.library-deck-neon-btn:not(.h-7)` in
+// `app/globals.css`, lines ~358-402). Controller and Player modes share ONE
+// look; mode is communicated only through the mode pill and volume label,
+// never through different accent colors.
 //
-// Secondary: plain slate chrome, no gradient, no inset highlight, rounded-2xl.
-// Primary:  solid brand green `#1db954` with a white glyph and a drop shadow
-//           — matches `.sb-phs-tbtn-play` (hex kept exact on purpose since
-//           Tailwind's emerald palette does not match SyncBiz's brand green).
-const TRANSPORT_SEC =
-  "flex shrink-0 items-center justify-center rounded-2xl border border-slate-700 bg-slate-950/80 text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400/40";
+// Secondary: rounded-2xl `border-2` cyan stroke, dark slate fill, cyan-300
+//            glyph, subtle cyan glow.
+// Primary:   same chrome but WIDER (stadium pill) and a stronger cyan glow
+//            — this is the "hero" play control.
+export const MOBILE_TRANSPORT_SEC =
+  "flex shrink-0 items-center justify-center rounded-2xl border-2 border-cyan-400/65 bg-slate-900/95 text-cyan-300 transition shadow-[0_0_0_1px_rgba(34,211,238,0.28),0_0_24px_-4px_rgba(34,211,238,0.42)] hover:border-cyan-300 hover:text-cyan-100 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.55),0_0_32px_-4px_rgba(34,211,238,0.55)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60";
 
-const TRANSPORT_PRIMARY =
-  "flex shrink-0 items-center justify-center rounded-2xl bg-[#1db954] text-white shadow-[0_10px_15px_-3px_rgba(0,0,0,0.3)] transition hover:bg-[#1ed760] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1ed760]/50";
+export const MOBILE_TRANSPORT_PRIMARY =
+  "flex shrink-0 items-center justify-center rounded-2xl border-2 border-cyan-400/75 bg-slate-900/95 text-cyan-200 transition shadow-[0_0_0_2px_rgba(34,211,238,0.5),0_0_32px_-2px_rgba(34,211,238,0.55),0_0_60px_-10px_rgba(34,211,238,0.35)] hover:border-cyan-300 hover:text-cyan-100 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.75),0_0_40px_-2px_rgba(34,211,238,0.7),0_0_72px_-10px_rgba(34,211,238,0.45)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/70";
 
 /**
  * Full-screen bottom sheet shown when the user taps the mini-player.
@@ -176,8 +180,9 @@ const TRANSPORT_PRIMARY =
  *   - volume slider is ALWAYS rendered with a mode-specific label:
  *       Controller → "MASTER · desktop volume"
  *       Player     → "This phone · local player volume"
- *   - visual language matches `PlayerHeroSurface` — solid `#1db954` primary,
- *     plain `rounded-2xl` slate secondary, emerald-accented slim volume row.
+ *   - visual language matches the main player's deck: cyan-400 stroke,
+ *     dark slate fill, cyan glow; Play is a wider stadium pill; volume and
+ *     seek sliders are cyan-accented; artwork is circular with a cyan ring.
  *   - closes via: X button, backdrop tap, or ESC key. No swipe gestures.
  */
 export function MobileNowPlayingSheet({ open, onClose }: Props) {
@@ -243,8 +248,15 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
         </div>
 
         <div className="flex flex-1 flex-col overflow-y-auto px-6 pb-6">
-          {/* Artwork — sized to keep transport above the fold on short phones. */}
-          <div className="mx-auto mt-2 aspect-square w-full max-w-[220px] overflow-hidden rounded-2xl bg-slate-800/80 shadow-[0_10px_15px_-3px_rgba(0,0,0,0.25)] ring-1 ring-slate-700/60">
+          {/* Artwork — circular with cyan ring when playing, matching the main
+              SyncBiz player's `.library-deck-art-host` on `/sources`. */}
+          <div
+            className={`mx-auto mt-2 aspect-square w-full max-w-[220px] overflow-hidden rounded-full bg-slate-800/80 shadow-[0_10px_20px_-6px_rgba(0,0,0,0.5)] ${
+              d.hasSource && d.isPlaying
+                ? "ring-2 ring-cyan-400/70 shadow-[0_0_32px_-6px_rgba(34,211,238,0.45)]"
+                : "ring-2 ring-slate-700/70"
+            }`}
+          >
             {d.cover ? (
               <HydrationSafeImage src={d.cover} alt="" className="h-full w-full object-cover" />
             ) : (
@@ -269,16 +281,16 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
             )}
           </div>
 
-          {/* Transport — hero order & hierarchy: Prev · Stop · [dominant Play/Pause] · Next.
-              Placed directly under meta (same position as the main player hero)
-              so it sits high in the viewport and reads as the primary action. */}
-          <div className="mt-6 flex items-center justify-center gap-3">
+          {/* Transport — hero hierarchy: Prev · Stop · [wider Play pill] · Next.
+              Matches the main SyncBiz player: same height across all buttons,
+              Play is a WIDER stadium pill, all share the cyan-neon chrome. */}
+          <div className="mt-7 flex items-center justify-center gap-2.5">
             <button
               type="button"
               onClick={d.onPrev}
               disabled={transportDisabled}
               aria-label="Previous"
-              className={`${TRANSPORT_SEC} h-[3.25rem] w-[3.25rem]`}
+              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.5rem]`}
             >
               <PlaybackTransportIconPrev className="h-6 w-6" />
             </button>
@@ -287,7 +299,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               onClick={d.onStop}
               disabled={transportDisabled}
               aria-label="Stop"
-              className={`${TRANSPORT_SEC} h-[3.25rem] w-[3.25rem]`}
+              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.5rem]`}
             >
               <PlaybackTransportIconStop className="h-6 w-6" />
             </button>
@@ -296,12 +308,12 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               onClick={d.onPlayPause}
               disabled={!d.canControl || !d.hasSource}
               aria-label={d.isPlaying ? "Pause" : "Play"}
-              className={`${TRANSPORT_PRIMARY} h-[4.5rem] w-[4.5rem]`}
+              className={`${MOBILE_TRANSPORT_PRIMARY} h-[3.25rem] w-[7rem]`}
             >
               {d.isPlaying ? (
-                <PlaybackTransportIconPause className="h-9 w-9" />
+                <PlaybackTransportIconPause className="h-7 w-7" />
               ) : (
-                <PlaybackTransportIconPlay className="ml-0.5 h-9 w-9" />
+                <PlaybackTransportIconPlay className="ml-0.5 h-7 w-7" />
               )}
             </button>
             <button
@@ -309,7 +321,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               onClick={d.onNext}
               disabled={transportDisabled}
               aria-label="Next"
-              className={`${TRANSPORT_SEC} h-[3.25rem] w-[3.25rem]`}
+              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.5rem]`}
             >
               <PlaybackTransportIconNext className="h-6 w-6" />
             </button>
@@ -329,7 +341,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               aria-valuenow={Math.floor(d.position)}
               aria-valuemin={0}
               aria-valuemax={Math.max(1, Math.floor(d.duration))}
-              className="h-2 w-full appearance-none rounded-full bg-slate-700/80 accent-[#1db954] disabled:opacity-40"
+              className="h-2 w-full appearance-none rounded-full bg-slate-700/80 accent-cyan-400 disabled:opacity-40"
             />
             <div className="mt-1 flex items-center justify-between text-[11px] tabular-nums text-slate-500">
               <span>{formatTime(d.position)}</span>
@@ -347,7 +359,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
               </span>
             </div>
             <div className="flex items-center gap-3">
-              <PlaybackTransportIconVolume className="h-4 w-4 shrink-0 text-slate-500" />
+              <PlaybackTransportIconVolume className="h-4 w-4 shrink-0 text-cyan-400/80" />
               <input
                 type="range"
                 min={0}
@@ -357,7 +369,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
                 onChange={(e) => d.onVolume(Number(e.target.value))}
                 disabled={!d.canControl}
                 aria-label={volumeLabel}
-                className="h-2 flex-1 appearance-none rounded-full bg-slate-700/80 accent-[#1db954] disabled:opacity-40"
+                className="h-2 flex-1 appearance-none rounded-full bg-slate-700/80 accent-cyan-400 disabled:opacity-40"
               />
             </div>
           </div>
