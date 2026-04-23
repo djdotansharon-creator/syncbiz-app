@@ -4,6 +4,19 @@ import { isResendConfigured, sendPasswordResetEmail } from "@/lib/email/resend-t
 
 const GENERIC_MESSAGE = "If that email exists, a reset link has been sent.";
 
+/** Public site URL for links in email (Railway: set to your `https://…` app URL if `req.nextUrl.origin` is wrong behind a proxy). */
+function publicAppOrigin(req: NextRequest): string {
+  const raw = process.env.SYNCBIZ_PUBLIC_URL?.trim();
+  if (raw) {
+    try {
+      return new URL(raw).origin;
+    } catch {
+      /* ignore */
+    }
+  }
+  return req.nextUrl.origin;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as { email?: string };
@@ -12,7 +25,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, message: GENERIC_MESSAGE });
     }
     const token = await createPasswordResetToken(email);
-    const origin = req.nextUrl.origin;
+    const origin = publicAppOrigin(req);
     if (token) {
       const resetUrl = `${origin}/reset-password?token=${encodeURIComponent(token)}`;
       if (process.env.NODE_ENV !== "production") {

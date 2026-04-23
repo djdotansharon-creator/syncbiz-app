@@ -11,6 +11,8 @@ export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
   const [message, setMessage] = useState("");
+  /** Set only in development when the API returns a reset URL (no email is sent). */
+  const [devOnlyResetUrl, setDevOnlyResetUrl] = useState<string | null>(null);
 
   const isResetMode = token.length > 0;
 
@@ -19,6 +21,7 @@ export default function ResetPasswordPage() {
     setStatus("loading");
     setMessage("");
     try {
+      setDevOnlyResetUrl(null);
       const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -31,7 +34,17 @@ export default function ResetPasswordPage() {
         return;
       }
       setStatus("ok");
-      setMessage(data.resetUrl ? `${data.message}\n${data.resetUrl}` : (data.message ?? "If that email exists, a reset link has been sent."));
+      if (data.resetUrl) {
+        setDevOnlyResetUrl(data.resetUrl);
+        setMessage(
+          "Local development: email is not sent. Use the link below to set a new password. On production (e.g. Railway) with RESEND_API_KEY, a real email is sent instead.",
+        );
+      } else {
+        setMessage(
+          data.message ??
+            "If that account exists, we sent a password reset email. Check your inbox and spam folder.",
+        );
+      }
     } catch {
       setStatus("error");
       setMessage("Failed to request reset");
@@ -114,9 +127,17 @@ export default function ResetPasswordPage() {
         )}
 
         {message ? (
-          <p className={`mt-4 whitespace-pre-wrap text-sm ${status === "error" ? "text-rose-400" : "text-emerald-300"}`}>
-            {message}
-          </p>
+          <div className={`mt-4 space-y-2 text-sm ${status === "error" ? "text-rose-400" : "text-emerald-300"}`}>
+            <p className="whitespace-pre-wrap">{message}</p>
+            {devOnlyResetUrl ? (
+              <a
+                href={devOnlyResetUrl}
+                className="block break-all font-mono text-xs text-sky-300 underline hover:text-sky-200"
+              >
+                {devOnlyResetUrl}
+              </a>
+            ) : null}
+          </div>
         ) : null}
 
         <p className="mt-6 text-center text-sm text-slate-400">
