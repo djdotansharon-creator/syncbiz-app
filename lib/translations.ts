@@ -221,6 +221,8 @@ const TRANSLATIONS = {
     playlistSearchPlaceholder: "Paste YouTube, SoundCloud, Spotify, or M3U URL…",
     searchPlaceholder: "Search YouTube (e.g. George Michael) or paste URL…",
     addUrlPlaceholder: "Add URL source…",
+    addUrlOrPathPlaceholder: "Web URL (https://…) or local file path (e.g. C:\\Music\\track.mp3)",
+    pasteOrDropUrlOrLocal: "Paste or drop a link, or a full local file path",
     universalSearchPlaceholder: "Search library or discover playlists…",
     aiSearchPlaceholder: "Search library or discover playlists…",
     aiSearchSuggest: "Try different keywords, e.g. artist name, song title, or playlist.",
@@ -310,6 +312,10 @@ const TRANSLATIONS = {
     invalidStreamUrlTitle: "Invalid stream URL — edit to fix",
     defaultGenreRadioShort: "Radio",
     urlErrorInvalidHttp: "Please enter a valid URL starting with http:// or https://",
+    urlErrorInvalidUrlOrPath:
+      "Enter a web address (https://…), a full local path (e.g. C:\\Music\\file.mp3), or file:///… for a file on this PC.",
+    urlErrorLocalFolderDesktopOnly:
+      "Adding a folder of audio files is only supported in the SyncBiz Desktop app. Paste a single file path here, or open Desktop and add the folder there.",
     urlErrorYoutubeNotFound: "Could not find that track on YouTube",
     urlErrorFailedAdd: "Could not add item",
     defaultUntitled: "Untitled",
@@ -596,6 +602,8 @@ const TRANSLATIONS = {
     playlistSearchPlaceholder: "הדבק קישור YouTube, SoundCloud, Spotify או M3U…",
     searchPlaceholder: "חפש ב-YouTube (למשל George Michael) או הדבק קישור…",
     addUrlPlaceholder: "הוסף קישור מקור…",
+    addUrlOrPathPlaceholder: "קישור אינטרנט (https://…) או נתיב מלא לקובץ (למשל C:\\Music\\track.mp3)",
+    pasteOrDropUrlOrLocal: "הדבק או זרוק קישור, או נתיב מלא לקובץ במחשב",
     universalSearchPlaceholder: "חפש בספרייה או גלה פלייליסטים…",
     aiSearchPlaceholder: "חפש בספרייה או גלה פלייליסטים…",
     aiSearchSuggest: "נסה מילות מפתח אחרות, למשל שם אמן, שיר או פלייליסט.",
@@ -685,6 +693,10 @@ const TRANSLATIONS = {
     invalidStreamUrlTitle: "כתובת שידור לא תקינה — ערוך כדי לתקן",
     defaultGenreRadioShort: "רדיו",
     urlErrorInvalidHttp: "נא להזין כתובת תקינה שמתחילה ב-http:// או https://",
+    urlErrorInvalidUrlOrPath:
+      "הזן כתובת אינטרנט (https://…), נתיב מלא (למשל C:\\Music\\file.mp3), או file:///… לקובץ במחשב הזה.",
+    urlErrorLocalFolderDesktopOnly:
+      "הוספת תיקיית קבצי אודיו נתמכת רק באפליקציית SyncBiz לשולחן העבודה. הדבק כאן נתיב לקובץ בודד, או הוסף את התיקייה מהדסקטופ.",
     urlErrorYoutubeNotFound: "לא נמצאה רצועה כזו ביוטיוב",
     urlErrorFailedAdd: "לא ניתן להוסיף את הפריט",
     defaultUntitled: "ללא כותרת",

@@ -576,13 +576,58 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   will-change: transform;
 }
 
-/* Track title marquee – subtle scroll when text overflows */
+/*
+ * Track-title marquee — smooth, readable scroll for long titles.
+ * The 0–8% hold keeps the title stationary at the start of each loop so a glance
+ * reads the beginning without chasing motion; 92–100% holds at -50% so the
+ * *end* of the title also gets to breathe before the seamless wrap. Middle
+ * 84% of the cycle is the actual linear drift.
+ */
 @keyframes track-title-marquee {
-  0% { transform: translateX(0); }
+  0%   { transform: translateX(0); }
+  8%   { transform: translateX(0); }
+  92%  { transform: translateX(-50%); }
   100% { transform: translateX(-50%); }
 }
 .track-title-marquee {
-  animation: track-title-marquee 12s linear infinite;
+  animation: track-title-marquee 22s linear infinite;
+}
+
+/*
+ * Live Queue row titles: same keyframe, slightly slower than the main deck so
+ * the passive queue browse doesn't compete for attention. Paused by default;
+ * only runs on row hover or when the row is the current (highlighted) track.
+ * The duplicated `<span>` pair inside the marquee container lets the -50%
+ * translate loop seamlessly regardless of title length.
+ */
+.queue-row-title-marquee {
+  animation: track-title-marquee 26s linear infinite;
+  animation-play-state: paused;
+}
+.queue-row:hover .queue-row-title-marquee,
+.queue-row-current .queue-row-title-marquee {
+  animation-play-state: running;
+}
+@media (prefers-reduced-motion: reduce) {
+  .queue-row-title-marquee,
+  .track-title-marquee {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+/* Flash the NEXT block briefly when playNextQueue grows — positive confirmation of a drop/paste. */
+@keyframes play-next-block-flash {
+  0%   { background-color: rgba(251, 191, 36, 0.18); }
+  100% { background-color: transparent; }
+}
+.play-next-block-flash {
+  animation: play-next-block-flash 900ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .play-next-block-flash {
+    animation: none !important;
+  }
 }
 
 /* Drop zone – inviting blink when dragging link */

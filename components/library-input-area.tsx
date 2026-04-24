@@ -30,12 +30,46 @@ import {
   type RadioStream,
 } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
+import {
+  collectElectronFilePathsFromDataTransfer,
+  isLocalPathLikelyFolderInWebBrowser,
+  normalizeLocalFilePathInput,
+  resolveDesktopFolderDropPath,
+  titleFromLocalPath,
+} from "@/lib/local-audio-path";
 
 const controlHeight = "h-10";
 const inputBase =
   "w-full rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 py-2 text-sm text-slate-100 placeholder:text-slate-400 transition-all focus:border-[#1ed760]/70 focus:ring-2 focus:ring-[#1ed760]/30 focus:outline-none disabled:opacity-60 backdrop-blur-sm";
 const addBtn =
   "shrink-0 rounded-full bg-gradient-to-b from-[#1ed760] to-[#1db954] px-5 text-sm font-semibold text-white shadow-[0_0_0_2px_rgba(29,185,84,0.35),0_2px_8px_rgba(29,185,84,0.2)] transition-all hover:from-[#2ee770] hover:to-[#1ed760] hover:shadow-[0_0_0_2px_rgba(30,215,96,0.5),0_4px_16px_rgba(30,215,96,0.3)] disabled:opacity-40 disabled:pointer-events-none";
+
+/** Desktop: trace folder drag; remove or gate if noisy. */
+function logDesktopLibraryIngestDrop(e: React.DragEvent, payload: string | null) {
+  if (typeof window === "undefined" || !window.syncbizDesktop) return;
+  const dt = e.dataTransfer;
+  const collected = collectElectronFilePathsFromDataTransfer(dt);
+  const fileRows = Array.from({ length: dt.files.length }, (_, i) => {
+    const f = dt.files[i] as File & { path?: string };
+    let getPath = "";
+    try {
+      getPath = window.syncbizDesktop?.getPathForFile?.(f) ?? "";
+    } catch {
+      /* */
+    }
+    return { name: f.name, pathProp: f.path ?? "", getPathForFile: getPath };
+  });
+  console.debug("[SyncBiz:library-dnd]", {
+    filesLen: dt.files.length,
+    itemsLen: dt.items.length,
+    types: [...dt.types],
+    fileRows,
+    collected,
+    hasScan: typeof window.syncbizDesktop?.scanLocalAudioFolder === "function",
+    hasGetPath: typeof window.syncbizDesktop?.getPathForFile === "function",
+    resolvedIngestPath: payload,
+  });
+}
 
 async function parseUrl(url: string): Promise<ParseUrlJson | null> {
   const controller = new AbortController();
@@ -190,8 +224,105 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
     async (url: string) => {
       const trimmed = url.trim();
       if (!trimmed) return;
+      const localPath = normalizeLocalFilePathInput(trimmed);
+      if (localPath) {
+        if (ingestingRef.current) return;
+        ingestingRef.current = true;
+        setUrlIngesting(true);
+        setUrlError(null);
+        setYoutubeMixImportUrl(null);
+        try {
+          const scanFolder =
+            typeof window !== "undefined" ? window.syncbizDesktop?.scanLocalAudioFolder : undefined;
+          if (typeof scanFolder === "function") {
+            const scan = await scanFolder(localPath);
+            if (scan.status === "ok") {
+              const tracks = scan.files.map((filePath) => ({
+                id: crypto.randomUUID(),
+                name: titleFromLocalPath(filePath),
+                type: "local" as const,
+                url: filePath,
+              }));
+              const res = await fetch("/api/playlists", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  name: scan.playlistName,
+                  url: scan.files[0]!,
+                  genre: tx.defaultGenreMixed,
+                  type: "local",
+                  thumbnail: "",
+                  tracks,
+                }),
+              });
+              if (res.ok) {
+                const created = (await res.json()) as Playlist;
+                onAdd({
+                  id: `pl-${created.id}`,
+                  title: created.name,
+                  genre: created.genre || tx.defaultGenreMixed,
+                  cover: created.thumbnail || null,
+                  type: "local",
+                  url: created.url,
+                  origin: "playlist",
+                  playlist: created,
+                  ...unifiedFoundationHints("playlist", "local", created.url),
+                });
+                setUrlValue("");
+              } else {
+                setUrlError(tx.urlErrorFailedAdd);
+              }
+              return;
+            }
+            if (scan.status === "error") {
+              setUrlError(scan.message || tx.urlErrorFailedAdd);
+              return;
+            }
+            // not_directory: fall through to single-file path
+          } else if (isLocalPathLikelyFolderInWebBrowser(localPath)) {
+            setUrlError(tx.urlErrorLocalFolderDesktopOnly);
+            return;
+          }
+
+          const name = titleFromLocalPath(localPath);
+          const res = await fetch("/api/playlists", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name,
+              url: localPath,
+              genre: tx.defaultGenreMixed,
+              type: "local",
+              thumbnail: "",
+            }),
+          });
+          if (res.ok) {
+            const created = (await res.json()) as Playlist;
+            onAdd({
+              id: `pl-${created.id}`,
+              title: created.name,
+              genre: created.genre || tx.defaultGenreMixed,
+              cover: created.thumbnail || null,
+              type: "local",
+              url: created.url,
+              origin: "playlist",
+              playlist: created,
+              ...unifiedFoundationHints("playlist", "local", created.url),
+            });
+            setUrlValue("");
+          } else {
+            setUrlError(tx.urlErrorFailedAdd);
+          }
+        } catch {
+          setUrlError(tx.urlErrorFailedAdd);
+        } finally {
+          ingestingRef.current = false;
+          setUrlIngesting(false);
+        }
+        return;
+      }
       if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-        setUrlError(tx.urlErrorInvalidHttp);
+        setUrlError(tx.urlErrorInvalidUrlOrPath);
         return;
       }
       if (ingestingRef.current) return;
@@ -390,17 +521,31 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
     );
   }, []);
 
-  const isDraggingLink = (e: React.DragEvent) => {
+  const isDraggingIngestPayload = (e: React.DragEvent) => {
     const types = e.dataTransfer?.types ?? [];
+    if (types.includes("Files")) return true;
     return types.includes("text/uri-list") || types.includes("text/plain") || types.includes("url");
   };
 
-  const extractUrlFromDrop = (e: React.DragEvent) => {
+  const extractIngestFromDrop = (e: React.DragEvent): string | null => {
+    const fromElectron = collectElectronFilePathsFromDataTransfer(e.dataTransfer);
+    if (fromElectron.length > 0) {
+      const useFolderResolve =
+        typeof window !== "undefined" &&
+        typeof window.syncbizDesktop?.scanLocalAudioFolder === "function";
+      const pick = useFolderResolve
+        ? resolveDesktopFolderDropPath(fromElectron)
+        : fromElectron[0]!;
+      const p = normalizeLocalFilePathInput(pick);
+      if (p) return p;
+    }
     const uriList = e.dataTransfer.getData("text/uri-list");
     const plain = e.dataTransfer.getData("text/plain");
     const raw = (uriList || plain || "").trim();
-    const url = raw.split(/[\r\n]+/)[0]?.trim();
-    return url && (url.startsWith("http://") || url.startsWith("https://")) ? url : null;
+    const first = raw.split(/[\r\n]+/)[0]?.trim() ?? "";
+    if (!first) return null;
+    if (first.startsWith("http://") || first.startsWith("https://")) return first;
+    return normalizeLocalFilePathInput(first);
   };
 
   const handleDropUrl = useCallback(
@@ -410,6 +555,16 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
     },
     [ingestUrl]
   );
+
+  const handleIngestDrop = (e: React.DragEvent) => {
+    setDragOver(false);
+    setHasLinkInDrag(false);
+    e.preventDefault();
+    e.stopPropagation();
+    const payload = extractIngestFromDrop(e);
+    logDesktopLibraryIngestDrop(e, payload);
+    if (payload) handleDropUrl(payload);
+  };
 
   const handleAddAllYoutube = useCallback(
     async () => {
@@ -565,23 +720,23 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
       <div
         onPaste={(e) => {
           const text = e.clipboardData?.getData("text/plain")?.trim();
-          if (text && (text.startsWith("http://") || text.startsWith("https://"))) {
+          if (!text) return;
+          if (normalizeLocalFilePathInput(text) || text.startsWith("http://") || text.startsWith("https://")) {
             e.preventDefault();
             e.stopPropagation();
             setUrlValue(text);
             void ingestUrl(text);
           }
         }}
-        onDrop={(e) => {
-          setDragOver(false);
-          setHasLinkInDrag(false);
-          e.preventDefault();
-          e.stopPropagation();
-          const url = extractUrlFromDrop(e);
-          if (url) handleDropUrl(url);
+        onDrop={handleIngestDrop}
+        onDragOverCapture={(e) => {
+          if (isDraggingIngestPayload(e)) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }
         }}
         onDragOver={(e) => {
-          if (isDraggingLink(e)) {
+          if (isDraggingIngestPayload(e)) {
             e.preventDefault();
             e.dataTransfer.dropEffect = "copy";
             setDragOver(true);
@@ -600,22 +755,22 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
       >
         {/* Single compact control row – Add centered */}
         <form
+          noValidate
           onSubmit={handleUrlSubmit}
-          className="flex flex-nowrap items-center gap-3 px-4 py-3"
-          onDragOver={(e) => {
-            if (isDraggingLink(e)) {
+          className="flex flex-nowrap items-center gap-2.5 px-3 py-2"
+          onDragOverCapture={(e) => {
+            if (isDraggingIngestPayload(e)) {
               e.preventDefault();
               e.dataTransfer.dropEffect = "copy";
             }
           }}
-          onDrop={(e) => {
-            setDragOver(false);
-            setHasLinkInDrag(false);
-            e.preventDefault();
-            e.stopPropagation();
-            const url = extractUrlFromDrop(e);
-            if (url) handleDropUrl(url);
+          onDragOver={(e) => {
+            if (isDraggingIngestPayload(e)) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+            }
           }}
+          onDrop={handleIngestDrop}
         >
           {/* URL input */}
           <div className={`relative min-w-0 flex-1 ${controlHeight}`}>
@@ -626,28 +781,25 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
             </span>
             <input
               type="text"
-              inputMode="url"
-              autoComplete="url"
+              autoComplete="off"
               value={urlValue}
               onChange={(e) => {
                 setYoutubeMixImportUrl(null);
+                setUrlError(null);
                 setUrlValue(e.target.value);
               }}
               onDragOver={(e) => {
-                if (e.dataTransfer?.types?.includes("text/uri-list") || e.dataTransfer?.types?.includes("text/plain")) {
+                if (
+                  e.dataTransfer?.types?.includes("Files") ||
+                  e.dataTransfer?.types?.includes("text/uri-list") ||
+                  e.dataTransfer?.types?.includes("text/plain")
+                ) {
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "copy";
                 }
               }}
-              onDrop={(e) => {
-                setDragOver(false);
-                setHasLinkInDrag(false);
-                e.preventDefault();
-                e.stopPropagation();
-                const url = extractUrlFromDrop(e);
-                if (url) handleDropUrl(url);
-              }}
-              placeholder={t.addUrlPlaceholder ?? "Add URL source…"}
+              onDrop={handleIngestDrop}
+              placeholder={t.addUrlOrPathPlaceholder ?? t.addUrlPlaceholder ?? "Add URL or local path…"}
               disabled={urlIngesting}
               className={`${inputBase} ${controlHeight} pl-9 pr-3`}
             />
@@ -753,21 +905,6 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
           )}
           </div>
         </form>
-
-        {/* Inviting hint – "Drop the link" when dragging, "Paste or drop URL" when idle – like Library */}
-        <div className="flex items-center justify-center gap-2 border-t border-slate-800/60 px-4 py-3">
-          <span
-            className={`text-lg font-semibold tracking-tight ${
-              dragOver && hasLinkInDrag
-                ? "text-[#1ed760] drop-zone-blink"
-                : "text-slate-100"
-            }`}
-          >
-            {dragOver && hasLinkInDrag
-              ? (t.dropTheLink ?? "Drop the link")
-              : (t.pasteOrDropUrl ?? "Paste or Drop URL")}
-          </span>
-        </div>
       </div>
 
       {urlError && <p className="mt-1.5 text-xs text-amber-400">{urlError}</p>}

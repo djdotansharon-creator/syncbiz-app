@@ -9,6 +9,7 @@ import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
 import { useLibraryTheme } from "@/lib/library-theme-context";
 import { AudioPlayer } from "@/components/audio-player";
+import { LiveQueuePanel } from "@/components/live-queue-panel";
 import { usePlayback } from "@/lib/playback-provider";
 import { inferPlaylistType } from "@/lib/playlist-utils";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
@@ -757,50 +758,31 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           {/* Row 3: Player — keep a single AudioPlayer instance across routes (media vs non-media); swapping branches remounts embeds */}
           <div
-            className={isMediaThemeRoute ? "library-theme library-player-route-bridge px-3 sm:px-4" : undefined}
+            className={isMediaThemeRoute ? "library-theme library-player-route-bridge shrink-0 overflow-x-hidden px-3 pb-2 sm:px-4" : undefined}
             {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
           >
             {/*
-             * Deck row: [Left slot] [Player] [Command Pads].
-             * Left + right aside columns share the same fixed width so
-             * the player shell stays centered and both sides sit away
-             * from the viewport edges (matching the `px-3 sm:px-4` inset
-             * we just added to the theme wrapper). The left slot is a
-             * placeholder today — reserved for an upcoming operator
-             * module (see TODO comment on the aside).
+             * Deck row: unified [Live Queue | Player | Command Pads] card, height-capped at xl+ so
+             * the player band stays predictable. LiveQueuePanel owns its own internal scroll.
              */}
             <div
               className={
                 isMediaThemeRoute
-                  ? "grid items-stretch gap-3 xl:grid-cols-[260px_minmax(0,1fr)_260px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px]"
+                  ? "library-deck-unified overflow-hidden rounded-2xl border border-slate-700/55 bg-slate-950/70 shadow-[0_12px_30px_rgba(0,0,0,0.42)] backdrop-blur-md"
+                  : undefined
+              }
+            >
+            <div
+              className={
+                isMediaThemeRoute
+                  ? "grid min-w-0 xl:grid-cols-[260px_minmax(0,1fr)_260px] xl:h-[220px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px] 2xl:h-[240px]"
                   : "grid grid-cols-1"
               }
             >
               {isMediaThemeRoute ? (
-                <aside className="library-deck-slot-aside relative z-[60] isolate hidden xl:block">
-                  {/* TODO: wire this slot once the user decides on its
-                      module (they mentioned a future purpose). Keep the
-                      outer shape identical to `library-deck-pads-aside`
-                      so the row stays symmetric. */}
-                  <div className="h-full rounded-2xl border border-slate-700/45 bg-slate-950/65 p-3 shadow-[0_10px_24px_rgba(0,0,0,0.38)] backdrop-blur-md">
-                    <header className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400/75">
-                          Reserved
-                        </p>
-                        <span className="inline-flex items-center gap-1 rounded-full border border-slate-600/35 bg-slate-800/50 px-2 py-0.5 text-[10px] text-slate-400/80">
-                          <span className="h-1.5 w-1.5 rounded-full bg-slate-500" />
-                          Soon
-                        </span>
-                      </div>
-                      <p className="mt-1 text-[11px] text-slate-500/80">Placeholder slot</p>
-                    </header>
-                    <div className="grid grid-cols-2 gap-2" aria-hidden>
-                      <div className="h-[58px] rounded-xl border border-dashed border-slate-700/45 bg-slate-900/35" />
-                      <div className="h-[58px] rounded-xl border border-dashed border-slate-700/45 bg-slate-900/35" />
-                      <div className="h-[58px] rounded-xl border border-dashed border-slate-700/45 bg-slate-900/35" />
-                      <div className="h-[58px] rounded-xl border border-dashed border-slate-700/45 bg-slate-900/35" />
-                    </div>
+                <aside className="library-deck-slot-aside relative z-[60] isolate hidden h-full min-h-0 overflow-hidden xl:block xl:border-e xl:border-slate-800/60">
+                  <div className="flex h-full min-h-0 flex-col overflow-hidden p-2.5">
+                    <LiveQueuePanel />
                   </div>
                 </aside>
               ) : null}
@@ -818,8 +800,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                   : {})}
                 className={
                   isMediaThemeRoute
-                    ? `relative min-w-0 overflow-hidden rounded-2xl border bg-slate-950/72 p-1.5 shadow-[0_12px_30px_rgba(0,0,0,0.42)] backdrop-blur-md transition-colors ${
-                        playerDropActive ? "border-cyan-400/70" : "border-slate-700/70"
+                    ? `library-deck-player-cell relative h-full min-h-0 min-w-0 overflow-hidden transition-colors ${
+                        playerDropActive ? "ring-2 ring-inset ring-cyan-400/70" : ""
                       }`
                     : "relative min-w-0 w-full"
                 }
@@ -832,8 +814,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <AudioPlayer />
               </div>
               {isMediaThemeRoute ? (
-                <aside className="library-deck-pads-aside relative z-[60] isolate hidden xl:block">
-                  <div className="h-full rounded-2xl border border-cyan-500/25 bg-slate-950/80 p-3 shadow-[0_10px_24px_rgba(0,0,0,0.45)] backdrop-blur-md">
+                <aside className="library-deck-pads-aside relative z-[60] isolate hidden h-full overflow-hidden xl:block xl:border-s xl:border-slate-800/60">
+                  <div className="flex h-full flex-col overflow-hidden p-3">
                     <header className="pb-2">
                       <div className="flex items-center justify-between">
                         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200/90">
@@ -888,6 +870,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </div>
                 </aside>
               ) : null}
+            </div>
             </div>
           </div>
         </header>

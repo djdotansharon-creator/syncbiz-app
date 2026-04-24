@@ -1,3 +1,7 @@
+/**
+ * App-wide playback orchestration (queue, source, status). Executors: embedded / browser
+ * and, on desktop, local engines (e.g. MPV). See `docs/PLAYBACK-PRODUCT-PRINCIPLES.md`.
+ */
 "use client";
 
 import {
@@ -35,9 +39,16 @@ import {
   syncbizAuditTrackChangedEmit,
   syncbizAuditTransportTransitionStart,
 } from "./syncbiz-transport-audit";
-import { isValidPlaybackUrl } from "./url-validation";
+import { isValidPlaybackUrl, isValidLocalFilePlaybackPath } from "./url-validation";
+import { isPlayNextSourceId, playNextLog, createPlayNextLocalSource, createPlayNextUrlSource } from "./play-next";
 import { fetchUnifiedSourcesWithFallback } from "./unified-sources-client";
 import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
+
+/** Desktop Electron shell: MPV is driven from AudioPlayer via `window.syncbizDesktop` — never POST legacy /api/commands/* OS shell routes. */
+function hasSyncBizDesktopBridge(): boolean {
+  if (typeof window === "undefined") return false;
+  return !!(window as Window & { syncbizDesktop?: unknown }).syncbizDesktop;
+}
 
 export type PlaybackStatus = "idle" | "playing" | "paused" | "stopped";
 
@@ -100,6 +111,17 @@ export function sourceToUnified(s: Source): UnifiedSource {
   };
 }
 
+/** Session snapshot for returning after Live Play Next injects (memory only, not persisted). */
+type PlayNextSessionSnapshot = {
+  currentSource: UnifiedSource;
+  currentPlaylist: Playlist | null;
+  currentTrackIndex: number;
+  queue: UnifiedSource[];
+  queueIndex: number;
+  shuffle: boolean;
+  repeat: boolean;
+};
+
 type PlaybackState = {
   currentPlaylist: Playlist | null;
   currentSource: UnifiedSource | null;
@@ -112,6 +134,10 @@ type PlaybackState = {
   /** All playlists/sources for next/prev between items */
   queue: UnifiedSource[];
   queueIndex: number;
+  /** In-memory: pending local/one-off tracks (never saved to library). */
+  playNextQueue: UnifiedSource[];
+  /** Where to return after the Play Next list drains. */
+  playNextBaseline: PlayNextSessionSnapshot | null;
 };
 
 /** Derived from currentSource + currentTrackIndex – single source of truth, never stored separately */
@@ -213,7 +239,7 @@ function getActivePlaylist(s: Pick<PlaybackState, "currentSource" | "currentPlay
   return chosen;
 }
 
-function getPlaylistSessionTracks(s: Pick<PlaybackState, "currentSource" | "currentPlaylist">) {
+export function getPlaylistSessionTracks(s: Pick<PlaybackState, "currentSource" | "currentPlaylist">) {
   const pl = getActivePlaylist(s);
   return pl ? getPlaylistTracks(pl) : [];
 }
@@ -225,7 +251,7 @@ type SessionNextKind = "advance" | "restart" | "exhausted";
  * Session always loops at end; exhausted only when trackCount is 0.
  * UI repeat flag does not disable session loop (passed for API compatibility).
  */
-function computeSessionNextTrackIndex(
+export function computeSessionNextTrackIndex(
   trackCount: number,
   currentIndex: number,
   shuffle: boolean,
@@ -400,6 +426,10 @@ type PlaybackContextValue = PlaybackState & {
   setRepeat: (value: boolean) => void;
   toggleRepeat: () => void;
   setLastMessage: (message: string | null) => void;
+  /** Append local paths to the Live Play Next queue (does not call API / mutate saved playlists). */
+  addPlayNextFromPaths: (absolutePaths: string[]) => void;
+  /** Append supported http(s) playback URLs to Play Next (in-memory only). */
+  addPlayNextFromUrls: (urls: string[]) => void;
   playSource: (source: UnifiedSource, trackIndex?: number) => void;
   playSourceFromDb: (source: Source, opts?: { auditScheduledNonEmbedded?: boolean }) => void;
   playPlaylist: (playlist: Playlist, trackIndex?: number) => void;
@@ -589,6 +619,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     lastMessage: null,
     queue: [],
     queueIndex: -1,
+    playNextQueue: [],
+    playNextBaseline: null,
   });
   /**
    * True while the mount-time restore path is in flight. Seeded SYNCHRONOUSLY
@@ -792,7 +824,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     persistRecoverySnapshot();
   }, [persistRecoverySnapshot]);
 
-  /** Stop all known players: embedded YT/SC, local Winamp. Call before starting new source. */
+  /** Stop embeds (YT/SC/HLS) before a new local/source handoff. Legacy POST /api/commands/stop-local (taskkill winamp) only when not in desktop MPV mode. */
   const stopAllBeforePlay = useCallback(() => {
     if (!deviceModeAllowsLocalPlayback.current) return;
     try {
@@ -800,21 +832,20 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
+    if (hasSyncBizDesktopBridge()) return;
     fetch("/api/commands/stop-local", { method: "POST" }).catch(() => {});
   }, []);
 
   const playLocal = useCallback((url: string, browserPreference?: string) => {
     const target = canonicalYouTubeWatchUrlForPlayback(url);
-    // `/api/commands/play-local` is a desktop-only integration (opens the URL in the host OS
-    // default browser / media player via the Electron bridge). On a phone there is no OS-level
-    // player surface we can hand off to, and opening a new tab is disruptive — the mobile
-    // surface plays URLs through the in-app embedded iframe / <audio> pipeline instead.
-    // Return silently so non-embedded sources (radio, HLS) still advance via the state update
-    // above that fed AudioPlayer; they just don't get the OS-app handoff.
     if (
       typeof window !== "undefined" &&
       window.location.pathname.startsWith("/mobile")
     ) {
+      return;
+    }
+    if (hasSyncBizDesktopBridge()) {
+      // SyncBiz desktop: `currentPlayUrl` + AudioPlayer already route to MPV — do not open default app / shell.
       return;
     }
     fetch("/api/commands/play-local", {
@@ -883,7 +914,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         let url = canonicalYouTubeWatchUrlForPlayback(rawTrack || rawRes);
 
         const urlPlayable = (u: string) =>
-          !!u && !u.startsWith("local://") && isValidPlaybackUrl(u);
+          !!u &&
+          !u.startsWith("local://") &&
+          (isValidPlaybackUrl(u) || isValidLocalFilePlaybackPath(u));
 
         if (!urlPlayable(url) && playlist && tracks.length > 0) {
           for (let i = 0; i < tracks.length; i++) {
@@ -990,7 +1023,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           };
         });
 
-        if (!embedded && url) {
+        if (!embedded && url && !isValidLocalFilePlaybackPath(url)) {
           const browserPref = resolved.source?.browserPreference ?? "default";
           playLocal(url, browserPref);
         }
@@ -1296,6 +1329,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         currentPlaylist: null,
         currentTrackIndex: 0,
         queueIndex: -1,
+        playNextQueue: [],
+        playNextBaseline: null,
       }));
       return;
     }
@@ -1307,6 +1342,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       currentPlaylist: null,
       currentTrackIndex: 0,
       queueIndex: -1,
+      playNextQueue: [],
+      playNextBaseline: null,
     }));
   }, [stopAllBeforePlay]);
 
@@ -1323,6 +1360,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       currentPlaylist: null,
       currentTrackIndex: 0,
       queueIndex: -1,
+      playNextQueue: [],
+      playNextBaseline: null,
     }));
   }, []);
 
@@ -1528,6 +1567,137 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         queueLength: prevQueueLength,
         skipPlay,
       });
+      if (s.playNextQueue.length > 0) {
+        const first = s.playNextQueue[0]!;
+        const rest = s.playNextQueue.slice(1);
+        const fromSession = !!(s.currentSource && !isPlayNextSourceId(s.currentSource.id));
+        const nextBaseline: PlayNextSessionSnapshot | null = fromSession
+          ? {
+              currentSource: s.currentSource!,
+              currentPlaylist: s.currentPlaylist,
+              currentTrackIndex: s.currentTrackIndex,
+              queue: s.queue,
+              queueIndex: s.queueIndex,
+              shuffle: s.shuffle,
+              repeat: s.repeat,
+            }
+          : s.playNextBaseline;
+        playNextLog("next_dequeue_play_next", {
+          fromSession,
+          incomingId: first.id,
+          remaining: rest.length,
+          hadPriorBaseline: !!s.playNextBaseline,
+        });
+        const plTrk = unifiedToPlaybackTrack(first, 0);
+        const embedded = canEmbedInCard(plTrk.type);
+        const url = plTrk.url;
+        if (!skipPlay && !embedded && url) {
+          stopAllBeforePlay();
+          playLocal(url);
+        }
+        transportLockRef.current = false;
+        const base: PlaybackState = {
+          ...s,
+          currentSource: first,
+          currentTrackIndex: 0,
+          currentPlaylist: null,
+          playNextQueue: rest,
+          playNextBaseline: nextBaseline,
+        };
+        return getAdvanceState(base, 0);
+      }
+
+      if (s.playNextQueue.length === 0 && isPlayNextSourceId(s.currentSource?.id)) {
+        if (!s.playNextBaseline) {
+          playNextLog("next_play_next_done_no_baseline", { id: s.currentSource?.id ?? null });
+          transportLockRef.current = false;
+          return {
+            ...s,
+            status: "stopped" as const,
+            currentSource: null,
+            currentPlaylist: null,
+            currentTrackIndex: 0,
+            playNextQueue: [],
+            playNextBaseline: null,
+          };
+        }
+        const b = s.playNextBaseline;
+        const restored: PlaybackState = {
+          ...s,
+          currentSource: b.currentSource,
+          currentPlaylist: b.currentPlaylist,
+          currentTrackIndex: b.currentTrackIndex,
+          queue: b.queue,
+          queueIndex: b.queueIndex,
+          shuffle: b.shuffle,
+          repeat: b.repeat,
+          playNextBaseline: null,
+        };
+        const back = b.currentSource;
+        const sessionTracks = getPlaylistSessionTracks(restored);
+        if (sessionTracks.length > 0 && !preferQueueTransportOverCollapsedSession(restored, sessionTracks.length, "next")) {
+          const sessionStep = computeSessionNextTrackIndex(
+            sessionTracks.length,
+            restored.currentTrackIndex,
+            restored.shuffle,
+            restored.repeat,
+            getShuffledIndex,
+          );
+          if (sessionStep.kind === "exhausted") {
+            transportLockRef.current = false;
+            return restored;
+          }
+          const nextIdx = sessionStep.nextIndex;
+          const track = sessionTracks[nextIdx];
+          const trUrl = track?.url ?? back.url;
+          const emb = track ? canEmbedInCard(track.type) : false;
+          mvpLog("playback_next", { scope: "return_play_next", toIndex: nextIdx, skipPlay });
+          playNextLog("return_to_session", {
+            fromPlayNextId: s.currentSource?.id,
+            toSessionIndex: nextIdx,
+            baselineIndex: b.currentTrackIndex,
+          });
+          if (!skipPlay && !emb && trUrl) {
+            stopAllBeforePlay();
+            playLocal(trUrl);
+          }
+          transportLockRef.current = false;
+          emitScheduledQueueEndedAutoProof(back.id);
+          return getAdvanceState(restored, nextIdx);
+        }
+
+        const playlist = restored.currentPlaylist;
+        const trks = playlist ? getPlaylistTracks(playlist) : [];
+        if (trks.length === 0) {
+          playNextLog("return_to_session_no_tracks", {});
+          transportLockRef.current = false;
+          return restored;
+        }
+        const fbStep = computeSessionNextTrackIndex(
+          trks.length,
+          restored.currentTrackIndex,
+          restored.shuffle,
+          restored.repeat,
+          getShuffledIndex,
+        );
+        if (fbStep.kind === "exhausted") {
+          transportLockRef.current = false;
+          return restored;
+        }
+        const nextIdx = fbStep.nextIndex;
+        const track = trks[nextIdx];
+        const trUrl = track?.url ?? back.url;
+        const emb = track ? canEmbedInCard(track.type) : false;
+        playNextLog("return_to_session_fallback", { nextIdx });
+        if (!skipPlay && !emb && trUrl) {
+          stopAllBeforePlay();
+          playLocal(trUrl);
+        }
+        transportLockRef.current = false;
+        emitScheduledQueueEndedAutoProof(back.id);
+        return getAdvanceState(restored, nextIdx);
+      }
+
       if (!s.currentSource) {
         transportLockRef.current = false;
         return s;
@@ -1729,6 +1899,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const s = state;
       if (!s.currentSource) return null;
 
+      if (isPlayNextSourceId(s.currentSource.id) && s.playNextQueue.length > 0) {
+        const t = s.playNextQueue[0]!;
+        const u = canonicalYouTubeWatchUrlForPlayback(t.url ?? "");
+        const em = canEmbedInCard(unifiedToPlaybackTrack(t, 0).type);
+        if (!em && u) {
+          mvpLog("playback_get_next_stream", { scope: "play_next", nextId: t.id });
+          return u;
+        }
+        return null;
+      }
+
       const sessionTracks = getPlaylistSessionTracks(s);
       if (
         sessionTracks.length > 0 &&
@@ -1928,6 +2109,26 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const addPlayNextFromPaths = useCallback((absolutePaths: string[]) => {
+    const paths = absolutePaths.map((p) => p.trim()).filter((p) => p && isValidLocalFilePlaybackPath(p));
+    if (paths.length === 0) return;
+    setState((s) => {
+      const added = paths.map((p) => createPlayNextLocalSource(p));
+      playNextLog("add_play_next_paths", { count: added.length, firstPaths: paths.slice(0, 6) });
+      return { ...s, playNextQueue: [...s.playNextQueue, ...added] };
+    });
+  }, []);
+
+  const addPlayNextFromUrls = useCallback((urls: string[]) => {
+    const cleaned = urls.map((u) => u.trim()).filter((u) => u && isValidPlaybackUrl(u));
+    if (cleaned.length === 0) return;
+    setState((s) => {
+      const added = cleaned.map((u) => createPlayNextUrlSource(u));
+      playNextLog("add_play_next_urls", { count: added.length, firstUrls: cleaned.slice(0, 4) });
+      return { ...s, playNextQueue: [...s.playNextQueue, ...added] };
+    });
+  }, []);
+
   const value = useMemo<PlaybackContextValue>(
     () => ({
       ...state,
@@ -1944,6 +2145,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       setRepeat,
       toggleRepeat,
       setLastMessage,
+      addPlayNextFromPaths,
+      addPlayNextFromUrls,
       playSource,
       playSourceFromDb,
       playPlaylist,
@@ -1974,6 +2177,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       setRepeat,
       toggleRepeat,
       setLastMessage,
+      addPlayNextFromPaths,
+      addPlayNextFromUrls,
       playSource,
       playSourceFromDb,
       playPlaylist,

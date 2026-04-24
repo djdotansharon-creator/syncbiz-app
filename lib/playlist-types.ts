@@ -60,6 +60,12 @@ export type PlaylistTrack = {
   cover?: string;
   /** Optional link to catalog row for this track URL (Phase 1); playback still uses `url`. */
   catalogItemId?: string;
+  /**
+   * Duration of the track in seconds. Populated at runtime from yt-dlp / media metadata; may
+   * already be on persisted tracks for sources that stored it. Absence means "unknown" —
+   * callers should show "—" rather than treating missing as zero.
+   */
+  durationSeconds?: number;
 };
 
 /** Contributor sections for composite scheduled playlists (persisted JSON). */
@@ -148,6 +154,11 @@ export function getPlaylistTracks(p: Playlist): PlaylistTrack[] {
       type: p.type,
       url: p.url,
       cover: p.thumbnail || undefined,
+      // Single-track fallback: the playlist *is* the track, so pass through its duration
+      // rather than stripping it. Fixes the Live Queue showing "—" for single-video drops.
+      ...(typeof p.durationSeconds === "number" && p.durationSeconds >= 0
+        ? { durationSeconds: p.durationSeconds }
+        : {}),
     },
   ];
 }

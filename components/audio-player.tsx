@@ -387,6 +387,7 @@ export function AudioPlayer() {
   const [isHoveringTimeline, setIsHoveringTimeline] = useState(false);
   const [hoverPercent, setHoverPercent] = useState(0);
   const [titleOverflows, setTitleOverflows] = useState(false);
+  const [nextLabelOverflows, setNextLabelOverflows] = useState(false);
   const [autoMix, setAutoMixState] = useState(false);
   const [mixDurationDisplay, setMixDurationDisplay] = useState(6);
   const [embedReady, setEmbedReady] = useState(false);
@@ -395,6 +396,8 @@ export function AudioPlayer() {
   const timelineRef = useRef<HTMLDivElement>(null);
   const titleMeasureRef = useRef<HTMLSpanElement>(null);
   const titleContainerRef = useRef<HTMLDivElement>(null);
+  const nextLabelMeasureRef = useRef<HTMLSpanElement>(null);
+  const nextLabelContainerRef = useRef<HTMLDivElement>(null);
   const volumeRef = useRef(volume);
   const statusRef = useRef(status);
   const currentPlayUrlRef = useRef<string | null>(null);
@@ -2327,6 +2330,17 @@ export function AudioPlayer() {
     return () => ro.disconnect();
   }, [currentTrack?.title, ytMultiTrackState?.currentTitle]);
 
+  useEffect(() => {
+    const measure = nextLabelMeasureRef.current;
+    const container = nextLabelContainerRef.current;
+    if (!measure || !container) return;
+    const check = () => setNextLabelOverflows(measure.scrollWidth > container.clientWidth);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [displayNextLabel]);
+
   return (
     <header
       className={
@@ -2560,61 +2574,93 @@ export function AudioPlayer() {
                           isSourcesLibraryDeck ? "library-player-track-inner rounded-xl" : "rounded border border-slate-700/50 bg-slate-800/30"
                         }`}
                       >
-                        {/* Row 1: PLAY NOW : current track */}
-                        <div ref={titleContainerRef} className="relative flex min-w-0 flex-1 items-center overflow-hidden gap-1.5">
-                          <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
-                            {displayTitle as string}
-                          </span>
+                        {/* Row 1: NOW PLAYING (stacked — label then title) */}
+                        <div className="flex min-w-0 flex-col">
                           <span
-                            className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider sm:text-xs ${
+                            className={`shrink-0 text-[9px] font-semibold uppercase tracking-wider sm:text-[10px] ${
                               isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"
                             }`}
                           >
                             {t.playNowColon}
                           </span>
-                          {titleOverflows ? (
-                            <div className="min-w-0 flex-1 overflow-hidden">
-                              <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
-                                <span
-                                  className={`text-xs font-medium sm:text-sm ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"}`}
-                                >
-                                  {displayTitle}
-                                </span>
-                                <span
-                                  className={`text-xs font-medium sm:text-sm ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"}`}
-                                >
-                                  {displayTitle}
-                                </span>
+                          <div ref={titleContainerRef} className="relative mt-0.5 flex min-w-0 items-center overflow-hidden">
+                            <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
+                              {displayTitle as string}
+                            </span>
+                            {titleOverflows ? (
+                              <div className="min-w-0 flex-1 overflow-hidden">
+                                <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
+                                  <span
+                                    dir="auto"
+                                    className={`text-xs font-medium sm:text-sm ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"}`}
+                                  >
+                                    {displayTitle}
+                                  </span>
+                                  <span
+                                    dir="auto"
+                                    className={`text-xs font-medium sm:text-sm ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"}`}
+                                    aria-hidden
+                                  >
+                                    {displayTitle}
+                                  </span>
+                                </div>
                               </div>
-                            </div>
-                          ) : (
-                            <p
-                              className={`min-w-0 flex-1 truncate text-xs font-medium sm:text-sm ${
-                                isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"
-                              }`}
-                              title={displayTitle}
-                            >
-                              {displayTitle}
-                            </p>
-                          )}
+                            ) : (
+                              <p
+                                dir="auto"
+                                className={`min-w-0 flex-1 truncate text-xs font-medium sm:text-sm ${
+                                  isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"
+                                }`}
+                                title={displayTitle}
+                              >
+                                {displayTitle}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        {/* Row 2: NEXT TRACK : next track */}
-                        <div className="flex min-w-0 items-center gap-1.5">
+                        {/* Row 2: NEXT TRACK (stacked — label then title) */}
+                        <div className="flex min-w-0 flex-col">
                           <span
-                            className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider sm:text-xs ${
+                            className={`shrink-0 text-[9px] font-semibold uppercase tracking-wider sm:text-[10px] ${
                               isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"
                             }`}
                           >
                             {t.nextTrackColon}
                           </span>
-                          <span
-                            className={`min-w-0 flex-1 truncate text-xs font-medium ${
-                              isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-400"
-                            }`}
-                            title={displayNextLabel ?? undefined}
-                          >
-                            {displayNextLabel ?? "—"}
-                          </span>
+                          <div ref={nextLabelContainerRef} className="relative mt-0.5 flex min-w-0 items-center overflow-hidden">
+                            <span ref={nextLabelMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
+                              {displayNextLabel ?? "—"}
+                            </span>
+                            {nextLabelOverflows && displayNextLabel ? (
+                              <div className="min-w-0 flex-1 overflow-hidden">
+                                <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
+                                  <span
+                                    dir="auto"
+                                    className={`text-xs font-medium ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-400"}`}
+                                  >
+                                    {displayNextLabel}
+                                  </span>
+                                  <span
+                                    dir="auto"
+                                    className={`text-xs font-medium ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-400"}`}
+                                    aria-hidden
+                                  >
+                                    {displayNextLabel}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <p
+                                dir="auto"
+                                className={`min-w-0 flex-1 truncate text-xs font-medium ${
+                                  isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-400"
+                                }`}
+                                title={displayNextLabel ?? undefined}
+                              >
+                                {displayNextLabel ?? "—"}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div
