@@ -190,32 +190,79 @@ export function PlaybackControls({
         </button>
       </div>
 
-      {/* Volume fader strip – deck-style */}
+      {/* Volume fader strip – deck-style with LED segment readout */}
       <div
         className={`flex items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/90 px-3 py-2 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.03),0_2px_8px_rgba(0,0,0,0.3)] ${
           compact ? "rounded-l-none border-l-slate-700/80 pl-3" : "ml-1 border-l border-slate-700/80 pl-4"
         }`}
       >
         <IconVolume className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
-        <input
-          type="range"
-          min={0}
-          max={100}
+        <VolumeLedFader
           value={draftVolume}
-          onChange={(e) => setDraftVolume(Number(e.target.value))}
-          onPointerUp={commitVolume}
-          onMouseUp={commitVolume}
-          onTouchEnd={commitVolume}
-          onKeyUp={commitVolume}
+          onChange={setDraftVolume}
+          onCommit={commitVolume}
           disabled={disabled}
-          className="h-1.5 w-20 shrink-0 appearance-none rounded-full bg-slate-700/80 focus:outline-none focus:ring-0 sm:w-24 [&::-webkit-slider-thumb]:cursor-pointer"
-          aria-label="Volume"
+          compact={compact}
         />
         <span className="w-7 text-end text-xs font-semibold tabular-nums text-slate-400">
           {draftVolume}
         </span>
       </div>
     </div>
+  );
+}
+
+const VOLUME_LED_SEGMENT_COUNT = 12;
+
+function VolumeLedFader({
+  value,
+  onChange,
+  onCommit,
+  disabled,
+  compact,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  onCommit: () => void;
+  disabled?: boolean;
+  compact?: boolean;
+}) {
+  // Lit-segment count tracks the slider value. Final segment lights only at full
+  // volume so the readout never lies — the LED row exactly mirrors the input.
+  const litCount = Math.round((Math.max(0, Math.min(100, value)) / 100) * VOLUME_LED_SEGMENT_COUNT);
+  return (
+    <span
+      className={`relative inline-flex shrink-0 ${compact ? "w-20" : "w-24"} h-5 items-center sm:w-28`}
+    >
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        onPointerUp={onCommit}
+        onMouseUp={onCommit}
+        onTouchEnd={onCommit}
+        onKeyUp={onCommit}
+        disabled={disabled}
+        className="volume-led-input"
+        aria-label="Volume"
+      />
+      <span aria-hidden className="volume-led-track">
+        {Array.from({ length: VOLUME_LED_SEGMENT_COUNT }).map((_, i) => {
+          const on = i < litCount;
+          // Last 2 segments warn (yellow), final segment hot (red) — classic VU palette.
+          const warm = on && i >= VOLUME_LED_SEGMENT_COUNT - 3 && i < VOLUME_LED_SEGMENT_COUNT - 1;
+          const hot = on && i >= VOLUME_LED_SEGMENT_COUNT - 1;
+          return (
+            <span
+              key={i}
+              className={`volume-led-seg${on ? " is-on" : ""}${warm ? " is-warm" : ""}${hot ? " is-hot" : ""}`}
+            />
+          );
+        })}
+      </span>
+    </span>
   );
 }
 

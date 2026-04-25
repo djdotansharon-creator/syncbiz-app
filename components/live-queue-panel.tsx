@@ -457,8 +457,14 @@ export function LiveQueuePanel() {
                 >
                   <span className="text-right font-mono text-[10px] tabular-nums text-slate-500">{i + 1}</span>
                   <div className="min-w-0 overflow-hidden">
-                    <div className="queue-row-title relative flex min-w-0 items-baseline overflow-hidden">
-                      {isCurrent ? <span className="me-0.5 shrink-0 text-[9px] font-bold uppercase text-sky-400/95">Now </span> : null}
+                    <div className="queue-row-title relative flex min-w-0 items-center overflow-hidden">
+                      {isCurrent ? (
+                        <span
+                          aria-label="Now playing"
+                          title="Now playing"
+                          className="live-queue-led-now me-1 inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-sky-300 shadow-[0_0_6px_rgba(56,189,248,0.95)]"
+                        />
+                      ) : null}
                       {isNextInList && !isCurrent ? <span className="me-0.5 shrink-0 text-[9px] font-bold uppercase text-emerald-400/90">Next </span> : null}
                       <div className="min-w-0 flex-1 overflow-hidden">
                         <div className="queue-row-title-marquee flex w-max gap-12 whitespace-nowrap" title={title}>

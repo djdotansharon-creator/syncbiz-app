@@ -639,6 +639,84 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   animation: drop-zone-blink 1.2s ease-in-out infinite;
 }
 
+/* Live Queue: pulsing LED on the current row (replaces the prior "NOW" text label). */
+@keyframes live-queue-led-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 4px rgba(56, 189, 248, 0.7), 0 0 10px rgba(56, 189, 248, 0.45);
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 2px rgba(56, 189, 248, 0.4), 0 0 6px rgba(56, 189, 248, 0.2);
+  }
+}
+.live-queue-led-now {
+  animation: live-queue-led-pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-queue-led-now { animation: none !important; }
+}
+
+/* Volume LED segments — visual layer over the native <input type="range"> (input stays for a11y). */
+.volume-led-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.volume-led-track .volume-led-seg {
+  flex: 1 1 0;
+  height: 0.55rem;
+  border-radius: 1px;
+  background: rgba(51, 65, 85, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.6);
+  transition: background-color 80ms linear, box-shadow 80ms linear;
+}
+.volume-led-track .volume-led-seg.is-on {
+  background: linear-gradient(to top, #15803d, #4ade80);
+  box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.55), 0 0 4px rgba(74, 222, 128, 0.55);
+}
+.volume-led-track .volume-led-seg.is-on.is-warm {
+  background: linear-gradient(to top, #b45309, #fbbf24);
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.55), 0 0 4px rgba(251, 191, 36, 0.55);
+}
+.volume-led-track .volume-led-seg.is-on.is-hot {
+  background: linear-gradient(to top, #b91c1c, #fb7185);
+  box-shadow: inset 0 0 0 1px rgba(244, 63, 94, 0.55), 0 0 4px rgba(244, 63, 94, 0.55);
+}
+.volume-led-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  opacity: 0;
+}
+.volume-led-input:focus-visible + .volume-led-track {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.volume-led-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: transparent;
+  border: 0;
+}
+.volume-led-input::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: transparent;
+  border: 0;
+}
+
 /* ─── Library /sources theme tokens (Graphite Black baseline = current look) ───
    Future: .library-theme[data-library-theme="deep-blue"] { --lib-accent: ... }
    Pearl:  .library-theme[data-library-theme="pearl-light"] { --lib-text-primary: ... } */
