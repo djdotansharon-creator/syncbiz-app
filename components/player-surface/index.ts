@@ -22,6 +22,8 @@ export {
 export { PlayerDeckTransportSurface } from "./player-deck-transport-surface";
 export { PlayerHeroSurface } from "./player-hero-surface";
 export { PlayerUnitSurface } from "./player-unit-surface";
+export { PlayerVerticalVolume } from "./player-vertical-volume";
+export type { PlayerVerticalVolumeProps } from "./player-vertical-volume";
 export type {
   PlayerDeckTransportLabels,
   PlayerDeckTransportSurfaceProps,

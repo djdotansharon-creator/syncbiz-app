@@ -33,45 +33,45 @@ export type RuntimeBinaries = {
 export async function ensureRuntimeBinaries(): Promise<RuntimeBinaries> {
   const names: BinaryName[] = ["mpv", "yt-dlp"];
 
-  // Loop (not recursion) so repeated Retry clicks never overflow the stack.
-  for (;;) {
-    // Pre-flight: does anything need a download? We DON'T want to flash a
-    // setup window when both binaries are already cached — so we peek at the
-    // manifest first and only open the window if at least one is missing.
-    const needsAnyDownload = await needsFirstRun(names);
+  // Pre-flight: does anything need a download? We DON'T want to flash a
+  // setup window when both binaries are already cached — so we peek at the
+  // manifest first and only open the window if at least one is missing.
+  const needsAnyDownload = await needsFirstRun(names);
 
-    let win: FirstRunWindowHandle | null = null;
-    if (needsAnyDownload) {
-      win = await openFirstRunWindow();
-    }
+  let win: FirstRunWindowHandle | null = null;
+  if (needsAnyDownload) {
+    win = await openFirstRunWindow();
+  }
 
-    try {
-      const paths = await resolveAll(names, (p) => {
-        if (!win) return;
-        if (p.error) {
-          win.setError(p.error);
-        } else {
-          win.setProgress(p);
-        }
-      });
-      win?.setDone();
-      // Brief "Ready." flash so the user sees success rather than a fast blink.
-      if (win) await delay(400);
-      return { mpvBin: paths.mpv, ytDlpBin: paths["yt-dlp"] };
-    } catch (err) {
-      const message = (err as Error).message ?? String(err);
-      if (win) {
-        win.setError(message);
-        // Leave window on-screen for 1.2s so the user can read the error
-        // before the dialog box takes over.
-        await delay(1200);
+  try {
+    const paths = await resolveAll(names, (p) => {
+      if (!win) return;
+      if (p.error) {
+        win.setError(p.error);
+      } else {
+        win.setProgress(p);
       }
-      const retry = await showErrorAndAskRetry(message);
-      if (!retry) throw err;
-      // retry === true: fall through to next loop iteration
-    } finally {
-      win?.close();
+    });
+    win?.setDone();
+    // Brief "Ready." flash so the user sees success rather than a fast blink.
+    if (win) await delay(400);
+    return { mpvBin: paths.mpv, ytDlpBin: paths["yt-dlp"] };
+  } catch (err) {
+    const message = (err as Error).message ?? String(err);
+    if (win) {
+      win.setError(message);
+      // Leave window on-screen for 1.2s so the user can read the error
+      // before the dialog box takes over.
+      await delay(1200);
     }
+    const retry = await showErrorAndAskRetry(message);
+    if (retry) {
+      win?.close();
+      return ensureRuntimeBinaries();
+    }
+    throw err;
+  } finally {
+    win?.close();
   }
 }
 

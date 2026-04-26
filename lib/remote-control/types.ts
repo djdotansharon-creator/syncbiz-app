@@ -59,6 +59,10 @@ export type StationPlaybackState = {
   /** Future: which engine is driving playback on MASTER (metadata only). */
   activePlaybackEngineId?: string;
   activePlaybackEngineType?: PlaybackEngineType;
+  /** Optional: branch desktop MASTER reports MPV process + IPC health. */
+  mpvEngineReady?: boolean;
+  /** Optional: last MPV/engine error string from branch desktop (not optimistic). */
+  mpvEngineError?: string | null;
 };
 
 /** Minimal source payload for PLAY_SOURCE command. */

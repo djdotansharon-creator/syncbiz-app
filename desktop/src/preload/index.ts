@@ -1,7 +1,7 @@
 /**
  * Preload — narrow `contextBridge` API for Desktop MVP (config + WS control + status stream).
  */
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   BranchLibraryItem,
   BranchLibrarySummary,
@@ -10,6 +10,7 @@ import type {
   LocalMockTransportPayload,
   MvpConfigPatch,
   MvpStatusSnapshot,
+  ScanLocalAudioFolderResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import type { SyncBizDesktopMvp } from "../shared/mvp-desktop-api";
@@ -38,6 +39,16 @@ const api: SyncBizDesktopMvp = {
     ipcRenderer.invoke(MVP_IPC.SET_DUCK_PERCENT, n),
   mpvSeekTo: (seconds: number): Promise<void> =>
     ipcRenderer.invoke(MVP_IPC.MPV_SEEK_TO, seconds),
+  scanLocalAudioFolder: (dir: string): Promise<ScanLocalAudioFolderResult> =>
+    ipcRenderer.invoke(MVP_IPC.SCAN_LOCAL_AUDIO_FOLDER, dir),
+  /** Prefer over deprecated `File.path` for native paths from file inputs and drag/drop. */
+  getPathForFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return "";
+    }
+  },
   onStatus: (callback) => {
     const handler = (_: unknown, status: MvpStatusSnapshot) => {
       callback(status);

@@ -7,12 +7,14 @@ import type {
   LocalMockTransportPayload,
   MvpConfigPatch,
   MvpStatusSnapshot,
+  ScanLocalAudioFolderResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import { DeviceWsManager } from "../device-websocket-client/device-ws-manager";
 import { fetchBranchLibrarySummary } from "./branch-library-fetch";
 import { loadRuntimeConfig, patchRuntimeConfig } from "./runtime-config-service";
 import type { PlaybackOrchestrator } from "./playback-orchestrator";
+import { scanLocalAudioFolder } from "./scan-local-audio-folder";
 
 let manager: DeviceWsManager | null = null;
 let cachedConfig: DesktopRuntimeConfig | null = null;
@@ -177,6 +179,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   ipcMain.handle(MVP_IPC.MPV_PLAY_URL, (_e, url: string): void => {
     const u = typeof url === "string" ? url.trim() : "";
     if (!u) return;
+    console.log("[SyncBiz:desktop-mpv:ipc] MPV_PLAY_URL (renderer test / dev) → playMusic", { preview: u.slice(0, 160) });
     orchestratorInstance?.playMusic(u);
   });
 
@@ -196,6 +199,13 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     if (typeof seconds === "number" && Number.isFinite(seconds)) {
       orchestratorInstance?.seekMusic(seconds);
     }
+  });
+
+  ipcMain.handle(MVP_IPC.SCAN_LOCAL_AUDIO_FOLDER, async (_e, dir: string): Promise<ScanLocalAudioFolderResult> => {
+    if (typeof dir !== "string" || !dir.trim()) {
+      return { status: "error", message: "Empty path" };
+    }
+    return scanLocalAudioFolder(dir);
   });
 }
 
@@ -233,5 +243,7 @@ function fallbackSnapshotFromConfig(c: DesktopRuntimeConfig): MvpStatusSnapshot 
     duckPercent: 40,
     mpvPosition: 0,
     mpvDuration: 0,
+    mpvEngineReady: false,
+    mpvLastError: null,
   };
 }

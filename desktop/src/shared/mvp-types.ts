@@ -17,7 +17,15 @@ export const MVP_IPC = {
   MPV_PLAY_INTERRUPT: "mvp:mpv-play-interrupt",
   SET_DUCK_PERCENT: "mvp:set-duck-percent",
   MPV_SEEK_TO: "mvp:mpv-seek-to",
+  /** Main process: list audio files in a directory (Desktop only). */
+  SCAN_LOCAL_AUDIO_FOLDER: "mvp:scan-local-audio-folder",
 } as const;
+
+/** Result of scanning a folder for audio files (IPC from main). */
+export type ScanLocalAudioFolderResult =
+  | { status: "ok"; playlistName: string; files: string[] }
+  | { status: "not_directory" }
+  | { status: "error"; message: string };
 
 /** Local mock console — same commands as remote WS COMMAND (no MPV). */
 export type LocalMockTransportPayload = {
@@ -130,6 +138,10 @@ export type MvpStatusSnapshot = {
   mpvPosition: number;
   /** MPV Channel A track duration in seconds — 0 when no file is loaded. */
   mpvDuration: number;
+  /** true when the music-channel mpv process is up and JSON IPC is connected. */
+  mpvEngineReady: boolean;
+  /** Last engine issue for the music channel (load, binary, IPC, process) — not optimistic. */
+  mpvLastError: string | null;
 };
 
 export type MvpConfigPatch = Partial<Omit<DesktopRuntimeConfig, "deviceId">> & {

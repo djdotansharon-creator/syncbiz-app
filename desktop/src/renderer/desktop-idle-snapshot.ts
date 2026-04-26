@@ -30,4 +30,6 @@ export const DESKTOP_IDLE_STATUS_SNAPSHOT: MvpStatusSnapshot = {
   duckTargetVolume: 0,
   mpvPosition: 0,
   mpvDuration: 0,
+  mpvEngineReady: false,
+  mpvLastError: null,
 };

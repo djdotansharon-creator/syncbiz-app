@@ -1,6 +1,7 @@
 # MPV Integration Plan — SyncBiz Player Desktop Phase 1 (v1)
 
 **Status:** Technical integration design — no implementation, no wire protocol specification.  
+**Product framing (network + local, MPV as desktop execution only):** `docs/PLAYBACK-PRODUCT-PRINCIPLES.md`  
 **Locked alignment:** `docs/ARCHITECTURE-DECISION-syncbiz-player-desktop-announcements-v1.md`, `docs/PLAYER-DESKTOP-INTERNAL-STRUCTURE-v1.md`, `docs/PLAYER-DESKTOP-COMMAND-EVENT-CONTRACT-v1.md`, `docs/ANNOUNCEMENT-PLAYBACK-FLOW-v1.md`.
 
 ---

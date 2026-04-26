@@ -27,13 +27,21 @@ export function PlaybackBar() {
     next,
     lastMessage,
     queue,
+    playNextQueue,
+    playNextBaseline,
   } = playback;
 
   const hasSource = !!currentSource;
+  // Next/Prev should also light up when staged Play Next items exist or when we're playing
+  // an ephemeral Play Next item that has a baseline waiting to resume. Without this the
+  // operator gets stuck on a single dropped track because queue.length is 0 and the
+  // item has no playlist attachment.
   const hasPrevNext = Boolean(
     hasSource &&
       (queue.length > 1 ||
-        (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1)),
+        (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1) ||
+        (playNextQueue?.length ?? 0) > 0 ||
+        !!playNextBaseline),
   );
 
   const statusSubtext = lastMessage

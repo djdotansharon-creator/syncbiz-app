@@ -68,10 +68,14 @@ export class MockPlaybackSession {
     this.state.position = mpv.position;
     this.state.duration = mpv.duration;
     this.state.positionAt = Date.now();
+    this.state.mpvEngineReady = mpv.engineReady;
+    this.state.mpvEngineError = mpv.lastError ?? null;
   }
 
   /**
-   * Apply a remote command from WS. Unknown commands are ignored (MVP).
+   * Optimistic transport updates when **no** `PlaybackOrchestrator`/MPV is attached (e.g. tests).
+   * With a real desktop engine, `DeviceWsManager` skips this for PLAY/PAUSE/STOP/SET_VOLUME and
+   * uses `syncMpvStatus` from MPV events instead (playback truth).
    */
   applyCommand(command: string, payload: unknown): boolean {
     if (!MVP_COMMANDS.has(command)) return false;

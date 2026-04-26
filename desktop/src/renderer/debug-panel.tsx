@@ -37,6 +37,10 @@ export function DesktopDebugPanel({ snapshot: s, pageHref }: Props) {
         <dd>{catalogPosition}</dd>
         <dt>lastError</dt>
         <dd className="sb-desktop-debug-err">{s.lastError ?? "—"}</dd>
+        <dt>mpvEngineReady</dt>
+        <dd>{s.mpvEngineReady ? "true" : "false"}</dd>
+        <dt>mpvLastError</dt>
+        <dd className="sb-desktop-debug-err">{s.mpvLastError ?? "—"}</dd>
         <dt>volume</dt>
         <dd>{s.mockVolume}</dd>
         <dt>workspace</dt>

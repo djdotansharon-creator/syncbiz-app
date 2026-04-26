@@ -80,6 +80,33 @@ export function DesktopMpvTestPanel() {
     }
   }
 
+  async function handlePause() {
+    try {
+      await api().localMockTransport({ command: "PAUSE" });
+      setFeedback("Music: pause sent (check main process logs + status).");
+    } catch (e) {
+      setFeedback(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleResume() {
+    try {
+      await api().localMockTransport({ command: "PLAY" });
+      setFeedback("Music: play/resume sent.");
+    } catch (e) {
+      setFeedback(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleVolume(percent: number) {
+    try {
+      await api().localMockTransport({ command: "SET_VOLUME", volume: percent });
+      setFeedback(`Volume → ${percent}`);
+    } catch (e) {
+      setFeedback(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   async function handleInterrupt() {
     if (interruptPending) return;
     const trimmed = url.trim();
@@ -168,6 +195,22 @@ export function DesktopMpvTestPanel() {
         <button type="button" onClick={() => void handleStop()} style={btnStyle("#475569")}>
           Stop
         </button>
+        <div style={{ marginTop: 8 }}>
+          <button type="button" onClick={() => void handlePause()} style={btnStyle("#0ea5e9")}>
+            Pause
+          </button>
+          <button type="button" onClick={() => void handleResume()} style={btnStyle("#10b981")}>
+            Resume
+          </button>
+        </div>
+        <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: "#94a3b8" }}>Vol</span>
+          {[20, 50, 80, 100].map((n) => (
+            <button key={n} type="button" onClick={() => void handleVolume(n)} style={{ ...btnStyle("#334155"), marginRight: 4, padding: "4px 8px" }}>
+              {n}%
+            </button>
+          ))}
+        </div>
       </div>
       {feedback && (
         <p style={{ margin: "6px 0 0", fontSize: 11, color: feedback.startsWith("Error") ? "#f87171" : "#4ade80" }}>

@@ -775,7 +775,12 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div
               className={
                 isMediaThemeRoute
-                  ? "grid min-w-0 xl:grid-cols-[260px_minmax(0,1fr)_260px] xl:h-[220px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px] 2xl:h-[240px]"
+                  ? // Live Queue widened from 260/280 -> 300/320 to give the new Time column +
+                    // always-on trash icons enough breathing room without truncating titles.
+                    // Command Pads (right) keep their original width to avoid disturbing the
+                    // existing pad grid; only the left aside grew, balanced against the
+                    // flexible 1fr middle column.
+                    "grid min-w-0 xl:grid-cols-[300px_minmax(0,1fr)_260px] xl:h-[220px] 2xl:grid-cols-[320px_minmax(0,1fr)_280px] 2xl:h-[240px]"
                   : "grid grid-cols-1"
               }
             >

@@ -249,6 +249,150 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   box-shadow: none !important;
 }
 
+/* ===== Vertical DJ-style VOLUME module =====
+ * Channel-strip rendering for the in-shell deck. Pointer interaction is
+ * owned by React in `PlayerVerticalVolume` (custom drag with
+ * `setPointerCapture`); a sibling visually-hidden <input type="range">
+ * handles keyboard / screen reader a11y.
+ *
+ * The previous pass overlaid a visible vertical native input on the painted
+ * track. That ships a smoothness bug because the native vertical thumb's
+ * value range is inset by half the thumb height at the ends — it doesn't
+ * line up with our painted handle's `top: ${100-v}%` mapping. The custom
+ * pointer path computes value from cursor Y relative to the exact track
+ * inset, so the handle tracks the cursor 1:1.
+ */
+
+/* Visually-hidden but focusable input. sr-only pattern. */
+.vol-deck-input-a11y {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Shell focus ring — lights up when the hidden a11y input has keyboard
+ * focus, so sighted keyboard users see where they are. Glow softened to
+ * match the slim mixer-strip direction (no big drop shadow / no cyan fog).
+ * Polish pass: ~30% softer to read closer to Rekordbox / Traktor than neon. */
+.vol-deck-shell:focus-within {
+  border-color: rgba(34, 211, 238, 0.35);
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.28);
+}
+
+/* Status dot in the header — dim when muted, lit when v > 0. */
+.vol-deck-status-dot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(100, 116, 139, 0.45);
+  transition: background 180ms ease, box-shadow 180ms ease;
+}
+.vol-deck-status-dot[data-active="true"] {
+  background: #22d3ee;
+  box-shadow: 0 0 4px rgba(34, 211, 238, 0.5);
+}
+
+/* Compact value badge — slim mixer-strip variant. Glow softened so the
+ * number reads as a quiet readout rather than a hero LCD. */
+.vol-deck-readout {
+  color: #cffafe;
+  text-shadow: 0 0 2px rgba(34, 211, 238, 0.22);
+  letter-spacing: 0.03em;
+}
+
+/* Pointer hit zone for the slider. `cursor: ns-resize` hints "drag me
+ * vertically"; `touch-none` (set on the JSX) prevents touch scrolling
+ * conflicts during drag. */
+.vol-deck-track {
+  cursor: ns-resize;
+}
+
+/* Plastic mixer handle: dark body, subtle bevel, thin cyan stripe down the
+ * center via ::before. Cyan halo dialed back to a soft outline for the
+ * slim-mixer direction. */
+.vol-deck-handle {
+  background: linear-gradient(180deg, #1e293b 0%, #0b1220 50%, #1e293b 100%);
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  box-shadow: 0 0 2px rgba(34, 211, 238, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.32);
+  /* No transition on `top` — we want 1:1 cursor tracking; transitions
+   * would lag the handle behind the cursor and re-introduce the
+   * "feels mushy" complaint. */
+}
+.vol-deck-handle::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, #22d3ee 0%, #a5f3fc 50%, #22d3ee 100%);
+  border-radius: 1px;
+  box-shadow: 0 0 1px rgba(34, 211, 238, 0.28);
+}
+/* Subtle "active" glow while the user is dragging or hovering. */
+.vol-deck-track:hover .vol-deck-handle,
+.vol-deck-track:active .vol-deck-handle {
+  border-color: rgba(34, 211, 238, 0.38);
+  box-shadow: 0 0 4px rgba(34, 211, 238, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.32);
+}
+
+/* LED meter segments — bottom-up fill, classic green → amber → red.
+ * `flex: 1 1 0` distributes evenly across the column height regardless of
+ * the deck row size.
+ *
+ * Tuned for the 2-column L / R meter at 16 thin segments per column:
+ *   - `min-height: 2px` lets each segment read as a fine bar instead of a
+ *     chunky rectangle (the 12×min-3px version was called out as clunky).
+ *   - `border-radius: 1px` replaces the previous 1.5px so segments look more
+ *     like LED rectangles than rounded pills at this thinner scale.
+ */
+.vol-deck-led {
+  width: 100%;
+  flex: 1 1 0;
+  min-height: 2px;
+  border-radius: 1px;
+  /* Idle reads more matte / less glossy — closer to Rekordbox channel-strip
+   * meters than a backlit toy LED. */
+  background: rgba(15, 23, 42, 0.85);
+  box-shadow: inset 0 0 1px rgba(0, 0, 0, 0.45);
+  transition: background 90ms ease, box-shadow 90ms ease;
+}
+/* Lit-segment glows softened across all three zones — slim mixer strip
+ * direction, no toy-bright halos. Polish pass: ~30% softer than the prior
+ * tuning so lit segments read as illumination, not as neon. */
+.vol-deck-led.is-on {
+  background: linear-gradient(90deg, #059669 0%, #34d399 100%);
+  box-shadow: 0 0 1px rgba(16, 185, 129, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+}
+.vol-deck-led.is-on.is-warm {
+  background: linear-gradient(90deg, #d97706 0%, #fbbf24 100%);
+  box-shadow: 0 0 1px rgba(245, 158, 11, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+}
+.vol-deck-led.is-on.is-hot {
+  background: linear-gradient(90deg, #dc2626 0%, #f87171 100%);
+  box-shadow: 0 0 2px rgba(239, 68, 68, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+}
+
 /* Active playing state – neon glow (reduced blur to prevent layout jitter) */
 @keyframes playing-glow {
   0%, 100% {
@@ -576,58 +720,26 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   will-change: transform;
 }
 
-/*
- * Track-title marquee — smooth, readable scroll for long titles.
- * The 0–8% hold keeps the title stationary at the start of each loop so a glance
- * reads the beginning without chasing motion; 92–100% holds at -50% so the
- * *end* of the title also gets to breathe before the seamless wrap. Middle
- * 84% of the cycle is the actual linear drift.
- */
+/* Track title marquee – subtle scroll when text overflows */
 @keyframes track-title-marquee {
-  0%   { transform: translateX(0); }
-  8%   { transform: translateX(0); }
-  92%  { transform: translateX(-50%); }
+  0% { transform: translateX(0); }
   100% { transform: translateX(-50%); }
 }
 .track-title-marquee {
-  animation: track-title-marquee 22s linear infinite;
+  animation: track-title-marquee 12s linear infinite;
 }
 
-/*
- * Live Queue row titles: same keyframe, slightly slower than the main deck so
- * the passive queue browse doesn't compete for attention. Paused by default;
- * only runs on row hover or when the row is the current (highlighted) track.
- * The duplicated `<span>` pair inside the marquee container lets the -50%
- * translate loop seamlessly regardless of title length.
- */
+/* Live Queue session + Play Next row marquee.
+   Both rows render two adjacent copies of the title inside an overflow-hidden parent;
+   when the combined width exceeds the parent the animation scrolls them so a long title
+   becomes legible without wrapping to a second line. Same keyframe contract as
+   `.track-title-marquee`. Slightly slower than the meta-strip marquee so the queue feels
+   calm. The pause-on-hover lets the operator read a long title comfortably. */
 .queue-row-title-marquee {
-  animation: track-title-marquee 26s linear infinite;
+  animation: track-title-marquee 16s linear infinite;
+}
+.queue-row-title-marquee:hover {
   animation-play-state: paused;
-}
-.queue-row:hover .queue-row-title-marquee,
-.queue-row-current .queue-row-title-marquee {
-  animation-play-state: running;
-}
-@media (prefers-reduced-motion: reduce) {
-  .queue-row-title-marquee,
-  .track-title-marquee {
-    animation: none !important;
-    transform: none !important;
-  }
-}
-
-/* Flash the NEXT block briefly when playNextQueue grows — positive confirmation of a drop/paste. */
-@keyframes play-next-block-flash {
-  0%   { background-color: rgba(251, 191, 36, 0.18); }
-  100% { background-color: transparent; }
-}
-.play-next-block-flash {
-  animation: play-next-block-flash 900ms ease-out;
-}
-@media (prefers-reduced-motion: reduce) {
-  .play-next-block-flash {
-    animation: none !important;
-  }
 }
 
 /* Drop zone – inviting blink when dragging link */
@@ -637,84 +749,6 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
 }
 .drop-zone-blink {
   animation: drop-zone-blink 1.2s ease-in-out infinite;
-}
-
-/* Live Queue: pulsing LED on the current row (replaces the prior "NOW" text label). */
-@keyframes live-queue-led-pulse {
-  0%, 100% {
-    opacity: 1;
-    box-shadow: 0 0 4px rgba(56, 189, 248, 0.7), 0 0 10px rgba(56, 189, 248, 0.45);
-  }
-  50% {
-    opacity: 0.55;
-    box-shadow: 0 0 2px rgba(56, 189, 248, 0.4), 0 0 6px rgba(56, 189, 248, 0.2);
-  }
-}
-.live-queue-led-now {
-  animation: live-queue-led-pulse 1.4s ease-in-out infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .live-queue-led-now { animation: none !important; }
-}
-
-/* Volume LED segments — visual layer over the native <input type="range"> (input stays for a11y). */
-.volume-led-track {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.volume-led-track .volume-led-seg {
-  flex: 1 1 0;
-  height: 0.55rem;
-  border-radius: 1px;
-  background: rgba(51, 65, 85, 0.55);
-  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.6);
-  transition: background-color 80ms linear, box-shadow 80ms linear;
-}
-.volume-led-track .volume-led-seg.is-on {
-  background: linear-gradient(to top, #15803d, #4ade80);
-  box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.55), 0 0 4px rgba(74, 222, 128, 0.55);
-}
-.volume-led-track .volume-led-seg.is-on.is-warm {
-  background: linear-gradient(to top, #b45309, #fbbf24);
-  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.55), 0 0 4px rgba(251, 191, 36, 0.55);
-}
-.volume-led-track .volume-led-seg.is-on.is-hot {
-  background: linear-gradient(to top, #b91c1c, #fb7185);
-  box-shadow: inset 0 0 0 1px rgba(244, 63, 94, 0.55), 0 0 4px rgba(244, 63, 94, 0.55);
-}
-.volume-led-input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  -webkit-appearance: none;
-  appearance: none;
-  cursor: pointer;
-  opacity: 0;
-}
-.volume-led-input:focus-visible + .volume-led-track {
-  outline: 2px solid rgba(56, 189, 248, 0.55);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-.volume-led-input::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  background: transparent;
-  border: 0;
-}
-.volume-led-input::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  background: transparent;
-  border: 0;
 }
 
 /* ─── Library /sources theme tokens (Graphite Black baseline = current look) ───

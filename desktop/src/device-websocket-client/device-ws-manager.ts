@@ -97,6 +97,26 @@ export class DeviceWsManager {
     this.ws.send(JSON.stringify({ type: "STATE_UPDATE", state }));
   }
 
+  /**
+   * Run remote/local transport: MPV (when `orchestrator` is set) is the only source of truth for
+   * play state / volume. Avoid optimistic `applyCommand` so STATE_UPDATE and UI do not show
+   * "playing" before the engine has actually started (or after failed loadfile).
+   */
+  private runTransportCommand(cmd: string, payload: unknown, source: "ws" | "local"): void {
+    if (this.orchestrator) {
+      console.log("[SyncBiz:desktop-mpv:truth] transport (MPV will sync; skipping optimistic applyCommand)", {
+        cmd,
+        source,
+      });
+      this.routeToOrchestrator(cmd, payload);
+      this.lastCommandSummary = cmd;
+    } else {
+      const applied = this.mock.applyCommand(cmd, payload);
+      this.lastCommandSummary = applied ? cmd : `${cmd} (not handled in mock)`;
+      this.routeToOrchestrator(cmd, payload);
+    }
+  }
+
   snapshot(): MvpStatusSnapshot {
     const c = this.config;
     const st = this.mock.getState();
@@ -136,6 +156,8 @@ export class DeviceWsManager {
       duckPercent: orchState?.duckPercent ?? 40,
       mpvPosition: st.position ?? 0,
       mpvDuration: st.duration ?? 0,
+      mpvEngineReady: orchState?.music.engineReady ?? false,
+      mpvLastError: orchState?.music.lastError ?? st.mpvEngineError ?? null,
     };
   }
 
@@ -195,9 +217,10 @@ export class DeviceWsManager {
   private routeToOrchestrator(cmd: string, payload: unknown): void {
     const orch = this.orchestrator;
     if (!orch) {
-      console.warn("[DeviceWsManager] routeToOrchestrator: no orchestrator for cmd", cmd);
+      console.warn("[SyncBiz:desktop-mpv:route] no orchestrator; command dropped", { cmd });
       return;
     }
+    console.log("[SyncBiz:desktop-mpv:route] command → PlaybackOrchestrator (music Ch-A)", { cmd });
     type P = { url?: string; volume?: number; source?: { url?: string } };
     const p = payload as P | null | undefined;
 
@@ -255,6 +278,7 @@ export class DeviceWsManager {
    */
   applyLocalMockTransport(payload: LocalMockTransportPayload): void {
     const { command } = payload;
+    console.log("[SyncBiz:desktop-mpv:route] localMockTransport (same semantics as remote COMMAND)", { command });
     if (command === "PREV" || command === "NEXT") {
       const moved = this.navigateCatalogStep(command);
       if (moved) this.lastCommandSummary = command;
@@ -271,11 +295,7 @@ export class DeviceWsManager {
       }
       transportPayload = { volume: v };
     }
-    const applied = this.mock.applyCommand(command, transportPayload);
-    if (applied) {
-      this.lastCommandSummary = command;
-    }
-    this.routeToOrchestrator(command, transportPayload);
+    this.runTransportCommand(command, transportPayload, "local");
     this.push();
     this.sendStateUpdateIfMaster();
   }
@@ -380,9 +400,7 @@ export class DeviceWsManager {
             if (moved) this.lastCommandSummary = cmd;
             this.sendStateUpdateIfMaster();
           } else {
-            const applied = this.mock.applyCommand(cmd, p.payload);
-            this.lastCommandSummary = applied ? cmd : `${cmd} (not handled in mock)`;
-            this.routeToOrchestrator(cmd, p.payload);
+            this.runTransportCommand(cmd, p.payload, "ws");
             this.sendStateUpdateIfMaster();
           }
         } else {

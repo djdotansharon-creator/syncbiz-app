@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource } from "@/lib/playback-provider";
 import { getPlaylistTracks } from "@/lib/playlist-types";
+import { effectivePlaybackPlaylistAttachment } from "@/lib/playlist-utils";
+import { isPlayNextSourceId } from "@/lib/play-next";
 import { useLocale, useTranslations, labels } from "@/lib/locale-context";
 import { getTranslations } from "@/lib/translations";
 import { ShareModal } from "@/components/share-modal";
@@ -33,6 +35,7 @@ import {
 } from "@/lib/yt-player-utils";
 import { PlayerDeckTransportSurface } from "@/components/player-surface/player-deck-transport-surface";
 import { PlayerUnitSurface } from "@/components/player-surface/player-unit-surface";
+import { PlayerVerticalVolume } from "@/components/player-surface/player-vertical-volume";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
 import {
@@ -324,6 +327,8 @@ export function AudioPlayer() {
     isEmbedded,
     getNextStreamUrl,
     getNextEmbeddedSource,
+    playNextQueue,
+    playNextBaseline,
   } = usePlayback();
 
   const ytContainerRef = useRef<HTMLDivElement>(null);
@@ -387,7 +392,6 @@ export function AudioPlayer() {
   const [isHoveringTimeline, setIsHoveringTimeline] = useState(false);
   const [hoverPercent, setHoverPercent] = useState(0);
   const [titleOverflows, setTitleOverflows] = useState(false);
-  const [nextLabelOverflows, setNextLabelOverflows] = useState(false);
   const [autoMix, setAutoMixState] = useState(false);
   const [mixDurationDisplay, setMixDurationDisplay] = useState(6);
   const [embedReady, setEmbedReady] = useState(false);
@@ -396,8 +400,6 @@ export function AudioPlayer() {
   const timelineRef = useRef<HTMLDivElement>(null);
   const titleMeasureRef = useRef<HTMLSpanElement>(null);
   const titleContainerRef = useRef<HTMLDivElement>(null);
-  const nextLabelMeasureRef = useRef<HTMLSpanElement>(null);
-  const nextLabelContainerRef = useRef<HTMLDivElement>(null);
   const volumeRef = useRef(volume);
   const statusRef = useRef(status);
   const currentPlayUrlRef = useRef<string | null>(null);
@@ -1945,7 +1947,6 @@ export function AudioPlayer() {
   }, [volume]);
   // ── End desktop routing ───────────────────────────────────────────────────
 
-  const hasPrevNext = (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1);
   const thumbnailCover = ytMultiTrackState?.currentThumbnail ?? currentTrack?.cover ?? currentSource?.cover ?? null;
 
   /** Unified display values: desktop MPV > CONTROL mirror > local React state. */
@@ -1984,23 +1985,70 @@ export function AudioPlayer() {
   const displayTitle = isControlMirror
     ? (ms?.currentTrack?.title ?? ms?.currentSource?.title ?? t.noSourceSelected)
     : (ytMultiTrackState?.currentTitle ?? currentTrack?.title ?? t.noSourceSelected);
+  /*
+   * NEXT TRACK label resolution. Old logic walked currentPlaylist -> queue and was wrong in
+   * two common cases the operator hit on stage:
+   *   1) Play Next item playing -> currentPlaylist is null, so we fell to queue[i+1]?.title
+   *      which is the *playlist source* title (e.g. "Afro SET"), not the actual next track.
+   *   2) currentPlaylist null but currentSource has a playlist attachment (the routine session
+   *      shape after the provider promotes a leaf source) — same fallthrough, same wrong label.
+   * New logic, in priority order:
+   *   a) ytMultiTrackState.nextTitle (YouTube mix preview, unchanged)
+   *   b) Play Next active: first staged item's title; if queue empty but baseline exists, peek
+   *      the baseline session's next track via the attached playlist.
+   *   c) Effective attachment of currentSource (covers leaf sources that point back to a saved
+   *      playlist) — next track relative to currentTrackIndex.
+   *   d) currentPlaylist next track.
+   *   e) Stop. Do NOT fall back to queue[i+1]?.title — that's the playlist name, never the
+   *      next track, and that fallback is what the operator was reading as wrong.
+   */
   const displayNextLabel = isControlMirror
     ? (ms?.queue?.[(ms?.queueIndex ?? 0) + 1]?.title ?? null)
     : (() => {
-        const tracks = currentPlaylist ? getPlaylistTracks(currentPlaylist) : [];
-        const hasMore = tracks.length > 1 && currentTrackIndex < tracks.length - 1;
-        const nextTrack = hasMore ? tracks[currentTrackIndex + 1] : null;
-        const safeQueue = Array.isArray(queue) ? queue : [];
-        const nextSrc = queueIndex >= 0 && queueIndex < safeQueue.length - 1 ? safeQueue[queueIndex + 1] : null;
-        return ytMultiTrackState?.nextTitle ?? nextTrack?.name ?? nextSrc?.title ?? null;
+        if (ytMultiTrackState?.nextTitle) return ytMultiTrackState.nextTitle;
+
+        const isPlayNextActive = isPlayNextSourceId(currentSource?.id);
+        if (isPlayNextActive) {
+          const firstStaged = (playNextQueue ?? [])[0];
+          if (firstStaged?.title) return firstStaged.title;
+          if (playNextBaseline?.currentSource) {
+            const baselinePl = effectivePlaybackPlaylistAttachment(playNextBaseline.currentSource);
+            if (baselinePl) {
+              const baseTracks = getPlaylistTracks(baselinePl);
+              const baseIdx = playNextBaseline.currentTrackIndex ?? 0;
+              const baseNextIdx = baseIdx + 1 < baseTracks.length ? baseIdx + 1 : 0;
+              const baseNext = baseTracks[baseNextIdx];
+              if (baseNext?.name) return baseNext.name;
+            }
+          }
+          return null;
+        }
+
+        const effectivePl =
+          (currentSource ? effectivePlaybackPlaylistAttachment(currentSource) : null) ??
+          currentPlaylist;
+        if (effectivePl) {
+          const tracks = getPlaylistTracks(effectivePl);
+          if (tracks.length > 1) {
+            const idx = currentTrackIndex < tracks.length - 1 ? currentTrackIndex + 1 : 0;
+            const t = tracks[idx];
+            if (t?.name) return t.name;
+          }
+        }
+        return null;
       })();
   const displayHasContent = isControlMirror ? !!(ms?.currentSource || ms?.currentTrack) : !!currentSource;
+  // Live Play Next staged items (and the post-play baseline-resume) need to keep the Next/Prev
+  // transport active even when the operator dropped a one-off track that has no queue or
+  // playlist of its own. Without this the Next button goes dead the moment a Play Next item
+  // becomes the current source.
+  const hasStagedPlayNext = (playNextQueue?.length ?? 0) > 0 || !!playNextBaseline;
   const displayHasPrevNext = isDesktopMode
     // Desktop: catalog navigation — enabled when library has > 1 item, OR local playlist/queue also covers the case
-    ? (desktopMpvSnap.catalogCount > 1 || (currentSource && queue.length > 1) || !!(currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1))
+    ? (desktopMpvSnap.catalogCount > 1 || (currentSource && queue.length > 1) || !!(currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1) || hasStagedPlayNext)
     : isControlMirror
       ? ((ms?.queue?.length ?? 0) > 1)
-      : (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1);
+      : (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1) || hasStagedPlayNext;
   const displayCanSeek = isDesktopMode
     // Desktop: MPV reports duration when a file is loaded — that is the only condition needed.
     ? displayDuration > 0
@@ -2330,17 +2378,6 @@ export function AudioPlayer() {
     return () => ro.disconnect();
   }, [currentTrack?.title, ytMultiTrackState?.currentTitle]);
 
-  useEffect(() => {
-    const measure = nextLabelMeasureRef.current;
-    const container = nextLabelContainerRef.current;
-    if (!measure || !container) return;
-    const check = () => setNextLabelOverflows(measure.scrollWidth > container.clientWidth);
-    check();
-    const ro = new ResizeObserver(check);
-    ro.observe(container);
-    return () => ro.disconnect();
-  }, [displayNextLabel]);
-
   return (
     <header
       className={
@@ -2387,6 +2424,22 @@ export function AudioPlayer() {
               </div>
             </div>
           )
+        }
+        rightAside={
+          <PlayerVerticalVolume
+            value={displayVolume}
+            onChange={onVolumeChange}
+            onMuteToggle={() => {
+              if (displayVolume > 0) {
+                volumeBeforeMuteRef.current = displayVolume;
+                onVolumeChange(0);
+              } else {
+                onVolumeChange(volumeBeforeMuteRef.current);
+              }
+            }}
+            ariaLabel={t.volumeAria}
+            muteLabel={displayVolume === 0 ? t.unmute : t.mute}
+          />
         }
       >
             <PlayerDeckTransportSurface
@@ -2574,93 +2627,61 @@ export function AudioPlayer() {
                           isSourcesLibraryDeck ? "library-player-track-inner rounded-xl" : "rounded border border-slate-700/50 bg-slate-800/30"
                         }`}
                       >
-                        {/* Row 1: NOW PLAYING (stacked — label then title) */}
-                        <div className="flex min-w-0 flex-col">
+                        {/* Row 1: PLAY NOW : current track */}
+                        <div ref={titleContainerRef} className="relative flex min-w-0 flex-1 items-center overflow-hidden gap-1.5">
+                          <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
+                            {displayTitle as string}
+                          </span>
                           <span
-                            className={`shrink-0 text-[9px] font-semibold uppercase tracking-wider sm:text-[10px] ${
+                            className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider sm:text-xs ${
                               isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"
                             }`}
                           >
                             {t.playNowColon}
                           </span>
-                          <div ref={titleContainerRef} className="relative mt-0.5 flex min-w-0 items-center overflow-hidden">
-                            <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
-                              {displayTitle as string}
-                            </span>
-                            {titleOverflows ? (
-                              <div className="min-w-0 flex-1 overflow-hidden">
-                                <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
-                                  <span
-                                    dir="auto"
-                                    className={`text-xs font-medium sm:text-sm ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"}`}
-                                  >
-                                    {displayTitle}
-                                  </span>
-                                  <span
-                                    dir="auto"
-                                    className={`text-xs font-medium sm:text-sm ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"}`}
-                                    aria-hidden
-                                  >
-                                    {displayTitle}
-                                  </span>
-                                </div>
+                          {titleOverflows ? (
+                            <div className="min-w-0 flex-1 overflow-hidden">
+                              <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
+                                <span
+                                  className={`text-xs font-medium sm:text-sm ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"}`}
+                                >
+                                  {displayTitle}
+                                </span>
+                                <span
+                                  className={`text-xs font-medium sm:text-sm ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"}`}
+                                >
+                                  {displayTitle}
+                                </span>
                               </div>
-                            ) : (
-                              <p
-                                dir="auto"
-                                className={`min-w-0 flex-1 truncate text-xs font-medium sm:text-sm ${
-                                  isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"
-                                }`}
-                                title={displayTitle}
-                              >
-                                {displayTitle}
-                              </p>
-                            )}
-                          </div>
+                            </div>
+                          ) : (
+                            <p
+                              className={`min-w-0 flex-1 truncate text-xs font-medium sm:text-sm ${
+                                isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"
+                              }`}
+                              title={displayTitle}
+                            >
+                              {displayTitle}
+                            </p>
+                          )}
                         </div>
-                        {/* Row 2: NEXT TRACK (stacked — label then title) */}
-                        <div className="flex min-w-0 flex-col">
+                        {/* Row 2: NEXT TRACK : next track */}
+                        <div className="flex min-w-0 items-center gap-1.5">
                           <span
-                            className={`shrink-0 text-[9px] font-semibold uppercase tracking-wider sm:text-[10px] ${
+                            className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider sm:text-xs ${
                               isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"
                             }`}
                           >
                             {t.nextTrackColon}
                           </span>
-                          <div ref={nextLabelContainerRef} className="relative mt-0.5 flex min-w-0 items-center overflow-hidden">
-                            <span ref={nextLabelMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
-                              {displayNextLabel ?? "—"}
-                            </span>
-                            {nextLabelOverflows && displayNextLabel ? (
-                              <div className="min-w-0 flex-1 overflow-hidden">
-                                <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
-                                  <span
-                                    dir="auto"
-                                    className={`text-xs font-medium ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-400"}`}
-                                  >
-                                    {displayNextLabel}
-                                  </span>
-                                  <span
-                                    dir="auto"
-                                    className={`text-xs font-medium ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-400"}`}
-                                    aria-hidden
-                                  >
-                                    {displayNextLabel}
-                                  </span>
-                                </div>
-                              </div>
-                            ) : (
-                              <p
-                                dir="auto"
-                                className={`min-w-0 flex-1 truncate text-xs font-medium ${
-                                  isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-400"
-                                }`}
-                                title={displayNextLabel ?? undefined}
-                              >
-                                {displayNextLabel ?? "—"}
-                              </p>
-                            )}
-                          </div>
+                          <span
+                            className={`min-w-0 flex-1 truncate text-xs font-medium ${
+                              isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-400"
+                            }`}
+                            title={displayNextLabel ?? undefined}
+                          >
+                            {displayNextLabel ?? "—"}
+                          </span>
                         </div>
                       </div>
                       <div

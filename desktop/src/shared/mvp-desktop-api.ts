@@ -6,6 +6,7 @@ import type {
   LocalMockTransportPayload,
   MvpConfigPatch,
   MvpStatusSnapshot,
+  ScanLocalAudioFolderResult,
 } from "./mvp-types";
 
 /** Preload `contextBridge` contract (renderer uses `window.syncbizDesktop`). */
@@ -28,4 +29,8 @@ export type SyncBizDesktopMvp = {
   setDuckPercent: (n: number) => Promise<void>;
   /** Seek MPV Channel A to an absolute position in seconds. */
   mpvSeekTo: (seconds: number) => Promise<void>;
+  /** Desktop: list supported audio files in a directory (absolute paths for MPV). */
+  scanLocalAudioFolder: (dir: string) => Promise<ScanLocalAudioFolderResult>;
+  /** Native absolute path for a dropped/selected `File` (replaces deprecated `file.path` in modern Electron). */
+  getPathForFile: (file: File) => string;
 };

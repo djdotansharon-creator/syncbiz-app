@@ -25,6 +25,10 @@ export type StationPlaybackState = {
   duration?: number;
   positionAt?: number;
   volume?: number;
+  /** Desktop: MPV channel reports running + IPC; omitted on web. */
+  mpvEngineReady?: boolean;
+  /** Desktop: last load/IPC/process/binary issue for operators (not optimistic). */
+  mpvEngineError?: string | null;
 };
 
 export function createInitialStationState(): StationPlaybackState {

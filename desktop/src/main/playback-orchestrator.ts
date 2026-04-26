@@ -9,7 +9,9 @@
  *    and back up when Channel B ends.
  */
 
-import { MpvManager, type MpvBinaries, type MpvStatus } from "./mpv-manager";
+import { MpvManager, type MpvBinaries, type MpvStatus, createInitialMpvStatus } from "./mpv-manager";
+
+const ORCH = "[SyncBiz:desktop-mpv:orchestrator] music";
 
 // ─── Ducking constants ────────────────────────────────────────────────────────
 /** Default duck depth: Channel A falls to this % of masterVolume while Channel B plays.
@@ -49,8 +51,8 @@ export class PlaybackOrchestrator {
   private readonly musicMpv: MpvManager;
   private readonly interruptMpv: MpvManager;
 
-  private musicSt: MpvStatus = { status: "idle", position: 0, duration: 0, volume: 80 };
-  private interruptSt: MpvStatus = { status: "idle", position: 0, duration: 0, volume: 80 };
+  private musicSt: MpvStatus = createInitialMpvStatus();
+  private interruptSt: MpvStatus = createInitialMpvStatus();
 
   private masterVolume = 80;
   private duckPercent = DUCK_PERCENT_DEFAULT;
@@ -152,23 +154,28 @@ export class PlaybackOrchestrator {
   playMusic(url: string): void {
     const u = url.trim();
     if (!u) return;
+    console.log(ORCH, "playMusic (→ MPV loadfile/replace)", { preview: u.slice(0, 200) });
     this.musicMpv.play(u);
   }
 
   pauseMusic(): void {
+    console.log(ORCH, "pauseMusic (→ MPV pause)");
     this.musicMpv.pause();
   }
 
   resumeMusic(): void {
+    console.log(ORCH, "resumeMusic (→ MPV resume)");
     this.musicMpv.resume();
   }
 
   stopMusic(): void {
+    console.log(ORCH, "stopMusic (→ MPV stop)");
     this.musicMpv.stop();
   }
 
   /** Seek Channel A to an absolute position in seconds. */
   seekMusic(seconds: number): void {
+    console.log(ORCH, "seekMusic", { seconds });
     this.musicMpv.seek(seconds);
   }
 
@@ -181,6 +188,7 @@ export class PlaybackOrchestrator {
   /** Set master volume (0–100). Applies to Channel A immediately unless ducked. */
   setVolume(n: number): void {
     const v = Math.max(0, Math.min(100, Math.round(n)));
+    console.log(ORCH, "setVolume (→ MPV volume unless ducked)", { volume: v });
     this.masterVolume = v;
     if (this.isDucked) {
       // Update the target we will restore to; leave ducked level proportional.

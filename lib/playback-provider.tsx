@@ -40,7 +40,13 @@ import {
   syncbizAuditTransportTransitionStart,
 } from "./syncbiz-transport-audit";
 import { isValidPlaybackUrl, isValidLocalFilePlaybackPath } from "./url-validation";
-import { isPlayNextSourceId, playNextLog, createPlayNextLocalSource, createPlayNextUrlSource } from "./play-next";
+import {
+  isPlayNextSourceId,
+  playNextLog,
+  createPlayNextLocalSource,
+  createPlayNextUrlSource,
+  createPlayNextFromUnifiedSource,
+} from "./play-next";
 import { fetchUnifiedSourcesWithFallback } from "./unified-sources-client";
 import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
 
@@ -430,6 +436,24 @@ type PlaybackContextValue = PlaybackState & {
   addPlayNextFromPaths: (absolutePaths: string[]) => void;
   /** Append supported http(s) playback URLs to Play Next (in-memory only). */
   addPlayNextFromUrls: (urls: string[]) => void;
+  /**
+   * Append full library `UnifiedSource` items (preserves title, cover, type) — used by the Live
+   * Queue panel when a library tile is dragged onto the Play Next pad. Round-trip the metadata
+   * so the player UI doesn't have to re-derive titles from raw URLs.
+   */
+  addPlayNextSources: (sources: UnifiedSource[]) => void;
+  /**
+   * Patch fields of an item in `playNextQueue` (or the live `currentSource` when it matches)
+   * by id. Used by the async URL-enrichment path to fill in title/cover/durationSeconds after
+   * the parse-url backend resolves them. No-op if the id isn't currently tracked.
+   */
+  updatePlayNextItem: (id: string, patch: Partial<UnifiedSource>) => void;
+  /**
+   * Drop a not-yet-played item from `playNextQueue` by id. Operator UX is "throw it away from
+   * the staged list" — only affects items that haven't started playing yet, since promoted
+   * items already left the queue. No-op if the id isn't currently in the queue.
+   */
+  removePlayNextItem: (id: string) => void;
   playSource: (source: UnifiedSource, trackIndex?: number) => void;
   playSourceFromDb: (source: Source, opts?: { auditScheduledNonEmbedded?: boolean }) => void;
   playPlaylist: (playlist: Playlist, trackIndex?: number) => void;
@@ -1316,6 +1340,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const stop = useCallback(() => {
+    // STOP halts playback but preserves the operator's queued Play Next items + baseline so
+    // the operator can press Play (or Next) and resume from where they staged things. Clearing
+    // here would silently drop work the operator just queued, which the desk treated as a bug.
     if (!deviceModeAllowsLocalPlayback.current) {
       try {
         stopAllPlayersRef.current?.();
@@ -1329,8 +1356,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         currentPlaylist: null,
         currentTrackIndex: 0,
         queueIndex: -1,
-        playNextQueue: [],
-        playNextBaseline: null,
       }));
       return;
     }
@@ -1342,8 +1367,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       currentPlaylist: null,
       currentTrackIndex: 0,
       queueIndex: -1,
-      playNextQueue: [],
-      playNextBaseline: null,
     }));
   }, [stopAllBeforePlay]);
 
@@ -1609,16 +1632,23 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
       if (s.playNextQueue.length === 0 && isPlayNextSourceId(s.currentSource?.id)) {
         if (!s.playNextBaseline) {
+          // Operator dropped a one-off Play Next item with no active session running. After it
+          // ends there's nothing to "return to" — but we keep the just-played source visible
+          // and stop playback so the player UI stays interactive (transport buttons remain
+          // usable, queue+session info preserved). Previously we nulled currentSource which
+          // disabled the Next button entirely.
           playNextLog("next_play_next_done_no_baseline", { id: s.currentSource?.id ?? null });
+          if (!skipPlay) {
+            try {
+              stopAllPlayersRef.current?.();
+            } catch {
+              /* ignore */
+            }
+          }
           transportLockRef.current = false;
           return {
             ...s,
             status: "stopped" as const,
-            currentSource: null,
-            currentPlaylist: null,
-            currentTrackIndex: 0,
-            playNextQueue: [],
-            playNextBaseline: null,
           };
         }
         const b = s.playNextBaseline;
@@ -2119,12 +2149,93 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const removePlayNextItem = useCallback((id: string) => {
+    if (!id) return;
+    setState((s) => {
+      const idx = s.playNextQueue.findIndex((it) => it.id === id);
+      if (idx < 0) return s;
+      const next = s.playNextQueue.slice();
+      next.splice(idx, 1);
+      playNextLog("remove_play_next_item", { id, newLength: next.length });
+      return { ...s, playNextQueue: next };
+    });
+  }, []);
+
+  const updatePlayNextItem = useCallback((id: string, patch: Partial<UnifiedSource>) => {
+    if (!id || !patch) return;
+    setState((s) => {
+      const idxQ = s.playNextQueue.findIndex((it) => it.id === id);
+      const isCurrent = s.currentSource?.id === id;
+      if (idxQ < 0 && !isCurrent) return s;
+      const nextQueue =
+        idxQ < 0
+          ? s.playNextQueue
+          : s.playNextQueue.map((it, i) => (i === idxQ ? ({ ...it, ...patch } as UnifiedSource) : it));
+      const nextCurrent = isCurrent && s.currentSource ? ({ ...s.currentSource, ...patch } as UnifiedSource) : s.currentSource;
+      return { ...s, playNextQueue: nextQueue, currentSource: nextCurrent };
+    });
+  }, []);
+
   const addPlayNextFromUrls = useCallback((urls: string[]) => {
     const cleaned = urls.map((u) => u.trim()).filter((u) => u && isValidPlaybackUrl(u));
     if (cleaned.length === 0) return;
+    const created: UnifiedSource[] = [];
     setState((s) => {
       const added = cleaned.map((u) => createPlayNextUrlSource(u));
+      created.push(...added);
       playNextLog("add_play_next_urls", { count: added.length, firstUrls: cleaned.slice(0, 4) });
+      return { ...s, playNextQueue: [...s.playNextQueue, ...added] };
+    });
+    // Async metadata enrichment: resolve real title/cover/duration from /api/sources/parse-url
+    // and patch the corresponding play-next item in place. Fire-and-forget — the queue item is
+    // already playable (we have a usable URL); enrichment just upgrades the display.
+    if (typeof window === "undefined") return;
+    for (const item of created) {
+      const url = item.url;
+      const id = item.id;
+      void (async () => {
+        try {
+          const res = await fetch("/api/sources/parse-url", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!res.ok) return;
+          const data = (await res.json()) as {
+            title?: string;
+            cover?: string | null;
+            durationSeconds?: number;
+            viewCount?: number;
+          };
+          const patch: Partial<UnifiedSource> = {};
+          if (data.title && data.title.trim()) patch.title = data.title.trim();
+          if (data.cover) patch.cover = data.cover;
+          if (typeof data.viewCount === "number") patch.viewCount = data.viewCount;
+          if (Object.keys(patch).length > 0) {
+            playNextLog("enrich_play_next_url", { id, title: patch.title ?? null, cover: patch.cover ?? null });
+            updatePlayNextItem(id, patch);
+          }
+        } catch {
+          /* enrichment is best-effort — failures leave the basic title in place */
+        }
+      })();
+    }
+  }, [updatePlayNextItem]);
+
+  const addPlayNextSources = useCallback((sources: UnifiedSource[]) => {
+    if (!Array.isArray(sources) || sources.length === 0) return;
+    setState((s) => {
+      const added: UnifiedSource[] = [];
+      for (const src of sources) {
+        const cloned = createPlayNextFromUnifiedSource(src);
+        if (cloned) added.push(cloned);
+      }
+      if (added.length === 0) return s;
+      playNextLog("add_play_next_sources", {
+        count: added.length,
+        firstTitles: added.slice(0, 4).map((a) => a.title),
+      });
       return { ...s, playNextQueue: [...s.playNextQueue, ...added] };
     });
   }, []);
@@ -2147,6 +2258,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       setLastMessage,
       addPlayNextFromPaths,
       addPlayNextFromUrls,
+      addPlayNextSources,
+      updatePlayNextItem,
+      removePlayNextItem,
       playSource,
       playSourceFromDb,
       playPlaylist,
@@ -2179,6 +2293,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       setLastMessage,
       addPlayNextFromPaths,
       addPlayNextFromUrls,
+      addPlayNextSources,
+      updatePlayNextItem,
+      removePlayNextItem,
       playSource,
       playSourceFromDb,
       playPlaylist,

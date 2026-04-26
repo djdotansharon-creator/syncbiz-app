@@ -7,13 +7,15 @@ Drop platform icons here before running `npm run dist` so they get baked into th
 
 | File            | Platform | Notes                                                                                   |
 | --------------- | -------- | --------------------------------------------------------------------------------------- |
+| `icon.svg`      | source   | Brand source-of-truth — SyncBiz "SB" tile. Edit this; `build-icons` rasterizes the rest. |
 | `icon.ico`      | Windows  | Multi-resolution Windows icon. 256x256 recommended as the largest embedded frame.       |
 | `icon.icns`     | macOS    | Apple icon bundle. Use `iconutil` or `png2icns` from a 1024x1024 master.                |
 | `icon.png`      | Linux    | 512x512 PNG for AppImage/deb.                                                           |
 | `background.png`| macOS    | Optional DMG background (540x380). Ignored if absent.                                   |
 
-`icon.png` (512×512 or larger) is the master; `npm run build-icons` in `desktop/`
-regenerates `icon.ico` and `icon.icns` for Windows and macOS.
+Pipeline: `npm run build-icons` in `desktop/` rasterizes `icon.svg` (if present) to
+`icon.png` at 1024×1024, then derives `icon.ico` (Windows) and `icon.icns` (macOS).
+If `icon.svg` is absent, the existing `icon.png` is used as-is.
 
 ## Where installers land
 

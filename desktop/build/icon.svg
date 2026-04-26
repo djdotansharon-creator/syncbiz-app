@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SyncBiz desktop app icon (master source).
+  - Sky-blue gradient tile, iOS-style rounded square.
+  - "SB" wordmark in white (matches the in-app SB tile in app-shell.tsx).
+  - Small green LED accent (matches the brand LED motif in renderer + live queue).
+  Rasterized to icon.png (1024x1024) by desktop/scripts/build-icons.cjs,
+  then derived to icon.ico (Windows) and icon.icns (macOS).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="55%" stop-color="#0369a1"/>
+      <stop offset="100%" stop-color="#0c4a6e"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="55%" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#dbeafe"/>
+    </linearGradient>
+  </defs>
+  <!-- Tile base -->
+  <rect width="1024" height="1024" rx="232" ry="232" fill="url(#bg)"/>
+  <!-- Top-half sheen for depth (no harsh highlight) -->
+  <rect width="1024" height="1024" rx="232" ry="232" fill="url(#sheen)"/>
+  <!-- Inner stroke for definition at small sizes -->
+  <rect x="6" y="6" width="1012" height="1012" rx="226" ry="226"
+        fill="none" stroke="#ffffff" stroke-opacity="0.10" stroke-width="2"/>
+  <!-- "SB" wordmark, multiple font fallbacks so librsvg picks an installed sans family. -->
+  <text x="512" y="700" text-anchor="middle"
+        font-family="'Arial Black', 'Helvetica Neue', 'Segoe UI', Arial, Helvetica, sans-serif"
+        font-weight="900"
+        font-size="540"
+        letter-spacing="-22"
+        fill="url(#ink)">SB</text>
+  <!-- Live LED accent (top-right, matches the brand "live" LED in the app header) -->
+  <circle cx="836" cy="200" r="40" fill="#4ade80"/>
+  <circle cx="836" cy="200" r="40" fill="#86efac" opacity="0.45"/>
+</svg>
