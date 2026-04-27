@@ -5,9 +5,12 @@
  * lifecycle row (`WorkspaceEntitlement`) at a glance: owner, status,
  * trial expiry, configured limits, and current resource usage.
  *
- * No mutations in V1. No suspended/contact-support page. No impersonation.
- * Suspend/unsuspend lands in Week 2; enforcement (gating workspaces by
- * `status`) lands in Week 3 behind a feature flag — see audit §6.
+ * Week 2 adds a thin `Actions` column with suspend/unsuspend/extend-trial
+ * buttons. The actions hit dedicated POST endpoints under
+ * `/api/admin/platform/workspaces/[id]/...` which mutate
+ * `WorkspaceEntitlement` and write a `PlatformAuditLog` row in the same
+ * Prisma transaction. Enforcement (gating workspace member traffic by
+ * `status`) is still Week 3, behind a feature flag — see audit §6.
  *
  * The parent layout (`app/admin/layout.tsx`) already enforces
  * `requireSuperAdmin()`. We re-call it here for defense-in-depth so the
@@ -17,6 +20,7 @@
 
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { prisma } from "@/lib/prisma";
+import WorkspaceActions from "@/components/admin/workspace-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -105,7 +109,9 @@ export default async function AdminPlatformPage() {
         </p>
       </div>
       <p className="text-xs text-neutral-500">
-        Read-only V1 view. Suspend/unsuspend, edits, and audit log land in Week 2. Enforcement is Week 3.
+        Suspend/unsuspend and trial extensions write to <code>WorkspaceEntitlement</code> and{" "}
+        <code>PlatformAuditLog</code> atomically. Workspace-side enforcement of <code>SUSPENDED</code>{" "}
+        ships in Week 3 behind a feature flag.
       </p>
 
       {sorted.length === 0 ? (
@@ -127,6 +133,7 @@ export default async function AdminPlatformPage() {
                 <th className="px-3 py-2 font-medium text-right">Branches</th>
                 <th className="px-3 py-2 font-medium text-right">Devices</th>
                 <th className="px-3 py-2 font-medium">Created</th>
+                <th className="px-3 py-2 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800">
@@ -178,6 +185,14 @@ export default async function AdminPlatformPage() {
                     </td>
                     <td className="px-3 py-2 align-top text-neutral-400">
                       {fmtDate(ws.createdAt)}
+                    </td>
+                    <td className="px-3 py-2 align-top">
+                      <WorkspaceActions
+                        workspaceId={ws.id}
+                        workspaceName={ws.name}
+                        status={status ?? null}
+                        hasEntitlement={Boolean(ent)}
+                      />
                     </td>
                   </tr>
                 );
