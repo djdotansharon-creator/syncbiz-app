@@ -18,16 +18,30 @@ import type { Prisma } from "@prisma/client";
 /**
  * Closed set of V1 platform admin actions. Adding a new action means
  * adding a string here so unrelated code can't write opaque values.
+ *
+ * Naming convention: `<entity>.<verb>`. The audit reader UI groups by
+ * the prefix when filtering, so keep the entity stable.
  */
 export type PlatformAuditAction =
   | "workspace.suspend"
   | "workspace.unsuspend"
-  | "entitlement.extend_trial";
+  | "entitlement.extend_trial"
+  | "entitlement.update_limits"
+  | "user.platform_disable"
+  | "user.platform_enable";
 
 export type PlatformAuditInput = {
   action: PlatformAuditAction;
   actorUserId: string;
-  targetWorkspaceId: string;
+  /**
+   * Workspace this action targeted, if any. Workspace-scoped actions
+   * (suspend/unsuspend/extend-trial/update-limits) always set this so
+   * per-workspace audit reads can filter by `targetWorkspaceId`.
+   * User-scoped actions (`user.platform_*`) pass `null` because the
+   * user can be a member of zero or many workspaces; the affected
+   * user lives in `metadata.targetUserId` instead.
+   */
+  targetWorkspaceId: string | null;
   metadata?: Prisma.InputJsonValue;
   ipAddress?: string | null;
 };
@@ -61,7 +75,7 @@ export async function writePlatformAuditLog(
     data: {
       action: input.action,
       actorUserId: input.actorUserId,
-      targetWorkspaceId: input.targetWorkspaceId,
+      targetWorkspaceId: input.targetWorkspaceId ?? null,
       metadata: input.metadata ?? undefined,
       ipAddress: input.ipAddress ?? null,
     },

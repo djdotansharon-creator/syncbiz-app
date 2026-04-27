@@ -1,16 +1,21 @@
 /**
- * V1 SaaS — read-only platform workspaces dashboard.
+ * V1 SaaS — platform workspaces dashboard.
  *
  * Surface for the SyncBiz platform owner to inspect every Workspace's
  * lifecycle row (`WorkspaceEntitlement`) at a glance: owner, status,
  * trial expiry, configured limits, and current resource usage.
  *
- * Week 2 adds a thin `Actions` column with suspend/unsuspend/extend-trial
- * buttons. The actions hit dedicated POST endpoints under
- * `/api/admin/platform/workspaces/[id]/...` which mutate
- * `WorkspaceEntitlement` and write a `PlatformAuditLog` row in the same
- * Prisma transaction. Enforcement (gating workspace member traffic by
- * `status`) is still Week 3, behind a feature flag — see audit §6.
+ * Layered V1 capabilities:
+ * - Week 1: read-only table with B/D/U/P limits, owner, trial expiry.
+ * - Week 2: per-row Suspend / Unsuspend / Extend-trial actions, written
+ *   through dedicated POST endpoints with `PlatformAuditLog` in the
+ *   same Prisma transaction.
+ * - Week 3: workspace-side enforcement of `SUSPENDED` for non-admins,
+ *   gated behind `SYNCBIZ_ENFORCE_SUSPENSION`.
+ * - Week 4: drill-down (members, devices, audit) at
+ *   `/admin/platform/workspaces/[id]`, plus a global audit log at
+ *   `/admin/platform/audit` and the ability to edit pilot limits and
+ *   globally disable / enable users.
  *
  * The parent layout (`app/admin/layout.tsx`) already enforces
  * `requireSuperAdmin()`. We re-call it here for defense-in-depth so the
@@ -18,6 +23,7 @@
  * future refactor changes how the layout chains.
  */
 
+import Link from "next/link";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { prisma } from "@/lib/prisma";
 import WorkspaceActions from "@/components/admin/workspace-actions";
@@ -98,20 +104,27 @@ export default async function AdminPlatformPage() {
     <div className="space-y-4">
       <div className="flex items-baseline justify-between gap-4">
         <h1 className="text-2xl font-semibold">Platform · Workspaces</h1>
-        <p className="text-sm text-neutral-500">
-          {sorted.length} workspace{sorted.length === 1 ? "" : "s"}
-          {missingEntitlement > 0 ? (
-            <>
-              {" "}
-              · <span className="text-amber-400">{missingEntitlement} missing entitlement</span>
-            </>
-          ) : null}
-        </p>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/admin/platform/audit"
+            className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
+          >
+            Audit log
+          </Link>
+          <p className="text-sm text-neutral-500">
+            {sorted.length} workspace{sorted.length === 1 ? "" : "s"}
+            {missingEntitlement > 0 ? (
+              <>
+                {" "}
+                · <span className="text-amber-400">{missingEntitlement} missing entitlement</span>
+              </>
+            ) : null}
+          </p>
+        </div>
       </div>
       <p className="text-xs text-neutral-500">
-        Suspend/unsuspend and trial extensions write to <code>WorkspaceEntitlement</code> and{" "}
-        <code>PlatformAuditLog</code> atomically. Workspace-side enforcement of <code>SUSPENDED</code>{" "}
-        ships in Week 3 behind a feature flag.
+        Click a workspace name to drill into members, devices, and edit pilot limits. Suspend /
+        unsuspend / extend-trial happen here on each row.
       </p>
 
       {sorted.length === 0 ? (
@@ -149,7 +162,12 @@ export default async function AdminPlatformPage() {
                 return (
                   <tr key={ws.id} className="hover:bg-neutral-900/40">
                     <td className="px-3 py-2 align-top">
-                      <div className="font-medium text-neutral-100">{ws.name}</div>
+                      <Link
+                        href={`/admin/platform/workspaces/${encodeURIComponent(ws.id)}`}
+                        className="block font-medium text-neutral-100 hover:text-white hover:underline"
+                      >
+                        {ws.name}
+                      </Link>
                       <div className="font-mono text-[11px] text-neutral-500">{ws.slug}</div>
                     </td>
                     <td className="px-3 py-2 align-top text-neutral-300">{ws.owner.email}</td>
