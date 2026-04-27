@@ -10,6 +10,11 @@ type UserSummary = {
   name?: string;
   accessType: "OWNER" | "BRANCH_USER";
   branchIds: string[];
+  /** Lifecycle status. Older API responses may omit this; treat missing as ACTIVE. */
+  status?: "ACTIVE" | "PENDING" | "DISABLED";
+  deactivatedAt?: string;
+  /** True when this row cannot be soft-disabled (super admin / workspace owner / last admin). */
+  protected?: boolean;
 };
 type BranchOption = { id: string; name: string };
 type SessionSummary = { accessType?: "OWNER" | "BRANCH_USER"; branchIds?: string[] };
@@ -40,6 +45,8 @@ export function AdminUsersSection() {
   const [editErrorMsg, setEditErrorMsg] = useState<string>("");
   /** Optional: set a new password for the user (never shown back; stored as hash only). */
   const [editNewPassword, setEditNewPassword] = useState("");
+  const [disableBusyEmail, setDisableBusyEmail] = useState<string | null>(null);
+  const [disableErrorByEmail, setDisableErrorByEmail] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -184,6 +191,37 @@ export function AdminUsersSection() {
     } catch {
       setBranchCreateStatus("error");
       setBranchCreateError("Network error");
+    }
+  };
+
+  const handleDisable = async (u: UserSummary) => {
+    const confirmText =
+      `Disable ${u.email}?\n\n` +
+      `They will no longer be able to login. Existing sessions will be revoked.\n` +
+      `You can re-enable them later by editing the user (e.g. setting a new password).`;
+    if (!window.confirm(confirmText)) return;
+    setDisableBusyEmail(u.email);
+    setDisableErrorByEmail((prev) => {
+      const next = { ...prev };
+      delete next[u.email];
+      return next;
+    });
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: u.email }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setDisableErrorByEmail((prev) => ({ ...prev, [u.email]: data.error ?? `Failed (${res.status})` }));
+        return;
+      }
+      await reloadUsers();
+    } catch {
+      setDisableErrorByEmail((prev) => ({ ...prev, [u.email]: "Network error" }));
+    } finally {
+      setDisableBusyEmail(null);
     }
   };
 
@@ -476,39 +514,80 @@ export function AdminUsersSection() {
       )}
       {users.length > 0 && (
         <div className="mt-6 border-t border-slate-800/60 pt-4">
-          <p className="text-xs text-slate-500">Active users</p>
-          <ul className="mt-2 space-y-1 text-sm text-slate-300">
-            {users.map((u) => (
-              <li key={u.id}>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <span className="truncate font-medium text-slate-200">{u.name?.trim() ? u.name : u.email}</span>
-                    <span className="text-slate-600">
-                      {" "}
-                      · {u.accessType === "OWNER" ? "Owner" : "Branch User"}
-                      {u.accessType === "BRANCH_USER"
-                        ? ` (${u.branchIds.length ? u.branchIds.join(", ") : "no branches"})`
-                        : " (all branches)"}
-                    </span>
+          <p className="text-xs text-slate-500">Workspace users</p>
+          <ul className="mt-2 space-y-1.5 text-sm text-slate-300">
+            {users.map((u) => {
+              const status = u.status ?? "ACTIVE";
+              const isDisabled = status === "DISABLED";
+              const isProtected = u.protected === true;
+              const disableBusy = disableBusyEmail === u.email;
+              const disableErr = disableErrorByEmail[u.email];
+              return (
+                <li key={u.id}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <span
+                        className={`truncate font-medium ${isDisabled ? "text-slate-500 line-through" : "text-slate-200"}`}
+                      >
+                        {u.name?.trim() ? u.name : u.email}
+                      </span>
+                      <span className="text-slate-600">
+                        {" "}
+                        · {u.accessType === "OWNER" ? "Owner" : "Branch User"}
+                        {u.accessType === "BRANCH_USER"
+                          ? ` (${u.branchIds.length ? u.branchIds.join(", ") : "no branches"})`
+                          : " (all branches)"}
+                      </span>
+                      {isDisabled && (
+                        <span className="ml-2 inline-flex items-center rounded-md border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-rose-200">
+                          Disabled
+                        </span>
+                      )}
+                      {isProtected && !isDisabled && (
+                        <span className="ml-2 inline-flex items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200">
+                          Protected
+                        </span>
+                      )}
+                    </div>
+                    <div className="shrink-0 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditEmail(u.email);
+                          setEditName(u.name ?? "");
+                          setEditAccessType(u.accessType);
+                          setEditSelectedBranchIds(u.branchIds?.length ? u.branchIds : []);
+                          setEditNewPassword("");
+                          setEditStatus("idle");
+                          setEditErrorMsg("");
+                        }}
+                        className="rounded-lg border border-slate-700 bg-slate-800/50 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800/30"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isDisabled || isProtected || disableBusy}
+                        title={
+                          isDisabled
+                            ? "Already disabled"
+                            : isProtected
+                              ? "Protected user (super admin / workspace owner / last admin)"
+                              : "Disable this user"
+                        }
+                        onClick={() => handleDisable(u)}
+                        className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1.5 text-xs font-medium text-rose-200 hover:bg-rose-500/20 hover:border-rose-500/60 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-500/10 disabled:hover:border-rose-500/40"
+                      >
+                        {disableBusy ? "Disabling…" : "Disable"}
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditEmail(u.email);
-                      setEditName(u.name ?? "");
-                      setEditAccessType(u.accessType);
-                      setEditSelectedBranchIds(u.branchIds?.length ? u.branchIds : []);
-                      setEditNewPassword("");
-                      setEditStatus("idle");
-                      setEditErrorMsg("");
-                    }}
-                    className="shrink-0 rounded-lg border border-slate-700 bg-slate-800/50 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800/30"
-                  >
-                    Edit
-                  </button>
-                </div>
-              </li>
-            ))}
+                  {disableErr && (
+                    <p className="mt-1 text-xs text-rose-400">{disableErr}</p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

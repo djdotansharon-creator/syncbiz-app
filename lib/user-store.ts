@@ -66,7 +66,7 @@ function tenantRoleToPrismaRole(role: TenantRole): string {
 // ─── Mapping helpers ──────────────────────────────────────────────────────────
 
 function rowToUser(
-  row: { id: string; email: string; name: string | null; passwordHash: string | null; createdAt: Date },
+  row: { id: string; email: string; name: string | null; passwordHash: string | null; createdAt: Date; status?: string | null; deactivatedAt?: Date | null },
   workspaceId: string,
 ): User {
   return {
@@ -76,6 +76,8 @@ function rowToUser(
     createdAt: row.createdAt.toISOString(),
     passwordHash: row.passwordHash ?? undefined,
     name: row.name ?? undefined,
+    status: (row.status as User["status"]) ?? "ACTIVE",
+    deactivatedAt: row.deactivatedAt ? row.deactivatedAt.toISOString() : undefined,
   };
 }
 
@@ -149,6 +151,22 @@ async function ensureSeedWorkspace(ownerEmail: string): Promise<{ workspace: { i
   return { workspace, userId: user.id };
 }
 
+/**
+ * Picks a single active workspace for session/auth when a user has multiple
+ * `WorkspaceMember` rows. Prefer the workspace the user owns, else the oldest
+ * membership. Avoids `findFirst` non-determinism and wrong-tenant access checks.
+ */
+async function resolvePrimaryWorkspaceMembership(userId: string) {
+  const memberships = await prisma.workspaceMember.findMany({
+    where: { userId },
+    include: { workspace: { select: { id: true, ownerId: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  if (memberships.length === 0) return null;
+  const owned = memberships.find((m) => m.workspace.ownerId === userId);
+  return (owned ?? memberships[0])!;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function getUserByEmail(email: string): Promise<User | null> {
@@ -156,7 +174,10 @@ export async function getUserByEmail(email: string): Promise<User | null> {
   if (!norm) return null;
   const user = await prisma.user.findUnique({ where: { email: norm } });
   if (!user) return null;
-  const membership = await prisma.workspaceMember.findFirst({ where: { userId: user.id } });
+  // Soft-disabled users are invisible to login and to current-session resolution.
+  // SUPER_ADMIN cannot be soft-disabled, so this gate is safe for owner CRM access too.
+  if (user.status === "DISABLED") return null;
+  const membership = await resolvePrimaryWorkspaceMembership(user.id);
   if (!membership) return null;
   return rowToUser(user, membership.workspaceId);
 }
@@ -180,7 +201,9 @@ export async function getOrCreateUserByEmail(email: string): Promise<User> {
 export async function getUserById(userId: string): Promise<User | null> {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return null;
-  const membership = await prisma.workspaceMember.findFirst({ where: { userId } });
+  // Mirror the gate in getUserByEmail: disabled users are not resolvable.
+  if (user.status === "DISABLED") return null;
+  const membership = await resolvePrimaryWorkspaceMembership(userId);
   if (!membership) return null;
   return rowToUser(user, membership.workspaceId);
 }
@@ -242,9 +265,7 @@ export async function createUser(params: {
   });
 
   const rawAssignments = Array.isArray(params.branchAssignments) ? params.branchAssignments : [];
-  if (params.tenantRole === "TENANT_MEMBER" && rawAssignments.length === 0) {
-    throw new Error("branchIds are required for BRANCH_USER");
-  }
+  // Empty branch list → default branch (create-then-assign flow from Access Control).
   const assignments = rawAssignments.length > 0 ? rawAssignments : [{ branchId: DEFAULT_BRANCH_ID, role: "BRANCH_CONTROLLER" as BranchRole }];
 
   for (const a of assignments) {
@@ -263,6 +284,10 @@ export async function listUsersWithScopeForTenant(tenantId: string): Promise<
   Array<{
     id: string; email: string; tenantId: string; createdAt: string;
     name?: string; accessType: AccessType; branchIds: string[];
+    status: "ACTIVE" | "PENDING" | "DISABLED";
+    deactivatedAt?: string;
+    /** True when this row cannot be soft-disabled (super_admin / workspace owner / last admin). */
+    protected: boolean;
   }>
 > {
   const workspace = await prisma.workspace.findFirst({
@@ -275,16 +300,39 @@ export async function listUsersWithScopeForTenant(tenantId: string): Promise<
     include: { user: true },
   });
 
+  // Pre-compute "is last WORKSPACE_ADMIN" so we don't issue N count queries.
+  const adminMemberIds = members.filter((m) => m.role === "WORKSPACE_ADMIN").map((m) => m.userId);
+  const onlyAdminUserId = adminMemberIds.length === 1 ? adminMemberIds[0] : null;
+
   return Promise.all(
     members.map(async (m) => {
       const tenantRole = prismaRoleToTenantRole(m.role);
       const accessType: AccessType = tenantRole === "TENANT_OWNER" || tenantRole === "TENANT_ADMIN" ? "OWNER" : "BRANCH_USER";
-      if (accessType === "OWNER") {
-        return { id: m.user.id, email: m.user.email, tenantId: workspace.id, createdAt: m.user.createdAt.toISOString(), name: m.user.name ?? undefined, accessType, branchIds: [] };
-      }
-      const assignments = await prisma.userBranchAssignment.findMany({ where: { userId: m.user.id, workspaceId: workspace.id } });
-      const branchIds = [...new Set(assignments.map((a) => a.branchId))].filter(Boolean);
-      return { id: m.user.id, email: m.user.email, tenantId: workspace.id, createdAt: m.user.createdAt.toISOString(), name: m.user.name ?? undefined, accessType, branchIds };
+      const status = (m.user.status ?? "ACTIVE") as "ACTIVE" | "PENDING" | "DISABLED";
+      const deactivatedAt = m.user.deactivatedAt ? m.user.deactivatedAt.toISOString() : undefined;
+      const isSuperAdmin = m.user.role === "SUPER_ADMIN";
+      const isWorkspaceOwner = workspace.ownerId === m.user.id;
+      const isLastAdmin = onlyAdminUserId === m.user.id;
+      const isProtected = isSuperAdmin || isWorkspaceOwner || isLastAdmin;
+
+      const branchIds: string[] = await (async () => {
+        if (accessType === "OWNER") return [];
+        const assignments = await prisma.userBranchAssignment.findMany({ where: { userId: m.user.id, workspaceId: workspace.id } });
+        return [...new Set(assignments.map((a) => a.branchId))].filter(Boolean);
+      })();
+
+      return {
+        id: m.user.id,
+        email: m.user.email,
+        tenantId: workspace.id,
+        createdAt: m.user.createdAt.toISOString(),
+        name: m.user.name ?? undefined,
+        accessType,
+        branchIds,
+        status,
+        deactivatedAt,
+        protected: isProtected,
+      };
     }),
   );
 }
@@ -324,6 +372,9 @@ export async function updateUser(params: {
     data: {
       name: typeof params.name === "string" ? (params.name.trim() || null) : undefined,
       ...(updatePassword ? { passwordHash: hashPassword(pw) } : {}),
+      // Reactivate on edit: setting a new password or otherwise editing
+      // a disabled user is interpreted as the admin un-disabling them.
+      ...(user.status === "DISABLED" ? { status: "ACTIVE" as const, deactivatedAt: null } : {}),
     },
   });
   await prisma.workspaceMember.update({
@@ -332,9 +383,6 @@ export async function updateUser(params: {
   });
 
   const rawAssignments = Array.isArray(params.branchAssignments) ? params.branchAssignments : [];
-  if (params.tenantRole === "TENANT_MEMBER" && rawAssignments.length === 0) {
-    throw new Error("branchIds are required for BRANCH_USER");
-  }
   const assignments = rawAssignments.length > 0 ? rawAssignments : [{ branchId: DEFAULT_BRANCH_ID, role: "BRANCH_CONTROLLER" as BranchRole }];
 
   await prisma.userBranchAssignment.deleteMany({ where: { userId: user.id, workspaceId: workspace.id } });
@@ -431,14 +479,126 @@ export async function resetPasswordWithToken(
   return "ok";
 }
 
-export async function getTenantRole(userId: string): Promise<TenantRole | null> {
-  const membership = await prisma.workspaceMember.findFirst({ where: { userId } });
-  if (!membership) return null;
-  return prismaRoleToTenantRole(membership.role);
+/**
+ * Outcome of a soft-disable request. Discriminated union so the route can
+ * map each case to a clean HTTP status without re-deriving conditions.
+ */
+export type DisableOutcome =
+  | { ok: true; userId: string; email: string }
+  | { ok: false; reason: "not_found" | "wrong_workspace" | "self" | "super_admin" | "workspace_owner" | "last_admin" };
+
+/**
+ * Soft-disable a user inside the admin's workspace.
+ *
+ * - Sets `User.status = DISABLED` and `User.deactivatedAt = now()`.
+ * - Does NOT delete the User row.
+ * - Does NOT touch WorkspaceMember or UserBranchAssignment, so the admin
+ *   list keeps showing disabled users and reactivation is a single update.
+ *
+ * Refuses (returns `ok: false` with a reason) if:
+ *   - target email does not exist
+ *   - target user is not a member of `tenantId`
+ *   - target is the acting admin (`actingUserId`)
+ *   - target has `User.role = SUPER_ADMIN`
+ *   - target is the `Workspace.ownerId` of `tenantId`
+ *   - target is the last remaining `WORKSPACE_ADMIN` member of `tenantId`
+ */
+export async function disableUserInWorkspace(params: {
+  email: string;
+  tenantId: string;
+  actingUserId: string;
+}): Promise<DisableOutcome> {
+  const norm = params.email?.trim().toLowerCase();
+  if (!norm) return { ok: false, reason: "not_found" };
+
+  const target = await prisma.user.findUnique({ where: { email: norm } });
+  if (!target) return { ok: false, reason: "not_found" };
+
+  const workspace = await prisma.workspace.findFirst({
+    where: { OR: [{ id: params.tenantId }, { slug: params.tenantId }] },
+  });
+  if (!workspace) return { ok: false, reason: "wrong_workspace" };
+
+  const membership = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId: workspace.id, userId: target.id } },
+  });
+  if (!membership) return { ok: false, reason: "wrong_workspace" };
+
+  if (target.id === params.actingUserId) return { ok: false, reason: "self" };
+  if (target.role === "SUPER_ADMIN") return { ok: false, reason: "super_admin" };
+  if (workspace.ownerId === target.id) return { ok: false, reason: "workspace_owner" };
+
+  if (membership.role === "WORKSPACE_ADMIN") {
+    const otherAdmins = await prisma.workspaceMember.count({
+      where: {
+        workspaceId: workspace.id,
+        role: "WORKSPACE_ADMIN",
+        userId: { not: target.id },
+      },
+    });
+    if (otherAdmins === 0) return { ok: false, reason: "last_admin" };
+  }
+
+  await prisma.user.update({
+    where: { id: target.id },
+    data: {
+      status: "DISABLED",
+      deactivatedAt: new Date(),
+    },
+  });
+
+  emitEvent(EVENT_TYPES.USER_UPDATED, { userId: target.id, email: norm, action: "disabled" });
+  return { ok: true, userId: target.id, email: norm };
 }
 
-export async function getAccessType(userId: string): Promise<AccessType> {
-  const role = await getTenantRole(userId);
+/**
+ * Read-only protection check used by the admin list to render row-level UI
+ * affordances (e.g. greyed-out "Disable" button). Mirrors the refusal logic
+ * inside `disableUserInWorkspace` but does not require an acting user since
+ * the UI only needs the workspace-intrinsic protections.
+ */
+export async function isUserProtectedInWorkspace(params: {
+  userId: string;
+  tenantId: string;
+}): Promise<boolean> {
+  const user = await prisma.user.findUnique({ where: { id: params.userId } });
+  if (!user) return true;
+  if (user.role === "SUPER_ADMIN") return true;
+  const workspace = await prisma.workspace.findFirst({
+    where: { OR: [{ id: params.tenantId }, { slug: params.tenantId }] },
+  });
+  if (!workspace) return true;
+  if (workspace.ownerId === user.id) return true;
+  const membership = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } },
+  });
+  if (membership?.role === "WORKSPACE_ADMIN") {
+    const otherAdmins = await prisma.workspaceMember.count({
+      where: {
+        workspaceId: workspace.id,
+        role: "WORKSPACE_ADMIN",
+        userId: { not: user.id },
+      },
+    });
+    if (otherAdmins === 0) return true;
+  }
+  return false;
+}
+
+export async function getTenantRole(userId: string, workspaceId?: string | null): Promise<TenantRole | null> {
+  const ws = workspaceId ?? (await getUserById(userId))?.tenantId;
+  if (ws) {
+    const membership = await prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId: ws, userId } },
+    });
+    if (membership) return prismaRoleToTenantRole(membership.role);
+  }
+  const m = await resolvePrimaryWorkspaceMembership(userId);
+  return m ? prismaRoleToTenantRole(m.role) : null;
+}
+
+export async function getAccessType(userId: string, workspaceId?: string | null): Promise<AccessType> {
+  const role = await getTenantRole(userId, workspaceId);
   return role === "TENANT_OWNER" || role === "TENANT_ADMIN" ? "OWNER" : "BRANCH_USER";
 }
 
@@ -450,29 +610,43 @@ export async function isBranchUser(userId: string): Promise<boolean> {
   return (await getAccessType(userId)) === "BRANCH_USER";
 }
 
-export async function getAssignedBranchIds(userId: string): Promise<string[]> {
-  const role = await getTenantRole(userId);
+export async function getAssignedBranchIds(userId: string, workspaceId?: string | null): Promise<string[]> {
+  const role = await getTenantRole(userId, workspaceId);
   if (role === "TENANT_OWNER" || role === "TENANT_ADMIN") return [ALL_BRANCHES_SENTINEL];
-  const assignments = await prisma.userBranchAssignment.findMany({ where: { userId } });
+  const ws = workspaceId ?? (await getUserById(userId))?.tenantId;
+  const assignments = await prisma.userBranchAssignment.findMany({
+    where: ws ? { userId, workspaceId: ws } : { userId },
+  });
   const ids = [...new Set(assignments.map((a) => a.branchId))];
   return ids.length > 0 ? ids : [DEFAULT_BRANCH_ID];
 }
 
-export async function getBranchesForUser(userId: string): Promise<string[]> {
-  return getAssignedBranchIds(userId);
+export async function getBranchesForUser(userId: string, workspaceId?: string | null): Promise<string[]> {
+  return getAssignedBranchIds(userId, workspaceId);
 }
 
-export async function hasBranchAccess(userId: string, branchId: string): Promise<boolean> {
-  const allowed = await getBranchesForUser(userId);
+export async function hasBranchAccess(
+  userId: string,
+  branchId: string,
+  workspaceId?: string | null,
+): Promise<boolean> {
+  const allowed = await getBranchesForUser(userId, workspaceId);
   if (allowed.includes(ALL_BRANCHES_SENTINEL)) return true;
   const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
   return allowed.includes(normalized);
 }
 
-export async function getBranchRole(userId: string, branchId: string): Promise<BranchRole | null> {
+export async function getBranchRole(
+  userId: string,
+  branchId: string,
+  workspaceId?: string | null,
+): Promise<BranchRole | null> {
   const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
+  const ws = workspaceId ?? (await getUserById(userId))?.tenantId;
   const assignment = await prisma.userBranchAssignment.findFirst({
-    where: { userId, branchId: normalized },
+    where: ws
+      ? { userId, branchId: normalized, workspaceId: ws }
+      : { userId, branchId: normalized },
   });
   return (assignment?.role as BranchRole) ?? null;
 }

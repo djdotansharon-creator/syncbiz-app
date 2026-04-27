@@ -22,11 +22,17 @@ export function validateCredentials(email: string, password: string): boolean {
 
 /**
  * Async validation: checks TEST_USERS first, then user-store for API-created users.
+ *
+ * Disabled users are blocked here as a defense in depth. `getUserByEmail`
+ * already filters them out, but the legacy TEST_USERS fallback below would
+ * otherwise allow a disabled email if it ever appeared in that map. Cheap
+ * extra check, no behavior change for active users.
  */
 export async function validateCredentialsAsync(email: string, password: string): Promise<boolean> {
   const normalized = email?.trim().toLowerCase();
   if (!normalized || !password) return false;
   const user = await getUserByEmail(normalized);
+  if (user?.status === "DISABLED") return false;
   if (user?.passwordHash) {
     return verifyPassword(password, user.passwordHash);
   }

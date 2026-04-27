@@ -26,6 +26,18 @@ enum UserRole {
   VIEWER
 }
 
+/// Lifecycle status for a User row.
+/// ACTIVE   – normal account, can authenticate.
+/// PENDING  – account exists but cannot authenticate (reserved for a
+///            future invite flow; not produced by any current code path).
+/// DISABLED – soft-disabled by an admin via DELETE /api/admin/users.
+///            Cannot login; existing sessions resolve to null.
+enum UserStatus {
+  ACTIVE
+  PENDING
+  DISABLED
+}
+
 enum DeviceType {
   ELECTRON
   BROWSER
@@ -171,6 +183,8 @@ model User {
   lastName     String?
   passwordHash String?
   role         UserRole  @default(CONTROLLER)
+  status        UserStatus @default(ACTIVE)
+  deactivatedAt DateTime?
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt

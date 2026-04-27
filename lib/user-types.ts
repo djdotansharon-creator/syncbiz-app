@@ -25,6 +25,9 @@ export type Tenant = {
   createdAt: string;
 };
 
+/** Lifecycle status for a User row (mirrors prisma `UserStatus`). */
+export type UserStatus = "ACTIVE" | "PENDING" | "DISABLED";
+
 /** User – human actor with stable identity. */
 export type User = {
   id: string;
@@ -37,6 +40,10 @@ export type User = {
   name?: string;
   firstName?: string;
   lastName?: string;
+  /** Lifecycle status. Defaults to ACTIVE when missing (legacy rows). */
+  status?: UserStatus;
+  /** Set when an admin soft-disabled this user. */
+  deactivatedAt?: string;
 };
 
 /** Membership – user ↔ tenant, tenant-level role. */

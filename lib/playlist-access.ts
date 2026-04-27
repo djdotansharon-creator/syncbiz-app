@@ -42,7 +42,7 @@ export async function gatePlaylistAccess(
   if (!playlistTenantMatches(user, playlist)) {
     return { allow: false, httpStatus: 404, message: "Playlist not found" };
   }
-  const accessType: AccessType = await getAccessType(user.id);
+  const accessType: AccessType = await getAccessType(user.id, user.tenantId ?? null);
   const scope = playlist.playlistOwnershipScope ?? "branch";
   if (scope === "owner_personal") {
     if (accessType !== "OWNER") {

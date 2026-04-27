@@ -9,8 +9,8 @@ export async function GET() {
     return NextResponse.json({ email: null, userId: null }, { status: 200 });
   }
   const [accessType, branchIds] = await Promise.all([
-    getAccessType(user.id),
-    getAssignedBranchIds(user.id),
+    getAccessType(user.id, user.tenantId),
+    getAssignedBranchIds(user.id, user.tenantId),
   ]);
   const tenant = await getTenantById(user.tenantId);
   return NextResponse.json({

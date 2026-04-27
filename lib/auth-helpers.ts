@@ -12,13 +12,13 @@ import {
   getOrCreateUserByEmail,
   getUserById,
   hasBranchAccess as storeHasBranchAccess,
-  getBranchesForUser,
   getTenantRole,
   getBranchRole,
   getAccessType,
   getAssignedBranchIds,
   isOwner as storeIsOwner,
   isBranchUser as storeIsBranchUser,
+  ALL_BRANCHES_SENTINEL_EXPORT,
 } from "@/lib/user-store";
 import type { User, SessionUser, BranchRole } from "@/lib/user-types";
 
@@ -80,11 +80,12 @@ export async function getCurrentUserFromApiRequest(request: Request): Promise<Us
 export async function getSessionUser(): Promise<SessionUser | null> {
   const user = await getCurrentUserFromCookies();
   if (!user) return null;
-  const tenantRole = await getTenantRole(user.id);
-  const branchIds = await getBranchesForUser(user.id);
+  const tenantRole = await getTenantRole(user.id, user.tenantId);
+  const branchIds = await getAssignedBranchIds(user.id, user.tenantId);
   const branchRoles: Record<string, BranchRole> = {};
   for (const bid of branchIds) {
-    const r = await getBranchRole(user.id, bid);
+    if (bid === ALL_BRANCHES_SENTINEL_EXPORT) continue;
+    const r = await getBranchRole(user.id, bid, user.tenantId);
     if (r) branchRoles[bid] = r;
   }
   return {
@@ -106,23 +107,30 @@ export async function resolveEmailToUser(email: string): Promise<User> {
 
 /** Check if user has access to branch. */
 export async function hasBranchAccess(userId: string, branchId: string): Promise<boolean> {
-  return storeHasBranchAccess(userId, branchId ?? DEFAULT_BRANCH_ID);
+  const u = await getUserById(userId);
+  if (!u) return false;
+  return storeHasBranchAccess(userId, branchId ?? DEFAULT_BRANCH_ID, u.tenantId);
 }
 
 /** Check if user has tenant-level admin role. */
 export async function hasTenantAdminRole(userId: string): Promise<boolean> {
-  const r = await getTenantRole(userId);
+  const u = await getUserById(userId);
+  if (!u) return false;
+  const r = await getTenantRole(userId, u.tenantId);
   return r === "TENANT_OWNER" || r === "TENANT_ADMIN";
 }
 
 /** V1 public: get simplified access type. */
 export async function getAccessTypeForUser(userId: string): Promise<"OWNER" | "BRANCH_USER"> {
-  return getAccessType(userId);
+  const u = await getUserById(userId);
+  if (!u) return "BRANCH_USER";
+  return getAccessType(userId, u.tenantId);
 }
 
 /** V1 public: assigned branch IDs. OWNER returns ["*"]. */
 export async function getAssignedBranchIdsForUser(userId: string): Promise<string[]> {
-  return getAssignedBranchIds(userId);
+  const u = await getUserById(userId);
+  return getAssignedBranchIds(userId, u?.tenantId);
 }
 
 /** V1 public: is OWNER. */

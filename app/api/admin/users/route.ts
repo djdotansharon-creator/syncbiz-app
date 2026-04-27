@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth-helpers";
-import { createUser, getUserByEmail, listUsersWithScopeForTenant, updateUser } from "@/lib/user-store";
+import { createUser, getUserByEmail, listUsersWithScopeForTenant, updateUser, disableUserInWorkspace } from "@/lib/user-store";
 import { db } from "@/lib/store";
 import type { TenantRole, BranchRole } from "@/lib/user-types";
 
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
       accessType?: string;
       branchIds?: string[];
     };
-    const email = typeof body.email === "string" ? body.email.trim() : "";
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     const password = typeof body.password === "string" ? body.password : "";
     const accessType = (body.accessType ?? "BRANCH_USER") as "OWNER" | "BRANCH_USER";
 
@@ -62,10 +62,7 @@ export async function POST(req: NextRequest) {
       .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
       .map((id) => id.trim());
 
-    if (accessType === "BRANCH_USER" && filteredBranchIds.length === 0) {
-      return NextResponse.json({ error: "branchIds are required for BRANCH_USER" }, { status: 400 });
-    }
-
+    // Empty branch list is allowed: create with default "default" row in store, then admin assigns in UI.
     const branchAssignments =
       accessType === "OWNER"
         ? [{ branchId: DEFAULT_BRANCH_ID, role: branchRole }]
@@ -138,6 +135,66 @@ export async function POST(req: NextRequest) {
   }
 }
 
+/**
+ * Soft-disable a user. Phase-1 user-management integrity fix.
+ *
+ * - No hard delete. The User row is preserved.
+ * - Sets `User.status = DISABLED` and `User.deactivatedAt = now()`.
+ * - WorkspaceMember and UserBranchAssignment rows are kept so the admin
+ *   list still shows the row and a future reactivate is one update.
+ * - Refuses to disable: self / SUPER_ADMIN / workspace owner / last admin.
+ */
+export async function DELETE(req: NextRequest) {
+  const admin = await requireAdmin();
+  if (!admin) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  if (!admin.tenantId?.trim()) {
+    return NextResponse.json({ error: "Admin tenant context missing" }, { status: 400 });
+  }
+
+  let body: { email?: string };
+  try {
+    body = (await req.json()) as { email?: string };
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  if (!email || !email.includes("@")) {
+    return NextResponse.json({ error: "Valid email required" }, { status: 400 });
+  }
+
+  const outcome = await disableUserInWorkspace({
+    email,
+    tenantId: admin.tenantId.trim(),
+    actingUserId: admin.id,
+  });
+
+  if (!outcome.ok) {
+    switch (outcome.reason) {
+      case "not_found":
+        return NextResponse.json({ error: "User not found" }, { status: 404 });
+      case "wrong_workspace":
+        return NextResponse.json({ error: "User is not in your workspace" }, { status: 404 });
+      case "self":
+        return NextResponse.json({ error: "You cannot disable yourself", code: "CANNOT_DISABLE_SELF" }, { status: 400 });
+      case "super_admin":
+        return NextResponse.json({ error: "Cannot disable a platform super admin", code: "CANNOT_DISABLE_SUPER_ADMIN" }, { status: 403 });
+      case "workspace_owner":
+        return NextResponse.json({ error: "Cannot disable the workspace owner", code: "CANNOT_DISABLE_OWNER" }, { status: 403 });
+      case "last_admin":
+        return NextResponse.json({ error: "Cannot disable the last workspace admin", code: "CANNOT_DISABLE_LAST_ADMIN" }, { status: 400 });
+      default:
+        return NextResponse.json({ error: "Cannot disable user" }, { status: 400 });
+    }
+  }
+
+  return NextResponse.json(
+    { ok: true, userId: outcome.userId, email: outcome.email, status: "DISABLED" },
+    { status: 200 },
+  );
+}
+
 export async function PATCH(req: NextRequest) {
   const admin = await requireAdmin();
   if (!admin) {
@@ -157,7 +214,7 @@ export async function PATCH(req: NextRequest) {
       newPassword?: string;
     };
 
-    const email = typeof body.email === "string" ? body.email.trim() : "";
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     const name = typeof body.name === "string" ? body.name : undefined;
     const newPassword =
       typeof body.newPassword === "string" && body.newPassword.length > 0
@@ -180,7 +237,10 @@ export async function PATCH(req: NextRequest) {
       .map((id) => id.trim());
 
     if (accessType === "BRANCH_USER" && filteredBranchIds.length === 0) {
-      return NextResponse.json({ error: "branchIds are required for BRANCH_USER" }, { status: 400 });
+      return NextResponse.json(
+        { error: "branchIds are required for BRANCH_USER" },
+        { status: 400 },
+      );
     }
 
     const branchAssignments: Array<{ branchId: string; role: BranchRole }> =

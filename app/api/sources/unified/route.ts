@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
   }
   const scope: ApiContentScope = parseApiContentScope(request.nextUrl.searchParams.get("scope"));
   try {
-    const accessType = await getAccessType(user.id);
+    const accessType = await getAccessType(user.id, user.tenantId);
     if (!canRequestApiScope(scope, accessType)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

@@ -18,17 +18,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!(await validateCredentialsAsync(email, password))) {
+    const normEmail = String(email).trim().toLowerCase();
+
+    if (!(await validateCredentialsAsync(normEmail, password))) {
       return NextResponse.json(
         { error: "Invalid email or password" },
         { status: 401 }
       );
     }
 
-    const user = await getOrCreateUserByEmail(email);
+    const user = await getOrCreateUserByEmail(normEmail);
     emitEvent(EVENT_TYPES.USER_LOGIN, { userId: user.id, email: user.email });
 
-    const sessionValue = createSessionValue(email);
+    const sessionValue = createSessionValue(normEmail);
     const res = NextResponse.json({ ok: true });
     res.cookies.set(COOKIE_NAME, sessionValue, {
       httpOnly: true,

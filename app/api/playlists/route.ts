@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
   }
   const scope: ApiContentScope = parseApiContentScope(req.nextUrl.searchParams.get("scope"));
   try {
-    const accessType = await getAccessType(user.id);
+    const accessType = await getAccessType(user.id, user.tenantId);
     if (!canRequestApiScope(scope, accessType)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     const playlistOwnershipScope: "branch" | "owner_personal" | undefined =
       rawScope === "owner_personal" ? "owner_personal" : rawScope === "branch" ? "branch" : undefined;
     if (playlistOwnershipScope === "owner_personal") {
-      if ((await getAccessType(user.id)) !== "OWNER") {
+      if ((await getAccessType(user.id, user.tenantId)) !== "OWNER") {
         return NextResponse.json({ error: "Forbidden: owner personal scope requires OWNER" }, { status: 403 });
       }
     }
