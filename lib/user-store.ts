@@ -14,6 +14,58 @@ import type { User, Tenant, Membership, UserBranchAssignment, TenantRole, Branch
 const DEFAULT_BRANCH_ID = "default";
 const ALL_BRANCHES_SENTINEL = "*";
 
+/**
+ * V1 SaaS trial length for brand-new workspaces created through signup.
+ * Existing workspaces hit during the one-time backfill get 60 days instead
+ * (see scripts/backfill-workspace-entitlements.mjs) — that asymmetry is
+ * intentional grace for users that pre-date the V1 plan.
+ */
+const NEW_WORKSPACE_TRIAL_DAYS = 30;
+
+/**
+ * V1 pilot limits — match the actual business pilot:
+ *   - 1 branch
+ *   - up to 4 devices total (1 main desktop player + 1 control computer
+ *     + 1–2 mobile devices)
+ *   - 5 users
+ *   - at least 20 playlists
+ *
+ * Mirrored in `prisma/schema.prisma` as the model defaults and in
+ * `scripts/backfill-workspace-entitlements.mjs`. Kept in sync deliberately:
+ * setting these explicitly at insert time means we never silently rely on
+ * stale schema defaults from a prior migration.
+ */
+const PILOT_LIMITS = {
+  maxBranches: 1,
+  maxDevices: 4,
+  maxUsers: 5,
+  maxPlaylists: 20,
+} as const;
+
+/**
+ * Idempotent: create a TRIALING `WorkspaceEntitlement` row if one doesn't
+ * exist yet. Safe to call from any workspace-creation path. V1 has no
+ * enforcement code reading this — it's lifecycle bookkeeping only, surfaced
+ * read-only at /admin/platform.
+ */
+async function ensureWorkspaceEntitlement(workspaceId: string, opts: { trialDays?: number } = {}): Promise<void> {
+  const trialDays = opts.trialDays ?? NEW_WORKSPACE_TRIAL_DAYS;
+  const existing = await prisma.workspaceEntitlement.findUnique({
+    where: { workspaceId },
+    select: { id: true },
+  });
+  if (existing) return;
+  await prisma.workspaceEntitlement.create({
+    data: {
+      workspaceId,
+      status: "TRIALING",
+      planCode: "trial",
+      trialEndsAt: new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
+      ...PILOT_LIMITS,
+    },
+  });
+}
+
 /** Sentinel meaning user can access all branches (OWNER). */
 export const ALL_BRANCHES_SENTINEL_EXPORT = ALL_BRANCHES_SENTINEL;
 
@@ -147,6 +199,8 @@ async function ensureSeedWorkspace(ownerEmail: string): Promise<{ workspace: { i
   await prisma.userBranchAssignment.create({
     data: { userId: user.id, workspaceId: workspace.id, branchId: DEFAULT_BRANCH_ID, role: "BRANCH_MANAGER" },
   });
+
+  await ensureWorkspaceEntitlement(workspace.id);
 
   return { workspace, userId: user.id };
 }
@@ -435,6 +489,8 @@ export async function createWorkspaceOwner(params: {
     data: { userId: user.id, workspaceId: workspace.id, branchId: DEFAULT_BRANCH_ID, role: "BRANCH_MANAGER" },
   });
 
+  await ensureWorkspaceEntitlement(workspace.id);
+
   return {
     user: rowToUser({ ...user, passwordHash: null }, workspace.id),
     tenant: rowToTenant(workspace),
@@ -445,6 +501,8 @@ export async function createPasswordResetToken(email: string): Promise<string | 
   const norm = email?.trim().toLowerCase();
   const user = await prisma.user.findUnique({ where: { email: norm } });
   if (!user) return null;
+  // Match login: soft-disabled accounts cannot authenticate; do not issue a reset token.
+  if (user.status === "DISABLED") return null;
   // Invalidate existing tokens
   await prisma.passwordResetToken.deleteMany({ where: { userId: user.id, usedAt: null } });
   const rawToken = randomBytes(32).toString("hex");

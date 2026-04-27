@@ -81,6 +81,20 @@ enum AddonType {
   EXTRA_USERS
 }
 
+/// Lifecycle status for a Workspace, owned by `WorkspaceEntitlement`.
+///
+/// V1 only sets TRIALING (on signup / backfill) and SUSPENDED (manual admin
+/// action, written in Week 2). The remaining values are placeholders for
+/// Week 4+ billing integration so we don't need a follow-up enum migration
+/// when those code paths land. No code reads non-V1 values today.
+enum WorkspaceStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+}
+
 enum TimeSlot {
   MORNING
   AFTERNOON
@@ -126,13 +140,13 @@ enum SubmissionSource {
 /// review-queue UI (Stage 5). No production code path reads/mutates it
 /// yet; enforcing that keeps Stage 0 a pure scaffolding migration.
 model DiscoverySubmission {
-  id                 String           @id @default(uuid())
+  id String @id @default(uuid())
 
   /// `null` when the submission came from an autonomous agent (AI search,
   /// scheduled import). Owner reviewers can still trace it via
   /// `submissionSource`.
-  submittedById      String?
-  submissionSource   SubmissionSource
+  submittedById    String?
+  submissionSource SubmissionSource
 
   /// The raw URL as received. We keep both `rawUrl` and (later) the
   /// canonicalized form so we can deduplicate across link shorteners and
@@ -146,24 +160,24 @@ model DiscoverySubmission {
   /// capture-everything bucket.
   resolvedMetadata   Json?
 
-  suggestedTags      String[]
-  suggestedTitle     String?
-  submitterNote      String?
+  suggestedTags  String[]
+  suggestedTitle String?
+  submitterNote  String?
 
-  status             ReviewStatus     @default(PENDING)
-  reviewedById       String?
-  reviewedAt         DateTime?
-  reviewNote         String?
+  status       ReviewStatus @default(PENDING)
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?
 
   /// When status transitions to MERGED / APPROVED, points to the canonical
   /// record that owns this URL going forward. String-typed (not FK) for
   /// Stage 0 because the canonical table doesn't exist yet; Stage 2 will
   /// convert this to a proper relation in the same migration that adds
   /// `CanonicalUrl`.
-  mergedIntoId       String?
-  duplicateOfId      String?
+  mergedIntoId  String?
+  duplicateOfId String?
 
-  createdAt          DateTime         @default(now())
+  createdAt DateTime @default(now())
 
   @@index([status])
   @@index([submittedById])
@@ -176,26 +190,27 @@ model DiscoverySubmission {
 // ─────────────────────────────────────────────
 
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  name         String?
-  firstName    String?
-  lastName     String?
-  passwordHash String?
-  role         UserRole  @default(CONTROLLER)
+  id            String     @id @default(uuid())
+  email         String     @unique
+  name          String?
+  firstName     String?
+  lastName      String?
+  passwordHash  String?
+  role          UserRole   @default(CONTROLLER)
   status        UserStatus @default(ACTIVE)
   deactivatedAt DateTime?
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  lastLoginAt   DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
-  ownedWorkspaces      Workspace[]           @relation("WorkspaceOwner")
+  ownedWorkspaces      Workspace[]            @relation("WorkspaceOwner")
   memberships          WorkspaceMember[]
   branchAssignments    UserBranchAssignment[]
   passwordResetTokens  PasswordResetToken[]
   auditLogs            AuditLog[]
   createdGuestSessions GuestSession[]
   aiDjSessions         AiDjSession[]
+  platformAuditActions PlatformAuditLog[]     @relation("PlatformAuditActor")
 }
 
 model Workspace {
@@ -218,8 +233,10 @@ model Workspace {
   auditLogs           AuditLog[]
   aiDjSessions        AiDjSession[]
   billing             WorkspaceBilling?
+  entitlement         WorkspaceEntitlement?
   addons              WorkspaceAddon[]
   announcementChannel AnnouncementChannel?
+  platformAuditEvents PlatformAuditLog[]     @relation("PlatformAuditTarget")
 
   @@index([ownerId])
 }
@@ -297,26 +314,26 @@ model Branch {
 }
 
 model Device {
-  id             String     @id @default(uuid())
-  workspaceId    String
-  branchId       String
-  name           String
-  type           DeviceType @default(ELECTRON)
-  deviceKind     String     @default("audio-player")
-  token          String     @unique
-  isOnline       Boolean    @default(false)
-  platform       String     @default("windows")
-  deviceStatus   String     @default("offline")
-  health         String     @default("ok")
-  capabilities   String[]
-  lastHeartbeat  String?
-  ipAddress      String     @default("")
-  agentVersion   String     @default("1.0.0")
-  volume         Int        @default(50)
+  id              String     @id @default(uuid())
+  workspaceId     String
+  branchId        String
+  name            String
+  type            DeviceType @default(ELECTRON)
+  deviceKind      String     @default("audio-player")
+  token           String     @unique
+  isOnline        Boolean    @default(false)
+  platform        String     @default("windows")
+  deviceStatus    String     @default("offline")
+  health          String     @default("ok")
+  capabilities    String[]
+  lastHeartbeat   String?
+  ipAddress       String     @default("")
+  agentVersion    String     @default("1.0.0")
+  volume          Int        @default(50)
   currentSourceId String?
-  lastSeenAt     DateTime?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  lastSeenAt      DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 
   branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
@@ -470,7 +487,7 @@ model CatalogItem {
   artist        String?
   durationSec   Int?
   thumbnail     String?
-  genres        String[]  @default([])
+  genres        String[]       @default([])
   businessTypes BusinessType[]
   addedById     String?
   createdAt     DateTime       @default(now())
@@ -548,6 +565,44 @@ model WorkspaceAddon {
   @@index([workspaceId])
 }
 
+/// V1 SaaS lifecycle row: one per Workspace. Single source of truth for
+/// trial/active/suspended state and pilot limits. Sits next to the
+/// `WorkspaceBilling` row deliberately — billing is plan/payment, this is
+/// lifecycle/limits. We keep them separate in V1; if/when paid plans land,
+/// the merge (or kept split) is a deliberate decision, not an accident.
+///
+/// V1 writes this row from two paths only:
+///   1. signup — `createWorkspaceOwner` in lib/user-store.ts (30-day trial)
+///   2. backfill — scripts/backfill-workspace-entitlements.mjs (60-day grace)
+///
+/// V1 has NO enforcement code. Reads happen only from `/admin/platform`.
+/// Enforcement is Week 3 work and lands behind a feature flag.
+model WorkspaceEntitlement {
+  id              String          @id @default(uuid())
+  workspaceId     String          @unique
+  status          WorkspaceStatus @default(TRIALING)
+  planCode        String          @default("trial")
+  trialEndsAt     DateTime?
+  suspendedAt     DateTime?
+  suspendedReason String?
+  // V1 pilot defaults: 1 branch, up to 4 devices (1 main desktop player +
+  // 1 control computer + 1–2 mobile), 5 users, at least 20 playlists.
+  // Mirrored explicitly in lib/user-store.ts:ensureWorkspaceEntitlement
+  // and scripts/backfill-workspace-entitlements.mjs as defense in depth.
+  maxBranches     Int             @default(1)
+  maxDevices      Int             @default(4)
+  maxUsers        Int             @default(5)
+  maxPlaylists    Int             @default(20)
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([trialEndsAt])
+}
+
 // ─────────────────────────────────────────────
 // AUDIT LOG
 // ─────────────────────────────────────────────
@@ -569,6 +624,35 @@ model AuditLog {
 
   @@index([workspaceId])
   @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+// ─────────────────────────────────────────────
+// PLATFORM ADMIN — V1 SAAS LIFECYCLE
+// ─────────────────────────────────────────────
+
+/// Platform-scope audit log for `/admin/platform` actions. Distinct from
+/// `AuditLog`, which is workspace-scoped (workspaceId NOT NULL, userId
+/// onDelete: Restrict). Platform actions need to survive workspace deletion
+/// and may be system-emitted (no actor), so both relations use SetNull.
+///
+/// V1 creates this table empty. Writes start in Week 2 alongside the first
+/// admin mutations (suspend / unsuspend / entitlement edit).
+model PlatformAuditLog {
+  id                String   @id @default(uuid())
+  actorUserId       String?
+  targetWorkspaceId String?
+  action            String
+  metadata          Json?
+  ipAddress         String?
+  createdAt         DateTime @default(now())
+
+  actor           User?      @relation("PlatformAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  targetWorkspace Workspace? @relation("PlatformAuditTarget", fields: [targetWorkspaceId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([targetWorkspaceId])
   @@index([createdAt])
   @@index([action])
 }
