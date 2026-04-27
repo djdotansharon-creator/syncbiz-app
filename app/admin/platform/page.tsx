@@ -27,6 +27,13 @@ import Link from "next/link";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { prisma } from "@/lib/prisma";
 import WorkspaceActions from "@/components/admin/workspace-actions";
+import PlatformWorkspaceDeletedBanner from "@/components/admin/platform-workspace-deleted-banner";
+import {
+  PlatformQuotaRowBadges,
+  PlatformQuotaStatusPill,
+} from "@/components/admin/platform-quota-ui";
+import WorkspaceTestDeleteButton from "@/components/admin/workspace-test-delete-button";
+import { buildQuotaChecks } from "@/lib/admin/platform-quotas";
 
 export const dynamic = "force-dynamic";
 
@@ -68,14 +75,14 @@ function statusClass(status: string | undefined): string {
 }
 
 export default async function AdminPlatformPage() {
-  await requireSuperAdmin();
+  const admin = await requireSuperAdmin();
 
   const [workspaces, deviceCounts] = await Promise.all([
     prisma.workspace.findMany({
       include: {
-        owner: { select: { email: true } },
+        owner: { select: { id: true, email: true, role: true } },
         entitlement: true,
-        _count: { select: { members: true, branches: true } },
+        _count: { select: { members: true, branches: true, playlists: true } },
       },
     }),
     // `Device` has no inverse relation back to Workspace in the schema, so
@@ -102,9 +109,16 @@ export default async function AdminPlatformPage() {
 
   return (
     <div className="space-y-4">
+      <PlatformWorkspaceDeletedBanner />
       <div className="flex items-baseline justify-between gap-4">
         <h1 className="text-2xl font-semibold">Platform · Workspaces</h1>
         <div className="flex items-center gap-3">
+          <Link
+            href="/admin/platform/users"
+            className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
+          >
+            All users
+          </Link>
           <Link
             href="/admin/platform/audit"
             className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
@@ -142,11 +156,13 @@ export default async function AdminPlatformPage() {
                 <th className="px-3 py-2 font-medium">Plan</th>
                 <th className="px-3 py-2 font-medium">Trial ends</th>
                 <th className="px-3 py-2 font-medium">Limits (B/D/U/P)</th>
+                <th className="px-3 py-2 font-medium">Pilot quota</th>
                 <th className="px-3 py-2 font-medium text-right">Users</th>
                 <th className="px-3 py-2 font-medium text-right">Branches</th>
                 <th className="px-3 py-2 font-medium text-right">Devices</th>
                 <th className="px-3 py-2 font-medium">Created</th>
                 <th className="px-3 py-2 font-medium">Actions</th>
+                <th className="px-3 py-2 font-medium">Test cleanup</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800">
@@ -159,6 +175,12 @@ export default async function AdminPlatformPage() {
                 const trialLabel = ent?.trialEndsAt ? fmtDate(ent.trialEndsAt) : "—";
                 const trialRel = ent?.trialEndsAt ? fmtRelative(ent.trialEndsAt) : "";
                 const deviceCount = deviceCountByWorkspace.get(ws.id) ?? 0;
+                const quota = buildQuotaChecks(ent, {
+                  branches: ws._count.branches,
+                  devices: deviceCount,
+                  members: ws._count.members,
+                  playlists: ws._count.playlists,
+                });
                 return (
                   <tr key={ws.id} className="hover:bg-neutral-900/40">
                     <td className="px-3 py-2 align-top">
@@ -192,6 +214,15 @@ export default async function AdminPlatformPage() {
                     <td className="px-3 py-2 align-top font-mono text-[12px] text-neutral-300">
                       {limits}
                     </td>
+                    <td className="px-3 py-2 align-top">
+                      <div className="space-y-1.5">
+                        <PlatformQuotaStatusPill
+                          hasEntitlement={quota.hasEntitlement}
+                          anyOver={quota.anyOver}
+                        />
+                        <PlatformQuotaRowBadges checks={quota.checks} />
+                      </div>
+                    </td>
                     <td className="px-3 py-2 align-top text-right tabular-nums text-neutral-200">
                       {ws._count.members}
                     </td>
@@ -208,8 +239,24 @@ export default async function AdminPlatformPage() {
                       <WorkspaceActions
                         workspaceId={ws.id}
                         workspaceName={ws.name}
+                        workspaceSlug={ws.slug}
+                        ownerEmail={ws.owner.email}
                         status={status ?? null}
                         hasEntitlement={Boolean(ent)}
+                        trialEndsAtLabel={ent?.trialEndsAt ? fmtDate(ent.trialEndsAt) : "—"}
+                        trialEndsAtRelative={ent?.trialEndsAt ? fmtRelative(ent.trialEndsAt) : ""}
+                        trialEndsAtIso={ent?.trialEndsAt ? ent.trialEndsAt.toISOString() : null}
+                      />
+                    </td>
+                    <td className="px-3 py-2 align-top max-w-[140px]">
+                      <WorkspaceTestDeleteButton
+                        workspaceId={ws.id}
+                        name={ws.name}
+                        slug={ws.slug}
+                        ownerId={ws.ownerId}
+                        ownerEmail={ws.owner.email}
+                        adminId={admin.id}
+                        ownerIsSuperAdmin={ws.owner.role === "SUPER_ADMIN"}
                       />
                     </td>
                   </tr>
@@ -221,8 +268,8 @@ export default async function AdminPlatformPage() {
       )}
 
       <p className="pt-2 text-[11px] text-neutral-600">
-        Limits column: Branches / Devices / Users / Playlists (max). Sort: soonest trial expiry
-        first, then newest workspace.
+        Limits: configured max (B/D/U/P). Pilot quota: current vs max — OK or Over limit (B/D/U/P
+        badges; enforcement not active). Sort: soonest trial expiry first, then newest workspace.
       </p>
     </div>
   );

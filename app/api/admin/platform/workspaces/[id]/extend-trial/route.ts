@@ -99,7 +99,7 @@ export async function POST(
         metadata: {
           workspaceName: ws.name,
           days,
-          previousTrialEndsAt: entitlement.trialEndsAt?.toISOString() ?? null,
+          oldTrialEndsAt: entitlement.trialEndsAt?.toISOString() ?? null,
           newTrialEndsAt: newTrialEndsAt.toISOString(),
           statusUnchanged: entitlement.status,
         },

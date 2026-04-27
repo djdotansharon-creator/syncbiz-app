@@ -18,6 +18,8 @@ import { prisma } from "@/lib/prisma";
 import { getSuperAdminOrNull } from "@/lib/auth/guards";
 import { extractClientIp, writePlatformAuditLog } from "@/lib/admin/platform-audit";
 
+const MAX_REASON_LENGTH = 500;
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -30,6 +32,23 @@ export async function POST(
   const { id: workspaceId } = await params;
   if (!workspaceId?.trim()) {
     return NextResponse.json({ error: "Missing workspace id" }, { status: 400 });
+  }
+
+  let reason: string | null = null;
+  try {
+    const body = (await req.json().catch(() => ({}))) as { reason?: unknown };
+    if (typeof body.reason === "string") {
+      const trimmed = body.reason.trim();
+      if (trimmed.length > MAX_REASON_LENGTH) {
+        return NextResponse.json(
+          { error: `Reason must be ${MAX_REASON_LENGTH} characters or less` },
+          { status: 400 },
+        );
+      }
+      reason = trimmed.length > 0 ? trimmed : null;
+    }
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const ipAddress = extractClientIp(req);
@@ -93,6 +112,7 @@ export async function POST(
           restoredTo,
           previousReason: entitlement.suspendedReason,
           suspendedDurationMs,
+          ...(reason ? { adminNote: reason } : {}),
         },
       });
 

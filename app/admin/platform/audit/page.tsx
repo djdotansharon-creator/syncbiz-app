@@ -32,10 +32,14 @@ export const metadata = {
 const KNOWN_ACTIONS = [
   "workspace.suspend",
   "workspace.unsuspend",
+  "workspace.test_delete",
   "entitlement.extend_trial",
   "entitlement.update_limits",
   "user.platform_disable",
   "user.platform_enable",
+  "user.set_password",
+  "user.orphan_delete",
+  "user.safe_account_delete",
 ] as const;
 
 function fmtDateTime(d: Date | null | undefined): string {

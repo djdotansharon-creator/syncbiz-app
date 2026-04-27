@@ -25,7 +25,10 @@ import { notFound } from "next/navigation";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { prisma } from "@/lib/prisma";
 import EntitlementForm from "@/components/admin/entitlement-form";
+import { PlatformQuotaDetailsSection } from "@/components/admin/platform-quota-ui";
 import UserPlatformActions from "@/components/admin/user-platform-actions";
+import WorkspaceTestDeleteButton from "@/components/admin/workspace-test-delete-button";
+import { buildQuotaChecks } from "@/lib/admin/platform-quotas";
 
 export const dynamic = "force-dynamic";
 
@@ -102,11 +105,11 @@ export default async function AdminWorkspaceDetailPage({
   // (e.g. legacy "default"), so we cannot rely on a relation join from
   // UserBranchAssignment → Branch. We fetch the workspace's branches
   // separately and map by id ourselves.
-  const [ws, branches, devices, members, branchAssignments, auditEvents] = await Promise.all([
+  const [ws, branches, devices, members, branchAssignments, auditEvents, playlistCount] = await Promise.all([
     prisma.workspace.findUnique({
       where: { id },
       include: {
-        owner: { select: { id: true, email: true } },
+        owner: { select: { id: true, email: true, role: true } },
         entitlement: true,
       },
     }),
@@ -146,6 +149,7 @@ export default async function AdminWorkspaceDetailPage({
       orderBy: { createdAt: "desc" },
       take: 20,
     }),
+    prisma.playlist.count({ where: { workspaceId: id } }),
   ]);
 
   if (!ws) notFound();
@@ -159,6 +163,12 @@ export default async function AdminWorkspaceDetailPage({
   }
 
   const ent = ws.entitlement;
+  const quota = buildQuotaChecks(ent, {
+    branches: branches.length,
+    devices: devices.length,
+    members: members.length,
+    playlists: playlistCount,
+  });
 
   return (
     <div className="space-y-6">
@@ -172,6 +182,27 @@ export default async function AdminWorkspaceDetailPage({
         <h1 className="mt-1 text-2xl font-semibold">{ws.name}</h1>
         <p className="font-mono text-xs text-neutral-500">{ws.slug}</p>
       </div>
+
+      <section className="rounded-md border border-red-500/30 bg-red-950/20 p-4 text-sm text-neutral-200">
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-red-300">
+          Test / sandbox cleanup
+        </h2>
+        <p className="mb-3 text-xs text-neutral-400">
+          There is no separate DB “archive” for workspaces — use Suspend on the main platform list
+          for a soft business stop, or the button below for a full DB tear-down of this workspace only
+          (see confirmation dialog for cascade + optional owner user removal). This removes database
+          rows; it does not modify playback, desktop, WebSocket, or MPV code.
+        </p>
+        <WorkspaceTestDeleteButton
+          workspaceId={ws.id}
+          name={ws.name}
+          slug={ws.slug}
+          ownerId={ws.ownerId}
+          ownerEmail={ws.owner.email}
+          adminId={admin.id}
+          ownerIsSuperAdmin={ws.owner.role === "SUPER_ADMIN"}
+        />
+      </section>
 
       {/* Workspace card */}
       <section className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4 text-sm">
@@ -265,6 +296,14 @@ export default async function AdminWorkspaceDetailPage({
           </div>
         )}
       </section>
+
+      {quota.hasEntitlement ? (
+        <PlatformQuotaDetailsSection
+          checks={quota.checks}
+          hasEntitlement={quota.hasEntitlement}
+          anyOver={quota.anyOver}
+        />
+      ) : null}
 
       {/* Members */}
       <section className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4">

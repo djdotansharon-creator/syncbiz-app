@@ -4,22 +4,11 @@
  * Per-row Disable / Enable button for users in
  * `/admin/platform/workspaces/[id]`.
  *
- * Calls `/api/admin/platform/users/[id]/disable` or `/enable`. After a
- * successful write, `router.refresh()` re-renders the parent server
- * component so the user's badge and the audit list update.
- *
- * Hard guards (UI mirrors of server-side checks):
- * - SUPER_ADMIN targets render no button (the API would 403).
- * - The current admin's own row renders no button (would 400).
- *
- * "Disable" globally locks login (`User.status = "DISABLED"` is checked
- * in `lib/auth.ts::validateCredentialsAsync` and `getUserByEmail`).
- * The reason field is optional but recommended; it lands in
- * `PlatformAuditLog.metadata.reason`.
+ * Centered modals (no `alert` / `prompt` / `confirm`). Success: toast + `router.refresh()`.
  */
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useCallback, useEffect, useId, useState, useTransition } from "react";
 
 type Props = {
   userId: string;
@@ -29,10 +18,49 @@ type Props = {
   isSelf: boolean;
 };
 
+type ModalKind = "disable" | "enable" | null;
+
 export default function UserPlatformActions({ userId, userEmail, status, isSuperAdmin, isSelf }: Props) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
+  const [activeModal, setActiveModal] = useState<ModalKind>(null);
+  const [disableReason, setDisableReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const titleId = useId();
+
+  const open = (kind: Exclude<ModalKind, null>) => {
+    setError(null);
+    if (kind === "disable") setDisableReason("");
+    setActiveModal(kind);
+  };
+
+  const closeModal = useCallback(() => {
+    if (busy) return;
+    setActiveModal(null);
+    setError(null);
+  }, [busy]);
+
+  useEffect(() => {
+    if (!activeModal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeModal();
+    };
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [activeModal, closeModal]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [toast]);
 
   if (isSuperAdmin) {
     return <span className="text-[11px] text-neutral-500">platform admin</span>;
@@ -42,9 +70,11 @@ export default function UserPlatformActions({ userId, userEmail, status, isSuper
   }
 
   const isDisabled = status === "DISABLED";
+  const disabled = busy || activeModal !== null;
 
-  async function call(action: "disable" | "enable", reason: string | null) {
+  async function call(action: "disable" | "enable", reason: string | null, successMessage: string) {
     setBusy(true);
+    setError(null);
     try {
       const res = await fetch(
         `/api/admin/platform/users/${encodeURIComponent(userId)}/${action}`,
@@ -63,57 +93,154 @@ export default function UserPlatformActions({ userId, userEmail, status, isSuper
             : null) ?? `HTTP ${res.status}`;
         throw new Error(msg);
       }
+      setActiveModal(null);
+      setDisableReason("");
+      setToast(successMessage);
       startTransition(() => {
         router.refresh();
       });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      alert(`Failed to ${action} ${userEmail}:\n${msg}`);
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
     } finally {
       setBusy(false);
     }
   }
 
-  function onDisable() {
-    const reason = window.prompt(
-      `Disable platform login for "${userEmail}"?\n\n` +
-        `This blocks login everywhere. Existing sessions will resolve to logged-out on next request.\n\n` +
-        `Optional reason (visible in audit log):`,
-      "",
-    );
-    if (reason === null) return;
-    void call("disable", reason.trim() || null);
-  }
-
-  function onEnable() {
-    const ok = window.confirm(`Re-enable platform login for "${userEmail}"?`);
-    if (!ok) return;
-    void call("enable", null);
-  }
-
-  const disabled = isPending || busy;
-
-  if (isDisabled) {
-    return (
-      <button
-        type="button"
-        onClick={onEnable}
-        disabled={disabled}
-        className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {busy ? "…" : "Enable"}
-      </button>
-    );
-  }
-
   return (
-    <button
-      type="button"
-      onClick={onDisable}
-      disabled={disabled}
-      className="rounded border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[11px] font-medium text-rose-300 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      {busy ? "…" : "Disable"}
-    </button>
+    <div>
+      {isDisabled ? (
+        <button
+          type="button"
+          onClick={() => open("enable")}
+          disabled={disabled}
+          className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy && activeModal === "enable" ? "…" : "Enable"}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => open("disable")}
+          disabled={disabled}
+          className="rounded border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[11px] font-medium text-rose-300 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy && activeModal === "disable" ? "…" : "Disable"}
+        </button>
+      )}
+
+      {toast ? (
+        <div
+          role="status"
+          className="fixed right-4 top-4 z-[60] max-w-sm rounded border border-emerald-500/40 bg-emerald-950/95 px-4 py-2 text-sm text-emerald-100 shadow-lg"
+        >
+          {toast}
+        </div>
+      ) : null}
+
+      {activeModal ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+        >
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/60"
+            aria-label="Close"
+            onClick={closeModal}
+          />
+          <div
+            className="relative w-full max-w-md rounded-lg border border-neutral-700 bg-neutral-950 p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {activeModal === "disable" ? (
+              <>
+                <h2 id={titleId} className="text-base font-semibold text-neutral-100">
+                  Disable platform login
+                </h2>
+                <p className="mt-2 text-sm text-neutral-400">{userEmail}</p>
+                <p className="mt-2 text-xs text-neutral-500">
+                  This blocks login everywhere. Existing sessions become logged out on the next
+                  request.
+                </p>
+                <label className="mt-3 block text-xs font-medium text-neutral-400">
+                  Reason <span className="text-neutral-600">(optional)</span>
+                </label>
+                <textarea
+                  className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-200"
+                  rows={2}
+                  value={disableReason}
+                  onChange={(e) => setDisableReason(e.target.value)}
+                  placeholder="Visible in the audit log"
+                />
+                {error ? (
+                  <p
+                    className="mt-2 rounded border border-rose-500/40 bg-rose-950/50 px-3 py-2 text-sm text-rose-200"
+                    role="alert"
+                  >
+                    {error}
+                  </p>
+                ) : null}
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="rounded border border-neutral-600 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"
+                    onClick={closeModal}
+                    disabled={busy}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-rose-500/40 bg-rose-600/20 px-3 py-1.5 text-sm font-medium text-rose-100 hover:bg-rose-600/30 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() =>
+                      void call("disable", disableReason.trim() || null, `Disabled login for ${userEmail}.`)
+                    }
+                    disabled={busy}
+                  >
+                    {busy ? "Working…" : "Disable"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 id={titleId} className="text-base font-semibold text-neutral-100">
+                  Re-enable platform login
+                </h2>
+                <p className="mt-2 text-sm text-neutral-300">{userEmail}</p>
+                {error ? (
+                  <p
+                    className="mt-2 rounded border border-rose-500/40 bg-rose-950/50 px-3 py-2 text-sm text-rose-200"
+                    role="alert"
+                  >
+                    {error}
+                  </p>
+                ) : null}
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="rounded border border-neutral-600 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"
+                    onClick={closeModal}
+                    disabled={busy}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-emerald-500/40 bg-emerald-600/20 px-3 py-1.5 text-sm font-medium text-emerald-100 hover:bg-emerald-600/30 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => void call("enable", null, `Re-enabled login for ${userEmail}.`)}
+                    disabled={busy}
+                  >
+                    {busy ? "Working…" : "Enable"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }

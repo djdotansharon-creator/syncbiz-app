@@ -25,10 +25,14 @@ import type { Prisma } from "@prisma/client";
 export type PlatformAuditAction =
   | "workspace.suspend"
   | "workspace.unsuspend"
+  | "workspace.test_delete"
   | "entitlement.extend_trial"
   | "entitlement.update_limits"
   | "user.platform_disable"
-  | "user.platform_enable";
+  | "user.platform_enable"
+  | "user.set_password"
+  | "user.orphan_delete"
+  | "user.safe_account_delete";
 
 export type PlatformAuditInput = {
   action: PlatformAuditAction;
