@@ -1,0 +1,31 @@
+{
+  "aliasMergeByLabel": {
+    "HOUSE - Latin": "latin-house",
+    "HOUSE - Deep & Sexy": "deep-house",
+    "HOUSE - Nu Disco": "disco-house",
+    "JAZZ - Smooth": "smooth-jazz",
+    "JAZZ - Swing": "swing",
+    "JAZZ - General": "jazz",
+    "MTV - Hip Hop": "hip-hop",
+    "MTV - Hip Hop Classics": "hip-hop",
+    "BRAZIL - Bossa Nova": "bossa-nova",
+    "BOSSA NOVA - Easy": "bossa-nova",
+    "BOSSA NOVA - General": "bossa-nova",
+    "FUNK - Easy": "funk",
+    "FUNK - General": "funk",
+    "FUNK - Nu": "funk",
+    "REGGAE - Easy": "reggae-dub",
+    "REGGAE - General": "reggae-dub",
+    "SOUL - Easy": "soul",
+    "SOUL - General": "soul",
+    "FRENCH - Chansons": "french-chanson",
+    "FRENCH - General": "french-chanson",
+    "FRENCH - 40's": "french-chanson"
+  },
+  "hebrewLabelSlugOverrides": {
+    "ישראלי - כללי": "playlist-pro-israeli-kelali",
+    "ישראלי - שקט": "playlist-pro-israeli-sheket",
+    "ישראלי - רגוע": "playlist-pro-israeli-regua",
+    "ישראלי - רוק 1990": "playlist-pro-israeli-rock-1990"
+  }
+}

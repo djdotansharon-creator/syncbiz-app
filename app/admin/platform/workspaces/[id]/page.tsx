@@ -6,14 +6,16 @@
  * place where the platform owner can manage pilot limits and toggle
  * user access without going to Prisma Studio.
  *
- * Sections:
- *  1. Workspace card    — name, slug, owner, dates.
- *  2. Entitlement card  — status, plan, trial, limits, notes + Edit form.
- *  3. Members table     — email, role, branches, status, last login,
- *                         per-row Disable/Enable platform action.
- *  4. Devices table     — read-only, includes online/offline state.
- *  5. Recent admin log  — last 20 PlatformAuditLog rows scoped to this
- *                         workspace (suspend/unsuspend/extend/etc.).
+ * Sections (visual order):
+ *  1. Page header       — back link, workspace name, slug.
+ *  2. Workspace card    — owner email, created/updated dates.
+ *  3. Members table     — email, role, branches, status, platform actions.
+ *  4. Entitlement card  — status, plan, trial, limits, notes + Edit form.
+ *  5. Pilot quota panel — resource usage vs limits (when entitlement exists).
+ *  6. Devices table     — read-only; branch column surfaces branch linkage.
+ *  7. Business profile  — WorkspaceBusinessProfile form (Stage 1).
+ *  8. Recent admin log  — last 20 PlatformAuditLog rows for this workspace.
+ *  9. Test / sandbox cleanup — destructive workspace tear-down (bottom).
  *
  * Auth: parent layout enforces `requireSuperAdmin()`; we re-call here
  * for defense-in-depth and to grab the actor's id (used to mark the
@@ -31,6 +33,8 @@ import PlatformWorkspaceMemberRemoval from "@/components/admin/platform-workspac
 import WorkspaceTestDeleteButton from "@/components/admin/workspace-test-delete-button";
 import { buildQuotaChecks } from "@/lib/admin/platform-quotas";
 import { platformRemovalAllowedPreview } from "@/lib/user-store";
+import { WorkspaceBusinessProfileForm } from "@/components/workspace-business-profile-form";
+import { getWorkspaceBusinessProfileJson } from "@/lib/workspace-business-profile";
 
 export const dynamic = "force-dynamic";
 
@@ -107,7 +111,8 @@ export default async function AdminWorkspaceDetailPage({
   // (e.g. legacy "default"), so we cannot rely on a relation join from
   // UserBranchAssignment → Branch. We fetch the workspace's branches
   // separately and map by id ourselves.
-  const [ws, branches, devices, members, branchAssignments, auditEvents, playlistCount] = await Promise.all([
+  const [ws, branches, devices, members, branchAssignments, auditEvents, playlistCount, businessProfile] =
+    await Promise.all([
     prisma.workspace.findUnique({
       where: { id },
       include: {
@@ -152,6 +157,7 @@ export default async function AdminWorkspaceDetailPage({
       take: 20,
     }),
     prisma.playlist.count({ where: { workspaceId: id } }),
+    getWorkspaceBusinessProfileJson(id),
   ]);
 
   if (!ws) notFound();
@@ -185,27 +191,6 @@ export default async function AdminWorkspaceDetailPage({
         <p className="font-mono text-xs text-neutral-500">{ws.slug}</p>
       </div>
 
-      <section className="rounded-md border border-red-500/30 bg-red-950/20 p-4 text-sm text-neutral-200">
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-red-300">
-          Test / sandbox cleanup
-        </h2>
-        <p className="mb-3 text-xs text-neutral-400">
-          There is no separate DB “archive” for workspaces — use Suspend on the main platform list
-          for a soft business stop, or the button below for a full DB tear-down of this workspace only
-          (see confirmation dialog for cascade + optional owner user removal). This removes database
-          rows; it does not modify playback, desktop, WebSocket, or MPV code.
-        </p>
-        <WorkspaceTestDeleteButton
-          workspaceId={ws.id}
-          name={ws.name}
-          slug={ws.slug}
-          ownerId={ws.ownerId}
-          ownerEmail={ws.owner.email}
-          adminId={admin.id}
-          ownerIsSuperAdmin={ws.owner.role === "SUPER_ADMIN"}
-        />
-      </section>
-
       {/* Workspace card */}
       <section className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4 text-sm">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-neutral-400">
@@ -217,95 +202,6 @@ export default async function AdminWorkspaceDetailPage({
           <Field label="Updated" value={fmtDateTime(ws.updatedAt)} />
         </dl>
       </section>
-
-      {/* Entitlement card */}
-      <section className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4 text-sm">
-        <div className="mb-3 flex items-baseline justify-between gap-4">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-            Entitlement
-          </h2>
-          <span className="text-[11px] text-neutral-500">
-            Suspend/Unsuspend/Extend trial → use the Actions column on the workspaces list.
-          </span>
-        </div>
-
-        {!ent ? (
-          <div className="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200">
-            No entitlement row. Run{" "}
-            <code className="rounded bg-neutral-900 px-1 py-0.5 text-[12px]">
-              node scripts/backfill-workspace-entitlements.mjs
-            </code>{" "}
-            then refresh.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <Field
-                label="Status"
-                value={
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${statusClass(
-                      ent.status,
-                    )}`}
-                  >
-                    {ent.status}
-                  </span>
-                }
-              />
-              <Field label="Plan" value={ent.planCode} />
-              <Field
-                label="Trial ends"
-                value={
-                  <>
-                    <div>{fmtDate(ent.trialEndsAt)}</div>
-                    <div className="text-[11px] text-neutral-500">{fmtRelative(ent.trialEndsAt)}</div>
-                  </>
-                }
-              />
-              <Field
-                label="Limits B/D/U/P"
-                value={
-                  <span className="font-mono">
-                    {ent.maxBranches}/{ent.maxDevices}/{ent.maxUsers}/{ent.maxPlaylists}
-                  </span>
-                }
-              />
-              {ent.suspendedAt ? (
-                <>
-                  <Field label="Suspended at" value={fmtDateTime(ent.suspendedAt)} />
-                  <div className="md:col-span-3">
-                    <Field label="Suspended reason" value={ent.suspendedReason ?? "—"} />
-                  </div>
-                </>
-              ) : null}
-              <div className="md:col-span-4">
-                <Field label="Notes" value={ent.notes ?? "—"} multiline />
-              </div>
-            </dl>
-
-            <EntitlementForm
-              workspaceId={ws.id}
-              workspaceName={ws.name}
-              initial={{
-                maxBranches: ent.maxBranches,
-                maxDevices: ent.maxDevices,
-                maxUsers: ent.maxUsers,
-                maxPlaylists: ent.maxPlaylists,
-                planCode: ent.planCode,
-                notes: ent.notes,
-              }}
-            />
-          </div>
-        )}
-      </section>
-
-      {quota.hasEntitlement ? (
-        <PlatformQuotaDetailsSection
-          checks={quota.checks}
-          hasEntitlement={quota.hasEntitlement}
-          anyOver={quota.anyOver}
-        />
-      ) : null}
 
       {/* Members */}
       <section className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4">
@@ -417,6 +313,95 @@ export default async function AdminWorkspaceDetailPage({
         )}
       </section>
 
+      {/* Entitlement card */}
+      <section className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4 text-sm">
+        <div className="mb-3 flex items-baseline justify-between gap-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+            Entitlement
+          </h2>
+          <span className="text-[11px] text-neutral-500">
+            Suspend/Unsuspend/Extend trial → use the Actions column on the workspaces list.
+          </span>
+        </div>
+
+        {!ent ? (
+          <div className="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200">
+            No entitlement row. Run{" "}
+            <code className="rounded bg-neutral-900 px-1 py-0.5 text-[12px]">
+              node scripts/backfill-workspace-entitlements.mjs
+            </code>{" "}
+            then refresh.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <Field
+                label="Status"
+                value={
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${statusClass(
+                      ent.status,
+                    )}`}
+                  >
+                    {ent.status}
+                  </span>
+                }
+              />
+              <Field label="Plan" value={ent.planCode} />
+              <Field
+                label="Trial ends"
+                value={
+                  <>
+                    <div>{fmtDate(ent.trialEndsAt)}</div>
+                    <div className="text-[11px] text-neutral-500">{fmtRelative(ent.trialEndsAt)}</div>
+                  </>
+                }
+              />
+              <Field
+                label="Limits B/D/U/P"
+                value={
+                  <span className="font-mono">
+                    {ent.maxBranches}/{ent.maxDevices}/{ent.maxUsers}/{ent.maxPlaylists}
+                  </span>
+                }
+              />
+              {ent.suspendedAt ? (
+                <>
+                  <Field label="Suspended at" value={fmtDateTime(ent.suspendedAt)} />
+                  <div className="md:col-span-3">
+                    <Field label="Suspended reason" value={ent.suspendedReason ?? "—"} />
+                  </div>
+                </>
+              ) : null}
+              <div className="md:col-span-4">
+                <Field label="Notes" value={ent.notes ?? "—"} multiline />
+              </div>
+            </dl>
+
+            <EntitlementForm
+              workspaceId={ws.id}
+              workspaceName={ws.name}
+              initial={{
+                maxBranches: ent.maxBranches,
+                maxDevices: ent.maxDevices,
+                maxUsers: ent.maxUsers,
+                maxPlaylists: ent.maxPlaylists,
+                planCode: ent.planCode,
+                notes: ent.notes,
+              }}
+            />
+          </div>
+        )}
+      </section>
+
+      {quota.hasEntitlement ? (
+        <PlatformQuotaDetailsSection
+          checks={quota.checks}
+          hasEntitlement={quota.hasEntitlement}
+          anyOver={quota.anyOver}
+        />
+      ) : null}
+
       {/* Devices */}
       <section className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-neutral-400">
@@ -479,6 +464,28 @@ export default async function AdminWorkspaceDetailPage({
         )}
       </section>
 
+      {/* Business profile — outer card matches Devices / Recent; form has no duplicate border */}
+      <section className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4 text-sm">
+        <div className="mb-5 space-y-1.5">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+            Business profile
+          </h2>
+          <p className="max-w-3xl text-[12px] leading-relaxed text-neutral-500">
+            Venue identity for music and brand context—helps future personalization. Branch-level labels stay on branches.
+          </p>
+          <p className="font-mono text-[11px] text-neutral-600">
+            {ws.name} · {ws.slug}
+          </p>
+        </div>
+        <WorkspaceBusinessProfileForm
+          workspaceId={ws.id}
+          initialProfile={businessProfile}
+          variant="admin"
+          canEdit
+          embedInPlatformAdminSection
+        />
+      </section>
+
       {/* Recent platform audit events for this workspace */}
       <section className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4">
         <div className="mb-3 flex items-baseline justify-between gap-4">
@@ -526,6 +533,27 @@ export default async function AdminWorkspaceDetailPage({
             </table>
           </div>
         )}
+      </section>
+
+      <section className="rounded-md border border-red-500/30 bg-red-950/20 p-4 text-sm text-neutral-200">
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-red-300">
+          Test / sandbox cleanup
+        </h2>
+        <p className="mb-3 text-xs text-neutral-400">
+          There is no separate DB “archive” for workspaces — use Suspend on the main platform list
+          for a soft business stop, or the button below for a full DB tear-down of this workspace only
+          (see confirmation dialog for cascade + optional owner user removal). This removes database
+          rows; it does not modify playback, desktop, WebSocket, or MPV code.
+        </p>
+        <WorkspaceTestDeleteButton
+          workspaceId={ws.id}
+          name={ws.name}
+          slug={ws.slug}
+          ownerId={ws.ownerId}
+          ownerEmail={ws.owner.email}
+          adminId={admin.id}
+          ownerIsSuperAdmin={ws.owner.role === "SUPER_ADMIN"}
+        />
       </section>
     </div>
   );

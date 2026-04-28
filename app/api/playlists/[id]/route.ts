@@ -18,7 +18,13 @@ import {
   type PlaylistMoodPhase15,
   type PlaylistEnergyLevelPhase15,
   type ScheduleContributorBlock,
+  type Playlist,
 } from "@/lib/playlist-types";
+import { getCurrentPlatformUser } from "@/lib/auth/guards";
+import {
+  parsePublicationScope,
+  publicationScopeRequiresPlatformAdmin,
+} from "@/lib/playlist-publication-scope";
 
 const VALID_TYPES: PlaylistType[] = ["soundcloud", "youtube", "spotify", "winamp", "local", "stream-url"];
 
@@ -52,6 +58,9 @@ export async function PUT(
   if (!g.allow) {
     return NextResponse.json({ error: g.message }, { status: g.httpStatus });
   }
+  if (!existing) {
+    return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
+  }
 
   try {
     const body = (await req.json()) as Record<string, unknown> & Partial<{
@@ -70,6 +79,7 @@ export async function PUT(
       subGenres?: unknown;
       mood?: string | null;
       energyLevel?: string | null;
+      publicationScope?: unknown;
     }>;
     if ("playlistOwnershipScope" in body) {
       return NextResponse.json(
@@ -77,7 +87,7 @@ export async function PUT(
         { status: 400 },
       );
     }
-    const updates: Partial<typeof existing> = {};
+    const updates: Partial<Playlist> = {};
 
     if (body.name != null) updates.name = String(body.name).trim();
     if (body.genre != null) updates.genre = String(body.genre).trim();
@@ -223,6 +233,38 @@ export async function PUT(
       } else {
         updates.energyLevel = raw as PlaylistEnergyLevelPhase15;
       }
+    }
+
+    if ("publicationScope" in body) {
+      const parsed = parsePublicationScope(body.publicationScope);
+      if (!parsed) {
+        return NextResponse.json({ error: "publicationScope must be a valid PlaylistPublicationScope value" }, { status: 400 });
+      }
+      const platformUser = await getCurrentPlatformUser();
+      const isPlatformSuperAdmin = platformUser?.role === "SUPER_ADMIN";
+
+      if (publicationScopeRequiresPlatformAdmin(parsed) && !isPlatformSuperAdmin) {
+        return NextResponse.json(
+          {
+            error:
+              "Only SyncBiz platform admins may set Official SyncBiz or Template publication scope.",
+          },
+          { status: 403 },
+        );
+      }
+
+      const currentScope = existing.publicationScope ?? "PRIVATE";
+      if (publicationScopeRequiresPlatformAdmin(currentScope) && !isPlatformSuperAdmin && parsed !== currentScope) {
+        return NextResponse.json(
+          {
+            error:
+              "This playlist uses a platform-managed publication scope; only platform admins may change it.",
+          },
+          { status: 403 },
+        );
+      }
+
+      updates.publicationScope = parsed;
     }
 
     const updated = await updatePlaylist(id, updates);

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { getAccessType, getAssignedBranchIds, getTenantById, listEligibleWorkspacesForUser } from "@/lib/user-store";
 
@@ -14,6 +15,10 @@ export async function GET() {
     listEligibleWorkspacesForUser(user.id),
   ]);
   const tenant = await getTenantById(user.tenantId);
+  const platformRow = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { role: true },
+  });
   return NextResponse.json({
     email: user.email,
     userId: user.id,
@@ -24,5 +29,6 @@ export async function GET() {
     workspaces,
     accessType,
     branchIds,
+    isPlatformSuperAdmin: platformRow?.role === "SUPER_ADMIN",
   });
 }

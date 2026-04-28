@@ -6,6 +6,7 @@ import {
   type MetadataSubGenreValue,
   type MetadataUseCaseValue,
 } from "./playlist-metadata-registry";
+import type { PlaylistPublicationScope } from "./playlist-publication-scope";
 
 /** Allowed use-case keys for playlist JSON (see `playlist-metadata-registry.ts` for labels). */
 export type PlaylistUseCasePhase1 = MetadataUseCaseValue;
@@ -124,6 +125,11 @@ export type Playlist = {
    * whose leaf `trackIds` partition (or cover) persisted `tracks`. Playback still uses `tracks` + `order` only.
    */
   scheduleContributorBlocks?: ScheduleContributorBlock[];
+  /**
+   * Stage 2 — opt-in discovery scope beyond the workspace (default PRIVATE).
+   * Independent of `playlistOwnershipScope` (branch vs personal library bucket).
+   */
+  publicationScope?: PlaylistPublicationScope;
 };
 
 /** Effective use cases: prefer `useCases` when non-empty; else legacy single `useCase`. */

@@ -86,6 +86,42 @@ enum BusinessType {
   OTHER
 }
 
+/// Workspace-level energy preference for Business Profile (Stage 1).
+enum WorkspaceEnergyLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+/// Stage 2 — playlist discovery beyond the owning workspace (opt-in; default private).
+enum PlaylistPublicationScope {
+  PRIVATE
+  LINK_SHARED
+  COMMUNITY_PUBLISHED
+  TEMPLATE
+  OFFICIAL_SYNCBIZ
+  FORK_REMIX
+}
+
+/// Stage 3 — Music Taxonomy Dictionary (platform-wide controlled vocabulary).
+enum MusicTaxonomyCategory {
+  PLAYBACK_CONTEXT
+  VIBE_ENERGY
+  MAIN_SOUND_GENRE
+  STYLE_TAGS
+  ISRAELI_SPECIALS
+  TECHNICAL_TAGS
+  BUSINESS_FIT
+  DAYPART_FIT
+}
+
+enum MusicTaxonomyTagStatus {
+  ACTIVE
+  DEPRECATED
+  HIDDEN
+  MERGED
+}
+
 enum AddonType {
   AI_ANNOUNCEMENTS
   MULTI_ZONE
@@ -250,7 +286,39 @@ model Workspace {
   announcementChannel AnnouncementChannel?
   platformAuditEvents PlatformAuditLog[]     @relation("PlatformAuditTarget")
 
+  /// Business / music identity for recommendations & catalog intelligence (Stage 1).
+  /// Default matching context for the workspace; Branch.businessType remains per-branch and is not auto-synced here.
+  businessProfile WorkspaceBusinessProfile?
+
   @@index([ownerId])
+}
+
+/// 1:1 business & music identity for a workspace (source of truth for future tagging / recommendations).
+/// Does not replace or sync Branch.businessType — branches may later override for branch-specific context.
+model WorkspaceBusinessProfile {
+  id                    String              @id @default(uuid())
+  workspaceId           String              @unique
+  primaryBusinessType   BusinessType        @default(OTHER)
+  cuisineOrConcept      String?
+  conceptTags           String[]            @default([])
+  countryCode           String?
+  cultureNotes          String?
+  primaryLanguage       String?
+  additionalLanguages   String[]            @default([])
+  audienceDescriptors   String[]            @default([])
+  desiredMoodNotes      String?
+  energyLevel           WorkspaceEnergyLevel?
+  openingHoursSummary   String?
+  openingHoursStructured Json?
+  daypartPreferences    Json?
+  preferredStyleHints   String[]            @default([])
+  blockedStyleHints     String[]            @default([])
+  adminNotes            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 model WorkspaceMember {
@@ -314,6 +382,7 @@ model Branch {
   city          String       @default("")
   country       String       @default("")
   status        String       @default("active")
+  /// Per-location business label; not auto-synced from WorkspaceBusinessProfile (may become branch-level override vs workspace defaults later).
   businessType  BusinessType @default(OTHER)
   devicesOnline Int          @default(0)
   devicesTotal  Int          @default(0)
@@ -414,6 +483,7 @@ model Playlist {
   scheduleContributorBlocks Json?
   isShared                  Boolean  @default(false)
   sharedById                String?
+  publicationScope          PlaylistPublicationScope @default(PRIVATE)
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
@@ -425,6 +495,7 @@ model Playlist {
   @@index([workspaceId])
   @@index([isShared])
   @@index([branchId])
+  @@index([publicationScope])
 }
 
 model PlaylistItem {
@@ -485,6 +556,37 @@ model Schedule {
 
   @@index([workspaceId])
   @@index([branchId])
+}
+
+// ─────────────────────────────────────────────
+// MUSIC TAXONOMY DICTIONARY (Stage 3) — global, no tenancy
+// ─────────────────────────────────────────────
+
+model MusicTaxonomyTag {
+  id                  String                   @id @default(uuid())
+  slug                String                   @unique
+  category            MusicTaxonomyCategory
+  labelEn             String
+  labelHe             String
+  descriptionHeUser   String?                  @db.Text
+  descriptionAi       String?                  @db.Text
+  aliases             String[]                 @default([])
+  status              MusicTaxonomyTagStatus   @default(ACTIVE)
+  parentId            String?
+  mergedIntoId        String?
+  sortOrder           Int                      @default(0)
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  parent     MusicTaxonomyTag?  @relation("TaxonomyParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children   MusicTaxonomyTag[] @relation("TaxonomyParent")
+  mergedInto MusicTaxonomyTag?  @relation("TaxonomyMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom MusicTaxonomyTag[] @relation("TaxonomyMerge")
+
+  @@index([category])
+  @@index([status])
+  @@index([parentId])
+  @@index([mergedIntoId])
 }
 
 // ─────────────────────────────────────────────

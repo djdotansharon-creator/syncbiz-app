@@ -2,8 +2,24 @@ import { ClearPlaybackCacheButton } from "@/components/clear-playback-cache-butt
 import { DeviceModeSettingsSwitch } from "@/components/device-mode-settings-switch";
 import { MixDurationSetting } from "@/components/mix-duration-setting";
 import { SettingsPreferencesControls } from "@/components/settings-preferences-controls";
+import { WorkspaceBusinessProfileForm } from "@/components/workspace-business-profile-form";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
+import {
+  getWorkspaceBusinessProfileJson,
+  sanitizeBusinessProfileForTenant,
+} from "@/lib/workspace-business-profile";
+import { getTenantRole } from "@/lib/user-store";
+import { redirect } from "next/navigation";
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const user = await getCurrentUserFromCookies();
+  if (!user) redirect("/login?from=/settings");
+
+  const role = await getTenantRole(user.id, user.tenantId);
+  const canEdit = role === "TENANT_OWNER" || role === "TENANT_ADMIN";
+  const rawProfile = await getWorkspaceBusinessProfileJson(user.tenantId);
+  const businessProfile = sanitizeBusinessProfileForTenant(rawProfile);
+
   return (
     <div className="space-y-8">
       <div>
@@ -12,6 +28,13 @@ export default function SettingsPage() {
           Account and playback preferences.
         </p>
       </div>
+
+      <WorkspaceBusinessProfileForm
+        workspaceId={user.tenantId}
+        initialProfile={businessProfile}
+        variant="tenant"
+        canEdit={canEdit}
+      />
 
       <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
         <h2 className="text-sm font-semibold text-slate-50">Preferences</h2>
@@ -31,7 +54,7 @@ export default function SettingsPage() {
         <div className="mt-4">
           <DeviceModeSettingsSwitch />
         </div>
-        <div className="mt-6 pt-6 border-t border-slate-800/60">
+        <div className="mt-6 border-t border-slate-800/60 pt-6">
           <h3 className="text-xs font-semibold text-slate-300">Mix / crossfade</h3>
           <p className="mt-0.5 text-[11px] text-slate-500">
             Crossfade length when AutoMix is on. Direct audio URL playback only.

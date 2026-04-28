@@ -11,7 +11,10 @@
     "desktop:shell": "npm run build:electron-web && npm run build --prefix desktop && node desktop/scripts/run-electron-with-staged-web.cjs",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "music-taxonomy:seed": "npx tsx prisma/seed.ts",
+    "music-taxonomy:import-xlsx": "node scripts/import-music-taxonomy-xlsx.cjs",
+    "music-taxonomy:enrich-playlist-pro": "node scripts/build-playlist-pro-enrichment-from-pdf.cjs"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -32,8 +35,14 @@
     "concurrently": "^9.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "pdf-parse": "^2.4.5",
     "prisma": "^5.22.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "xlsx": "^0.18.5"
+  },
+  "prisma": {
+    "seed": "npx tsx prisma/seed.ts"
   }
 }

@@ -26,17 +26,71 @@ async function resolveWorkspaceId(id: string | undefined): Promise<string | null
 
 // ─── Mapping helpers ─────────────────────────────────────────────────────────
 
+/** Stable PlaylistTrack.id: prefer trackId; legacy rows used CatalogItem id when trackId was empty. */
+function playlistTrackIdFromItem(item: {
+  id: string;
+  trackId: string;
+  catalogId: string | null;
+}): string {
+  const tid = (item.trackId ?? "").trim();
+  if (tid) return tid;
+  const cid = (item.catalogId ?? "").trim();
+  if (cid) return cid;
+  return item.id;
+}
+
+/**
+ * Future backfill (not implemented): rows imported before this fix may have `PlaylistItem.catalogId` null
+ * while `CatalogItem` exists for the same URL. Safe approach: for each `PlaylistItem` with null catalogId,
+ * compute `normalizeCatalogUrlKey(url, trackType)`, call `findOrCreateCatalogItem`, then UPDATE `PlaylistItem`
+ * SET catalogId = returned id WHERE id = row.id. Idempotent if catalog rows already exist; non-destructive.
+ */
+
+/** Maps PlaylistTrack.catalogItemId ↔ PlaylistItem.catalogId (FK to CatalogItem). */
+function catalogIdFromTrack(t: PlaylistTrack): string | null {
+  const v = (t.catalogItemId ?? "").trim();
+  return v || null;
+}
+
+/**
+ * Drops `catalogItemId` when it does not reference an existing CatalogItem row.
+ * Prevents Prisma FK errors on playlist save if a catalog row was removed or IDs diverged.
+ */
+async function stripInvalidCatalogItemIds(tracks: PlaylistTrack[]): Promise<PlaylistTrack[]> {
+  const ids = [...new Set(tracks.map((t) => (t.catalogItemId ?? "").trim()).filter(Boolean))];
+  if (ids.length === 0) return tracks;
+
+  const existing = await prisma.catalogItem.findMany({
+    where: { id: { in: ids } },
+    select: { id: true },
+  });
+  const ok = new Set(existing.map((r) => r.id));
+
+  return tracks.map((t) => {
+    const cid = (t.catalogItemId ?? "").trim();
+    if (!cid || ok.has(cid)) return t;
+    const { catalogItemId: _drop, ...rest } = t;
+    return rest as PlaylistTrack;
+  });
+}
+
 function rowToPlaylist(row: PlaylistRow): Playlist {
   const tracks: PlaylistTrack[] = row.items
     .slice()
     .sort((a, b) => a.position - b.position)
-    .map((item) => ({
-      id: item.trackId || item.catalogId || "",
-      name: item.name,
-      type: item.trackType as Playlist["type"],
-      url: item.url,
-      cover: item.cover ?? undefined,
-    }));
+    .map((item) => {
+      const track: PlaylistTrack = {
+        id: playlistTrackIdFromItem(item),
+        name: item.name,
+        type: item.trackType as Playlist["type"],
+        url: item.url,
+        cover: item.cover ?? undefined,
+      };
+      if (item.catalogId) {
+        track.catalogItemId = item.catalogId;
+      }
+      return track;
+    });
 
   return {
     id: row.id,
@@ -68,6 +122,7 @@ function rowToPlaylist(row: PlaylistRow): Playlist {
       : undefined,
     isShared: row.isShared,
     sharedById: row.sharedById ?? undefined,
+    publicationScope: row.publicationScope as Playlist["publicationScope"],
   } as Playlist;
 }
 
@@ -110,7 +165,8 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
 
   await enforceCanAddPlaylist(wsId);
 
-  const tracks = normalized.tracks ?? [];
+  const tracksRaw = normalized.tracks ?? [];
+  const tracks = await stripInvalidCatalogItemIds(tracksRaw);
   const order = normalized.order ?? tracks.map((t) => t.id);
 
   const row = await prisma.playlist.create({
@@ -143,6 +199,7 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
       items: {
         create: tracks.map((t, idx) => ({
           trackId: t.id,
+          catalogId: catalogIdFromTrack(t),
           name: t.name,
           trackType: t.type,
           url: t.url,
@@ -178,6 +235,9 @@ export async function updatePlaylist(id: string, data: Partial<Playlist>): Promi
   if (data.subGenres !== undefined) updateData.subGenres = data.subGenres ?? [];
   if (data.mood !== undefined) updateData.mood = data.mood ?? null;
   if (data.energyLevel !== undefined) updateData.energyLevel = data.energyLevel ?? null;
+  if (data.publicationScope !== undefined) {
+    updateData.publicationScope = data.publicationScope as import("@prisma/client").PlaylistPublicationScope;
+  }
   if ("scheduleContributorBlocks" in data) {
     updateData.scheduleContributorBlocks = data.scheduleContributorBlocks
       ? (data.scheduleContributorBlocks as object)
@@ -185,13 +245,14 @@ export async function updatePlaylist(id: string, data: Partial<Playlist>): Promi
   }
 
   if (data.tracks !== undefined) {
-    const tracks = data.tracks;
+    const tracks = await stripInvalidCatalogItemIds(data.tracks);
     const order = data.order ?? tracks.map((t) => t.id);
     updateData.trackOrder = order;
     updateData.items = {
       deleteMany: {},
       create: tracks.map((t, idx) => ({
         trackId: t.id,
+        catalogId: catalogIdFromTrack(t),
         name: t.name,
         trackType: t.type,
         url: t.url,

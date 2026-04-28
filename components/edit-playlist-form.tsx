@@ -21,6 +21,20 @@ import {
 } from "@/lib/playlist-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { getPlaylistsLocal } from "@/lib/playlists-local-store";
+import {
+  PLAYLIST_PUBLICATION_SCOPE_UI,
+  PLAYLIST_PUBLICATION_SCOPES,
+  publicationScopeRequiresPlatformAdmin,
+  type PlaylistPublicationScope,
+} from "@/lib/playlist-publication-scope";
+
+/** Publication scopes editable by workspace users without platform SUPER_ADMIN. */
+const WORKSPACE_PUBLICATION_SCOPES: PlaylistPublicationScope[] = [
+  "PRIVATE",
+  "LINK_SHARED",
+  "COMMUNITY_PUBLISHED",
+  "FORK_REMIX",
+];
 
 function playlistTypeLabel(t: PlaylistType): string {
   const labels: Record<PlaylistType, string> = {
@@ -90,6 +104,21 @@ export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = 
   const [subGenreTags, setSubGenreTags] = useState<string[]>([]);
   const [mood, setMood] = useState<string>("");
   const [energyLevel, setEnergyLevel] = useState<string>("");
+  const [publicationScope, setPublicationScope] = useState<PlaylistPublicationScope>("PRIVATE");
+  const [platformSuperAdmin, setPlatformSuperAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((data: { isPlatformSuperAdmin?: boolean }) => {
+        if (!cancelled) setPlatformSuperAdmin(Boolean(data.isPlatformSuperAdmin));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +142,7 @@ export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = 
         setSubGenreTags([...(data.subGenres ?? [])].sort());
         setMood(data.mood ?? "");
         setEnergyLevel(data.energyLevel ?? "");
+        setPublicationScope(data.publicationScope ?? "PRIVATE");
         const tracksList = getPlaylistTracks(data);
         setTracks(tracksList);
         setOrder(data.order ?? tracksList.map((t) => t.id));
@@ -133,6 +163,7 @@ export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = 
           setSubGenreTags([...(local.subGenres ?? [])].sort());
           setMood(local.mood ?? "");
           setEnergyLevel(local.energyLevel ?? "");
+          setPublicationScope(local.publicationScope ?? "PRIVATE");
           const tracksList = getPlaylistTracks(local);
           setTracks(tracksList);
           setOrder(local.order ?? tracksList.map((t) => t.id));
@@ -170,6 +201,13 @@ export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = 
         mood: mood.trim() === "" ? "" : mood,
         energyLevel: energyLevel.trim() === "" ? "" : energyLevel,
       };
+      const scopeLocked =
+        playlist.publicationScope != null &&
+        publicationScopeRequiresPlatformAdmin(playlist.publicationScope) &&
+        !platformSuperAdmin;
+      if (!scopeLocked) {
+        payload.publicationScope = publicationScope;
+      }
       if (tracks.length >= 1) {
         payload.tracks = tracks;
         payload.order = order;
@@ -351,6 +389,45 @@ export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = 
             onChange={(e) => setThumbnail(e.target.value)}
             className="mt-1 w-full min-h-[44px] rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 sm:py-2 text-base sm:text-sm text-slate-50 touch-manipulation"
           />
+        </div>
+        <div className="rounded-xl border border-slate-800/80 bg-slate-950/40 p-4 space-y-2">
+          <h2 className="text-sm font-semibold text-slate-200">Publishing & visibility</h2>
+          <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">
+            Who can discover this playlist beyond your workspace when discovery ships. Separate from branch vs personal library.
+          </p>
+          {playlist.publicationScope != null &&
+          publicationScopeRequiresPlatformAdmin(playlist.publicationScope) &&
+          !platformSuperAdmin ? (
+            <div className="rounded-lg border border-slate-700/80 bg-slate-900/50 px-3 py-2 text-sm text-slate-300">
+              <span className="font-medium">
+                {PLAYLIST_PUBLICATION_SCOPE_UI[playlist.publicationScope].label}
+              </span>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {PLAYLIST_PUBLICATION_SCOPE_UI[playlist.publicationScope].description}
+              </p>
+              <p className="mt-2 text-[11px] text-amber-200/90">
+                Only SyncBiz platform admins can change this publication scope.
+              </p>
+            </div>
+          ) : (
+            <>
+              <label className="block text-xs font-medium text-slate-400">Publication scope</label>
+              <select
+                value={publicationScope}
+                onChange={(e) => setPublicationScope(e.target.value as PlaylistPublicationScope)}
+                className="mt-1 w-full min-h-[44px] rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 sm:py-2 text-base sm:text-sm text-slate-50 touch-manipulation"
+              >
+                {(platformSuperAdmin ? PLAYLIST_PUBLICATION_SCOPES : WORKSPACE_PUBLICATION_SCOPES).map((scope) => (
+                  <option key={scope} value={scope}>
+                    {PLAYLIST_PUBLICATION_SCOPE_UI[scope].label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-500">
+                {PLAYLIST_PUBLICATION_SCOPE_UI[publicationScope]?.description ?? ""}
+              </p>
+            </>
+          )}
         </div>
         <div className="rounded-2xl border border-slate-800/90 bg-slate-950/60 p-4 sm:p-5 space-y-5 ring-1 ring-white/[0.04]">
           <div>

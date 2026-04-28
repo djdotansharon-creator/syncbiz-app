@@ -155,6 +155,12 @@ export default async function AdminPlatformPage({
               All users
             </Link>
             <Link
+              href="/admin/platform/music-taxonomy"
+              className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
+            >
+              Music taxonomy
+            </Link>
+            <Link
               href="/admin/platform/audit"
               className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
             >

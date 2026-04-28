@@ -1,0 +1,1941 @@
+[
+  {
+    "slug": "lounge",
+    "category": "Playback Context",
+    "labelEn": "Lounge",
+    "labelHe": "לאונג' / אירוח",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "אירוח",
+      "Lobby",
+      "Background"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 10
+  },
+  {
+    "slug": "peak-hours",
+    "category": "Playback Context",
+    "labelEn": "Peak Hours",
+    "labelHe": "שעות שיא",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Rush hour",
+      "Busy hours"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 20
+  },
+  {
+    "slug": "warm-up",
+    "category": "Playback Context",
+    "labelEn": "Warm-up",
+    "labelHe": "חימום",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Build-up",
+      "Opening"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 30
+  },
+  {
+    "slug": "closing",
+    "category": "Playback Context",
+    "labelEn": "Closing",
+    "labelHe": "סגירה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Close",
+      "End of day"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 40
+  },
+  {
+    "slug": "spa-and-wellness",
+    "category": "Playback Context",
+    "labelEn": "SPA & Wellness",
+    "labelHe": "ספא ובריאות",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Wellness",
+      "Relaxation",
+      "Ambient spa"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 50
+  },
+  {
+    "slug": "business-lunch",
+    "category": "Playback Context",
+    "labelEn": "Business Lunch",
+    "labelHe": "צהריים עסקיים",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Lunch meeting",
+      "Corporate lunch"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 60
+  },
+  {
+    "slug": "workout-gym",
+    "category": "Playback Context",
+    "labelEn": "Workout / Gym",
+    "labelHe": "אימון / חדר כושר",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Fitness",
+      "Training",
+      "Gym"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 70
+  },
+  {
+    "slug": "sunrise-morning",
+    "category": "Playback Context",
+    "labelEn": "Sunrise / Morning",
+    "labelHe": "זריחה / בוקר",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Morning",
+      "Sunrise"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 80
+  },
+  {
+    "slug": "sunset-golden-hour",
+    "category": "Playback Context",
+    "labelEn": "Sunset / Golden Hour",
+    "labelHe": "שקיעה / Golden Hour",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Sunset",
+      "Golden hour"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 90
+  },
+  {
+    "slug": "after-hours",
+    "category": "Playback Context",
+    "labelEn": "After Hours",
+    "labelHe": "שעות קטנות",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Late night",
+      "Afterhours"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 100
+  },
+  {
+    "slug": "chill-mellow",
+    "category": "Vibe/Energy",
+    "labelEn": "Chill / Mellow",
+    "labelHe": "רגוע / נינוח",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Chill",
+      "Mellow",
+      "Calm"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 10
+  },
+  {
+    "slug": "uplifting-happy",
+    "category": "Vibe/Energy",
+    "labelEn": "Uplifting / Happy",
+    "labelHe": "מעורר / שמח",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Happy",
+      "Positive"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 20
+  },
+  {
+    "slug": "elegant",
+    "category": "Vibe/Energy",
+    "labelEn": "Elegant",
+    "labelHe": "אלגנטי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Luxury",
+      "Premium",
+      "Classy"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 30
+  },
+  {
+    "slug": "sensual-sexy",
+    "category": "Vibe/Energy",
+    "labelEn": "Sensual / Sexy",
+    "labelHe": "חושני / סקסי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Sensual",
+      "Sexy"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 40
+  },
+  {
+    "slug": "dramatic",
+    "category": "Vibe/Energy",
+    "labelEn": "Dramatic",
+    "labelHe": "דרמטי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Cinematic",
+      "Powerful"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 50
+  },
+  {
+    "slug": "groovy",
+    "category": "Vibe/Energy",
+    "labelEn": "Groovy",
+    "labelHe": "גרובי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Groove",
+      "Funky"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 60
+  },
+  {
+    "slug": "spiritual",
+    "category": "Vibe/Energy",
+    "labelEn": "Spiritual",
+    "labelHe": "רוחני",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Meditative",
+      "World"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 70
+  },
+  {
+    "slug": "sophisticated",
+    "category": "Vibe/Energy",
+    "labelEn": "Sophisticated",
+    "labelHe": "מתוחכם",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Refined",
+      "Smart lounge"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 80
+  },
+  {
+    "slug": "dark-moody",
+    "category": "Vibe/Energy",
+    "labelEn": "Dark / Moody",
+    "labelHe": "אפל / מסתורי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Moody",
+      "Mysterious"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 90
+  },
+  {
+    "slug": "aggressive-raw",
+    "category": "Vibe/Energy",
+    "labelEn": "Aggressive / Raw",
+    "labelHe": "אגרסיבי / בועט",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Raw",
+      "Hard"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 100
+  },
+  {
+    "slug": "melancholic",
+    "category": "Vibe/Energy",
+    "labelEn": "Melancholic",
+    "labelHe": "מלנכולי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Sad",
+      "Rainy"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 110
+  },
+  {
+    "slug": "inspiring",
+    "category": "Vibe/Energy",
+    "labelEn": "Inspiring",
+    "labelHe": "מעורר השראה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Motivational",
+      "Inspiring"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 120
+  },
+  {
+    "slug": "nostalgic",
+    "category": "Vibe/Energy",
+    "labelEn": "Nostalgic",
+    "labelHe": "נוסטלגי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Retro feeling"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 130
+  },
+  {
+    "slug": "relaxing",
+    "category": "Vibe/Energy",
+    "labelEn": "Relaxing",
+    "labelHe": "מרגיע",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Relaxed",
+      "Calm"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 140
+  },
+  {
+    "slug": "high-energy",
+    "category": "Vibe/Energy",
+    "labelEn": "High Energy",
+    "labelHe": "אנרגיה גבוהה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Energetic",
+      "Peak"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 150
+  },
+  {
+    "slug": "low-energy",
+    "category": "Vibe/Energy",
+    "labelEn": "Low Energy",
+    "labelHe": "אנרגיה נמוכה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Soft",
+      "Low"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 160
+  },
+  {
+    "slug": "mysterious",
+    "category": "Vibe/Energy",
+    "labelEn": "Mysterious",
+    "labelHe": "מסתורי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Mystery",
+      "Dark"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 170
+  },
+  {
+    "slug": "afro",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Afro",
+    "labelHe": "אפרו",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Afrobeat",
+      "African"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 10
+  },
+  {
+    "slug": "mediterranean-pop",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Mediterranean Pop",
+    "labelHe": "פופ ים־תיכוני",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Mizrahi",
+      "Mediterranean"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 20
+  },
+  {
+    "slug": "oldies",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Oldies",
+    "labelHe": "נוסטלגיה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Classic hits"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 30
+  },
+  {
+    "slug": "50s-and-60s",
+    "category": "Main Sound (Genre)",
+    "labelEn": "50's & 60's",
+    "labelHe": "שנות ה־50 וה־60",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Fifties",
+      "Sixties"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 40
+  },
+  {
+    "slug": "70s-disco-and-funk",
+    "category": "Main Sound (Genre)",
+    "labelEn": "70's Disco & Funk",
+    "labelHe": "שנות ה־70",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Disco",
+      "Funk"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 50
+  },
+  {
+    "slug": "80s-new-wave-pop",
+    "category": "Main Sound (Genre)",
+    "labelEn": "80's New Wave/Pop",
+    "labelHe": "שנות ה־80",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Eighties",
+      "New wave"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 60
+  },
+  {
+    "slug": "90s-eurodance",
+    "category": "Main Sound (Genre)",
+    "labelEn": "90's Eurodance",
+    "labelHe": "שנות ה־90",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Nineties",
+      "Eurodance"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 70
+  },
+  {
+    "slug": "2000s-nostalgia",
+    "category": "Main Sound (Genre)",
+    "labelEn": "2000's Nostalgia",
+    "labelHe": "שנות ה־2000",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Y2K",
+      "2000s"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 80
+  },
+  {
+    "slug": "contemporary",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Contemporary",
+    "labelHe": "עכשווי / מצעדים",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Current",
+      "Charts"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 90
+  },
+  {
+    "slug": "jazz",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Jazz",
+    "labelHe": "ג'אז",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "JAZZ"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 100
+  },
+  {
+    "slug": "r-and-b",
+    "category": "Main Sound (Genre)",
+    "labelEn": "R&B",
+    "labelHe": "אר־אנד־בי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "RnB"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 110
+  },
+  {
+    "slug": "techno",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Techno",
+    "labelHe": "טכנו",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Electronic techno"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 120
+  },
+  {
+    "slug": "funk",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Funk",
+    "labelHe": "פאנק",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Funky"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 130
+  },
+  {
+    "slug": "soul",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Soul",
+    "labelHe": "סול",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Soul music"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 140
+  },
+  {
+    "slug": "classic-rock",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Classic Rock",
+    "labelHe": "רוק קלאסי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Rock classics"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 150
+  },
+  {
+    "slug": "indie-pop",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Indie Pop",
+    "labelHe": "אינדי פופ",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Alternative pop"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 160
+  },
+  {
+    "slug": "ambient",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Ambient",
+    "labelHe": "אמביינט",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Atmospheric"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 170
+  },
+  {
+    "slug": "hip-hop",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Hip-Hop",
+    "labelHe": "היפ־הופ",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Rap"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 180
+  },
+  {
+    "slug": "reggaeton",
+    "category": "Main Sound (Genre)",
+    "labelEn": "Reggaeton",
+    "labelHe": "רגאטון",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Latin urban"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 190
+  },
+  {
+    "slug": "world-music",
+    "category": "Main Sound (Genre)",
+    "labelEn": "World Music",
+    "labelHe": "מוזיקת עולם",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Ethnic",
+      "Global"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 200
+  },
+  {
+    "slug": "organic-house",
+    "category": "Style Tags",
+    "labelEn": "Organic House",
+    "labelHe": "האוס אורגני",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Organic / Ethnic"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 10
+  },
+  {
+    "slug": "melodic-techno",
+    "category": "Style Tags",
+    "labelEn": "Melodic Techno",
+    "labelHe": "טכנו מלודי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Melodic"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 20
+  },
+  {
+    "slug": "oriental",
+    "category": "Style Tags",
+    "labelEn": "Oriental",
+    "labelHe": "אוריינטלי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Middle Eastern"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 30
+  },
+  {
+    "slug": "nu-disco",
+    "category": "Style Tags",
+    "labelEn": "Nu-Disco",
+    "labelHe": "נו־דיסקו",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "New disco"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 40
+  },
+  {
+    "slug": "deep-house",
+    "category": "Style Tags",
+    "labelEn": "Deep House",
+    "labelHe": "דיפ האוס",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Deep"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 50
+  },
+  {
+    "slug": "lofi-beats",
+    "category": "Style Tags",
+    "labelEn": "Lofi / Beats",
+    "labelHe": "לופיי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Lo-fi",
+      "Lo-Fi Hip-Hop"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 60
+  },
+  {
+    "slug": "acid-jazz",
+    "category": "Style Tags",
+    "labelEn": "Acid Jazz",
+    "labelHe": "אסיד ג'אז",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Jazz funk"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 70
+  },
+  {
+    "slug": "electro-swing",
+    "category": "Style Tags",
+    "labelEn": "Electro-Swing",
+    "labelHe": "אלקטרו סווינג",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Electro swing"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 80
+  },
+  {
+    "slug": "reggae-dub",
+    "category": "Style Tags",
+    "labelEn": "Reggae / Dub",
+    "labelHe": "רגאיי / דאב",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Reggae",
+      "Dub"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 90
+  },
+  {
+    "slug": "acoustic",
+    "category": "Style Tags",
+    "labelEn": "Acoustic",
+    "labelHe": "אקוסטי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Unplugged",
+      "Acoustic / Unplugged"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 100
+  },
+  {
+    "slug": "tech-house",
+    "category": "Style Tags",
+    "labelEn": "Tech House",
+    "labelHe": "טק האוס",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Tech-house"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 110
+  },
+  {
+    "slug": "tropical-house",
+    "category": "Style Tags",
+    "labelEn": "Tropical House",
+    "labelHe": "טרופיקאל האוס",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Tropical"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 120
+  },
+  {
+    "slug": "disco-house",
+    "category": "Style Tags",
+    "labelEn": "Disco House",
+    "labelHe": "דיסקו האוס",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "House disco"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 130
+  },
+  {
+    "slug": "deep-techno",
+    "category": "Style Tags",
+    "labelEn": "Deep Techno",
+    "labelHe": "טכנו עמוק",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Dark techno"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 140
+  },
+  {
+    "slug": "soft-pop",
+    "category": "Style Tags",
+    "labelEn": "Soft Pop",
+    "labelHe": "פופ רך",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Soft hits"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 150
+  },
+  {
+    "slug": "nature-sounds",
+    "category": "Style Tags",
+    "labelEn": "Nature Sounds",
+    "labelHe": "צלילי טבע",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Nature"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 160
+  },
+  {
+    "slug": "new-age",
+    "category": "Style Tags",
+    "labelEn": "New Age",
+    "labelHe": "ניו אייג'",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "New-age"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 170
+  },
+  {
+    "slug": "meditation",
+    "category": "Style Tags",
+    "labelEn": "Meditation",
+    "labelHe": "מדיטציה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Meditative"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 180
+  },
+  {
+    "slug": "chill-out",
+    "category": "Style Tags",
+    "labelEn": "Chill-out",
+    "labelHe": "צ'יל־אאוט",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Chillout"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 190
+  },
+  {
+    "slug": "afrobeat",
+    "category": "Style Tags",
+    "labelEn": "Afrobeat",
+    "labelHe": "אפרוביט",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Afro beat"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 200
+  },
+  {
+    "slug": "progressive-house",
+    "category": "Style Tags",
+    "labelEn": "Progressive House",
+    "labelHe": "פרוגרסיב האוס",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Prog house"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 210
+  },
+  {
+    "slug": "minimal-techno",
+    "category": "Style Tags",
+    "labelEn": "Minimal Techno",
+    "labelHe": "מינימל טכנו",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Minimal"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 220
+  },
+  {
+    "slug": "downtempo",
+    "category": "Style Tags",
+    "labelEn": "Downtempo",
+    "labelHe": "דאונטמפו",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Down tempo"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 230
+  },
+  {
+    "slug": "future-bass",
+    "category": "Style Tags",
+    "labelEn": "Future Bass",
+    "labelHe": "פיוצ'ר בייס",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Future-bass"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 240
+  },
+  {
+    "slug": "latin-house",
+    "category": "Style Tags",
+    "labelEn": "Latin House",
+    "labelHe": "לטין האוס",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Latin"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 250
+  },
+  {
+    "slug": "smooth-jazz",
+    "category": "Style Tags",
+    "labelEn": "Smooth Jazz",
+    "labelHe": "סמות' ג'אז",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Smooth"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 260
+  },
+  {
+    "slug": "bossa-nova",
+    "category": "Style Tags",
+    "labelEn": "Bossa Nova",
+    "labelHe": "בוסה נובה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Brazilian jazz"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 270
+  },
+  {
+    "slug": "swing",
+    "category": "Style Tags",
+    "labelEn": "Swing",
+    "labelHe": "סווינג",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Swing jazz"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 280
+  },
+  {
+    "slug": "soul-blues",
+    "category": "Style Tags",
+    "labelEn": "Soul Blues",
+    "labelHe": "סול בלוז",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Blues soul"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 290
+  },
+  {
+    "slug": "gipsy-jazz",
+    "category": "Style Tags",
+    "labelEn": "Gipsy Jazz",
+    "labelHe": "ג'אז צועני",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Gypsy Jazz"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 300
+  },
+  {
+    "slug": "old-school-hip-hop",
+    "category": "Style Tags",
+    "labelEn": "Old School Hip-Hop",
+    "labelHe": "היפ־הופ קלאסי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Old-school rap"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 310
+  },
+  {
+    "slug": "trap",
+    "category": "Style Tags",
+    "labelEn": "Trap",
+    "labelHe": "טראפ",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Trap music"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 320
+  },
+  {
+    "slug": "r-and-b-contemporary",
+    "category": "Style Tags",
+    "labelEn": "R&B Contemporary",
+    "labelHe": "אר־אנד־בי מודרני",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Contemporary R&B"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 330
+  },
+  {
+    "slug": "soft-rock",
+    "category": "Style Tags",
+    "labelEn": "Soft Rock",
+    "labelHe": "רוק רך",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Lite rock"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 340
+  },
+  {
+    "slug": "indie-folk",
+    "category": "Style Tags",
+    "labelEn": "Indie Folk",
+    "labelHe": "אינדי פולק",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Folk"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 350
+  },
+  {
+    "slug": "psychedelic-rock",
+    "category": "Style Tags",
+    "labelEn": "Psychedelic Rock",
+    "labelHe": "רוק פסיכדלי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Psych rock"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 360
+  },
+  {
+    "slug": "britpop",
+    "category": "Style Tags",
+    "labelEn": "Britpop",
+    "labelHe": "בריטפופ",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "British pop"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 370
+  },
+  {
+    "slug": "grunge",
+    "category": "Style Tags",
+    "labelEn": "Grunge",
+    "labelHe": "גראנג'",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Grunge rock"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 380
+  },
+  {
+    "slug": "afro-cuban",
+    "category": "Style Tags",
+    "labelEn": "Afro-Cuban",
+    "labelHe": "אפרו־קובני",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Afro Cuban"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 390
+  },
+  {
+    "slug": "french-chanson",
+    "category": "Style Tags",
+    "labelEn": "French Chanson",
+    "labelHe": "שאנסון צרפתי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Chanson"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 400
+  },
+  {
+    "slug": "italian-classics",
+    "category": "Style Tags",
+    "labelEn": "Italian Classics",
+    "labelHe": "קלאסיקה איטלקית",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Italian"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 410
+  },
+  {
+    "slug": "flamenco",
+    "category": "Style Tags",
+    "labelEn": "Flamenco",
+    "labelHe": "פלמנקו",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Spanish guitar"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 420
+  },
+  {
+    "slug": "arabic-lounge",
+    "category": "Style Tags",
+    "labelEn": "Arabic Lounge",
+    "labelHe": "לאונג' ערבי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Arabic",
+      "Oud"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 430
+  },
+  {
+    "slug": "quiet-morning",
+    "category": "Israeli Specials",
+    "labelEn": "Quiet Morning",
+    "labelHe": "בוקר רגוע",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Israeli Morning"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 10
+  },
+  {
+    "slug": "israeli-hits",
+    "category": "Israeli Specials",
+    "labelEn": "Israeli Hits",
+    "labelHe": "להיטים ישראליים",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Hebrew hits"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 20
+  },
+  {
+    "slug": "nostalgic-folk",
+    "category": "Israeli Specials",
+    "labelEn": "Nostalgic Folk",
+    "labelHe": "שירי ארץ ישראל",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Israeli folk",
+      "Old Israel"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 30
+  },
+  {
+    "slug": "kabbalat-shabbat",
+    "category": "Israeli Specials",
+    "labelEn": "Kabbalat Shabbat",
+    "labelHe": "קבלת שבת",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Shabbat",
+      "Friday"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 40
+  },
+  {
+    "slug": "israeli-acoustic",
+    "category": "Israeli Specials",
+    "labelEn": "Israeli Acoustic",
+    "labelHe": "ישראלי אקוסטי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Hebrew acoustic"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 50
+  },
+  {
+    "slug": "israeli-rock",
+    "category": "Israeli Specials",
+    "labelEn": "Israeli Rock",
+    "labelHe": "רוק ישראלי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Hebrew rock"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 60
+  },
+  {
+    "slug": "ethnic-israeli",
+    "category": "Israeli Specials",
+    "labelEn": "Ethnic Israeli",
+    "labelHe": "ישראלי אתני",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Israeli ethnic"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 70
+  },
+  {
+    "slug": "shabbat-atmosphere",
+    "category": "Israeli Specials",
+    "labelEn": "Shabbat Atmosphere",
+    "labelHe": "אווירת שבת",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Friday atmosphere"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 80
+  },
+  {
+    "slug": "middle-eastern-beats",
+    "category": "Israeli Specials",
+    "labelEn": "Middle Eastern Beats",
+    "labelHe": "ביט מזרחי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Mizrahi beats"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 90
+  },
+  {
+    "slug": "instrumental",
+    "category": "Technical Tags",
+    "labelEn": "Instrumental",
+    "labelHe": "אינסטרומנטלי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "No vocals"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 10
+  },
+  {
+    "slug": "vocal",
+    "category": "Technical Tags",
+    "labelEn": "Vocal",
+    "labelHe": "ווקאלי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Vocals"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 20
+  },
+  {
+    "slug": "vocal-heavy",
+    "category": "Technical Tags",
+    "labelEn": "Vocal-Heavy",
+    "labelHe": "דגש על שירה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Vocal heavy"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 30
+  },
+  {
+    "slug": "high-bpm",
+    "category": "Technical Tags",
+    "labelEn": "High BPM",
+    "labelHe": "קצב גבוה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Fast tempo"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 40
+  },
+  {
+    "slug": "low-bpm",
+    "category": "Technical Tags",
+    "labelEn": "Low BPM",
+    "labelHe": "קצב נמוך",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Slow tempo"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 50
+  },
+  {
+    "slug": "clean-business-safe",
+    "category": "Technical Tags",
+    "labelEn": "Clean / Business Safe",
+    "labelHe": "נקי / מתאים לעסק",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Clean",
+      "Business safe"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 60
+  },
+  {
+    "slug": "explicit",
+    "category": "Technical Tags",
+    "labelEn": "Explicit",
+    "labelHe": "תוכן מפורש",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Explicit lyrics"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 70
+  },
+  {
+    "slug": "restaurant",
+    "category": "Business Fit",
+    "labelEn": "Restaurant",
+    "labelHe": "מסעדה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Dining"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 10
+  },
+  {
+    "slug": "cafe",
+    "category": "Business Fit",
+    "labelEn": "Cafe",
+    "labelHe": "בית קפה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Coffee shop"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 20
+  },
+  {
+    "slug": "bar",
+    "category": "Business Fit",
+    "labelEn": "Bar",
+    "labelHe": "בר",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Pub",
+      "Cocktail bar"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 30
+  },
+  {
+    "slug": "gym",
+    "category": "Business Fit",
+    "labelEn": "Gym",
+    "labelHe": "חדר כושר",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Fitness"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 40
+  },
+  {
+    "slug": "hotel",
+    "category": "Business Fit",
+    "labelEn": "Hotel",
+    "labelHe": "מלון",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Hospitality"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 50
+  },
+  {
+    "slug": "spa",
+    "category": "Business Fit",
+    "labelEn": "Spa",
+    "labelHe": "ספא",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Wellness"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 60
+  },
+  {
+    "slug": "retail-store",
+    "category": "Business Fit",
+    "labelEn": "Retail Store",
+    "labelHe": "חנות / ריטייל",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Retail"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 70
+  },
+  {
+    "slug": "office",
+    "category": "Business Fit",
+    "labelEn": "Office",
+    "labelHe": "משרד",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Workspace"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 80
+  },
+  {
+    "slug": "clinic",
+    "category": "Business Fit",
+    "labelEn": "Clinic",
+    "labelHe": "קליניקה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Healthcare"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 90
+  },
+  {
+    "slug": "event-venue",
+    "category": "Business Fit",
+    "labelEn": "Event Venue",
+    "labelHe": "אולם אירועים",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Events"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 100
+  },
+  {
+    "slug": "salon",
+    "category": "Business Fit",
+    "labelEn": "Salon",
+    "labelHe": "סלון / טיפוח",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Beauty salon"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 110
+  },
+  {
+    "slug": "morning",
+    "category": "Daypart Fit",
+    "labelEn": "Morning",
+    "labelHe": "בוקר",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Sunrise"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 10
+  },
+  {
+    "slug": "lunch",
+    "category": "Daypart Fit",
+    "labelEn": "Lunch",
+    "labelHe": "צהריים",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Noon"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 20
+  },
+  {
+    "slug": "afternoon",
+    "category": "Daypart Fit",
+    "labelEn": "Afternoon",
+    "labelHe": "אחר הצהריים",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Afternoon"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 30
+  },
+  {
+    "slug": "dinner",
+    "category": "Daypart Fit",
+    "labelEn": "Dinner",
+    "labelHe": "ערב / ארוחת ערב",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Evening dinner"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 40
+  },
+  {
+    "slug": "night",
+    "category": "Daypart Fit",
+    "labelEn": "Night",
+    "labelHe": "לילה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Night"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 50
+  },
+  {
+    "slug": "late-night",
+    "category": "Daypart Fit",
+    "labelEn": "Late Night",
+    "labelHe": "שעות מאוחרות",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "After hours"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 60
+  },
+  {
+    "slug": "closing-time",
+    "category": "Daypart Fit",
+    "labelEn": "Closing Time",
+    "labelHe": "זמן סגירה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Closing"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 70
+  },
+  {
+    "slug": "golden-hour",
+    "category": "Daypart Fit",
+    "labelEn": "Golden Hour",
+    "labelHe": "שעת שקיעה",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Sunset"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 80
+  },
+  {
+    "slug": "weekend-friday",
+    "category": "Daypart Fit",
+    "labelEn": "Weekend / Friday",
+    "labelHe": "סוף שבוע / שישי",
+    "descriptionHeUser": null,
+    "descriptionAi": null,
+    "aliases": [
+      "Friday",
+      "Weekend"
+    ],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 90
+  }
+]
