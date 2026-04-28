@@ -15,9 +15,28 @@ type UserSummary = {
   deactivatedAt?: string;
   /** True when this row cannot be soft-disabled (super admin / workspace owner / last admin). */
   protected?: boolean;
+  /** Present when API includes it (password exists). */
+  hasPassword?: boolean;
+  /** When true, "Remove from workspace" is allowed for this row. */
+  canRemoveFromWorkspace?: boolean;
+  tenantRemoveDeniedReason?: "WORKSPACE_OWNER" | "LAST_WORKSPACE_ADMIN";
+  isGlobalSuperAdmin?: boolean;
 };
 type BranchOption = { id: string; name: string };
 type SessionSummary = { accessType?: "OWNER" | "BRANCH_USER"; branchIds?: string[] };
+
+function tenantRemoveHint(
+  r: UserSummary["tenantRemoveDeniedReason"],
+): string {
+  switch (r) {
+    case "WORKSPACE_OWNER":
+      return "Workspace owner cannot be removed from here.";
+    case "LAST_WORKSPACE_ADMIN":
+      return "Sole tenant-wide admin in this workspace — add another admin before removing this person.";
+    default:
+      return "";
+  }
+}
 
 export function AdminUsersSection() {
   const [users, setUsers] = useState<UserSummary[]>([]);
@@ -47,6 +66,8 @@ export function AdminUsersSection() {
   const [editNewPassword, setEditNewPassword] = useState("");
   const [disableBusyEmail, setDisableBusyEmail] = useState<string | null>(null);
   const [disableErrorByEmail, setDisableErrorByEmail] = useState<Record<string, string>>({});
+  const [removeBusyEmail, setRemoveBusyEmail] = useState<string | null>(null);
+  const [removeErrorByEmail, setRemoveErrorByEmail] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -125,8 +146,10 @@ export function AdminUsersSection() {
       if (!res.ok) {
         setStatus("error");
         setErrorMsg(data.error ?? "Failed");
-        if (res.status === 409 && data.code === "USER_EXISTS") {
-          // Switch to edit mode for existing user.
+        if (
+          res.status === 409 &&
+          (data.code === "USER_EXISTS" || data.code === "USER_ALREADY_MEMBER")
+        ) {
           const existing = users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
           setEditEmail(email.trim());
           setEditName(existing?.name ?? "");
@@ -191,6 +214,35 @@ export function AdminUsersSection() {
     } catch {
       setBranchCreateStatus("error");
       setBranchCreateError("Network error");
+    }
+  };
+
+  const handleRemoveFromWorkspace = async (u: UserSummary) => {
+    const confirmText =
+      `Remove ${u.email} from this workspace?\n\nThey will lose access to this workspace and its branches. Their login account remains (they may still belong to other workspaces).`;
+    if (!window.confirm(confirmText)) return;
+    setRemoveBusyEmail(u.email);
+    setRemoveErrorByEmail((prev) => {
+      const next = { ...prev };
+      delete next[u.email];
+      return next;
+    });
+    try {
+      const res = await fetch("/api/admin/users/remove-member", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: u.email }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setRemoveErrorByEmail((prev) => ({ ...prev, [u.email]: data.error ?? `Failed (${res.status})` }));
+        return;
+      }
+      await reloadUsers();
+    } catch {
+      setRemoveErrorByEmail((prev) => ({ ...prev, [u.email]: "Network error" }));
+    } finally {
+      setRemoveBusyEmail(null);
     }
   };
 
@@ -344,11 +396,15 @@ export function AdminUsersSection() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
+                autoComplete="new-password"
                 className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100"
-                placeholder="Min 6 characters"
+                placeholder="Required for new accounts; optional when inviting an existing user who already has a password"
               />
+              <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                If the email already exists globally but is not in this workspace, they are linked without creating a
+                duplicate account. Password is required only when that account has never had a password set — otherwise
+                leave blank or use Edit → New password to reset.
+              </p>
             </div>
             <div>
               <label className="block text-xs text-slate-500">Access type</label>
@@ -515,13 +571,21 @@ export function AdminUsersSection() {
       {users.length > 0 && (
         <div className="mt-6 border-t border-slate-800/60 pt-4">
           <p className="text-xs text-slate-500">Workspace users</p>
+          <p className="mt-1 max-w-xl text-[11px] leading-snug text-slate-500">
+            <strong className="font-medium text-slate-400">Remove from workspace</strong> drops membership here only (no global
+            delete). <strong className="font-medium text-slate-400">Disable login</strong> locks login for that user globally
+            from this screen when allowed — use Platform Admin for platform accounts when needed.
+          </p>
           <ul className="mt-2 space-y-1.5 text-sm text-slate-300">
-            {users.map((u) => {
+              {users.map((u) => {
               const status = u.status ?? "ACTIVE";
               const isDisabled = status === "DISABLED";
               const isProtected = u.protected === true;
               const disableBusy = disableBusyEmail === u.email;
               const disableErr = disableErrorByEmail[u.email];
+              const removeBusy = removeBusyEmail === u.email;
+              const removeErr = removeErrorByEmail[u.email];
+              const canRemove = u.canRemoveFromWorkspace === true;
               return (
                 <li key={u.id}>
                   <div className="flex items-center justify-between gap-3">
@@ -543,9 +607,25 @@ export function AdminUsersSection() {
                           Disabled
                         </span>
                       )}
-                      {isProtected && !isDisabled && (
+                      {!isDisabled && u.isGlobalSuperAdmin && (
+                        <span
+                          className="ml-2 inline-flex max-w-[260px] items-center rounded-md border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-200"
+                          title="Global platform role — tenant tools cannot disable login here or remove membership; edit branches."
+                        >
+                          Platform account
+                        </span>
+                      )}
+                      {isProtected && !isDisabled && !u.isGlobalSuperAdmin && (
                         <span className="ml-2 inline-flex items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200">
-                          Protected
+                          Login locked out
+                        </span>
+                      )}
+                      {Boolean(u.tenantRemoveDeniedReason) && (
+                        <span
+                          className="ml-2 inline-flex max-w-[280px] items-center rounded-md border border-slate-600/60 bg-slate-800/60 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300"
+                          title={tenantRemoveHint(u.tenantRemoveDeniedReason)}
+                        >
+                          Remove blocked
                         </span>
                       )}
                     </div>
@@ -567,21 +647,37 @@ export function AdminUsersSection() {
                       </button>
                       <button
                         type="button"
+                        onClick={() => handleRemoveFromWorkspace(u)}
+                        disabled={!canRemove || removeBusy}
+                        title={
+                          !canRemove
+                            ? tenantRemoveHint(u.tenantRemoveDeniedReason) || "Cannot remove"
+                            : "Removes membership for this workspace only — does not delete the account globally"
+                        }
+                        className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        {removeBusy ? "Removing…" : "Remove from workspace"}
+                      </button>
+                      <button
+                        type="button"
                         disabled={isDisabled || isProtected || disableBusy}
                         title={
                           isDisabled
                             ? "Already disabled"
                             : isProtected
-                              ? "Protected user (super admin / workspace owner / last admin)"
-                              : "Disable this user"
+                              ? "Login lock not available here (platform account, owner, or sole tenant admin); use Platform Admin for global locks."
+                              : "Disable login globally for this user (workspace-scoped UI)"
                         }
                         onClick={() => handleDisable(u)}
                         className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1.5 text-xs font-medium text-rose-200 hover:bg-rose-500/20 hover:border-rose-500/60 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-500/10 disabled:hover:border-rose-500/40"
                       >
-                        {disableBusy ? "Disabling…" : "Disable"}
+                        {disableBusy ? "Disabling…" : "Disable login"}
                       </button>
                     </div>
                   </div>
+                  {removeErr && (
+                    <p className="mt-1 text-xs text-rose-400">{removeErr}</p>
+                  )}
                   {disableErr && (
                     <p className="mt-1 text-xs text-rose-400">{disableErr}</p>
                   )}

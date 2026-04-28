@@ -27,8 +27,10 @@ import { prisma } from "@/lib/prisma";
 import EntitlementForm from "@/components/admin/entitlement-form";
 import { PlatformQuotaDetailsSection } from "@/components/admin/platform-quota-ui";
 import UserPlatformActions from "@/components/admin/user-platform-actions";
+import PlatformWorkspaceMemberRemoval from "@/components/admin/platform-workspace-member-removal";
 import WorkspaceTestDeleteButton from "@/components/admin/workspace-test-delete-button";
 import { buildQuotaChecks } from "@/lib/admin/platform-quotas";
+import { platformRemovalAllowedPreview } from "@/lib/user-store";
 
 export const dynamic = "force-dynamic";
 
@@ -312,7 +314,9 @@ export default async function AdminWorkspaceDetailPage({
             Members <span className="text-neutral-600">({members.length})</span>
           </h2>
           <span className="text-[11px] text-neutral-500">
-            Disable here = global platform login lock. Workspace-only removal is in Access Control.
+            Two separate actions:{" "}
+            <span className="text-neutral-400">Workspace</span> = membership only ·{" "}
+            <span className="text-neutral-400">Platform login</span> = global account lock (not a DB delete).
           </span>
         </div>
         {members.length === 0 ? (
@@ -327,7 +331,8 @@ export default async function AdminWorkspaceDetailPage({
                   <th className="px-3 py-2 font-medium">Branches</th>
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium">Last login</th>
-                  <th className="px-3 py-2 font-medium">Actions</th>
+                  <th className="px-3 py-2 font-medium">Workspace</th>
+                  <th className="px-3 py-2 font-medium">Platform login</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-800">
@@ -339,6 +344,23 @@ export default async function AdminWorkspaceDetailPage({
                     const b = branchById.get(a.branchId);
                     return b ? b.name : a.branchId;
                   });
+                  const otherWorkspaceAdminCountExcludingTarget = members.filter(
+                    (row) => row.role === "WORKSPACE_ADMIN" && row.user.id !== u.id,
+                  ).length;
+                  const canPlatformRemove = platformRemovalAllowedPreview({
+                    workspaceOwnerUserId: ws.ownerId,
+                    actingUserId: admin.id,
+                    targetUserId: u.id,
+                    membershipRole: m.role,
+                    otherWorkspaceAdminCountExcludingTarget,
+                  });
+                  const workspaceRemovalDisabledHint =
+                    ws.ownerId === u.id
+                      ? "Cannot remove workspace owner."
+                      : !canPlatformRemove
+                        ? "Sole tenant admin: add another admin, or remove your own membership from your row."
+                        : "";
+
                   return (
                     <tr key={m.id} className="hover:bg-neutral-900/40">
                       <td className="px-3 py-2 align-top">
@@ -367,6 +389,15 @@ export default async function AdminWorkspaceDetailPage({
                       </td>
                       <td className="px-3 py-2 align-top text-neutral-400">
                         {u.lastLoginAt ? fmtDateTime(u.lastLoginAt) : "never"}
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <PlatformWorkspaceMemberRemoval
+                          workspaceId={ws.id}
+                          workspaceName={ws.name}
+                          targetEmail={u.email}
+                          canRemove={canPlatformRemove}
+                          disabledHint={workspaceRemovalDisabledHint}
+                        />
                       </td>
                       <td className="px-3 py-2 align-top">
                         <UserPlatformActions

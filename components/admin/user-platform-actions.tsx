@@ -62,11 +62,23 @@ export default function UserPlatformActions({ userId, userEmail, status, isSuper
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  if (isSuperAdmin) {
-    return <span className="text-[11px] text-neutral-500">platform admin</span>;
-  }
   if (isSelf) {
-    return <span className="text-[11px] text-neutral-500">you</span>;
+    return (
+      <span className="text-[11px] text-neutral-500" title="Leave this workspace via “Remove from workspace” in the Workspace column.">
+        you
+      </span>
+    );
+  }
+
+  if (isSuperAdmin) {
+    return (
+      <span
+        className="block max-w-[220px] text-[11px] leading-snug text-neutral-500"
+        title="Use Platform Admin user actions to disable login platform-wide."
+      >
+        Global login: use Platform › Users. Remove pilot access in the Workspace column.
+      </span>
+    );
   }
 
   const isDisabled = status === "DISABLED";
@@ -116,7 +128,7 @@ export default function UserPlatformActions({ userId, userEmail, status, isSuper
           disabled={disabled}
           className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy && activeModal === "enable" ? "…" : "Enable"}
+          {busy && activeModal === "enable" ? "…" : "Enable login"}
         </button>
       ) : (
         <button
@@ -125,7 +137,7 @@ export default function UserPlatformActions({ userId, userEmail, status, isSuper
           disabled={disabled}
           className="rounded border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[11px] font-medium text-rose-300 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy && activeModal === "disable" ? "…" : "Disable"}
+          {busy && activeModal === "disable" ? "…" : "Disable login"}
         </button>
       )}
 

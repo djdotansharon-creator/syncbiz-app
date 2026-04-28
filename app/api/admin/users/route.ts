@@ -5,7 +5,15 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth-helpers";
-import { createUser, getUserByEmail, listUsersWithScopeForTenant, updateUser, disableUserInWorkspace } from "@/lib/user-store";
+import { EntitlementLimitError } from "@/lib/entitlement-limits";
+import {
+  createUser,
+  inviteExistingUserToWorkspace,
+  listUsersWithScopeForTenant,
+  updateUser,
+  disableUserInWorkspace,
+} from "@/lib/user-store";
+import { prisma } from "@/lib/prisma";
 import { db } from "@/lib/store";
 import type { TenantRole, BranchRole } from "@/lib/user-types";
 
@@ -74,28 +82,45 @@ export async function POST(req: NextRequest) {
     if (!email || !email.includes("@")) {
       return NextResponse.json({ error: "Valid email required" }, { status: 400 });
     }
-    if (!password || password.length < 6) {
-      return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
-    }
+    // Password is enforced below: required for brand-new accounts; invite rules differ per user row.
     if (accessType !== "OWNER" && accessType !== "BRANCH_USER") {
       return NextResponse.json({ error: "accessType must be OWNER or BRANCH_USER" }, { status: 400 });
     }
 
-    // Workspace isolation for duplicates:
-    // - If the email exists in another tenant: deny with 403.
-    // - If it exists in the same tenant: return 409 with a dedicated code so UI can switch to edit mode.
-    const existing = await getUserByEmail(email);
-    if (existing) {
-      if (existing.tenantId !== admin.tenantId.trim()) {
+    const tenantKey = admin.tenantId.trim();
+    const workspace = await prisma.workspace.findFirst({
+      where: { OR: [{ id: tenantKey }, { slug: tenantKey }] },
+      select: { id: true },
+    });
+    if (!workspace) {
+      return NextResponse.json({ error: "Workspace not found" }, { status: 400 });
+    }
+
+    const rowByEmail = await prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        passwordHash: true,
+      },
+    });
+
+    if (rowByEmail) {
+      const membershipHere = await prisma.workspaceMember.findUnique({
+        where: {
+          workspaceId_userId: { workspaceId: workspace.id, userId: rowByEmail.id },
+        },
+      });
+      if (membershipHere) {
         return NextResponse.json(
-          { error: "Forbidden: user email exists in another workspace" },
-          { status: 403 }
+          {
+            error: "This user is already in this workspace — use Edit to change access.",
+            code: "USER_ALREADY_MEMBER",
+          },
+          { status: 409 },
         );
       }
-      return NextResponse.json(
-        { error: "User already exists", code: "USER_EXISTS" },
-        { status: 409 }
-      );
+    } else if (!password || password.length < 6) {
+      return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
     }
 
     // Prevent cross-tenant branch assignment (workspace isolation).
@@ -120,16 +145,36 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (rowByEmail) {
+      const user = await inviteExistingUserToWorkspace({
+        email,
+        tenantId: tenantKey,
+        tenantRole,
+        branchAssignments,
+        seedPassword: password.trim().length > 0 ? password : null,
+      });
+      return NextResponse.json(user, { status: 201 });
+    }
+
     const user = await createUser({
       email,
       password,
       tenantRole,
       branchAssignments,
-      tenantId: admin.tenantId.trim(),
+      tenantId: tenantKey,
     });
     return NextResponse.json(user, { status: 201 });
   } catch (e) {
+    if (e instanceof EntitlementLimitError) {
+      return NextResponse.json({ error: e.message }, { status: 403 });
+    }
     const msg = e instanceof Error ? e.message : "Failed to create user";
+    if (/already a member of this workspace/i.test(msg)) {
+      return NextResponse.json(
+        { error: "This user is already in this workspace — use Edit to change access.", code: "USER_ALREADY_MEMBER" },
+        { status: 409 },
+      );
+    }
     const status = /already exists/i.test(msg) ? 409 : 400;
     return NextResponse.json({ error: msg, code: status === 409 ? "USER_EXISTS" : undefined }, { status });
   }

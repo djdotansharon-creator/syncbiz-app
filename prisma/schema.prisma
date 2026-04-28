@@ -38,6 +38,18 @@ enum UserStatus {
   DISABLED
 }
 
+/// Per-workspace membership lifecycle (workspace-scoped, distinct from global
+/// `User.status`).
+/// ACTIVE    – membership grants access in this workspace as normal.
+/// SUSPENDED – soft-paused: the user remains a workspace member but all
+///             tenant/branch role lookups for this workspace return as if no
+///             membership exists. The user can still log in globally and use
+///             other workspaces. Reversible via "Resume in workspace".
+enum MembershipStatus {
+  ACTIVE
+  SUSPENDED
+}
+
 enum DeviceType {
   ELECTRON
   BROWSER
@@ -242,11 +254,13 @@ model Workspace {
 }
 
 model WorkspaceMember {
-  id          String   @id @default(uuid())
+  id          String           @id @default(uuid())
   workspaceId String
   userId      String
-  role        UserRole @default(CONTROLLER)
-  createdAt   DateTime @default(now())
+  role        UserRole         @default(CONTROLLER)
+  status      MembershipStatus @default(ACTIVE)
+  suspendedAt DateTime?
+  createdAt   DateTime         @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)

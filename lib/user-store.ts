@@ -340,14 +340,242 @@ export async function createUser(params: {
   return rowToUser({ ...user, passwordHash: null }, workspace.id);
 }
 
+/**
+ * Link an existing global `User` to a workspace they are not yet a member of.
+ * Does not create a second User row. Optional `seedPassword` sets the hash only
+ * when the user currently has no password — never overwrites an existing hash here
+ * (use PATCH `newPassword` for an explicit reset).
+ */
+export async function inviteExistingUserToWorkspace(params: {
+  email: string;
+  tenantId: string;
+  tenantRole: TenantRole;
+  branchAssignments: Array<{ branchId: string; role: BranchRole }>;
+  /** If set and ≥6 chars, applied only when `user.passwordHash` is null. */
+  seedPassword?: string | null;
+}): Promise<User> {
+  const norm = params.email?.trim().toLowerCase();
+  if (!norm) throw new Error("Email required");
+
+  const user = await prisma.user.findUnique({ where: { email: norm } });
+  if (!user) throw new Error("User not found");
+
+  const tenantId = params.tenantId.trim();
+  if (!tenantId) throw new Error("tenantId is required");
+
+  const workspace = await prisma.workspace.findFirst({
+    where: { OR: [{ id: tenantId }, { slug: tenantId }] },
+  });
+  if (!workspace) throw new Error("tenantId does not exist");
+
+  const already = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } },
+  });
+  if (already) {
+    throw new Error("Already a member of this workspace");
+  }
+
+  await enforceCanAddWorkspaceMember(workspace.id);
+
+  const prismaRole = tenantRoleToPrismaRole(params.tenantRole);
+  const seed = typeof params.seedPassword === "string" ? params.seedPassword : "";
+
+  if (!user.passwordHash) {
+    if (seed.length < 6) {
+      throw new Error("Password is required (min 6 characters): this account has no password yet");
+    }
+  }
+  // Never overwrite existing password on invite — ignore seed if hash exists (PATCH for reset).
+  if (!user.passwordHash && seed.length >= 6) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: hashPassword(seed) },
+    });
+  }
+
+  await prisma.workspaceMember.create({
+    data: { workspaceId: workspace.id, userId: user.id, role: prismaRole as import("@prisma/client").UserRole },
+  });
+
+  const rawAssignments = Array.isArray(params.branchAssignments) ? params.branchAssignments : [];
+  const assignments = rawAssignments.length > 0 ? rawAssignments : [{ branchId: DEFAULT_BRANCH_ID, role: "BRANCH_CONTROLLER" as BranchRole }];
+
+  for (const a of assignments) {
+    await prisma.userBranchAssignment.upsert({
+      where: {
+        userId_workspaceId_branchId: {
+          userId: user.id,
+          workspaceId: workspace.id,
+          branchId: a.branchId || DEFAULT_BRANCH_ID,
+        },
+      },
+      update: { role: a.role },
+      create: {
+        userId: user.id,
+        workspaceId: workspace.id,
+        branchId: a.branchId || DEFAULT_BRANCH_ID,
+        role: a.role,
+      },
+    });
+  }
+
+  emitEvent(EVENT_TYPES.USER_UPDATED, { userId: user.id, email: norm, action: "invited_to_workspace" });
+  const fresh = await prisma.user.findUnique({ where: { id: user.id } });
+  return rowToUser({ ...fresh!, passwordHash: null }, workspace.id);
+}
+
+/**
+ * Why Access Control (`tenant_access_control`) cannot remove this workspace membership.
+ * Note: a tenant owner may remove a globally-`SUPER_ADMIN` user from THEIR workspace
+ * (the membership), but soft-disable of that user's login is still blocked elsewhere.
+ */
+export type TenantRemovalDeniedReason =
+  | "WORKSPACE_OWNER"
+  | "LAST_WORKSPACE_ADMIN";
+
+/**
+ * Predicts `/api/admin/users/remove-member` behavior for UX (routes re-enforce server-side).
+ * Not used for Platform Admin removals.
+ */
+export function tenantRemovalDeniedReasonForMembership(args: {
+  workspaceOwnerUserId: string;
+  targetUserId: string;
+  membershipRole: string;
+  /** True when only one WORKSPACE_ADMIN exists in this workspace and it is this member. */
+  isSoleWorkspaceAdminRow: boolean;
+}): TenantRemovalDeniedReason | undefined {
+  if (args.workspaceOwnerUserId === args.targetUserId) return "WORKSPACE_OWNER";
+  if (args.membershipRole === "WORKSPACE_ADMIN" && args.isSoleWorkspaceAdminRow) {
+    return "LAST_WORKSPACE_ADMIN";
+  }
+  return undefined;
+}
+
+/**
+ * Workspace drill-down eligibility for {@link removeUserFromWorkspace} with
+ * `platform_super_admin_drilldown`.
+ */
+export function platformRemovalAllowedPreview(args: {
+  workspaceOwnerUserId: string;
+  actingUserId: string;
+  targetUserId: string;
+  membershipRole: string;
+  /** Prisma count of other WORKSPACE_ADMIN members excluding target. */
+  otherWorkspaceAdminCountExcludingTarget: number;
+}): boolean {
+  if (args.workspaceOwnerUserId === args.targetUserId) return false;
+  if (args.membershipRole === "WORKSPACE_ADMIN" && args.otherWorkspaceAdminCountExcludingTarget === 0) {
+    return args.actingUserId === args.targetUserId;
+  }
+  return true;
+}
+
+export type RemoveFromWorkspaceOutcome =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | "not_found"
+        | "wrong_workspace"
+        | "workspace_owner"
+        | "super_admin"
+        | "last_admin";
+    };
+
+/** Who is calling {@link removeUserFromWorkspace} — entitlement rules differ. */
+export type RemoveWorkspaceMembershipPolicy =
+  /** Normal Access Control `/api/admin/users/remove-member` (tenant owner session). */
+  | "tenant_access_control"
+  /** Platform `/admin` workspace drill-down only; executed by platform `SUPER_ADMIN`. */
+  | "platform_super_admin_drilldown";
+
+/**
+ * Removes `WorkspaceMember` and all `UserBranchAssignment` rows for this workspace only.
+ * Does not delete the `User` row and does not touch other workspaces.
+ */
+export async function removeUserFromWorkspace(params: {
+  email: string;
+  tenantId: string;
+  actingUserId: string;
+  /** @default `"tenant_access_control"` */
+  policy?: RemoveWorkspaceMembershipPolicy;
+}): Promise<RemoveFromWorkspaceOutcome> {
+  const policy = params.policy ?? "tenant_access_control";
+  const norm = params.email?.trim().toLowerCase();
+  if (!norm) return { ok: false, reason: "not_found" };
+
+  const target = await prisma.user.findUnique({ where: { email: norm } });
+  if (!target) return { ok: false, reason: "not_found" };
+
+  const workspace = await prisma.workspace.findFirst({
+    where: { OR: [{ id: params.tenantId }, { slug: params.tenantId }] },
+  });
+  if (!workspace) return { ok: false, reason: "wrong_workspace" };
+
+  const membership = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId: workspace.id, userId: target.id } },
+  });
+  if (!membership) return { ok: false, reason: "wrong_workspace" };
+
+  if (workspace.ownerId === target.id) return { ok: false, reason: "workspace_owner" };
+
+  if (membership.role === "WORKSPACE_ADMIN") {
+    const otherAdmins = await prisma.workspaceMember.count({
+      where: {
+        workspaceId: workspace.id,
+        role: "WORKSPACE_ADMIN",
+        userId: { not: target.id },
+      },
+    });
+    if (otherAdmins === 0) {
+      const selfRemoveOnPlatform =
+        policy === "platform_super_admin_drilldown" && target.id === params.actingUserId;
+      if (!selfRemoveOnPlatform) return { ok: false, reason: "last_admin" };
+    }
+  }
+
+  // SUPER_ADMIN policy: tenant owners may remove a SUPER_ADMIN user from THEIR workspace
+  // (membership only). Soft-disabling the SUPER_ADMIN login is still blocked elsewhere.
+
+  await prisma.userBranchAssignment.deleteMany({
+    where: { userId: target.id, workspaceId: workspace.id },
+  });
+  await prisma.workspaceMember.delete({
+    where: { workspaceId_userId: { workspaceId: workspace.id, userId: target.id } },
+  });
+
+  emitEvent(EVENT_TYPES.USER_UPDATED, { userId: target.id, email: norm, action: "removed_from_workspace" });
+  return { ok: true };
+}
+
+export type PauseMembershipDeniedReason =
+  | "WORKSPACE_OWNER"
+  | "LAST_ACTIVE_WORKSPACE_ADMIN"
+  | "SELF";
+
 export async function listUsersWithScopeForTenant(tenantId: string): Promise<
   Array<{
     id: string; email: string; tenantId: string; createdAt: string;
     name?: string; accessType: AccessType; branchIds: string[];
     status: "ACTIVE" | "PENDING" | "DISABLED";
     deactivatedAt?: string;
-    /** True when this row cannot be soft-disabled (super_admin / workspace owner / last admin). */
+    /** Workspace-scoped membership lifecycle ("Active" or "Suspended in workspace"). */
+    membershipStatus: "ACTIVE" | "SUSPENDED";
+    membershipSuspendedAt?: string;
+    /** Same as historically: disables workspace-scope "Disable login" affordance only. Not the same as remove-from-workspace. */
     protected: boolean;
+    /** Present when tenant cannot workspace-remove this membership (explain in UI). Excludes platform super-admin role — tenant owner may still remove that membership. */
+    tenantRemoveDeniedReason?: TenantRemovalDeniedReason | undefined;
+    /** Present when tenant cannot pause/disable this membership in this workspace. */
+    pauseDeniedReason?: PauseMembershipDeniedReason | undefined;
+    /** True when `User.role` is platform SUPER_ADMIN (login identity), distinct from tenant owner UI. */
+    isGlobalSuperAdmin?: boolean;
+    /** True when the user has a password hash (can log in when active). */
+    hasPassword: boolean;
+    /** True when "Remove from workspace" may be shown for this row (server-side eligibility). */
+    canRemoveFromWorkspace: boolean;
+    /** True when "Disable in workspace" may be shown for this row (server-side eligibility). Acting-user-aware variant is enforced inside the route handler. */
+    canPauseInWorkspace: boolean;
   }>
 > {
   const workspace = await prisma.workspace.findFirst({
@@ -363,6 +591,13 @@ export async function listUsersWithScopeForTenant(tenantId: string): Promise<
   // Pre-compute "is last WORKSPACE_ADMIN" so we don't issue N count queries.
   const adminMemberIds = members.filter((m) => m.role === "WORKSPACE_ADMIN").map((m) => m.userId);
   const onlyAdminUserId = adminMemberIds.length === 1 ? adminMemberIds[0] : null;
+  // Pause-eligibility uses ACTIVE-only admin count: pausing a row that's the
+  // last *active* admin would lock out all admins, even if a SUSPENDED admin
+  // still exists on paper.
+  const activeAdminMemberIds = members
+    .filter((m) => m.role === "WORKSPACE_ADMIN" && m.status !== "SUSPENDED")
+    .map((m) => m.userId);
+  const onlyActiveAdminUserId = activeAdminMemberIds.length === 1 ? activeAdminMemberIds[0] : null;
 
   return Promise.all(
     members.map(async (m) => {
@@ -370,6 +605,8 @@ export async function listUsersWithScopeForTenant(tenantId: string): Promise<
       const accessType: AccessType = tenantRole === "TENANT_OWNER" || tenantRole === "TENANT_ADMIN" ? "OWNER" : "BRANCH_USER";
       const status = (m.user.status ?? "ACTIVE") as "ACTIVE" | "PENDING" | "DISABLED";
       const deactivatedAt = m.user.deactivatedAt ? m.user.deactivatedAt.toISOString() : undefined;
+      const membershipStatus = (m.status ?? "ACTIVE") as "ACTIVE" | "SUSPENDED";
+      const membershipSuspendedAt = m.suspendedAt ? m.suspendedAt.toISOString() : undefined;
       const isSuperAdmin = m.user.role === "SUPER_ADMIN";
       const isWorkspaceOwner = workspace.ownerId === m.user.id;
       const isLastAdmin = onlyAdminUserId === m.user.id;
@@ -381,6 +618,27 @@ export async function listUsersWithScopeForTenant(tenantId: string): Promise<
         return [...new Set(assignments.map((a) => a.branchId))].filter(Boolean);
       })();
 
+      const isGlobalSuperAdminUser = isSuperAdmin;
+      const isSoleWorkspaceAdminRow = onlyAdminUserId === m.user.id;
+      const tenantRemoveDeniedReason = tenantRemovalDeniedReasonForMembership({
+        workspaceOwnerUserId: workspace.ownerId,
+        targetUserId: m.user.id,
+        membershipRole: m.role,
+        isSoleWorkspaceAdminRow,
+      });
+      const canRemoveFromWorkspace = tenantRemoveDeniedReason === undefined;
+
+      // Pause eligibility (workspace-scoped). Acting-user "self" check is
+      // enforced inside the route; here we surface only workspace-intrinsic
+      // refusals so the UI can disable the button + show a tooltip.
+      let pauseDeniedReason: PauseMembershipDeniedReason | undefined;
+      if (isWorkspaceOwner) {
+        pauseDeniedReason = "WORKSPACE_OWNER";
+      } else if (m.role === "WORKSPACE_ADMIN" && onlyActiveAdminUserId === m.user.id) {
+        pauseDeniedReason = "LAST_ACTIVE_WORKSPACE_ADMIN";
+      }
+      const canPauseInWorkspace = pauseDeniedReason === undefined;
+
       return {
         id: m.user.id,
         email: m.user.email,
@@ -391,7 +649,15 @@ export async function listUsersWithScopeForTenant(tenantId: string): Promise<
         branchIds,
         status,
         deactivatedAt,
+        membershipStatus,
+        membershipSuspendedAt,
         protected: isProtected,
+        tenantRemoveDeniedReason,
+        pauseDeniedReason,
+        isGlobalSuperAdmin: isGlobalSuperAdminUser,
+        hasPassword: Boolean(m.user.passwordHash),
+        canRemoveFromWorkspace,
+        canPauseInWorkspace,
       };
     }),
   );
@@ -617,6 +883,127 @@ export async function disableUserInWorkspace(params: {
 }
 
 /**
+ * Outcome of a workspace-scoped pause/resume request. Workspace-scoped means
+ * we toggle `WorkspaceMember.status` only — the user's global `User.status`,
+ * password and other workspace memberships are untouched.
+ */
+export type PauseMembershipOutcome =
+  | { ok: true; userId: string; email: string }
+  | {
+      ok: false;
+      reason: "not_found" | "wrong_workspace" | "self" | "workspace_owner" | "last_admin";
+    };
+
+/**
+ * Soft-pause a user's membership in a single workspace ("Disable in workspace").
+ *
+ * - Sets `WorkspaceMember.status = SUSPENDED` and `WorkspaceMember.suspendedAt = now()`.
+ * - Does NOT touch `User.status`, so the user can still authenticate globally
+ *   and access any other workspaces they belong to.
+ * - Permission lookups (`getTenantRole`, `getAssignedBranchIds`,
+ *   `hasBranchAccess`) read the suspended membership as null.
+ *
+ * Refuses (returns `ok: false` with a reason) if:
+ *   - target email does not exist
+ *   - target user is not a member of `tenantId`
+ *   - target is the acting admin (`actingUserId`)
+ *   - target is the `Workspace.ownerId` of `tenantId`
+ *   - target is the last remaining `WORKSPACE_ADMIN` member of `tenantId`
+ *
+ * NOTE: Unlike `disableUserInWorkspace`, this is allowed for `User.role = SUPER_ADMIN`
+ * because it never disables their global identity — only their access to this workspace.
+ */
+export async function pauseMembershipInWorkspace(params: {
+  email: string;
+  tenantId: string;
+  actingUserId: string;
+}): Promise<PauseMembershipOutcome> {
+  const norm = params.email?.trim().toLowerCase();
+  if (!norm) return { ok: false, reason: "not_found" };
+
+  const target = await prisma.user.findUnique({ where: { email: norm } });
+  if (!target) return { ok: false, reason: "not_found" };
+
+  const workspace = await prisma.workspace.findFirst({
+    where: { OR: [{ id: params.tenantId }, { slug: params.tenantId }] },
+  });
+  if (!workspace) return { ok: false, reason: "wrong_workspace" };
+
+  const membership = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId: workspace.id, userId: target.id } },
+  });
+  if (!membership) return { ok: false, reason: "wrong_workspace" };
+
+  if (target.id === params.actingUserId) return { ok: false, reason: "self" };
+  if (workspace.ownerId === target.id) return { ok: false, reason: "workspace_owner" };
+
+  if (membership.role === "WORKSPACE_ADMIN") {
+    const otherActiveAdmins = await prisma.workspaceMember.count({
+      where: {
+        workspaceId: workspace.id,
+        role: "WORKSPACE_ADMIN",
+        userId: { not: target.id },
+        status: "ACTIVE",
+      },
+    });
+    if (otherActiveAdmins === 0) return { ok: false, reason: "last_admin" };
+  }
+
+  await prisma.workspaceMember.update({
+    where: { workspaceId_userId: { workspaceId: workspace.id, userId: target.id } },
+    data: { status: "SUSPENDED", suspendedAt: new Date() },
+  });
+
+  emitEvent(EVENT_TYPES.USER_UPDATED, {
+    userId: target.id,
+    email: norm,
+    action: "membership_paused",
+  });
+  return { ok: true, userId: target.id, email: norm };
+}
+
+/**
+ * Re-activate a previously paused workspace membership ("Activate" in
+ * Access Control). No-op if the membership is already ACTIVE.
+ */
+export async function resumeMembershipInWorkspace(params: {
+  email: string;
+  tenantId: string;
+}): Promise<PauseMembershipOutcome> {
+  const norm = params.email?.trim().toLowerCase();
+  if (!norm) return { ok: false, reason: "not_found" };
+
+  const target = await prisma.user.findUnique({ where: { email: norm } });
+  if (!target) return { ok: false, reason: "not_found" };
+
+  const workspace = await prisma.workspace.findFirst({
+    where: { OR: [{ id: params.tenantId }, { slug: params.tenantId }] },
+  });
+  if (!workspace) return { ok: false, reason: "wrong_workspace" };
+
+  const membership = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId: workspace.id, userId: target.id } },
+  });
+  if (!membership) return { ok: false, reason: "wrong_workspace" };
+
+  if (membership.status === "ACTIVE") {
+    return { ok: true, userId: target.id, email: norm };
+  }
+
+  await prisma.workspaceMember.update({
+    where: { workspaceId_userId: { workspaceId: workspace.id, userId: target.id } },
+    data: { status: "ACTIVE", suspendedAt: null },
+  });
+
+  emitEvent(EVENT_TYPES.USER_UPDATED, {
+    userId: target.id,
+    email: norm,
+    action: "membership_resumed",
+  });
+  return { ok: true, userId: target.id, email: norm };
+}
+
+/**
  * Read-only protection check used by the admin list to render row-level UI
  * affordances (e.g. greyed-out "Disable" button). Mirrors the refusal logic
  * inside `disableUserInWorkspace` but does not require an acting user since
@@ -656,7 +1043,12 @@ export async function getTenantRole(userId: string, workspaceId?: string | null)
     const membership = await prisma.workspaceMember.findUnique({
       where: { workspaceId_userId: { workspaceId: ws, userId } },
     });
-    if (membership) return prismaRoleToTenantRole(membership.role);
+    // Suspended memberships read as if the user has no role in this workspace —
+    // tenant/branch access checks then fail closed without deleting the row.
+    if (membership && membership.status !== "SUSPENDED") {
+      return prismaRoleToTenantRole(membership.role);
+    }
+    if (membership && membership.status === "SUSPENDED") return null;
   }
   const m = await resolvePrimaryWorkspaceMembership(userId);
   return m ? prismaRoleToTenantRole(m.role) : null;
@@ -679,6 +1071,17 @@ export async function getAssignedBranchIds(userId: string, workspaceId?: string 
   const role = await getTenantRole(userId, workspaceId);
   if (role === "TENANT_OWNER" || role === "TENANT_ADMIN") return [ALL_BRANCHES_SENTINEL];
   const ws = workspaceId ?? (await getUserById(userId))?.tenantId;
+  // Suspended-in-workspace short-circuit: do not surface any branch assignments.
+  // `getTenantRole` returns null for SUSPENDED, but a BRANCH_USER call path
+  // would otherwise still skip the role-null branch and reach the assignment
+  // query, so we explicitly check the membership row here.
+  if (ws) {
+    const membership = await prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId: ws, userId } },
+      select: { status: true },
+    });
+    if (membership && membership.status === "SUSPENDED") return [];
+  }
   const assignments = await prisma.userBranchAssignment.findMany({
     where: ws ? { userId, workspaceId: ws } : { userId },
   });

@@ -18,6 +18,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 
 // ─── Visual primitives (unchanged from the design prototype) ──────────────────
 
@@ -121,8 +122,45 @@ type ApiUser = {
   branchIds: string[];
   status?: "ACTIVE" | "PENDING" | "DISABLED";
   deactivatedAt?: string;
+  membershipStatus?: "ACTIVE" | "SUSPENDED";
+  membershipSuspendedAt?: string;
   protected?: boolean;
+  tenantRemoveDeniedReason?: "WORKSPACE_OWNER" | "LAST_WORKSPACE_ADMIN";
+  pauseDeniedReason?: "WORKSPACE_OWNER" | "LAST_ACTIVE_WORKSPACE_ADMIN" | "SELF";
+  isGlobalSuperAdmin?: boolean;
+  canRemoveFromWorkspace?: boolean;
+  canPauseInWorkspace?: boolean;
 };
+
+function tenantRemoveHint(
+  reason: ApiUser["tenantRemoveDeniedReason"],
+): string {
+  switch (reason) {
+    case "WORKSPACE_OWNER":
+      return "Workspace owner cannot be removed from here.";
+    case "LAST_WORKSPACE_ADMIN":
+      return "Sole tenant-wide admin in this workspace — add another admin before removing this person.";
+    default:
+      return "";
+  }
+}
+
+function pauseDeniedHint(
+  reason: ApiUser["pauseDeniedReason"],
+  isSelf: boolean,
+): string {
+  if (isSelf) return "You cannot pause your own membership.";
+  switch (reason) {
+    case "WORKSPACE_OWNER":
+      return "Workspace owner cannot be paused. Transfer ownership first.";
+    case "LAST_ACTIVE_WORKSPACE_ADMIN":
+      return "Sole active tenant-wide admin — promote another admin before pausing this person.";
+    case "SELF":
+      return "You cannot pause your own membership.";
+    default:
+      return "";
+  }
+}
 
 type BranchOption = { id: string; name: string };
 type SessionSummary = { accessType?: AccessMode; branchIds?: string[]; userId?: string; email?: string };
@@ -227,10 +265,10 @@ function useAdminUsers() {
     [reload],
   );
 
-  const disableUser = useCallback(
+  const pauseMembership = useCallback(
     async (email: string) => {
-      const res = await fetch("/api/admin/users", {
-        method: "DELETE",
+      const res = await fetch("/api/admin/users/pause-member", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
@@ -242,19 +280,51 @@ function useAdminUsers() {
     [reload],
   );
 
-  return { users, branches, me, loading, bootstrapError, reload, createUser, updateUser, disableUser };
+  const resumeMembership = useCallback(
+    async (email: string) => {
+      const res = await fetch("/api/admin/users/resume-member", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+      if (!res.ok) throw new Error(data.error ?? `Activate failed (${res.status})`);
+      await reload();
+      return data;
+    },
+    [reload],
+  );
+
+  const removeFromWorkspace = useCallback(
+    async (email: string) => {
+      const res = await fetch("/api/admin/users/remove-member", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+      if (!res.ok) throw new Error(data.error ?? `Remove failed (${res.status})`);
+      await reload();
+      return data;
+    },
+    [reload],
+  );
+
+  return { users, branches, me, loading, bootstrapError, reload, createUser, updateUser, pauseMembership, resumeMembership, removeFromWorkspace };
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function AccessControlConsole() {
-  const { users, branches, me, loading, bootstrapError, reload, createUser, updateUser, disableUser } = useAdminUsers();
+  const { users, branches, me, loading, bootstrapError, reload, createUser, updateUser, pauseMembership, resumeMembership, removeFromWorkspace } = useAdminUsers();
 
   const [unlocked, setUnlocked] = useState(false);
   const [workflow, setWorkflow] = useState<Workflow>("idle");
   const [lookupEmail, setLookupEmail] = useState("");
   const [toast, setToast] = useState<string | null>(null);
-  const [busy, setBusy] = useState<null | "create" | "apply" | "disable" | "activate">(null);
+  const [busy, setBusy] = useState<null | "create" | "apply" | "disable" | "activate" | "remove">(null);
+  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   const [selectedUserEmail, setSelectedUserEmail] = useState<string | null>(null);
   const selectedUser = useMemo(
@@ -314,8 +384,20 @@ export function AccessControlConsole() {
   );
 
   const branchScopeInvalid = accessMode === "BRANCH_USER" && selectedBranchIds.length === 0;
+  /**
+   * Membership-paused (workspace-scoped). Distinct from `selectedUser.status`,
+   * which is the global User.status (managed only by Platform Admin).
+   */
+  const membershipSuspended =
+    workflow === "found" && selectedUser?.membershipStatus === "SUSPENDED";
   const userIsDisabled = workflow === "found" && selectedUser?.status === "DISABLED";
-  const userIsProtected = workflow === "found" && selectedUser?.protected === true;
+  const isSelfTarget =
+    workflow === "found" && !!selectedUser && me?.userId === selectedUser.id;
+  /** True when this row's workspace-scoped pause is server-blocked (e.g. owner, last admin, self). */
+  const pauseInWorkspaceBlocked =
+    workflow === "found" && (
+      selectedUser?.canPauseInWorkspace === false || isSelfTarget
+    );
 
   const selectedBranchNames = useMemo(() => {
     if (accessMode === "OWNER") return "All branches";
@@ -437,34 +519,71 @@ export function AccessControlConsole() {
 
   const handleDisable = async () => {
     if (!unlocked || !selectedUser || busy) return;
-    if (selectedUser.protected) {
-      setToast("This user is protected (super admin / workspace owner / last admin).");
+    if (pauseInWorkspaceBlocked) {
+      setToast(pauseDeniedHint(selectedUser.pauseDeniedReason, isSelfTarget) || "Cannot pause this user.");
       return;
     }
-    if (!window.confirm(`Disable ${selectedUser.email}?\n\nThey will no longer be able to login. Existing sessions will be revoked.`)) return;
     setBusy("disable");
     try {
-      await disableUser(selectedUser.email);
-      setToast(`${selectedUser.email} has been disabled.`);
+      await pauseMembership(selectedUser.email);
+      setToast(`${selectedUser.email} paused in this workspace. Their other workspaces are unaffected.`);
     } catch (e) {
-      setToast(e instanceof Error ? e.message : "Failed to disable user.");
+      setToast(e instanceof Error ? e.message : "Failed to pause user.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openRemoveConfirm = () => {
+    if (!unlocked || !selectedUser || busy) return;
+    if (selectedUser.canRemoveFromWorkspace === false) {
+      setToast(tenantRemoveHint(selectedUser.tenantRemoveDeniedReason) || "Cannot remove this user from the workspace.");
+      return;
+    }
+    setRemoveError(null);
+    setRemoveConfirmOpen(true);
+  };
+
+  const performRemoveFromWorkspace = async () => {
+    if (!unlocked || !selectedUser) return;
+    setBusy("remove");
+    setRemoveError(null);
+    try {
+      await removeFromWorkspace(selectedUser.email);
+      setRemoveConfirmOpen(false);
+      setToast(`${selectedUser.email} removed from this workspace.`);
+      setWorkflow("idle");
+      setSelectedUserEmail(null);
+      setLookupEmail("");
+    } catch (e) {
+      setRemoveError(e instanceof Error ? e.message : "Failed to remove from workspace.");
+      throw e; // keep modal open
     } finally {
       setBusy(null);
     }
   };
 
   const handleActivate = async () => {
-    // PATCH on a DISABLED user reactivates it (see lib/user-store.ts updateUser).
+    // Resume a paused workspace membership. Idempotent for ACTIVE rows.
+    // (Global `User.status` reactivation lives in Platform Admin and is handled
+    //  via PATCH side-effects in updateUser.)
     if (!unlocked || !selectedUser || busy) return;
     setBusy("activate");
     try {
-      await updateUser({
-        email: selectedUser.email,
-        name: selectedUser.name,
-        accessType: selectedUser.accessType,
-        branchIds: selectedUser.accessType === "BRANCH_USER" ? selectedUser.branchIds : [],
-      });
-      setToast(`${selectedUser.email} re-activated.`);
+      if (selectedUser.membershipStatus === "SUSPENDED") {
+        await resumeMembership(selectedUser.email);
+        setToast(`${selectedUser.email} re-activated in this workspace.`);
+      } else {
+        // No-op when already active in workspace; PATCH still useful if `User.status`
+        // was DISABLED globally (interpreted as un-disable inside updateUser).
+        await updateUser({
+          email: selectedUser.email,
+          name: selectedUser.name,
+          accessType: selectedUser.accessType,
+          branchIds: selectedUser.accessType === "BRANCH_USER" ? selectedUser.branchIds : [],
+        });
+        setToast(`${selectedUser.email} is active.`);
+      }
     } catch (e) {
       setToast(e instanceof Error ? e.message : "Failed to activate user.");
     } finally {
@@ -650,7 +769,7 @@ export function AccessControlConsole() {
     return (
       <button
         type="button"
-        disabled={!unlocked || userIsDisabled || userIsProtected}
+        disabled={!unlocked || userIsDisabled}
         onClick={() => {
           if (!unlocked || accessMode !== "BRANCH_USER") return;
           setSelectedBranchIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -975,7 +1094,7 @@ export function AccessControlConsole() {
                       description="All branches scope."
                       tone="primary"
                       active={accessMode === "OWNER"}
-                      disabled={!unlocked || userIsDisabled || userIsProtected}
+                      disabled={!unlocked || userIsDisabled}
                       onClick={() => {
                         setAccessMode("OWNER");
                         setSelectedBranchIds([]);
@@ -987,7 +1106,7 @@ export function AccessControlConsole() {
                       description="Only assigned branches."
                       tone="neutral"
                       active={accessMode === "BRANCH_USER"}
-                      disabled={!unlocked || userIsDisabled || userIsProtected}
+                      disabled={!unlocked || userIsDisabled}
                       onClick={() => {
                         setAccessMode("BRANCH_USER");
                         setSelectedBranchIds([]);
@@ -1012,41 +1131,100 @@ export function AccessControlConsole() {
                   <div>
                     <div className="text-sm font-semibold text-slate-100">User status</div>
                     <div className="mt-1 text-xs text-slate-400">
-                      Disable removes login access (soft, reversible). Protected users cannot be disabled.
+                      <strong className="font-semibold text-slate-300">Active</strong> — full workspace access.{" "}
+                      <strong className="font-semibold text-slate-300">Disable</strong> pauses access in this
+                      workspace only (reversible, other workspaces unaffected).{" "}
+                      <strong className="font-semibold text-slate-300">Remove</strong> deletes the membership and
+                      branch assignments here.
                     </div>
                   </div>
                   <div className="text-[11px] text-slate-500">
                     Current:{" "}
                     <span className="text-slate-200 font-semibold">
                       {selectedUser.status === "DISABLED"
-                        ? "Disabled"
-                        : selectedUser.status === "PENDING"
-                          ? "Pending"
+                        ? "Login disabled"
+                        : membershipSuspended
+                          ? "Paused in workspace"
                           : "Active"}
                     </span>
                   </div>
                 </div>
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
                   <PadButton
                     label={busy === "activate" ? "Activating…" : "Active"}
-                    description="Identity is enabled."
+                    description={
+                      membershipSuspended
+                        ? "Resume access in this workspace."
+                        : userIsDisabled
+                          ? "Login is globally disabled."
+                          : "Identity is enabled."
+                    }
                     tone="primary"
-                    active={selectedUser.status !== "DISABLED"}
-                    disabled={!unlocked || busy !== null || selectedUser.status !== "DISABLED"}
+                    active={!membershipSuspended && !userIsDisabled}
+                    disabled={
+                      !unlocked ||
+                      busy !== null ||
+                      (!membershipSuspended && !userIsDisabled)
+                    }
                     onClick={handleActivate}
                   />
                   <PadButton
-                    label={busy === "disable" ? "Disabling…" : "Disabled"}
-                    description={selectedUser.protected ? "Protected — cannot disable." : "Block login and revoke session."}
-                    tone="danger"
-                    active={selectedUser.status === "DISABLED"}
+                    label={busy === "disable" ? "Disabling…" : "Disable"}
+                    description={
+                      pauseInWorkspaceBlocked
+                        ? pauseDeniedHint(selectedUser.pauseDeniedReason, isSelfTarget) || "Protected — cannot disable here."
+                        : membershipSuspended
+                          ? "Already paused in this workspace."
+                          : "Pause access in this workspace (reversible, other workspaces unaffected)."
+                    }
+                    tone="protected"
+                    active={membershipSuspended === true}
                     disabled={
-                      !unlocked || busy !== null || selectedUser.status === "DISABLED" || selectedUser.protected === true
+                      !unlocked ||
+                      busy !== null ||
+                      membershipSuspended === true ||
+                      pauseInWorkspaceBlocked
                     }
                     onClick={handleDisable}
                   />
+                  <PadButton
+                    label={busy === "remove" ? "Removing…" : "Remove"}
+                    description={
+                      selectedUser.canRemoveFromWorkspace === false
+                        ? tenantRemoveHint(selectedUser.tenantRemoveDeniedReason) || "Cannot remove from workspace."
+                        : "Delete membership and branches in this workspace only."
+                    }
+                    tone="danger"
+                    active={false}
+                    disabled={
+                      !unlocked ||
+                      busy !== null ||
+                      selectedUser.canRemoveFromWorkspace === false
+                    }
+                    onClick={openRemoveConfirm}
+                  />
                 </div>
+
+                {(membershipSuspended || pauseInWorkspaceBlocked || selectedUser.canRemoveFromWorkspace === false) ? (
+                  <div className="mt-3 rounded-xl border border-slate-700/40 bg-slate-900/40 p-3 text-[11px] leading-snug text-slate-400">
+                    {membershipSuspended ? (
+                      <div className="text-amber-200/85">
+                        Paused in this workspace
+                        {selectedUser.membershipSuspendedAt
+                          ? ` since ${new Date(selectedUser.membershipSuspendedAt).toLocaleDateString()}`
+                          : ""}
+                        . Login still works for other workspaces. Click <strong>Active</strong> to resume.
+                      </div>
+                    ) : null}
+                    {pauseInWorkspaceBlocked ? (
+                      <div>{pauseDeniedHint(selectedUser.pauseDeniedReason, isSelfTarget)}</div>
+                    ) : null}
+                    {selectedUser.canRemoveFromWorkspace === false ? (
+                      <div>{tenantRemoveHint(selectedUser.tenantRemoveDeniedReason)}</div>
+                    ) : null}
+                  </div>
+                ) : null}
               </ConsoleCard>
 
               <ConsoleCard>
@@ -1060,6 +1238,14 @@ export function AccessControlConsole() {
                   <div className="text-[11px] text-slate-500">
                     Scope: <span className="text-slate-200 font-semibold">{selectedBranchNames}</span>
                   </div>
+                </div>
+
+                <div className="mt-3 rounded-xl border border-slate-700/40 bg-slate-900/40 px-3 py-2 text-[11px] leading-snug text-slate-400">
+                  <strong className="font-semibold text-slate-300">Read-only preview.</strong>{" "}
+                  Capabilities are derived from the access type and branch scope chosen above. To change them, switch
+                  between <strong className="text-sky-300">Full Network</strong> and{" "}
+                  <strong className="text-sky-300">Assigned Scope</strong>, adjust branch cards, and click{" "}
+                  <strong className="text-emerald-300">Apply access</strong>.
                 </div>
 
                 <div className="mt-4 space-y-5">
@@ -1104,7 +1290,6 @@ export function AccessControlConsole() {
                     disabled={
                       branchScopeInvalid ||
                       userIsDisabled ||
-                      userIsProtected ||
                       busy !== null
                     }
                     onClick={handleApplyAccess}
@@ -1346,6 +1531,27 @@ export function AccessControlConsole() {
           </div>
         </div>
       ) : null}
+
+      <DeleteConfirmModal
+        isOpen={removeConfirmOpen}
+        onClose={() => {
+          if (busy === "remove") return;
+          setRemoveConfirmOpen(false);
+          setRemoveError(null);
+        }}
+        onConfirm={performRemoveFromWorkspace}
+        title="Remove from workspace"
+        message={
+          selectedUser
+            ? `Remove ${selectedUser.email} from this workspace?\n\nTheir membership and branch assignments are deleted for this workspace only. Their global SyncBiz account is preserved (other workspaces, login).`
+            : ""
+        }
+        errorHint={removeError}
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        loading={busy === "remove"}
+        loadingLabel="Removing…"
+      />
     </div>
   );
 }
