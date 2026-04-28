@@ -16,6 +16,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { db } from "@/lib/store";
 import type { TenantRole, BranchRole } from "@/lib/user-types";
+import { extractClientIp, writeTenantAuditLog } from "@/lib/admin/tenant-audit";
 
 const DEFAULT_BRANCH_ID = "default";
 
@@ -145,6 +146,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const ipAddress = extractClientIp(req);
+
     if (rowByEmail) {
       const user = await inviteExistingUserToWorkspace({
         email,
@@ -152,6 +155,19 @@ export async function POST(req: NextRequest) {
         tenantRole,
         branchAssignments,
         seedPassword: password.trim().length > 0 ? password : null,
+      });
+      await writeTenantAuditLog(prisma, {
+        action: "member.invite",
+        actorUserId: admin.id,
+        workspaceId: workspace.id,
+        targetUserId: user.id,
+        ipAddress,
+        metadata: {
+          targetEmail: email,
+          tenantRole,
+          branchAssignments: branchAssignments.map((a) => a.branchId),
+          seededPassword: password.trim().length > 0 && !rowByEmail.passwordHash,
+        },
       });
       return NextResponse.json(user, { status: 201 });
     }
@@ -162,6 +178,18 @@ export async function POST(req: NextRequest) {
       tenantRole,
       branchAssignments,
       tenantId: tenantKey,
+    });
+    await writeTenantAuditLog(prisma, {
+      action: "member.create",
+      actorUserId: admin.id,
+      workspaceId: workspace.id,
+      targetUserId: user.id,
+      ipAddress,
+      metadata: {
+        targetEmail: email,
+        tenantRole,
+        branchAssignments: branchAssignments.map((a) => a.branchId),
+      },
     });
     return NextResponse.json(user, { status: 201 });
   } catch (e) {
@@ -232,6 +260,25 @@ export async function DELETE(req: NextRequest) {
       default:
         return NextResponse.json({ error: "Cannot disable user" }, { status: 400 });
     }
+  }
+
+  // The DELETE handler is the legacy global-disable path (tenant-scoped UI now
+  // pauses membership instead). We still log it so any backend caller leaves
+  // an audit trail. Workspace lookup is best-effort; a missing row is unusual
+  // here because disableUserInWorkspace already validated membership.
+  const ws = await prisma.workspace.findFirst({
+    where: { OR: [{ id: admin.tenantId!.trim() }, { slug: admin.tenantId!.trim() }] },
+    select: { id: true },
+  });
+  if (ws) {
+    await writeTenantAuditLog(prisma, {
+      action: "member.global_disable",
+      actorUserId: admin.id,
+      workspaceId: ws.id,
+      targetUserId: outcome.userId,
+      ipAddress: extractClientIp(req),
+      metadata: { targetEmail: outcome.email },
+    });
   }
 
   return NextResponse.json(
@@ -326,6 +373,37 @@ export async function PATCH(req: NextRequest) {
       tenantRole,
       branchAssignments,
     });
+
+    const wsRow = await prisma.workspace.findFirst({
+      where: { OR: [{ id: admin.tenantId.trim() }, { slug: admin.tenantId.trim() }] },
+      select: { id: true },
+    });
+    if (wsRow) {
+      const ip = extractClientIp(req);
+      await writeTenantAuditLog(prisma, {
+        action: "member.update",
+        actorUserId: admin.id,
+        workspaceId: wsRow.id,
+        targetUserId: updated.id,
+        ipAddress: ip,
+        metadata: {
+          targetEmail: email,
+          tenantRole,
+          branchAssignments: branchAssignments.map((a) => a.branchId),
+          nameChanged: typeof name === "string" && name.length > 0,
+        },
+      });
+      if (newPassword) {
+        await writeTenantAuditLog(prisma, {
+          action: "member.password_set",
+          actorUserId: admin.id,
+          workspaceId: wsRow.id,
+          targetUserId: updated.id,
+          ipAddress: ip,
+          metadata: { targetEmail: email },
+        });
+      }
+    }
 
     return NextResponse.json(updated, { status: 200 });
   } catch (e) {

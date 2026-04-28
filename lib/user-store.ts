@@ -221,8 +221,16 @@ async function resolvePrimaryWorkspaceMembership(userId: string) {
     orderBy: { createdAt: "asc" },
   });
   if (memberships.length === 0) return null;
-  const owned = memberships.find((m) => m.workspace.ownerId === userId);
-  return (owned ?? memberships[0])!;
+  // Owner-of-workspace beats everything else, even if SUSPENDED — owners need
+  // to be able to log into their own workspace to resume themselves.
+  const ownedAny = memberships.find((m) => m.workspace.ownerId === userId);
+  if (ownedAny) return ownedAny;
+  // Otherwise: prefer ACTIVE memberships so a SUSPENDED-in-primary user still
+  // resolves to a workspace where they actually have access. Fall back to any
+  // (suspended) membership if every row is suspended — keeps `tenantId`
+  // populated so login flows don't break.
+  const activeFirst = memberships.find((m) => m.status !== "SUSPENDED");
+  return (activeFirst ?? memberships[0])!;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

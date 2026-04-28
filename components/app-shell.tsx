@@ -24,8 +24,7 @@ import {
 import { unifiedFoundationHints, type UnifiedSource, type ParseUrlJson, type RadioStream } from "@/lib/source-types";
 import { searchExternal } from "@/lib/search-service";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
-import { DeviceModeIndicator } from "@/components/device-mode-indicator";
-import { StandaloneIndicator } from "@/components/standalone-indicator";
+import { HeaderDeviceIndicators } from "@/components/header-device-indicators";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
 import { CenterModuleContext, type CenterModule, isJinglesModule } from "@/lib/center-module-context";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
@@ -216,8 +215,8 @@ const navItems = navKeys.map((key) => ({
   labelKey: key === "sources" ? "library" : key,
 }));
 
-function getTimeBasedGreeting(locale: Locale, t: Record<string, string>): string {
-  const h = new Date().getHours();
+function getTimeBasedGreeting(hour: number, t: Record<string, string>): string {
+  const h = hour;
   if (h >= 5 && h < 12) return t.greetingMorning ?? "Good morning";
   if (h >= 12 && h < 17) return t.greetingAfternoon ?? "Good afternoon";
   if (h >= 17 && h < 20) return t.greetingEvening ?? "Good evening";
@@ -281,7 +280,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [now, setNow] = useState(() => new Date());
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [sessionAccountName, setSessionAccountName] = useState<string | null>(null);
-  const greeting = getTimeBasedGreeting(locale, t);
+  const greeting = getTimeBasedGreeting(now.getHours(), t);
   const headerSubtitle = t.headerSubtitle ?? labels.headerSubtitle?.en ?? "Schedule playback and send commands to endpoint devices";
 
   useEffect(() => {
@@ -683,8 +682,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="me-0.5 min-w-0 shrink-0 border-e border-slate-600/60 pe-2 sm:pe-3">
                 <DesktopDownloadButton />
               </div>
-              <StandaloneIndicator />
-              <DeviceModeIndicator />
+              <HeaderDeviceIndicators />
               <span className="hidden items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/80 px-2.5 py-1 text-xs text-slate-400 sm:flex">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 {t.agentsHealthy}

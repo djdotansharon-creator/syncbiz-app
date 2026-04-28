@@ -32,6 +32,45 @@ function ConsoleCard({ children, className = "" }: { children: ReactNode; classN
   );
 }
 
+const TENANT_AUDIT_LABELS: Record<string, { label: string; tone: "neutral" | "warn" | "danger" | "ok" }> = {
+  "member.create": { label: "User created", tone: "ok" },
+  "member.invite": { label: "Existing user invited", tone: "ok" },
+  "member.update": { label: "Access updated", tone: "neutral" },
+  "member.password_set": { label: "Password set", tone: "warn" },
+  "member.pause": { label: "Paused in workspace", tone: "warn" },
+  "member.resume": { label: "Resumed in workspace", tone: "ok" },
+  "member.remove": { label: "Removed from workspace", tone: "danger" },
+  "member.global_disable": { label: "Login globally disabled", tone: "danger" },
+  "member.platform_remove": { label: "Removed by platform admin", tone: "danger" },
+};
+
+function AuditToneBadge({ tone, children }: { tone: "neutral" | "warn" | "danger" | "ok"; children: ReactNode }) {
+  const cls =
+    tone === "ok"
+      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+      : tone === "warn"
+        ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+        : tone === "danger"
+          ? "border-rose-500/30 bg-rose-500/10 text-rose-200"
+          : "border-slate-700 bg-slate-900 text-slate-300";
+  return <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${cls}`}>{children}</span>;
+}
+
+function fmtRelative(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "—";
+  const ms = Date.now() - t;
+  const sec = Math.round(ms / 1000);
+  if (sec < 45) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 14) return `${day}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 function PadButton({
   label,
   description,
@@ -167,12 +206,39 @@ type SessionSummary = { accessType?: AccessMode; branchIds?: string[]; userId?: 
 
 // ─── Tiny local hook: real admin-users API client ─────────────────────────────
 
+/** Shape returned by GET /api/admin/audit. */
+type ApiAuditEvent = {
+  id: string;
+  action: string;
+  entity: string;
+  createdAt: string;
+  ipAddress: string | null;
+  metadata: unknown;
+  actor: { id: string; email: string; name: string | null } | null;
+  target: { id: string; email: string | null; name: string | null } | null;
+};
+
 function useAdminUsers() {
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [me, setMe] = useState<SessionSummary | null>(null);
+  const [auditEvents, setAuditEvents] = useState<ApiAuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+
+  const reloadAudit = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/audit?limit=50", { cache: "no-store" });
+      if (!res.ok) {
+        setAuditEvents([]);
+        return;
+      }
+      const json = await res.json();
+      setAuditEvents(Array.isArray(json) ? (json as ApiAuditEvent[]) : []);
+    } catch {
+      setAuditEvents([]);
+    }
+  }, []);
 
   const reload = useCallback(async () => {
     const [usersRes, branchesRes] = await Promise.all([
@@ -193,7 +259,10 @@ function useAdminUsers() {
       opts.unshift({ id: "default", name: "Default (legacy)" });
     }
     setBranches(opts.length > 0 ? opts : [{ id: "default", name: "Default (legacy)" }]);
-  }, []);
+    // Audit log refresh runs in parallel-ish; failure here is non-fatal so we
+    // do not block the rest of the console on it.
+    void reloadAudit();
+  }, [reloadAudit]);
 
   useEffect(() => {
     let cancelled = false;
@@ -310,13 +379,13 @@ function useAdminUsers() {
     [reload],
   );
 
-  return { users, branches, me, loading, bootstrapError, reload, createUser, updateUser, pauseMembership, resumeMembership, removeFromWorkspace };
+  return { users, branches, me, auditEvents, loading, bootstrapError, reload, reloadAudit, createUser, updateUser, pauseMembership, resumeMembership, removeFromWorkspace };
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function AccessControlConsole() {
-  const { users, branches, me, loading, bootstrapError, reload, createUser, updateUser, pauseMembership, resumeMembership, removeFromWorkspace } = useAdminUsers();
+  const { users, branches, me, auditEvents, loading, bootstrapError, reload, reloadAudit, createUser, updateUser, pauseMembership, resumeMembership, removeFromWorkspace } = useAdminUsers();
 
   const [unlocked, setUnlocked] = useState(false);
   const [workflow, setWorkflow] = useState<Workflow>("idle");
@@ -1426,7 +1495,7 @@ export function AccessControlConsole() {
                 </button>
               </div>
 
-              <ul className="mt-3 max-h-[360px] space-y-1.5 overflow-y-auto pr-1 text-xs text-slate-300">
+              <ul className="mt-3 max-h-[260px] space-y-1.5 overflow-y-auto pr-1 text-xs text-slate-300">
                 {users.length === 0 ? (
                   <li className="rounded-lg border border-slate-800/80 bg-slate-900/30 p-3 text-slate-500">
                     No users in this workspace yet.
@@ -1472,6 +1541,68 @@ export function AccessControlConsole() {
                             {u.accessType === "OWNER" ? "Owner · all branches" : `Branch User · ${u.branchIds.join(", ") || "no branches"}`}
                           </div>
                         </button>
+                      </li>
+                    );
+                  })
+                )}
+              </ul>
+            </ConsoleCard>
+
+            <ConsoleCard>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-100">Activity</div>
+                  <div className="mt-1 text-xs text-slate-400">Recent admin actions in this workspace.</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void reloadAudit();
+                  }}
+                  className="rounded-lg border border-slate-700/80 bg-slate-900/30 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800/60 hover:border-slate-600/90 transition-all"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <ul className="mt-3 max-h-[300px] space-y-1.5 overflow-y-auto pr-1 text-xs text-slate-300">
+                {auditEvents.length === 0 ? (
+                  <li className="rounded-lg border border-slate-800/80 bg-slate-900/30 p-3 text-slate-500">
+                    No activity yet. Invite a user, change access, or pause / remove a member to log an event here.
+                  </li>
+                ) : (
+                  auditEvents.map((ev) => {
+                    const meta = TENANT_AUDIT_LABELS[ev.action] ?? { label: ev.action, tone: "neutral" as const };
+                    const actorEmail = ev.actor?.email ?? "deleted user";
+                    const targetEmail =
+                      ev.target?.email ??
+                      (ev.metadata && typeof ev.metadata === "object" && ev.metadata !== null
+                        ? ((ev.metadata as { targetEmail?: unknown }).targetEmail as string | undefined) ?? null
+                        : null);
+                    return (
+                      <li
+                        key={ev.id}
+                        className="rounded-lg border border-slate-800 bg-slate-900/30 px-3 py-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <AuditToneBadge tone={meta.tone}>{meta.label}</AuditToneBadge>
+                          <span
+                            className="text-[11px] text-slate-500"
+                            title={new Date(ev.createdAt).toLocaleString()}
+                          >
+                            {fmtRelative(ev.createdAt)}
+                          </span>
+                        </div>
+                        <div className="mt-1 truncate text-[11px] text-slate-300">
+                          <span className="text-slate-500">by </span>
+                          <span className="font-semibold text-slate-200">{actorEmail}</span>
+                          {targetEmail ? (
+                            <>
+                              <span className="text-slate-500"> · target </span>
+                              <span className="font-semibold text-slate-200">{targetEmail}</span>
+                            </>
+                          ) : null}
+                        </div>
                       </li>
                     );
                   })

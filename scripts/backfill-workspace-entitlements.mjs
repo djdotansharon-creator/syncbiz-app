@@ -24,6 +24,10 @@
  *
  * Usage:
  *   node --env-file=.env scripts/backfill-workspace-entitlements.mjs
+ *
+ * If rows were created earlier with legacy column values (1/1/5/5), update them
+ * in dev with:
+ *   node --env-file=.env scripts/dev-sync-pilot-entitlement-limits.mjs
  */
 
 import { PrismaClient } from "@prisma/client";

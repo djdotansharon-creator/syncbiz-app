@@ -14,6 +14,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth-helpers";
 import { pauseMembershipInWorkspace } from "@/lib/user-store";
+import { prisma } from "@/lib/prisma";
+import { extractClientIp, writeTenantAuditLog } from "@/lib/admin/tenant-audit";
 
 export async function POST(req: NextRequest) {
   const admin = await requireAdmin();
@@ -68,6 +70,21 @@ export async function POST(req: NextRequest) {
       default:
         return NextResponse.json({ error: "Cannot pause user" }, { status: 400 });
     }
+  }
+
+  const ws = await prisma.workspace.findFirst({
+    where: { OR: [{ id: admin.tenantId.trim() }, { slug: admin.tenantId.trim() }] },
+    select: { id: true },
+  });
+  if (ws) {
+    await writeTenantAuditLog(prisma, {
+      action: "member.pause",
+      actorUserId: admin.id,
+      workspaceId: ws.id,
+      targetUserId: outcome.userId,
+      ipAddress: extractClientIp(req),
+      metadata: { targetEmail: outcome.email },
+    });
   }
 
   return NextResponse.json({ ok: true, userId: outcome.userId, email: outcome.email }, { status: 200 });

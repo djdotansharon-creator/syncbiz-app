@@ -6,6 +6,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth-helpers";
 import { removeUserFromWorkspace } from "@/lib/user-store";
+import { prisma } from "@/lib/prisma";
+import { extractClientIp, writeTenantAuditLog } from "@/lib/admin/tenant-audit";
 
 export async function POST(req: NextRequest) {
   const admin = await requireAdmin();
@@ -26,6 +28,17 @@ export async function POST(req: NextRequest) {
   if (!email || !email.includes("@")) {
     return NextResponse.json({ error: "Valid email required" }, { status: 400 });
   }
+
+  // Resolve target user + workspace before the destructive call so we can
+  // write a meaningful audit row even though removeUserFromWorkspace deletes
+  // the membership and assignment rows.
+  const [targetUser, ws] = await Promise.all([
+    prisma.user.findUnique({ where: { email }, select: { id: true } }),
+    prisma.workspace.findFirst({
+      where: { OR: [{ id: admin.tenantId.trim() }, { slug: admin.tenantId.trim() }] },
+      select: { id: true },
+    }),
+  ]);
 
   const outcome = await removeUserFromWorkspace({
     email,
@@ -57,6 +70,17 @@ export async function POST(req: NextRequest) {
       default:
         return NextResponse.json({ error: "Cannot remove user" }, { status: 400 });
     }
+  }
+
+  if (ws && targetUser) {
+    await writeTenantAuditLog(prisma, {
+      action: "member.remove",
+      actorUserId: admin.id,
+      workspaceId: ws.id,
+      targetUserId: targetUser.id,
+      ipAddress: extractClientIp(req),
+      metadata: { targetEmail: email },
+    });
   }
 
   return NextResponse.json({ ok: true }, { status: 200 });
