@@ -6,6 +6,7 @@
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
+import { enforceCanAddPlaylist } from "./entitlement-limits";
 import { normalizePlaylistForPersist, PlaylistPersistError } from "./playlist-persist-rules";
 import type { Playlist, PlaylistCreateInput, PlaylistTrack } from "./playlist-types";
 
@@ -106,6 +107,8 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
   const normalized = normalizePlaylistForPersist({ ...input, id: input.id ?? crypto.randomUUID(), createdAt: new Date().toISOString() } as Playlist);
   const wsId = await resolveWorkspaceId(normalized.tenantId);
   if (!wsId) throw new Error("Workspace not found for tenantId: " + normalized.tenantId);
+
+  await enforceCanAddPlaylist(wsId);
 
   const tracks = normalized.tracks ?? [];
   const order = normalized.order ?? tracks.map((t) => t.id);

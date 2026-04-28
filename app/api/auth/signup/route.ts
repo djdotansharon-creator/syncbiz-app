@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { EntitlementLimitError } from "@/lib/entitlement-limits";
 import { createWorkspaceOwner } from "@/lib/user-store";
 const DEMO_TENANT_ID = "tnt-default";
 
@@ -39,6 +40,9 @@ export async function POST(req: NextRequest) {
       accountId: created.tenant.id,
     }, { status: 201 });
   } catch (e) {
+    if (e instanceof EntitlementLimitError) {
+      return NextResponse.json({ error: e.message }, { status: 403 });
+    }
     const msg = e instanceof Error ? e.message : "Signup failed";
     const duplicate = /already exists/i.test(msg);
     return NextResponse.json({ error: msg }, { status: duplicate ? 409 : 400 });

@@ -7,6 +7,10 @@
 
 import { createHash, randomBytes } from "crypto";
 import { prisma } from "./prisma";
+import {
+  assertWorkspaceMembershipWithinEntitlement,
+  enforceCanAddWorkspaceMember,
+} from "./entitlement-limits";
 import { hashPassword } from "./password-utils";
 import { emitEvent, EVENT_TYPES } from "./analytics-boundary";
 import type { User, Tenant, Membership, UserBranchAssignment, TenantRole, BranchRole, AccessType } from "./user-types";
@@ -304,6 +308,8 @@ export async function createUser(params: {
   });
   if (!workspace) throw new Error("tenantId does not exist");
 
+  await enforceCanAddWorkspaceMember(workspace.id);
+
   const prismaRole = tenantRoleToPrismaRole(params.tenantRole);
   const user = await prisma.user.create({
     data: {
@@ -490,6 +496,7 @@ export async function createWorkspaceOwner(params: {
   });
 
   await ensureWorkspaceEntitlement(workspace.id);
+  await assertWorkspaceMembershipWithinEntitlement(workspace.id);
 
   return {
     user: rowToUser({ ...user, passwordHash: null }, workspace.id),

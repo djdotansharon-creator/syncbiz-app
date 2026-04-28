@@ -5,6 +5,10 @@
  */
 
 import { prisma } from "./prisma";
+import {
+  enforceCanAddBranch,
+  enforceCanAddDevice,
+} from "./entitlement-limits";
 import type {
   Account,
   Announcement,
@@ -192,6 +196,9 @@ export const db = {
   ): Promise<Branch> {
     const wsId = await resolveWorkspaceId(input.accountId);
     if (!wsId) throw new Error("Workspace not found for accountId: " + input.accountId);
+
+    await enforceCanAddBranch(wsId);
+
     const normalizedName = input.name.trim();
     if (!normalizedName) throw new Error("name is required");
     const id = (input.id ?? "").trim() || crypto.randomUUID();
@@ -234,6 +241,11 @@ export const db = {
     const branch = await prisma.branch.findFirst({
       where: { workspaceId: wsId, id: branchDbId },
     });
+    if (!branch) {
+      await enforceCanAddBranch(wsId);
+    }
+    await enforceCanAddDevice(wsId);
+
     if (!branch) {
       // Create a stub branch record for legacy "default" branch
       const stub = await prisma.branch.upsert({

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { EntitlementLimitError } from "@/lib/entitlement-limits";
 import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, getAccessTypeForUser } from "@/lib/auth-helpers";
 import { NextRequest } from "next/server";
@@ -53,6 +54,9 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(branch, { status: 201 });
   } catch (e) {
+    if (e instanceof EntitlementLimitError) {
+      return NextResponse.json({ error: e.message }, { status: 403 });
+    }
     const message = e instanceof Error ? e.message : "Failed to create branch";
     const status = /already exists/i.test(message) ? 409 : 400;
     return NextResponse.json({ error: message }, { status });

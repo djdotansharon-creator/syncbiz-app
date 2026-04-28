@@ -9,6 +9,7 @@ import {
   playlistMatchesApiScope,
   type ApiContentScope,
 } from "@/lib/content-scope-filters";
+import { EntitlementLimitError } from "@/lib/entitlement-limits";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import {
@@ -197,6 +198,9 @@ export async function POST(req: NextRequest) {
     if (uid) void notifyLibraryUpdated(uid, { branchId, entityType: "playlist", action: "created" });
     return NextResponse.json(playlist, { status: 201 });
   } catch (e) {
+    if (e instanceof EntitlementLimitError) {
+      return NextResponse.json({ error: e.message }, { status: 403 });
+    }
     if (isPlaylistPersistError(e)) {
       return NextResponse.json({ error: e.message }, { status: 400 });
     }
