@@ -33,6 +33,7 @@ import {
   PlatformQuotaStatusPill,
 } from "@/components/admin/platform-quota-ui";
 import WorkspaceTestDeleteButton from "@/components/admin/workspace-test-delete-button";
+import PlatformToolbarSearch from "@/components/admin/platform-toolbar-search";
 import { buildQuotaChecks } from "@/lib/admin/platform-quotas";
 
 export const dynamic = "force-dynamic";
@@ -74,7 +75,31 @@ function statusClass(status: string | undefined): string {
   }
 }
 
-export default async function AdminPlatformPage() {
+function normalizeSearch(q: unknown): string {
+  return typeof q === "string" ? q.trim().toLowerCase() : "";
+}
+
+function workspaceMatchesQuery(ws: {
+  name: string;
+  slug: string;
+  owner: { email: string };
+}, needle: string): boolean {
+  if (!needle) return true;
+  return (
+    ws.name.toLowerCase().includes(needle) ||
+    ws.slug.toLowerCase().includes(needle) ||
+    ws.owner.email.toLowerCase().includes(needle)
+  );
+}
+
+export default async function AdminPlatformPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
+  const sp = await searchParams;
+  const qNormalized = normalizeSearch(sp.q);
+
   const admin = await requireSuperAdmin();
 
   const [workspaces, deviceCounts] = await Promise.all([
@@ -107,26 +132,48 @@ export default async function AdminPlatformPage() {
 
   const missingEntitlement = sorted.filter((w) => !w.entitlement).length;
 
+  const displayedWorkspaces = qNormalized
+    ? sorted.filter((w) => workspaceMatchesQuery(w, qNormalized))
+    : sorted;
+
   return (
     <div className="space-y-4">
       <PlatformWorkspaceDeletedBanner />
-      <div className="flex items-baseline justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-baseline sm:justify-between">
         <h1 className="text-2xl font-semibold">Platform · Workspaces</h1>
-        <div className="flex items-center gap-3">
-          <Link
-            href="/admin/platform/users"
-            className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
-          >
-            All users
-          </Link>
-          <Link
-            href="/admin/platform/audit"
-            className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
-          >
-            Audit log
-          </Link>
+        <div className="flex flex-col gap-2 sm:items-end sm:text-right">
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <PlatformToolbarSearch
+              actionPath="/admin/platform"
+              placeholder="Search name, slug, owner email…"
+              initialQ={typeof sp.q === "string" ? sp.q : ""}
+            />
+            <Link
+              href="/admin/platform/users"
+              className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
+            >
+              All users
+            </Link>
+            <Link
+              href="/admin/platform/audit"
+              className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
+            >
+              Audit log
+            </Link>
+          </div>
           <p className="text-sm text-neutral-500">
-            {sorted.length} workspace{sorted.length === 1 ? "" : "s"}
+            {qNormalized ? (
+              <>
+                <span className="text-neutral-200">{displayedWorkspaces.length}</span> match
+                {displayedWorkspaces.length === 1 ? "" : "es"}
+                <span className="text-neutral-600"> · </span>
+                <span className="text-neutral-600">{sorted.length} total workspaces</span>
+              </>
+            ) : (
+              <>
+                {sorted.length} workspace{sorted.length === 1 ? "" : "s"}
+              </>
+            )}
             {missingEntitlement > 0 ? (
               <>
                 {" "}
@@ -144,6 +191,13 @@ export default async function AdminPlatformPage() {
       {sorted.length === 0 ? (
         <div className="rounded-md border border-neutral-800 bg-neutral-900/50 p-6 text-sm text-neutral-400">
           No workspaces yet.
+        </div>
+      ) : displayedWorkspaces.length === 0 ? (
+        <div className="rounded-md border border-neutral-800 bg-neutral-900/50 p-6 text-sm text-neutral-400">
+          No workspaces match “{typeof sp.q === "string" ? sp.q.trim() : ""}”.{" "}
+          <Link href="/admin/platform" className="text-sky-400 hover:underline">
+            Clear search
+          </Link>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-md border border-neutral-800">
@@ -166,7 +220,7 @@ export default async function AdminPlatformPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800">
-              {sorted.map((ws) => {
+              {displayedWorkspaces.map((ws) => {
                 const ent = ws.entitlement;
                 const status = ent?.status;
                 const limits = ent

@@ -16,6 +16,7 @@ import Link from "next/link";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { prisma } from "@/lib/prisma";
 import PlatformUsersRowActions from "@/components/admin/platform-users-row-actions";
+import PlatformToolbarSearch from "@/components/admin/platform-toolbar-search";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,29 @@ function statusClass(status: string): string {
   }
 }
 
-type SearchParams = { filter?: string };
+type SearchParams = { filter?: string; q?: string };
+
+function normalizeSearch(q: unknown): string {
+  return typeof q === "string" ? q.trim().toLowerCase() : "";
+}
+
+function userSearchBlob(u: {
+  email: string;
+  name: string | null;
+  role: string;
+  ownedWorkspaces: { name: string; slug: string }[];
+  memberships: { role: string; workspace: { name: string; slug: string } }[];
+}): string {
+  const bits: string[] = [];
+  bits.push(u.email, u.name ?? "", u.role);
+  for (const w of u.ownedWorkspaces) {
+    bits.push(w.name, w.slug);
+  }
+  for (const m of u.memberships) {
+    bits.push(m.role, m.workspace.name, m.workspace.slug);
+  }
+  return bits.join("\n").toLowerCase();
+}
 
 export default async function AdminPlatformUsersPage({
   searchParams,
@@ -51,6 +74,16 @@ export default async function AdminPlatformUsersPage({
 }) {
   const sp = await searchParams;
   const onlyOrphan = sp.filter === "orphan" || sp.filter === "1";
+  const qNormalized = normalizeSearch(sp.q);
+  const qRaw = typeof sp.q === "string" ? sp.q : "";
+
+  function usersListHref(opts: { orphanOnly?: boolean }) {
+    const p = new URLSearchParams();
+    if (opts.orphanOnly) p.set("filter", "orphan");
+    if (qRaw.trim()) p.set("q", qRaw.trim());
+    const s = p.toString();
+    return s ? `/admin/platform/users?${s}` : "/admin/platform/users";
+  }
 
   const admin = await requireSuperAdmin();
   const adminId = admin.id;
@@ -97,6 +130,10 @@ export default async function AdminPlatformUsersPage({
       return { u, isSuperAdmin, isOwner, orphan, canSafeDelete };
     })
     .filter((r) => (onlyOrphan ? r.orphan : true));
+
+  const displayedRows = qNormalized
+    ? rows.filter((r) => userSearchBlob(r.u).includes(qNormalized))
+    : rows;
 
   return (
     <div className="space-y-4">
@@ -179,45 +216,76 @@ export default async function AdminPlatformUsersPage({
         </div>
       </details>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-neutral-400">
-          Showing <span className="text-neutral-200">{rows.length}</span> user
-          {rows.length === 1 ? "" : "s"}
-          {onlyOrphan ? " (orphan filter on)" : ""}
-        </p>
-        <div className="flex flex-wrap gap-2 text-xs">
-          <Link
-            href="/admin/platform/users"
-            className={
-              !onlyOrphan
-                ? "rounded border border-neutral-500 bg-neutral-200 px-2 py-1 font-medium text-neutral-900"
-                : "rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-300 hover:bg-neutral-800"
-            }
-          >
-            All
-          </Link>
-          <Link
-            href="/admin/platform/users?filter=orphan"
-            className={
-              onlyOrphan
-                ? "rounded border border-amber-500/50 bg-amber-500/15 px-2 py-1 font-medium text-amber-200"
-                : "rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-300 hover:bg-neutral-800"
-            }
-          >
-            Orphans only
-          </Link>
-          <Link
-            href="/admin/platform/audit"
-            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-300 hover:bg-neutral-800"
-          >
-            Audit log
-          </Link>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <PlatformToolbarSearch
+            actionPath="/admin/platform/users"
+            placeholder="Search email, name, role, workspaces…"
+            initialQ={qRaw}
+            preserveOrphanFilter={onlyOrphan}
+          />
+          <div className="flex flex-wrap gap-2 text-xs">
+            <Link
+              href={usersListHref({ orphanOnly: false })}
+              className={
+                !onlyOrphan
+                  ? "rounded border border-neutral-500 bg-neutral-200 px-2 py-1 font-medium text-neutral-900"
+                  : "rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-300 hover:bg-neutral-800"
+              }
+            >
+              All
+            </Link>
+            <Link
+              href={usersListHref({ orphanOnly: true })}
+              className={
+                onlyOrphan
+                  ? "rounded border border-amber-500/50 bg-amber-500/15 px-2 py-1 font-medium text-amber-200"
+                  : "rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-300 hover:bg-neutral-800"
+              }
+            >
+              Orphans only
+            </Link>
+            <Link
+              href="/admin/platform/audit"
+              className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-300 hover:bg-neutral-800"
+            >
+              Audit log
+            </Link>
+          </div>
         </div>
+        <p className="text-sm text-neutral-400">
+          {qNormalized ? (
+            <>
+              <span className="text-neutral-200">{displayedRows.length}</span> match
+              {displayedRows.length === 1 ? "" : "es"}
+              <span className="text-neutral-600"> · </span>
+              <span className="text-neutral-600">
+                {rows.length} with current filter{onlyOrphan ? " (orphans)" : ""}
+              </span>
+            </>
+          ) : (
+            <>
+              Showing <span className="text-neutral-200">{rows.length}</span> user
+              {rows.length === 1 ? "" : "s"}
+              {onlyOrphan ? " (orphan filter on)" : ""}
+            </>
+          )}
+        </p>
       </div>
 
       {rows.length === 0 ? (
         <div className="rounded-md border border-neutral-800 bg-neutral-900/50 p-6 text-sm text-neutral-400">
           {onlyOrphan ? "No orphan users. Try “All”." : "No users in the database."}
+        </div>
+      ) : displayedRows.length === 0 ? (
+        <div className="rounded-md border border-neutral-800 bg-neutral-900/50 p-6 text-sm text-neutral-400">
+          No users match “{qRaw.trim()}”.{" "}
+          <Link
+            href={usersListHref({ orphanOnly: onlyOrphan })}
+            className="text-sky-400 hover:underline"
+          >
+            Clear search
+          </Link>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-md border border-neutral-800">
@@ -239,7 +307,7 @@ export default async function AdminPlatformUsersPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800">
-              {rows.map(({ u, isSuperAdmin, isOwner, orphan, canSafeDelete }) => (
+              {displayedRows.map(({ u, isSuperAdmin, isOwner, orphan, canSafeDelete }) => (
                 <tr
                   key={u.id}
                   className={
