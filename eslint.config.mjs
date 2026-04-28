@@ -14,6 +14,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // SyncBiz Player Desktop (Electron) — separate package under desktop/
     "desktop/**",
+    // WS server compiled output (`tsc` from `server/`) — generated, tracked
+    // for deploys that skip a build step but must not be linted.
+    "server/dist/**",
   ]),
 ]);
 
