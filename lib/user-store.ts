@@ -13,7 +13,7 @@ import {
 } from "./entitlement-limits";
 import { hashPassword } from "./password-utils";
 import { emitEvent, EVENT_TYPES } from "./analytics-boundary";
-import type { User, Tenant, Membership, UserBranchAssignment, TenantRole, BranchRole, AccessType } from "./user-types";
+import type { User, Tenant, TenantRole, BranchRole, AccessType } from "./user-types";
 
 const DEFAULT_BRANCH_ID = "default";
 const ALL_BRANCHES_SENTINEL = "*";
