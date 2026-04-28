@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateCredentialsAsync, createSessionValue } from "@/lib/auth";
 import { getOrCreateUserByEmail } from "@/lib/user-store";
 import { emitEvent, EVENT_TYPES } from "@/lib/analytics-boundary";
+import { ACTIVE_WORKSPACE_COOKIE_NAME } from "@/lib/active-workspace-constants";
 
 const COOKIE_NAME = "syncbiz-session";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
@@ -37,6 +38,14 @@ export async function POST(req: NextRequest) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: COOKIE_MAX_AGE,
+      path: "/",
+    });
+    // Prevent a stale active-workspace UUID from applying to this account/session.
+    res.cookies.set(ACTIVE_WORKSPACE_COOKIE_NAME, "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 0,
       path: "/",
     });
     return res;

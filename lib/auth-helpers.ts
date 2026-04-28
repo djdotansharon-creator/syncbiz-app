@@ -21,6 +21,7 @@ import {
   ALL_BRANCHES_SENTINEL_EXPORT,
 } from "@/lib/user-store";
 import type { User, SessionUser, BranchRole } from "@/lib/user-types";
+import { ACTIVE_WORKSPACE_COOKIE_NAME } from "@/lib/active-workspace-constants";
 
 const COOKIE_NAME = "syncbiz-session";
 const DEFAULT_BRANCH_ID = "default";
@@ -41,11 +42,12 @@ export async function getCurrentUserFromCookies(): Promise<User | null> {
   const cookieStore = await cookies();
   const cookie = cookieStore.get(COOKIE_NAME)?.value;
   const email = cookie ? parseSessionValue(cookie) : null;
+  const activeWs = cookieStore.get(ACTIVE_WORKSPACE_COOKIE_NAME)?.value ?? null;
   if (!email?.trim()) {
     logIdentity("session_resolve", { result: "no_cookie" });
     return null;
   }
-  const user = await getUserByEmail(email);
+  const user = await getUserByEmail(email, { activeWorkspaceId: activeWs });
   if (user) {
     logIdentity("session_resolve", { result: "user", userId: user.id, email: user.email });
     return user;

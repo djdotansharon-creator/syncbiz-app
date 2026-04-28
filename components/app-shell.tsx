@@ -25,6 +25,7 @@ import { unifiedFoundationHints, type UnifiedSource, type ParseUrlJson, type Rad
 import { searchExternal } from "@/lib/search-service";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { HeaderDeviceIndicators } from "@/components/header-device-indicators";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
 import { CenterModuleContext, type CenterModule, isJinglesModule } from "@/lib/center-module-context";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
@@ -280,6 +281,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [now, setNow] = useState(() => new Date());
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [sessionAccountName, setSessionAccountName] = useState<string | null>(null);
+  const [workspaceList, setWorkspaceList] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const greeting = getTimeBasedGreeting(now.getHours(), t);
   const headerSubtitle = t.headerSubtitle ?? labels.headerSubtitle?.en ?? "Schedule playback and send commands to endpoint devices";
 
@@ -292,11 +295,19 @@ export function AppShell({ children }: { children: ReactNode }) {
     let cancelled = false;
     fetch("/api/auth/me")
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: { name?: string | null; email?: string | null; accountName?: string | null } | null) => {
+      .then((data: {
+        name?: string | null;
+        email?: string | null;
+        accountName?: string | null;
+        workspaces?: Array<{ id: string; name: string }>;
+        tenantId?: string | null;
+      } | null) => {
         if (cancelled || !data) return;
         const displayName = (data.name ?? "").trim() || (data.email ?? "").trim() || null;
         setSessionName(displayName);
         setSessionAccountName((data.accountName ?? "").trim() || null);
+        setWorkspaceList(Array.isArray(data.workspaces) ? data.workspaces : []);
+        setActiveWorkspaceId(typeof data.tenantId === "string" ? data.tenantId : null);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -676,6 +687,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <span className="truncate text-slate-300">
                   {sessionAccountName ?? t.companyName ?? "Company"}
                 </span>
+                {activeWorkspaceId && workspaceList && workspaceList.length > 1 ? (
+                  <>
+                    <span className="h-3 w-px shrink-0 bg-slate-700/50" aria-hidden />
+                    <WorkspaceSwitcher workspaces={workspaceList} activeId={activeWorkspaceId} />
+                  </>
+                ) : null}
               </div>
             </div>
             <div className="flex min-w-0 flex-1 basis-0 items-center justify-end gap-1.5 sm:gap-2">

@@ -233,9 +233,68 @@ async function resolvePrimaryWorkspaceMembership(userId: string) {
   return (activeFirst ?? memberships[0])!;
 }
 
+const WORKSPACE_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolves which workspace UUID should drive `User.tenantId` for this request.
+ * Optional `syncbiz-active-workspace-id` cookie may point at any membership the
+ * user may use; invalid or forbidden values fall back to the primary membership
+ * from `resolvePrimaryWorkspaceMembership`.
+ */
+export async function resolveActiveTenantScope(
+  userId: string,
+  preferredWorkspaceId: string | null | undefined,
+): Promise<string | null> {
+  const primary = await resolvePrimaryWorkspaceMembership(userId);
+  if (!primary) return null;
+
+  const pref = typeof preferredWorkspaceId === "string" ? preferredWorkspaceId.trim() : "";
+  if (!pref || !WORKSPACE_UUID_RE.test(pref)) {
+    return primary.workspaceId;
+  }
+
+  const m = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId: pref, userId } },
+    include: { workspace: { select: { ownerId: true } } },
+  });
+  if (!m) return primary.workspaceId;
+
+  if (m.status === "SUSPENDED" && m.workspace.ownerId !== userId) {
+    return primary.workspaceId;
+  }
+
+  return pref;
+}
+
+export async function userMayAccessWorkspace(userId: string, workspaceId: string): Promise<boolean> {
+  const m = await prisma.workspaceMember.findUnique({
+    where: { workspaceId_userId: { workspaceId, userId } },
+    include: { workspace: { select: { ownerId: true } } },
+  });
+  if (!m) return false;
+  if (m.status === "SUSPENDED" && m.workspace.ownerId !== userId) return false;
+  return true;
+}
+
+export async function listEligibleWorkspacesForUser(
+  userId: string,
+): Promise<Array<{ id: string; name: string }>> {
+  const rows = await prisma.workspaceMember.findMany({
+    where: { userId },
+    include: { workspace: { select: { id: true, name: true, ownerId: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  return rows
+    .filter((m) => m.status !== "SUSPENDED" || m.workspace.ownerId === userId)
+    .map((m) => ({ id: m.workspace.id, name: m.workspace.name }));
+}
+
+export type SessionTenantOptions = { activeWorkspaceId?: string | null };
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-export async function getUserByEmail(email: string): Promise<User | null> {
+export async function getUserByEmail(email: string, opts?: SessionTenantOptions): Promise<User | null> {
   const norm = email?.trim().toLowerCase();
   if (!norm) return null;
   const user = await prisma.user.findUnique({ where: { email: norm } });
@@ -243,9 +302,9 @@ export async function getUserByEmail(email: string): Promise<User | null> {
   // Soft-disabled users are invisible to login and to current-session resolution.
   // SUPER_ADMIN cannot be soft-disabled, so this gate is safe for owner CRM access too.
   if (user.status === "DISABLED") return null;
-  const membership = await resolvePrimaryWorkspaceMembership(user.id);
-  if (!membership) return null;
-  return rowToUser(user, membership.workspaceId);
+  const tenantId = await resolveActiveTenantScope(user.id, opts?.activeWorkspaceId);
+  if (!tenantId) return null;
+  return rowToUser(user, tenantId);
 }
 
 export async function getOrCreateUserByEmail(email: string): Promise<User> {
@@ -264,14 +323,14 @@ export async function getOrCreateUserByEmail(email: string): Promise<User> {
   return rowToUser(user, workspace.id);
 }
 
-export async function getUserById(userId: string): Promise<User | null> {
+export async function getUserById(userId: string, opts?: SessionTenantOptions): Promise<User | null> {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return null;
   // Mirror the gate in getUserByEmail: disabled users are not resolvable.
   if (user.status === "DISABLED") return null;
-  const membership = await resolvePrimaryWorkspaceMembership(userId);
-  if (!membership) return null;
-  return rowToUser(user, membership.workspaceId);
+  const tenantId = await resolveActiveTenantScope(userId, opts?.activeWorkspaceId);
+  if (!tenantId) return null;
+  return rowToUser(user, tenantId);
 }
 
 export async function getTenantById(tenantId: string): Promise<Tenant | null> {

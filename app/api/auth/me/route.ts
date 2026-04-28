@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
-import { getAccessType, getAssignedBranchIds, getTenantById } from "@/lib/user-store";
+import { getAccessType, getAssignedBranchIds, getTenantById, listEligibleWorkspacesForUser } from "@/lib/user-store";
 
 /** Returns current user from session. V1 public shape: accessType, accountId, branchIds. */
 export async function GET() {
@@ -8,9 +8,10 @@ export async function GET() {
   if (!user) {
     return NextResponse.json({ email: null, userId: null }, { status: 200 });
   }
-  const [accessType, branchIds] = await Promise.all([
+  const [accessType, branchIds, workspaces] = await Promise.all([
     getAccessType(user.id, user.tenantId),
     getAssignedBranchIds(user.id, user.tenantId),
+    listEligibleWorkspacesForUser(user.id),
   ]);
   const tenant = await getTenantById(user.tenantId);
   return NextResponse.json({
@@ -20,6 +21,7 @@ export async function GET() {
     accountId: user.tenantId,
     accountName: tenant?.name ?? null,
     tenantId: user.tenantId,
+    workspaces,
     accessType,
     branchIds,
   });
