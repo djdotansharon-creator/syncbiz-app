@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type TaxonomyTagRow = {
   id: string;
@@ -30,6 +30,9 @@ export function CatalogItemTaxonomyEditor({
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [pickTagId, setPickTagId] = useState("");
+  /** After first successful load, avoid swapping the whole panel for a spinner on refresh — prevents flaky controlled `<select>` state and perceived “single tag only”. */
+  const hasLoadedOnceRef = useRef(false);
+  const lastCatalogItemIdRef = useRef<string | null>(null);
 
   const base = catalogItemId
     ? `/api/admin/platform/catalog-items/${catalogItemId}/taxonomy-tags`
@@ -44,13 +47,16 @@ export function CatalogItemTaxonomyEditor({
       return;
     }
     setErr(null);
-    setLoading(true);
+    const blockingSpinner = !hasLoadedOnceRef.current;
+    if (blockingSpinner) setLoading(true);
     try {
+      const fetchOpts: RequestInit = {
+        credentials: "same-origin",
+        cache: "no-store",
+      };
       const [lr, dr] = await Promise.all([
-        fetch(base, { credentials: "same-origin" }),
-        fetch("/api/admin/platform/music-taxonomy/tags?status=ACTIVE", {
-          credentials: "same-origin",
-        }),
+        fetch(base, fetchOpts),
+        fetch("/api/admin/platform/music-taxonomy/tags?status=ACTIVE", fetchOpts),
       ]);
       if (!lr.ok) {
         const j = await lr.json().catch(() => ({}));
@@ -65,7 +71,11 @@ export function CatalogItemTaxonomyEditor({
       const lj = (await lr.json()) as { links: LinkRow[] };
       const dj = (await dr.json()) as { tags: TaxonomyTagRow[] };
       setLinks(lj.links ?? []);
-      setDictionary((dj.tags ?? []).filter((t) => t.status === "ACTIVE"));
+      const rawTags = (dj.tags ?? []).filter((t) => t.status === "ACTIVE");
+      const dedup = new Map<string, TaxonomyTagRow>();
+      for (const t of rawTags) dedup.set(t.id, t);
+      setDictionary([...dedup.values()]);
+      hasLoadedOnceRef.current = true;
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -80,12 +90,28 @@ export function CatalogItemTaxonomyEditor({
       setDictionary([]);
       setPickTagId("");
       setErr(null);
+      hasLoadedOnceRef.current = false;
+      lastCatalogItemIdRef.current = null;
       return;
+    }
+    if (lastCatalogItemIdRef.current !== catalogItemId) {
+      lastCatalogItemIdRef.current = catalogItemId;
+      hasLoadedOnceRef.current = false;
+      setLinks([]);
+      setDictionary([]);
+      setPickTagId("");
     }
     void load();
   }, [catalogItemId, load]);
 
-  const linkedIds = useMemo(() => new Set(links.map((l) => l.taxonomyTagId)), [links]);
+  const linkedIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const l of links) {
+      if (l.taxonomyTagId) s.add(l.taxonomyTagId);
+      if (l.taxonomyTag?.id) s.add(l.taxonomyTag.id);
+    }
+    return s;
+  }, [links]);
 
   const addOptions = useMemo(() => {
     return dictionary
@@ -101,6 +127,7 @@ export function CatalogItemTaxonomyEditor({
     const res = await fetch(base, {
       method: "POST",
       credentials: "same-origin",
+      cache: "no-store",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ taxonomyTagId: pickTagId }),
     });
@@ -116,7 +143,7 @@ export function CatalogItemTaxonomyEditor({
   async function removeTag(taxonomyTagId: string) {
     setErr(null);
     const url = `${base}?taxonomyTagId=${encodeURIComponent(taxonomyTagId)}`;
-    const res = await fetch(url, { method: "DELETE", credentials: "same-origin" });
+    const res = await fetch(url, { method: "DELETE", credentials: "same-origin", cache: "no-store" });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       setErr(typeof j.error === "string" ? j.error : `Remove failed (${res.status})`);
