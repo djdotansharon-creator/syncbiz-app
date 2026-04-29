@@ -1,0 +1,247 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "taxonomyTagSlug": "jazz",
+      "primaryBusinessTypes": ["RESTAURANT", "CAFE", "HOTEL", "BAR"],
+      "audienceFit": ["premium", "business", "adult"],
+      "daypartFit": ["morning", "lunch", "dinner", "night"],
+      "energyFit": ["LOW", "MEDIUM"],
+      "moodFit": ["elegant", "wine", "lobby", "boutique"],
+      "avoidFor": ["GYM"],
+      "scoreBoost": 1.02,
+      "explainHuman": "Jazz fits boutique hotels, lobby listening, quality cafés, wine bars, business lunch, and elegant dinner — calm-to-medium energy listening spaces."
+    },
+    {
+      "taxonomyTagSlug": "smooth-jazz",
+      "primaryBusinessTypes": ["RESTAURANT", "HOTEL", "CAFE", "BAR"],
+      "audienceFit": ["premium", "business", "adult"],
+      "daypartFit": ["morning", "lunch", "dinner", "night"],
+      "energyFit": ["LOW", "MEDIUM"],
+      "moodFit": ["background", "elegant"],
+      "avoidFor": ["GYM"],
+      "scoreBoost": 1,
+      "explainHuman": "Smooth jazz works as unobtrusive background for hotels, cafés, and hospitality floors — lobby-friendly when energy stays refined."
+    },
+    {
+      "taxonomyTagSlug": "bossa-nova",
+      "primaryBusinessTypes": ["RESTAURANT", "CAFE", "HOTEL", "BAR"],
+      "audienceFit": ["adult", "premium"],
+      "daypartFit": ["morning", "lunch", "dinner"],
+      "energyFit": ["LOW", "MEDIUM"],
+      "moodFit": ["calm", "elegant"],
+      "avoidFor": ["GYM"],
+      "scoreBoost": 1.06,
+      "explainHuman": "Bossa nova suits cafés, restaurants, and hotels from morning through dinner — relaxed, polished atmosphere."
+    },
+    {
+      "taxonomyTagSlug": "lounge",
+      "primaryBusinessTypes": ["HOTEL", "BAR", "RESTAURANT", "CAFE"],
+      "audienceFit": ["adult", "business", "premium"],
+      "daypartFit": ["lunch", "dinner", "night"],
+      "energyFit": ["LOW", "MEDIUM"],
+      "moodFit": ["lobby", "hospitality"],
+      "avoidFor": ["GYM"],
+      "scoreBoost": 1.03,
+      "explainHuman": "Lounge fits hotels (lobby/listening zones), premium hospitality, restaurants, and cafés — calm-to-medium presence."
+    },
+    {
+      "taxonomyTagSlug": "afro",
+      "primaryBusinessTypes": ["GYM", "BAR", "RESTAURANT", "RETAIL"],
+      "audienceFit": ["young", "tourist"],
+      "daypartFit": ["morning", "lunch", "dinner", "night"],
+      "energyFit": ["MEDIUM", "HIGH"],
+      "moodFit": ["summer", "beach", "party"],
+      "avoidFor": ["OFFICE"],
+      "scoreBoost": 0.96,
+      "explainHuman": "Afro-leaning grooves fit gyms (morning/afternoon energy), beach bars, young bars early evening, and tourist-heavy venues — medium/high energy; not ideal for desk-heavy office lunch contexts."
+    },
+    {
+      "taxonomyTagSlug": "deep-house",
+      "primaryBusinessTypes": ["BAR", "HOTEL", "RESTAURANT"],
+      "audienceFit": ["young", "adult"],
+      "daypartFit": ["dinner", "night"],
+      "energyFit": ["MEDIUM", "HIGH"],
+      "moodFit": ["club", "nightlife"],
+      "avoidFor": ["OFFICE"],
+      "scoreBoost": 0.98,
+      "explainHuman": "Deep house fits bars, lounges, and youthful restaurants — evening/night, medium/high energy; poor fit for quiet desk or clinical-feeling spaces."
+    },
+    {
+      "taxonomyTagSlug": "organic-house",
+      "primaryBusinessTypes": ["BAR", "RESTAURANT", "HOTEL", "CAFE"],
+      "audienceFit": ["adult", "young"],
+      "daypartFit": ["lunch", "dinner", "night"],
+      "energyFit": ["MEDIUM", "HIGH"],
+      "moodFit": ["warm", "organic"],
+      "avoidFor": ["OFFICE"],
+      "scoreBoost": 0.97,
+      "explainHuman": "Organic house suits hospitality floors and contemporary bars/restaurants — afternoon-through-night groove without harsh peaks."
+    },
+    {
+      "taxonomyTagSlug": "latin-house",
+      "primaryBusinessTypes": ["BAR", "RESTAURANT", "HOTEL"],
+      "audienceFit": ["young", "adult"],
+      "daypartFit": ["dinner", "night"],
+      "energyFit": ["MEDIUM", "HIGH"],
+      "moodFit": ["summer", "dance"],
+      "avoidFor": [],
+      "scoreBoost": 0.96,
+      "explainHuman": "Latin house adds movement for bars and evening dining — best when the room can handle rhythm and warmth."
+    },
+    {
+      "taxonomyTagSlug": "funk",
+      "primaryBusinessTypes": ["BAR", "RESTAURANT", "RETAIL", "GYM"],
+      "audienceFit": ["young", "adult"],
+      "daypartFit": ["lunch", "dinner", "night"],
+      "energyFit": ["MEDIUM", "HIGH"],
+      "moodFit": ["groove", "dance"],
+      "avoidFor": ["OFFICE"],
+      "scoreBoost": 0.94,
+      "explainHuman": "Funk brings forward motion — retail brand moments, energetic dining, bars, or training floors; weaker for silent office cores."
+    },
+    {
+      "taxonomyTagSlug": "soul",
+      "primaryBusinessTypes": ["BAR", "RESTAURANT", "CAFE", "HOTEL"],
+      "audienceFit": ["adult", "premium"],
+      "daypartFit": ["lunch", "dinner", "night"],
+      "energyFit": ["LOW", "MEDIUM"],
+      "moodFit": ["warm", "romantic"],
+      "avoidFor": ["GYM"],
+      "scoreBoost": 0.98,
+      "explainHuman": "Soul fits warm hospitality listening — cafés, restaurants, hotel bars — depth without sprinting the room."
+    },
+    {
+      "taxonomyTagSlug": "reggae-dub",
+      "primaryBusinessTypes": ["BAR", "RESTAURANT", "CAFE", "RETAIL"],
+      "audienceFit": ["young", "adult", "casual"],
+      "daypartFit": ["lunch", "dinner", "night"],
+      "energyFit": ["LOW", "MEDIUM", "HIGH"],
+      "moodFit": ["beach", "chill"],
+      "avoidFor": ["OFFICE"],
+      "scoreBoost": 0.93,
+      "explainHuman": "Reggae/dub suits laid-back bars and beach-adjacent dining — easygoing or medium energy; rarely a match for sterile office environments."
+    },
+    {
+      "taxonomyTagSlug": "mediterranean-pop",
+      "primaryBusinessTypes": ["RESTAURANT", "CAFE", "BAR", "HOTEL"],
+      "audienceFit": ["adult", "family"],
+      "daypartFit": ["lunch", "dinner"],
+      "energyFit": ["LOW", "MEDIUM"],
+      "moodFit": ["sun", "holiday"],
+      "avoidFor": [],
+      "scoreBoost": 0.95,
+      "explainHuman": "Mediterranean pop fits Mediterranean-themed dining and hospitality — daytime-through-evening sunshine vibes."
+    },
+    {
+      "taxonomyTagSlug": "italian-classics",
+      "primaryBusinessTypes": ["RESTAURANT", "CAFE", "BAR"],
+      "audienceFit": ["adult", "family", "premium"],
+      "daypartFit": ["lunch", "dinner"],
+      "energyFit": ["LOW", "MEDIUM"],
+      "moodFit": ["classic", "romantic"],
+      "avoidFor": ["GYM"],
+      "scoreBoost": 0.96,
+      "explainHuman": "Italian classics anchor trattoria and casual-upscale Italian dining — lunch and dinner storytelling playlists."
+    },
+    {
+      "taxonomyTagSlug": "israeli-hits",
+      "primaryBusinessTypes": ["RESTAURANT", "CAFE", "BAR", "RETAIL", "OFFICE"],
+      "audienceFit": ["local", "casual", "young"],
+      "daypartFit": ["lunch", "dinner", "night"],
+      "energyFit": ["MEDIUM", "HIGH"],
+      "moodFit": ["party", "radio"],
+      "avoidFor": [],
+      "scoreBoost": 0.97,
+      "explainHuman": "Israeli hits fit local-facing venues — casual eateries, cafés, bars, afternoon-through-evening energy; luxury-quiet lobby should rely on softer companion tags rather than peak-hour hits alone."
+    },
+    {
+      "taxonomyTagSlug": "quiet-morning",
+      "primaryBusinessTypes": ["CAFE", "HOTEL", "RESTAURANT"],
+      "audienceFit": ["adult", "premium"],
+      "daypartFit": ["morning"],
+      "energyFit": ["LOW", "MEDIUM"],
+      "moodFit": ["soft", "quiet", "breakfast"],
+      "avoidFor": [],
+      "scoreBoost": 0.94,
+      "explainHuman": "Quiet morning selections suit breakfast cafés, hotel mornings, and soft-open restaurants — gentle wake-up listening."
+    },
+    {
+      "taxonomyTagSlug": "restaurant",
+      "primaryBusinessTypes": ["RESTAURANT"],
+      "audienceFit": ["adult", "family"],
+      "daypartFit": ["lunch", "dinner"],
+      "energyFit": ["LOW", "MEDIUM", "HIGH"],
+      "moodFit": ["dining"],
+      "avoidFor": [],
+      "scoreBoost": 0.85,
+      "explainHuman": "Catalog item tagged “restaurant” business-fit — strongest when workspace primary type is restaurant-shaped."
+    },
+    {
+      "taxonomyTagSlug": "cafe",
+      "primaryBusinessTypes": ["CAFE"],
+      "audienceFit": ["casual", "young", "adult"],
+      "daypartFit": ["morning", "lunch"],
+      "energyFit": ["LOW", "MEDIUM"],
+      "moodFit": ["coffee", "study"],
+      "avoidFor": [],
+      "scoreBoost": 0.85,
+      "explainHuman": "Catalog item tagged “cafe” business-fit — strongest when workspace primary type is café-shaped."
+    },
+    {
+      "taxonomyTagSlug": "hotel",
+      "primaryBusinessTypes": ["HOTEL"],
+      "audienceFit": ["premium", "business", "tourist"],
+      "daypartFit": ["morning", "lunch", "dinner", "night"],
+      "energyFit": ["LOW", "MEDIUM"],
+      "moodFit": ["lobby", "hospitality"],
+      "avoidFor": [],
+      "scoreBoost": 0.88,
+      "explainHuman": "Hotel-tagged catalog aligns with hospitality workspaces — lobby and floor programming across dayparts."
+    },
+    {
+      "taxonomyTagSlug": "morning",
+      "primaryBusinessTypes": ["CAFE", "HOTEL", "RESTAURANT"],
+      "audienceFit": ["adult"],
+      "daypartFit": ["morning"],
+      "energyFit": ["LOW", "MEDIUM"],
+      "moodFit": ["breakfast"],
+      "avoidFor": [],
+      "scoreBoost": 0.75,
+      "explainHuman": "Morning-tagged catalog aligns when daypart is morning (breakfast / soft open)."
+    },
+    {
+      "taxonomyTagSlug": "lunch",
+      "primaryBusinessTypes": ["RESTAURANT", "CAFE", "OFFICE", "RETAIL"],
+      "audienceFit": ["business", "casual"],
+      "daypartFit": ["lunch"],
+      "energyFit": ["LOW", "MEDIUM"],
+      "moodFit": ["workday"],
+      "avoidFor": [],
+      "scoreBoost": 0.72,
+      "explainHuman": "Lunch-tagged catalog aligns when daypart is lunch (service or workday contexts)."
+    },
+    {
+      "taxonomyTagSlug": "dinner",
+      "primaryBusinessTypes": ["RESTAURANT", "BAR", "HOTEL"],
+      "audienceFit": ["adult", "premium"],
+      "daypartFit": ["dinner"],
+      "energyFit": ["LOW", "MEDIUM", "HIGH"],
+      "moodFit": ["evening"],
+      "avoidFor": [],
+      "scoreBoost": 0.74,
+      "explainHuman": "Dinner-tagged catalog aligns when daypart is dinner — peak hospitality storytelling window."
+    },
+    {
+      "taxonomyTagSlug": "night",
+      "primaryBusinessTypes": ["BAR", "HOTEL", "RESTAURANT"],
+      "audienceFit": ["young", "adult"],
+      "daypartFit": ["night"],
+      "energyFit": ["MEDIUM", "HIGH"],
+      "moodFit": ["nightlife"],
+      "avoidFor": [],
+      "scoreBoost": 0.76,
+      "explainHuman": "Night-tagged catalog aligns when daypart is night — evening-through-close programming."
+    }
+  ]
+}

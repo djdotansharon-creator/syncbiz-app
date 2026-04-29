@@ -334,6 +334,117 @@ export async function fetchYouTubeMetadataByYtDlp(
   }
 }
 
+/** Stage 5.9 — richer single-URL snapshot via `--dump-json` (catalog refresh fallback). */
+export type YouTubeCatalogYtDlpSnapshotFields = {
+  title: string | null;
+  description: string | null;
+  hashtags: string[];
+  sourceTags: string[];
+  channelTitle: string | null;
+  channelId: string | null;
+  publishedAt: Date | null;
+  viewCount: number | null;
+  likeCount: number | null;
+  commentCount: number | null;
+  durationSec: number | null;
+  thumbnail: string | null;
+};
+
+function extractHashtagsFromYtDlpDescription(description: string | null | undefined): string[] {
+  if (!description) return [];
+  const re = /#[\w\u0590-\u05FF][\w\u0590-\u05FF-]*/gu;
+  const m = description.match(re);
+  return m ? [...new Set(m)] : [];
+}
+
+function uploadDateToDate(uploadDate: string | undefined): Date | null {
+  if (!uploadDate || uploadDate.length !== 8 || !/^\d{8}$/.test(uploadDate)) return null;
+  const y = uploadDate.slice(0, 4);
+  const mo = uploadDate.slice(4, 6);
+  const d = uploadDate.slice(6, 8);
+  const dt = new Date(`${y}-${mo}-${d}T12:00:00.000Z`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+export async function fetchYouTubeCatalogSnapshotByYtDlp(
+  url: string,
+): Promise<{ fields: YouTubeCatalogYtDlpSnapshotFields; raw: unknown } | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, YT_DLP_TIMEOUT_MS);
+
+  try {
+    const wrap = await getYtDlp();
+    if (!wrap) return null;
+
+    const stdout = await wrap.execPromise(
+      [url, "--dump-json", "--no-warnings", "--no-download"],
+      {},
+      controller.signal,
+    );
+    const firstLine = (stdout || "").split("\n").find((l) => l.trim());
+    if (!firstLine) return null;
+    const obj = JSON.parse(firstLine) as Record<string, unknown>;
+
+    const title = typeof obj.title === "string" ? obj.title : null;
+    const description = typeof obj.description === "string" ? obj.description : null;
+    const tagsRaw = obj.tags;
+    const sourceTags = Array.isArray(tagsRaw)
+      ? tagsRaw.filter((x): x is string => typeof x === "string")
+      : [];
+    const hashtags = extractHashtagsFromYtDlpDescription(description);
+    const channelTitle = typeof obj.channel === "string" ? obj.channel : null;
+    const channelId = typeof obj.channel_id === "string" ? obj.channel_id : null;
+    const publishedAt = uploadDateToDate(
+      typeof obj.upload_date === "string" ? obj.upload_date : undefined,
+    );
+
+    const thumb = typeof obj.thumbnail === "string" ? obj.thumbnail : null;
+
+    const vc = obj.view_count;
+    const viewCount = typeof vc === "number" && Number.isFinite(vc) ? Math.round(vc) : null;
+
+    const lk = obj.like_count;
+    const likeCount = typeof lk === "number" && Number.isFinite(lk) ? Math.round(lk) : null;
+
+    const cc = obj.comment_count;
+    const commentCount = typeof cc === "number" && Number.isFinite(cc) ? Math.round(cc) : null;
+
+    const dur = obj.duration;
+    const durationSec =
+      typeof dur === "number" && Number.isFinite(dur) ? Math.round(dur) : null;
+
+    const fields: YouTubeCatalogYtDlpSnapshotFields = {
+      title,
+      description,
+      hashtags,
+      sourceTags,
+      channelTitle,
+      channelId,
+      publishedAt,
+      viewCount,
+      likeCount,
+      commentCount,
+      durationSec,
+      thumbnail: thumb,
+    };
+
+    const usable =
+      title?.trim() ||
+      durationSec !== null ||
+      viewCount !== null ||
+      description?.trim() ||
+      sourceTags.length > 0;
+
+    return usable ? { fields, raw: obj } : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 /** Fetch view count for a single YouTube URL via yt-dlp. Returns undefined if unavailable. */
 export async function fetchYouTubeViewCountByYtDlp(
   url: string

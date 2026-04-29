@@ -127,6 +127,20 @@ enum CatalogItemTaxonomyTagSource {
   MANUAL
 }
 
+/// Stage 5.9 — append-only source metadata pulls (SUPER_ADMIN catalog refresh).
+enum CatalogSourceFetchStatus {
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+enum CatalogSourceFetchMethod {
+  YOUTUBE_API
+  YTDLP
+  MANUAL
+  UNKNOWN
+}
+
 enum AddonType {
   AI_ANNOUNCEMENTS
   MULTI_ZONE
@@ -612,16 +626,51 @@ model CatalogItem {
   thumbnail     String?
   genres        String[]       @default([])
   businessTypes BusinessType[]
+  /// Manual SyncBiz/editorial rating — not YouTube metrics, popularity, or auto-calculated scores.
+  curationRating Int           @default(0)
+  curationNotes  String?       @db.Text
   addedById     String?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
-  playlistItems       PlaylistItem[]
-  analytics           CatalogAnalytics?
-  playsByBusinessType CatalogPlayByBusiness[]
-  taxonomyLinks       CatalogItemTaxonomyTag[]
+  playlistItems            PlaylistItem[]
+  analytics                CatalogAnalytics?
+  playsByBusinessType      CatalogPlayByBusiness[]
+  taxonomyLinks            CatalogItemTaxonomyTag[]
+  catalogSourceSnapshots   CatalogSourceSnapshot[]
 
   @@index([videoId])
+}
+
+/// Stage 5.9 — append-only provider metadata snapshot per refresh (no automatic CatalogItem overwrite).
+model CatalogSourceSnapshot {
+  id            String                   @id @default(uuid())
+  catalogItemId String
+  provider      String?
+  sourceUrl     String
+  fetchedAt     DateTime                 @default(now())
+  fetchStatus   CatalogSourceFetchStatus
+  fetchMethod   CatalogSourceFetchMethod
+  title         String?
+  description   String?                  @db.Text
+  hashtags      String[]                 @default([])
+  sourceTags    String[]                 @default([])
+  channelTitle  String?
+  channelId     String?
+  publishedAt   DateTime?
+  viewCount     Int?
+  likeCount     Int?
+  commentCount  Int?
+  durationSec   Int?
+  thumbnail     String?
+  rawJson       Json?
+  errorMessage  String?                  @db.Text
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+
+  catalogItem CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+
+  @@index([catalogItemId, fetchedAt(sort: Desc)])
 }
 
 /// Stage 4 V1 — global manual tagging of catalog rows against the platform taxonomy dictionary.

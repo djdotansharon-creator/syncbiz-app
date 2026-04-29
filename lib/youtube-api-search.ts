@@ -124,3 +124,134 @@ export async function fetchYouTubeViewCountByApi(videoId: string): Promise<numbe
   const meta = await fetchYouTubeMetadataByApi(videoId);
   return meta?.viewCount;
 }
+
+// ── Stage 5.9 — full `videos.list` snapshot (catalog source metadata refresh; not used for search ranking).
+
+function extractHashtagsFromDescription(description: string | null | undefined): string[] {
+  if (!description) return [];
+  const re = /#[\w\u0590-\u05FF][\w\u0590-\u05FF-]*/gu;
+  const m = description.match(re);
+  return m ? [...new Set(m)] : [];
+}
+
+export type YouTubeCatalogApiSnapshotFields = {
+  title: string | null;
+  description: string | null;
+  hashtags: string[];
+  sourceTags: string[];
+  channelTitle: string | null;
+  channelId: string | null;
+  publishedAt: Date | null;
+  viewCount: number | null;
+  likeCount: number | null;
+  commentCount: number | null;
+  durationSec: number | null;
+  thumbnail: string | null;
+};
+
+/**
+ * `videos.list` with snippet + statistics + contentDetails. Returns null if API key missing or request fails.
+ */
+export async function fetchYouTubeCatalogSnapshotViaApi(
+  videoId: string,
+): Promise<{ fields: YouTubeCatalogApiSnapshotFields; raw: unknown } | null> {
+  const key = process.env.YOUTUBE_API_KEY;
+  if (!key || !key.trim()) return null;
+
+  const params = new URLSearchParams({
+    part: "snippet,statistics,contentDetails",
+    id: videoId,
+    key,
+  });
+  let res: Response;
+  try {
+    res = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params}`, {
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+
+  const raw = (await res.json()) as {
+    items?: Array<{
+      id?: string;
+      snippet?: {
+        title?: string;
+        description?: string;
+        tags?: string[];
+        channelId?: string;
+        channelTitle?: string;
+        publishedAt?: string;
+        thumbnails?: {
+          maxres?: { url?: string };
+          high?: { url?: string };
+          medium?: { url?: string };
+          default?: { url?: string };
+        };
+      };
+      statistics?: {
+        viewCount?: string;
+        likeCount?: string;
+        commentCount?: string;
+      };
+      contentDetails?: { duration?: string };
+    }>;
+  };
+
+  const item = raw.items?.[0];
+  if (!item?.snippet) return null;
+
+  const sn = item.snippet;
+  const title = typeof sn.title === "string" ? sn.title : null;
+  const description = typeof sn.description === "string" ? sn.description : null;
+  const sourceTags = Array.isArray(sn.tags) ? sn.tags.map((t) => String(t)) : [];
+  const hashtags = extractHashtagsFromDescription(description);
+  const channelId = typeof sn.channelId === "string" ? sn.channelId : null;
+  const channelTitle = typeof sn.channelTitle === "string" ? sn.channelTitle : null;
+  let publishedAt: Date | null = null;
+  if (typeof sn.publishedAt === "string" && sn.publishedAt.trim()) {
+    const d = new Date(sn.publishedAt);
+    publishedAt = Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const thumbs = sn.thumbnails;
+  const thumbnail =
+    thumbs?.maxres?.url ||
+    thumbs?.high?.url ||
+    thumbs?.medium?.url ||
+    thumbs?.default?.url ||
+    null;
+
+  const st = item.statistics;
+  const viewRaw = st?.viewCount;
+  const viewCount =
+    typeof viewRaw === "string" && viewRaw.trim() ? parseInt(viewRaw, 10) : null;
+  const likeRaw = st?.likeCount;
+  const likeCount =
+    typeof likeRaw === "string" && likeRaw.trim() ? parseInt(likeRaw, 10) : null;
+  const comRaw = st?.commentCount;
+  const commentCount =
+    typeof comRaw === "string" && comRaw.trim() ? parseInt(comRaw, 10) : null;
+
+  const durStr = item.contentDetails?.duration;
+  const durationSec =
+    typeof durStr === "string" && durStr ? parseIso8601Duration(durStr) : null;
+
+  const fields: YouTubeCatalogApiSnapshotFields = {
+    title,
+    description,
+    hashtags,
+    sourceTags,
+    channelTitle,
+    channelId,
+    publishedAt,
+    viewCount: viewCount !== null && Number.isFinite(viewCount) ? viewCount : null,
+    likeCount: likeCount !== null && Number.isFinite(likeCount) ? likeCount : null,
+    commentCount: commentCount !== null && Number.isFinite(commentCount) ? commentCount : null,
+    durationSec: durationSec !== undefined && durationSec !== null ? durationSec : null,
+    thumbnail,
+  };
+
+  return { fields, raw };
+}
