@@ -92,56 +92,21 @@ export default async function CatalogTaggingAdminPage({
         </button>
       </form>
 
-      {q.length >= 1 && results.length === 0 ? (
-        <p className="text-sm text-neutral-500">No catalog items matched.</p>
-      ) : null}
-
-      {results.length > 0 ? (
-        <div className="rounded-md border border-neutral-800 bg-neutral-950/40">
-          <p className="border-b border-neutral-800 px-4 py-2 text-xs text-neutral-500">
-            Results ({results.length})
-          </p>
-          <ul className="divide-y divide-neutral-800">
-            {results.map((row) => {
-              const isCurrentSelection = catalogItemId === row.id;
-              return (
-                <li key={row.id}>
-                  <Link
-                    href={`/admin/platform/catalog-tagging?catalogItemId=${encodeURIComponent(row.id)}&q=${encodeURIComponent(q)}`}
-                    className={`block px-4 py-3 text-sm transition-colors ${
-                      isCurrentSelection
-                        ? "border-l-[3px] border-l-sky-500 bg-sky-950/35 ring-1 ring-inset ring-sky-500/25 hover:bg-sky-950/45"
-                        : "border-l-[3px] border-l-transparent hover:bg-neutral-900/80"
-                    }`}
-                  >
-                    <span className="font-medium text-neutral-100">{row.title}</span>
-                    <span className="mt-1 block truncate font-mono text-xs text-neutral-500">{row.url}</span>
-                    {isCurrentSelection ? (
-                      <span className="mt-2 inline-block rounded bg-sky-900/60 px-2 py-0.5 text-[11px] font-medium text-sky-200">
-                        Selected — editing tags below
-                      </span>
-                    ) : null}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ) : null}
-
       {catalogItemId && !selected ? (
         <p className="rounded-md border border-amber-900/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">
           Catalog item not found for this id.
         </p>
       ) : null}
 
+      {/* Editor zone directly under search — no scrolling past results first */}
       <div className="space-y-4">
-        <div className="border-t border-neutral-800 pt-6">
+        <div>
           <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
             Tag editor
           </h2>
           <p className="mt-1 text-sm text-neutral-500">
-            Search above and choose a row to edit dictionary tags for that catalog entry.
+            After you search, pick a catalog row in the results further down — tags load here right away when an item is
+            selected.
           </p>
         </div>
 
@@ -184,6 +149,43 @@ export default async function CatalogTaggingAdminPage({
 
         <CatalogItemTaxonomyEditor catalogItemId={selected?.id ?? null} />
       </div>
+
+      {q.length >= 1 && results.length === 0 ? (
+        <p className="text-sm text-neutral-500">No catalog items matched.</p>
+      ) : null}
+
+      {results.length > 0 ? (
+        <div className="rounded-md border border-neutral-800 bg-neutral-950/40">
+          <p className="border-b border-neutral-800 px-4 py-2 text-xs text-neutral-500">
+            Search results ({results.length}) — select a row to load it into the editor above
+          </p>
+          <ul className="divide-y divide-neutral-800">
+            {results.map((row) => {
+              const isCurrentSelection = catalogItemId === row.id;
+              return (
+                <li key={row.id}>
+                  <Link
+                    href={`/admin/platform/catalog-tagging?catalogItemId=${encodeURIComponent(row.id)}&q=${encodeURIComponent(q)}`}
+                    className={`block px-4 py-3 text-sm transition-colors ${
+                      isCurrentSelection
+                        ? "border-l-[3px] border-l-sky-500 bg-sky-950/35 ring-1 ring-inset ring-sky-500/25 hover:bg-sky-950/45"
+                        : "border-l-[3px] border-l-transparent hover:bg-neutral-900/80"
+                    }`}
+                  >
+                    <span className="font-medium text-neutral-100">{row.title}</span>
+                    <span className="mt-1 block truncate font-mono text-xs text-neutral-500">{row.url}</span>
+                    {isCurrentSelection ? (
+                      <span className="mt-2 inline-block rounded bg-sky-900/60 px-2 py-0.5 text-[11px] font-medium text-sky-200">
+                        Selected — loaded in editor above
+                      </span>
+                    ) : null}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }

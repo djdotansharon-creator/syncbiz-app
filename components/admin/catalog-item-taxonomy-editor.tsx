@@ -134,7 +134,7 @@ export function CatalogItemTaxonomyEditor({
 
         <div>
           <h3 className="text-sm font-medium text-neutral-500">Assigned tags</h3>
-          <p className="mt-2 text-sm text-neutral-600">Choose a row in the search results above.</p>
+          <p className="mt-2 text-sm text-neutral-600">Choose a row in the search results below.</p>
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
