@@ -122,6 +122,11 @@ enum MusicTaxonomyTagStatus {
   MERGED
 }
 
+/// Stage 4 — provenance for CatalogItem ↔ taxonomy links (extend later e.g. ML_IMPORT).
+enum CatalogItemTaxonomyTagSource {
+  MANUAL
+}
+
 enum AddonType {
   AI_ANNOUNCEMENTS
   MULTI_ZONE
@@ -259,6 +264,7 @@ model User {
   createdGuestSessions GuestSession[]
   aiDjSessions         AiDjSession[]
   platformAuditActions PlatformAuditLog[]     @relation("PlatformAuditActor")
+  catalogTaxonomyTagsCreated CatalogItemTaxonomyTag[] @relation("CatalogTaxonomyTagCreatedBy")
 }
 
 model Workspace {
@@ -582,6 +588,7 @@ model MusicTaxonomyTag {
   children   MusicTaxonomyTag[] @relation("TaxonomyParent")
   mergedInto MusicTaxonomyTag?  @relation("TaxonomyMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
   mergedFrom MusicTaxonomyTag[] @relation("TaxonomyMerge")
+  catalogLinks CatalogItemTaxonomyTag[]
 
   @@index([category])
   @@index([status])
@@ -612,8 +619,29 @@ model CatalogItem {
   playlistItems       PlaylistItem[]
   analytics           CatalogAnalytics?
   playsByBusinessType CatalogPlayByBusiness[]
+  taxonomyLinks       CatalogItemTaxonomyTag[]
 
   @@index([videoId])
+}
+
+/// Stage 4 V1 — global manual tagging of catalog rows against the platform taxonomy dictionary.
+model CatalogItemTaxonomyTag {
+  id             String                       @id @default(uuid())
+  catalogItemId  String
+  taxonomyTagId  String
+  source         CatalogItemTaxonomyTagSource @default(MANUAL)
+  confidence     Float?
+  createdById    String?
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+
+  catalogItem CatalogItem      @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  taxonomyTag MusicTaxonomyTag   @relation(fields: [taxonomyTagId], references: [id], onDelete: Cascade)
+  createdBy   User?              @relation("CatalogTaxonomyTagCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([catalogItemId, taxonomyTagId])
+  @@index([catalogItemId])
+  @@index([taxonomyTagId])
 }
 
 model CatalogAnalytics {
