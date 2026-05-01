@@ -11,10 +11,15 @@ import {
   loadSourceMetadataSuggestionsForSnapshot,
   serializeCatalogSourceSnapshot,
 } from "@/lib/catalog-source-refresh";
-import { CatalogAuditionBar, CatalogItemTaxonomyEditor } from "@/components/admin/catalog-item-taxonomy-editor";
+import { CatalogItemTaxonomyEditor } from "@/components/admin/catalog-item-taxonomy-editor";
 import { CatalogCurationEditor } from "@/components/admin/catalog-curation-editor";
 import { CatalogDisplayTitleEditor } from "@/components/admin/catalog-display-title-editor";
 import { CatalogSourceMetadataPanel } from "@/components/admin/catalog-source-metadata-panel";
+import { CatalogWorkbenchCleanupAction } from "@/components/admin/catalog-workbench-cleanup-action";
+import { CatalogManualEnergyEditor } from "@/components/admin/catalog-manual-energy-editor";
+import { CatalogWorkbenchItemActions } from "@/components/admin/catalog-workbench-item-actions";
+import { CatalogWorkbenchTopDashboard } from "@/components/admin/catalog-workbench-top-dashboard";
+import { CatalogMetadataBackfillPanel } from "@/components/admin/catalog-metadata-backfill-panel";
 import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 
@@ -37,6 +42,35 @@ function formatCatalogDuration(sec: number | null | undefined): string | null {
 
 function formatAdminTimestamp(d: Date): string {
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+function catalogUsageTier(input: {
+  playlistItemRows: number;
+  distinctPlaylists: number;
+  scheduleCount: number;
+  playCount: number;
+}): "HIGH" | "MEDIUM" | "LOW" | "NOT_USED" {
+  const { playlistItemRows, distinctPlaylists, scheduleCount, playCount } = input;
+  const inactive =
+    playlistItemRows === 0 && scheduleCount === 0 && playCount === 0;
+  if (inactive) return "NOT_USED";
+  if (
+    distinctPlaylists >= 5 ||
+    playCount >= 100 ||
+    scheduleCount >= 8 ||
+    playlistItemRows >= 14
+  ) {
+    return "HIGH";
+  }
+  if (
+    distinctPlaylists >= 2 ||
+    playCount >= 12 ||
+    scheduleCount >= 2 ||
+    playlistItemRows >= 4
+  ) {
+    return "MEDIUM";
+  }
+  return "LOW";
 }
 
 /** Same rules as CatalogAuditionBar (server-safe links for browse rows only). */
@@ -314,6 +348,7 @@ export default async function CatalogTaggingAdminPage({
         durationSec: true,
         videoId: true,
         curationRating: true,
+        manualEnergyRating: true,
         _count: { select: { taxonomyLinks: true } },
         taxonomyLinks: {
           take: SLUG_PREVIEW,
@@ -338,6 +373,7 @@ export default async function CatalogTaggingAdminPage({
             videoId: true,
             curationRating: true,
             curationNotes: true,
+            manualEnergyRating: true,
             addedById: true,
             createdAt: true,
             updatedAt: true,
@@ -376,6 +412,16 @@ export default async function CatalogTaggingAdminPage({
   }> = [];
   let playlistHintTexts: string[] = [];
   let nextUntaggedHref: string | null = null;
+
+  let metadataHaystackPartsForTaxonomy: string[] = [];
+  let catalogAnalyticsRow: {
+    playCount: number;
+    lastPlayedAt: Date | null;
+    sharedCount: number;
+  } | null = null;
+  let scheduleRefsCount = 0;
+  let distinctBranchesFromSchedules = 0;
+  let lastPlaylistLinkAt: Date | null = null;
 
   if (selected) {
     const urlCandidates = [
@@ -449,12 +495,111 @@ export default async function CatalogTaggingAdminPage({
       metadataSuggestionsFromSnapshot = sug.metadataSuggestions;
       unknownMetadataCues = sug.unknownCues;
     }
+
+    const playlistIds = [...new Set(pRows.map((r) => r.playlistId))];
+    const [analyticsRow, scheduleBranchGroups, scheduleCountTotal, playlistAddedAgg] = await Promise.all([
+      prisma.catalogAnalytics.findUnique({
+        where: { catalogItemId: selected.id },
+        select: { playCount: true, lastPlayedAt: true, sharedCount: true },
+      }),
+      playlistIds.length === 0
+        ? Promise.resolve([] as { branchId: string }[])
+        : prisma.schedule.groupBy({
+            by: ["branchId"],
+            where: { playlistId: { in: playlistIds } },
+          }),
+      playlistIds.length === 0
+        ? Promise.resolve(0)
+        : prisma.schedule.count({ where: { playlistId: { in: playlistIds } } }),
+      prisma.playlistItem.aggregate({
+        where: { catalogId: selected.id },
+        _max: { addedAt: true },
+      }),
+    ]);
+    catalogAnalyticsRow = analyticsRow;
+    scheduleRefsCount = scheduleCountTotal;
+    distinctBranchesFromSchedules = scheduleBranchGroups.length;
+    lastPlaylistLinkAt = playlistAddedAgg._max.addedAt ?? null;
+
+    if (serializedLatestSnapshot) {
+      const snap = serializedLatestSnapshot;
+      const parts: string[] = [];
+      if (snap.description?.trim()) parts.push(snap.description);
+      if (snap.title?.trim()) parts.push(snap.title);
+      if (snap.channelTitle?.trim()) parts.push(snap.channelTitle);
+      parts.push(...snap.hashtags, ...snap.sourceTags);
+      metadataHaystackPartsForTaxonomy = parts;
+    }
   }
 
   const workspacesUsingCatalog =
     playlistUsageRows.length > 0
       ? [...new Map(playlistUsageRows.map((r) => [r.playlist.workspace.id, r.playlist.workspace])).values()]
       : [];
+
+  const distinctPlaylistCount =
+    playlistUsageRows.length > 0 ? new Set(playlistUsageRows.map((r) => r.playlist.id)).size : 0;
+
+  const usageTier = selected
+    ? catalogUsageTier({
+        playlistItemRows: playlistUsageCount,
+        distinctPlaylists: distinctPlaylistCount,
+        scheduleCount: scheduleRefsCount,
+        playCount: catalogAnalyticsRow?.playCount ?? 0,
+      })
+    : "NOT_USED";
+
+  const strictlyUnused =
+    !!selected &&
+    playlistUsageCount === 0 &&
+    scheduleRefsCount === 0 &&
+    (catalogAnalyticsRow?.playCount ?? 0) === 0;
+
+  const cleanupBlockParts: string[] = [];
+  if (selected && !strictlyUnused) {
+    if (playlistUsageCount > 0) {
+      cleanupBlockParts.push(
+        `${playlistUsageCount} playlist item row(s)${
+          distinctPlaylistCount > 0 ? ` across ${distinctPlaylistCount} playlist(s)` : ""
+        }`,
+      );
+    }
+    if (workspacesUsingCatalog.length > 0) {
+      cleanupBlockParts.push(`${workspacesUsingCatalog.length} workspace(s) via playlists`);
+    }
+    if (distinctBranchesFromSchedules > 0) {
+      cleanupBlockParts.push(`${distinctBranchesFromSchedules} branch(es) via schedules`);
+    }
+    if (scheduleRefsCount > 0) {
+      cleanupBlockParts.push(`${scheduleRefsCount} schedule row(s)`);
+    }
+    if ((catalogAnalyticsRow?.playCount ?? 0) > 0) {
+      cleanupBlockParts.push(`${catalogAnalyticsRow!.playCount} analytics play(s)`);
+    }
+  }
+
+  const cleanupUsageSummaryLine =
+    selected && !strictlyUnused
+      ? [
+          playlistUsageCount > 0 ? `${playlistUsageCount} playlist item link(s)` : null,
+          distinctPlaylistCount > 0 ? `${distinctPlaylistCount} playlist(s)` : null,
+          workspacesUsingCatalog.length > 0 ? `${workspacesUsingCatalog.length} workspace(s)` : null,
+          scheduleRefsCount > 0 ? `${scheduleRefsCount} schedule row(s)` : null,
+          distinctBranchesFromSchedules > 0 ? `${distinctBranchesFromSchedules} branch(es) via schedules` : null,
+          (catalogAnalyticsRow?.playCount ?? 0) > 0 ? `${catalogAnalyticsRow!.playCount} analytics play(s)` : null,
+        ]
+          .filter((x): x is string => typeof x === "string" && x.length > 0)
+          .join(" · ") || null
+      : null;
+
+  const tierBadgeClass =
+    usageTier === "HIGH"
+      ? "border-emerald-800/70 bg-emerald-950/45 text-emerald-100"
+      : usageTier === "MEDIUM"
+        ? "border-sky-800/70 bg-sky-950/45 text-sky-100"
+        : usageTier === "LOW"
+          ? "border-amber-800/65 bg-amber-950/35 text-amber-100"
+          : "border-neutral-700 bg-neutral-900/80 text-neutral-400";
 
   return (
     <div className="space-y-6">
@@ -485,6 +630,8 @@ export default async function CatalogTaggingAdminPage({
           <span className="tabular-nums font-medium text-amber-200/90">{untaggedCount}</span>
         </p>
       </section>
+
+      <CatalogMetadataBackfillPanel />
 
       <form
         action="/admin/platform/catalog-tagging"
@@ -566,6 +713,39 @@ export default async function CatalogTaggingAdminPage({
             <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-400/90">
               Editing tags for this catalog item
             </p>
+            <div className="mt-3 flex flex-wrap items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <CatalogWorkbenchItemActions
+                  catalogItemId={selected.id}
+                  url={selected.url}
+                  provider={selected.provider}
+                  videoId={selected.videoId}
+                />
+              </div>
+              <CatalogWorkbenchCleanupAction
+                catalogItemId={selected.id}
+                strictlyUnused={strictlyUnused}
+                blockParts={cleanupBlockParts}
+                usageSummaryLine={cleanupUsageSummaryLine}
+              />
+            </div>
+            <CatalogWorkbenchTopDashboard
+              snapshot={serializedLatestSnapshot}
+              catalogCreatedAt={selected.createdAt}
+              lastPlaylistLinkAt={lastPlaylistLinkAt}
+              lastAnalyticsPlayAt={catalogAnalyticsRow?.lastPlayedAt ?? null}
+              playlistUsageCount={playlistUsageCount}
+              distinctPlaylistCount={distinctPlaylistCount}
+              workspaceCount={workspacesUsingCatalog.length}
+              branchesViaSchedules={distinctBranchesFromSchedules}
+              scheduleRefsCount={scheduleRefsCount}
+              analyticsPlays={catalogAnalyticsRow?.playCount ?? 0}
+              analyticsShares={catalogAnalyticsRow?.sharedCount ?? 0}
+              usageTier={usageTier}
+              tierBadgeClass={tierBadgeClass}
+              curationRating={selected.curationRating}
+              manualEnergyRating={selected.manualEnergyRating ?? null}
+            />
             <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start">
               {selected.thumbnail ? (
                 <div className="shrink-0 overflow-hidden rounded-md border border-neutral-700 bg-neutral-900">
@@ -602,18 +782,22 @@ export default async function CatalogTaggingAdminPage({
               </div>
             </div>
 
-            <div className="mt-4 border-t border-sky-900/35 pt-4">
+            <div className="mt-4 border-t border-sky-900/35 pt-4 space-y-4">
               <CatalogCurationEditor
-                key={selected.id}
+                key={`cur-${selected.id}`}
                 catalogItemId={selected.id}
                 initialRating={selected.curationRating}
                 initialNotes={selected.curationNotes}
+              />
+              <CatalogManualEnergyEditor
+                catalogItemId={selected.id}
+                initialManualEnergyRating={selected.manualEnergyRating ?? null}
               />
             </div>
 
             <div className="mt-4 border-t border-teal-900/35 pt-4">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-teal-300/95">
-                Playlist usage
+                Playlist usage (detail)
               </p>
               <p className="mt-2 text-[11px] leading-relaxed text-neutral-500">
                 Rows linked via <code className="text-neutral-600">PlaylistItem.catalogId</code> → this catalog row (
@@ -627,41 +811,46 @@ export default async function CatalogTaggingAdminPage({
                     <span className="text-neutral-500">Playlist item rows · </span>
                     <span className="tabular-nums font-semibold text-neutral-100">{playlistUsageCount}</span>
                   </p>
-                  <ul className="mt-3 space-y-3">
-                    {playlistUsageRows.map((row) => (
-                      <li
-                        key={row.id}
-                        className="rounded border border-neutral-800 bg-neutral-950/65 px-3 py-2 text-[11px] text-neutral-300"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-medium text-neutral-100">{row.playlist.name}</span>
-                          <span className="tabular-nums text-neutral-500">position {row.position}</span>
-                        </div>
-                        <div className="mt-1 font-mono text-[10px] text-neutral-600">
-                          playlistId · {row.playlist.id}
-                          <span className="mx-2 text-neutral-700">·</span>
-                          workspace · {row.playlist.workspace.name}{" "}
-                          <span className="text-neutral-600">({row.playlist.workspace.slug})</span>
-                          <span className="mx-2 text-neutral-700">·</span>
-                          workspaceId · {row.playlist.workspace.id}
-                        </div>
-                        <div className="mt-1 text-neutral-400">
-                          Track title ·{" "}
-                          <span className="text-neutral-200">{row.name.trim().length > 0 ? row.name : "—"}</span>
-                          <span className="mx-2 text-neutral-700">·</span>
-                          playlistItemId · <span className="font-mono text-neutral-500">{row.id}</span>
-                        </div>
-                        <div className="mt-2">
-                          <Link
-                            href={`/playlists/${row.playlist.id}/edit`}
-                            className="text-[11px] font-medium text-teal-300 hover:text-teal-200 hover:underline"
-                          >
-                            Open playlist editor
-                          </Link>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                  <details className="mt-2 rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2">
+                    <summary className="cursor-pointer text-[11px] font-medium text-teal-200/90 hover:text-teal-100">
+                      Expand playlist rows (IDs & editors)
+                    </summary>
+                    <ul className="mt-3 space-y-3">
+                      {playlistUsageRows.map((row) => (
+                        <li
+                          key={row.id}
+                          className="rounded border border-neutral-800 bg-neutral-950/65 px-3 py-2 text-[11px] text-neutral-300"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="font-medium text-neutral-100">{row.playlist.name}</span>
+                            <span className="tabular-nums text-neutral-500">position {row.position}</span>
+                          </div>
+                          <div className="mt-1 font-mono text-[10px] text-neutral-600">
+                            playlistId · {row.playlist.id}
+                            <span className="mx-2 text-neutral-700">·</span>
+                            workspace · {row.playlist.workspace.name}{" "}
+                            <span className="text-neutral-600">({row.playlist.workspace.slug})</span>
+                            <span className="mx-2 text-neutral-700">·</span>
+                            workspaceId · {row.playlist.workspace.id}
+                          </div>
+                          <div className="mt-1 text-neutral-400">
+                            Track title ·{" "}
+                            <span className="text-neutral-200">{row.name.trim().length > 0 ? row.name : "—"}</span>
+                            <span className="mx-2 text-neutral-700">·</span>
+                            playlistItemId · <span className="font-mono text-neutral-500">{row.id}</span>
+                          </div>
+                          <div className="mt-2">
+                            <Link
+                              href={`/playlists/${row.playlist.id}/edit`}
+                              className="text-[11px] font-medium text-teal-300 hover:text-teal-200 hover:underline"
+                            >
+                              Open playlist editor
+                            </Link>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
                 </>
               )}
             </div>
@@ -735,9 +924,9 @@ export default async function CatalogTaggingAdminPage({
                 Catalog audition
               </p>
               <p className="mt-2 text-[11px] leading-relaxed text-neutral-500">
-                Use this to listen manually before tagging. This does not play through SyncBiz branch players or any device playback.
+                Open URL / Copy / YouTube and refresh snapshots from the toolbar <strong className="font-medium text-neutral-400">above</strong>{" "}
+                before tagging when you need to hear the track or rebuild provider metadata. Nothing here routes through SyncBiz branch players or device playback.
               </p>
-              <CatalogAuditionBar url={selected.url} provider={selected.provider} videoId={selected.videoId} />
               <p className="mt-3 text-[10px] leading-snug text-neutral-600">
                 Planned future “Audition Mode”: isolated admin-side preview only — separate audio path from business playback,
                 explicit volume/output control, never routed through WebSocket / desktop / MPV / branch schedules.
@@ -760,6 +949,7 @@ export default async function CatalogTaggingAdminPage({
           catalogUrl={selected?.url ?? ""}
           catalogProvider={selected?.provider ?? null}
           playlistHintTexts={playlistHintTexts}
+          metadataHaystackParts={metadataHaystackPartsForTaxonomy}
           nextUntaggedHref={nextUntaggedHref}
           metadataSuggestions={metadataSuggestionsFromSnapshot}
         />
@@ -928,6 +1118,13 @@ export default async function CatalogTaggingAdminPage({
                         <span className="inline-flex items-center rounded border border-amber-900/45 bg-amber-950/35 px-1.5 py-0 font-mono text-[10px] font-semibold tabular-nums text-amber-100/95">
                           SYNC {typeof row.curationRating === "number" ? Math.min(5, Math.max(0, row.curationRating)) : 0}/5
                         </span>
+                        {typeof row.manualEnergyRating === "number" &&
+                        row.manualEnergyRating >= 1 &&
+                        row.manualEnergyRating <= 10 ? (
+                          <span className="inline-flex items-center rounded border border-violet-900/45 bg-violet-950/35 px-1.5 py-0 font-mono text-[10px] font-semibold tabular-nums text-violet-100/95">
+                            E {row.manualEnergyRating}/10
+                          </span>
+                        ) : null}
                         {rowDur ? (
                           <span className="tabular-nums">
                             <span className="text-neutral-600">Duration · </span>

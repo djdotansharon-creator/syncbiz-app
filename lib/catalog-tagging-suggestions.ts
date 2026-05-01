@@ -18,6 +18,8 @@ export type CatalogTagSuggestionInput = {
   url: string;
   provider: string | null;
   playlistHints: readonly string[];
+  /** Snapshot description, hashtags, channel title, etc. — suggestions only. */
+  extraHaystackParts?: readonly string[];
 };
 
 export type CatalogTagSuggestion = {
@@ -25,6 +27,14 @@ export type CatalogTagSuggestion = {
   slug: string;
   labelEn: string;
   reason: string;
+  /** When true, workbench seeds this id into pending once per item load (never auto-saved). */
+  preselectPending?: boolean;
+};
+
+/** Human-readable language / vocal cues for admin banner (no customer PII). */
+export type CatalogLanguageSignal = {
+  label: string;
+  slugHints: readonly string[];
 };
 
 /** Cue tokens in title/URL/context → candidate slugs (skip if slug not in dictionary). */
@@ -42,15 +52,79 @@ const KEYWORD_RULES: readonly {
   },
   { triggers: ["lounge"], slugHints: ["lounge", "hotel", "cafe", "restaurant"] },
   {
-    triggers: ["chill", "relax", "relaxing"],
-    slugHints: ["chill-mellow", "lounge", "cafe"],
+    triggers: ["chill", "relax", "relaxing", "calm", "quiet", "peaceful"],
+    slugHints: ["chill-mellow", "lounge", "cafe", "quiet-morning"],
+  },
+  {
+    triggers: ["romantic", "romance"],
+    slugHints: ["chill-mellow", "lounge", "quiet-morning", "biz-spa-wellness", "playback-context-spa-quiet"],
   },
   { triggers: ["morning"], slugHints: ["morning", "quiet-morning", "cafe"] },
   { triggers: ["dinner"], slugHints: ["dinner", "restaurant", "lounge"] },
+  { triggers: ["cafe", "coffee shop"], slugHints: ["cafe", "morning", "lounge"] },
+  { triggers: ["hotel", "lobby"], slugHints: ["hotel", "lounge", "playback-context-lobby-welcome"] },
+  { triggers: ["restaurant"], slugHints: ["restaurant", "dinner", "lounge", "cafe"] },
+  { triggers: ["spa"], slugHints: ["biz-spa-wellness", "playback-context-spa-quiet"] },
 ];
 
-function buildHaystack(title: string, url: string, provider: string | null, playlistHints: readonly string[]): string {
-  return [title, url, provider ?? "", ...playlistHints].join(" ").toLowerCase();
+function buildHaystack(
+  title: string,
+  url: string,
+  provider: string | null,
+  playlistHints: readonly string[],
+  extraHaystackParts?: readonly string[],
+): string {
+  return [title, url, provider ?? "", ...playlistHints, ...(extraHaystackParts ?? [])].join(" ").toLowerCase();
+}
+
+const HEBREW_SCRIPT_RE = /[\u0590-\u05FF]/;
+
+/**
+ * Surfaces Hebrew / English / instrumental / mixed-language cues for the workbench banner and slug hints.
+ * Slugs are resolved against the dictionary inside computeCatalogTagSuggestions.
+ */
+export function inferCatalogLanguageSignals(rawHaystack: string): CatalogLanguageSignal[] {
+  const hay = rawHaystack.toLowerCase();
+  const scriptHay = rawHaystack;
+  const out: CatalogLanguageSignal[] = [];
+
+  const hebrewScript = HEBREW_SCRIPT_RE.test(scriptHay);
+  const hebrewCue =
+    /\b(hebrew|israeli lyrics|עברית|בעברית|שירים בעברית|דיבור בעברית)\b/i.test(hay) || hebrewScript;
+  if (hebrewCue) {
+    out.push({
+      label: hebrewScript ? "Hebrew script in metadata" : "Hebrew / Israeli lyrics (text cue)",
+      slugHints: ["il-hebrew-lyrics-only", "il-traditional-hebrew-song", "il-israeli-pop", "il-mixed-languages-radio"],
+    });
+  }
+
+  if (
+    /\b(english lyrics|english songs|english only|anglais|באנגלית)\b/i.test(hay)
+  ) {
+    out.push({
+      label: "English (text cue)",
+      slugHints: ["il-mixed-languages-radio"],
+    });
+  }
+
+  if (/\b(international|world music|multilingual|mixed language)\b/i.test(hay)) {
+    out.push({
+      label: "International / mixed-language (text cue)",
+      slugHints: ["il-mixed-languages-radio"],
+    });
+  }
+
+  if (
+    /\b(instrumental|inst\.|no vocal|non-vocal|karaoke backing|backing track)\b/i.test(hay) ||
+    /\b(no lyrics|sans paroles)\b/i.test(hay)
+  ) {
+    out.push({
+      label: "Likely instrumental / low vocal prominence (text cue)",
+      slugHints: ["instrumental", "tech-instrumental-only", "style-instrumental-forward"],
+    });
+  }
+
+  return out;
 }
 
 function slugParts(slug: string): string[] {
@@ -105,7 +179,7 @@ function tagMatchesHaystack(tag: CatalogTagSuggestionDictionaryRow, hay: string)
  * Ordered suggestions: keyword cues first, then dictionary-derived matches (stable order).
  */
 export function computeCatalogTagSuggestions(input: CatalogTagSuggestionInput): CatalogTagSuggestion[] {
-  const hay = buildHaystack(input.title, input.url, input.provider, input.playlistHints);
+  const hay = buildHaystack(input.title, input.url, input.provider, input.playlistHints, input.extraHaystackParts);
   const slugIndex = new Map<string, CatalogTagSuggestionDictionaryRow>();
   for (const t of input.dictionary) {
     slugIndex.set(t.slug, t);
@@ -114,7 +188,7 @@ export function computeCatalogTagSuggestions(input: CatalogTagSuggestionInput): 
   const seen = new Set<string>();
   const out: CatalogTagSuggestion[] = [];
 
-  function pushTag(tag: CatalogTagSuggestionDictionaryRow, reason: string) {
+  function pushTag(tag: CatalogTagSuggestionDictionaryRow, reason: string, preselectPending?: boolean) {
     if (input.assignedIds.has(tag.id) || seen.has(tag.id)) return;
     seen.add(tag.id);
     out.push({
@@ -122,7 +196,20 @@ export function computeCatalogTagSuggestions(input: CatalogTagSuggestionInput): 
       slug: tag.slug,
       labelEn: tag.labelEn,
       reason,
+      preselectPending,
     });
+  }
+
+  for (const sig of inferCatalogLanguageSignals(
+    [input.title, input.url, input.provider ?? "", ...input.playlistHints, ...(input.extraHaystackParts ?? [])].join(
+      " ",
+    ),
+  )) {
+    for (const slug of sig.slugHints) {
+      const tag = slugIndex.get(slug);
+      if (!tag) continue;
+      pushTag(tag, `language / vocal cue — ${sig.label}`, true);
+    }
   }
 
   for (const rule of KEYWORD_RULES) {
@@ -131,7 +218,7 @@ export function computeCatalogTagSuggestions(input: CatalogTagSuggestionInput): 
     for (const slug of rule.slugHints) {
       const tag = slugIndex.get(slug);
       if (!tag) continue;
-      pushTag(tag, `matched cue “${triggerHit}”`);
+      pushTag(tag, `matched cue “${triggerHit}”`, true);
     }
   }
 
@@ -140,7 +227,11 @@ export function computeCatalogTagSuggestions(input: CatalogTagSuggestionInput): 
 
     const direct = tagMatchesHaystack(tag, hay);
     if (direct.match && direct.reason) {
-      pushTag(tag, direct.reason);
+      const strong =
+        direct.reason.includes("matched alias") ||
+        direct.reason.includes("matched Hebrew label") ||
+        direct.reason.includes("matched title/URL text for slug");
+      pushTag(tag, direct.reason, strong);
     }
   }
 

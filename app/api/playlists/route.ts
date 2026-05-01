@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findOrCreateCatalogItem, normalizeCatalogUrlKey } from "@/lib/catalog-store";
+import { ensurePlaylistTracksLinkedToCatalog, findOrCreateCatalogItem, normalizeCatalogUrlKey } from "@/lib/catalog-store";
 import { listPlaylistsForTenant, createPlaylist, isPlaylistPersistError } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { getAccessType } from "@/lib/user-store";
@@ -135,48 +135,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (
-      tenantId &&
-      saveOrigin === PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT &&
-      tracks &&
-      tracks.length > 0
-    ) {
-      const enriched: PlaylistTrack[] = [];
-      for (const t of tracks) {
-        if (!t || typeof t.url !== "string" || !VALID_TYPES.includes(t.type)) {
-          enriched.push(t);
-          continue;
-        }
-        const u = t.url.trim();
-        if (!u) {
-          enriched.push(t);
-          continue;
-        }
-        try {
-          const urlKey = normalizeCatalogUrlKey(u, t.type);
-          if (!urlKey) {
-            enriched.push(t);
-            continue;
-          }
-          const title = (t.name ?? t.title ?? "").trim() || "Untitled";
-          const thumb = (t.cover ?? "").trim();
-          const row = await findOrCreateCatalogItem({
-            tenantId,
-            urlKey,
-            type: t.type,
-            title,
-            thumbnailUrl: thumb,
-          });
-          enriched.push({ ...t, catalogItemId: row.id });
-        } catch (trackErr) {
-          console.warn(
-            "[api/playlists] POST youtube mix import catalog track find-or-create skipped:",
-            trackErr,
-          );
-          enriched.push(t);
-        }
-      }
-      tracks = enriched;
+    if (tenantId && tracks && tracks.length > 0) {
+      tracks = await ensurePlaylistTracksLinkedToCatalog(tenantId, tracks);
     }
 
     const playlist = await createPlaylist({

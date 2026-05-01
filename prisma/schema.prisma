@@ -629,6 +629,8 @@ model CatalogItem {
   /// Manual SyncBiz/editorial rating — not YouTube metrics, popularity, or auto-calculated scores.
   curationRating Int           @default(0)
   curationNotes  String?       @db.Text
+  /// Stage 6.2A — manual music energy / tempo-feeling score (1–10); nullable = unset. BPM bands are display-only hints.
+  manualEnergyRating Int?
   addedById     String?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt

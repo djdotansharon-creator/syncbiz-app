@@ -18,6 +18,16 @@ function looksYouTubeCatalogItem(url: string, provider: string | null): boolean 
   return (provider ?? "").toLowerCase().includes("youtube");
 }
 
+/** True when refreshCatalogSourceSnapshot can attempt YouTube API / yt-dlp for this row. */
+export function shouldAttemptYouTubeCatalogSnapshot(item: {
+  url: string;
+  provider: string | null;
+  videoId: string | null;
+}): boolean {
+  const vid = (item.videoId?.trim() || getYouTubeVideoId(item.url))?.trim();
+  return Boolean(vid && looksYouTubeCatalogItem(item.url, item.provider));
+}
+
 function classifyApiSnapshot(
   fields: import("@/lib/youtube-api-search").YouTubeCatalogApiSnapshotFields,
 ): "SUCCESS" | "PARTIAL" {
@@ -177,6 +187,48 @@ export async function loadSourceMetadataSuggestionsForSnapshot(
     metadataSuggestions: meta.suggestions,
     unknownCues: meta.unknownCues,
   };
+}
+
+/**
+ * Enqueue a non-blocking YouTube provider snapshot fetch for this catalog row (normal intake path).
+ * Skips non-YouTube / missing video id; skips when latest snapshot is SUCCESS or PARTIAL (no duplicate auto-refresh).
+ * Retries FAILED snapshots after a cooldown. Manual admin refresh always appends a new snapshot.
+ */
+export function scheduleCatalogSnapshotIntakeIfNeeded(catalogItemId: string): void {
+  void runCatalogSnapshotIntakeIfNeeded(catalogItemId);
+}
+
+/** Failed snapshot auto-retry cooldown — avoids hammering API when keys/quota are down. */
+const SNAPSHOT_FAILED_RETRY_COOLDOWN_MS = 3 * 60 * 1000;
+
+async function runCatalogSnapshotIntakeIfNeeded(catalogItemId: string): Promise<void> {
+  try {
+    const item = await prisma.catalogItem.findUnique({
+      where: { id: catalogItemId },
+      select: { url: true, provider: true, videoId: true },
+    });
+    if (!item) return;
+    if (!shouldAttemptYouTubeCatalogSnapshot(item)) return;
+
+    const latest = await prisma.catalogSourceSnapshot.findFirst({
+      where: { catalogItemId },
+      orderBy: { fetchedAt: "desc" },
+      select: { fetchStatus: true, fetchedAt: true },
+    });
+
+    if (latest?.fetchStatus === "SUCCESS" || latest?.fetchStatus === "PARTIAL") {
+      return;
+    }
+
+    if (latest?.fetchStatus === "FAILED") {
+      const age = Date.now() - latest.fetchedAt.getTime();
+      if (age < SNAPSHOT_FAILED_RETRY_COOLDOWN_MS) return;
+    }
+
+    await refreshCatalogSourceSnapshot(catalogItemId);
+  } catch (e) {
+    console.warn("[catalog snapshot intake]", catalogItemId, e);
+  }
 }
 
 /** Serialize snapshot for JSON responses / client props (ISO date strings). */

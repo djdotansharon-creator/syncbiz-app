@@ -52,11 +52,16 @@ export function computeMetadataTaxonomySuggestions(
     const direct = matchTaxonomyDictionaryTagAgainstHaystack(tag, hay);
     if (direct.match && direct.reason) {
       seen.add(tag.id);
+      const preselectPending =
+        direct.reason.includes("matched alias") ||
+        direct.reason.includes("matched Hebrew label") ||
+        direct.reason.includes("matched title/URL text for slug");
       suggestions.push({
         taxonomyTagId: tag.id,
         slug: tag.slug,
         labelEn: tag.labelEn,
         reason: `source metadata — ${direct.reason}`,
+        preselectPending,
       });
     }
   }

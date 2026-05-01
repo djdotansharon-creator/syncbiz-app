@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { MusicTaxonomyCategory } from "@prisma/client";
 import {
   computeCatalogTagSuggestions,
+  inferCatalogLanguageSignals,
   type CatalogTagSuggestion,
 } from "@/lib/catalog-tagging-suggestions";
 
@@ -38,6 +39,46 @@ const CATEGORY_TABS: { id: MusicTaxonomyCategory | "ALL"; label: string }[] = [
   { id: "DAYPART_FIT", label: "Daypart Fit" },
 ];
 
+function taxonomyCategoryLabel(cat: MusicTaxonomyCategory): string {
+  const row = CATEGORY_TABS.find((t) => t.id === cat);
+  return row?.label ?? cat.replace(/_/g, " ");
+}
+
+function dictionaryTagTooltip(t: TaxonomyTagRow): string {
+  const lines: string[] = [t.labelEn, `Slug: ${t.slug}`, `Category: ${taxonomyCategoryLabel(t.category)}`];
+  if (t.labelHe.trim()) lines.push(`Hebrew: ${t.labelHe}`);
+  const aliases = t.aliases ?? [];
+  if (aliases.length) lines.push(`Aliases: ${aliases.join(", ")}`);
+  return lines.join("\n");
+}
+
+/** Subtle unlink — avoids heavy bordered “destructive button” chrome inside chips. */
+function AssignedTagUnlinkIcon({
+  title,
+  onClick,
+}: {
+  title: string;
+  onClick: (e: MouseEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="inline-flex shrink-0 rounded p-0.5 text-neutral-500 transition-colors hover:bg-neutral-800/90 hover:text-rose-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-500/60"
+      title={title}
+      aria-label="Remove tag from this catalog item"
+      onClick={onClick}
+    >
+      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+        <path
+          d="M3 6h18M8 6V4h8v2M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M10 11v6M14 11v6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
+
 function tagsMatchSearch(t: TaxonomyTagRow, q: string): boolean {
   const s = q.trim();
   if (!s) return true;
@@ -65,6 +106,7 @@ export function CatalogItemTaxonomyEditor({
   catalogUrl = "",
   catalogProvider = null,
   playlistHintTexts = [],
+  metadataHaystackParts = [],
   nextUntaggedHref = null,
   metadataSuggestions = [],
 }: {
@@ -73,6 +115,8 @@ export function CatalogItemTaxonomyEditor({
   catalogUrl?: string;
   catalogProvider?: string | null;
   playlistHintTexts?: string[];
+  /** Snapshot description, hashtags, channel title — strengthens deterministic hints only. */
+  metadataHaystackParts?: string[];
   nextUntaggedHref?: string | null;
   /** Stage 5.9 — merged into deterministic suggestions (still pending → save only). */
   metadataSuggestions?: CatalogTagSuggestion[];
@@ -89,6 +133,7 @@ export function CatalogItemTaxonomyEditor({
 
   const hasLoadedOnceRef = useRef(false);
   const lastCatalogItemIdRef = useRef<string | null>(null);
+  const preselectAppliedKeyRef = useRef<string>("");
 
   const base = catalogItemId
     ? `/api/admin/platform/catalog-items/${catalogItemId}/taxonomy-tags`
@@ -148,6 +193,7 @@ export function CatalogItemTaxonomyEditor({
       setPendingIds(new Set());
       setSearchQuery("");
       setCategoryTab("ALL");
+      preselectAppliedKeyRef.current = "";
       hasLoadedOnceRef.current = false;
       lastCatalogItemIdRef.current = null;
       return;
@@ -160,6 +206,7 @@ export function CatalogItemTaxonomyEditor({
       setPendingIds(new Set());
       setSearchQuery("");
       setCategoryTab("ALL");
+      preselectAppliedKeyRef.current = "";
     }
     void load();
   }, [catalogItemId, load]);
@@ -201,23 +248,27 @@ export function CatalogItemTaxonomyEditor({
 
   const suggestions = useMemo(() => {
     if (!catalogItemId) return [];
-    const base =
-      catalogTitle.trim().length > 0
-        ? computeCatalogTagSuggestions({
-            dictionary: dictionary.map((t) => ({
-              id: t.id,
-              slug: t.slug,
-              labelEn: t.labelEn,
-              labelHe: t.labelHe,
-              aliases: t.aliases ?? [],
-            })),
-            assignedIds: linkedIds,
-            title: catalogTitle,
-            url: catalogUrl,
-            provider: catalogProvider,
-            playlistHints: playlistHintTexts,
-          })
-        : [];
+    const hasHaystack =
+      catalogTitle.trim().length > 0 ||
+      catalogUrl.trim().length > 0 ||
+      metadataHaystackParts.some((x) => typeof x === "string" && x.trim().length > 0);
+    const base = hasHaystack
+      ? computeCatalogTagSuggestions({
+          dictionary: dictionary.map((t) => ({
+            id: t.id,
+            slug: t.slug,
+            labelEn: t.labelEn,
+            labelHe: t.labelHe,
+            aliases: t.aliases ?? [],
+          })),
+          assignedIds: linkedIds,
+          title: catalogTitle,
+          url: catalogUrl,
+          provider: catalogProvider,
+          playlistHints: playlistHintTexts,
+          extraHaystackParts: metadataHaystackParts,
+        })
+      : [];
     const seen = new Set(base.map((x) => x.taxonomyTagId));
     const merged: CatalogTagSuggestion[] = [...base];
     for (const m of metadataSuggestions) {
@@ -232,10 +283,48 @@ export function CatalogItemTaxonomyEditor({
     catalogUrl,
     catalogProvider,
     playlistHintTexts,
+    metadataHaystackParts,
     dictionary,
     linkedIds,
     metadataSuggestions,
   ]);
+
+  const languageSignals = useMemo(() => {
+    const raw = [
+      catalogTitle,
+      catalogUrl,
+      catalogProvider ?? "",
+      ...playlistHintTexts,
+      ...metadataHaystackParts,
+    ].join(" ");
+    return inferCatalogLanguageSignals(raw);
+  }, [catalogTitle, catalogUrl, catalogProvider, playlistHintTexts, metadataHaystackParts]);
+
+  const preselectKey = useMemo(
+    () =>
+      suggestions
+        .filter((s) => s.preselectPending)
+        .map((s) => s.taxonomyTagId)
+        .sort()
+        .join(","),
+    [suggestions],
+  );
+
+  useEffect(() => {
+    if (!catalogItemId || loading || dictionary.length === 0) return;
+    const marker = `${catalogItemId}|${preselectKey}`;
+    if (marker === preselectAppliedKeyRef.current) return;
+    preselectAppliedKeyRef.current = marker;
+    if (!preselectKey) return;
+    const ids = suggestions.filter((s) => s.preselectPending).map((s) => s.taxonomyTagId);
+    setPendingIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (!linkedIds.has(id)) next.add(id);
+      }
+      return next;
+    });
+  }, [catalogItemId, loading, dictionary.length, preselectKey, suggestions, linkedIds]);
 
   function togglePending(id: string) {
     setPendingIds((prev) => {
@@ -314,11 +403,13 @@ export function CatalogItemTaxonomyEditor({
   }
 
   async function removeTag(taxonomyTagId: string) {
+    const tagId = taxonomyTagId.trim();
+    if (!tagId || !base) return;
     setErr(null);
-    const url = `${base}?taxonomyTagId=${encodeURIComponent(taxonomyTagId)}`;
+    const url = `${base}/${encodeURIComponent(tagId)}`;
     const res = await fetch(url, { method: "DELETE", credentials: "same-origin", cache: "no-store" });
+    const j = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
       setErr(typeof j.error === "string" ? j.error : `Remove failed (${res.status})`);
       return;
     }
@@ -357,29 +448,36 @@ export function CatalogItemTaxonomyEditor({
       ) : null}
 
       <div>
-        <h3 className="text-sm font-medium text-neutral-200">Tags on this catalog item</h3>
+        <h3 className="text-sm font-medium text-neutral-200">Assigned tags ({links.length})</h3>
         <p className="mt-1 text-[11px] text-neutral-600">
           Removing unlinks this dictionary tag from this catalog row only — other assignments stay untouched.
         </p>
         {links.length === 0 ? (
           <p className="mt-2 text-sm text-neutral-500">No taxonomy tags yet.</p>
         ) : (
-          <ul className="mt-2 flex flex-wrap gap-2">
+          <ul className="mt-2 flex flex-wrap gap-1.5">
             {links.map((row) => (
               <li
                 key={row.id}
-                className="inline-flex max-w-full items-center gap-2 rounded-full border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-200"
+                className="inline-flex max-w-full items-center gap-1 rounded-full border border-neutral-700 bg-neutral-900 py-1 pl-2.5 pr-1 text-xs text-neutral-200"
               >
-                <span className="truncate font-mono text-neutral-400">{row.taxonomyTag.slug}</span>
-                <span className="truncate">{row.taxonomyTag.labelEn}</span>
-                <button
-                  type="button"
-                  className="shrink-0 rounded border border-rose-900/50 bg-rose-950/40 px-2 py-0.5 text-[11px] font-medium text-rose-200 hover:bg-rose-950/70"
+                <span className="min-w-0">
+                  <span className="block truncate font-medium text-neutral-100">{row.taxonomyTag.labelEn}</span>
+                  <span className="block truncate font-mono text-[9px] text-neutral-500">{row.taxonomyTag.slug}</span>
+                </span>
+                <AssignedTagUnlinkIcon
                   title="Remove only this catalog item’s link to the tag (does not delete the tag from the dictionary)"
-                  onClick={() => void removeTag(row.taxonomyTagId)}
-                >
-                  Remove from item
-                </button>
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const id = (row.taxonomyTagId ?? row.taxonomyTag?.id ?? "").trim();
+                    if (!id) {
+                      setErr("Missing taxonomy tag id — reload the page.");
+                      return;
+                    }
+                    void removeTag(id);
+                  }}
+                />
               </li>
             ))}
           </ul>
@@ -424,40 +522,58 @@ export function CatalogItemTaxonomyEditor({
       <div className="rounded-md border border-violet-950/45 bg-violet-950/15 px-3 py-3">
         <h3 className="text-sm font-medium text-neutral-100">Suggested tags</h3>
         <p className="mt-1 text-[11px] text-neutral-500">
-          Review only — suggestions are never auto-applied. Combines catalog-title rules with Stage 5.9 provider snapshot hints when available (pending → save).
+          Review only — suggestions are never auto-applied. High-confidence cues seed{" "}
+          <strong className="font-medium text-neutral-400">pending</strong> until you save; weaker matches appear here for manual ticks only.
         </p>
+
+        {languageSignals.length > 0 ? (
+          <div className="mt-3 rounded border border-cyan-900/45 bg-cyan-950/20 px-2.5 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-cyan-200/90">
+              Language / vocal hints (from title + URL + snapshot text)
+            </p>
+            <ul className="mt-1.5 flex flex-wrap gap-1.5">
+              {languageSignals.map((sig) => (
+                <li
+                  key={sig.label}
+                  className="rounded-full border border-cyan-800/40 bg-cyan-950/45 px-2 py-0.5 text-[11px] text-cyan-50"
+                >
+                  {sig.label}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         {suggestions.length === 0 ? (
           <p className="mt-3 text-sm text-neutral-600">No suggestions from current deterministic rules.</p>
         ) : (
-          <ul className="mt-3 space-y-2">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {suggestions.map((s) => {
               const inPending = pendingIds.has(s.taxonomyTagId);
+              const tip = `${s.labelEn}\n${s.slug}\n\n${s.reason}`;
               return (
-                <li key={s.taxonomyTagId}>
-                  <button
-                    type="button"
-                    className={`flex w-full flex-col items-start gap-0.5 rounded border px-2.5 py-2 text-left text-sm transition-colors sm:flex-row sm:items-center sm:justify-between ${
-                      inPending
-                        ? "border-violet-600/70 bg-violet-950/40"
-                        : "border-neutral-700 bg-neutral-950/50 hover:bg-neutral-900/80"
-                    }`}
-                    onClick={() => togglePending(s.taxonomyTagId)}
-                  >
-                    <span>
-                      <span className="font-mono text-[11px] text-violet-300/90">{s.slug}</span>
-                      <span className="ml-2 text-neutral-200">{s.labelEn}</span>
-                      {inPending ? (
-                        <span className="ml-2 rounded bg-violet-900/70 px-1.5 py-0.5 text-[10px] text-violet-100">
-                          In pending
-                        </span>
-                      ) : null}
+                <button
+                  key={s.taxonomyTagId}
+                  type="button"
+                  title={tip}
+                  className={`inline-flex max-w-[10.5rem] flex-col rounded-lg border px-2 py-1 text-left transition-colors ${
+                    inPending
+                      ? "border-violet-500/75 bg-violet-950/45 ring-1 ring-violet-500/25"
+                      : "border-neutral-700 bg-neutral-950/55 hover:border-neutral-600 hover:bg-neutral-900/85"
+                  }`}
+                  onClick={() => togglePending(s.taxonomyTagId)}
+                >
+                  <span className="line-clamp-2 text-[11px] font-semibold leading-snug text-neutral-100">{s.labelEn}</span>
+                  <span className="mt-0.5 truncate font-mono text-[9px] text-violet-300/90">{s.slug}</span>
+                  {inPending ? (
+                    <span className="mt-1 w-fit rounded bg-violet-900/65 px-1 py-px text-[8px] font-semibold uppercase text-violet-100">
+                      Pending
                     </span>
-                    <span className="text-[10px] text-neutral-500 sm:max-w-[55%] sm:text-right">{s.reason}</span>
-                  </button>
-                </li>
+                  ) : null}
+                </button>
               );
             })}
-          </ul>
+          </div>
         )}
       </div>
 
@@ -523,12 +639,15 @@ export function CatalogItemTaxonomyEditor({
               {pendingResolved.map((t) => (
                 <span
                   key={t.id}
-                  className="inline-flex items-center gap-1 rounded-full border border-amber-800/60 bg-neutral-900/80 px-2 py-0.5 text-[11px] text-amber-100"
+                  className="inline-flex max-w-[14rem] items-start gap-1 rounded-lg border border-amber-800/55 bg-neutral-900/90 py-1 pl-2 pr-1 text-[11px] text-amber-50"
                 >
-                  <span className="font-mono text-neutral-500">{t.slug}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-semibold leading-tight text-amber-50">{t.labelEn}</span>
+                    <span className="block truncate font-mono text-[9px] text-neutral-500">{t.slug}</span>
+                  </span>
                   <button
                     type="button"
-                    className="rounded px-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+                    className="shrink-0 rounded p-0.5 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
                     aria-label={`Remove ${t.slug} from pending`}
                     onClick={() => removePending(t.id)}
                   >
@@ -540,48 +659,43 @@ export function CatalogItemTaxonomyEditor({
           </div>
         ) : null}
 
-        <div className="max-h-72 overflow-y-auto rounded border border-neutral-800 bg-neutral-950/80">
+        <div className="max-h-[min(28rem,58vh)] overflow-y-auto rounded border border-neutral-800 bg-neutral-950/80 p-2">
           {filteredPickList.length === 0 ? (
-            <p className="px-3 py-8 text-center text-sm text-neutral-600">
+            <p className="px-2 py-8 text-center text-sm text-neutral-600">
               No matching tags — try another tab or search.
             </p>
           ) : (
-            <ul className="divide-y divide-neutral-800">
+            <ul
+              className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(9.75rem,1fr))] gap-2 p-0 sm:grid-cols-[repeat(auto-fill,minmax(10.25rem,1fr))]"
+              aria-label="Dictionary tags"
+            >
               {filteredPickList.map((t) => {
                 const pending = pendingIds.has(t.id);
+                const catShort = taxonomyCategoryLabel(t.category);
+                const tip = dictionaryTagTooltip(t);
                 return (
-                  <li key={t.id}>
+                  <li key={t.id} className="min-w-0">
                     <button
                       type="button"
-                      className={`flex w-full gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-neutral-900/90 ${
-                        pending ? "bg-sky-950/25 ring-1 ring-inset ring-sky-600/40" : ""
-                      }`}
+                      title={tip}
                       onClick={() => togglePending(t.id)}
+                      className={`flex h-[5.125rem] w-full flex-col gap-1 rounded-lg border px-2 py-2 text-left transition-colors ${
+                        pending
+                          ? "border-sky-500/85 bg-sky-950/35 ring-1 ring-sky-500/35 shadow-sm shadow-black/20"
+                          : "border-neutral-700 bg-neutral-900/85 hover:border-neutral-600 hover:bg-neutral-800/75"
+                      }`}
                     >
+                      <span className="min-h-0 flex-1 overflow-hidden text-[12px] font-semibold leading-snug text-neutral-100">
+                        <span className="line-clamp-2 block">{t.labelEn}</span>
+                      </span>
+                      <span className="shrink-0 truncate font-mono text-[9px] text-neutral-500" title={t.slug}>
+                        {t.slug}
+                      </span>
                       <span
-                        className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                          pending ? "border-sky-500 bg-sky-700 text-neutral-950" : "border-neutral-600 bg-neutral-950"
-                        }`}
-                        aria-hidden
+                        className="shrink-0 truncate text-[7px] font-medium uppercase tracking-wide text-neutral-600/90"
+                        title={catShort}
                       >
-                        {pending ? "✓" : ""}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="font-medium text-neutral-100">{t.labelEn}</span>
-                        <span className="mt-0.5 block font-mono text-[11px] text-neutral-500">{t.slug}</span>
-                        <span className="mt-0.5 block text-[11px] text-neutral-600">
-                          {t.labelHe}
-                          {(t.aliases ?? []).length > 0 ? (
-                            <span className="text-neutral-500">
-                              {" "}
-                              · aliases: {(t.aliases ?? []).slice(0, 5).join(", ")}
-                              {(t.aliases ?? []).length > 5 ? "…" : ""}
-                            </span>
-                          ) : null}
-                        </span>
-                      </span>
-                      <span className="hidden shrink-0 self-start rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-500 sm:inline">
-                        {t.category}
+                        {catShort}
                       </span>
                     </button>
                   </li>

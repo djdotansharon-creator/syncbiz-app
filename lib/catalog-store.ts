@@ -5,9 +5,10 @@
  */
 
 import { prisma } from "./prisma";
-import type { PlaylistType } from "./playlist-types";
+import type { PlaylistTrack, PlaylistType } from "./playlist-types";
 import { getYouTubeVideoId } from "./playlist-utils";
 import { inferGenre } from "./infer-genre";
+import { scheduleCatalogSnapshotIntakeIfNeeded } from "./catalog-source-refresh";
 
 export function normalizeCatalogUrlKey(url: string, type: PlaylistType): string {
   const u = (url ?? "").trim();
@@ -42,7 +43,7 @@ export async function findOrCreateCatalogItem(input: {
   type: PlaylistType; // kept for drop-in compat; not stored
   title: string;
   thumbnailUrl: string;
-}): Promise<{ id: string }> {
+}): Promise<{ id: string; created: boolean }> {
   const raw = input.urlKey.trim();
   if (!raw) throw new Error("urlKey is required");
 
@@ -55,7 +56,7 @@ export async function findOrCreateCatalogItem(input: {
   const thumbnail = (input.thumbnailUrl ?? "").trim() || null;
   const genres = genresFromTitle(title);
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     // 1. YouTube dedup: videoId catches all URL variants for the same video
     if (videoId) {
       const byVideoId = await tx.catalogItem.findFirst({
@@ -71,7 +72,7 @@ export async function findOrCreateCatalogItem(input: {
             ...((byVideoId.genres ?? []).length === 0 && genres.length > 0 ? { genres } : {}),
           },
         });
-        return { id: byVideoId.id };
+        return { id: byVideoId.id, created: false };
       }
     }
 
@@ -90,7 +91,7 @@ export async function findOrCreateCatalogItem(input: {
           ...((existing.genres ?? []).length === 0 && genres.length > 0 ? { genres } : {}),
         },
       });
-      return { id: existing.id };
+      return { id: existing.id, created: false };
     }
 
     // 3. Create new
@@ -98,8 +99,63 @@ export async function findOrCreateCatalogItem(input: {
       data: { url: canonicalUrl, canonicalUrl, videoId, provider, title, thumbnail, genres },
       select: { id: true },
     });
-    return { id: created.id };
+    return { id: created.id, created: true };
   });
+
+  scheduleCatalogSnapshotIntakeIfNeeded(result.id);
+
+  return { id: result.id, created: result.created };
+}
+
+const TRACK_TYPES_LINKABLE_TO_CATALOG: PlaylistType[] = ["youtube", "soundcloud", "spotify", "stream-url"];
+
+/**
+ * Ensures each playlist track has a CatalogItem id where applicable (URL-based tracks).
+ * Runs automatic provider snapshot intake for YouTube via scheduleCatalogSnapshotIntakeIfNeeded (non-blocking).
+ */
+export async function ensurePlaylistTracksLinkedToCatalog(
+  tenantId: string,
+  tracks: PlaylistTrack[],
+): Promise<PlaylistTrack[]> {
+  const tid = tenantId.trim();
+  if (!tid || tracks.length === 0) return tracks;
+
+  const out: PlaylistTrack[] = [];
+  for (const t of tracks) {
+    if (!t || !TRACK_TYPES_LINKABLE_TO_CATALOG.includes(t.type)) {
+      out.push(t);
+      continue;
+    }
+    const u = (t.url ?? "").trim();
+    if (!u) {
+      out.push(t);
+      continue;
+    }
+    if ((t.catalogItemId ?? "").trim()) {
+      out.push(t);
+      continue;
+    }
+    try {
+      const urlKey = normalizeCatalogUrlKey(u, t.type);
+      if (!urlKey) {
+        out.push(t);
+        continue;
+      }
+      const title = (t.name ?? t.title ?? "").trim() || "Untitled";
+      const thumb = (t.cover ?? "").trim();
+      const row = await findOrCreateCatalogItem({
+        tenantId: tid,
+        urlKey,
+        type: t.type,
+        title,
+        thumbnailUrl: thumb,
+      });
+      out.push({ ...t, catalogItemId: row.id });
+    } catch {
+      out.push(t);
+    }
+  }
+  return out;
 }
 
 /**

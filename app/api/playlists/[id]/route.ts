@@ -3,6 +3,7 @@ import { getPlaylist, updatePlaylist, deletePlaylist, isPlaylistPersistError } f
 import { getCurrentUserFromCookies, getUserIdFromSession } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { gatePlaylistAccess } from "@/lib/playlist-access";
+import { ensurePlaylistTracksLinkedToCatalog } from "@/lib/catalog-store";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import {
   PLAYLIST_USE_CASES_PHASE1,
@@ -102,7 +103,14 @@ export async function PUT(
     }
     if (body.url != null) updates.url = String(body.url).trim();
     if (body.thumbnail != null) updates.thumbnail = String(body.thumbnail).trim();
-    if (body.tracks != null) updates.tracks = body.tracks;
+    if (body.tracks != null) {
+      let tr = body.tracks as PlaylistTrack[];
+      const tenantId = (user?.tenantId ?? "").trim();
+      if (tenantId && tr.length > 0) {
+        tr = await ensurePlaylistTracksLinkedToCatalog(tenantId, tr);
+      }
+      updates.tracks = tr;
+    }
     if (body.order != null) updates.order = body.order;
     if ("scheduleContributorBlocks" in body) {
       const raw = body.scheduleContributorBlocks;
