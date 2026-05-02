@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "taxonomySlugReference": "Draft slugs cross-checked against prisma/seed-data/music-taxonomy.generated.json (Stage 3 workbook export). Not enforced against DB at runtime.",
+  "branches": [
+    {
+      "id": "cafe-morning-easy",
+      "labelHe": "קפה · בוקר · רגוע",
+      "labelEn": "Café · morning · easy",
+      "isActive": true,
+      "priority": 10,
+      "triggerBusinessTags": ["cafe"],
+      "triggerDaypartTags": ["morning"],
+      "triggerVibeTags": ["chill-mellow"],
+      "triggerEnergyMin": null,
+      "triggerEnergyMax": null,
+      "boostTagSlugs": ["bossa-nova", "acoustic", "chill-mellow", "quiet-morning", "smooth-jazz"],
+      "avoidTagSlugs": ["high-energy", "techno"],
+      "preferredUrlType": "SINGLE",
+      "explainHuman": "Draft recipe for calm café breakfast contexts: favour easy acoustic moods and light grooves.",
+      "notes": "Omitted soft-jazz (no slug). Omitted hard-rock in avoid list (no slug). chill-mellow aliases include Calm."
+    },
+    {
+      "id": "beach-poolside",
+      "labelHe": "חוף · בריכה",
+      "labelEn": "Beach / poolside",
+      "isActive": true,
+      "priority": 20,
+      "triggerBusinessTags": [],
+      "triggerDaypartTags": [],
+      "triggerVibeTags": [],
+      "triggerEnergyMin": null,
+      "triggerEnergyMax": null,
+      "boostTagSlugs": ["reggae-dub", "tropical-house", "afro", "chill-out", "latin-house"],
+      "avoidTagSlugs": ["melancholic", "aggressive-raw"],
+      "preferredUrlType": "EITHER",
+      "explainHuman": "Draft recipe for sunny outdoor leisure programming (no dedicated venue taxonomy slug yet).",
+      "notes": "Triggers intentionally empty pending venue/context tags. Skipped heavy-rock (no slug); aggressive-raw proxies heavy intensity. tropical-house used instead of tropical; chill-out instead of chillout; reggae-dub instead of reggae."
+    },
+    {
+      "id": "evening-sexy-rhythmic",
+      "labelHe": "ערב · סקסי · קצבי",
+      "labelEn": "Evening · sexy · rhythmic",
+      "isActive": true,
+      "priority": 30,
+      "triggerBusinessTags": ["bar"],
+      "triggerDaypartTags": ["golden-hour"],
+      "triggerVibeTags": ["sensual-sexy", "groovy"],
+      "triggerEnergyMin": null,
+      "triggerEnergyMax": null,
+      "boostTagSlugs": ["deep-house", "disco-house", "organic-house", "sensual-sexy", "groovy"],
+      "avoidTagSlugs": [],
+      "preferredUrlType": "SET_MIX",
+      "explainHuman": "Draft recipe for golden-hour bar grooves leaning sensual and rhythmic.",
+      "notes": "Omitted afro-house and lounge-house (no slugs). organic-house is a loose lush-house substitute until lounge-house exists. No acoustic-led avoid slug in workbook — bias handled via boosts only."
+    }
+  ]
+}

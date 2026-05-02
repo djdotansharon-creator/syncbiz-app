@@ -99,6 +99,7 @@ export default async function MusicTaxonomyAdminPage({
             <option value="TECHNICAL_TAGS">TECHNICAL_TAGS</option>
             <option value="BUSINESS_FIT">BUSINESS_FIT</option>
             <option value="DAYPART_FIT">DAYPART_FIT</option>
+            <option value="CATALOG_PROGRAMMING">CATALOG_PROGRAMMING</option>
           </select>
         </label>
 

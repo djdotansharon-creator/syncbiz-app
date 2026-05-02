@@ -7,9 +7,11 @@ import type {
   Prisma,
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import type { MusicTaxonomyCategoryLiteral, MusicTaxonomyTagStatusLiteral } from "@/lib/music-taxonomy-types";
-
-const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+import {
+  type MusicTaxonomyCategoryLiteral,
+  isValidMusicTaxonomySlugFormat,
+  type MusicTaxonomyTagStatusLiteral,
+} from "@/lib/music-taxonomy-types";
 
 export const MUSIC_TAXONOMY_CATEGORIES: MusicTaxonomyCategoryLiteral[] = [
   "PLAYBACK_CONTEXT",
@@ -20,6 +22,7 @@ export const MUSIC_TAXONOMY_CATEGORIES: MusicTaxonomyCategoryLiteral[] = [
   "TECHNICAL_TAGS",
   "BUSINESS_FIT",
   "DAYPART_FIT",
+  "CATALOG_PROGRAMMING",
 ];
 
 export const MUSIC_TAXONOMY_STATUSES: MusicTaxonomyTagStatusLiteral[] = [
@@ -30,7 +33,7 @@ export const MUSIC_TAXONOMY_STATUSES: MusicTaxonomyTagStatusLiteral[] = [
 ];
 
 export function isValidTaxonomySlug(slug: string): boolean {
-  return SLUG_PATTERN.test(slug);
+  return isValidMusicTaxonomySlugFormat(slug);
 }
 
 export function parseMusicTaxonomyCategory(

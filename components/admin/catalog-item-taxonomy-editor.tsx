@@ -37,6 +37,7 @@ const CATEGORY_TABS: { id: MusicTaxonomyCategory | "ALL"; label: string }[] = [
   { id: "ISRAELI_SPECIALS", label: "Israeli Specials" },
   { id: "TECHNICAL_TAGS", label: "Technical Tags" },
   { id: "DAYPART_FIT", label: "Daypart Fit" },
+  { id: "CATALOG_PROGRAMMING", label: "Catalog Programming" },
 ];
 
 function taxonomyCategoryLabel(cat: MusicTaxonomyCategory): string {

@@ -113,6 +113,8 @@ enum MusicTaxonomyCategory {
   TECHNICAL_TAGS
   BUSINESS_FIT
   DAYPART_FIT
+  /// Editorial / programming signals on catalog items (not genres).
+  CATALOG_PROGRAMMING
 }
 
 enum MusicTaxonomyTagStatus {

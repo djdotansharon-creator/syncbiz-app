@@ -31,6 +31,7 @@ const CATEGORIES = [
   "TECHNICAL_TAGS",
   "BUSINESS_FIT",
   "DAYPART_FIT",
+  "CATALOG_PROGRAMMING",
 ] as const;
 
 const STATUSES = ["ACTIVE", "DEPRECATED", "HIDDEN", "MERGED"] as const;

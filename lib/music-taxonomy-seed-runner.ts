@@ -23,6 +23,7 @@ const MUSIC_TAXONOMY_CATEGORY_ENUMS = new Set<string>([
   "TECHNICAL_TAGS",
   "BUSINESS_FIT",
   "DAYPART_FIT",
+  "CATALOG_PROGRAMMING",
 ]);
 
 /**
@@ -40,6 +41,7 @@ const CATEGORY_ALIAS_TO_ENUM: Record<string, MusicTaxonomyCategoryLiteral> = {
   "technical tags": "TECHNICAL_TAGS",
   "business fit": "BUSINESS_FIT",
   "daypart fit": "DAYPART_FIT",
+  "catalog programming": "CATALOG_PROGRAMMING",
 };
 
 /** Normalize whitespace and slashes so "Vibe / Energy" and "Vibe/Energy" share one lookup key. */

@@ -1937,5 +1937,31 @@
     "parentSlug": null,
     "mergedIntoSlug": null,
     "sortOrder": 90
+  },
+  {
+    "slug": "selected",
+    "category": "Catalog Programming",
+    "labelEn": "Selected",
+    "labelHe": "נבחר",
+    "descriptionHeUser": "נבחר ידנית על ידי SyncBiz / מומלץ לשימוש",
+    "descriptionAi": null,
+    "aliases": ["syncbiz-selected", "syncbiz selected", "recommended", "מומלץ", "נבחר"],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 10
+  },
+  {
+    "slug": "hits",
+    "category": "Catalog Programming",
+    "labelEn": "Hits",
+    "labelHe": "להיטים",
+    "descriptionHeUser": "תוכן מוכר, קליט או להיט שמתאים לקהל רחב",
+    "descriptionAi": null,
+    "aliases": ["hit", "hits", "popular", "familiar", "crowd-pleaser", "crowd pleaser", "להיט", "להיטים"],
+    "status": "ACTIVE",
+    "parentSlug": null,
+    "mergedIntoSlug": null,
+    "sortOrder": 20
   }
 ]

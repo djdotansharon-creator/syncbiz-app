@@ -3,6 +3,13 @@
  * Enum literals mirror `MusicTaxonomyCategory` / `MusicTaxonomyTagStatus` in schema.prisma.
  */
 
+/** Kebab-case slug pattern for dictionary tags (matches admin CRUD validation). */
+export const MUSIC_TAXONOMY_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function isValidMusicTaxonomySlugFormat(slug: string): boolean {
+  return MUSIC_TAXONOMY_SLUG_PATTERN.test(slug);
+}
+
 export type MusicTaxonomyCategoryLiteral =
   | "PLAYBACK_CONTEXT"
   | "VIBE_ENERGY"
@@ -11,7 +18,8 @@ export type MusicTaxonomyCategoryLiteral =
   | "ISRAELI_SPECIALS"
   | "TECHNICAL_TAGS"
   | "BUSINESS_FIT"
-  | "DAYPART_FIT";
+  | "DAYPART_FIT"
+  | "CATALOG_PROGRAMMING";
 
 export type MusicTaxonomyTagStatusLiteral =
   | "ACTIVE"

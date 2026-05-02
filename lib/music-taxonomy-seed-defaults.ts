@@ -570,4 +570,23 @@ export const DEFAULT_MUSIC_TAXONOMY_SEED_ROWS: MusicTaxonomySeedRow[] = [
     labelHe: "פתיחה / סגירה",
     sortOrder: 90,
   },
+  // CATALOG_PROGRAMMING — editorial / programming signals (not genres)
+  {
+    slug: "selected",
+    category: "CATALOG_PROGRAMMING",
+    labelEn: "Selected",
+    labelHe: "נבחר",
+    descriptionHeUser: "נבחר ידנית על ידי SyncBiz / מומלץ לשימוש",
+    sortOrder: 10,
+    aliases: ["syncbiz-selected", "syncbiz selected", "recommended", "מומלץ", "נבחר"],
+  },
+  {
+    slug: "hits",
+    category: "CATALOG_PROGRAMMING",
+    labelEn: "Hits",
+    labelHe: "להיטים",
+    descriptionHeUser: "תוכן מוכר, קליט או להיט שמתאים לקהל רחב",
+    sortOrder: 20,
+    aliases: ["hit", "hits", "popular", "familiar", "crowd-pleaser", "crowd pleaser", "להיט", "להיטים"],
+  },
 ];
