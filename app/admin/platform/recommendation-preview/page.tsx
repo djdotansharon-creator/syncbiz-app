@@ -22,6 +22,7 @@ import {
   DAYPART_SEGMENT_OPTIONS,
   resolveDaypartSegment,
 } from "@/lib/recommendations/daypart-segment-map";
+import { catalogDiscoveryActiveWhere } from "@/lib/catalog-discovery-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -176,7 +177,9 @@ export default async function RecommendationPreviewPage({
   });
 
   const catalogRowsRaw = await prisma.catalogItem.findMany({
-    where: { taxonomyLinks: { some: {} } },
+    where: {
+      AND: [{ taxonomyLinks: { some: {} } }, catalogDiscoveryActiveWhere],
+    },
     select: {
       id: true,
       title: true,

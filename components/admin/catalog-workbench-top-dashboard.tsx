@@ -122,6 +122,9 @@ function metricTile(label: string, value: string, wide?: boolean, title?: string
 
 export function CatalogWorkbenchTopDashboard({
   snapshot,
+  providerSnapshotPhase,
+  archivedAt,
+  archiveReason,
   catalogCreatedAt,
   lastPlaylistLinkAt,
   lastAnalyticsPlayAt,
@@ -138,6 +141,10 @@ export function CatalogWorkbenchTopDashboard({
   manualEnergyRating,
 }: {
   snapshot: CatalogSourceSnapshotDTO | null;
+  /** First-intake visibility — UNSUPPORTED = non-YouTube V1; PENDING = eligible, snapshot row not written yet; READY = snapshot exists. */
+  providerSnapshotPhase: "UNSUPPORTED" | "PENDING" | "READY";
+  archivedAt: Date | null;
+  archiveReason?: string | null;
   catalogCreatedAt: Date;
   lastPlaylistLinkAt: Date | null;
   lastAnalyticsPlayAt: Date | null;
@@ -174,12 +181,24 @@ export function CatalogWorkbenchTopDashboard({
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-300/95">Catalog overview</p>
           <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-neutral-500">
-            Source metrics, SyncBiz timeline, usage, curation preview, and energy/BPM status at a glance. Cleanup controls sit next to URL actions above.
+            Provider snapshot status, SyncBiz timeline, usage, and curation preview.
           </p>
+          {archivedAt ? (
+            <p className="mt-2 text-[11px] text-neutral-500">
+              <span className="rounded border border-neutral-600 bg-neutral-900 px-2 py-0.5 font-semibold uppercase tracking-wide text-neutral-400">
+                Archived
+              </span>
+              <span className="ml-2 tabular-nums text-neutral-600">{fmtDateTime(archivedAt)}</span>
+              {archiveReason?.trim() ? (
+                <span className="mt-1 block text-neutral-600">Reason · {archiveReason.trim()}</span>
+              ) : null}
+            </p>
+          ) : null}
         </div>
-        <span
-          className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${tierBadgeClass}`}
-        >
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${tierBadgeClass}`}
+          >
           {usageTier === "NOT_USED"
             ? "Not used"
             : usageTier === "HIGH"
@@ -187,7 +206,8 @@ export function CatalogWorkbenchTopDashboard({
               : usageTier === "MEDIUM"
                 ? "Medium usage"
                 : "Low usage"}
-        </span>
+          </span>
+        </div>
       </div>
 
       {snapshot ? (
@@ -244,6 +264,12 @@ export function CatalogWorkbenchTopDashboard({
               {snapshot.title.trim()}
             </p>
           ) : null}
+          {snapshot.description?.trim() ? (
+            <p className="mt-2 line-clamp-3 text-[11px] leading-snug text-neutral-400" title={snapshot.description!.trim()}>
+              <span className="font-semibold text-neutral-600">Description · </span>
+              {snapshot.description!.trim()}
+            </p>
+          ) : null}
           {cuesPreview.length > 0 ? (
             <p className="mt-1 line-clamp-2 text-[11px] text-neutral-500" title={[...snapshot.sourceTags, ...snapshot.hashtags].join(" · ")}>
               <span className="font-semibold text-neutral-600">Metadata cues · </span>
@@ -254,16 +280,31 @@ export function CatalogWorkbenchTopDashboard({
             <p className="mt-1 text-[11px] text-neutral-600">Metadata cues · none in snapshot</p>
           )}
         </>
+      ) : providerSnapshotPhase === "PENDING" ? (
+        <>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase text-amber-300/90">Provider snapshot</span>
+            <span className="rounded border border-amber-700/55 bg-amber-950/45 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-amber-100">
+              Refreshing…
+            </span>
+          </div>
+          <p className="mt-2 rounded-lg border border-amber-900/45 bg-amber-950/25 px-3 py-2 text-[12px] text-amber-50/95">
+            Fetching YouTube metadata now (first intake). This page picks up the snapshot automatically — usually within seconds.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">{urlTypeMetricShell(urlFormFactor, null, null)}</div>
+        </>
       ) : (
         <>
-          <p className="mt-3 rounded-lg border border-indigo-900/40 bg-indigo-950/20 px-3 py-2 text-[12px] text-neutral-400">
-            No provider snapshot yet — YouTube metadata intake runs automatically when the catalog row is linked (reload shortly).
-            Non-YouTube URLs have no centralized provider snapshot in V1. Use{" "}
-            <strong className="text-neutral-300">Refresh source metadata</strong> in the header to retry or override.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {urlTypeMetricShell(urlFormFactor, null, null)}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase text-neutral-500">Provider snapshot</span>
+            <span className="rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 font-mono text-[10px] uppercase text-neutral-400">
+              Unsupported
+            </span>
           </div>
+          <p className="mt-2 rounded-lg border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-[12px] text-neutral-400">
+            Provider metadata snapshots are YouTube-only in this version. Automatic intake does not run for this URL; use Refresh source metadata only if you need an audit trail row (records FAILED with details).
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">{urlTypeMetricShell(urlFormFactor, null, null)}</div>
         </>
       )}
 

@@ -7,6 +7,7 @@ import { requireSuperAdmin } from "@/lib/auth/guards";
 import { prisma } from "@/lib/prisma";
 import { loadValidatedFitRules } from "@/lib/recommendations/load-fit-rules";
 import { loadBusinessDaypartVibeRules } from "@/lib/recommendations/load-business-daypart-vibe";
+import { catalogDiscoveryActiveWhere } from "@/lib/catalog-discovery-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -44,14 +45,16 @@ export default async function RecommendationCoveragePage() {
     dictionaryTagCount,
     untaggedCatalogSample,
   ] = await Promise.all([
-    prisma.catalogItem.count(),
-    prisma.catalogItem.count({ where: { taxonomyLinks: { some: {} } } }),
+    prisma.catalogItem.count({ where: catalogDiscoveryActiveWhere }),
+    prisma.catalogItem.count({
+      where: { AND: [{ taxonomyLinks: { some: {} } }, catalogDiscoveryActiveWhere] },
+    }),
     prisma.workspace.count(),
     prisma.workspace.count({ where: { businessProfile: null } }),
     prisma.workspaceBusinessProfile.count({ where: { energyLevel: null } }),
     prisma.musicTaxonomyTag.count({ where: { status: "ACTIVE" } }),
     prisma.catalogItem.findMany({
-      where: { taxonomyLinks: { none: {} } },
+      where: { AND: [{ taxonomyLinks: { none: {} } }, catalogDiscoveryActiveWhere] },
       select: { id: true, title: true, url: true, provider: true },
       orderBy: { updatedAt: "desc" },
       take: UNTAGGED_SAMPLE,

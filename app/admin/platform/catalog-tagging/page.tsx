@@ -10,12 +10,14 @@ import type { CatalogSourceSnapshotDTO } from "@/lib/catalog-source-snapshot-dto
 import {
   loadSourceMetadataSuggestionsForSnapshot,
   serializeCatalogSourceSnapshot,
+  shouldAttemptYouTubeCatalogSnapshot,
 } from "@/lib/catalog-source-refresh";
 import { CatalogItemTaxonomyEditor } from "@/components/admin/catalog-item-taxonomy-editor";
 import { CatalogCurationEditor } from "@/components/admin/catalog-curation-editor";
 import { CatalogDisplayTitleEditor } from "@/components/admin/catalog-display-title-editor";
 import { CatalogSourceMetadataPanel } from "@/components/admin/catalog-source-metadata-panel";
 import { CatalogWorkbenchCleanupAction } from "@/components/admin/catalog-workbench-cleanup-action";
+import { CatalogWorkbenchSnapshotPoller } from "@/components/admin/catalog-workbench-snapshot-poller";
 import { CatalogManualEnergyEditor } from "@/components/admin/catalog-manual-energy-editor";
 import { CatalogWorkbenchItemActions } from "@/components/admin/catalog-workbench-item-actions";
 import { CatalogWorkbenchTopDashboard } from "@/components/admin/catalog-workbench-top-dashboard";
@@ -246,6 +248,8 @@ function catalogTaggingHref(parts: {
   catalogItemId?: string;
   filter?: FilterMode;
   provider?: string;
+  /** When true, preserve browse mode that includes archived catalog rows. */
+  includeArchived?: boolean;
 }): string {
   const u = new URLSearchParams();
   const q = parts.q?.trim() ?? "";
@@ -254,6 +258,7 @@ function catalogTaggingHref(parts: {
   const prov = parts.provider?.trim() ?? "";
   if (prov.length >= 1) u.set("provider", prov);
   if (parts.catalogItemId?.trim()) u.set("catalogItemId", parts.catalogItemId.trim());
+  if (parts.includeArchived) u.set("includeArchived", "1");
   const qs = u.toString();
   return qs.length ? `/admin/platform/catalog-tagging?${qs}` : "/admin/platform/catalog-tagging";
 }
@@ -261,7 +266,7 @@ function catalogTaggingHref(parts: {
 function computeNextUntaggedHref(
   currentId: string,
   queue: Array<{ id: string }>,
-  baseParams: { q: string; filter: FilterMode; provider: string },
+  baseParams: { q: string; filter: FilterMode; provider: string; includeArchived?: boolean },
 ): string | null {
   const ids = queue.map((x) => x.id);
   if (ids.length === 0) return null;
@@ -284,6 +289,7 @@ export default async function CatalogTaggingAdminPage({
     catalogItemId?: string;
     filter?: string;
     provider?: string;
+    includeArchived?: string;
   }>;
 }) {
   await requireSuperAdmin();
@@ -293,8 +299,14 @@ export default async function CatalogTaggingAdminPage({
   const catalogItemId = typeof sp.catalogItemId === "string" ? sp.catalogItemId.trim() : "";
   const filterMode = parseFilter(sp.filter);
   const providerQ = typeof sp.provider === "string" ? sp.provider.trim() : "";
+  const includeArchived =
+    typeof sp.includeArchived === "string" &&
+    (sp.includeArchived === "1" || sp.includeArchived.toLowerCase() === "true");
 
   const clauses: Prisma.CatalogItemWhereInput[] = [];
+  if (!includeArchived) {
+    clauses.push({ archivedAt: null });
+  }
 
   if (q.length >= 1) {
     clauses.push({
@@ -317,6 +329,17 @@ export default async function CatalogTaggingAdminPage({
 
   const where: Prisma.CatalogItemWhereInput = clauses.length > 0 ? { AND: clauses } : {};
 
+  const discoveryScope = includeArchived ? {} : { archivedAt: null };
+  const taggedWhere: Prisma.CatalogItemWhereInput = includeArchived
+    ? { taxonomyLinks: { some: {} } }
+    : { archivedAt: null, taxonomyLinks: { some: {} } };
+  const untaggedWhere: Prisma.CatalogItemWhereInput = includeArchived
+    ? { taxonomyLinks: { none: {} } }
+    : { archivedAt: null, taxonomyLinks: { none: {} } };
+  const providerWhere: Prisma.CatalogItemWhereInput = includeArchived
+    ? { provider: { not: null } }
+    : { archivedAt: null, provider: { not: null } };
+
   const [
     totalCatalog,
     taggedCount,
@@ -325,11 +348,11 @@ export default async function CatalogTaggingAdminPage({
     results,
     selected,
   ] = await Promise.all([
-    prisma.catalogItem.count(),
-    prisma.catalogItem.count({ where: { taxonomyLinks: { some: {} } } }),
-    prisma.catalogItem.count({ where: { taxonomyLinks: { none: {} } } }),
+    prisma.catalogItem.count({ where: discoveryScope }),
+    prisma.catalogItem.count({ where: taggedWhere }),
+    prisma.catalogItem.count({ where: untaggedWhere }),
     prisma.catalogItem.findMany({
-      where: { provider: { not: null } },
+      where: providerWhere,
       select: { provider: true },
       distinct: ["provider"],
       orderBy: { provider: "asc" },
@@ -349,6 +372,7 @@ export default async function CatalogTaggingAdminPage({
         videoId: true,
         curationRating: true,
         manualEnergyRating: true,
+        archivedAt: true,
         _count: { select: { taxonomyLinks: true } },
         taxonomyLinks: {
           take: SLUG_PREVIEW,
@@ -375,6 +399,9 @@ export default async function CatalogTaggingAdminPage({
             curationNotes: true,
             manualEnergyRating: true,
             addedById: true,
+            archivedAt: true,
+            archivedByUserId: true,
+            archiveReason: true,
             createdAt: true,
             updatedAt: true,
           },
@@ -382,7 +409,7 @@ export default async function CatalogTaggingAdminPage({
       : Promise.resolve(null),
   ]);
 
-  const baseParams = { q, filter: filterMode, provider: providerQ };
+  const baseParams = { q, filter: filterMode, provider: providerQ, includeArchived };
 
   let serializedLatestSnapshot: CatalogSourceSnapshotDTO | null = null;
   let metadataSuggestionsFromSnapshot: CatalogTagSuggestion[] = [];
@@ -418,6 +445,7 @@ export default async function CatalogTaggingAdminPage({
     playCount: number;
     lastPlayedAt: Date | null;
     sharedCount: number;
+    aiDjCount: number;
   } | null = null;
   let scheduleRefsCount = 0;
   let distinctBranchesFromSchedules = 0;
@@ -450,7 +478,7 @@ export default async function CatalogTaggingAdminPage({
       }),
       gatherDuplicateHints(selected),
       prisma.catalogItem.findMany({
-        where: { taxonomyLinks: { none: {} } },
+        where: untaggedWhere,
         orderBy: [{ updatedAt: "desc" }],
         select: { id: true },
         take: 500,
@@ -500,7 +528,7 @@ export default async function CatalogTaggingAdminPage({
     const [analyticsRow, scheduleBranchGroups, scheduleCountTotal, playlistAddedAgg] = await Promise.all([
       prisma.catalogAnalytics.findUnique({
         where: { catalogItemId: selected.id },
-        select: { playCount: true, lastPlayedAt: true, sharedCount: true },
+        select: { playCount: true, lastPlayedAt: true, sharedCount: true, aiDjCount: true },
       }),
       playlistIds.length === 0
         ? Promise.resolve([] as { branchId: string }[])
@@ -553,30 +581,9 @@ export default async function CatalogTaggingAdminPage({
     !!selected &&
     playlistUsageCount === 0 &&
     scheduleRefsCount === 0 &&
-    (catalogAnalyticsRow?.playCount ?? 0) === 0;
-
-  const cleanupBlockParts: string[] = [];
-  if (selected && !strictlyUnused) {
-    if (playlistUsageCount > 0) {
-      cleanupBlockParts.push(
-        `${playlistUsageCount} playlist item row(s)${
-          distinctPlaylistCount > 0 ? ` across ${distinctPlaylistCount} playlist(s)` : ""
-        }`,
-      );
-    }
-    if (workspacesUsingCatalog.length > 0) {
-      cleanupBlockParts.push(`${workspacesUsingCatalog.length} workspace(s) via playlists`);
-    }
-    if (distinctBranchesFromSchedules > 0) {
-      cleanupBlockParts.push(`${distinctBranchesFromSchedules} branch(es) via schedules`);
-    }
-    if (scheduleRefsCount > 0) {
-      cleanupBlockParts.push(`${scheduleRefsCount} schedule row(s)`);
-    }
-    if ((catalogAnalyticsRow?.playCount ?? 0) > 0) {
-      cleanupBlockParts.push(`${catalogAnalyticsRow!.playCount} analytics play(s)`);
-    }
-  }
+    (catalogAnalyticsRow?.playCount ?? 0) === 0 &&
+    (catalogAnalyticsRow?.sharedCount ?? 0) === 0 &&
+    (catalogAnalyticsRow?.aiDjCount ?? 0) === 0;
 
   const cleanupUsageSummaryLine =
     selected && !strictlyUnused
@@ -587,6 +594,8 @@ export default async function CatalogTaggingAdminPage({
           scheduleRefsCount > 0 ? `${scheduleRefsCount} schedule row(s)` : null,
           distinctBranchesFromSchedules > 0 ? `${distinctBranchesFromSchedules} branch(es) via schedules` : null,
           (catalogAnalyticsRow?.playCount ?? 0) > 0 ? `${catalogAnalyticsRow!.playCount} analytics play(s)` : null,
+          (catalogAnalyticsRow?.sharedCount ?? 0) > 0 ? `${catalogAnalyticsRow!.sharedCount} share signal(s)` : null,
+          (catalogAnalyticsRow?.aiDjCount ?? 0) > 0 ? `${catalogAnalyticsRow!.aiDjCount} AI DJ signal(s)` : null,
         ]
           .filter((x): x is string => typeof x === "string" && x.length > 0)
           .join(" · ") || null
@@ -600,6 +609,10 @@ export default async function CatalogTaggingAdminPage({
         : usageTier === "LOW"
           ? "border-amber-800/65 bg-amber-950/35 text-amber-100"
           : "border-neutral-700 bg-neutral-900/80 text-neutral-400";
+
+  const youtubeEligible = selected ? shouldAttemptYouTubeCatalogSnapshot(selected) : false;
+  const providerSnapshotPhase: "UNSUPPORTED" | "PENDING" | "READY" =
+    !selected ? "READY" : serializedLatestSnapshot ? "READY" : youtubeEligible ? "PENDING" : "UNSUPPORTED";
 
   return (
     <div className="space-y-6">
@@ -680,6 +693,16 @@ export default async function CatalogTaggingAdminPage({
                 ))}
             </datalist>
           </label>
+          <label className="flex cursor-pointer items-center gap-2 rounded border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-xs text-neutral-400">
+            <input
+              type="checkbox"
+              name="includeArchived"
+              value="1"
+              defaultChecked={includeArchived}
+              className="rounded border-neutral-600"
+            />
+            Show archived
+          </label>
           <button
             type="submit"
             className="rounded border border-neutral-600 bg-neutral-800 px-4 py-2 text-sm font-medium text-neutral-100 hover:bg-neutral-700"
@@ -725,12 +748,21 @@ export default async function CatalogTaggingAdminPage({
               <CatalogWorkbenchCleanupAction
                 catalogItemId={selected.id}
                 strictlyUnused={strictlyUnused}
-                blockParts={cleanupBlockParts}
-                usageSummaryLine={cleanupUsageSummaryLine}
+                isArchived={selected.archivedAt != null}
+                distinctPlaylistCount={distinctPlaylistCount}
+                workspaceCount={workspacesUsingCatalog.length}
+                usageSummaryCompact={strictlyUnused ? null : cleanupUsageSummaryLine}
               />
             </div>
+            <CatalogWorkbenchSnapshotPoller
+              catalogItemId={selected.id}
+              enabled={youtubeEligible && !serializedLatestSnapshot}
+            />
             <CatalogWorkbenchTopDashboard
               snapshot={serializedLatestSnapshot}
+              providerSnapshotPhase={providerSnapshotPhase}
+              archivedAt={selected.archivedAt}
+              archiveReason={selected.archiveReason}
               catalogCreatedAt={selected.createdAt}
               lastPlaylistLinkAt={lastPlaylistLinkAt}
               lastAnalyticsPlayAt={catalogAnalyticsRow?.lastPlayedAt ?? null}
@@ -1038,6 +1070,7 @@ export default async function CatalogTaggingAdminPage({
           <p className="mt-1 text-[11px] text-neutral-600">
             Filters: {filterMode === "all" ? "All" : filterMode === "untagged" ? "Untagged" : "Tagged"}
             {providerQ ? ` · provider contains “${providerQ}”` : ""}
+            {includeArchived ? ` · including archived` : ""}
           </p>
         </div>
 
@@ -1080,7 +1113,14 @@ export default async function CatalogTaggingAdminPage({
                       )}
                     </div>
                     <div className="min-w-0 flex-1 space-y-1.5">
-                      <p className="font-medium leading-snug text-neutral-100">{row.title}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium leading-snug text-neutral-100">{row.title}</p>
+                        {row.archivedAt ? (
+                          <span className="rounded border border-neutral-600 bg-neutral-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                            Archived
+                          </span>
+                        ) : null}
+                      </div>
                       <p className="break-all font-mono text-[11px] text-neutral-500">{row.url}</p>
                       <div className="flex flex-wrap gap-x-3 gap-y-1 pt-0.5">
                         <a

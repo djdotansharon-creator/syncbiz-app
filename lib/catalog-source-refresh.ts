@@ -44,6 +44,88 @@ function classifyYtDlpSnapshot(
   return hasTitle && hasCore ? "SUCCESS" : "PARTIAL";
 }
 
+/** Bounded wait on first catalog link — balances fast metadata vs playlist-save latency. */
+const DEFAULT_YOUTUBE_SNAPSHOT_INTAKE_WAIT_MS = 12_000;
+
+/** Failed snapshot auto-retry cooldown — avoids hammering API when keys/quota are down. */
+const SNAPSHOT_FAILED_RETRY_COOLDOWN_MS = 3 * 60 * 1000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** One automatic intake flight per catalog row — avoids duplicate snapshot rows from overlapping kicks. */
+const automaticYoutubeSnapshotTasks = new Map<string, Promise<void>>();
+
+async function runAutomaticYoutubeCatalogSnapshotOnce(catalogItemId: string): Promise<void> {
+  const item = await prisma.catalogItem.findUnique({
+    where: { id: catalogItemId },
+    select: { url: true, provider: true, videoId: true },
+  });
+  if (!item) return;
+  if (!shouldAttemptYouTubeCatalogSnapshot(item)) return;
+
+  const latest = await prisma.catalogSourceSnapshot.findFirst({
+    where: { catalogItemId },
+    orderBy: { fetchedAt: "desc" },
+    select: { fetchStatus: true, fetchedAt: true },
+  });
+
+  if (latest?.fetchStatus === "SUCCESS" || latest?.fetchStatus === "PARTIAL") {
+    return;
+  }
+
+  if (latest?.fetchStatus === "FAILED") {
+    const age = Date.now() - latest.fetchedAt.getTime();
+    if (age < SNAPSHOT_FAILED_RETRY_COOLDOWN_MS) return;
+  }
+
+  await refreshCatalogSourceSnapshot(catalogItemId);
+}
+
+/**
+ * Deduped automatic snapshot fetch (shared promise per catalogItemId).
+ * Manual {@link refreshCatalogSourceSnapshot} bypasses this map and always appends.
+ */
+export function kickAutomaticYoutubeCatalogSnapshotIntake(catalogItemId: string): Promise<void> {
+  const existing = automaticYoutubeSnapshotTasks.get(catalogItemId);
+  if (existing) return existing;
+
+  const task = runAutomaticYoutubeCatalogSnapshotOnce(catalogItemId).finally(() => {
+    if (automaticYoutubeSnapshotTasks.get(catalogItemId) === task) {
+      automaticYoutubeSnapshotTasks.delete(catalogItemId);
+    }
+  });
+
+  automaticYoutubeSnapshotTasks.set(catalogItemId, task);
+  return task;
+}
+
+/**
+ * Wait up to `maxWaitMs` for the first automatic YouTube snapshot attempt to finish.
+ * Returns immediately when latest snapshot is already SUCCESS/PARTIAL, or when the URL is not YouTube-eligible.
+ * After timeout, intake continues in the background via the shared task promise.
+ */
+export async function awaitCatalogYoutubeSnapshotFirstAttempt(
+  catalogItemId: string,
+  maxWaitMs: number = DEFAULT_YOUTUBE_SNAPSHOT_INTAKE_WAIT_MS,
+): Promise<void> {
+  const item = await prisma.catalogItem.findUnique({
+    where: { id: catalogItemId },
+    select: { url: true, provider: true, videoId: true },
+  });
+  if (!item || !shouldAttemptYouTubeCatalogSnapshot(item)) return;
+
+  const latest = await prisma.catalogSourceSnapshot.findFirst({
+    where: { catalogItemId },
+    orderBy: { fetchedAt: "desc" },
+    select: { fetchStatus: true },
+  });
+  if (latest?.fetchStatus === "SUCCESS" || latest?.fetchStatus === "PARTIAL") return;
+
+  await Promise.race([kickAutomaticYoutubeCatalogSnapshotIntake(catalogItemId), delay(maxWaitMs)]);
+}
+
 export async function refreshCatalogSourceSnapshot(
   catalogItemId: string,
 ): Promise<CatalogSourceSnapshot> {
@@ -198,34 +280,9 @@ export function scheduleCatalogSnapshotIntakeIfNeeded(catalogItemId: string): vo
   void runCatalogSnapshotIntakeIfNeeded(catalogItemId);
 }
 
-/** Failed snapshot auto-retry cooldown — avoids hammering API when keys/quota are down. */
-const SNAPSHOT_FAILED_RETRY_COOLDOWN_MS = 3 * 60 * 1000;
-
 async function runCatalogSnapshotIntakeIfNeeded(catalogItemId: string): Promise<void> {
   try {
-    const item = await prisma.catalogItem.findUnique({
-      where: { id: catalogItemId },
-      select: { url: true, provider: true, videoId: true },
-    });
-    if (!item) return;
-    if (!shouldAttemptYouTubeCatalogSnapshot(item)) return;
-
-    const latest = await prisma.catalogSourceSnapshot.findFirst({
-      where: { catalogItemId },
-      orderBy: { fetchedAt: "desc" },
-      select: { fetchStatus: true, fetchedAt: true },
-    });
-
-    if (latest?.fetchStatus === "SUCCESS" || latest?.fetchStatus === "PARTIAL") {
-      return;
-    }
-
-    if (latest?.fetchStatus === "FAILED") {
-      const age = Date.now() - latest.fetchedAt.getTime();
-      if (age < SNAPSHOT_FAILED_RETRY_COOLDOWN_MS) return;
-    }
-
-    await refreshCatalogSourceSnapshot(catalogItemId);
+    await kickAutomaticYoutubeCatalogSnapshotIntake(catalogItemId);
   } catch (e) {
     console.warn("[catalog snapshot intake]", catalogItemId, e);
   }

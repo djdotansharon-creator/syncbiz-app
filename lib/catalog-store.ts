@@ -8,7 +8,8 @@ import { prisma } from "./prisma";
 import type { PlaylistTrack, PlaylistType } from "./playlist-types";
 import { getYouTubeVideoId } from "./playlist-utils";
 import { inferGenre } from "./infer-genre";
-import { scheduleCatalogSnapshotIntakeIfNeeded } from "./catalog-source-refresh";
+import { awaitCatalogYoutubeSnapshotFirstAttempt } from "./catalog-source-refresh";
+import { catalogDiscoveryActiveWhere } from "./catalog-discovery-scope";
 
 export function normalizeCatalogUrlKey(url: string, type: PlaylistType): string {
   const u = (url ?? "").trim();
@@ -102,7 +103,7 @@ export async function findOrCreateCatalogItem(input: {
     return { id: created.id, created: true };
   });
 
-  scheduleCatalogSnapshotIntakeIfNeeded(result.id);
+  await awaitCatalogYoutubeSnapshotFirstAttempt(result.id);
 
   return { id: result.id, created: result.created };
 }
@@ -111,7 +112,8 @@ const TRACK_TYPES_LINKABLE_TO_CATALOG: PlaylistType[] = ["youtube", "soundcloud"
 
 /**
  * Ensures each playlist track has a CatalogItem id where applicable (URL-based tracks).
- * Runs automatic provider snapshot intake for YouTube via scheduleCatalogSnapshotIntakeIfNeeded (non-blocking).
+ * Runs automatic provider snapshot intake for YouTube: bounded wait on first link
+ * ({@link awaitCatalogYoutubeSnapshotFirstAttempt}), then background completion via deduped task.
  */
 export async function ensurePlaylistTracksLinkedToCatalog(
   tenantId: string,
@@ -167,6 +169,7 @@ export async function backfillCatalogGenres(): Promise<number> {
   // Fetch all items — NULL arrays are returned as [] by Prisma so we can
   // filter in JS. Using isEmpty:true in WHERE misses NULL-stored arrays.
   const items = await prisma.catalogItem.findMany({
+    where: catalogDiscoveryActiveWhere,
     select: { id: true, title: true, genres: true },
   });
 

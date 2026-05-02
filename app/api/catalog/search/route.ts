@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
+import { catalogDiscoveryActiveWhere } from "@/lib/catalog-discovery-scope";
 
 const LIMIT = 12;
 
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest) {
   const items = await prisma.catalogItem.findMany({
     where: {
       AND: [
+        catalogDiscoveryActiveWhere,
         { OR: words.map((w) => ({ title: { contains: w, mode: "insensitive" as const } })) },
         ...(genre ? [{ genres: { has: genre } }] : []),
       ],

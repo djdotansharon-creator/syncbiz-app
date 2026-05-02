@@ -5,6 +5,7 @@ import {
   shouldAttemptYouTubeCatalogSnapshot,
 } from "@/lib/catalog-source-refresh";
 import { prisma } from "@/lib/prisma";
+import { catalogDiscoveryActiveWhere } from "@/lib/catalog-discovery-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -28,10 +29,15 @@ export async function POST(req: NextRequest) {
 
   const candidates = await prisma.catalogItem.findMany({
     where: {
-      OR: [
-        { videoId: { not: null } },
-        { url: { contains: "youtube.com", mode: "insensitive" } },
-        { url: { contains: "youtu.be", mode: "insensitive" } },
+      AND: [
+        catalogDiscoveryActiveWhere,
+        {
+          OR: [
+            { videoId: { not: null } },
+            { url: { contains: "youtube.com", mode: "insensitive" } },
+            { url: { contains: "youtu.be", mode: "insensitive" } },
+          ],
+        },
       ],
     },
     select: { id: true, url: true, provider: true, videoId: true },
