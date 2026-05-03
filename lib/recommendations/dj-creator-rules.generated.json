@@ -1,0 +1,1716 @@
+{
+  "version": 1,
+  "generatedAt": "2026-05-01T05:23:06.501Z",
+  "sourceFile": "data/dj-creator-rules/syncbiz_dj_creator_rules_stage6.xlsx",
+  "taxonomyAllowlistPath": "prisma/seed-data/music-taxonomy.generated.json",
+  "lookups": {
+    "businessType": [
+      "bar_nightlife",
+      "cafe",
+      "gym",
+      "hotel_lobby",
+      "office",
+      "other",
+      "restaurant",
+      "retail"
+    ],
+    "daypart": [
+      "afternoon",
+      "any",
+      "dinner",
+      "evening",
+      "lunch",
+      "morning",
+      "night"
+    ],
+    "vibe": [
+      "balanced",
+      "calm",
+      "focused",
+      "happy",
+      "high_energy",
+      "party",
+      "premium",
+      "romantic"
+    ],
+    "energy": [
+      "high",
+      "low",
+      "low_medium",
+      "medium",
+      "medium_high"
+    ],
+    "audience": []
+  },
+  "rules": [
+    {
+      "ruleId": "GYM_EVENING_HIGH_ENERGY",
+      "isActive": true,
+      "priority": 100,
+      "businessType": "GYM",
+      "daypart": "evening",
+      "vibe": "high_energy",
+      "energy": "high",
+      "audience": "young;fitness",
+      "styleQuestionHe": "איזה כיוון אימון?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "afro",
+          "label": "Afro",
+          "labelHe": "אפרו",
+          "query": "afro"
+        },
+        {
+          "id": "house-edm",
+          "label": "House / EDM",
+          "labelHe": "האוס / EDM",
+          "query": "house deep-house dance"
+        },
+        {
+          "id": "pop",
+          "label": "Pop",
+          "labelHe": "פופ",
+          "query": "pop"
+        },
+        {
+          "id": "hip-hop",
+          "label": "Hip Hop",
+          "labelHe": "היפ הופ",
+          "query": "hip hop"
+        },
+        {
+          "id": "dance",
+          "label": "Dance",
+          "labelHe": "דאנס",
+          "query": "dance"
+        }
+      ],
+      "styleSlugHints": [
+        "afro",
+        "deep-house",
+        "funk",
+        "israeli-hits"
+      ],
+      "avoidStyleSlugs": [
+        "jazz",
+        "bossa-nova",
+        "lounge",
+        "acoustic",
+        "smooth-jazz"
+      ],
+      "defaultStyleSlugs": [
+        "afro",
+        "deep-house",
+        "funk"
+      ],
+      "languageOptions": [
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "מכון כושר בערב צריך אנרגיה, גרוב וקצב. לא להציע ג׳אז/בוסה כבחירה ראשית.",
+      "notes": "Pop/Hip-Hop may require taxonomy candidates if slugs do not exist."
+    },
+    {
+      "ruleId": "GYM_MORNING_HIGH_ENERGY",
+      "isActive": true,
+      "priority": 90,
+      "businessType": "GYM",
+      "daypart": "morning",
+      "vibe": "high_energy",
+      "energy": "medium_high",
+      "audience": "fitness",
+      "styleQuestionHe": "איזה כיוון אימון בוקר?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "pop",
+          "label": "Pop",
+          "labelHe": "Pop",
+          "query": "pop"
+        },
+        {
+          "id": "afro",
+          "label": "Afro",
+          "labelHe": "Afro",
+          "query": "afro"
+        },
+        {
+          "id": "dance",
+          "label": "Dance",
+          "labelHe": "Dance",
+          "query": "dance"
+        },
+        {
+          "id": "house-edm",
+          "label": "House / EDM",
+          "labelHe": "House / EDM",
+          "query": "house deep-house dance"
+        },
+        {
+          "id": "israeli-local",
+          "label": "Israeli / Local",
+          "labelHe": "Israeli / Local",
+          "query": "israeli hebrew local"
+        }
+      ],
+      "styleSlugHints": [
+        "afro",
+        "israeli-hits",
+        "funk",
+        "deep-house"
+      ],
+      "avoidStyleSlugs": [
+        "jazz",
+        "bossa-nova",
+        "lounge",
+        "soul"
+      ],
+      "defaultStyleSlugs": [
+        "afro",
+        "israeli-hits",
+        "funk"
+      ],
+      "languageOptions": [
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "בוקר במכון כושר צריך לפתוח אנרגיה בלי להיות כבד מדי.",
+      "notes": ""
+    },
+    {
+      "ruleId": "GYM_LUNCH_HIGH_ENERGY",
+      "isActive": true,
+      "priority": 85,
+      "businessType": "GYM",
+      "daypart": "lunch",
+      "vibe": "high_energy",
+      "energy": "high",
+      "audience": "fitness",
+      "styleQuestionHe": "איזה קצב אימון?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "afro",
+          "label": "Afro",
+          "labelHe": "Afro",
+          "query": "afro"
+        },
+        {
+          "id": "dance",
+          "label": "Dance",
+          "labelHe": "Dance",
+          "query": "dance"
+        },
+        {
+          "id": "pop",
+          "label": "Pop",
+          "labelHe": "Pop",
+          "query": "pop"
+        },
+        {
+          "id": "house-edm",
+          "label": "House / EDM",
+          "labelHe": "House / EDM",
+          "query": "house deep-house dance"
+        },
+        {
+          "id": "hip-hop",
+          "label": "Hip Hop",
+          "labelHe": "Hip Hop",
+          "query": "hip hop"
+        }
+      ],
+      "styleSlugHints": [
+        "afro",
+        "funk",
+        "deep-house"
+      ],
+      "avoidStyleSlugs": [
+        "jazz",
+        "bossa-nova",
+        "lounge",
+        "acoustic"
+      ],
+      "defaultStyleSlugs": [
+        "afro",
+        "funk",
+        "deep-house"
+      ],
+      "languageOptions": [
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "צהריים במכון כושר מתאים לקצב ברור ומרים.",
+      "notes": ""
+    },
+    {
+      "ruleId": "HOTEL_NIGHT_PREMIUM",
+      "isActive": true,
+      "priority": 100,
+      "businessType": "HOTEL_LOBBY",
+      "daypart": "night",
+      "vibe": "premium",
+      "energy": "low_medium",
+      "audience": "premium;business;tourists",
+      "styleQuestionHe": "איזה כיוון אלגנטי?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "לאונג׳",
+          "query": "lounge"
+        },
+        {
+          "id": "jazz",
+          "label": "Jazz",
+          "labelHe": "ג׳אז",
+          "query": "jazz"
+        },
+        {
+          "id": "bossa",
+          "label": "Bossa",
+          "labelHe": "בוסה נובה",
+          "query": "bossa"
+        },
+        {
+          "id": "smooth-jazz",
+          "label": "Smooth Jazz",
+          "labelHe": "ג׳אז חלק",
+          "query": "smooth jazz"
+        },
+        {
+          "id": "instrumental",
+          "label": "Instrumental",
+          "labelHe": "אינסטרומנטלי",
+          "query": "instrumental"
+        },
+        {
+          "id": "chill",
+          "label": "Chill",
+          "labelHe": "צ׳יל",
+          "query": "chill"
+        }
+      ],
+      "styleSlugHints": [
+        "lounge",
+        "jazz",
+        "bossa-nova",
+        "smooth-jazz",
+        "quiet-morning"
+      ],
+      "avoidStyleSlugs": [
+        "gym",
+        "hip-hop"
+      ],
+      "defaultStyleSlugs": [
+        "lounge",
+        "smooth-jazz",
+        "bossa-nova"
+      ],
+      "languageOptions": [
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "לובי מלון בלילה צריך יוקרה, עומק ושקט יחסי.",
+      "notes": ""
+    },
+    {
+      "ruleId": "HOTEL_MORNING_CALM",
+      "isActive": true,
+      "priority": 90,
+      "businessType": "HOTEL_LOBBY",
+      "daypart": "morning",
+      "vibe": "calm",
+      "energy": "low",
+      "audience": "premium;business;tourists",
+      "styleQuestionHe": "איזה בוקר ללובי?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "Lounge",
+          "query": "lounge"
+        },
+        {
+          "id": "bossa",
+          "label": "Bossa",
+          "labelHe": "Bossa",
+          "query": "bossa"
+        },
+        {
+          "id": "soft-jazz",
+          "label": "Soft Jazz",
+          "labelHe": "Soft Jazz",
+          "query": "soft jazz"
+        },
+        {
+          "id": "instrumental",
+          "label": "Instrumental",
+          "labelHe": "Instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "chill",
+          "label": "Chill",
+          "labelHe": "Chill",
+          "query": "chill"
+        }
+      ],
+      "styleSlugHints": [
+        "lounge",
+        "bossa-nova",
+        "smooth-jazz",
+        "quiet-morning"
+      ],
+      "avoidStyleSlugs": [
+        "high-energy",
+        "workout-gym"
+      ],
+      "defaultStyleSlugs": [
+        "lounge",
+        "bossa-nova",
+        "quiet-morning"
+      ],
+      "languageOptions": [
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "בוקר במלון צריך רגוע, נקי ולא משתלט.",
+      "notes": ""
+    },
+    {
+      "ruleId": "HOTEL_AFTERNOON_PREMIUM",
+      "isActive": true,
+      "priority": 80,
+      "businessType": "HOTEL_LOBBY",
+      "daypart": "afternoon",
+      "vibe": "premium",
+      "energy": "low_medium",
+      "audience": "premium;business",
+      "styleQuestionHe": "איזה כיוון ללובי?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "Lounge",
+          "query": "lounge"
+        },
+        {
+          "id": "jazz",
+          "label": "Jazz",
+          "labelHe": "Jazz",
+          "query": "jazz"
+        },
+        {
+          "id": "bossa",
+          "label": "Bossa",
+          "labelHe": "Bossa",
+          "query": "bossa"
+        },
+        {
+          "id": "instrumental",
+          "label": "Instrumental",
+          "labelHe": "Instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "chill",
+          "label": "Chill",
+          "labelHe": "Chill",
+          "query": "chill"
+        }
+      ],
+      "styleSlugHints": [
+        "lounge",
+        "jazz",
+        "bossa-nova",
+        "smooth-jazz"
+      ],
+      "avoidStyleSlugs": [
+        "techno"
+      ],
+      "defaultStyleSlugs": [
+        "lounge",
+        "jazz",
+        "bossa-nova"
+      ],
+      "languageOptions": [
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "אחר הצהריים במלון צריך אלגנטיות ונוכחות עדינה.",
+      "notes": ""
+    },
+    {
+      "ruleId": "CAFE_MORNING_CALM",
+      "isActive": true,
+      "priority": 100,
+      "businessType": "CAFE",
+      "daypart": "morning",
+      "vibe": "calm",
+      "energy": "low",
+      "audience": "local;casual",
+      "styleQuestionHe": "איזה כיוון רגוע?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "acoustic",
+          "label": "Acoustic",
+          "labelHe": "אקוסטי",
+          "query": "acoustic"
+        },
+        {
+          "id": "bossa",
+          "label": "Bossa",
+          "labelHe": "בוסה נובה",
+          "query": "bossa"
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "לאונג׳",
+          "query": "lounge"
+        },
+        {
+          "id": "soft-jazz",
+          "label": "Soft Jazz",
+          "labelHe": "ג׳אז רך",
+          "query": "soft jazz"
+        },
+        {
+          "id": "chill",
+          "label": "Chill",
+          "labelHe": "צ׳יל",
+          "query": "chill"
+        },
+        {
+          "id": "instrumental",
+          "label": "Instrumental",
+          "labelHe": "אינסטרומנטלי",
+          "query": "instrumental"
+        }
+      ],
+      "styleSlugHints": [
+        "bossa-nova",
+        "lounge",
+        "smooth-jazz",
+        "quiet-morning"
+      ],
+      "avoidStyleSlugs": [
+        "high-energy"
+      ],
+      "defaultStyleSlugs": [
+        "bossa-nova",
+        "lounge",
+        "quiet-morning"
+      ],
+      "languageOptions": [
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "hebrew",
+          "label": "hebrew",
+          "labelHe": "hebrew",
+          "query": "hebrew"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "בית קפה בבוקר צריך רוגע, חמימות וקצב נמוך.",
+      "notes": ""
+    },
+    {
+      "ruleId": "CAFE_AFTERNOON_HAPPY",
+      "isActive": true,
+      "priority": 80,
+      "businessType": "CAFE",
+      "daypart": "afternoon",
+      "vibe": "happy",
+      "energy": "medium",
+      "audience": "local;casual",
+      "styleQuestionHe": "איזה אחר צהריים?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "israeli-local",
+          "label": "Israeli / Local",
+          "labelHe": "Israeli / Local",
+          "query": "israeli hebrew local"
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "Lounge",
+          "query": "lounge"
+        },
+        {
+          "id": "pop",
+          "label": "Pop",
+          "labelHe": "Pop",
+          "query": "pop"
+        },
+        {
+          "id": "bossa",
+          "label": "Bossa",
+          "labelHe": "Bossa",
+          "query": "bossa"
+        },
+        {
+          "id": "funk",
+          "label": "Funk",
+          "labelHe": "Funk",
+          "query": "funk"
+        }
+      ],
+      "styleSlugHints": [
+        "israeli-hits",
+        "lounge",
+        "bossa-nova",
+        "funk"
+      ],
+      "avoidStyleSlugs": [
+        "techno"
+      ],
+      "defaultStyleSlugs": [
+        "israeli-hits",
+        "lounge",
+        "funk"
+      ],
+      "languageOptions": [
+        {
+          "id": "hebrew",
+          "label": "hebrew",
+          "labelHe": "hebrew",
+          "query": "hebrew"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "בית קפה אחר הצהריים יכול להיות יותר חי אבל עדיין נעים.",
+      "notes": ""
+    },
+    {
+      "ruleId": "CAFE_LUNCH_CALM",
+      "isActive": true,
+      "priority": 85,
+      "businessType": "CAFE",
+      "daypart": "lunch",
+      "vibe": "calm",
+      "energy": "low_medium",
+      "audience": "casual",
+      "styleQuestionHe": "איזה צהריים לבית קפה?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "bossa",
+          "label": "Bossa",
+          "labelHe": "Bossa",
+          "query": "bossa"
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "Lounge",
+          "query": "lounge"
+        },
+        {
+          "id": "acoustic",
+          "label": "Acoustic",
+          "labelHe": "Acoustic",
+          "query": "acoustic"
+        },
+        {
+          "id": "soft-jazz",
+          "label": "Soft Jazz",
+          "labelHe": "Soft Jazz",
+          "query": "soft jazz"
+        },
+        {
+          "id": "israeli-local",
+          "label": "Israeli / Local",
+          "labelHe": "Israeli / Local",
+          "query": "israeli hebrew local"
+        }
+      ],
+      "styleSlugHints": [
+        "bossa-nova",
+        "lounge",
+        "smooth-jazz",
+        "israeli-hits"
+      ],
+      "avoidStyleSlugs": [
+        "high-energy"
+      ],
+      "defaultStyleSlugs": [
+        "bossa-nova",
+        "lounge",
+        "israeli-hits"
+      ],
+      "languageOptions": [
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "hebrew",
+          "label": "hebrew",
+          "labelHe": "hebrew",
+          "query": "hebrew"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "צהריים בבית קפה צריך זרימה נעימה בלי להפריע לשיחה.",
+      "notes": ""
+    },
+    {
+      "ruleId": "RESTAURANT_DINNER_ROMANTIC",
+      "isActive": true,
+      "priority": 100,
+      "businessType": "RESTAURANT",
+      "daypart": "dinner",
+      "vibe": "romantic",
+      "energy": "low_medium",
+      "audience": "couples;premium",
+      "styleQuestionHe": "איזה mood לארוחה?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "Lounge",
+          "query": "lounge"
+        },
+        {
+          "id": "bossa",
+          "label": "Bossa",
+          "labelHe": "Bossa",
+          "query": "bossa"
+        },
+        {
+          "id": "jazz",
+          "label": "Jazz",
+          "labelHe": "Jazz",
+          "query": "jazz"
+        },
+        {
+          "id": "italian",
+          "label": "Italian",
+          "labelHe": "Italian",
+          "query": "italian"
+        },
+        {
+          "id": "soul",
+          "label": "Soul",
+          "labelHe": "Soul",
+          "query": "soul"
+        },
+        {
+          "id": "instrumental",
+          "label": "Instrumental",
+          "labelHe": "Instrumental",
+          "query": "instrumental"
+        }
+      ],
+      "styleSlugHints": [
+        "lounge",
+        "bossa-nova",
+        "jazz",
+        "italian-classics",
+        "soul"
+      ],
+      "avoidStyleSlugs": [
+        "techno"
+      ],
+      "defaultStyleSlugs": [
+        "lounge",
+        "bossa-nova",
+        "italian-classics"
+      ],
+      "languageOptions": [
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "מסעדה בערב רומנטי צריכה עומק, חמימות ואלגנטיות.",
+      "notes": ""
+    },
+    {
+      "ruleId": "RESTAURANT_LUNCH_PREMIUM",
+      "isActive": true,
+      "priority": 90,
+      "businessType": "RESTAURANT",
+      "daypart": "lunch",
+      "vibe": "premium",
+      "energy": "medium",
+      "audience": "business;premium",
+      "styleQuestionHe": "איזה אווירת צהריים?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "Lounge",
+          "query": "lounge"
+        },
+        {
+          "id": "jazz",
+          "label": "Jazz",
+          "labelHe": "Jazz",
+          "query": "jazz"
+        },
+        {
+          "id": "bossa",
+          "label": "Bossa",
+          "labelHe": "Bossa",
+          "query": "bossa"
+        },
+        {
+          "id": "mediterranean",
+          "label": "Mediterranean",
+          "labelHe": "Mediterranean",
+          "query": "mediterranean"
+        },
+        {
+          "id": "italian",
+          "label": "Italian",
+          "labelHe": "Italian",
+          "query": "italian"
+        },
+        {
+          "id": "soul",
+          "label": "Soul",
+          "labelHe": "Soul",
+          "query": "soul"
+        }
+      ],
+      "styleSlugHints": [
+        "lounge",
+        "jazz",
+        "bossa-nova",
+        "mediterranean-pop",
+        "italian-classics",
+        "soul"
+      ],
+      "avoidStyleSlugs": [
+        "workout-gym"
+      ],
+      "defaultStyleSlugs": [
+        "lounge",
+        "jazz",
+        "mediterranean-pop"
+      ],
+      "languageOptions": [
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "צהריים במסעדה יכול להיות יוקרתי אבל לא כבד מדי.",
+      "notes": ""
+    },
+    {
+      "ruleId": "RESTAURANT_EVENING_HAPPY",
+      "isActive": true,
+      "priority": 80,
+      "businessType": "RESTAURANT",
+      "daypart": "evening",
+      "vibe": "happy",
+      "energy": "medium",
+      "audience": "casual;tourists",
+      "styleQuestionHe": "איזה ערב שמח?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "mediterranean",
+          "label": "Mediterranean",
+          "labelHe": "Mediterranean",
+          "query": "mediterranean"
+        },
+        {
+          "id": "israeli-local",
+          "label": "Israeli / Local",
+          "labelHe": "Israeli / Local",
+          "query": "israeli hebrew local"
+        },
+        {
+          "id": "funk",
+          "label": "Funk",
+          "labelHe": "Funk",
+          "query": "funk"
+        },
+        {
+          "id": "soul",
+          "label": "Soul",
+          "labelHe": "Soul",
+          "query": "soul"
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "Lounge",
+          "query": "lounge"
+        }
+      ],
+      "styleSlugHints": [
+        "mediterranean-pop",
+        "israeli-hits",
+        "funk",
+        "soul",
+        "lounge"
+      ],
+      "avoidStyleSlugs": [
+        "techno"
+      ],
+      "defaultStyleSlugs": [
+        "mediterranean-pop",
+        "israeli-hits",
+        "funk"
+      ],
+      "languageOptions": [
+        {
+          "id": "hebrew",
+          "label": "hebrew",
+          "labelHe": "hebrew",
+          "query": "hebrew"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "ערב שמח במסעדה צריך להיות חי, אבל עדיין לא להפוך למועדון.",
+      "notes": ""
+    },
+    {
+      "ruleId": "BAR_NIGHT_HIGH_ENERGY",
+      "isActive": true,
+      "priority": 100,
+      "businessType": "BAR_NIGHTLIFE",
+      "daypart": "night",
+      "vibe": "high_energy",
+      "energy": "high",
+      "audience": "young;nightlife",
+      "styleQuestionHe": "איזה לילה לבר?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "afro",
+          "label": "Afro",
+          "labelHe": "Afro",
+          "query": "afro"
+        },
+        {
+          "id": "house-edm",
+          "label": "House / EDM",
+          "labelHe": "House / EDM",
+          "query": "house deep-house dance"
+        },
+        {
+          "id": "pop",
+          "label": "Pop",
+          "labelHe": "Pop",
+          "query": "pop"
+        },
+        {
+          "id": "hip-hop",
+          "label": "Hip Hop",
+          "labelHe": "Hip Hop",
+          "query": "hip hop"
+        },
+        {
+          "id": "dance",
+          "label": "Dance",
+          "labelHe": "Dance",
+          "query": "dance"
+        },
+        {
+          "id": "funk",
+          "label": "Funk",
+          "labelHe": "Funk",
+          "query": "funk"
+        }
+      ],
+      "styleSlugHints": [
+        "afro",
+        "deep-house",
+        "funk",
+        "israeli-hits"
+      ],
+      "avoidStyleSlugs": [
+        "bossa-nova",
+        "smooth-jazz",
+        "quiet-morning",
+        "acoustic"
+      ],
+      "defaultStyleSlugs": [
+        "afro",
+        "deep-house",
+        "funk"
+      ],
+      "languageOptions": [
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "בר בלילה צריך אנרגיה, גרוב ותחושת בילוי.",
+      "notes": ""
+    },
+    {
+      "ruleId": "BAR_EVENING_HAPPY",
+      "isActive": true,
+      "priority": 90,
+      "businessType": "BAR_NIGHTLIFE",
+      "daypart": "evening",
+      "vibe": "happy",
+      "energy": "medium_high",
+      "audience": "young;nightlife",
+      "styleQuestionHe": "איזה פתיחת ערב?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "afro",
+          "label": "Afro",
+          "labelHe": "Afro",
+          "query": "afro"
+        },
+        {
+          "id": "funk",
+          "label": "Funk",
+          "labelHe": "Funk",
+          "query": "funk"
+        },
+        {
+          "id": "pop",
+          "label": "Pop",
+          "labelHe": "Pop",
+          "query": "pop"
+        },
+        {
+          "id": "house-edm",
+          "label": "House / EDM",
+          "labelHe": "House / EDM",
+          "query": "house deep-house dance"
+        },
+        {
+          "id": "israeli-local",
+          "label": "Israeli / Local",
+          "labelHe": "Israeli / Local",
+          "query": "israeli hebrew local"
+        }
+      ],
+      "styleSlugHints": [
+        "afro",
+        "funk",
+        "deep-house",
+        "israeli-hits"
+      ],
+      "avoidStyleSlugs": [
+        "bossa-nova",
+        "smooth-jazz",
+        "quiet-morning"
+      ],
+      "defaultStyleSlugs": [
+        "afro",
+        "funk",
+        "israeli-hits"
+      ],
+      "languageOptions": [
+        {
+          "id": "hebrew",
+          "label": "hebrew",
+          "labelHe": "hebrew",
+          "query": "hebrew"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "תחילת ערב בבר צריכה להרים בהדרגה.",
+      "notes": ""
+    },
+    {
+      "ruleId": "RETAIL_AFTERNOON_HAPPY",
+      "isActive": true,
+      "priority": 75,
+      "businessType": "RETAIL",
+      "daypart": "afternoon",
+      "vibe": "happy",
+      "energy": "medium",
+      "audience": "families;casual",
+      "styleQuestionHe": "איזה קצב לחנות?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "pop",
+          "label": "Pop",
+          "labelHe": "Pop",
+          "query": "pop"
+        },
+        {
+          "id": "funk",
+          "label": "Funk",
+          "labelHe": "Funk",
+          "query": "funk"
+        },
+        {
+          "id": "israeli-local",
+          "label": "Israeli / Local",
+          "labelHe": "Israeli / Local",
+          "query": "israeli hebrew local"
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "Lounge",
+          "query": "lounge"
+        },
+        {
+          "id": "dance",
+          "label": "Dance",
+          "labelHe": "Dance",
+          "query": "dance"
+        }
+      ],
+      "styleSlugHints": [
+        "funk",
+        "israeli-hits",
+        "lounge"
+      ],
+      "avoidStyleSlugs": [
+        "techno",
+        "workout-gym"
+      ],
+      "defaultStyleSlugs": [
+        "funk",
+        "israeli-hits",
+        "lounge"
+      ],
+      "languageOptions": [
+        {
+          "id": "hebrew",
+          "label": "hebrew",
+          "labelHe": "hebrew",
+          "query": "hebrew"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "חנות צריכה מוזיקה נעימה, מוכרת ומניעה, בלי להשתלט.",
+      "notes": ""
+    },
+    {
+      "ruleId": "OFFICE_MORNING_FOCUSED",
+      "isActive": true,
+      "priority": 80,
+      "businessType": "OFFICE",
+      "daypart": "morning",
+      "vibe": "focused",
+      "energy": "low",
+      "audience": "business",
+      "styleQuestionHe": "איזה ריכוז?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "instrumental",
+          "label": "Instrumental",
+          "labelHe": "Instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "chill",
+          "label": "Chill",
+          "labelHe": "Chill",
+          "query": "chill"
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "Lounge",
+          "query": "lounge"
+        },
+        {
+          "id": "soft-jazz",
+          "label": "Soft Jazz",
+          "labelHe": "Soft Jazz",
+          "query": "soft jazz"
+        },
+        {
+          "id": "acoustic",
+          "label": "Acoustic",
+          "labelHe": "Acoustic",
+          "query": "acoustic"
+        }
+      ],
+      "styleSlugHints": [
+        "lounge",
+        "smooth-jazz",
+        "quiet-morning"
+      ],
+      "avoidStyleSlugs": [
+        "high-energy",
+        "workout-gym"
+      ],
+      "defaultStyleSlugs": [
+        "lounge",
+        "smooth-jazz",
+        "quiet-morning"
+      ],
+      "languageOptions": [
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "משרד צריך רקע שלא מפריע לריכוז.",
+      "notes": ""
+    },
+    {
+      "ruleId": "OFFICE_AFTERNOON_FOCUSED",
+      "isActive": true,
+      "priority": 70,
+      "businessType": "OFFICE",
+      "daypart": "afternoon",
+      "vibe": "focused",
+      "energy": "low_medium",
+      "audience": "business",
+      "styleQuestionHe": "איזה רקע למשרד?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "instrumental",
+          "label": "Instrumental",
+          "labelHe": "Instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "chill",
+          "label": "Chill",
+          "labelHe": "Chill",
+          "query": "chill"
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "Lounge",
+          "query": "lounge"
+        },
+        {
+          "id": "soft-jazz",
+          "label": "Soft Jazz",
+          "labelHe": "Soft Jazz",
+          "query": "soft jazz"
+        }
+      ],
+      "styleSlugHints": [
+        "lounge",
+        "smooth-jazz",
+        "quiet-morning"
+      ],
+      "avoidStyleSlugs": [
+        "workout-gym",
+        "techno"
+      ],
+      "defaultStyleSlugs": [
+        "lounge",
+        "smooth-jazz"
+      ],
+      "languageOptions": [
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "אחר הצהריים במשרד צריך אנרגיה עדינה ויציבות.",
+      "notes": ""
+    },
+    {
+      "ruleId": "OTHER_ANY_BALANCED",
+      "isActive": true,
+      "priority": 50,
+      "businessType": "OTHER",
+      "daypart": "any",
+      "vibe": "balanced",
+      "energy": "medium",
+      "audience": "general",
+      "styleQuestionHe": "איזה סגנון?",
+      "styleOptionsForWizard": [
+        {
+          "id": "auto",
+          "label": "Let DJ Creator choose",
+          "labelHe": "תן ל-DJ Creator לבחור",
+          "query": ""
+        },
+        {
+          "id": "lounge",
+          "label": "Lounge",
+          "labelHe": "Lounge",
+          "query": "lounge"
+        },
+        {
+          "id": "afro",
+          "label": "Afro",
+          "labelHe": "Afro",
+          "query": "afro"
+        },
+        {
+          "id": "jazz",
+          "label": "Jazz",
+          "labelHe": "Jazz",
+          "query": "jazz"
+        },
+        {
+          "id": "pop",
+          "label": "Pop",
+          "labelHe": "Pop",
+          "query": "pop"
+        },
+        {
+          "id": "israeli-local",
+          "label": "Israeli / Local",
+          "labelHe": "Israeli / Local",
+          "query": "israeli hebrew local"
+        }
+      ],
+      "styleSlugHints": [
+        "lounge",
+        "afro",
+        "jazz",
+        "israeli-hits",
+        "funk"
+      ],
+      "avoidStyleSlugs": [],
+      "defaultStyleSlugs": [
+        "lounge",
+        "israeli-hits"
+      ],
+      "languageOptions": [
+        {
+          "id": "instrumental",
+          "label": "instrumental",
+          "labelHe": "instrumental",
+          "query": "instrumental"
+        },
+        {
+          "id": "hebrew",
+          "label": "hebrew",
+          "labelHe": "hebrew",
+          "query": "hebrew"
+        },
+        {
+          "id": "english",
+          "label": "english",
+          "labelHe": "english",
+          "query": "english"
+        },
+        {
+          "id": "international",
+          "label": "international",
+          "labelHe": "international",
+          "query": "international"
+        },
+        {
+          "id": "no_preference",
+          "label": "no_preference",
+          "labelHe": "no_preference",
+          "query": "no_preference"
+        }
+      ],
+      "resultCountDefault": 10,
+      "explanationHe": "ברירת מחדל בטוחה כשלא יודעים את סוג העסק.",
+      "notes": ""
+    }
+  ],
+  "taxonomyCandidatesRowCount": 13
+}

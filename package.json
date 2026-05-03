@@ -13,6 +13,7 @@
     "lint": "eslint",
     "postinstall": "prisma generate",
     "music-taxonomy:seed": "npx tsx prisma/seed.ts",
+    "dj-creator:import-rules": "npx tsx scripts/import-dj-creator-rules.ts",
     "music-taxonomy:import-xlsx": "node scripts/import-music-taxonomy-xlsx.cjs",
     "music-taxonomy:enrich-playlist-pro": "node scripts/build-playlist-pro-enrichment-from-pdf.cjs",
     "e2e:seed-user": "npx tsx scripts/seed-e2e-user.ts"

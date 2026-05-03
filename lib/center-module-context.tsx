@@ -12,6 +12,7 @@ export type CenterModuleEditTarget = { kind: "playlist" | "source"; id: string }
 
 export type CenterModule =
   | "jingles"
+  | "dj-creator-hub"
   | { kind: "edit-current"; target: CenterModuleEditTarget }
   | null;
 
@@ -31,6 +32,10 @@ export function useCenterModule(): CenterModuleCtx {
 
 export function isJinglesModule(m: CenterModule): m is "jingles" {
   return m === "jingles";
+}
+
+export function isDjCreatorHubModule(m: CenterModule): m is "dj-creator-hub" {
+  return m === "dj-creator-hub";
 }
 
 export function isEditCurrentModule(
