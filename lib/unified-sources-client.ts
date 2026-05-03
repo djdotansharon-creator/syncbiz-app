@@ -8,11 +8,11 @@ import { getPlaylistsLocal, addPlaylistLocal, removePlaylistLocal } from "./play
 import { getRadioStationsLocal, addRadioStationLocal, removeRadioStationLocal } from "./radio-local-store";
 import type { UnifiedSource, SourceProviderType } from "./source-types";
 import type { Playlist } from "./playlist-types";
-import { unifiedPlaylistSourceId } from "./playlist-utils";
+import { derivePlaylistUnifiedCoverArt, unifiedPlaylistSourceId } from "./playlist-utils";
 import type { ApiContentScope } from "./content-scope-filters";
 
 function playlistToUnified(p: Playlist): UnifiedSource {
-  const cover = p.thumbnail || p.cover || null;
+  const cover = derivePlaylistUnifiedCoverArt(p);
   return {
     id: unifiedPlaylistSourceId(p.id),
     title: p.name,

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource } from "@/lib/playback-provider";
 import { getPlaylistTracks } from "@/lib/playlist-types";
-import { effectivePlaybackPlaylistAttachment } from "@/lib/playlist-utils";
 import { isPlayNextSourceId } from "@/lib/play-next";
 import { useLocale, useTranslations, labels } from "@/lib/locale-context";
 import { getTranslations } from "@/lib/translations";
@@ -12,7 +11,14 @@ import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { editHrefForLibrarySource } from "@/components/library-source-item-actions";
 import { useCenterModule } from "@/lib/center-module-context";
-import { getYouTubeVideoId, getYouTubePlaylistId, getYouTubeThumbnail, isYouTubeMixUrl, isYouTubeMultiTrackUrl } from "@/lib/playlist-utils";
+import {
+  effectivePlaybackPlaylistAttachment,
+  getYouTubeVideoId,
+  getYouTubePlaylistId,
+  isYouTubeMixUrl,
+  isYouTubeMultiTrackUrl,
+  resolvePlaybackHeroCoverArt,
+} from "@/lib/playlist-utils";
 import { getSoundCloudEmbedUrl, isSoundCloudUrl } from "@/lib/player-utils";
 import {
   isYtPlayerReady,
@@ -43,7 +49,7 @@ import {
   playbackLifecycleLog,
   releasePlaybackWakeLock,
 } from "@/lib/playback-resilience";
-import { resolveDeckSourceBadge } from "@/lib/deck-source-badge";
+import { resolveDeckSourceBadge, labelForPlaylistOriginBadge } from "@/lib/deck-source-badge";
 import { syncbizAuditPlayerCreationTarget, syncbizAuditTransportTransitionStart } from "@/lib/syncbiz-transport-audit";
 
 /** Crossfade runtime diagnostics – key transitions only, no 500ms spam */
@@ -1947,8 +1953,6 @@ export function AudioPlayer() {
   }, [volume]);
   // ── End desktop routing ───────────────────────────────────────────────────
 
-  const thumbnailCover = ytMultiTrackState?.currentThumbnail ?? currentTrack?.cover ?? currentSource?.cover ?? null;
-
   /** Unified display values: desktop MPV > CONTROL mirror > local React state. */
   const ms = deviceCtx?.masterState;
   // In desktop mode the Orchestrator/MPV state is the single source of truth for all playback display.
@@ -1978,10 +1982,22 @@ export function AudioPlayer() {
     isControlMirror ? (typeof ms?.shuffle === "boolean" ? ms?.shuffle : shuffle) : shuffle;
   const displayAutoMix =
     isControlMirror ? (typeof ms?.autoMix === "boolean" ? ms?.autoMix : autoMix) : autoMix;
-  const displayThumbnailCover =
-    isControlMirror
-      ? (ms?.currentTrack?.cover ?? ms?.currentSource?.cover ?? null)
-      : (ytMultiTrackState?.currentThumbnail ?? currentTrack?.cover ?? currentSource?.cover ?? null);
+  const displayThumbnailCover = (() => {
+    if (!isControlMirror && ytMultiTrackState?.currentThumbnail) return ytMultiTrackState.currentThumbnail;
+    if (isControlMirror) {
+      return ms?.currentTrack?.cover ?? ms?.currentSource?.cover ?? null;
+    }
+    const pl =
+      currentSource != null ? effectivePlaybackPlaylistAttachment(currentSource) ?? currentPlaylist : null;
+    return resolvePlaybackHeroCoverArt({
+      trackCover: currentTrack?.cover,
+      trackUrl: currentTrack?.url,
+      trackType: currentTrack?.type,
+      sourceCover: currentSource?.cover,
+      sourceUrl: currentSource?.url,
+      playlist: pl,
+    });
+  })();
   const displayTitle = isControlMirror
     ? (ms?.currentTrack?.title ?? ms?.currentSource?.title ?? t.noSourceSelected)
     : (ytMultiTrackState?.currentTitle ?? currentTrack?.title ?? t.noSourceSelected);
@@ -2091,16 +2107,23 @@ export function AudioPlayer() {
               ? t.providerSpotify
               : t.providerLocal;
 
+  const deckBadgeLabels = {
+    youtube: t.deckBadgeYoutube,
+    soundcloud: t.deckBadgeSoundcloud,
+    radio: t.deckBadgeRadio,
+    liveStream: t.deckBadgeLiveStream,
+    syncbizPlaylist: t.deckBadgeSyncbizPlaylist,
+    local: t.deckBadgeLocal,
+    djCreatorPlaylist: t.deckBadgeDjCreator,
+    readyPlaylist: t.deckBadgeReadyPlaylist,
+    scheduledPlaylist: t.deckBadgeScheduledPlaylist,
+    myPlaylist: t.deckBadgeMyPlaylist,
+    branchPlaylist: t.deckBadgeBranchPlaylist,
+  };
+
   const deckSourceBadgeLabel = isControlMirror
-    ? t.deckBadgeRemote
-    : resolveDeckSourceBadge(currentSource ?? undefined, currentTrack ?? undefined, {
-        youtube: t.deckBadgeYoutube,
-        soundcloud: t.deckBadgeSoundcloud,
-        radio: t.deckBadgeRadio,
-        liveStream: t.deckBadgeLiveStream,
-        syncbizPlaylist: t.deckBadgeSyncbizPlaylist,
-        local: t.deckBadgeLocal,
-      });
+    ? labelForPlaylistOriginBadge(ms?.currentSource?.playlistOriginBadge, deckBadgeLabels) ?? t.deckBadgeRemote
+    : resolveDeckSourceBadge(currentSource ?? undefined, currentTrack ?? undefined, deckBadgeLabels);
 
   // Desktop PREV/NEXT strategy:
   //  - Multi-track playlist or queued items → provider prev()/next() changes currentPlayUrl

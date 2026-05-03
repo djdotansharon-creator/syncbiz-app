@@ -3374,10 +3374,22 @@ function SourceRow({
       }
       metaSlot={
         <div className="library-card-meta flex items-center gap-1.5 text-xs">
-          {source.genre && <span>{source.genre}</span>}
+          {source.origin === "playlist" ? (
+            <>
+              {Boolean(source.genre?.trim()) && <span>{source.genre}</span>}
+              <span aria-hidden>{Boolean(source.genre?.trim()) ? " · " : null}</span>
+              <span>{t.scheduleTargetPlaylist}</span>
+            </>
+          ) : (
+            <>
+              {source.genre && <span>{source.genre}</span>}
+            </>
+          )}
           {(source.viewCount ?? source.playlist?.viewCount) != null && (
             <>
-              {source.genre && <span>•</span>}
+              <span aria-hidden>
+                {source.origin === "playlist" || source.genre?.trim() ? " • " : null}
+              </span>
               <span className="tabular-nums">
                 {formatViewCount(source.viewCount ?? source.playlist?.viewCount ?? 0)} {t.views}
               </span>
@@ -3385,7 +3397,13 @@ function SourceRow({
           )}
           {(source.playlist?.durationSeconds ?? 0) > 0 && (
             <>
-              <span>•</span>
+              <span aria-hidden>
+                {source.origin === "playlist" ||
+                source.genre?.trim() ||
+                (source.viewCount ?? source.playlist?.viewCount) != null
+                  ? " • "
+                  : null}
+              </span>
               <span className="tabular-nums">{formatDuration(source.playlist?.durationSeconds ?? 0)}</span>
             </>
           )}
@@ -3470,6 +3488,20 @@ function SourceLogo({ type, origin, size }: { type: UnifiedSource["type"]; origi
           <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
           <path d="M4 14h16" />
           <circle cx="12" cy="18" r="2" />
+        </svg>
+      </span>
+    );
+  }
+  if (origin === "playlist") {
+    return (
+      <span
+        className={`library-badge-logo flex ${sizeClass} items-center justify-center rounded-lg p-1 text-cyan-300`}
+        title={t.scheduleTargetPlaylist}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={sizeClass}>
+          <path d="M9 18V5l12-2v13" />
+          <circle cx="6" cy="18" r="3" />
+          <circle cx="18" cy="16" r="3" />
         </svg>
       </span>
     );

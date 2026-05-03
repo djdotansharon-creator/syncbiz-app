@@ -207,6 +207,27 @@ export type StoredSourceJson = {
  * collections/containers vs media items.
  */
 export function classifyLibraryEntityContract(source: UnifiedSource): LibraryEntityContract {
+  /**
+   * Persisted workspace playlists: foundation hints parsed from `url` (e.g. `mix_set` for YouTube watch
+   * URLs) must not downgrade the library contract — the entity is still a playlist container unless the
+   * stored URL clearly represents an external shell (YT list=, Spotify album/playlist, SC sets).
+   */
+  if (
+    source.origin === "playlist" &&
+    source.playlist &&
+    source.playlist.libraryPlacement !== "ready_external"
+  ) {
+    const u = (source.url ?? "").toLowerCase();
+    const isExternalPlaylistShell =
+      (u.includes("youtube.com") && u.includes("list=")) ||
+      (u.includes("open.spotify.com") && (u.includes("/playlist/") || u.includes("/album/"))) ||
+      (u.includes("soundcloud.com") && u.includes("/sets/"));
+    if (isExternalPlaylistShell) {
+      return { entityKind: "collection", collectionSubtype: "external_playlist" };
+    }
+    return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };
+  }
+
   const kind = source.contentNodeKind;
   if (kind === "syncbiz_playlist") {
     return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };

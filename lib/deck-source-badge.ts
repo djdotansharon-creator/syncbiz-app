@@ -1,5 +1,9 @@
 import type { PlaybackTrack } from "@/lib/playback-provider";
+import type { Playlist } from "@/lib/playlist-types";
 import type { UnifiedSource } from "@/lib/source-types";
+
+/** Persisted taxonomy for CONTROL mirror parity (serialized on `StationPlaybackState.currentSource`). */
+export type PlaylistOriginBadgeKey = "dj_creator" | "ready" | "scheduled" | "my" | "branch";
 
 /** User-facing deck pill labels (shown uppercase in UI). */
 export type DeckSourceBadgeLabels = {
@@ -7,9 +11,51 @@ export type DeckSourceBadgeLabels = {
   soundcloud: string;
   radio: string;
   liveStream: string;
+  /** @deprecated Prefer branchPlaylist in UI — kept for older call sites */
   syncbizPlaylist: string;
   local: string;
+  djCreatorPlaylist: string;
+  readyPlaylist: string;
+  scheduledPlaylist: string;
+  myPlaylist: string;
+  branchPlaylist: string;
 };
+
+export function resolvePlaylistOriginBadgeKey(playlist: Playlist | null | undefined): PlaylistOriginBadgeKey | null {
+  if (!playlist) return null;
+  if (playlist.libraryPlacement === "ready_external") return "ready";
+  const g = (playlist.genre ?? "").trim().toLowerCase();
+  if (g === "dj creator") return "dj_creator";
+  if (playlist.scheduleContributorBlocks && playlist.scheduleContributorBlocks.length > 0) return "scheduled";
+  if (playlist.playlistOwnershipScope === "owner_personal") return "my";
+  return "branch";
+}
+
+export function labelForPlaylistOriginBadge(
+  key: PlaylistOriginBadgeKey | null | undefined,
+  labels: DeckSourceBadgeLabels
+): string | null {
+  if (!key) return null;
+  switch (key) {
+    case "dj_creator":
+      return labels.djCreatorPlaylist;
+    case "ready":
+      return labels.readyPlaylist;
+    case "scheduled":
+      return labels.scheduledPlaylist;
+    case "my":
+      return labels.myPlaylist;
+    case "branch":
+      return labels.branchPlaylist;
+    default:
+      return labels.branchPlaylist;
+  }
+}
+
+function labelForPlaylistFromSource(source: UnifiedSource | null | undefined, labels: DeckSourceBadgeLabels): string {
+  const key = resolvePlaylistOriginBadgeKey(source?.playlist ?? null);
+  return labelForPlaylistOriginBadge(key, labels) ?? labels.branchPlaylist;
+}
 
 function isYouTubeLivePath(url: string): boolean {
   return /youtube\.com\/live\//i.test(url) || /youtu\.be\/live/i.test(url);
@@ -26,7 +72,7 @@ function isLiveOrStreamStyleUrl(url: string): boolean {
 
 /**
  * Compact deck badge next to transport. Allowed meanings: YOUTUBE, SOUNDCLOUD, RADIO,
- * LIVE STREAM, SYNCBIZ PLAYLIST, LOCAL, REMOTE.
+ * LIVE STREAM, playlist kinds (DJ Creator / Ready / …), LOCAL, REMOTE.
  */
 export function resolveDeckSourceBadge(
   source: UnifiedSource | null | undefined,
@@ -39,7 +85,7 @@ export function resolveDeckSourceBadge(
 
   if (!source && !track) return labels.local;
   if (origin === "radio") return labels.radio;
-  if (origin === "playlist") return labels.syncbizPlaylist;
+  if (origin === "playlist") return labelForPlaylistFromSource(source, labels);
 
   switch (type) {
     case "youtube":

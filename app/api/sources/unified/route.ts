@@ -17,7 +17,11 @@ import { unifiedFoundationHints } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
 import type { Source } from "@/lib/types";
 import { getSourceArtworkUrl, detectProvider } from "@/lib/player-utils";
-import { getYouTubeThumbnail, unifiedPlaylistSourceId } from "@/lib/playlist-utils";
+import {
+  derivePlaylistUnifiedCoverArt,
+  getYouTubeThumbnail,
+  unifiedPlaylistSourceId,
+} from "@/lib/playlist-utils";
 import { inferGenre } from "@/lib/infer-genre";
 
 function resolveAccountScope(userTenantId: string): string {
@@ -25,7 +29,7 @@ function resolveAccountScope(userTenantId: string): string {
 }
 
 function playlistToUnified(p: Playlist): UnifiedSource {
-  const cover = p.thumbnail || p.cover || null;
+  const cover = derivePlaylistUnifiedCoverArt(p);
   return {
     id: unifiedPlaylistSourceId(p.id),
     title: p.name,

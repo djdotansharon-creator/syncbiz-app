@@ -1,4 +1,4 @@
-import type { Playlist, PlaylistType } from "./playlist-types";
+import { getPlaylistTracks, type Playlist, type PlaylistTrack, type PlaylistType } from "./playlist-types";
 import type { UnifiedSource } from "./source-types";
 
 /**
@@ -104,6 +104,66 @@ export function effectivePlaybackPlaylistAttachment(source: UnifiedSource | null
 export function getYouTubeThumbnail(url: string): string | null {
   const vid = getYouTubeVideoId(url);
   return vid ? `https://img.youtube.com/vi/${vid}/hqdefault.jpg` : null;
+}
+
+/** Best-effort thumbnail for one playlist leaf row (saved cover or YouTube still from URL). */
+export function derivePlaylistTrackCoverArt(track: Pick<PlaylistTrack, "cover" | "url" | "type">): string | null {
+  const c = `${track.cover ?? ""}`.trim();
+  if (c) return c;
+  const url = `${track.url ?? ""}`.trim();
+  if (!url) return null;
+  if (track.type === "youtube") return getYouTubeThumbnail(url);
+  const low = url.toLowerCase();
+  if (low.includes("youtube.com") || low.includes("youtu.be")) return getYouTubeThumbnail(url);
+  return null;
+}
+
+/** Cover for unified/API playlist rows — playlist thumbnail, first usable track thumb, else root URL thumb. */
+export function derivePlaylistUnifiedCoverArt(p: Playlist): string | null {
+  const row = `${p.thumbnail ?? ""}`.trim() || `${p.cover ?? ""}`.trim();
+  if (row) return row;
+  for (const track of getPlaylistTracks(p)) {
+    const thumb = derivePlaylistTrackCoverArt(track);
+    if (thumb) return thumb;
+  }
+  const root = `${p.url ?? ""}`.trim();
+  return root ? getYouTubeThumbnail(root) : null;
+}
+
+/** Player hero fallback: leaf track → playlist row art → playlist track scan → UnifiedSource envelope. */
+export function resolvePlaybackHeroCoverArt(input: {
+  trackCover?: string | null;
+  trackUrl?: string | null | undefined;
+  trackType?: string | null | undefined;
+  sourceCover?: string | null;
+  sourceUrl?: string | null | undefined;
+  playlist: Playlist | null | undefined;
+}): string | null {
+  const leaf = derivePlaylistTrackCoverArt({
+    cover: input.trackCover ?? undefined,
+    url: `${input.trackUrl ?? ""}`,
+    type: (input.trackType ?? "stream-url") as PlaylistType,
+  });
+  if (leaf) return leaf;
+
+  const pl = input.playlist ?? null;
+  if (pl) {
+    const row = `${pl.thumbnail ?? ""}`.trim() || `${pl.cover ?? ""}`.trim();
+    if (row) return row;
+    for (const tr of getPlaylistTracks(pl)) {
+      const tc = derivePlaylistTrackCoverArt(tr);
+      if (tc) return tc;
+    }
+    const plUrl = `${pl.url ?? ""}`.trim();
+    const fromRoot = plUrl ? getYouTubeThumbnail(plUrl) : null;
+    if (fromRoot) return fromRoot;
+  }
+
+  return derivePlaylistTrackCoverArt({
+    cover: input.sourceCover ?? undefined,
+    url: `${input.sourceUrl ?? ""}`,
+    type: (input.trackType ?? "stream-url") as PlaylistType,
+  });
 }
 
 /** Check if URL is a Shazam song page. */

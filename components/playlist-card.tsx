@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/action-buttons";
 import { LIBRARY_SIDE_ACTION_ICON_BTN_CLASS } from "@/lib/library-side-action-styles";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
-import { canEmbedInCard } from "@/lib/playlist-utils";
+import { canEmbedInCard, derivePlaylistUnifiedCoverArt } from "@/lib/playlist-utils";
 import { usePlaylistPlayer } from "@/lib/playlist-player-context";
 import type { Playlist } from "@/lib/playlist-types";
 
@@ -58,11 +58,7 @@ export function PlaylistCard({ playlist, index, onShare }: Props) {
   const embedded = canEmbedInCard(playlist.type);
   const localOrStream = !embedded;
 
-  const thumbnail =
-    playlist.thumbnail ||
-    (playlist.type === "youtube"
-      ? `https://img.youtube.com/vi/${playlist.url.match(/(?:v=|\/)([^&\s?/]+)/)?.[1]}/hqdefault.jpg`
-      : null);
+  const thumbnail = derivePlaylistUnifiedCoverArt(playlist);
 
   useEffect(() => {
     if (!active || !localOrStream || status !== "playing") return;
