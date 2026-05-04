@@ -1,17 +1,17 @@
-import { existsSync, readFileSync, statSync } from "fs";
+import { existsSync, statSync } from "fs";
 import path from "path";
 import { NextResponse } from "next/server";
 
 /**
  * Returns JSON with a direct `url` to the Windows installer (.exe) when available.
  * See `DESKTOP_INSTALLER_BUNDLE_PATH`, `DESKTOP_WIN_INSTALLER_URL`, and GitHub
- * `desktop-v*` or semver `v*` (e.g. `v0.1.0`) release assets.
+ * `desktop-v*` or semver `v*` (e.g. `v0.1.2`) release assets.
  */
 
 const DEFAULT_OWNER = "djdotansharon-creator";
 const DEFAULT_REPO = "syncbiz-app";
 const TAG_PREFIX = "desktop-v";
-/** e.g. `v0.1.0` from electron-builder on main; matches GitHub's tag when not using `desktop-v*`. */
+/** e.g. `v0.1.2` from electron-builder on main; matches GitHub's tag when not using `desktop-v*`. */
 const SEMVER_V_TAG = /^v(\d+)\.(\d+)\.(\d+)/i;
 
 function isDesktopReleaseTag(tag: string): boolean {
@@ -119,55 +119,6 @@ function publicOrigin(req: Request): string {
   return `${proto}://${host}`;
 }
 
-/** Version from `desktop/package.json` so the default release URL matches CI artifact names. */
-function getDesktopPackageVersion(): string {
-  try {
-    const pkgPath = path.join(process.cwd(), "desktop", "package.json");
-    const j = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
-    const v = (j.version ?? "0.1.0").trim();
-    return v || "0.1.0";
-  } catch {
-    return "0.1.0";
-  }
-}
-
-/**
- * When GitHub has no matching release in the list yet (or no .exe in the release) we
- * still return a direct `releases/download/v<ver>/...exe` URL so the web UI can show a
- * download link; the file appears once a release is published. Uses `v` tag to match
- * electron-builder's common semver tags (and `dist:win` in this repo).
- * Only for Windows / unknown UA.
- */
-function defaultWinInstallerPart(
-  owner: string,
-  repo: string,
-  platform: "win" | "mac-intel" | "mac-arm" | "linux" | "unknown",
-):
-  | {
-      version: string;
-      releasedAt: null;
-      url: string;
-      fileName: string;
-      sizeBytes: null;
-      downloads: Array<{ name: string; url: string; sizeBytes: number }>;
-      source: "default";
-    }
-  | null {
-  if (platform !== "win" && platform !== "unknown") return null;
-  const version = getDesktopPackageVersion();
-  const fileName = `SyncBiz-Player-Setup-${version}-x64.exe`;
-  const url = `https://github.com/${owner}/${repo}/releases/download/v${version}/${fileName}`;
-  return {
-    version,
-    releasedAt: null,
-    url,
-    fileName,
-    sizeBytes: null,
-    downloads: [{ name: fileName, url, sizeBytes: 0 }],
-    source: "default",
-  };
-}
-
 /** Same as default URL pattern but pinned to an existing `desktop-v*` or `v*` tag (e.g. .exe not uploaded yet). */
 function defaultWinInstallerFromTag(
   owner: string,
@@ -240,7 +191,7 @@ function readBundlePayload(
   if (!existsSync(abs)) return null;
   const st = statSync(abs);
   const fileName = process.env.DESKTOP_WIN_INSTALLER_FILE_NAME?.trim() || path.basename(abs);
-  const version = (process.env.DESKTOP_WIN_INSTALLER_VERSION ?? "").trim() || "0.1.0";
+  const version = (process.env.DESKTOP_WIN_INSTALLER_VERSION ?? "").trim() || "0.1.2";
   const origin = publicOrigin(req);
   const ourl = `${origin}/api/desktop/installer`;
   return {
@@ -334,10 +285,6 @@ export async function GET(req: Request) {
       if (envPayload) {
         return successJson(platform, releasesUrl, envPayload);
       }
-      const def = defaultWinInstallerPart(owner, repo, platform);
-      if (def) {
-        return successJson(platform, releasesUrl, def);
-      }
       return NextResponse.json(
         { ok: false, error: `GitHub API returned ${resp.status}`, platform, releasesPageUrl: releasesUrl },
         { status: 502 },
@@ -353,10 +300,6 @@ export async function GET(req: Request) {
       const envPayload = fromEnvForWin();
       if (envPayload) {
         return successJson(platform, releasesUrl, envPayload);
-      }
-      const def = defaultWinInstallerPart(owner, repo, platform);
-      if (def) {
-        return successJson(platform, releasesUrl, def);
       }
       return NextResponse.json(
         { ok: false, error: "No desktop release has been published yet.", platform, releasesPageUrl: releasesUrl },
@@ -414,10 +357,6 @@ export async function GET(req: Request) {
     const envPayload = fromEnvForWin();
     if (envPayload) {
       return successJson(platform, releasesUrl, envPayload);
-    }
-    const def = defaultWinInstallerPart(owner, repo, platform);
-    if (def) {
-      return successJson(platform, releasesUrl, def);
     }
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : "unknown", platform, releasesPageUrl: releasesUrl },
