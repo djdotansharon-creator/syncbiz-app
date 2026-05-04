@@ -214,6 +214,20 @@ const TRANSLATIONS = {
       "No published build yet. You can follow GitHub for the first release, or check back after we publish a desktop-v tag.",
     downloadDesktopModalGitHubLink: "View releases on GitHub",
     downloadDesktopClose: "Close",
+    downloadDesktopNotPublishedHeading: "Desktop installer is not published yet",
+    downloadDesktopNotPublishedLead:
+      "This page targets SyncBiz Desktop version {expected}, but nothing is downloadable from GitHub/env/bundle for that version.",
+    downloadDesktopMissingGithubReleaseExpected:
+      "No GitHub Release matches that exact version yet (publish a tag like desktop-v{expected} or v{expected}, with installers attached).",
+    downloadDesktopLatestPublishedLine: "Latest published desktop-release version seen on GitHub: {latest}.",
+    downloadDesktopMissingGithubReleaseHint: "Push the desktop-v* tag after CI uploads the installers, then refresh.",
+    downloadDesktopMissingGithubAsset:
+      "There is a release for your version on GitHub, but it does not include an installer asset for your platform (.exe / .dmg / AppImage).",
+    downloadDesktopMissingGithubAssetTag: "Release tag: {tag}",
+    downloadDesktopOfferedVersionLine: "Offered Desktop version remains {expected}.",
+    downloadDesktopMissingRailwayBundle:
+      "The server lists DESKTOP_INSTALLER_BUNDLE_PATH, but there is no readable .exe at that path.",
+    downloadDesktopMissingGithubApi: "GitHub Releases could not be checked from the server.",
     pinToTop: "Pin to top",
     sidebarFooter: "Controller and scheduler. Does not store or host media.",
     newBreadcrumb: "New",
@@ -600,6 +614,20 @@ const TRANSLATIONS = {
       "אין עדיין גרסה מפורסמת. אפשר לעקוב ב-GitHub או לחזור אחרי שיעלה release עם תג desktop-v.",
     downloadDesktopModalGitHubLink: "לעמוד ה-Releases ב-GitHub",
     downloadDesktopClose: "סגור",
+    downloadDesktopNotPublishedHeading: "קובץ ההתקנה לדסקטופ עדיין לא פורסם",
+    downloadDesktopNotPublishedLead:
+      "העמוד מציע את גרסת SyncBiz Desktop {expected}, אבל אין הורדה זמינה מ-GitHub / משתני סביבה / קובץ מקומי עבור הגרסה הזו.",
+    downloadDesktopMissingGithubReleaseExpected:
+      "אין ב-GitHub Release שתואם בדיוק לגרסה הזו (יש לפרסם תג כמו desktop-v{expected} או v{expected} עם קבצי התקנה מצורפים).",
+    downloadDesktopLatestPublishedLine: "הגרסה האחרונה שזוהתה ב-GitHub לשחרורי דסקטופ: {latest}.",
+    downloadDesktopMissingGithubReleaseHint: "אחרי ש-CI מעלה את קבצי ההתקנה, רענן את העמוד.",
+    downloadDesktopMissingGithubAsset:
+      "יש Release לגרסה שלך ב-GitHub, אבל אין בו נכס התקנה לפלטפורמה שלך (.exe / .dmg / AppImage).",
+    downloadDesktopMissingGithubAssetTag: "תג Release: {tag}",
+    downloadDesktopOfferedVersionLine: "גרסת הדסקטופ המוצעת נשארת {expected}.",
+    downloadDesktopMissingRailwayBundle:
+      "השרת מגדיר DESKTOP_INSTALLER_BUNDLE_PATH, אבל אין .exe קריא בנתיב הזה.",
+    downloadDesktopMissingGithubApi: "לא ניתן היה לבדוק את GitHub Releases מהשרת.",
     pinToTop: "נעץ לסרגל העליון",
     sidebarFooter: "בקר ומתזמן. לא מאחסן ולא מארח מדיה.",
     newBreadcrumb: "חדש",

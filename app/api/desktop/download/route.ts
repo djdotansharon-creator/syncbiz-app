@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "fs";
+import { existsSync, readFileSync, statSync } from "fs";
 import path from "path";
 import { NextResponse } from "next/server";
 
@@ -88,7 +88,8 @@ function matchAssetForPlatform(
     case "linux":
       return byExt(".appimage") ?? null;
     default:
-      return null;
+      /** `unknown` UA: prefer Windows .exe download (covers dev tools / generic curl). */
+      return byExt(".exe") ?? null;
   }
 }
 
@@ -97,6 +98,26 @@ function desktopTagSortKey(tag: string): number {
   const m = semver.match(/^(\d+)\.(\d+)\.(\d+)/);
   if (!m) return -1;
   return parseInt(m[1]!, 10) * 1_000_000 + parseInt(m[2]!, 10) * 1_000 + parseInt(m[3]!, 10);
+}
+
+let cachedOfferedDesktopVersion: string | null = null;
+
+/**
+ * Canonical desktop app SemVer advertised by the repo (`desktop/package.json`).
+ * installers should match this before we point users at GitHub/GitHub Releases.
+ */
+function getOfferedDesktopPackageVersion(): string {
+  if (cachedOfferedDesktopVersion) return cachedOfferedDesktopVersion;
+  try {
+    const p = path.join(process.cwd(), "desktop", "package.json");
+    const raw = readFileSync(p, "utf8");
+    const j = JSON.parse(raw) as { version?: unknown };
+    const v = typeof j.version === "string" ? j.version.trim() : "";
+    cachedOfferedDesktopVersion = /^(\d+)\.(\d+)\.(\d+)/.test(v) ? v : "0.0.0";
+  } catch {
+    cachedOfferedDesktopVersion = "0.0.0";
+  }
+  return cachedOfferedDesktopVersion!;
 }
 
 function isAllowedPublicInstallerUrl(s: string): boolean {
@@ -108,49 +129,6 @@ function isAllowedPublicInstallerUrl(s: string): boolean {
   } catch {
     return false;
   }
-}
-
-function publicOrigin(req: Request): string {
-  const u = new URL(req.url);
-  const h = (n: string) => req.headers.get(n);
-  const host = h("x-forwarded-host") ?? h("host") ?? u.host;
-  const rawProto = h("x-forwarded-proto")?.split(",")[0]?.trim();
-  const proto = rawProto && rawProto.length > 0 ? rawProto : u.protocol.replace(":", "") || "https";
-  return `${proto}://${host}`;
-}
-
-/** Same as default URL pattern but pinned to an existing `desktop-v*` or `v*` tag (e.g. .exe not uploaded yet). */
-function defaultWinInstallerFromTag(
-  owner: string,
-  repo: string,
-  platform: "win" | "mac-intel" | "mac-arm" | "linux" | "unknown",
-  tagName: string,
-  releasedAt: string | null,
-):
-  | {
-      version: string;
-      releasedAt: string | null;
-      url: string;
-      fileName: string;
-      sizeBytes: null;
-      downloads: Array<{ name: string; url: string; sizeBytes: number }>;
-      source: "default";
-    }
-  | null {
-  if (platform !== "win" && platform !== "unknown") return null;
-  if (!isDesktopReleaseTag(tagName)) return null;
-  const version = versionFromReleaseTag(tagName);
-  const fileName = `SyncBiz-Player-Setup-${version}-x64.exe`;
-  const url = `https://github.com/${owner}/${repo}/releases/download/${tagName}/${fileName}`;
-  return {
-    version,
-    releasedAt,
-    url,
-    fileName,
-    sizeBytes: null,
-    downloads: [{ name: fileName, url, sizeBytes: 0 }],
-    source: "default",
-  };
 }
 
 /** `DESKTOP_WIN_INSTALLER_URL` — public URL to the .exe (or localhost http in dev). */
@@ -171,10 +149,7 @@ function readWinInstallerFromEnv(): { url: string; fileName: string; version: st
   return { url: raw, fileName, version };
 }
 
-function readBundlePayload(
-  req: Request,
-  platform: "win" | "mac-intel" | "mac-arm" | "linux" | "unknown",
-): {
+function readBundlePayload(platform: "win" | "mac-intel" | "mac-arm" | "linux" | "unknown"): {
   version: string;
   releasedAt: null;
   url: string;
@@ -191,9 +166,10 @@ function readBundlePayload(
   if (!existsSync(abs)) return null;
   const st = statSync(abs);
   const fileName = process.env.DESKTOP_WIN_INSTALLER_FILE_NAME?.trim() || path.basename(abs);
-  const version = (process.env.DESKTOP_WIN_INSTALLER_VERSION ?? "").trim() || "0.1.2";
-  const origin = publicOrigin(req);
-  const ourl = `${origin}/api/desktop/installer`;
+  const pkgV = getOfferedDesktopPackageVersion();
+  const version = (process.env.DESKTOP_WIN_INSTALLER_VERSION ?? "").trim() || pkgV || "0.1.2";
+  /** Relative path avoids cross-origin quirks with `<a download>` in the browser. */
+  const ourl = "/api/desktop/installer";
   return {
     version,
     releasedAt: null,
@@ -215,7 +191,7 @@ type SuccessBody = {
   sizeBytes: number | null;
   downloads: Array<{ name: string; url: string; sizeBytes: number }>;
   releasesPageUrl: string;
-  source: "github" | "env" | "bundle" | "default";
+  source: "github" | "env" | "bundle";
 };
 
 function successJson(
@@ -228,7 +204,7 @@ function successJson(
     fileName: string;
     sizeBytes: number | null;
     downloads: Array<{ name: string; url: string; sizeBytes: number }>;
-    source: "github" | "env" | "bundle" | "default";
+    source: "github" | "env" | "bundle";
   },
 ) {
   const body: SuccessBody = {
@@ -246,6 +222,38 @@ function successJson(
   return NextResponse.json(body);
 }
 
+type MissingInstallerSource =
+  | "railway_bundle"
+  | "github_release"
+  | "github_platform_asset"
+  /** Upstream GitHub API failure (no env/bundle override). */
+  | "github_api";
+
+function missingInstallerJson(
+  platform: string,
+  releasesUrl: string,
+  part: {
+    expectedVersion: string;
+    missingSource: MissingInstallerSource;
+    latestPublishedVersion: string | null;
+    githubTag?: string;
+    error?: string;
+  },
+) {
+  return NextResponse.json({
+    ok: false,
+    platform,
+    url: null,
+    releasesPageUrl: releasesUrl,
+    expectedVersion: part.expectedVersion,
+    latestPublishedVersion: part.latestPublishedVersion,
+    missingSource: part.missingSource,
+    githubTag: part.githubTag,
+    downloads: [],
+    error: part.error ?? "DESKTOP_INSTALLER_NOT_AVAILABLE",
+  });
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const explicit = url.searchParams.get("platform");
@@ -253,18 +261,35 @@ export async function GET(req: Request) {
   const platform = parsePlatform(explicit, ua);
   const { owner, repo } = getOwnerRepo();
   const releasesUrl = releasesPageUrl(owner, repo);
+  const offered = getOfferedDesktopPackageVersion();
   const winEnv = readWinInstallerFromEnv();
 
-  const bundle = readBundlePayload(req, platform);
+  const bundle = readBundlePayload(platform);
   if (bundle) {
     return successJson(platform, releasesUrl, bundle);
+  }
+
+  const bundlePathRaw = process.env.DESKTOP_INSTALLER_BUNDLE_PATH?.trim();
+  if (bundlePathRaw && (platform === "win" || platform === "unknown")) {
+    const abs = path.resolve(bundlePathRaw);
+    const invalidBundle =
+      !abs.toLowerCase().endsWith(".exe") || !existsSync(abs);
+    if (invalidBundle) {
+      return missingInstallerJson(platform, releasesUrl, {
+        expectedVersion: offered,
+        missingSource: "railway_bundle",
+        latestPublishedVersion: null,
+        error: "DESKTOP_INSTALLER_BUNDLE_PATH is set but does not point at a readable .exe.",
+      });
+    }
   }
 
   const fromEnvForWin = () => {
     if (platform !== "win" && platform !== "unknown") return null;
     if (!winEnv) return null;
+    const v = (process.env.DESKTOP_WIN_INSTALLER_VERSION ?? "").trim() || offered;
     return {
-      version: winEnv.version,
+      version: v,
       releasedAt: null as string | null,
       url: winEnv.url,
       fileName: winEnv.fileName,
@@ -274,19 +299,30 @@ export async function GET(req: Request) {
     };
   };
 
+  const envPayload = fromEnvForWin();
+  if (envPayload) {
+    return successJson(platform, releasesUrl, envPayload);
+  }
+
   try {
-    const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases?per_page=30`, {
+    const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases?per_page=60`, {
       headers: { Accept: "application/vnd.github+json" },
       next: { revalidate: 300 },
     });
 
     if (!resp.ok) {
-      const envPayload = fromEnvForWin();
-      if (envPayload) {
-        return successJson(platform, releasesUrl, envPayload);
-      }
       return NextResponse.json(
-        { ok: false, error: `GitHub API returned ${resp.status}`, platform, releasesPageUrl: releasesUrl },
+        {
+          ok: false,
+          error: `GitHub API returned ${resp.status}`,
+          platform,
+          releasesPageUrl: releasesUrl,
+          expectedVersion: offered,
+          missingSource: "github_api" satisfies MissingInstallerSource,
+          latestPublishedVersion: null,
+          url: null,
+          downloads: [],
+        },
         { status: 502 },
       );
     }
@@ -297,19 +333,28 @@ export async function GET(req: Request) {
       .sort((a, b) => desktopTagSortKey(b.tag_name) - desktopTagSortKey(a.tag_name));
 
     if (published.length === 0) {
-      const envPayload = fromEnvForWin();
-      if (envPayload) {
-        return successJson(platform, releasesUrl, envPayload);
-      }
-      return NextResponse.json(
-        { ok: false, error: "No desktop release has been published yet.", platform, releasesPageUrl: releasesUrl },
-        { status: 404 },
-      );
+      return missingInstallerJson(platform, releasesUrl, {
+        expectedVersion: offered,
+        missingSource: "github_release",
+        latestPublishedVersion: null,
+        githubTag: undefined,
+        error: "No desktop release tags (desktop-v* or vX.Y.Z) published on GitHub yet.",
+      });
     }
 
-    const latest = published[0]!;
-    const asset = matchAssetForPlatform(latest.assets, platform);
-    const downloads = latest.assets.map((a) => ({
+    const latestPublishedVersion = versionFromReleaseTag(published[0]!.tag_name);
+
+    const pinned = published.find((r) => versionFromReleaseTag(r.tag_name) === offered);
+    if (!pinned) {
+      return missingInstallerJson(platform, releasesUrl, {
+        expectedVersion: offered,
+        missingSource: "github_release",
+        latestPublishedVersion,
+      });
+    }
+
+    const asset = matchAssetForPlatform(pinned.assets, platform);
+    const downloads = pinned.assets.map((a) => ({
       name: a.name,
       url: a.browser_download_url,
       sizeBytes: a.size,
@@ -317,8 +362,8 @@ export async function GET(req: Request) {
 
     if (asset?.browser_download_url) {
       return successJson(platform, releasesUrl, {
-        version: versionFromReleaseTag(latest.tag_name),
-        releasedAt: latest.published_at,
+        version: versionFromReleaseTag(pinned.tag_name),
+        releasedAt: pinned.published_at,
         url: asset.browser_download_url,
         fileName: asset.name,
         sizeBytes: asset.size,
@@ -327,39 +372,26 @@ export async function GET(req: Request) {
       });
     }
 
-    const envPayload = fromEnvForWin();
-    if (envPayload) {
-      return successJson(platform, releasesUrl, {
-        ...envPayload,
-        releasedAt: latest.published_at,
-        version: winEnv?.version && winEnv.version !== "0.0.0" ? winEnv.version : versionFromReleaseTag(latest.tag_name),
-        downloads: downloads.length > 0 ? downloads : envPayload.downloads,
-      });
-    }
-
-    const fromTag = defaultWinInstallerFromTag(owner, repo, platform, latest.tag_name, latest.published_at);
-    if (fromTag) {
-      return successJson(platform, releasesUrl, fromTag);
-    }
-
-    return NextResponse.json({
-      ok: true,
-      platform,
-      version: versionFromReleaseTag(latest.tag_name),
-      releasedAt: latest.published_at,
-      url: null,
-      fileName: null,
-      sizeBytes: null,
-      downloads,
-      releasesPageUrl: releasesUrl,
+    return missingInstallerJson(platform, releasesUrl, {
+      expectedVersion: offered,
+      missingSource: "github_platform_asset",
+      latestPublishedVersion,
+      githubTag: pinned.tag_name,
+      error: `Release ${pinned.tag_name} has no installer for this platform (${platform}).`,
     });
   } catch (err) {
-    const envPayload = fromEnvForWin();
-    if (envPayload) {
-      return successJson(platform, releasesUrl, envPayload);
-    }
     return NextResponse.json(
-      { ok: false, error: err instanceof Error ? err.message : "unknown", platform, releasesPageUrl: releasesUrl },
+      {
+        ok: false,
+        error: err instanceof Error ? err.message : "unknown",
+        platform,
+        releasesPageUrl: releasesUrl,
+        expectedVersion: offered,
+        missingSource: "github_api" satisfies MissingInstallerSource,
+        latestPublishedVersion: null,
+        url: null,
+        downloads: [],
+      },
       { status: 500 },
     );
   }
