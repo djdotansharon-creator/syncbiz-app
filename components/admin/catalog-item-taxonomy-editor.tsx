@@ -6,6 +6,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 import type { MusicTaxonomyCategory } from "@prisma/client";
 import type { PackTagDimension } from "@/lib/recommendations/catalog-coverage-health";
 import {
+  assessCatalogItemReadiness,
+  CATALOG_READINESS_DIMENSION_SHORT,
+  type CatalogReadinessStatus,
+} from "@/lib/recommendations/catalog-item-readiness";
+import {
   computeCatalogTagSuggestions,
   inferCatalogLanguageSignals,
   type CatalogTagSuggestion,
@@ -133,6 +138,9 @@ export function CatalogItemTaxonomyEditor({
   catalogTitle = "",
   catalogUrl = "",
   catalogProvider = null,
+  catalogDurationSec = null,
+  catalogThumbnail = null,
+  catalogManualEnergyRating = null,
   playlistHintTexts = [],
   metadataHaystackParts = [],
   nextUntaggedHref = null,
@@ -143,6 +151,10 @@ export function CatalogItemTaxonomyEditor({
   catalogTitle?: string;
   catalogUrl?: string;
   catalogProvider?: string | null;
+  /** Stage 9 — used by the live readiness gate. */
+  catalogDurationSec?: number | null;
+  catalogThumbnail?: string | null;
+  catalogManualEnergyRating?: number | null;
   playlistHintTexts?: string[];
   /** Snapshot description, hashtags, channel title — strengthens deterministic hints only. */
   metadataHaystackParts?: string[];
@@ -250,6 +262,27 @@ export function CatalogItemTaxonomyEditor({
     }
     return s;
   }, [links]);
+
+  /** Stage 9 — live readiness gate from saved links + persisted item fields. */
+  const readiness = useMemo(() => {
+    if (!catalogItemId) return null;
+    return assessCatalogItemReadiness({
+      url: catalogUrl,
+      provider: catalogProvider,
+      durationSec: catalogDurationSec,
+      thumbnail: catalogThumbnail,
+      manualEnergyRating: catalogManualEnergyRating,
+      linkedCategories: links.map((l) => l.taxonomyTag.category),
+    });
+  }, [
+    catalogItemId,
+    catalogUrl,
+    catalogProvider,
+    catalogDurationSec,
+    catalogThumbnail,
+    catalogManualEnergyRating,
+    links,
+  ]);
 
   /** Tags available to pick: ACTIVE, not yet assigned — assignment hides from picker. */
   const pickPool = useMemo(() => {
@@ -551,6 +584,8 @@ export function CatalogItemTaxonomyEditor({
         <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Current item</span>
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-100">{catalogTitle.trim() || "—"}</span>
       </div>
+
+      {readiness ? <CatalogReadinessPanel readiness={readiness} /> : null}
 
       <div>
         <p className="mt-1 text-[11px] text-neutral-600">
@@ -946,4 +981,63 @@ function youtubeAuditionHref(url: string, provider: string | null, videoId: stri
     return null;
   }
   return null;
+}
+
+const READINESS_BADGE_CLASSES: Record<CatalogReadinessStatus, string> = {
+  ready: "border-emerald-700/55 bg-emerald-950/35 text-emerald-100",
+  partial: "border-amber-700/55 bg-amber-950/35 text-amber-100",
+  "needs-work": "border-rose-800/60 bg-rose-950/40 text-rose-100",
+};
+
+const READINESS_BADGE_LABEL: Record<CatalogReadinessStatus, string> = {
+  ready: "Ready",
+  partial: "Partial",
+  "needs-work": "Needs work",
+};
+
+function CatalogReadinessPanel({
+  readiness,
+}: {
+  readiness: ReturnType<typeof assessCatalogItemReadiness>;
+}) {
+  return (
+    <div
+      className={`flex flex-wrap items-start justify-between gap-3 rounded-md border px-3 py-2.5 text-xs ${
+        READINESS_BADGE_CLASSES[readiness.status]
+      }`}
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded border border-current/40 bg-black/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider">
+            {READINESS_BADGE_LABEL[readiness.status]}
+          </span>
+          <span className="text-[11px] opacity-90">{readiness.summary}</span>
+        </div>
+        {readiness.hardMissing.length > 0 ? (
+          <div className="flex flex-wrap gap-1 pt-0.5">
+            {readiness.hardMissing.map((k) => (
+              <span
+                key={`miss-${k}`}
+                className="rounded-full border border-current/40 bg-black/25 px-2 py-0.5 text-[10px] font-medium"
+              >
+                Missing · {CATALOG_READINESS_DIMENSION_SHORT[k]}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {readiness.warnings.length > 0 ? (
+          <div className="flex flex-wrap gap-1 pt-0.5">
+            {readiness.warnings.map((k) => (
+              <span
+                key={`warn-${k}`}
+                className="rounded-full border border-current/30 bg-black/15 px-2 py-0.5 text-[10px] font-medium opacity-80"
+              >
+                Warning · {CATALOG_READINESS_DIMENSION_SHORT[k]}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }

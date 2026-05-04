@@ -25,6 +25,7 @@ import { CatalogMetadataBackfillPanel } from "@/components/admin/catalog-metadat
 import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import type { PackTagDimension } from "@/lib/recommendations/catalog-coverage-health";
+import { assessCatalogItemReadiness } from "@/lib/recommendations/catalog-item-readiness";
 import { CatalogTaggingScrollToEditor } from "@/components/admin/catalog-tagging-scroll-to-editor";
 
 export const dynamic = "force-dynamic";
@@ -429,7 +430,7 @@ export default async function CatalogTaggingAdminPage({
           take: SLUG_PREVIEW,
           orderBy: { taxonomyTag: { slug: "asc" } },
           select: {
-            taxonomyTag: { select: { slug: true } },
+            taxonomyTag: { select: { slug: true, category: true } },
           },
         },
       },
@@ -1047,6 +1048,9 @@ export default async function CatalogTaggingAdminPage({
           catalogTitle={selected?.title ?? ""}
           catalogUrl={selected?.url ?? ""}
           catalogProvider={selected?.provider ?? null}
+          catalogDurationSec={selected?.durationSec ?? null}
+          catalogThumbnail={selected?.thumbnail ?? null}
+          catalogManualEnergyRating={selected?.manualEnergyRating ?? null}
           playlistHintTexts={playlistHintTexts}
           metadataHaystackParts={metadataHaystackPartsForTaxonomy}
           nextUntaggedHref={nextUntaggedHref}
@@ -1154,6 +1158,26 @@ export default async function CatalogTaggingAdminPage({
               const href = catalogTaggingHref({ ...baseParams, catalogItemId: row.id });
               const rowYtHref = youtubeAuditionHrefForCatalog(row.url, row.provider, row.videoId);
               const rowDur = formatCatalogDuration(row.durationSec);
+              const rowReadiness = assessCatalogItemReadiness({
+                url: row.url,
+                provider: row.provider,
+                durationSec: row.durationSec,
+                thumbnail: row.thumbnail,
+                manualEnergyRating: row.manualEnergyRating,
+                linkedCategories: row.taxonomyLinks.map((l) => l.taxonomyTag.category),
+              });
+              const readinessBadgeClass =
+                rowReadiness.status === "ready"
+                  ? "border-emerald-700/55 bg-emerald-950/40 text-emerald-100"
+                  : rowReadiness.status === "partial"
+                    ? "border-amber-700/55 bg-amber-950/40 text-amber-100"
+                    : "border-rose-800/55 bg-rose-950/45 text-rose-100";
+              const readinessBadgeLabel =
+                rowReadiness.status === "ready"
+                  ? "READY"
+                  : rowReadiness.status === "partial"
+                    ? "PARTIAL"
+                    : "NEEDS WORK";
               return (
                 <li key={row.id}>
                   <div
@@ -1183,6 +1207,12 @@ export default async function CatalogTaggingAdminPage({
                     <div className="min-w-0 flex-1 space-y-1.5">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium leading-snug text-neutral-100">{row.title}</p>
+                        <span
+                          title={rowReadiness.summary}
+                          className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${readinessBadgeClass}`}
+                        >
+                          {readinessBadgeLabel}
+                        </span>
                         {row.archivedAt ? (
                           <span className="rounded border border-neutral-600 bg-neutral-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
                             Archived
