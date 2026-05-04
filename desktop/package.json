@@ -72,7 +72,21 @@
           "!**/test/**",
           "!**/tests/**",
           "!**/__tests__/**",
-          "!**/*.test.js"
+          "!**/*.test.js",
+          "!**/test-results/**",
+          "!**/playwright-report/**",
+          "!**/e2e/**",
+          "!**/playwright.config.*",
+          "!**/backups/**",
+          "!**/docs/**",
+          "!**/agent.py",
+          "!**/eslint.config.*",
+          "!**/postcss.config.*",
+          "!**/nixpacks.toml",
+          "!**/tsconfig*.json",
+          "!**/tsconfig.tsbuildinfo",
+          "!**/node_modules/.prisma/**/*.tmp*",
+          "!**/node_modules/typescript/**"
         ]
       }
     ],
