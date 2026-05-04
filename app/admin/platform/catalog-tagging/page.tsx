@@ -26,6 +26,10 @@ import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import type { PackTagDimension } from "@/lib/recommendations/catalog-coverage-health";
 import { assessCatalogItemReadiness } from "@/lib/recommendations/catalog-item-readiness";
+import {
+  assessCatalogItemEligibility,
+  eligibilityShortSummary,
+} from "@/lib/recommendations/catalog-item-eligibility";
 import { CatalogTaggingScrollToEditor } from "@/components/admin/catalog-tagging-scroll-to-editor";
 
 export const dynamic = "force-dynamic";
@@ -1166,6 +1170,7 @@ export default async function CatalogTaggingAdminPage({
                 manualEnergyRating: row.manualEnergyRating,
                 linkedCategories: row.taxonomyLinks.map((l) => l.taxonomyTag.category),
               });
+              const rowEligibility = assessCatalogItemEligibility(rowReadiness);
               const readinessBadgeClass =
                 rowReadiness.status === "ready"
                   ? "border-emerald-700/55 bg-emerald-950/40 text-emerald-100"
@@ -1178,6 +1183,22 @@ export default async function CatalogTaggingAdminPage({
                   : rowReadiness.status === "partial"
                     ? "PARTIAL"
                     : "NEEDS WORK";
+              const eligibilityTooltip = [
+                eligibilityShortSummary(rowEligibility),
+                ...rowEligibility.reasons,
+              ].join("\n");
+              const eligibilityChipClass =
+                rowEligibility.tier === "fully-eligible"
+                  ? null
+                  : rowEligibility.tier === "limited"
+                    ? "border-amber-700/55 bg-amber-950/40 text-amber-100"
+                    : "border-rose-800/55 bg-rose-950/45 text-rose-100";
+              const eligibilityChipLabel =
+                rowEligibility.tier === "limited"
+                  ? "LIMITED"
+                  : rowEligibility.tier === "blocked"
+                    ? "BLOCKED"
+                    : null;
               return (
                 <li key={row.id}>
                   <div
@@ -1213,6 +1234,14 @@ export default async function CatalogTaggingAdminPage({
                         >
                           {readinessBadgeLabel}
                         </span>
+                        {eligibilityChipLabel && eligibilityChipClass ? (
+                          <span
+                            title={eligibilityTooltip}
+                            className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${eligibilityChipClass}`}
+                          >
+                            {eligibilityChipLabel}
+                          </span>
+                        ) : null}
                         {row.archivedAt ? (
                           <span className="rounded border border-neutral-600 bg-neutral-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
                             Archived

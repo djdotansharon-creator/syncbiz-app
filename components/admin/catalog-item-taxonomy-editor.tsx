@@ -11,6 +11,12 @@ import {
   type CatalogReadinessStatus,
 } from "@/lib/recommendations/catalog-item-readiness";
 import {
+  assessCatalogItemEligibility,
+  eligibilityTierLabel,
+  type CatalogEligibilityAssessment,
+  type CatalogEligibilityTier,
+} from "@/lib/recommendations/catalog-item-eligibility";
+import {
   computeCatalogTagSuggestions,
   inferCatalogLanguageSignals,
   type CatalogTagSuggestion,
@@ -283,6 +289,9 @@ export function CatalogItemTaxonomyEditor({
     catalogManualEnergyRating,
     links,
   ]);
+
+  /** Stage 10 — derived eligibility (DJ Creator / Coverage strict). Visibility/diagnostic only. */
+  const eligibility = useMemo(() => (readiness ? assessCatalogItemEligibility(readiness) : null), [readiness]);
 
   /** Tags available to pick: ACTIVE, not yet assigned — assignment hides from picker. */
   const pickPool = useMemo(() => {
@@ -586,6 +595,7 @@ export function CatalogItemTaxonomyEditor({
       </div>
 
       {readiness ? <CatalogReadinessPanel readiness={readiness} /> : null}
+      {eligibility ? <CatalogEligibilityPanel eligibility={eligibility} /> : null}
 
       <div>
         <p className="mt-1 text-[11px] text-neutral-600">
@@ -1038,6 +1048,64 @@ function CatalogReadinessPanel({
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+const ELIGIBILITY_PANEL_CLASSES: Record<CatalogEligibilityTier, string> = {
+  "fully-eligible": "border-emerald-700/55 bg-emerald-950/30 text-emerald-100",
+  limited: "border-amber-700/55 bg-amber-950/30 text-amber-100",
+  blocked: "border-rose-800/60 bg-rose-950/35 text-rose-100",
+};
+
+function EligibilityFlagPill({ ok, label }: { ok: boolean; label: string }) {
+  const cls = ok
+    ? "border-emerald-700/55 bg-emerald-950/40 text-emerald-100"
+    : "border-rose-800/55 bg-rose-950/45 text-rose-100";
+  return (
+    <span
+      className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${cls}`}
+    >
+      {label} · {ok ? "✓" : "✗"}
+    </span>
+  );
+}
+
+function CatalogEligibilityPanel({ eligibility }: { eligibility: CatalogEligibilityAssessment }) {
+  return (
+    <div
+      className={`flex flex-col gap-2 rounded-md border px-3 py-2.5 text-xs ${
+        ELIGIBILITY_PANEL_CLASSES[eligibility.tier]
+      }`}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded border border-current/40 bg-black/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider">
+          {eligibilityTierLabel(eligibility.tier)}
+        </span>
+        <span className="text-[11px] opacity-90">
+          Eligibility — visibility / diagnostic only; no scoring change.
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        <EligibilityFlagPill ok={eligibility.djCreatorStrictEligible} label="DJ Creator (strict)" />
+        <EligibilityFlagPill ok={eligibility.djCreatorAnyEligible} label="DJ Creator (loose)" />
+        <EligibilityFlagPill ok={eligibility.coverageStrictMatchEligible} label="Coverage (strict)" />
+        <EligibilityFlagPill ok={eligibility.adminVisible} label="Admin / search" />
+      </div>
+      {eligibility.reasons.length > 0 ? (
+        <ul className="list-disc space-y-0.5 pl-5 text-[11px] opacity-90">
+          {eligibility.reasons.map((r, i) => (
+            <li key={`eligi-r-${i}`}>{r}</li>
+          ))}
+        </ul>
+      ) : null}
+      {eligibility.warnings.length > 0 ? (
+        <ul className="list-disc space-y-0.5 pl-5 text-[11px] opacity-75">
+          {eligibility.warnings.map((w, i) => (
+            <li key={`eligi-w-${i}`}>{w}</li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
