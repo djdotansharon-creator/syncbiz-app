@@ -108,6 +108,14 @@ export default async function CatalogCoverageDashboardPage() {
           <code className="text-xs text-neutral-500">npm run catalog-coverage:report</code>,{" "}
           <code className="text-xs text-neutral-500">npm run catalog-coverage:work-queue</code>.
         </p>
+        <p className="mt-2 max-w-3xl text-xs text-neutral-500">
+          Workflow: pick a weak pack, open a candidate in tagging, fix the missing dimensions and energy / URL type,
+          return here. <code className="text-[11px] text-neutral-600">LIMITED</code> /{" "}
+          <code className="text-[11px] text-neutral-600">BLOCKED</code> chips on candidates show global eligibility
+          across DJ Creator and Coverage strict flows. See{" "}
+          <code className="text-[11px] text-neutral-600">docs/CATALOG-OPERATING-SYSTEM-V1.md</code> for the
+          end-to-end editor guide.
+        </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Link href="/admin/platform/catalog-tagging" className={btnSecondary}>
             Catalog tagging

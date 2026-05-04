@@ -596,6 +596,12 @@ export function CatalogItemTaxonomyEditor({
 
       {readiness ? <CatalogReadinessPanel readiness={readiness} /> : null}
       {eligibility ? <CatalogEligibilityPanel eligibility={eligibility} /> : null}
+      {readiness || eligibility ? (
+        <p className="-mt-1 text-[11px] leading-snug text-neutral-500">
+          Readiness and eligibility are diagnostic only — no scoring or DJ Creator behavior change in V1. End-to-end
+          guide: <code className="text-[10.5px] text-neutral-600">docs/CATALOG-OPERATING-SYSTEM-V1.md</code>.
+        </p>
+      ) : null}
 
       <div>
         <p className="mt-1 text-[11px] text-neutral-600">
