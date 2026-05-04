@@ -10,5 +10,8 @@ export type BranchLibraryListItem = {
 
 export function branchLibraryItemMetaLine(it: BranchLibraryListItem): string {
   const g = it.genre?.trim() && it.genre !== "—" ? it.genre : "";
+  if (it.origin === "playlist") {
+    return [g, "Playlist"].filter(Boolean).join(" · ") || "Playlist";
+  }
   return [g, it.type].filter(Boolean).join(" · ") || it.origin;
 }

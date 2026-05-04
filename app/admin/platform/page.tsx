@@ -179,6 +179,12 @@ export default async function AdminPlatformPage({
               Recommendation coverage
             </Link>
             <Link
+              href="/admin/platform/catalog-coverage"
+              className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
+            >
+              Programming pack coverage
+            </Link>
+            <Link
               href="/admin/platform/audit"
               className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
             >

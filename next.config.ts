@@ -22,6 +22,26 @@ const nextConfig: NextConfig = {
       "**/node_modules/yt-dlp-wrap/bin/**",
       "**/.next/cache/**",
       "**/*.map",
+      // Test artifacts and dev-only files that NFT keeps pulling into
+      // .next/standalone — these inflate the desktop installer by ~700MB.
+      "**/test-results/**",
+      "**/playwright-report/**",
+      "**/e2e/**",
+      "**/playwright.config.*",
+      "**/backups/**",
+      "**/docs/**",
+      "**/*.md",
+      "**/agent.py",
+      "**/eslint.config.*",
+      "**/postcss.config.*",
+      "**/nixpacks.toml",
+      "**/tsconfig*.json",
+      "**/tsconfig.tsbuildinfo",
+      // Prisma's atomic engine writes leave query_engine-*.tmpNNNN behind on
+      // Windows when the rename is blocked; each one is ~18MB and they
+      // accumulate across rebuilds.
+      "**/node_modules/.prisma/**/*.tmp*",
+      "**/node_modules/typescript/**",
     ],
   },
 };

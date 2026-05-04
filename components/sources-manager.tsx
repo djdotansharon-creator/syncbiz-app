@@ -1,10 +1,15 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect, useRef, startTransition, type DragEvent, type MouseEvent } from "react";
-import { useCenterModule } from "@/lib/center-module-context";
+import {
+  useCenterModule,
+  isJinglesModule,
+  isDjCreatorHubModule,
+  isEditCurrentModule,
+} from "@/lib/center-module-context";
 import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
 import { EditCurrentWorkspacePanel } from "@/components/edit-current-workspace-panel";
-import { isJinglesModule, isEditCurrentModule } from "@/lib/center-module-context";
+import { DjCreatorHubPanel } from "@/components/dj-creator-hub-panel";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ShareModal } from "@/components/share-modal";
@@ -23,6 +28,7 @@ import { LibraryItemContextDeleteModal } from "@/components/library-item-context
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { LibrarySourceItemActions } from "@/components/library-source-item-actions";
 import { LibraryInputArea } from "@/components/library-input-area";
+import { DjCreatorAiShell } from "@/components/dj-creator-ai-shell";
 import { GuestLinkButton, guestLinkLedButtonClass } from "@/components/guest-link-button";
 import { getFavorites, addFavorite as addFav, removeFavorite as removeFav } from "@/lib/favorites-store";
 import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal, removePlaylistFromLocal, removeRadioFromLocal } from "@/lib/unified-sources-client";
@@ -208,6 +214,7 @@ type Props = {
 
 export function SourcesManager({ initialSources, pageTitle, pageSubtitle }: Props) {
   const [effectiveSources, setEffectiveSources] = useState<UnifiedSource[]>(initialSources);
+  const [djCreatorOpen, setDjCreatorOpen] = useState(false);
   const prevIdsRef = useRef<string>("");
 
   const refetchSources = useCallback(() => {
@@ -237,7 +244,12 @@ export function SourcesManager({ initialSources, pageTitle, pageSubtitle }: Prop
 
   return (
     <SourcesPlaybackProvider sources={effectiveSources}>
-      <SourcesManagerInner pageTitle={pageTitle} pageSubtitle={pageSubtitle} />
+      <SourcesManagerInner
+        pageTitle={pageTitle}
+        pageSubtitle={pageSubtitle}
+        djCreatorOpen={djCreatorOpen}
+        onDjCreatorOpenChange={setDjCreatorOpen}
+      />
     </SourcesPlaybackProvider>
   );
 }
@@ -425,6 +437,20 @@ function isUserSyncbizPlaylistSource(source: UnifiedSource): boolean {
   return contract.entityKind === "collection" && contract.collectionSubtype === "syncbiz_playlist";
 }
 
+function isDjCreatorWorkspacePlaylistSource(source: UnifiedSource): boolean {
+  if (source.origin !== "playlist" || !source.playlist?.id) return false;
+  const genreDj = String((source.genre ?? source.playlist.genre ?? "")).trim() === "DJ Creator";
+  if (!genreDj) return false;
+  /** Ready/external disk imports use a separate rail — exclude from workspace DJ Creator hub. */
+  if (source.playlist.libraryPlacement === "ready_external") return false;
+  const contract = classifyLibraryEntityContract(source);
+  /** Shell-backed external playlists (YT list=, etc.) stay out of the DJ Creator workspace hub. */
+  if (contract.entityKind === "collection" && contract.collectionSubtype === "external_playlist") {
+    return false;
+  }
+  return true;
+}
+
 /** Disk-backed Ready Playlist from mix import (`libraryPlacement: "ready_external"`) — not URL-inferred groupings. */
 function isPersistedReadyPlaylistSource(source: UnifiedSource): boolean {
   return source.origin === "playlist" && source.playlist?.libraryPlacement === "ready_external";
@@ -574,7 +600,17 @@ function makeCollectionContainers(sources: UnifiedSource[]) {
   };
 }
 
-function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; pageSubtitle?: string }) {
+function SourcesManagerInner({
+  pageTitle,
+  pageSubtitle,
+  djCreatorOpen,
+  onDjCreatorOpenChange,
+}: {
+  pageTitle?: string;
+  pageSubtitle?: string;
+  djCreatorOpen: boolean;
+  onDjCreatorOpenChange: (open: boolean) => void;
+}) {
   const { active: activeCenterModule, setActive: setActiveCenterModule } = useCenterModule();
   const searchParams = useSearchParams();
   const { locale } = useLocale();
@@ -617,6 +653,17 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const stopOverride = isDevicePlayer && !isMaster ? deviceCtx?.stopOrSend : undefined;
   const pauseOverride = isDevicePlayer && !isMaster ? deviceCtx?.pauseOrSend : undefined;
   const masterState = deviceCtx?.masterState;
+
+  const djCreatorHubSources = useMemo(() => {
+    const rows = sources.filter(isDjCreatorWorkspacePlaylistSource);
+    return [...rows].sort((a, b) => {
+      const db = b.playlist?.createdAt ?? "";
+      const da = a.playlist?.createdAt ?? "";
+      return db.localeCompare(da);
+    });
+  }, [sources]);
+
+  const djHubRailActive = isDjCreatorHubModule(activeCenterModule);
 
   useEffect(() => {
     try {
@@ -691,9 +738,12 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     }
     if (selection.type === "library_view") {
       if (selection.id === "all_library") return displaySources;
-      if (selection.id === "recently_added") return displaySources.slice(0, 24);
+      if (selection.id === "recently_added")
+        return displaySources.filter((s) => !isDjCreatorWorkspacePlaylistSource(s)).slice(0, 24);
       if (selection.id === "playlists") {
-        return displaySources.filter((s) => s.origin === "playlist");
+        return displaySources.filter(
+          (s) => s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s)
+        );
       }
       if (selection.id === "favorites") return displaySources.filter((s) => favoriteIds.includes(s.id));
       if (selection.id === "single_tracks") {
@@ -777,10 +827,16 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
     selection.type === "collection_container" && selection.subtype === "external_playlist" ? selection.key : null,
   ]);
 
-  const sectionBuckets = useMemo(
-    () => partitionSourcesByLibrarySection(visibleSources),
-    [visibleSources]
-  );
+  const sectionBuckets = useMemo(() => {
+    const raw = partitionSourcesByLibrarySection(visibleSources);
+    const hideDjCreatorInMainBuckets = !genreFilter;
+    return {
+      ...raw,
+      syncbiz_playlists: hideDjCreatorInMainBuckets
+        ? raw.syncbiz_playlists.filter((s) => !isDjCreatorWorkspacePlaylistSource(s))
+        : raw.syncbiz_playlists,
+    };
+  }, [visibleSources, genreFilter]);
 
   const selectedCollectionCards = useMemo(() => {
     if (selection.type === "collection_group") {
@@ -799,6 +855,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
   const userPlaylistContainers = useMemo(() => {
     return displaySources
       .filter((s) => {
+        if (isDjCreatorWorkspacePlaylistSource(s)) return false;
         const contract = classifyLibraryEntityContract(s);
         return contract.entityKind === "collection" && contract.collectionSubtype === "syncbiz_playlist" && s.origin === "playlist";
       })
@@ -1046,6 +1103,25 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
       else playSource(queue[0], ti);
     },
     [resolveSourcesForSelection, setQueue, playSourceOverride, playSource]
+  );
+
+  const handleDjHubPlaylistDragStart = useCallback(
+    (e: DragEvent<HTMLElement>, s: UnifiedSource) => {
+      const key = `syncbiz:${s.id}`;
+      const sourcesForDrop = resolveSourcesForSelection("syncbiz_playlist", key);
+      if (sourcesForDrop.length === 0) return;
+      e.stopPropagation();
+      e.dataTransfer.setData(
+        "application/syncbiz-playlist-container",
+        JSON.stringify({
+          subtype: "syncbiz_playlist",
+          key,
+          label: s.title,
+        } satisfies PlaylistContainerPayload)
+      );
+      setLibrarySourcesPlaylistDragPayload(e, sourcesForDrop);
+    },
+    [resolveSourcesForSelection]
   );
 
   /** Ready external drill-in: expanded rows must set session queue + correct leaf index (same contract as Play All). */
@@ -2162,6 +2238,17 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
         <div className="library-list-shell row-start-1 min-w-0 self-start overflow-hidden rounded-2xl p-2.5 lg:col-start-2 lg:row-start-1 lg:px-3 xl:px-3">
           {isJinglesModule(activeCenterModule) ? (
             <JinglesWorkspacePanel onClose={() => setActiveCenterModule(null)} />
+          ) : isDjCreatorHubModule(activeCenterModule) ? (
+            <DjCreatorHubPanel
+              playlists={djCreatorHubSources}
+              onClose={() => setActiveCenterModule(null)}
+              onCreateNew={() => {
+                setActiveCenterModule(null);
+                onDjCreatorOpenChange(true);
+              }}
+              onPlayPlaylist={(s) => playCollectionSelection("syncbiz_playlist", `syncbiz:${s.id}`)}
+              onPlaylistDragStart={handleDjHubPlaylistDragStart}
+            />
           ) : isEditCurrentModule(activeCenterModule) ? (
             <EditCurrentWorkspacePanel
               target={activeCenterModule.target}
@@ -2267,17 +2354,24 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
                 <span className="h-5 w-px shrink-0 rounded-full bg-slate-700/45" />
               </div>
               <div className="library-command-rail-radio flex shrink-0 items-center self-center">
-                <Link
-                  href="/radio"
-                  className="library-nav-link flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-medium"
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDjCreatorOpenChange(false);
+                    setActiveCenterModule(activeCenterModule === "dj-creator-hub" ? null : "dj-creator-hub");
+                  }}
+                  className={[
+                    guestLinkLedButtonClass,
+                    "h-10 shrink-0 justify-center gap-2 px-3 text-sm font-medium",
+                    djHubRailActive ? "ring-2 ring-amber-300/45 border-amber-400/65 bg-amber-600/22 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  aria-label="DJ Creator playlists and assistant — open workspace"
+                  title="DJ Creator — saved playlists and new sets from your catalog"
                 >
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
-                    <path d="M4 14h16" />
-                    <circle cx="12" cy="18" r="2" />
-                  </svg>
-                  {labels.radio[locale]}
-                </Link>
+                  DJ Creator AI
+                </button>
               </div>
             </div>
           </div>
@@ -2775,6 +2869,7 @@ function SourcesManagerInner({ pageTitle, pageSubtitle }: { pageTitle?: string; 
 
         <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl p-2.5 lg:col-start-3 lg:row-start-1 lg:justify-self-stretch">
           <div className="space-y-4">
+            <DjCreatorAiShell drawerOpen={djCreatorOpen} onDrawerOpenChange={onDjCreatorOpenChange} />
             <section>
               <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
                 Library
@@ -3279,10 +3374,22 @@ function SourceRow({
       }
       metaSlot={
         <div className="library-card-meta flex items-center gap-1.5 text-xs">
-          {source.genre && <span>{source.genre}</span>}
+          {source.origin === "playlist" ? (
+            <>
+              {Boolean(source.genre?.trim()) && <span>{source.genre}</span>}
+              <span aria-hidden>{Boolean(source.genre?.trim()) ? " · " : null}</span>
+              <span>{t.scheduleTargetPlaylist}</span>
+            </>
+          ) : (
+            <>
+              {source.genre && <span>{source.genre}</span>}
+            </>
+          )}
           {(source.viewCount ?? source.playlist?.viewCount) != null && (
             <>
-              {source.genre && <span>•</span>}
+              <span aria-hidden>
+                {source.origin === "playlist" || source.genre?.trim() ? " • " : null}
+              </span>
               <span className="tabular-nums">
                 {formatViewCount(source.viewCount ?? source.playlist?.viewCount ?? 0)} {t.views}
               </span>
@@ -3290,7 +3397,13 @@ function SourceRow({
           )}
           {(source.playlist?.durationSeconds ?? 0) > 0 && (
             <>
-              <span>•</span>
+              <span aria-hidden>
+                {source.origin === "playlist" ||
+                source.genre?.trim() ||
+                (source.viewCount ?? source.playlist?.viewCount) != null
+                  ? " • "
+                  : null}
+              </span>
               <span className="tabular-nums">{formatDuration(source.playlist?.durationSeconds ?? 0)}</span>
             </>
           )}
@@ -3375,6 +3488,20 @@ function SourceLogo({ type, origin, size }: { type: UnifiedSource["type"]; origi
           <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />
           <path d="M4 14h16" />
           <circle cx="12" cy="18" r="2" />
+        </svg>
+      </span>
+    );
+  }
+  if (origin === "playlist") {
+    return (
+      <span
+        className={`library-badge-logo flex ${sizeClass} items-center justify-center rounded-lg p-1 text-cyan-300`}
+        title={t.scheduleTargetPlaylist}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={sizeClass}>
+          <path d="M9 18V5l12-2v13" />
+          <circle cx="6" cy="18" r="3" />
+          <circle cx="18" cy="16" r="3" />
         </svg>
       </span>
     );

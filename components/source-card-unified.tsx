@@ -119,6 +119,17 @@ function SourceLogo({ type, origin, size = "md" }: { type: UnifiedSource["type"]
       </span>
     );
   }
+  if (origin === "playlist") {
+    return (
+      <span className={`${badge} ${boxClass} text-cyan-300/90`} title={t.scheduleTargetPlaylist}>
+        <svg className={sizeClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M9 18V5l12-2v13" />
+          <circle cx="6" cy="18" r="3" />
+          <circle cx="18" cy="16" r="3" />
+        </svg>
+      </span>
+    );
+  }
   return (
     <span className={`${badge} ${boxClass} ${color}`} title={typeTitle}>
       {type === "youtube" && (
@@ -373,7 +384,9 @@ export function SourceCard({
             <div className="flex flex-col gap-1">
               <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                 <p className="library-card-meta text-[10px] font-semibold uppercase tracking-[0.14em]">
-                  {libraryCardDisplayGenre(source)}
+                  {source.origin === "playlist"
+                    ? `${libraryCardDisplayGenre(source)} · Playlist`
+                    : libraryCardDisplayGenre(source)}
                 </p>
                 <div className="library-card-meta ml-auto flex items-center gap-2 text-[11px] tabular-nums">
                   {effectiveViews != null && (

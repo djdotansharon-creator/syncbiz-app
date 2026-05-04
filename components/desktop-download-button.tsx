@@ -12,6 +12,12 @@ import { useTranslations } from "@/lib/locale-context";
 const HERO_PNG = "/desktop-download-hero.png";
 const HERO_SVG = "/desktop-promo-illustration.svg";
 
+export type DownloadMissingSource =
+  | "railway_bundle"
+  | "github_release"
+  | "github_platform_asset"
+  | "github_api";
+
 export type DownloadInfo = {
   ok?: boolean;
   platform?: string;
@@ -23,11 +29,28 @@ export type DownloadInfo = {
   releasesPageUrl?: string;
   downloads?: Array<{ name: string; url: string; sizeBytes: number }>;
   error?: string;
-  source?: "github" | "env" | "bundle" | "default";
+  source?: "github" | "env" | "bundle";
+  missingSource?: DownloadMissingSource | string;
+  expectedVersion?: string;
+  latestPublishedVersion?: string | null;
+  githubTag?: string;
 };
 
 type ButtonView =
-  | { kind: "direct"; href: string; download: string | undefined; version: string; title: string }
+  | {
+      kind: "direct";
+      href: string;
+      downloadFileName?: string;
+      /** Same-site path — browser can use `download=` reliably. */
+      sameOrigin: boolean;
+      version: string;
+      title: string;
+    }
+  | {
+      kind: "notPublished";
+      versionLabel: string;
+      lines: string[];
+    }
   | { kind: "fallback"; href: string; version?: string; title: string; external: true };
 
 type Payload = { view: ButtonView; data: DownloadInfo };
@@ -56,21 +79,79 @@ function DownloadGlyph({ className }: { className?: string }) {
   );
 }
 
+function subExpected(tpl: string, expected: string): string {
+  return tpl.replaceAll("{expected}", expected);
+}
+
 function buildPayload(data: DownloadInfo, tr: Record<string, string | undefined>): Payload {
   const releases =
     typeof data.releasesPageUrl === "string" && data.releasesPageUrl.startsWith("https://")
       ? data.releasesPageUrl
       : "https://github.com/djdotansharon-creator/syncbiz-app/releases";
-  if (data.ok && data.url) {
+
+  const trimUrl = typeof data.url === "string" ? data.url.trim() : "";
+  if (data.ok === true && trimUrl.length > 0) {
     const v = (data.version ?? "?").trim() || "?";
     const sizeLabel = formatMB(data.sizeBytes);
     const title = `${tr.downloadDesktopAppTitle ?? "Download"} ${v}${sizeLabel ? ` (${sizeLabel})` : ""}`;
-    return { data, view: { kind: "direct" as const, href: data.url, download: data.fileName ?? undefined, version: v, title } };
+    const sameOrigin = trimUrl.startsWith("/");
+    return {
+      data,
+      view: {
+        kind: "direct" as const,
+        href: trimUrl,
+        downloadFileName: (data.fileName ?? undefined) || undefined,
+        sameOrigin,
+        version: v,
+        title,
+      },
+    };
   }
-  if (data.url) {
-    const v = (data.version ?? "?").trim() || "?";
-    return { data, view: { kind: "direct" as const, href: data.url, download: data.fileName ?? undefined, version: v, title: `${tr.downloadDesktopAppTitle ?? "Download"} ${v}` } };
+
+  if (
+    data.ok === false &&
+    data.missingSource &&
+    typeof data.expectedVersion === "string" &&
+    data.expectedVersion.length > 0
+  ) {
+    const exp = data.expectedVersion;
+    const latest = data.latestPublishedVersion?.trim() ?? "";
+    const lines: string[] = [];
+    switch (data.missingSource) {
+      case "github_release":
+        lines.push(subExpected(tr.downloadDesktopMissingGithubReleaseExpected ?? "", exp));
+        if (latest.length > 0) {
+          lines.push((tr.downloadDesktopLatestPublishedLine ?? "").replaceAll("{latest}", latest));
+        }
+        lines.push(tr.downloadDesktopMissingGithubReleaseHint ?? "");
+        break;
+      case "github_platform_asset":
+        lines.push(tr.downloadDesktopMissingGithubAsset ?? "");
+        if (data.githubTag) {
+          lines.push((tr.downloadDesktopMissingGithubAssetTag ?? "").replaceAll("{tag}", data.githubTag));
+        }
+        lines.push(subExpected(tr.downloadDesktopOfferedVersionLine ?? "", exp));
+        break;
+      case "railway_bundle":
+        lines.push(tr.downloadDesktopMissingRailwayBundle ?? "");
+        break;
+      case "github_api":
+        lines.push(tr.downloadDesktopMissingGithubApi ?? "");
+        if (data.error) lines.push(data.error);
+        break;
+      default:
+        lines.push(data.error ?? tr.downloadDesktopModalNoBuild ?? "");
+    }
+    return {
+      data,
+      view: {
+        kind: "notPublished" as const,
+        versionLabel: exp,
+        lines: lines.filter(Boolean),
+      },
+    };
   }
+
   return {
     data,
     view: {
@@ -130,7 +211,7 @@ function DesktopDownloadModal({ onClose, payload }: DesktopDownloadModalProps) {
   if (!mounted) return null;
 
   const { view, data } = payload;
-  const hasDirect = view.kind === "direct";
+  const isNotPublished = view.kind === "notPublished";
   const releasesPage =
     typeof data.releasesPageUrl === "string" && data.releasesPageUrl.startsWith("https://")
       ? data.releasesPageUrl
@@ -167,15 +248,20 @@ function DesktopDownloadModal({ onClose, payload }: DesktopDownloadModalProps) {
           <div className="flex flex-col justify-center gap-4 p-5 sm:p-7">
             <div>
               <h2 id={titleId} className="text-lg font-bold tracking-tight text-slate-50 sm:text-xl">
-                {t.downloadDesktopModalTitle}
+                {isNotPublished ? t.downloadDesktopNotPublishedHeading : t.downloadDesktopModalTitle}
               </h2>
-              <p className="mt-2 text-sm leading-relaxed text-slate-400">{t.downloadDesktopModalBody}</p>
+              <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                {isNotPublished
+                  ? subExpected(t.downloadDesktopNotPublishedLead ?? "", view.versionLabel)
+                  : t.downloadDesktopModalBody}
+              </p>
             </div>
-            {hasDirect ? (
+            {view.kind === "direct" ? (
               <div className="flex flex-col gap-3">
                 <a
                   href={view.href}
-                  download={view.download}
+                  {...(view.sameOrigin && view.downloadFileName ? { download: view.downloadFileName } : {})}
+                  {...(!view.sameOrigin ? { target: "_blank", rel: "noopener noreferrer" as const } : {})}
                   onClick={onClose}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-sky-600 via-blue-800 to-slate-950 px-4 py-3 text-center text-sm font-bold text-white shadow-[0_10px_32px_rgba(12,74,120,0.45)] ring-1 ring-sky-400/30 transition hover:from-sky-500 hover:via-blue-700 hover:shadow-sky-900/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
                 >
@@ -188,13 +274,34 @@ function DesktopDownloadModal({ onClose, payload }: DesktopDownloadModalProps) {
                   {t.downloadDesktopCtaSub}
                 </p>
               </div>
+            ) : view.kind === "notPublished" ? (
+              <div className="flex flex-col gap-3">
+                <ul className="list-disc space-y-2 ps-4 text-sm leading-relaxed text-amber-100/95">
+                  {view.lines.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+                <a
+                  href={releasesPage}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                  className="text-center text-sm font-medium text-sky-300 underline decoration-sky-500/50 underline-offset-2 hover:text-sky-200"
+                >
+                  {t.downloadDesktopModalGitHubLink}
+                </a>
+              </div>
             ) : (
               <div className="flex flex-col gap-3">
                 {extraFiles.length > 0 ? (
                   <ul className="max-h-40 space-y-2 overflow-y-auto text-sm text-slate-300">
                     {extraFiles.map((a) => (
                       <li key={a.name}>
-                        <a href={a.url} className="text-sky-300 underline decoration-sky-500/50 underline-offset-2 hover:text-sky-200" rel="noreferrer" target="_blank">
+                        <a
+                          href={a.url}
+                          className="text-sky-300 underline decoration-sky-500/50 underline-offset-2 hover:text-sky-200"
+                          rel="noreferrer"
+                          target="_blank"
+                        >
                           {a.name}
                         </a>
                         {formatMB(a.sizeBytes) ? <span className="ms-1 text-slate-500">({formatMB(a.sizeBytes)})</span> : null}

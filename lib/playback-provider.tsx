@@ -15,13 +15,15 @@ import {
   type ReactNode,
 } from "react";
 import { initDeviceId } from "./device-id";
-import type { Playlist } from "./playlist-types";
+import type { Playlist, PlaylistType } from "./playlist-types";
 import type { UnifiedSource, SourceProviderType } from "./source-types";
 import type { Source } from "./types";
 import { getPlaylistTracks } from "./playlist-types";
 import {
   canEmbedInCard,
   canonicalYouTubeWatchUrlForPlayback,
+  derivePlaylistTrackCoverArt,
+  derivePlaylistUnifiedCoverArt,
   effectivePlaybackPlaylistAttachment,
   getYouTubeThumbnail,
   getYouTubeVideoId,
@@ -77,7 +79,14 @@ function unifiedToPlaybackTrack(source: UnifiedSource, trackIndex = 0): Playback
     const title = t?.name ?? (t as { title?: string })?.title ?? source.title;
     const type = (t?.type ?? source.type) as TrackSource;
     const url = canonicalYouTubeWatchUrlForPlayback(t?.url ?? source.url);
-    const cover = t?.cover ?? source.cover ?? null;
+    const cover =
+      derivePlaylistTrackCoverArt({
+        cover: t?.cover,
+        url: t?.url ?? source.url ?? "",
+        type: (t?.type ?? source.type) as PlaylistType,
+      }) ??
+      source.cover ??
+      null;
     return {
       id: t?.id ?? `${source.id}-${trackIndex}`,
       title,
@@ -91,7 +100,12 @@ function unifiedToPlaybackTrack(source: UnifiedSource, trackIndex = 0): Playback
     title: source.title,
     type: source.type as TrackSource,
     url: canonicalYouTubeWatchUrlForPlayback(source.url),
-    cover: source.cover,
+    cover:
+      derivePlaylistTrackCoverArt({
+        cover: source.cover ?? undefined,
+        url: source.url ?? "",
+        type: source.type as PlaylistType,
+      }) ?? source.cover ?? null,
   };
 }
 
@@ -1319,7 +1333,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         id: unifiedPlaylistSourceId(playlist.id),
         title: playlist.name,
         genre: playlist.genre || "Mixed",
-        cover: playlist.thumbnail || playlist.cover || null,
+        cover: derivePlaylistUnifiedCoverArt(playlist),
         type: (playlist.tracks?.[trackIndex]?.type ?? playlist.type) as UnifiedSource["type"],
         url: playlist.url,
         origin: "playlist",

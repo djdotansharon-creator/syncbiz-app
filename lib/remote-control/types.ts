@@ -40,7 +40,14 @@ export type StationPlaybackState = {
    * so a CONTROL client can show an Edit button that opens the right form
    * without having to reconstruct the full UnifiedSource on the wire.
    */
-  currentSource: { id: string; title: string; cover: string | null; editHref?: string | null } | null;
+  currentSource: {
+    id: string;
+    title: string;
+    cover: string | null;
+    editHref?: string | null;
+    /** Set when playing a persisted playlist — drives CONTROL playlist-kind badge without full `UnifiedSource`. */
+    playlistOriginBadge?: "dj_creator" | "ready" | "scheduled" | "my" | "branch";
+  } | null;
   currentTrackIndex: number;
   queue: Array<{ id: string; title: string; cover: string | null }>;
   queueIndex: number;
