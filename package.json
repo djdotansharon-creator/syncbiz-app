@@ -16,7 +16,9 @@
     "dj-creator:import-rules": "npx tsx scripts/import-dj-creator-rules.ts",
     "music-taxonomy:import-xlsx": "node scripts/import-music-taxonomy-xlsx.cjs",
     "music-taxonomy:enrich-playlist-pro": "node scripts/build-playlist-pro-enrichment-from-pdf.cjs",
-    "e2e:seed-user": "npx tsx scripts/seed-e2e-user.ts"
+    "e2e:seed-user": "npx tsx scripts/seed-e2e-user.ts",
+    "catalog-coverage:report": "npx tsx scripts/report-catalog-coverage.ts",
+    "catalog-coverage:work-queue": "npx tsx scripts/report-catalog-editor-work-queue.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

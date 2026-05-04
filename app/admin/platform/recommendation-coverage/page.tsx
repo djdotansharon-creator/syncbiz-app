@@ -167,6 +167,10 @@ export default async function RecommendationCoveragePage() {
             Recommendation preview
           </Link>
           <span className="text-neutral-600"> · </span>
+          <Link href="/admin/platform/catalog-coverage" className="text-sky-400 hover:underline">
+            Programming pack coverage
+          </Link>
+          <span className="text-neutral-600"> · </span>
           Coverage
         </p>
         <h1 className="mt-1 text-2xl font-semibold text-neutral-50">Recommendation coverage</h1>
@@ -193,6 +197,9 @@ export default async function RecommendationCoveragePage() {
           </li>
         </ul>
         <div className="mt-4 flex flex-wrap gap-2">
+          <Link href="/admin/platform/catalog-coverage" className={btnSecondary}>
+            Programming pack coverage (Stage 7)
+          </Link>
           <Link href="/admin/platform/catalog-tagging" className={btnSecondary}>
             Open Catalog tagging
           </Link>

@@ -29,6 +29,24 @@
 - **Catalog Programming** — `MusicTaxonomyCategory.CATALOG_PROGRAMMING` and workbench editor tab exist; editorial tags need **seed/content** and any product rules you want tied to DJ / search later.
 - **Affinity branches** — `lib/recommendations/music-affinity-branches.types.ts` + JSON bundle: **data-only scaffold**; file states they are **not** wired to scoring or DJ Creator. **Later:** product wiring + optional seed/ops process.
 
+### Music Programming Coverage (not “genre coverage” alone)
+
+**Music Programming Coverage** is how well the catalog satisfies a *programming intent*: a stack of separate axes, never a single blended “genre score.”
+
+Keep these dimensions **distinct in data, rules, and explanations** (they may co-appear in UI or packs, but must not be collapsed into one bucket):
+
+- **Genres** (dictionary genre / family semantics)
+- **Style tags** (fine-grained style / sonic vocabulary)
+- **Business-fit tags** (venue, audience, use-case fit vs workspace profile)
+- **Daypart tags** (time-of-day programming)
+- **Energy** (contextual intensity; BPM is related but not interchangeable — see Stage 6.2 doc)
+- **URL type** (source shape: stream, file identity, provider class — overlaps extended source metadata when modeled)
+- **Editorial signals** (curation, programming category, human labels)
+
+A **coverage pack** is a **bundle** that applies *together* for a scenario (e.g. wizard step + smart search context): it **combines** dimensions for evaluation and UX, but **does not merge** them into one lossy axis. Reporting, scoring hints, and curation should remain able to say *which* dimension is thin.
+
+*Note:* In conversations, “Stage 7” sometimes names **programming coverage** work. In *this* roadmap table, row **Stage 7** is still the separate placeholder for **catalog source extended metadata** (`docs/CATALOG-SOURCE-METADATA-FUTURE.md`). Do not treat “extended stats” as a substitute for the orthogonal coverage model above.
+
 ---
 
 ## 2–6. Stage detail (compact)
@@ -69,4 +87,5 @@ Affinity branches and Catalog Programming **do not** block Stage 6 closure if th
 
 ## Changelog
 
+- **Music Programming Coverage** — documented orthogonal dimensions (genre, style, business-fit, daypart, energy, URL type, editorial) and **coverage pack** rule (combine, do not merge); clarified informal “Stage 7” vs roadmap Stage 7 placeholder.
 - **Roadmap authored** in-repo as `docs/CATALOG-DJ-CREATOR-ROADMAP.md` to replace ad-hoc stage references scattered across comments.
