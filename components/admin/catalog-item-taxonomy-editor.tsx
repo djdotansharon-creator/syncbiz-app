@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { MusicTaxonomyCategory } from "@prisma/client";
+import type { PackTagDimension } from "@/lib/recommendations/catalog-coverage-health";
 import {
   computeCatalogTagSuggestions,
   inferCatalogLanguageSignals,
@@ -26,7 +27,33 @@ type LinkRow = {
   taxonomyTag: Pick<TaxonomyTagRow, "id" | "slug" | "category" | "labelEn" | "labelHe">;
 };
 
-/** Tab order matches Stage 5.5 UX brief — maps to MusicTaxonomyCategory. */
+/** Stage 8 — URL snapshot from programming coverage dashboard (read-only hints). */
+export type CatalogCoverageWorkbenchContext = {
+  packId: string;
+  packLabelEn: string;
+  missingDimensions: PackTagDimension[];
+  energyHint: "needs" | "ok" | "unset" | null;
+  inferredUrlType: string | null;
+  urlShape: string | null;
+};
+
+const COVERAGE_DIM_TO_CATEGORY: Record<PackTagDimension, MusicTaxonomyCategory> = {
+  genre: "MAIN_SOUND_GENRE",
+  style: "STYLE_TAGS",
+  businessFit: "BUSINESS_FIT",
+  daypart: "DAYPART_FIT",
+  vibe: "VIBE_ENERGY",
+  catalogProgramming: "CATALOG_PROGRAMMING",
+};
+
+const COVERAGE_DIM_SHORT_LABEL: Record<PackTagDimension, string> = {
+  genre: "Genre",
+  style: "Style / feel",
+  businessFit: "Business fit",
+  daypart: "Daypart",
+  vibe: "Vibe / energy",
+  catalogProgramming: "Catalog programming",
+};
 const CATEGORY_TABS: { id: MusicTaxonomyCategory | "ALL"; label: string }[] = [
   { id: "ALL", label: "All" },
   { id: "BUSINESS_FIT", label: "Business Fit" },
@@ -110,6 +137,7 @@ export function CatalogItemTaxonomyEditor({
   metadataHaystackParts = [],
   nextUntaggedHref = null,
   metadataSuggestions = [],
+  coverageWorkbenchContext = null,
 }: {
   catalogItemId: string | null;
   catalogTitle?: string;
@@ -121,6 +149,8 @@ export function CatalogItemTaxonomyEditor({
   nextUntaggedHref?: string | null;
   /** Stage 5.9 — merged into deterministic suggestions (still pending → save only). */
   metadataSuggestions?: CatalogTagSuggestion[];
+  /** Stage 8 — programming coverage dashboard deep-link context (display + tab jumps only). */
+  coverageWorkbenchContext?: CatalogCoverageWorkbenchContext | null;
 }) {
   const router = useRouter();
   const [links, setLinks] = useState<LinkRow[]>([]);
@@ -448,8 +478,81 @@ export function CatalogItemTaxonomyEditor({
         </p>
       ) : null}
 
+      {coverageWorkbenchContext ? (
+        <div className="space-y-3 rounded-lg border border-teal-800/55 bg-teal-950/25 px-3 py-3 ring-1 ring-teal-500/20">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0 space-y-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-teal-200/95">
+                Programming coverage work
+              </p>
+              <p className="text-sm font-medium text-neutral-100">{coverageWorkbenchContext.packLabelEn}</p>
+              <p className="font-mono text-[10px] text-neutral-500 break-all">{coverageWorkbenchContext.packId}</p>
+            </div>
+            <Link
+              href="/admin/platform/catalog-coverage"
+              className="shrink-0 rounded border border-teal-700/70 bg-teal-950/50 px-3 py-1.5 text-xs font-medium text-teal-50 hover:bg-teal-900/55"
+            >
+              ← Coverage dashboard
+            </Link>
+          </div>
+          {coverageWorkbenchContext.missingDimensions.length > 0 ? (
+            <div>
+              <p className="text-[11px] font-medium text-neutral-400">Missing taxonomy dimensions (for this pack)</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {coverageWorkbenchContext.missingDimensions.map((dim) => (
+                  <button
+                    key={dim}
+                    type="button"
+                    title={`Open dictionary tab: ${taxonomyCategoryLabel(COVERAGE_DIM_TO_CATEGORY[dim])}`}
+                    className="rounded-full border border-teal-700/55 bg-neutral-950/60 px-2.5 py-1 text-[11px] font-medium text-teal-50 hover:bg-teal-950/55"
+                    onClick={() => setCategoryTab(COVERAGE_DIM_TO_CATEGORY[dim])}
+                  >
+                    {COVERAGE_DIM_SHORT_LABEL[dim]}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[10px] leading-snug text-neutral-500">
+                Jumps to the matching taxonomy category tab below — choose dictionary tags explicitly; nothing is applied automatically.
+              </p>
+            </div>
+          ) : (
+            <p className="text-[11px] text-neutral-400">
+              No missing pack tag dimensions were passed for this deep link — use assigned tags and suggestions as usual.
+            </p>
+          )}
+          <div className="rounded border border-neutral-800/80 bg-neutral-950/45 px-2.5 py-2 text-[11px] text-neutral-400 space-y-1">
+            <p>
+              <span className="text-neutral-600">Manual energy (coverage hint): </span>
+              {coverageWorkbenchContext.energyHint === "needs" ? (
+                <span className="text-amber-200/95">Out of band or unset for pack targets — use Energy rating panel above.</span>
+              ) : coverageWorkbenchContext.energyHint === "unset" ? (
+                <span className="text-amber-200/95">Unset — set manual energy when this pack expects a band.</span>
+              ) : coverageWorkbenchContext.energyHint === "ok" ? (
+                <span className="text-emerald-200/90">In range at snapshot (re-check after edits).</span>
+              ) : (
+                <span className="text-neutral-500">—</span>
+              )}
+            </p>
+            <p>
+              <span className="text-neutral-600">URL type / shape (read-only): </span>
+              <span className="font-mono text-neutral-300">
+                {coverageWorkbenchContext.inferredUrlType ?? "?"}
+              </span>
+              <span className="text-neutral-600"> · </span>
+              <span className="font-mono text-neutral-300">{coverageWorkbenchContext.urlShape ?? "—"}</span>
+              <span className="text-neutral-600"> · provider </span>
+              <span className="font-mono text-neutral-300">{catalogProvider?.trim() ? catalogProvider : "—"}</span>
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-neutral-800 pb-3">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Current item</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-100">{catalogTitle.trim() || "—"}</span>
+      </div>
+
       <div>
-        <h3 className="text-sm font-medium text-neutral-200">Assigned tags ({links.length})</h3>
         <p className="mt-1 text-[11px] text-neutral-600">
           Removing unlinks this dictionary tag from this catalog row only — other assignments stay untouched.
         </p>
@@ -512,10 +615,10 @@ export function CatalogItemTaxonomyEditor({
             Clear pending
           </button>
           <Link
-            href="/admin/platform/recommendation-coverage"
+            href="/admin/platform/catalog-coverage"
             className="inline-flex items-center rounded border border-neutral-600 bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-neutral-800"
           >
-            Back to coverage
+            Programming coverage
           </Link>
         </div>
       </div>

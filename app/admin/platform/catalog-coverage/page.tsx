@@ -229,7 +229,7 @@ export default async function CatalogCoverageDashboardPage() {
                     <li key={c.catalogItemId} className="rounded border border-neutral-800/80 bg-neutral-950/40 p-2 text-xs">
                       <div className="font-medium text-neutral-200">
                         <Link
-                          href={`/admin/platform/catalog-tagging?catalogItemId=${encodeURIComponent(c.catalogItemId)}`}
+                          href={`/admin/platform/catalog-tagging?catalogItemId=${encodeURIComponent(c.catalogItemId)}&fromCoverage=1&coveragePack=${encodeURIComponent(hp.packId)}&coveragePackLabel=${encodeURIComponent(hp.labelEn)}&coverageMissing=${encodeURIComponent(c.missingTagDimensions.join(","))}&coverageEnergy=${encodeURIComponent(c.needsEnergyAttention ? "needs" : c.hasManualEnergy ? "ok" : "unset")}${c.inferredUrlType ? `&coverageUrlType=${encodeURIComponent(c.inferredUrlType)}` : ""}&coverageUrlShape=${encodeURIComponent(c.urlShape)}`}
                           className="text-sky-400 hover:underline"
                         >
                           Open in tagging

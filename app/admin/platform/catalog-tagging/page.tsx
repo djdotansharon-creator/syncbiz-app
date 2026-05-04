@@ -24,6 +24,8 @@ import { CatalogWorkbenchTopDashboard } from "@/components/admin/catalog-workben
 import { CatalogMetadataBackfillPanel } from "@/components/admin/catalog-metadata-backfill-panel";
 import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/auth/guards";
+import type { PackTagDimension } from "@/lib/recommendations/catalog-coverage-health";
+import { CatalogTaggingScrollToEditor } from "@/components/admin/catalog-tagging-scroll-to-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -243,6 +245,30 @@ async function gatherDuplicateHints(selected: {
     .slice(0, 50);
 }
 
+const VALID_COVERAGE_PACK_DIMS = new Set<PackTagDimension>([
+  "genre",
+  "style",
+  "businessFit",
+  "daypart",
+  "vibe",
+  "catalogProgramming",
+]);
+
+function parseCoverageMissingDims(raw: string | undefined): PackTagDimension[] {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  const out: PackTagDimension[] = [];
+  for (const part of raw.split(",")) {
+    const p = part.trim() as PackTagDimension;
+    if (VALID_COVERAGE_PACK_DIMS.has(p)) out.push(p);
+  }
+  return out;
+}
+
+function parseCoverageEnergyHint(raw: string | undefined): "needs" | "ok" | "unset" | null {
+  if (raw === "needs" || raw === "ok" || raw === "unset") return raw;
+  return null;
+}
+
 function catalogTaggingHref(parts: {
   q?: string;
   catalogItemId?: string;
@@ -290,6 +316,13 @@ export default async function CatalogTaggingAdminPage({
     filter?: string;
     provider?: string;
     includeArchived?: string;
+    fromCoverage?: string;
+    coveragePack?: string;
+    coveragePackLabel?: string;
+    coverageMissing?: string;
+    coverageEnergy?: string;
+    coverageUrlType?: string;
+    coverageUrlShape?: string;
   }>;
 }) {
   await requireSuperAdmin();
@@ -302,6 +335,24 @@ export default async function CatalogTaggingAdminPage({
   const includeArchived =
     typeof sp.includeArchived === "string" &&
     (sp.includeArchived === "1" || sp.includeArchived.toLowerCase() === "true");
+
+  const fromCoverageRaw = typeof sp.fromCoverage === "string" ? sp.fromCoverage.trim().toLowerCase() : "";
+  const fromProgrammingCoverage =
+    fromCoverageRaw === "1" || fromCoverageRaw === "true" || fromCoverageRaw === "yes";
+  const coveragePackId = typeof sp.coveragePack === "string" ? sp.coveragePack.trim() : "";
+  const coveragePackLabel = typeof sp.coveragePackLabel === "string" ? sp.coveragePackLabel.trim() : "";
+  const coverageMissingDims = parseCoverageMissingDims(sp.coverageMissing);
+  const coverageEnergyHint = parseCoverageEnergyHint(
+    typeof sp.coverageEnergy === "string" ? sp.coverageEnergy.trim().toLowerCase() : undefined,
+  );
+  const coverageUrlType =
+    typeof sp.coverageUrlType === "string" && sp.coverageUrlType.trim().length > 0
+      ? sp.coverageUrlType.trim()
+      : null;
+  const coverageUrlShape =
+    typeof sp.coverageUrlShape === "string" && sp.coverageUrlShape.trim().length > 0
+      ? sp.coverageUrlShape.trim()
+      : null;
 
   const clauses: Prisma.CatalogItemWhereInput[] = [];
   if (!includeArchived) {
@@ -408,6 +459,18 @@ export default async function CatalogTaggingAdminPage({
         })
       : Promise.resolve(null),
   ]);
+
+  const coverageWorkbenchContext =
+    fromProgrammingCoverage && selected
+      ? {
+          packId: coveragePackId || "(unspecified pack)",
+          packLabelEn: coveragePackLabel || coveragePackId || "Programming coverage",
+          missingDimensions: coverageMissingDims,
+          energyHint: coverageEnergyHint,
+          inferredUrlType: coverageUrlType,
+          urlShape: coverageUrlShape,
+        }
+      : null;
 
   const baseParams = { q, filter: filterMode, provider: providerQ, includeArchived };
 
@@ -732,7 +795,11 @@ export default async function CatalogTaggingAdminPage({
         </div>
 
         {selected ? (
-          <div className="rounded-lg border border-sky-900/60 bg-gradient-to-b from-sky-950/30 to-neutral-950/80 p-5 ring-1 ring-sky-500/20">
+          <div
+            id="catalog-tagging-editor-focus"
+            className="rounded-lg border border-sky-900/60 bg-gradient-to-b from-sky-950/30 to-neutral-950/80 p-5 ring-1 ring-sky-500/20 scroll-mt-4"
+          >
+            {catalogItemId ? <CatalogTaggingScrollToEditor catalogItemId={catalogItemId} /> : null}
             <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-400/90">
               Editing tags for this catalog item
             </p>
@@ -984,6 +1051,7 @@ export default async function CatalogTaggingAdminPage({
           metadataHaystackParts={metadataHaystackPartsForTaxonomy}
           nextUntaggedHref={nextUntaggedHref}
           metadataSuggestions={metadataSuggestionsFromSnapshot}
+          coverageWorkbenchContext={coverageWorkbenchContext}
         />
 
         {selected ? (
