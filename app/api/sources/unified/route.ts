@@ -104,25 +104,34 @@ export async function GET(request: NextRequest) {
 
     const items: UnifiedSource[] = [];
 
-    for (const p of playlists) {
-      if (!playlistMatchesApiScope(p, scope)) continue;
-      const branchId = resolveMediaBranchId(p);
-      if (await hasBranchAccess(user.id, branchId)) {
-        items.push(playlistToUnified(p));
-      }
+    const scopedPlaylists = playlists.filter((p) => playlistMatchesApiScope(p, scope));
+    const playlistGate = await Promise.all(
+      scopedPlaylists.map((p) =>
+        hasBranchAccess(user.id, resolveMediaBranchId(p)).then((ok) => (ok ? p : null)),
+      ),
+    );
+    for (const p of playlistGate) {
+      if (p) items.push(playlistToUnified(p));
     }
+
     if (scope === "branch") {
-      for (const r of radioStations) {
-        const branchId = resolveMediaBranchId(r);
-        if (await hasBranchAccess(user.id, branchId)) {
-          items.push(radioToUnified(r));
-        }
+      const radioGate = await Promise.all(
+        radioStations.map((r) =>
+          hasBranchAccess(user.id, resolveMediaBranchId(r)).then((ok) => (ok ? r : null)),
+        ),
+      );
+      for (const r of radioGate) {
+        if (r) items.push(radioToUnified(r));
       }
-      for (const s of filteredDbSources) {
-        const branchId = (s as Source).branchId ?? "default";
-        if (await hasBranchAccess(user.id, branchId)) {
-          items.push(dbSourceToUnified(s));
-        }
+
+      const sourceGate = await Promise.all(
+        filteredDbSources.map((s) => {
+          const branchId = (s as Source).branchId ?? "default";
+          return hasBranchAccess(user.id, branchId).then((ok) => (ok ? s : null));
+        }),
+      );
+      for (const s of sourceGate) {
+        if (s) items.push(dbSourceToUnified(s));
       }
     }
 

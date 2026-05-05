@@ -17,7 +17,7 @@ import {
 import { shouldAppendFreeTextToDjCreatorCatalogQuery } from "@/lib/recommendations/dj-creator-catalog-query";
 import { computeDjCreatorMatrixKey } from "@/lib/recommendations/dj-creator-search-context";
 import { useLocale } from "@/lib/locale-context";
-import { inferPlaylistType } from "@/lib/playlist-utils";
+import { getYouTubeThumbnail, inferPlaylistType } from "@/lib/playlist-utils";
 import type { Playlist, PlaylistType } from "@/lib/playlist-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { savePlaylistToLocal } from "@/lib/unified-sources-client";
@@ -26,6 +26,8 @@ type SmartSearchRow = {
   catalogItemId: string;
   title: string;
   url: string;
+  /** Catalog thumbnail URL from smart-search (`CatalogItem.thumbnail`). */
+  thumbnail?: string | null;
   provider: string | null;
   durationSec: number | null;
   curationRating: number;
@@ -859,16 +861,32 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
     setSaveMessage(null);
     setLastSavedPlaylistId(null);
     try {
-      const tracks = draftRows.map((r) => {
+      const tracks: Array<{
+        id: string;
+        name: string;
+        type: PlaylistType;
+        url: string;
+        catalogItemId: string;
+        cover?: string;
+      }> = [];
+      let playlistThumbnail = "";
+      for (const r of draftRows) {
         const type = inferPlaylistType(r.url) as PlaylistType;
-        return {
+        const urlTrim = r.url.trim();
+        const fromCatalog = `${r.thumbnail ?? ""}`.trim();
+        const derivedYt = getYouTubeThumbnail(urlTrim) ?? "";
+        const coverStr = fromCatalog || derivedYt;
+        const track = {
           id: crypto.randomUUID(),
           name: r.title,
           type,
-          url: r.url.trim(),
+          url: urlTrim,
           catalogItemId: r.catalogItemId,
+          ...(coverStr ? { cover: coverStr } : {}),
         };
-      });
+        tracks.push(track);
+        if (!playlistThumbnail && coverStr) playlistThumbnail = coverStr;
+      }
       const first = tracks[0];
       const res = await fetch("/api/playlists", {
         method: "POST",
@@ -880,7 +898,7 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
           url: first.url,
           genre: "DJ Creator",
           type: first.type,
-          thumbnail: "",
+          thumbnail: playlistThumbnail,
           tracks,
         }),
       });

@@ -33,6 +33,8 @@ const POP_LOG_WEIGHT = 0.004;
 
 export type SmartCatalogSearchResultRow = CatalogFitScoreRow & {
   url: string;
+  /** CatalogItem.thumbnail — HTTPS URL or null (not a stored file). */
+  thumbnail: string | null;
   provider: string | null;
   durationSec: number | null;
   curationRating: number;
@@ -398,6 +400,7 @@ export async function runSmartCatalogSearch(args: {
     return {
       ...row,
       url: meta.url,
+      thumbnail: meta.thumbnail,
       provider: meta.provider,
       durationSec: meta.durationSec,
       curationRating: meta.curationRating,

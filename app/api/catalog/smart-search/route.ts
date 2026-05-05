@@ -119,6 +119,7 @@ export async function GET(req: NextRequest) {
       catalogItemId: r.catalogItemId,
       title: r.title,
       url: r.url,
+      thumbnail: r.thumbnail,
       provider: r.provider,
       durationSec: r.durationSec,
       curationRating: r.curationRating,
