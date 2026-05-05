@@ -2,7 +2,7 @@
  * Stage 6 V1 — orchestrates deterministic smart catalog search (parser + existing fit scoring).
  */
 
-import type { WorkspaceBusinessProfile } from "@prisma/client";
+import type { MusicTaxonomyCategory, WorkspaceBusinessProfile } from "@prisma/client";
 import type { DaypartSegment } from "@/lib/recommendations/business-daypart-vibe.types";
 import { prisma } from "@/lib/prisma";
 import { loadValidatedFitRules } from "@/lib/recommendations/load-fit-rules";
@@ -23,6 +23,9 @@ import {
 } from "@/lib/recommendations/parse-smart-catalog-query";
 import { catalogDiscoveryActiveWhere } from "@/lib/catalog-discovery-scope";
 import type { DjSmartSearchDjContext } from "@/lib/recommendations/dj-creator-search-context";
+import { assessCatalogItemReadiness } from "@/lib/recommendations/catalog-item-readiness";
+import { assessCatalogItemEligibility } from "@/lib/recommendations/catalog-item-eligibility";
+import { isCatalogEligibilityEnforcementEnabled } from "@/lib/recommendations/catalog-eligibility-flag";
 
 const MAX_CATALOG_SCAN = 4000;
 const CURATION_WEIGHT = 0.012;
@@ -61,6 +64,12 @@ export type SmartCatalogSearchResponse = {
   djAvoidStyleFilterApplied: boolean;
   /** Present when DJ Creator passed a strict matrix key. */
   djMatrixKey?: string | null;
+  /** Stage 12 — true iff the SYNCBIZ_ENFORCE_CATALOG_ELIGIBILITY flag actively filtered this run. */
+  eligibilityFilterEnabled: boolean;
+  /** Items dropped because eligibility tier was `blocked` (only set when filter ran). */
+  filteredOutBlockedCount: number;
+  /** Items dropped because eligibility tier was `limited` (only set when filter ran). */
+  filteredOutLimitedCount: number;
 };
 
 function mapProfile(
@@ -267,9 +276,12 @@ export async function runSmartCatalogSearch(args: {
       url: true,
       provider: true,
       durationSec: true,
+      thumbnail: true,
       curationRating: true,
       manualEnergyRating: true,
-      taxonomyLinks: { select: { taxonomyTag: { select: { slug: true } } } },
+      taxonomyLinks: {
+        select: { taxonomyTag: { select: { slug: true, category: true } } },
+      },
       catalogSourceSnapshots: {
         orderBy: { fetchedAt: "desc" },
         take: 1,
@@ -277,6 +289,13 @@ export async function runSmartCatalogSearch(args: {
       },
     },
   });
+
+  const categoriesById = new Map<string, MusicTaxonomyCategory[]>(
+    catalogRowsRaw.map((row) => [
+      row.id,
+      row.taxonomyLinks.map((l) => l.taxonomyTag.category),
+    ] as const),
+  );
 
   const snapById = new Map<
     string,
@@ -336,6 +355,34 @@ export async function runSmartCatalogSearch(args: {
     });
   }
 
+  // Stage 12 — gated eligibility enforcement on the DJ Creator strict path only.
+  // Off by default. Non-DJ smart search (admin preview, library) is never affected
+  // because djCtx is null on those paths.
+  let filteredOutBlockedCount = 0;
+  let filteredOutLimitedCount = 0;
+  const eligibilityFilterEnabled = djCtx != null && isCatalogEligibilityEnforcementEnabled();
+  if (eligibilityFilterEnabled) {
+    rankedRescorePool = rankedRescorePool.filter((row) => {
+      const meta = metaById.get(row.catalogItemId);
+      const cats = categoriesById.get(row.catalogItemId) ?? [];
+      if (!meta) return true;
+      const readiness = assessCatalogItemReadiness({
+        url: meta.url,
+        provider: meta.provider,
+        durationSec: meta.durationSec,
+        thumbnail: meta.thumbnail,
+        manualEnergyRating: meta.manualEnergyRating,
+        linkedCategories: cats,
+      });
+      // catalogDiscoveryActiveWhere already excludes archived rows, so archivedAt is null here.
+      const elig = assessCatalogItemEligibility({ readiness, archivedAt: null });
+      if (elig.canUseInDjCreator) return true;
+      if (elig.eligibilityLevel === "blocked") filteredOutBlockedCount++;
+      else if (elig.eligibilityLevel === "limited") filteredOutLimitedCount++;
+      return false;
+    });
+  }
+
   const enriched: SmartCatalogSearchResultRow[] = rankedRescorePool.map((row) => {
     const meta = metaById.get(row.catalogItemId)!;
     const snap = snapById.get(row.catalogItemId)!;
@@ -388,6 +435,9 @@ export async function runSmartCatalogSearch(args: {
     dictSlugCount: dictSlugSet.size,
     parserTaxonomyInDictionary,
     djAvoidStyleFilterApplied,
+    eligibilityFilterEnabled,
+    filteredOutBlockedCount,
+    filteredOutLimitedCount,
     ...(djCtx ? { djMatrixKey: djCtx.matrixKey } : {}),
   };
 }
