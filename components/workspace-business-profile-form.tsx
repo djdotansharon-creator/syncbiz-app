@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Workspace Business Profile editor — tenant (`/settings`) or platform admin drill-down.
+ * Workspace Business Profile editor — tenant (`/owner`) or platform admin drill-down.
  * Maps to WorkspaceBusinessProfile (Stage 1). No recommendations or catalog UI.
  */
 

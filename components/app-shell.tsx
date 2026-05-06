@@ -320,6 +320,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   });
 
   const isSourcesLibraryRoute = pathname?.startsWith("/sources") ?? false;
+  /** Full-width main under the deck — same shell as library (workspace routes + library). */
+  const isLibraryPlayerMainFullWidth = (() => {
+    const p = pathname ?? "";
+    if (!p) return false;
+    if (p.startsWith("/sources")) return true;
+    if (/^\/playlists\/[^/]+\/edit(\/|$)/.test(p)) return true;
+    if (p === "/dashboard" || p === "/owner" || p === "/logs" || p === "/settings") return true;
+    if (p === "/radio") return true;
+    if (p.startsWith("/schedules")) return true;
+    return false;
+  })();
   // Unified deck treatment: every desktop (app) route gets the media-theme
   // player shell — hero card + Command Pads aside + library-theme tokens —
   // so the top bar looks identical on /library, /radio, /owner, /schedules,
@@ -896,12 +907,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
 
         <main
-          className={`flex-1 px-4 pb-4 sm:px-6${isSourcesLibraryRoute ? " pt-4" : " py-5"}${isMediaThemeRoute ? " library-main-below-deck" : ""}`}
+          className={`flex-1 px-4 pb-4 sm:px-6${isLibraryPlayerMainFullWidth ? " pt-4" : " py-5"}${isMediaThemeRoute ? " library-main-below-deck" : ""}`}
           {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
         >
           <div
             className={
-              isSourcesLibraryRoute ? "mx-auto w-full max-w-none" : "mx-auto max-w-5xl"
+              isLibraryPlayerMainFullWidth ? "mx-auto w-full max-w-none" : "mx-auto max-w-5xl"
             }
           >
             {children}

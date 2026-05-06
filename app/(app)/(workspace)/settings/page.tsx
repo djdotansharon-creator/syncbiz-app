@@ -1,50 +1,66 @@
+import type { ReactNode } from "react";
 import { ClearPlaybackCacheButton } from "@/components/clear-playback-cache-button";
+import { DesktopSettingsControls } from "@/components/desktop-settings-controls";
 import { DeviceModeSettingsSwitch } from "@/components/device-mode-settings-switch";
 import { MixDurationSetting } from "@/components/mix-duration-setting";
 import { SettingsPreferencesControls } from "@/components/settings-preferences-controls";
-import { WorkspaceBusinessProfileForm } from "@/components/workspace-business-profile-form";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
-import {
-  getWorkspaceBusinessProfileJson,
-  sanitizeBusinessProfileForTenant,
-} from "@/lib/workspace-business-profile";
-import { getTenantRole } from "@/lib/user-store";
 import { redirect } from "next/navigation";
+
+function PlaceholderCard({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
+      <h2 className="text-sm font-semibold text-slate-50">{title}</h2>
+      <p className="mt-0.5 text-xs text-slate-400">{description}</p>
+      {children ? <div className="mt-4">{children}</div> : null}
+    </div>
+  );
+}
 
 export default async function SettingsPage() {
   const user = await getCurrentUserFromCookies();
   if (!user) redirect("/login?from=/settings");
-
-  const role = await getTenantRole(user.id, user.tenantId);
-  const canEdit = role === "TENANT_OWNER" || role === "TENANT_ADMIN";
-  const rawProfile = await getWorkspaceBusinessProfileJson(user.tenantId);
-  const businessProfile = sanitizeBusinessProfileForTenant(rawProfile);
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-xl font-semibold text-slate-50">Settings</h1>
         <p className="mt-0.5 text-xs text-slate-400">
-          Account and playback preferences.
+          Day-to-day playback and device preferences. Workspace business profile lives under{" "}
+          <span className="text-slate-300">Owner</span>.
         </p>
       </div>
 
-      <WorkspaceBusinessProfileForm
-        workspaceId={user.tenantId}
-        initialProfile={businessProfile}
-        variant="tenant"
-        canEdit={canEdit}
-      />
-
-      <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
-        <h2 className="text-sm font-semibold text-slate-50">Preferences</h2>
-        <p className="mt-0.5 text-xs text-slate-400">
-          Theme and language preferences.
-        </p>
-        <div className="mt-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <PlaceholderCard
+          title="Playback preferences"
+          description="Theme and language for this browser."
+        >
           <SettingsPreferencesControls />
-        </div>
-      </section>
+        </PlaceholderCard>
+        <PlaceholderCard
+          title="Desktop app settings"
+          description="Auto-start and local music folder. Available when running the SyncBiz desktop app."
+        >
+          <DesktopSettingsControls />
+        </PlaceholderCard>
+        <PlaceholderCard
+          title="Account preferences"
+          description="Profile and workspace account options. More coming soon."
+        />
+        <PlaceholderCard
+          title="More settings"
+          description="Additional controls will appear here in future releases."
+        />
+      </div>
 
       <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
         <h2 className="text-sm font-semibold text-slate-50">Remote player</h2>

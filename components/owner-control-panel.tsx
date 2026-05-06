@@ -4,7 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 
-export default function OwnerControlPage() {
+/** Remote branch control (WS). Rendered below workspace business profile on `/owner`. */
+export function OwnerControlPanel() {
   const {
     branches,
     selectedBranchId,
@@ -27,7 +28,7 @@ export default function OwnerControlPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-slate-50">Owner Control</h1>
+        <h2 className="text-xl font-semibold text-slate-50">Owner control</h2>
         <p className="mt-1 text-sm text-slate-400">
           Control branch players from anywhere. No local Wi-Fi required.
         </p>
@@ -40,6 +41,7 @@ export default function OwnerControlPage() {
           </span>
           <div className="flex gap-2">
             <button
+              type="button"
               onClick={refreshBranchList}
               disabled={status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-700/80 disabled:opacity-50"
@@ -92,6 +94,7 @@ export default function OwnerControlPage() {
 
           <div className="flex flex-wrap gap-2">
             <button
+              type="button"
               onClick={() => sendCommand("PLAY")}
               disabled={!selectedBranchId || status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
@@ -99,6 +102,7 @@ export default function OwnerControlPage() {
               Play
             </button>
             <button
+              type="button"
               onClick={() => sendCommand("PAUSE")}
               disabled={!selectedBranchId || status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
@@ -106,6 +110,7 @@ export default function OwnerControlPage() {
               Pause
             </button>
             <button
+              type="button"
               onClick={() => sendCommand("STOP")}
               disabled={!selectedBranchId || status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
@@ -113,6 +118,7 @@ export default function OwnerControlPage() {
               Stop
             </button>
             <button
+              type="button"
               onClick={() => sendCommand("NEXT")}
               disabled={!selectedBranchId || status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
@@ -120,6 +126,7 @@ export default function OwnerControlPage() {
               Next
             </button>
             <button
+              type="button"
               onClick={() => sendCommand("PREV")}
               disabled={!selectedBranchId || status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
@@ -141,6 +148,7 @@ export default function OwnerControlPage() {
                 className="flex-1 rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-sky-500/50 focus:outline-none focus:ring-2 focus:ring-sky-500/30"
               />
               <button
+                type="button"
                 onClick={() => {
                   if (loadUrl.trim()) sendCommand("LOAD_PLAYLIST", { url: loadUrl.trim() });
                 }}
