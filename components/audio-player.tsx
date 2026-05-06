@@ -51,6 +51,11 @@ import {
 } from "@/lib/playback-resilience";
 import { resolveDeckSourceBadge, labelForPlaylistOriginBadge } from "@/lib/deck-source-badge";
 import { syncbizAuditPlayerCreationTarget, syncbizAuditTransportTransitionStart } from "@/lib/syncbiz-transport-audit";
+import {
+  isIOSAutoplayBlock,
+  registerIOSAudioElement,
+  setIOSNeedsTapToResume,
+} from "@/lib/ios-audio-unlock";
 
 /** Crossfade runtime diagnostics – key transitions only, no 500ms spam */
 function xfadeLog(phase: string, data?: Record<string, unknown>) {
@@ -998,6 +1003,29 @@ export function AudioPlayer() {
     [setLastMessage, locale]
   );
 
+  /**
+   * iPhone Safari rejects programmatic `audio.play()` outside the user-gesture
+   * activation window. When that happens, flip status back to paused so the
+   * UI doesn't claim audio is playing while it's silent, and surface the
+   * "Tap to resume" affordance via the iOS unlock module.
+   */
+  const handleAudioPlayRejection = useCallback(
+    (err: unknown, context?: string) => {
+      if (isIOSAutoplayBlock(err)) {
+        playbackLifecycleLog("ios_autoplay_block", { context, error: String(err) });
+        setIOSNeedsTapToResume(true);
+        try {
+          pause();
+        } catch {
+          /* ignore — pause is best-effort; UI still flips via state */
+        }
+        return;
+      }
+      handlePlaybackError(err, context);
+    },
+    [handlePlaybackError, pause]
+  );
+
   /** Best-effort resume when tab/app returns — does not override user pause (status must still be playing). */
   const nudgeResumePlayback = useCallback(() => {
     if (typeof document !== "undefined" && document.hidden) return;
@@ -1011,9 +1039,10 @@ export function AudioPlayer() {
     });
     try {
       if (isStreamUrlRef.current && audioRef.current?.paused) {
-        void audioRef.current.play().catch((e) =>
-          playbackLifecycleLog("resume_media_attempt", { result: "audio_reject", error: String(e) })
-        );
+        void audioRef.current.play().catch((e) => {
+          playbackLifecycleLog("resume_media_attempt", { result: "audio_reject", error: String(e) });
+          handleAudioPlayRejection(e, "nudgeResumePlayback");
+        });
       }
       if (isYouTubeRef.current && embedReadyRef.current) {
         const p = ytPlayerRef.current;
@@ -1029,7 +1058,7 @@ export function AudioPlayer() {
     } catch (e) {
       playbackLifecycleLog("resume_media_attempt", { result: "error", error: String(e) });
     }
-  }, []);
+  }, [handleAudioPlayRejection]);
 
   useEffect(() => {
     playbackLifecycleLog("platform_hint", {
@@ -1041,6 +1070,30 @@ export function AudioPlayer() {
           (navigator as Navigator & { standalone?: boolean }).standalone === true),
     });
   }, []);
+
+  // Make the live <audio> element discoverable by the iOS unlock module so
+  // mobile-now-playing-sheet can call audio.play() synchronously inside its
+  // tap handler. No-op on non-iOS UAs because primeIOSFromGesture short-circuits.
+  useEffect(() => {
+    registerIOSAudioElement(audioRef.current);
+    return () => registerIOSAudioElement(null);
+  }, []);
+
+  // Clear the "Tap to resume" flag whenever audio actually starts playing or
+  // the user explicitly pauses/stops, so the affordance only appears when
+  // iOS actually blocked us.
+  useEffect(() => {
+    if (status === "playing") {
+      const audio = audioRef.current;
+      if (!audio) return;
+      const onPlaying = () => setIOSNeedsTapToResume(false);
+      audio.addEventListener("playing", onPlaying);
+      return () => audio.removeEventListener("playing", onPlaying);
+    }
+    if (status === "paused" || status === "stopped" || status === "idle") {
+      setIOSNeedsTapToResume(false);
+    }
+  }, [status]);
 
   useEffect(() => {
     if (isControlMirror) return;
@@ -1117,12 +1170,12 @@ export function AudioPlayer() {
     const audio = audioRef.current;
     if (!audio || !isStreamUrl) return;
     if (status === "playing") {
-      if (audio.paused) audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
+      if (audio.paused) audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
     } else {
       audio.pause();
       if (status === "stopped") audio.currentTime = 0;
     }
-  }, [status, isStreamUrl, handlePlaybackError]);
+  }, [status, isStreamUrl, handleAudioPlayRejection]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -1283,14 +1336,14 @@ export function AudioPlayer() {
           hls.attachMedia(audio);
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             if (cancelled) return;
-            if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
+            if (statusRef.current === "playing") audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
           });
         } else if (audio.canPlayType("application/vnd.apple.mpegurl")) {
           audio.src = currentPlayUrl;
-          if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
+          if (statusRef.current === "playing") audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
         } else {
           audio.src = currentPlayUrl;
-          if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
+          if (statusRef.current === "playing") audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
         }
       });
       return () => {
@@ -1318,9 +1371,9 @@ export function AudioPlayer() {
     const onError = () => handlePlaybackError("audio load failed", "audio.error");
     audio.addEventListener("error", onError);
     audio.src = currentPlayUrl;
-    if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
+    if (statusRef.current === "playing") audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
     return () => audio.removeEventListener("error", onError);
-  }, [isStreamUrl, currentPlayUrl, handlePlaybackError, locale]);
+  }, [isStreamUrl, currentPlayUrl, handlePlaybackError, handleAudioPlayRejection, locale]);
 
   useEffect(() => {
     const p = ytPlayerRef.current;
