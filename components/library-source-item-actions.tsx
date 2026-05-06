@@ -85,7 +85,7 @@ export function LibrarySourceItemActions({
 
   return (
     <div
-      className="mt-0.5 flex w-full min-w-0 flex-nowrap items-center justify-center gap-1"
+      className="library-source-deck-actions mt-0.5 flex w-full min-w-0 flex-nowrap items-center justify-center gap-1"
       role="group"
       aria-label={t.sourceControlsAria}
       onClick={(e) => e.stopPropagation()}

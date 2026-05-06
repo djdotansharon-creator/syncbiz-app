@@ -8,8 +8,12 @@ export type LibraryBrowseCardSurfaceProps = {
   artworkUrl?: string | null;
   /** Top-left badge on default art (desktop). Omit or "" when `artSlot` provides custom art (web). */
   originBadgeLabel?: string;
+  /** Optional Tailwind classes merged onto the top-left badge (LIST/SINGLE/SET/Radio colors). */
+  originBadgeClassName?: string;
   /** Replace default art block (web: HydrationSafeImage + overlays). */
   artSlot?: ReactNode;
+  /** Top-right overlay on art (e.g. stream provider mark on leaf library cards). */
+  artTopRightSlot?: ReactNode;
   title: string;
   /** Primary subtitle line under title (ignored when `metaSlot` set). */
   metaLine: string;

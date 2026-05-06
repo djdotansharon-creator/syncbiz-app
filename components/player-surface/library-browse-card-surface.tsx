@@ -1,15 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import type { LibraryBrowseCardSurfaceProps } from "@/lib/player-surface/library-browse-types";
 import { isSafeHttpCoverUrl } from "@/lib/player-surface/cover-url";
 
 function DefaultArt({
   artworkUrl,
   originBadgeLabel,
+  originBadgeClassName = "",
+  topRightSlot,
 }: {
   artworkUrl: string | null;
   originBadgeLabel: string;
+  originBadgeClassName?: string;
+  topRightSlot?: ReactNode;
 }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -20,7 +24,9 @@ function DefaultArt({
 
   return (
     <div className="sb-lbc-art">
-      {originBadgeLabel.trim() ? <span className="sb-lbc-origin">{originBadgeLabel}</span> : null}
+      {originBadgeLabel.trim() ? (
+        <span className={`sb-lbc-origin ${originBadgeClassName}`.trim()}>{originBadgeLabel}</span>
+      ) : null}
       {showImg ? (
         <img
           src={artworkUrl!}
@@ -39,6 +45,11 @@ function DefaultArt({
           </svg>
         </div>
       )}
+      {topRightSlot ? (
+        <div className="pointer-events-none absolute right-2 top-2 z-[2] [&_button]:pointer-events-auto [&_span]:pointer-events-auto">
+          {topRightSlot}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -48,7 +59,9 @@ export function LibraryBrowseCardSurface(props: LibraryBrowseCardSurfaceProps) {
     as,
     artworkUrl,
     originBadgeLabel = "",
+    originBadgeClassName = "",
     artSlot,
+    artTopRightSlot,
     title,
     metaLine,
     metaSlot,
@@ -68,7 +81,14 @@ export function LibraryBrowseCardSurface(props: LibraryBrowseCardSurfaceProps) {
 
   const inner = (
     <>
-      {artSlot ?? <DefaultArt artworkUrl={safeUrl} originBadgeLabel={originBadgeLabel} />}
+      {artSlot ?? (
+        <DefaultArt
+          artworkUrl={safeUrl}
+          originBadgeLabel={originBadgeLabel}
+          originBadgeClassName={originBadgeClassName}
+          topRightSlot={artTopRightSlot}
+        />
+      )}
       <div className="sb-lbc-body">
         <div className="sb-lbc-title-row">
           <h3 className="sb-lbc-title">{title}</h3>
