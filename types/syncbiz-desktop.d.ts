@@ -20,6 +20,20 @@ type ScanLocalAudioFolderIpcResult =
   | { status: "not_directory" }
   | { status: "error"; message: string };
 
+type DesktopAutoStartState = {
+  enabled: boolean;
+  supported: boolean;
+};
+
+type DesktopMusicFolderSnapshot = {
+  path: string | null;
+};
+
+type DesktopPickMusicFolderResult =
+  | { status: "ok"; path: string }
+  | { status: "canceled" }
+  | { status: "error"; message: string };
+
 type SyncBizDesktopBridgePreload = {
   getConfig: () => Promise<{ deviceId: string }>;
   localMockTransport: (payload: DesktopLocalMockPayload) => Promise<unknown>;
@@ -27,6 +41,13 @@ type SyncBizDesktopBridgePreload = {
   scanLocalAudioFolder?: (dir: string) => Promise<ScanLocalAudioFolderIpcResult>;
   /** Optional: native path for a dropped `File` (Electron webUtils). */
   getPathForFile?: (file: File) => string;
+  /** Optional: OS auto-start (login item) state. */
+  getAutoStart?: () => Promise<DesktopAutoStartState>;
+  setAutoStart?: (enabled: boolean) => Promise<DesktopAutoStartState>;
+  /** Optional: persisted music folder path. */
+  getMusicFolder?: () => Promise<DesktopMusicFolderSnapshot>;
+  pickMusicFolder?: () => Promise<DesktopPickMusicFolderResult>;
+  clearMusicFolder?: () => Promise<DesktopMusicFolderSnapshot>;
 };
 
 declare global {

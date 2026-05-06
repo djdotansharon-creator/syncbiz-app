@@ -19,6 +19,7 @@ export function defaultRuntimeConfig(): DesktopRuntimeConfig {
     wsToken: "",
     lastAuthEmail: undefined,
     desktopTokenExpiresAtIso: undefined,
+    musicFolderPath: undefined,
   };
 }
 
@@ -51,6 +52,10 @@ export function loadRuntimeConfig(userData: string): DesktopRuntimeConfig {
       desktopTokenExpiresAtIso:
         typeof data.desktopTokenExpiresAtIso === "string" && data.desktopTokenExpiresAtIso.trim()
           ? data.desktopTokenExpiresAtIso.trim()
+          : undefined,
+      musicFolderPath:
+        typeof data.musicFolderPath === "string" && data.musicFolderPath.trim()
+          ? data.musicFolderPath.trim()
           : undefined,
     };
     return merged;
@@ -89,6 +94,13 @@ export function patchRuntimeConfig(
       patch.desktopTokenExpiresAtIso !== undefined
         ? patch.desktopTokenExpiresAtIso
         : current.desktopTokenExpiresAtIso,
+    // Empty string clears; absent key preserves current value.
+    musicFolderPath:
+      patch.musicFolderPath === undefined
+        ? current.musicFolderPath
+        : typeof patch.musicFolderPath === "string" && patch.musicFolderPath.trim()
+          ? patch.musicFolderPath.trim()
+          : undefined,
   };
   if (!next.deviceId.trim()) {
     next = { ...next, deviceId: newDeviceId() };

@@ -19,6 +19,16 @@ export const MVP_IPC = {
   MPV_SEEK_TO: "mvp:mpv-seek-to",
   /** Main process: list audio files in a directory (Desktop only). */
   SCAN_LOCAL_AUDIO_FOLDER: "mvp:scan-local-audio-folder",
+  /** Read OS login-item state via app.getLoginItemSettings. */
+  GET_AUTOSTART: "mvp:get-autostart",
+  /** Write OS login-item state via app.setLoginItemSettings. */
+  SET_AUTOSTART: "mvp:set-autostart",
+  /** Read persisted music folder path. */
+  GET_MUSIC_FOLDER: "mvp:get-music-folder",
+  /** Open native folder picker; persist + return chosen path. */
+  PICK_MUSIC_FOLDER: "mvp:pick-music-folder",
+  /** Clear persisted music folder path. */
+  CLEAR_MUSIC_FOLDER: "mvp:clear-music-folder",
 } as const;
 
 /** Result of scanning a folder for audio files (IPC from main). */
@@ -26,6 +36,25 @@ export type ScanLocalAudioFolderResult =
   | { status: "ok"; playlistName: string; files: string[] }
   | { status: "not_directory" }
   | { status: "error"; message: string };
+
+/** Current login-item state from app.getLoginItemSettings. */
+export type AutoStartState = {
+  /** True if Electron will launch the app at OS login. */
+  enabled: boolean;
+  /** False on platforms where openAtLogin is unsupported (e.g. some Linux configs). */
+  supported: boolean;
+};
+
+/** Result of the native music-folder picker. */
+export type PickMusicFolderResult =
+  | { status: "ok"; path: string }
+  | { status: "canceled" }
+  | { status: "error"; message: string };
+
+/** Persisted music folder snapshot returned by GET_MUSIC_FOLDER / CLEAR_MUSIC_FOLDER. */
+export type MusicFolderSnapshot = {
+  path: string | null;
+};
 
 /** Local mock console — same commands as remote WS COMMAND (no MPV). */
 export type LocalMockTransportPayload = {
@@ -59,6 +88,8 @@ export type DesktopRuntimeConfig = {
   lastAuthEmail?: string;
   /** ISO time when the current desktop bearer token expires (if known). */
   desktopTokenExpiresAtIso?: string;
+  /** User-selected music folder for local file browsing (Desktop only). */
+  musicFolderPath?: string;
 };
 
 export type DesktopSignInResult =

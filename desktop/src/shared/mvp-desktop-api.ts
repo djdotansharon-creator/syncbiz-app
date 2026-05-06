@@ -1,11 +1,14 @@
 import type {
+  AutoStartState,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
   DesktopSignInResult,
   LocalMockTransportPayload,
+  MusicFolderSnapshot,
   MvpConfigPatch,
   MvpStatusSnapshot,
+  PickMusicFolderResult,
   ScanLocalAudioFolderResult,
 } from "./mvp-types";
 
@@ -33,4 +36,14 @@ export type SyncBizDesktopMvp = {
   scanLocalAudioFolder: (dir: string) => Promise<ScanLocalAudioFolderResult>;
   /** Native absolute path for a dropped/selected `File` (replaces deprecated `file.path` in modern Electron). */
   getPathForFile: (file: File) => string;
+  /** Read the OS auto-start (login item) state for SyncBiz. */
+  getAutoStart: () => Promise<AutoStartState>;
+  /** Toggle the OS auto-start (login item) state for SyncBiz. */
+  setAutoStart: (enabled: boolean) => Promise<AutoStartState>;
+  /** Read the persisted music folder path (or null when unset). */
+  getMusicFolder: () => Promise<MusicFolderSnapshot>;
+  /** Open native folder picker; on confirm, persist + return chosen path. */
+  pickMusicFolder: () => Promise<PickMusicFolderResult>;
+  /** Clear the persisted music folder path. */
+  clearMusicFolder: () => Promise<MusicFolderSnapshot>;
 };

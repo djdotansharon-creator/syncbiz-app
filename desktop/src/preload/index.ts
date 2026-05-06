@@ -3,13 +3,16 @@
  */
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
+  AutoStartState,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
   DesktopSignInResult,
   LocalMockTransportPayload,
+  MusicFolderSnapshot,
   MvpConfigPatch,
   MvpStatusSnapshot,
+  PickMusicFolderResult,
   ScanLocalAudioFolderResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
@@ -49,6 +52,12 @@ const api: SyncBizDesktopMvp = {
       return "";
     }
   },
+  getAutoStart: (): Promise<AutoStartState> => ipcRenderer.invoke(MVP_IPC.GET_AUTOSTART),
+  setAutoStart: (enabled: boolean): Promise<AutoStartState> =>
+    ipcRenderer.invoke(MVP_IPC.SET_AUTOSTART, enabled),
+  getMusicFolder: (): Promise<MusicFolderSnapshot> => ipcRenderer.invoke(MVP_IPC.GET_MUSIC_FOLDER),
+  pickMusicFolder: (): Promise<PickMusicFolderResult> => ipcRenderer.invoke(MVP_IPC.PICK_MUSIC_FOLDER),
+  clearMusicFolder: (): Promise<MusicFolderSnapshot> => ipcRenderer.invoke(MVP_IPC.CLEAR_MUSIC_FOLDER),
   onStatus: (callback) => {
     const handler = (_: unknown, status: MvpStatusSnapshot) => {
       callback(status);

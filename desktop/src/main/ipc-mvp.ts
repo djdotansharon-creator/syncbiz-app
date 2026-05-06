@@ -1,12 +1,15 @@
-import { BrowserWindow, ipcMain, app } from "electron";
+import { BrowserWindow, ipcMain, app, dialog } from "electron";
 import type {
+  AutoStartState,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
   DesktopSignInResult,
   LocalMockTransportPayload,
+  MusicFolderSnapshot,
   MvpConfigPatch,
   MvpStatusSnapshot,
+  PickMusicFolderResult,
   ScanLocalAudioFolderResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
@@ -207,6 +210,74 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     }
     return scanLocalAudioFolder(dir);
   });
+
+  ipcMain.handle(MVP_IPC.GET_AUTOSTART, (): AutoStartState => readAutoStartState());
+
+  ipcMain.handle(MVP_IPC.SET_AUTOSTART, (_e, enabled: unknown): AutoStartState => {
+    const want = enabled === true;
+    try {
+      app.setLoginItemSettings({ openAtLogin: want });
+    } catch (err) {
+      console.error("[SyncBiz desktop] setLoginItemSettings failed:", err);
+    }
+    return readAutoStartState();
+  });
+
+  ipcMain.handle(MVP_IPC.GET_MUSIC_FOLDER, (): MusicFolderSnapshot => {
+    const c = loadRuntimeConfig(getUserData());
+    return { path: c.musicFolderPath ?? null };
+  });
+
+  ipcMain.handle(MVP_IPC.PICK_MUSIC_FOLDER, async (): Promise<PickMusicFolderResult> => {
+    const win = getWindow();
+    let result: Electron.OpenDialogReturnValue;
+    try {
+      const opts: Electron.OpenDialogOptions = {
+        title: "Choose music folder",
+        properties: ["openDirectory"],
+      };
+      result = win
+        ? await dialog.showOpenDialog(win, opts)
+        : await dialog.showOpenDialog(opts);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { status: "error", message: msg };
+    }
+    if (result.canceled || result.filePaths.length === 0) {
+      return { status: "canceled" };
+    }
+    const chosen = result.filePaths[0];
+    const cur = loadRuntimeConfig(getUserData());
+    const next = patchRuntimeConfig(getUserData(), cur, { musicFolderPath: chosen });
+    cachedConfig = next;
+    return { status: "ok", path: next.musicFolderPath ?? chosen };
+  });
+
+  ipcMain.handle(MVP_IPC.CLEAR_MUSIC_FOLDER, (): MusicFolderSnapshot => {
+    const cur = loadRuntimeConfig(getUserData());
+    // Empty string clears in patchRuntimeConfig.
+    const next = patchRuntimeConfig(getUserData(), cur, { musicFolderPath: "" });
+    cachedConfig = next;
+    return { path: next.musicFolderPath ?? null };
+  });
+}
+
+function readAutoStartState(): AutoStartState {
+  // Linux: openAtLogin is supported on AppImage and a few configurations, but not
+  // universally. Electron returns `false` for `executableWillLaunchAtLogin` on
+  // unsupported setups; we surface a `supported` flag so the UI can disable the
+  // toggle rather than silently no-op.
+  const supported = process.platform === "win32" || process.platform === "darwin";
+  try {
+    const settings = app.getLoginItemSettings();
+    return {
+      enabled: Boolean(settings.openAtLogin),
+      supported,
+    };
+  } catch (err) {
+    console.error("[SyncBiz desktop] getLoginItemSettings failed:", err);
+    return { enabled: false, supported };
+  }
 }
 
 function fallbackSnapshot(): MvpStatusSnapshot {
