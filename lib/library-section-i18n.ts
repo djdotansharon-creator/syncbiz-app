@@ -9,7 +9,20 @@ export const LIBRARY_SECTION_TRANSLATION_KEY: Record<LibrarySectionId, string> =
   other: "librarySectionOther",
 };
 
+export const LIBRARY_SECTION_SUBTITLE_KEY: Record<LibrarySectionId, string> = {
+  syncbiz_playlists: "librarySectionSyncbizPlaylistsHelp",
+  mix_set: "librarySectionMixSetHelp",
+  external_playlists: "librarySectionExternalPlaylistsHelp",
+  single_tracks: "librarySectionSingleTracksHelp",
+  other: "librarySectionOtherHelp",
+};
+
 export function librarySectionLabel(t: Record<string, string>, id: LibrarySectionId): string {
   const k = LIBRARY_SECTION_TRANSLATION_KEY[id];
   return t[k] ?? id;
+}
+
+export function librarySectionSubtitle(t: Record<string, string>, id: LibrarySectionId): string {
+  const k = LIBRARY_SECTION_SUBTITLE_KEY[id];
+  return t[k] ?? "";
 }
