@@ -13,7 +13,8 @@ import { parseCatalogCoverageTargetsBundle } from "@/lib/recommendations/catalog
 import { assessCatalogItemReadiness } from "@/lib/recommendations/catalog-item-readiness";
 import {
   assessCatalogItemEligibility,
-  type CatalogEligibilityAssessment,
+  eligibilityShortSummary,
+  type CatalogItemUsageEligibility,
 } from "@/lib/recommendations/catalog-item-eligibility";
 
 export const dynamic = "force-dynamic";
@@ -74,7 +75,7 @@ export default async function CatalogCoverageDashboardPage() {
   const workQueue = generateCatalogEditorWorkQueueReport(parsed.data, items, { candidateLimit: 5 });
 
   /** Stage 10 — derive global eligibility per item for diagnostic display in candidate rows. */
-  const eligibilityById = new Map<string, CatalogEligibilityAssessment>();
+  const eligibilityById = new Map<string, CatalogItemUsageEligibility>();
   for (const it of items) {
     const readiness = assessCatalogItemReadiness({
       url: it.url,
@@ -84,7 +85,7 @@ export default async function CatalogCoverageDashboardPage() {
       manualEnergyRating: it.manualEnergyRating,
       linkedCategories: it.taxonomyLinks.map((l) => l.taxonomyTag.category),
     });
-    eligibilityById.set(it.id, assessCatalogItemEligibility(readiness));
+    eligibilityById.set(it.id, assessCatalogItemEligibility({ readiness, archivedAt: it.archivedAt }));
   }
 
   return (
@@ -255,15 +256,19 @@ export default async function CatalogCoverageDashboardPage() {
                   {(wp?.candidates ?? []).map((c) => {
                     const elig = eligibilityById.get(c.catalogItemId) ?? null;
                     const eligPillClass =
-                      elig?.tier === "limited"
+                      elig?.eligibilityLevel === "limited"
                         ? "border-amber-700/55 bg-amber-950/40 text-amber-100"
-                        : elig?.tier === "blocked"
+                        : elig?.eligibilityLevel === "blocked"
                           ? "border-rose-800/55 bg-rose-950/45 text-rose-100"
                           : null;
                     const eligPillLabel =
-                      elig?.tier === "limited" ? "LIMITED" : elig?.tier === "blocked" ? "BLOCKED" : null;
+                      elig?.eligibilityLevel === "limited"
+                        ? "LIMITED"
+                        : elig?.eligibilityLevel === "blocked"
+                          ? "BLOCKED"
+                          : null;
                     const eligTooltip = elig
-                      ? [`Eligibility · ${elig.tier}`, ...elig.reasons].join("\n")
+                      ? [eligibilityShortSummary(elig), ...elig.blockedReasons].join("\n")
                       : "";
                     return (
                       <li key={c.catalogItemId} className="rounded border border-neutral-800/80 bg-neutral-950/40 p-2 text-xs">

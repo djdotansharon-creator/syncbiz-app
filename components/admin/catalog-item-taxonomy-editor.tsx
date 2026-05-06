@@ -12,9 +12,9 @@ import {
 } from "@/lib/recommendations/catalog-item-readiness";
 import {
   assessCatalogItemEligibility,
-  eligibilityTierLabel,
-  type CatalogEligibilityAssessment,
-  type CatalogEligibilityTier,
+  eligibilityLevelLabel,
+  type CatalogItemUsageEligibility,
+  type CatalogEligibilityLevel,
 } from "@/lib/recommendations/catalog-item-eligibility";
 import {
   computeCatalogTagSuggestions,
@@ -147,6 +147,7 @@ export function CatalogItemTaxonomyEditor({
   catalogDurationSec = null,
   catalogThumbnail = null,
   catalogManualEnergyRating = null,
+  catalogArchivedAt = null,
   playlistHintTexts = [],
   metadataHaystackParts = [],
   nextUntaggedHref = null,
@@ -161,6 +162,8 @@ export function CatalogItemTaxonomyEditor({
   catalogDurationSec?: number | null;
   catalogThumbnail?: string | null;
   catalogManualEnergyRating?: number | null;
+  /** Stage 10 — archive hides items from discovery-driven eligibility. */
+  catalogArchivedAt?: Date | string | null;
   playlistHintTexts?: string[];
   /** Snapshot description, hashtags, channel title — strengthens deterministic hints only. */
   metadataHaystackParts?: string[];
@@ -290,8 +293,14 @@ export function CatalogItemTaxonomyEditor({
     links,
   ]);
 
-  /** Stage 10 — derived eligibility (DJ Creator / Coverage strict). Visibility/diagnostic only. */
-  const eligibility = useMemo(() => (readiness ? assessCatalogItemEligibility(readiness) : null), [readiness]);
+  /** Stage 10 — derived eligibility (surfaces + archive). Visibility/diagnostic only. */
+  const eligibility = useMemo(
+    () =>
+      readiness
+        ? assessCatalogItemEligibility({ readiness, archivedAt: catalogArchivedAt ?? null })
+        : null,
+    [readiness, catalogArchivedAt],
+  );
 
   /** Tags available to pick: ACTIVE, not yet assigned — assignment hides from picker. */
   const pickPool = useMemo(() => {
@@ -1058,10 +1067,11 @@ function CatalogReadinessPanel({
   );
 }
 
-const ELIGIBILITY_PANEL_CLASSES: Record<CatalogEligibilityTier, string> = {
-  "fully-eligible": "border-emerald-700/55 bg-emerald-950/30 text-emerald-100",
+const ELIGIBILITY_PANEL_CLASSES: Record<CatalogEligibilityLevel, string> = {
+  eligible: "border-emerald-700/55 bg-emerald-950/30 text-emerald-100",
   limited: "border-amber-700/55 bg-amber-950/30 text-amber-100",
   blocked: "border-rose-800/60 bg-rose-950/35 text-rose-100",
+  archived: "border-neutral-600 bg-neutral-900/85 text-neutral-400",
 };
 
 function EligibilityFlagPill({ ok, label }: { ok: boolean; label: string }) {
@@ -1077,30 +1087,28 @@ function EligibilityFlagPill({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-function CatalogEligibilityPanel({ eligibility }: { eligibility: CatalogEligibilityAssessment }) {
+function CatalogEligibilityPanel({ eligibility }: { eligibility: CatalogItemUsageEligibility }) {
   return (
     <div
       className={`flex flex-col gap-2 rounded-md border px-3 py-2.5 text-xs ${
-        ELIGIBILITY_PANEL_CLASSES[eligibility.tier]
+        ELIGIBILITY_PANEL_CLASSES[eligibility.eligibilityLevel]
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="rounded border border-current/40 bg-black/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider">
-          {eligibilityTierLabel(eligibility.tier)}
+          {eligibilityLevelLabel(eligibility.eligibilityLevel)}
         </span>
-        <span className="text-[11px] opacity-90">
-          Eligibility — visibility / diagnostic only; no scoring change.
-        </span>
+        <span className="text-[11px] opacity-90">{eligibility.recommendedEditorAction}</span>
       </div>
       <div className="flex flex-wrap gap-1.5">
-        <EligibilityFlagPill ok={eligibility.djCreatorStrictEligible} label="DJ Creator (strict)" />
-        <EligibilityFlagPill ok={eligibility.djCreatorAnyEligible} label="DJ Creator (loose)" />
-        <EligibilityFlagPill ok={eligibility.coverageStrictMatchEligible} label="Coverage (strict)" />
-        <EligibilityFlagPill ok={eligibility.adminVisible} label="Admin / search" />
+        <EligibilityFlagPill ok={eligibility.canUseInDjCreator} label="DJ Creator" />
+        <EligibilityFlagPill ok={eligibility.canUseInCoverage} label="Coverage packs" />
+        <EligibilityFlagPill ok={eligibility.canUseInSmartSearch} label="Smart search" />
+        <EligibilityFlagPill ok={eligibility.canShowInLibraryDiscovery} label="Library discovery" />
       </div>
-      {eligibility.reasons.length > 0 ? (
+      {eligibility.blockedReasons.length > 0 ? (
         <ul className="list-disc space-y-0.5 pl-5 text-[11px] opacity-90">
-          {eligibility.reasons.map((r, i) => (
+          {eligibility.blockedReasons.map((r, i) => (
             <li key={`eligi-r-${i}`}>{r}</li>
           ))}
         </ul>

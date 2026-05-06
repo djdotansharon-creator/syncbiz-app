@@ -1,115 +1,162 @@
 /**
- * Stage 10 — Per-item eligibility derived from readiness.
+ * Stage 10 — Derived usage eligibility for CatalogItem rows (read-only V1).
  *
- * Translates a CatalogItem readiness verdict into downstream-flow eligibility
- * (DJ Creator strict / loose, Coverage strict matching, admin visibility).
- * Pure, read-only — no DB writes, no scoring/filtering changes. Surfaced as
- * V1 visibility/diagnostic in admin UI; consumers may opt in later.
- *
- * Tier mapping (from readiness.status):
- *   ready      → fully-eligible
- *   partial    → limited       (admin/search OK; warn before DJ Creator)
- *   needs-work → blocked       (admin only; not used in DJ Creator selection)
- *
- * Hard-fail dimension overrides:
- *   manualEnergy missing → not eligible for DJ Creator strict packs
- *   urlType unknown      → not eligible for Coverage strict matching
- *
- * Soft (warning only):
- *   thumbnail missing    → not blocked; UI warning only
+ * Readiness tells editors whether tagging/metadata is sufficient; eligibility
+ * tells operators where an item is safe to use (DJ Creator, coverage packs,
+ * smart search, library discovery). Pure — no DB writes, no auto-tagging.
  */
 
-import type {
-  CatalogReadinessAssessment,
-  CatalogReadinessDimensionKey,
+import {
+  CATALOG_READINESS_DIMENSION_LABEL,
+  type CatalogReadinessAssessment,
 } from "./catalog-item-readiness";
 
-export type CatalogEligibilityTier = "fully-eligible" | "limited" | "blocked";
+export type CatalogEligibilityLevel = "eligible" | "limited" | "blocked" | "archived";
 
-export type CatalogEligibilityAssessment = {
-  tier: CatalogEligibilityTier;
-  djCreatorStrictEligible: boolean;
-  djCreatorAnyEligible: boolean;
-  coverageStrictMatchEligible: boolean;
-  adminVisible: boolean;
-  reasons: string[];
+export type CatalogItemUsageEligibility = {
+  eligibilityLevel: CatalogEligibilityLevel;
+  canUseInDjCreator: boolean;
+  canUseInCoverage: boolean;
+  canUseInSmartSearch: boolean;
+  canShowInLibraryDiscovery: boolean;
+  blockedReasons: string[];
   warnings: string[];
+  recommendedEditorAction: string;
 };
 
-const ELIGIBILITY_TIER_LABEL: Record<CatalogEligibilityTier, string> = {
-  "fully-eligible": "Fully eligible",
+export type CatalogItemUsageEligibilityInput = {
+  readiness: CatalogReadinessAssessment;
+  /** When set, item is treated as archived (hidden from discovery / catalog automation). */
+  archivedAt?: Date | string | null;
+};
+
+const LEVEL_LABEL: Record<CatalogEligibilityLevel, string> = {
+  eligible: "Eligible",
   limited: "Limited",
   blocked: "Blocked",
+  archived: "Archived",
 };
 
-export function eligibilityTierLabel(tier: CatalogEligibilityTier): string {
-  return ELIGIBILITY_TIER_LABEL[tier];
+export function eligibilityLevelLabel(level: CatalogEligibilityLevel): string {
+  return LEVEL_LABEL[level];
 }
 
-function hasMissing(
-  readiness: CatalogReadinessAssessment,
-  key: CatalogReadinessDimensionKey,
-): boolean {
-  return readiness.hardMissing.includes(key);
+function isArchivedValue(archivedAt: Date | string | null | undefined): boolean {
+  if (archivedAt == null) return false;
+  if (archivedAt instanceof Date) return !Number.isNaN(archivedAt.getTime());
+  return String(archivedAt).trim().length > 0;
 }
 
+function warnLinesFromReadiness(readiness: CatalogReadinessAssessment): string[] {
+  const out: string[] = [];
+  for (const k of readiness.warnings) {
+    out.push(`${CATALOG_READINESS_DIMENSION_LABEL[k]} — warning only (not a hard block).`);
+  }
+  return out;
+}
+
+function baseLevelFromReadiness(status: CatalogReadinessAssessment["status"]): Exclude<CatalogEligibilityLevel, "archived"> {
+  if (status === "ready") return "eligible";
+  if (status === "partial") return "limited";
+  return "blocked";
+}
+
+/**
+ * Derives per-surface usage flags from Stage 9 readiness + archive state.
+ *
+ * V1 rules (summary):
+ * - Archived → level archived; no discovery or automated flows.
+ * - Ready (not archived) → eligible; all four can* true (strict surfaces).
+ * - Partial → limited; smart search + discovery OK; DJ Creator / coverage strict false with reasons.
+ * - Needs work → blocked from DJ Creator, coverage strict, and smart search; admin-only for fixing.
+ * - Missing manual energy → blocks DJ Creator strict (also prevents “ready”).
+ * - Unknown URL type → blocks coverage strict matching; demotes readiness to needs-work in Stage 9.
+ * - Missing thumbnail → warning only.
+ */
 export function assessCatalogItemEligibility(
-  readiness: CatalogReadinessAssessment,
-): CatalogEligibilityAssessment {
-  const reasons: string[] = [];
-  const warnings: string[] = [];
+  input: CatalogItemUsageEligibilityInput,
+): CatalogItemUsageEligibility {
+  const { readiness, archivedAt } = input;
+  const archived = isArchivedValue(archivedAt);
 
-  const energyMissing = hasMissing(readiness, "manualEnergy");
-  const urlTypeUnknown = hasMissing(readiness, "urlType");
+  if (archived) {
+    return {
+      eligibilityLevel: "archived",
+      canUseInDjCreator: false,
+      canUseInCoverage: false,
+      canUseInSmartSearch: false,
+      canShowInLibraryDiscovery: false,
+      blockedReasons: ["Item is archived — hidden from library discovery and automated catalog flows."],
+      warnings: warnLinesFromReadiness(readiness),
+      recommendedEditorAction:
+        "Unarchive this row if it should return to discovery, smart search, coverage packs, or DJ Creator.",
+    };
+  }
 
-  let tier: CatalogEligibilityTier;
-  if (readiness.status === "ready") tier = "fully-eligible";
-  else if (readiness.status === "partial") tier = "limited";
-  else tier = "blocked";
+  const urlTypeUnknown = readiness.hardMissing.includes("urlType");
 
-  const adminVisible = true;
+  const eligibilityLevel = baseLevelFromReadiness(readiness.status);
+  const canShowInLibraryDiscovery = true;
 
-  const coverageStrictMatchEligible = !urlTypeUnknown;
+  const canUseInDjCreator = readiness.status === "ready";
+
+  const canUseInCoverage = readiness.status === "ready" && !urlTypeUnknown;
+
+  const canUseInSmartSearch = readiness.status === "ready" || readiness.status === "partial";
+
+  const blockedReasons: string[] = [];
+  const warnings = warnLinesFromReadiness(readiness);
+
   if (urlTypeUnknown) {
-    reasons.push("Unknown URL type — excluded from Coverage strict matching.");
+    blockedReasons.push("Unknown URL type — not eligible for coverage strict matching.");
   }
 
-  const djCreatorAnyEligible = readiness.status !== "needs-work";
-  if (!djCreatorAnyEligible) {
-    reasons.push("Needs work — admin only; not used in DJ Creator selection.");
+  if (readiness.status === "needs-work") {
+    const miss = readiness.hardMissing.map((k) => CATALOG_READINESS_DIMENSION_LABEL[k]);
+    blockedReasons.push(
+      miss.length > 0
+        ? `Needs work — blocked from DJ Creator strict flows and smart search until fixed (missing: ${miss.join(", ")}).`
+        : "Needs work — blocked from DJ Creator strict flows and smart search until fixed.",
+    );
+  } else if (readiness.status === "partial") {
+    blockedReasons.push("Partial readiness — not eligible for DJ Creator strict packs or coverage strict matching.");
   }
 
-  const djCreatorStrictEligible = readiness.status === "ready" && !energyMissing;
-  if (!djCreatorStrictEligible && djCreatorAnyEligible) {
-    if (energyMissing) {
-      reasons.push("Manual energy unset — not eligible for DJ Creator strict packs.");
-    }
-    if (readiness.status === "partial") {
-      reasons.push("Partial readiness — limited in DJ Creator strict packs (warn before use).");
-    }
+  if (eligibilityLevel === "limited") {
+    warnings.push(
+      "Limited eligibility — usable in admin and smart search as a thinner row; tighten readiness before DJ/coverage strict use.",
+    );
   }
 
-  if (readiness.warnings.length > 0) {
-    warnings.push("Missing thumbnail — soft warning, not blocked.");
+  const dedupedBlocked = [...new Set(blockedReasons)];
+
+  let recommendedEditorAction: string;
+  if (eligibilityLevel === "eligible") {
+    recommendedEditorAction =
+      "Eligible for DJ Creator strict packs, coverage strict matching, and smart search — keep taxonomy and energy current.";
+  } else if (eligibilityLevel === "limited") {
+    recommendedEditorAction =
+      "Finish the remaining readiness dimensions (see readiness chips) to move from limited to fully eligible.";
+  } else {
+    recommendedEditorAction = readiness.summary;
   }
 
   return {
-    tier,
-    djCreatorStrictEligible,
-    djCreatorAnyEligible,
-    coverageStrictMatchEligible,
-    adminVisible,
-    reasons,
-    warnings,
+    eligibilityLevel,
+    canUseInDjCreator,
+    canUseInCoverage,
+    canUseInSmartSearch,
+    canShowInLibraryDiscovery,
+    blockedReasons: dedupedBlocked,
+    warnings: [...new Set(warnings)],
+    recommendedEditorAction,
   };
 }
 
-export function eligibilityShortSummary(elig: CatalogEligibilityAssessment): string {
-  const dj = elig.djCreatorStrictEligible
-    ? "DJ-strict ✓"
-    : elig.djCreatorAnyEligible
-      ? "DJ-strict ✗ (loose only)"
-      : "DJ ✗ (admin only)";
-  const cov = elig.coverageStrictMatchEligible ? "Cov-strict ✓" : "Cov-strict ✗";
-  return `${eligibilityTierLabel(elig.tier)} · ${dj} · ${cov}`;
+export function eligibilityShortSummary(e: CatalogItemUsageEligibility): string {
+  const dj = e.canUseInDjCreator ? "DJ ✓" : "DJ ✗";
+  const cov = e.canUseInCoverage ? "Cov ✓" : "Cov ✗";
+  const srch = e.canUseInSmartSearch ? "Smart ✓" : "Smart ✗";
+  const lib = e.canShowInLibraryDiscovery ? "Lib ✓" : "Lib ✗";
+  return `${eligibilityLevelLabel(e.eligibilityLevel)} · ${dj} · ${cov} · ${srch} · ${lib}`;
 }

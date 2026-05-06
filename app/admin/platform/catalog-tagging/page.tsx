@@ -1055,6 +1055,7 @@ export default async function CatalogTaggingAdminPage({
           catalogDurationSec={selected?.durationSec ?? null}
           catalogThumbnail={selected?.thumbnail ?? null}
           catalogManualEnergyRating={selected?.manualEnergyRating ?? null}
+          catalogArchivedAt={selected?.archivedAt ?? null}
           playlistHintTexts={playlistHintTexts}
           metadataHaystackParts={metadataHaystackPartsForTaxonomy}
           nextUntaggedHref={nextUntaggedHref}
@@ -1170,7 +1171,10 @@ export default async function CatalogTaggingAdminPage({
                 manualEnergyRating: row.manualEnergyRating,
                 linkedCategories: row.taxonomyLinks.map((l) => l.taxonomyTag.category),
               });
-              const rowEligibility = assessCatalogItemEligibility(rowReadiness);
+              const rowEligibility = assessCatalogItemEligibility({
+                readiness: rowReadiness,
+                archivedAt: row.archivedAt,
+              });
               const readinessBadgeClass =
                 rowReadiness.status === "ready"
                   ? "border-emerald-700/55 bg-emerald-950/40 text-emerald-100"
@@ -1185,20 +1189,24 @@ export default async function CatalogTaggingAdminPage({
                     : "NEEDS WORK";
               const eligibilityTooltip = [
                 eligibilityShortSummary(rowEligibility),
-                ...rowEligibility.reasons,
+                ...rowEligibility.blockedReasons,
               ].join("\n");
               const eligibilityChipClass =
-                rowEligibility.tier === "fully-eligible"
+                rowEligibility.eligibilityLevel === "eligible"
                   ? null
-                  : rowEligibility.tier === "limited"
+                  : rowEligibility.eligibilityLevel === "limited"
                     ? "border-amber-700/55 bg-amber-950/40 text-amber-100"
-                    : "border-rose-800/55 bg-rose-950/45 text-rose-100";
+                    : rowEligibility.eligibilityLevel === "blocked"
+                      ? "border-rose-800/55 bg-rose-950/45 text-rose-100"
+                      : "border-neutral-600 bg-neutral-900 text-neutral-500";
               const eligibilityChipLabel =
-                rowEligibility.tier === "limited"
-                  ? "LIMITED"
-                  : rowEligibility.tier === "blocked"
-                    ? "BLOCKED"
-                    : null;
+                rowEligibility.eligibilityLevel === "eligible"
+                  ? null
+                  : rowEligibility.eligibilityLevel === "limited"
+                    ? "LIMITED"
+                    : rowEligibility.eligibilityLevel === "blocked"
+                      ? "BLOCKED"
+                      : "ARCHIVED";
               return (
                 <li key={row.id}>
                   <div
@@ -1240,11 +1248,6 @@ export default async function CatalogTaggingAdminPage({
                             className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${eligibilityChipClass}`}
                           >
                             {eligibilityChipLabel}
-                          </span>
-                        ) : null}
-                        {row.archivedAt ? (
-                          <span className="rounded border border-neutral-600 bg-neutral-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-                            Archived
                           </span>
                         ) : null}
                       </div>
