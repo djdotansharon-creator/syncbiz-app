@@ -13,6 +13,7 @@ import type {
   ListMusicLibraryDirResult,
   GetLocalAudioCoverResult,
   GetLocalAudioTagsResult,
+  InspectLocalAudioTagsRawResult,
 } from "./mvp-types";
 
 /** Preload `contextBridge` contract (renderer uses `window.syncbizDesktop`). */
@@ -55,4 +56,6 @@ export type SyncBizDesktopMvp = {
   getLocalAudioCover: (absolutePath: string) => Promise<GetLocalAudioCoverResult>;
   /** ID3/tag metadata for browse rows (lazy; desktop main process only). */
   getLocalAudioTags: (absolutePath: string) => Promise<GetLocalAudioTagsResult>;
+  /** Dev inspector — returns raw common.* values; logs once in main on each call. */
+  inspectLocalAudioTagsRaw: (absolutePath: string) => Promise<InspectLocalAudioTagsRawResult>;
 };

@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type ReactElement,
+} from "react";
 import type { UnifiedSource } from "@/lib/source-types";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { usePlayback } from "@/lib/playback-provider";
@@ -54,140 +62,9 @@ type LocalAudioBrowseTags = {
   year: string | null;
   comment: string | null;
   durationSec: number | null;
+  bpm: number | null;
+  rating: number | null;
 };
-
-function formatDurationSec(sec: number | null | undefined): string | null {
-  if (sec == null || typeof sec !== "number" || !Number.isFinite(sec) || sec <= 0) return null;
-  const s = Math.max(0, Math.floor(sec + 0.5));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}:${r.toString().padStart(2, "0")}`;
-}
-
-function primaryTitleFromTags(fileName: string, t: LocalAudioBrowseTags | null): string {
-  if (!t) return fileName;
-  const artist = (t.artist ?? "").trim();
-  const title = (t.title ?? "").trim();
-  if (artist && title) return `${artist} — ${title}`;
-  if (title) return title;
-  if (artist) return artist;
-  return fileName;
-}
-
-function cleanCommentLine(comment: string | null): string | null {
-  const raw = (comment ?? "").replace(/\s+/g, " ").trim();
-  if (!raw || raw.length < 2 || raw.length > 80) return null;
-  if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(raw)) return null;
-  if (/^([0-9a-f]{2}\s*){12,}$/i.test(raw.replace(/\s/g, ""))) return null;
-  return raw;
-}
-
-function MusicLibraryTrackTitles({ fileName, absolutePath }: { fileName: string; absolutePath: string }): ReactElement {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const [state, setState] = useState<"idle" | "loading" | "done">("idle");
-  const [tags, setTags] = useState<LocalAudioBrowseTags | null>(null);
-
-  useEffect(() => {
-    setState("idle");
-    setTags(null);
-    if (!canGetLocalAudioTags()) return undefined;
-    const el = wrapRef.current;
-    if (!el) return undefined;
-    let cancelled = false;
-
-    const loadTags = (): void => {
-      setState("loading");
-      void (async () => {
-        try {
-          const api = window.syncbizDesktop!.getLocalAudioTags!;
-          const res = await api(absolutePath);
-          if (cancelled) return;
-          setTags(res.status === "ok" ? res.tags : null);
-          setState("done");
-        } catch {
-          if (!cancelled) {
-            setTags(null);
-            setState("done");
-          }
-        }
-      })();
-    };
-
-    const obs = new IntersectionObserver(
-      (entries) => {
-        for (const en of entries) {
-          if (en.isIntersecting) {
-            obs.disconnect();
-            loadTags();
-            break;
-          }
-        }
-      },
-      { root: null, rootMargin: "120px 0px", threshold: 0.03 },
-    );
-    obs.observe(el);
-    return () => {
-      cancelled = true;
-      obs.disconnect();
-    };
-  }, [absolutePath]);
-
-  const primary = primaryTitleFromTags(fileName, tags);
-  const dur = tags ? formatDurationSec(tags.durationSec) : null;
-  const genre = tags?.genre?.trim() || "";
-  const year = tags?.year?.trim() || "";
-  const album = tags?.album?.trim() || "";
-  const commentShown = tags?.comment ? cleanCommentLine(tags.comment) : null;
-  const hasSecondaryBits = dur || genre || year || album || state === "loading";
-
-  return (
-    <div ref={wrapRef} className="min-w-0 flex-1">
-      <p className="break-words text-base font-semibold leading-snug text-slate-100 sm:text-[1.02rem]">{primary}</p>
-      {primary !== fileName && tags ? (
-        <p className="mt-0.5 truncate font-mono text-[10px] text-slate-600" title={fileName}>
-          {fileName}
-        </p>
-      ) : null}
-      {hasSecondaryBits ? (
-        <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
-          {dur ? (
-            <span className="inline-flex shrink-0 rounded-md border border-slate-700/65 bg-slate-950/50 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-slate-400">
-              {dur}
-            </span>
-          ) : null}
-          {genre ? (
-            <span className="max-w-[8.5rem] truncate text-[11px] font-medium capitalize text-slate-500" title={genre}>
-              {genre}
-            </span>
-          ) : null}
-          {year ? (
-            <span className="text-[11px] font-medium tabular-nums text-slate-500" title={year}>
-              {year}
-            </span>
-          ) : null}
-          {album ? (
-            <span
-              className="max-w-[11rem] truncate text-[11px] font-medium text-slate-500/95"
-              title={album}
-            >
-              {album}
-            </span>
-          ) : null}
-          {state === "loading" ? (
-            <span className="text-[11px] font-medium tracking-widest text-slate-600" aria-hidden>
-              ···
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      {commentShown ? (
-        <p className="mt-1 line-clamp-1 text-[11px] leading-snug text-slate-500/92" title={commentShown}>
-          {commentShown}
-        </p>
-      ) : null}
-    </div>
-  );
-}
 
 function IconFolderGlyph({ className }: { className?: string }) {
   return (
@@ -246,6 +123,335 @@ function MusicLibraryTrackThumb({ absolutePath }: { absolutePath: string }) {
         </span>
       )}
     </span>
+  );
+}
+
+const TITLE_SPLIT_SEPARATORS = [" - ", " – ", " — "] as const;
+
+/**
+ * Display-only Artist/Title fallback split. Triggered ONLY when the file has no
+ * `common.artist` and `common.title` contains exactly one of " - ", " – ", " — ".
+ * Both sides must be non-empty after trim. Raw tags are not modified.
+ */
+function splitArtistFromTitleFallback(
+  rawArtist: string,
+  rawTitle: string,
+): { artist: string; title: string; split: boolean } {
+  if (rawArtist || !rawTitle) return { artist: rawArtist, title: rawTitle, split: false };
+  for (const sep of TITLE_SPLIT_SEPARATORS) {
+    const first = rawTitle.indexOf(sep);
+    if (first <= 0) continue;
+    const last = rawTitle.lastIndexOf(sep);
+    if (first !== last) continue; // Skip ambiguous "A - B - C" cases.
+    const left = rawTitle.slice(0, first).trim();
+    const right = rawTitle.slice(first + sep.length).trim();
+    if (left && right) return { artist: left, title: right, split: true };
+  }
+  return { artist: rawArtist, title: rawTitle, split: false };
+}
+
+function resolvedArtistTitle(tags: LocalAudioBrowseTags | null): { artist: string; title: string } {
+  const rawArtist = tags?.artist?.trim() || "";
+  const rawTitle = tags?.title?.trim() || "";
+  const r = splitArtistFromTitleFallback(rawArtist, rawTitle);
+  return { artist: r.artist, title: r.title };
+}
+
+/** On-demand dev tool: prints raw common.* values for one file to the renderer console. */
+async function inspectRawTagsAndLog(filePath: string): Promise<void> {
+  const api = typeof window !== "undefined" ? window.syncbizDesktop?.inspectLocalAudioTagsRaw : undefined;
+  if (typeof api !== "function") {
+    console.info("[SyncBiz:tag-inspect] inspector not available (update Desktop)");
+    return;
+  }
+  try {
+    const res = await api(filePath);
+    if (res.status === "ok") {
+      console.info("[SyncBiz:tag-inspect]", res.payload);
+    } else {
+      console.info("[SyncBiz:tag-inspect] error", res.message);
+    }
+  } catch (e) {
+    console.info("[SyncBiz:tag-inspect] threw", e);
+  }
+}
+
+type TrackSortKey = "artist" | "title" | "genre" | "year";
+
+type TrackTableFile = { name: string; path: string };
+
+function getTagFieldForSort(
+  file: TrackTableFile,
+  tags: LocalAudioBrowseTags | null,
+  key: TrackSortKey,
+): string | number | null {
+  if (key === "title") {
+    const { title } = resolvedArtistTitle(tags);
+    return (title || file.name).toLowerCase();
+  }
+  if (key === "artist") {
+    const { artist } = resolvedArtistTitle(tags);
+    return artist ? artist.toLowerCase() : null;
+  }
+  if (key === "genre") return tags?.genre?.trim().toLowerCase() ?? null;
+  if (key === "year") {
+    const n = tags?.year ? Number(tags.year) : NaN;
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function compareSortValues(
+  a: string | number | null,
+  b: string | number | null,
+  dir: "asc" | "desc",
+): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  const cmp = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b));
+  return dir === "asc" ? cmp : -cmp;
+}
+
+type TrackTableRowProps = {
+  file: TrackTableFile;
+  tags: LocalAudioBrowseTags | null;
+  onTagsLoaded: (path: string, tags: LocalAudioBrowseTags | null) => void;
+  onPlay: (path: string) => void;
+  onAddToPlaylist: (file: TrackTableFile) => void;
+  onDragStartFile: (e: ReactDragEvent<HTMLTableRowElement>, path: string) => void;
+  isPlayBusy: boolean;
+  isAddDisabled: boolean;
+  index: number;
+};
+
+function TrackTableRow({
+  file,
+  tags,
+  onTagsLoaded,
+  onPlay,
+  onAddToPlaylist,
+  onDragStartFile,
+  isPlayBusy,
+  isAddDisabled,
+  index,
+}: TrackTableRowProps): ReactElement {
+  const rowRef = useRef<HTMLTableRowElement>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (tags) return undefined;
+    if (!canGetLocalAudioTags()) return undefined;
+    const el = rowRef.current;
+    if (!el) return undefined;
+    let cancelled = false;
+    const load = (): void => {
+      setLoading(true);
+      void (async () => {
+        try {
+          const api = window.syncbizDesktop!.getLocalAudioTags!;
+          const res = await api(file.path);
+          if (cancelled) return;
+          onTagsLoaded(file.path, res.status === "ok" ? res.tags : null);
+        } catch {
+          if (cancelled) return;
+          onTagsLoaded(file.path, null);
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+    };
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const en of entries) {
+          if (en.isIntersecting) {
+            obs.disconnect();
+            load();
+            break;
+          }
+        }
+      },
+      { root: null, rootMargin: "240px 0px", threshold: 0.01 },
+    );
+    obs.observe(el);
+    return () => {
+      cancelled = true;
+      obs.disconnect();
+    };
+  }, [file.path, onTagsLoaded, tags]);
+
+  const { artist, title: titleTagged } = resolvedArtistTitle(tags);
+  const titleShown = titleTagged || file.name.replace(/\.[^/.]+$/, "");
+  const genre = tags?.genre?.trim() || "";
+  const year = tags?.year?.trim() || "";
+  const showLoadingHint = loading && !tags;
+  const zebra = index % 2 === 0 ? "bg-slate-900/30" : "bg-slate-900/15";
+
+  return (
+    <tr
+      ref={rowRef}
+      draggable
+      onDragStart={(e) => onDragStartFile(e, file.path)}
+      onDoubleClick={() => onPlay(file.path)}
+      className={`${zebra} cursor-grab border-b border-slate-800/60 align-middle text-slate-200 transition hover:bg-slate-800/45 active:cursor-grabbing`}
+    >
+      <td className="px-3 py-2">
+        <MusicLibraryTrackThumb absolutePath={file.path} />
+      </td>
+      <td className="max-w-[12rem] truncate px-3 py-2 text-sm" title={artist || undefined}>
+        {artist || <span className="text-slate-600">—</span>}
+      </td>
+      <td className="max-w-[18rem] px-3 py-2 text-sm font-medium text-slate-100" title={titleShown}>
+        <div className="truncate">{titleShown}</div>
+        {!titleTagged ? (
+          <div className="truncate font-mono text-[10px] text-slate-600" title={file.name}>
+            {file.name}
+          </div>
+        ) : null}
+      </td>
+      <td className="max-w-[10rem] truncate px-3 py-2 text-xs capitalize text-slate-400" title={genre || undefined}>
+        {genre || (showLoadingHint ? <span className="text-slate-600">…</span> : <span className="text-slate-700">—</span>)}
+      </td>
+      <td className="px-3 py-2 text-xs tabular-nums text-slate-400">
+        {year || <span className="text-slate-700">—</span>}
+      </td>
+      <td className="px-3 py-2 text-right">
+        <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+          {process.env.NODE_ENV !== "production" ? (
+            <button
+              type="button"
+              onClick={() => void inspectRawTagsAndLog(file.path)}
+              title="Inspect raw tags (logs to console)"
+              aria-label="Inspect raw tags"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/70 bg-slate-950/40 text-[10px] font-semibold text-slate-500 transition hover:border-slate-600 hover:bg-slate-800/60 hover:text-slate-200"
+            >
+              i
+            </button>
+          ) : null}
+          <button
+            type="button"
+            disabled={isAddDisabled || isPlayBusy}
+            onClick={() => onAddToPlaylist(file)}
+            title="Add to Playlist"
+            aria-label="Add to Playlist"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-700/70 bg-slate-900/60 text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 hover:text-slate-100 disabled:pointer-events-none disabled:opacity-40"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.25" aria-hidden>
+              <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            disabled={isPlayBusy}
+            onClick={() => onPlay(file.path)}
+            className="inline-flex h-8 min-w-[3.5rem] items-center justify-center rounded-md border border-cyan-500/40 bg-cyan-900/35 px-2.5 text-[11px] font-semibold text-cyan-100 transition hover:border-cyan-400/55 hover:bg-cyan-800/40 disabled:pointer-events-none disabled:opacity-40"
+          >
+            {isPlayBusy ? "…" : "Play"}
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+type TrackTableProps = {
+  files: TrackTableFile[];
+  scanBusyPath: string | null;
+  addFlowBusy: boolean;
+  onPlay: (path: string) => void;
+  onAddToPlaylist: (file: TrackTableFile) => void;
+  onDragStartFile: (e: ReactDragEvent<HTMLTableRowElement>, path: string) => void;
+};
+
+function TrackTable({
+  files,
+  scanBusyPath,
+  addFlowBusy,
+  onPlay,
+  onAddToPlaylist,
+  onDragStartFile,
+}: TrackTableProps): ReactElement {
+  const [tagsByPath, setTagsByPath] = useState<Record<string, LocalAudioBrowseTags | null>>({});
+  const [sortKey, setSortKey] = useState<TrackSortKey | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const handleTagsLoaded = useCallback((path: string, tags: LocalAudioBrowseTags | null) => {
+    setTagsByPath((prev) => (prev[path] === tags ? prev : { ...prev, [path]: tags }));
+  }, []);
+
+  const sortedFiles = useMemo(() => {
+    if (!sortKey) return files;
+    return [...files].sort((a, b) => {
+      const va = getTagFieldForSort(a, tagsByPath[a.path] ?? null, sortKey);
+      const vb = getTagFieldForSort(b, tagsByPath[b.path] ?? null, sortKey);
+      return compareSortValues(va, vb, sortDir);
+    });
+  }, [files, sortKey, sortDir, tagsByPath]);
+
+  const toggleSort = useCallback((key: TrackSortKey) => {
+    setSortKey((prevKey) => {
+      if (prevKey === key) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+        return prevKey;
+      }
+      setSortDir("asc");
+      return key;
+    });
+  }, []);
+
+  const sortIndicator = (key: TrackSortKey): string => (sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "");
+
+  type Col = { key: TrackSortKey | null; label: string; align?: "left" | "right" | "center"; widthClass?: string };
+  const columns: Col[] = [
+    { key: null, label: "", widthClass: "w-[64px]" },
+    { key: "artist", label: "Artist" },
+    { key: "title", label: "Title" },
+    { key: "genre", label: "Genre" },
+    { key: "year", label: "Year" },
+    { key: null, label: "", align: "right" },
+  ];
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[560px] table-auto border-collapse text-left">
+        <thead className="sticky top-0 z-[1] bg-slate-950/95 backdrop-blur">
+          <tr className="border-b border-slate-800/85 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            {columns.map((c, i) => (
+              <th key={`${c.label}-${i}`} className={`px-3 py-2 ${c.widthClass ?? ""} ${c.align === "right" ? "text-right" : "text-left"}`}>
+                {c.key ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleSort(c.key as TrackSortKey)}
+                    className="inline-flex items-center gap-1 text-slate-400 transition hover:text-slate-100"
+                  >
+                    {c.label}
+                    <span className="text-[9px] text-slate-500">{sortIndicator(c.key as TrackSortKey)}</span>
+                  </button>
+                ) : (
+                  c.label
+                )}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedFiles.map((f, idx) => (
+            <TrackTableRow
+              key={f.path}
+              file={f}
+              index={idx}
+              tags={tagsByPath[f.path] ?? null}
+              onTagsLoaded={handleTagsLoaded}
+              onPlay={onPlay}
+              onAddToPlaylist={onAddToPlaylist}
+              onDragStartFile={onDragStartFile}
+              isPlayBusy={scanBusyPath === f.path}
+              isAddDisabled={addFlowBusy}
+            />
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -765,46 +971,24 @@ export function MyMusicLibraryWorkspacePanel({
 
                 {list.files.length > 0 ? (
                   <div className={list.dirs.length > 0 ? "mt-6" : ""}>
-                    <p className="mb-3 px-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-                      Tracks
-                    </p>
-                    <ul className="flex flex-col gap-2">
-                      {list.files.map((f) => (
-                        <li
-                          key={f.path}
-                          className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-800/90 bg-slate-900/40 px-3.5 py-3 sm:gap-4 sm:px-4"
-                        >
-                          <button
-                            type="button"
-                            draggable
-                            onDragStart={(e) => setMusicLibraryDragData(e.dataTransfer, { kind: "file", path: f.path })}
-                            onDoubleClick={() => void playTrackInCurrentBrowseFolder(f.path)}
-                            className="flex min-w-0 flex-1 cursor-grab items-center gap-3 text-left active:cursor-grabbing sm:gap-4"
-                          >
-                            <MusicLibraryTrackThumb absolutePath={f.path} />
-                            <MusicLibraryTrackTitles fileName={f.name} absolutePath={f.path} />
-                          </button>
-                          <div className="flex shrink-0 items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={scanBusy === f.path || addFlowBusy}
-                              onClick={() => openAddModal({ kind: "file", path: f.path, defaultName: f.name.replace(/\.[^/.]+$/, "") })}
-                              className={`${ghostBtn} px-2.5 py-2 text-[10px]`}
-                            >
-                              Add to Playlist
-                            </button>
-                            <button
-                              type="button"
-                              disabled={Boolean(scanBusy)}
-                              onClick={() => void playTrackInCurrentBrowseFolder(f.path)}
-                              className="flex h-10 min-w-[4.75rem] shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-50 transition hover:border-slate-600 hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-45"
-                            >
-                              {scanBusy === f.path ? "…" : "Play"}
-                            </button>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="mb-3 flex items-baseline justify-between gap-3 px-1">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Tracks</p>
+                      <p className="text-[10px] font-medium text-slate-600">
+                        {list.files.length} track{list.files.length === 1 ? "" : "s"} · double-click to play
+                      </p>
+                    </div>
+                    <div className="overflow-hidden rounded-lg border border-slate-800/85 bg-slate-950/65">
+                      <TrackTable
+                        files={list.files}
+                        scanBusyPath={scanBusy}
+                        addFlowBusy={addFlowBusy}
+                        onPlay={(p) => void playTrackInCurrentBrowseFolder(p)}
+                        onAddToPlaylist={(f) =>
+                          openAddModal({ kind: "file", path: f.path, defaultName: f.name.replace(/\.[^/.]+$/, "") })
+                        }
+                        onDragStartFile={(e, p) => setMusicLibraryDragData(e.dataTransfer, { kind: "file", path: p })}
+                      />
+                    </div>
                   </div>
                 ) : null}
               </div>

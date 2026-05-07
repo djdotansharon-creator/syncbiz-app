@@ -51,10 +51,27 @@ type LocalAudioTagFieldsIpc = {
   year: string | null;
   comment: string | null;
   durationSec: number | null;
+  bpm: number | null;
+  rating: number | null;
 };
 
 type GetLocalAudioTagsIpcResult =
   | { status: "ok"; tags: LocalAudioTagFieldsIpc }
+  | { status: "error"; message: string };
+
+type InspectLocalAudioTagsRawIpcPayload = {
+  filePath: string;
+  artist: string | null;
+  artists: string[] | null;
+  title: string | null;
+  genre: string | string[] | null;
+  year: number | null;
+  date: string | null;
+  titleFallbackUsed: boolean;
+};
+
+type InspectLocalAudioTagsRawIpcResult =
+  | { status: "ok"; payload: InspectLocalAudioTagsRawIpcPayload }
   | { status: "error"; message: string };
 
 type SyncBizDesktopBridgePreload = {
@@ -77,6 +94,8 @@ type SyncBizDesktopBridgePreload = {
   getLocalAudioCover?: (absolutePath: string) => Promise<GetLocalAudioCoverIpcResult>;
   /** Lazily-loaded tag snapshot for browse rows (Desktop main process only). */
   getLocalAudioTags?: (absolutePath: string) => Promise<GetLocalAudioTagsIpcResult>;
+  /** Dev inspector — returns raw common.* values; logs once in main on each call. */
+  inspectLocalAudioTagsRaw?: (absolutePath: string) => Promise<InspectLocalAudioTagsRawIpcResult>;
 };
 
 declare global {

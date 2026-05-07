@@ -17,6 +17,7 @@ import type {
   ListMusicLibraryDirResult,
   GetLocalAudioCoverResult,
   GetLocalAudioTagsResult,
+  InspectLocalAudioTagsRawResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import type { SyncBizDesktopMvp } from "../shared/mvp-desktop-api";
@@ -67,6 +68,8 @@ const api: SyncBizDesktopMvp = {
     ipcRenderer.invoke(MVP_IPC.GET_LOCAL_AUDIO_COVER, absolutePath),
   getLocalAudioTags: (absolutePath: string): Promise<GetLocalAudioTagsResult> =>
     ipcRenderer.invoke(MVP_IPC.GET_LOCAL_AUDIO_TAGS, absolutePath),
+  inspectLocalAudioTagsRaw: (absolutePath: string): Promise<InspectLocalAudioTagsRawResult> =>
+    ipcRenderer.invoke(MVP_IPC.INSPECT_LOCAL_AUDIO_TAGS_RAW, absolutePath),
   onStatus: (callback) => {
     const handler = (_: unknown, status: MvpStatusSnapshot) => {
       callback(status);

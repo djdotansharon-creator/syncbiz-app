@@ -35,6 +35,8 @@ export const MVP_IPC = {
   GET_LOCAL_AUDIO_COVER: "mvp:get-local-audio-cover",
   /** Common tags + duration from an audio file (main process only). */
   GET_LOCAL_AUDIO_TAGS: "mvp:get-local-audio-tags",
+  /** Dev-only inspector: return raw common.* values and log once in main. */
+  INSPECT_LOCAL_AUDIO_TAGS_RAW: "mvp:inspect-local-audio-tags-raw",
 } as const;
 
 /** Result of scanning a folder for audio files (IPC from main). */
@@ -83,10 +85,35 @@ export type LocalAudioTagFields = {
   comment: string | null;
   /** Seconds from container; null when unknown. */
   durationSec: number | null;
+  /** BPM only when present in tags (no audio analysis). */
+  bpm: number | null;
+  /** Star rating 0–5 (averaged across rating sources); null when absent. */
+  rating: number | null;
 };
 
 export type GetLocalAudioTagsResult =
   | { status: "ok"; tags: LocalAudioTagFields }
+  | { status: "error"; message: string };
+
+/**
+ * Dev-only payload exposing the raw `common.*` values used by the parser, plus
+ * whether the displayed Title would fall back to the filename. Intended for
+ * one-off inspection from the UI while diagnosing tag mismatches.
+ */
+export type InspectLocalAudioTagsRawPayload = {
+  filePath: string;
+  artist: string | null;
+  artists: string[] | null;
+  title: string | null;
+  genre: string | string[] | null;
+  year: number | null;
+  date: string | null;
+  /** True when display falls back to the filename (no usable title tag). */
+  titleFallbackUsed: boolean;
+};
+
+export type InspectLocalAudioTagsRawResult =
+  | { status: "ok"; payload: InspectLocalAudioTagsRawPayload }
   | { status: "error"; message: string };
 
 /** Local mock console — same commands as remote WS COMMAND (no MPV). */
