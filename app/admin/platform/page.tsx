@@ -185,6 +185,12 @@ export default async function AdminPlatformPage({
               Programming pack coverage
             </Link>
             <Link
+              href="/admin/platform/smart-search"
+              className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
+            >
+              Smart search
+            </Link>
+            <Link
               href="/admin/platform/audit"
               className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
             >
