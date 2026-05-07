@@ -12,6 +12,7 @@ import type {
   ScanLocalAudioFolderResult,
   ListMusicLibraryDirResult,
   GetLocalAudioCoverResult,
+  GetLocalAudioTagsResult,
 } from "./mvp-types";
 
 /** Preload `contextBridge` contract (renderer uses `window.syncbizDesktop`). */
@@ -52,4 +53,6 @@ export type SyncBizDesktopMvp = {
   listMusicLibraryDir: (subPath: string) => Promise<ListMusicLibraryDirResult>;
   /** Embedded cover as `data:image/...;base64,...` or null. */
   getLocalAudioCover: (absolutePath: string) => Promise<GetLocalAudioCoverResult>;
+  /** ID3/tag metadata for browse rows (lazy; desktop main process only). */
+  getLocalAudioTags: (absolutePath: string) => Promise<GetLocalAudioTagsResult>;
 };

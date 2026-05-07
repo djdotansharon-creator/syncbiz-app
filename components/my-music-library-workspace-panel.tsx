@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import type { UnifiedSource } from "@/lib/source-types";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { usePlayback } from "@/lib/playback-provider";
@@ -11,10 +11,7 @@ import {
   createUnifiedPlaylistFromLocalFile,
   createUnifiedPlaylistFromLocalScan,
 } from "@/lib/local-music-library-playlist";
-import {
-  buildEphemeralLocalQueueFromPaths,
-  ephemeralLocalSourceWithCover,
-} from "@/lib/ephemeral-local-music-playback";
+import { buildEphemeralLocalQueueFromPaths } from "@/lib/ephemeral-local-music-playback";
 import { setMusicLibraryDragData } from "@/lib/music-library-drag";
 
 export type MyMusicPlaylistPickerOption = { key: string; label: string };
@@ -42,6 +39,154 @@ function canListMusicLibrary(): boolean {
 
 function canPickMusicFolder(): boolean {
   return typeof window !== "undefined" && typeof window.syncbizDesktop?.pickMusicFolder === "function";
+}
+
+function canGetLocalAudioTags(): boolean {
+  return typeof window !== "undefined" && typeof window.syncbizDesktop?.getLocalAudioTags === "function";
+}
+
+/** Mirrors desktop `LocalAudioTagFields` (preload IPC); duplicated here so Next doesn’t depend on desktop package. */
+type LocalAudioBrowseTags = {
+  artist: string | null;
+  title: string | null;
+  album: string | null;
+  genre: string | null;
+  year: string | null;
+  comment: string | null;
+  durationSec: number | null;
+};
+
+function formatDurationSec(sec: number | null | undefined): string | null {
+  if (sec == null || typeof sec !== "number" || !Number.isFinite(sec) || sec <= 0) return null;
+  const s = Math.max(0, Math.floor(sec + 0.5));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, "0")}`;
+}
+
+function primaryTitleFromTags(fileName: string, t: LocalAudioBrowseTags | null): string {
+  if (!t) return fileName;
+  const artist = (t.artist ?? "").trim();
+  const title = (t.title ?? "").trim();
+  if (artist && title) return `${artist} — ${title}`;
+  if (title) return title;
+  if (artist) return artist;
+  return fileName;
+}
+
+function cleanCommentLine(comment: string | null): string | null {
+  const raw = (comment ?? "").replace(/\s+/g, " ").trim();
+  if (!raw || raw.length < 2 || raw.length > 80) return null;
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(raw)) return null;
+  if (/^([0-9a-f]{2}\s*){12,}$/i.test(raw.replace(/\s/g, ""))) return null;
+  return raw;
+}
+
+function MusicLibraryTrackTitles({ fileName, absolutePath }: { fileName: string; absolutePath: string }): ReactElement {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [state, setState] = useState<"idle" | "loading" | "done">("idle");
+  const [tags, setTags] = useState<LocalAudioBrowseTags | null>(null);
+
+  useEffect(() => {
+    setState("idle");
+    setTags(null);
+    if (!canGetLocalAudioTags()) return undefined;
+    const el = wrapRef.current;
+    if (!el) return undefined;
+    let cancelled = false;
+
+    const loadTags = (): void => {
+      setState("loading");
+      void (async () => {
+        try {
+          const api = window.syncbizDesktop!.getLocalAudioTags!;
+          const res = await api(absolutePath);
+          if (cancelled) return;
+          setTags(res.status === "ok" ? res.tags : null);
+          setState("done");
+        } catch {
+          if (!cancelled) {
+            setTags(null);
+            setState("done");
+          }
+        }
+      })();
+    };
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const en of entries) {
+          if (en.isIntersecting) {
+            obs.disconnect();
+            loadTags();
+            break;
+          }
+        }
+      },
+      { root: null, rootMargin: "120px 0px", threshold: 0.03 },
+    );
+    obs.observe(el);
+    return () => {
+      cancelled = true;
+      obs.disconnect();
+    };
+  }, [absolutePath]);
+
+  const primary = primaryTitleFromTags(fileName, tags);
+  const dur = tags ? formatDurationSec(tags.durationSec) : null;
+  const genre = tags?.genre?.trim() || "";
+  const year = tags?.year?.trim() || "";
+  const album = tags?.album?.trim() || "";
+  const commentShown = tags?.comment ? cleanCommentLine(tags.comment) : null;
+  const hasSecondaryBits = dur || genre || year || album || state === "loading";
+
+  return (
+    <div ref={wrapRef} className="min-w-0 flex-1">
+      <p className="break-words text-base font-semibold leading-snug text-slate-100 sm:text-[1.02rem]">{primary}</p>
+      {primary !== fileName && tags ? (
+        <p className="mt-0.5 truncate font-mono text-[10px] text-slate-600" title={fileName}>
+          {fileName}
+        </p>
+      ) : null}
+      {hasSecondaryBits ? (
+        <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          {dur ? (
+            <span className="inline-flex shrink-0 rounded-md border border-slate-700/65 bg-slate-950/50 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-slate-400">
+              {dur}
+            </span>
+          ) : null}
+          {genre ? (
+            <span className="max-w-[8.5rem] truncate text-[11px] font-medium capitalize text-slate-500" title={genre}>
+              {genre}
+            </span>
+          ) : null}
+          {year ? (
+            <span className="text-[11px] font-medium tabular-nums text-slate-500" title={year}>
+              {year}
+            </span>
+          ) : null}
+          {album ? (
+            <span
+              className="max-w-[11rem] truncate text-[11px] font-medium text-slate-500/95"
+              title={album}
+            >
+              {album}
+            </span>
+          ) : null}
+          {state === "loading" ? (
+            <span className="text-[11px] font-medium tracking-widest text-slate-600" aria-hidden>
+              ···
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {commentShown ? (
+        <p className="mt-1 line-clamp-1 text-[11px] leading-snug text-slate-500/92" title={commentShown}>
+          {commentShown}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function IconFolderGlyph({ className }: { className?: string }) {
@@ -144,7 +289,7 @@ export function MyMusicLibraryWorkspacePanel({
   onAddToLibrary: (source: UnifiedSource) => void;
   userPlaylists: MyMusicPlaylistPickerOption[];
   onAppendLocalUnifiedToPlaylist: (playlistKey: string, items: UnifiedSource[]) => Promise<void>;
-}): React.ReactElement {
+}): ReactElement {
   const { t } = useTranslations();
   const { playSource, setQueue } = usePlayback();
   const defaultGenre = t.defaultGenreMixed ?? "Mixed";
@@ -209,6 +354,11 @@ export function MyMusicLibraryWorkspacePanel({
 
   const segments = useMemo(() => (relSubpath ? relSubpath.split("/").filter(Boolean) : []), [relSubpath]);
 
+  const browseFolderAudioPaths = useMemo(() => {
+    if (list?.status !== "ok") return [];
+    return list.files.map((f) => f.path.trim()).filter(Boolean);
+  }, [list]);
+
   const navigateUp = useCallback(() => {
     if (!segments.length) return;
     const next = segments.slice(0, -1);
@@ -246,28 +396,23 @@ export function MyMusicLibraryWorkspacePanel({
     }
   }, [refreshRoot]);
 
-  const playFile = useCallback(
+  const playTrackInCurrentBrowseFolder = useCallback(
     async (absPath: string) => {
-      setScanBusy(absPath);
+      const trimmed = absPath.trim();
+      const ordered = browseFolderAudioPaths.length ? browseFolderAudioPaths : [trimmed];
+      const idx = ordered.indexOf(trimmed);
+      const pathsToQueue = idx >= 0 ? ordered : [trimmed];
+      const startIdx = idx >= 0 ? idx : 0;
+      setScanBusy(trimmed);
       try {
-        let cover: string | null = null;
-        const getter = window.syncbizDesktop?.getLocalAudioCover;
-        if (typeof getter === "function") {
-          try {
-            const res = await getter(absPath);
-            if (res.status === "ok") cover = res.dataUrl;
-          } catch {
-            cover = null;
-          }
-        }
-        const ephemeral = ephemeralLocalSourceWithCover(absPath, cover ?? null);
-        setQueue([ephemeral], { force: true });
-        playSource(ephemeral);
+        const queue = buildEphemeralLocalQueueFromPaths(pathsToQueue);
+        setQueue(queue, { force: true });
+        playSource(queue[startIdx]!);
       } finally {
         setScanBusy(null);
       }
     },
-    [playSource, setQueue],
+    [playSource, setQueue, browseFolderAudioPaths],
   );
 
   const scanAndPlayFolder = useCallback(
@@ -633,13 +778,11 @@ export function MyMusicLibraryWorkspacePanel({
                             type="button"
                             draggable
                             onDragStart={(e) => setMusicLibraryDragData(e.dataTransfer, { kind: "file", path: f.path })}
-                            onDoubleClick={() => void playFile(f.path)}
+                            onDoubleClick={() => void playTrackInCurrentBrowseFolder(f.path)}
                             className="flex min-w-0 flex-1 cursor-grab items-center gap-3 text-left active:cursor-grabbing sm:gap-4"
                           >
                             <MusicLibraryTrackThumb absolutePath={f.path} />
-                            <span className="min-w-0 flex-1 break-words text-base font-medium leading-snug text-slate-100 sm:text-[1.02rem]">
-                              {f.name}
-                            </span>
+                            <MusicLibraryTrackTitles fileName={f.name} absolutePath={f.path} />
                           </button>
                           <div className="flex shrink-0 items-center gap-1.5">
                             <button
@@ -653,7 +796,7 @@ export function MyMusicLibraryWorkspacePanel({
                             <button
                               type="button"
                               disabled={Boolean(scanBusy)}
-                              onClick={() => void playFile(f.path)}
+                              onClick={() => void playTrackInCurrentBrowseFolder(f.path)}
                               className="flex h-10 min-w-[4.75rem] shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-50 transition hover:border-slate-600 hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-45"
                             >
                               {scanBusy === f.path ? "…" : "Play"}

@@ -33,6 +33,8 @@ export const MVP_IPC = {
   LIST_MUSIC_LIBRARY_DIR: "mvp:list-music-library-dir",
   /** First embedded picture from an audio file as a data URL, or null. */
   GET_LOCAL_AUDIO_COVER: "mvp:get-local-audio-cover",
+  /** Common tags + duration from an audio file (main process only). */
+  GET_LOCAL_AUDIO_TAGS: "mvp:get-local-audio-tags",
 } as const;
 
 /** Result of scanning a folder for audio files (IPC from main). */
@@ -69,6 +71,22 @@ export type ListMusicLibraryDirResult =
 /** Embedded artwork as data URL, or absent. */
 export type GetLocalAudioCoverResult =
   | { status: "ok"; dataUrl: string | null }
+  | { status: "error"; message: string };
+
+/** Tags read locally for browse UI (no upload). Missing fields use null. */
+export type LocalAudioTagFields = {
+  artist: string | null;
+  title: string | null;
+  album: string | null;
+  genre: string | null;
+  year: string | null;
+  comment: string | null;
+  /** Seconds from container; null when unknown. */
+  durationSec: number | null;
+};
+
+export type GetLocalAudioTagsResult =
+  | { status: "ok"; tags: LocalAudioTagFields }
   | { status: "error"; message: string };
 
 /** Local mock console — same commands as remote WS COMMAND (no MPV). */

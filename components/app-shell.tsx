@@ -984,9 +984,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                                 </a>
                               </div>
                             ) : isMusicPad && inDesktopApp ? (
-                              isActive ? (
-                                <p className="mt-2 text-[10px] font-medium text-slate-400/95">Close panel</p>
-                              ) : null
+                              <p className="mt-1 flex flex-wrap items-center gap-1 text-[10px] opacity-90">
+                                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />
+                                {isActive ? "Close panel" : "Open console"}
+                              </p>
                             ) : (
                               <p className="mt-1 flex flex-wrap items-center gap-1 text-[10px] opacity-90">
                                 <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />

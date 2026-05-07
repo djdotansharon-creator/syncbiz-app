@@ -43,6 +43,20 @@ type GetLocalAudioCoverIpcResult =
   | { status: "ok"; dataUrl: string | null }
   | { status: "error"; message: string };
 
+type LocalAudioTagFieldsIpc = {
+  artist: string | null;
+  title: string | null;
+  album: string | null;
+  genre: string | null;
+  year: string | null;
+  comment: string | null;
+  durationSec: number | null;
+};
+
+type GetLocalAudioTagsIpcResult =
+  | { status: "ok"; tags: LocalAudioTagFieldsIpc }
+  | { status: "error"; message: string };
+
 type SyncBizDesktopBridgePreload = {
   getConfig: () => Promise<{ deviceId: string }>;
   localMockTransport: (payload: DesktopLocalMockPayload) => Promise<unknown>;
@@ -61,6 +75,8 @@ type SyncBizDesktopBridgePreload = {
   listMusicLibraryDir?: (subPath: string) => Promise<ListMusicLibraryDirIpcResult>;
   /** Embedded cover art (`data:image/...`) or null from main-process parse. */
   getLocalAudioCover?: (absolutePath: string) => Promise<GetLocalAudioCoverIpcResult>;
+  /** Lazily-loaded tag snapshot for browse rows (Desktop main process only). */
+  getLocalAudioTags?: (absolutePath: string) => Promise<GetLocalAudioTagsIpcResult>;
 };
 
 declare global {

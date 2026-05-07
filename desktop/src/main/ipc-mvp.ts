@@ -13,6 +13,7 @@ import type {
   ScanLocalAudioFolderResult,
   ListMusicLibraryDirResult,
   GetLocalAudioCoverResult,
+  GetLocalAudioTagsResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import { DeviceWsManager } from "../device-websocket-client/device-ws-manager";
@@ -22,6 +23,7 @@ import type { PlaybackOrchestrator } from "./playback-orchestrator";
 import { scanLocalAudioFolder } from "./scan-local-audio-folder";
 import { listMusicLibraryDir } from "./list-music-library-dir";
 import { extractEmbeddedCoverDataUrlFromAudioFile } from "./extract-local-audio-cover";
+import { extractLocalAudioTagFields } from "./extract-local-audio-tags";
 
 let manager: DeviceWsManager | null = null;
 let cachedConfig: DesktopRuntimeConfig | null = null;
@@ -283,6 +285,22 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       try {
         const dataUrl = await extractEmbeddedCoverDataUrlFromAudioFile(filePath.trim());
         return { status: "ok", dataUrl };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { status: "error", message: msg };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    MVP_IPC.GET_LOCAL_AUDIO_TAGS,
+    async (_e, filePath: unknown): Promise<GetLocalAudioTagsResult> => {
+      if (typeof filePath !== "string" || !filePath.trim()) {
+        return { status: "error", message: "Empty path" };
+      }
+      try {
+        const tags = await extractLocalAudioTagFields(filePath.trim());
+        return { status: "ok", tags };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return { status: "error", message: msg };
