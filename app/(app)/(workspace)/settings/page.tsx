@@ -1,6 +1,9 @@
 import type { ReactNode } from "react";
 import { ClearPlaybackCacheButton } from "@/components/clear-playback-cache-button";
-import { DesktopSettingsControls } from "@/components/desktop-settings-controls";
+import {
+  DesktopStartupSettingsCard,
+  DesktopLocalMusicSettingsCard,
+} from "@/components/desktop-settings-controls";
 import { DeviceModeSettingsSwitch } from "@/components/device-mode-settings-switch";
 import { MixDurationSetting } from "@/components/mix-duration-setting";
 import { SettingsPreferencesControls } from "@/components/settings-preferences-controls";
@@ -46,11 +49,11 @@ export default async function SettingsPage() {
         >
           <SettingsPreferencesControls />
         </PlaceholderCard>
-        <PlaceholderCard
-          title="Desktop app settings"
-          description="Auto-start and local music folder. Available when running the SyncBiz desktop app."
-        >
-          <DesktopSettingsControls />
+        <PlaceholderCard title="Startup" description="Desktop app launches at login.">
+          <DesktopStartupSettingsCard />
+        </PlaceholderCard>
+        <PlaceholderCard title="Local Music" description="Folder for My Music Library on Desktop.">
+          <DesktopLocalMusicSettingsCard />
         </PlaceholderCard>
         <PlaceholderCard
           title="Account preferences"
