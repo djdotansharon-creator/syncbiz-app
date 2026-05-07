@@ -10,6 +10,8 @@ import type {
   MvpStatusSnapshot,
   PickMusicFolderResult,
   ScanLocalAudioFolderResult,
+  ListMusicLibraryDirResult,
+  GetLocalAudioCoverResult,
 } from "./mvp-types";
 
 /** Preload `contextBridge` contract (renderer uses `window.syncbizDesktop`). */
@@ -46,4 +48,8 @@ export type SyncBizDesktopMvp = {
   pickMusicFolder: () => Promise<PickMusicFolderResult>;
   /** Clear the persisted music folder path. */
   clearMusicFolder: () => Promise<MusicFolderSnapshot>;
+  /** List folders + supported audio files in one directory under the saved music root. */
+  listMusicLibraryDir: (subPath: string) => Promise<ListMusicLibraryDirResult>;
+  /** Embedded cover as `data:image/...;base64,...` or null. */
+  getLocalAudioCover: (absolutePath: string) => Promise<GetLocalAudioCoverResult>;
 };

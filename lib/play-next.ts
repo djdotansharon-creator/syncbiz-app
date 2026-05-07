@@ -57,12 +57,12 @@ function newPlayNextId(): string {
 }
 
 /** Ephemeral in-memory / playback-state only; never written to the library API. */
-export function createPlayNextLocalSource(absolutePath: string): UnifiedSource {
+export function createPlayNextLocalSource(absolutePath: string, cover?: string | null): UnifiedSource {
   return {
     id: newPlayNextId(),
     title: titleFromLocalPath(absolutePath),
     genre: "Mixed",
-    cover: null,
+    cover: cover ?? null,
     type: "local",
     url: absolutePath,
     origin: "source",

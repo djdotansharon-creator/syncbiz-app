@@ -1,0 +1,867 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { UnifiedSource } from "@/lib/source-types";
+import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
+import { usePlayback } from "@/lib/playback-provider";
+import { useTranslations } from "@/lib/locale-context";
+import { createPlayNextLocalSource } from "@/lib/play-next";
+import {
+  createUnifiedPlaylistFromLocalFile,
+  createUnifiedPlaylistFromLocalScan,
+} from "@/lib/local-music-library-playlist";
+import {
+  buildEphemeralLocalQueueFromPaths,
+  ephemeralLocalSourceWithCover,
+} from "@/lib/ephemeral-local-music-playback";
+import { setMusicLibraryDragData } from "@/lib/music-library-drag";
+
+export type MyMusicPlaylistPickerOption = { key: string; label: string };
+
+type AddToPlaylistModalTarget =
+  | { kind: "folder"; path: string; defaultName: string }
+  | { kind: "file"; path: string; defaultName: string };
+
+type AddToPlaylistModalStep = "menu" | "create" | "existing";
+
+type AddToPlaylistFeedback =
+  | { phase: "idle" }
+  | { phase: "loading"; message: string }
+  | { phase: "ok"; message: string }
+  | { phase: "error"; message: string };
+
+function isElectronWithBridge(): boolean {
+  if (typeof window === "undefined") return false;
+  return Boolean(window.syncbizDesktop);
+}
+
+function canListMusicLibrary(): boolean {
+  return typeof window !== "undefined" && typeof window.syncbizDesktop?.listMusicLibraryDir === "function";
+}
+
+function canPickMusicFolder(): boolean {
+  return typeof window !== "undefined" && typeof window.syncbizDesktop?.pickMusicFolder === "function";
+}
+
+function IconFolderGlyph({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+    </svg>
+  );
+}
+
+/** Local-browser placeholder: stacked vinyl + simplified deck silhouette (syncs with slate/cyan UI). */
+function LocalLibraryDeckPlaceholder({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 48 48" fill="none" aria-hidden>
+      <path
+        stroke="currentColor"
+        strokeWidth="1.5"
+        opacity="0.35"
+        d="M8 38h32a2 2 0 0 0 2-2v-6H6v6a2 2 0 0 0 2 2z"
+      />
+      <rect x="6" y="14" width="36" height="16" rx="3" stroke="currentColor" strokeWidth="1.35" opacity="0.45" />
+      <circle cx="18" cy="22" r="6" stroke="currentColor" strokeWidth="1.35" opacity="0.55" />
+      <circle cx="18" cy="22" r="1.75" fill="currentColor" opacity="0.4" />
+      <circle cx="30" cy="22" r="5" stroke="currentColor" strokeWidth="1.2" opacity="0.35" />
+      <circle cx="30" cy="22" r="1.35" fill="currentColor" opacity="0.25" />
+    </svg>
+  );
+}
+
+function MusicLibraryTrackThumb({ absolutePath }: { absolutePath: string }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const api = typeof window !== "undefined" ? window.syncbizDesktop?.getLocalAudioCover : undefined;
+    if (typeof api !== "function") return undefined;
+    void (async () => {
+      try {
+        const res = await api(absolutePath);
+        if (!cancelled && res.status === "ok" && res.dataUrl) setDataUrl(res.dataUrl);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [absolutePath]);
+
+  return (
+    <span className="flex h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-slate-700/45 bg-slate-950/65">
+      {dataUrl ? (
+        <HydrationSafeImage src={dataUrl} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <span className="flex h-full w-full items-center justify-center text-sky-500/55">
+          <LocalLibraryDeckPlaceholder className="h-10 w-10" />
+        </span>
+      )}
+    </span>
+  );
+}
+
+function IconChevronLeft({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" aria-hidden>
+      <path d="m15 6-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+const folderCardClass =
+  "rounded-xl border border-slate-700/40 bg-slate-950/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]";
+
+const ghostBtn =
+  "inline-flex shrink-0 items-center justify-center rounded-md border border-slate-600/50 bg-slate-900/50 px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500 hover:bg-slate-800/60 hover:text-white disabled:pointer-events-none disabled:opacity-40";
+
+const playOutlineBtn =
+  "inline-flex shrink-0 items-center justify-center rounded-md border border-cyan-500/35 bg-cyan-950/35 px-3 py-1.5 text-[11px] font-semibold text-cyan-100/95 transition hover:border-cyan-400/45 hover:bg-cyan-900/35 disabled:pointer-events-none disabled:opacity-40";
+
+const folderCardAccents = ["border-l-cyan-500/45", "border-l-sky-500/45", "border-l-teal-500/40", "border-l-violet-400/38"] as const;
+
+function folderAccentClass(path: string): string {
+  let h = 0;
+  for (let i = 0; i < path.length; i++) h = (h + path.charCodeAt(i) * (i + 3)) % 1009;
+  return folderCardAccents[h % folderCardAccents.length] ?? folderCardAccents[0];
+}
+
+type ListResult =
+  | { status: "ok"; dirs: { name: string; path: string }[]; files: { name: string; path: string }[] }
+  | { status: "error"; message: string }
+  | { status: "no_root" };
+
+export function MyMusicLibraryWorkspacePanel({
+  onClose,
+  onAddToLibrary,
+  userPlaylists,
+  onAppendLocalUnifiedToPlaylist,
+}: {
+  onClose: () => void;
+  onAddToLibrary: (source: UnifiedSource) => void;
+  userPlaylists: MyMusicPlaylistPickerOption[];
+  onAppendLocalUnifiedToPlaylist: (playlistKey: string, items: UnifiedSource[]) => Promise<void>;
+}): React.ReactElement {
+  const { t } = useTranslations();
+  const { playSource, setQueue } = usePlayback();
+  const defaultGenre = t.defaultGenreMixed ?? "Mixed";
+
+  const [rootPath, setRootPath] = useState<string | null>(null);
+  const [relSubpath, setRelSubpath] = useState("");
+  const [list, setList] = useState<ListResult | null>(null);
+  const [listLoading, setListLoading] = useState(false);
+  const [scanBusy, setScanBusy] = useState<string | null>(null);
+  const [folderPickBusy, setFolderPickBusy] = useState(false);
+  const [folderPickError, setFolderPickError] = useState<string | null>(null);
+
+  const [addModalTarget, setAddModalTarget] = useState<AddToPlaylistModalTarget | null>(null);
+  const [addModalStep, setAddModalStep] = useState<AddToPlaylistModalStep>("menu");
+  const [createNameDraft, setCreateNameDraft] = useState("");
+  const [pickedPlaylistKey, setPickedPlaylistKey] = useState<string | null>(null);
+  const [addFeedback, setAddFeedback] = useState<AddToPlaylistFeedback>({ phase: "idle" });
+  const [addFlowBusy, setAddFlowBusy] = useState(false);
+
+  const hasUserPlaylists = userPlaylists.length > 0;
+
+  const refreshRoot = useCallback(async () => {
+    if (!isElectronWithBridge() || !window.syncbizDesktop?.getMusicFolder) {
+      setRootPath(null);
+      return;
+    }
+    const snap = await window.syncbizDesktop.getMusicFolder();
+    setRootPath(snap.path?.trim() ? snap.path : null);
+  }, []);
+
+  useEffect(() => {
+    void refreshRoot();
+  }, [refreshRoot]);
+
+  const loadList = useCallback(async () => {
+    if (!canListMusicLibrary()) {
+      setList({ status: "no_root" });
+      return;
+    }
+    if (!rootPath) {
+      setList({ status: "no_root" });
+      return;
+    }
+    setListLoading(true);
+    try {
+      const res = await window.syncbizDesktop!.listMusicLibraryDir!(relSubpath);
+      setList(res);
+    } catch (e) {
+      setList({ status: "error", message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setListLoading(false);
+    }
+  }, [rootPath, relSubpath]);
+
+  useEffect(() => {
+    if (!rootPath) {
+      setList(null);
+      return;
+    }
+    void loadList();
+  }, [rootPath, relSubpath, loadList]);
+
+  const segments = useMemo(() => (relSubpath ? relSubpath.split("/").filter(Boolean) : []), [relSubpath]);
+
+  const navigateUp = useCallback(() => {
+    if (!segments.length) return;
+    const next = segments.slice(0, -1);
+    setRelSubpath(next.length ? next.join("/") : "");
+  }, [segments]);
+
+  const navigateToSegment = useCallback(
+    (index: number) => {
+      if (index < 0) {
+        setRelSubpath("");
+        return;
+      }
+      setRelSubpath(segments.slice(0, index + 1).join("/"));
+    },
+    [segments],
+  );
+
+  const chooseMusicFolderFromPanel = useCallback(async () => {
+    const api = window.syncbizDesktop?.pickMusicFolder;
+    if (typeof api !== "function") return;
+    setFolderPickBusy(true);
+    setFolderPickError(null);
+    try {
+      const result = await api();
+      if (result.status === "ok") {
+        setRelSubpath("");
+        await refreshRoot();
+      } else if (result.status === "error") {
+        setFolderPickError(result.message);
+      }
+    } catch (e) {
+      setFolderPickError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFolderPickBusy(false);
+    }
+  }, [refreshRoot]);
+
+  const playFile = useCallback(
+    async (absPath: string) => {
+      setScanBusy(absPath);
+      try {
+        let cover: string | null = null;
+        const getter = window.syncbizDesktop?.getLocalAudioCover;
+        if (typeof getter === "function") {
+          try {
+            const res = await getter(absPath);
+            if (res.status === "ok") cover = res.dataUrl;
+          } catch {
+            cover = null;
+          }
+        }
+        const ephemeral = ephemeralLocalSourceWithCover(absPath, cover ?? null);
+        setQueue([ephemeral], { force: true });
+        playSource(ephemeral);
+      } finally {
+        setScanBusy(null);
+      }
+    },
+    [playSource, setQueue],
+  );
+
+  const scanAndPlayFolder = useCallback(
+    async (absPath: string) => {
+      const scan = window.syncbizDesktop?.scanLocalAudioFolder;
+      if (typeof scan !== "function") return;
+      setScanBusy(absPath);
+      try {
+        const result = await scan(absPath);
+        if (result.status !== "ok" || result.files.length === 0) return;
+        const queue = buildEphemeralLocalQueueFromPaths(result.files);
+        setQueue(queue, { force: true });
+        playSource(queue[0]!);
+      } finally {
+        setScanBusy(null);
+      }
+    },
+    [playSource, setQueue],
+  );
+
+  const resetAddModal = useCallback(() => {
+    setAddModalTarget(null);
+    setAddModalStep("menu");
+    setCreateNameDraft("");
+    setPickedPlaylistKey(null);
+    setAddFeedback({ phase: "idle" });
+    setAddFlowBusy(false);
+  }, []);
+
+  const openAddModal = useCallback((target: AddToPlaylistModalTarget) => {
+    setAddModalTarget(target);
+    setAddModalStep("menu");
+    setCreateNameDraft(target.defaultName);
+    setPickedPlaylistKey(null);
+    setAddFeedback({ phase: "idle" });
+    setAddFlowBusy(false);
+  }, []);
+
+  const runCreateSavedPlaylist = useCallback(async () => {
+    if (!addModalTarget) return;
+    const nameFallback = createNameDraft.trim() || addModalTarget.defaultName;
+    setAddFlowBusy(true);
+    try {
+      if (addModalTarget.kind === "folder") {
+        const scan = window.syncbizDesktop?.scanLocalAudioFolder;
+        if (typeof scan !== "function") {
+          setAddFeedback({ phase: "error", message: "Desktop scan is unavailable." });
+          return;
+        }
+        setAddFeedback({ phase: "loading", message: "Scanning folder…" });
+        const result = await scan(addModalTarget.path);
+        if (result.status !== "ok" || result.files.length === 0) {
+          setAddFeedback({ phase: "error", message: "No playable audio files in that folder." });
+          return;
+        }
+        setAddFeedback({ phase: "loading", message: "Saving playlist…" });
+        const unified = await createUnifiedPlaylistFromLocalScan(
+          { playlistName: nameFallback, files: result.files },
+          defaultGenre,
+        );
+        if (!unified) {
+          setAddFeedback({ phase: "error", message: "Could not create playlist." });
+          return;
+        }
+        onAddToLibrary(unified);
+        setAddFeedback({ phase: "ok", message: `Created “${unified.title}”.` });
+      } else {
+        setAddFeedback({ phase: "loading", message: "Saving playlist…" });
+        const unified = await createUnifiedPlaylistFromLocalFile(addModalTarget.path, defaultGenre, {
+          name: nameFallback,
+        });
+        if (!unified) {
+          setAddFeedback({ phase: "error", message: "Could not create playlist." });
+          return;
+        }
+        onAddToLibrary(unified);
+        setAddFeedback({ phase: "ok", message: `Created “${unified.title}”.` });
+      }
+    } catch (e) {
+      setAddFeedback({
+        phase: "error",
+        message: e instanceof Error ? e.message : "Something went wrong.",
+      });
+    } finally {
+      setAddFlowBusy(false);
+    }
+  }, [addModalTarget, createNameDraft, defaultGenre, onAddToLibrary]);
+
+  const runAppendToExistingPlaylist = useCallback(async () => {
+    if (!addModalTarget || !pickedPlaylistKey) return;
+    setAddFlowBusy(true);
+    try {
+      let items: UnifiedSource[] = [];
+      if (addModalTarget.kind === "folder") {
+        const scan = window.syncbizDesktop?.scanLocalAudioFolder;
+        if (typeof scan !== "function") {
+          setAddFeedback({ phase: "error", message: "Desktop scan is unavailable." });
+          return;
+        }
+        setAddFeedback({ phase: "loading", message: "Scanning folder…" });
+        const result = await scan(addModalTarget.path);
+        if (result.status !== "ok" || result.files.length === 0) {
+          setAddFeedback({ phase: "error", message: "No playable audio files in that folder." });
+          return;
+        }
+        items = result.files.map((p) => createPlayNextLocalSource(p.trim()));
+      } else {
+        setAddFeedback({ phase: "loading", message: "Preparing track…" });
+        items = [createPlayNextLocalSource(addModalTarget.path.trim())];
+      }
+      setAddFeedback({ phase: "loading", message: "Updating playlist…" });
+      await onAppendLocalUnifiedToPlaylist(pickedPlaylistKey, items);
+      setAddFeedback({
+        phase: "ok",
+        message: `Added ${items.length} track${items.length === 1 ? "" : "s"} to playlist.`,
+      });
+    } catch (e) {
+      setAddFeedback({
+        phase: "error",
+        message: e instanceof Error ? e.message : "Something went wrong.",
+      });
+    } finally {
+      setAddFlowBusy(false);
+    }
+  }, [addModalTarget, pickedPlaylistKey, onAppendLocalUnifiedToPlaylist]);
+
+  useEffect(() => {
+    if (!addModalTarget) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !addFlowBusy) resetAddModal();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [addModalTarget, addFlowBusy, resetAddModal]);
+
+  const webOnly = !isElectronWithBridge();
+  const listApiMissing = isElectronWithBridge() && !canListMusicLibrary();
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4 bg-slate-950 p-4 sm:p-5">
+      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-800/70 pb-3">
+        <h2 className="text-xl font-semibold tracking-tight text-slate-100 sm:text-2xl">My Music Library</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          title="Close"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-700/75 bg-slate-900 text-slate-400 transition hover:border-slate-600 hover:bg-slate-800 hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/35"
+        >
+          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      {webOnly ? (
+        <div className="rounded-xl border border-slate-800/85 bg-slate-900/50 p-6 text-slate-300">
+          <p className="text-base font-semibold text-slate-100">Available in SyncBiz Desktop</p>
+          <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-400">
+            Local folder browsing runs in the desktop app on your PC.
+          </p>
+          <a
+            href="/api/desktop/download"
+            className="mt-5 inline-flex items-center justify-center rounded-xl border border-sky-500/40 bg-sky-500/15 px-5 py-2.5 text-sm font-semibold text-sky-100 transition hover:border-sky-400/60 hover:bg-sky-500/25"
+          >
+            Download Desktop
+          </a>
+          <Link
+            href="/settings"
+            className="mt-4 inline-flex text-sm font-medium text-slate-400 underline decoration-slate-600 underline-offset-2 transition hover:text-slate-200"
+          >
+            Open Settings
+          </Link>
+        </div>
+      ) : listApiMissing ? (
+        <p className="rounded-2xl border border-amber-500/25 bg-amber-500/[0.06] px-5 py-4 text-sm leading-relaxed text-amber-100/95">
+          Update SyncBiz Desktop to browse your music folder.
+        </p>
+      ) : !rootPath ? (
+        <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-slate-700/55 bg-slate-950 px-6 py-14 text-center">
+          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-lg border border-sky-500/20 bg-slate-900/95 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_16px_-2px_rgba(56,189,248,0.18)]">
+            <IconFolderGlyph className="h-8 w-8 text-sky-400/85 drop-shadow-[0_0_6px_rgba(125,211,252,0.35)]" />
+          </div>
+          <p className="max-w-sm text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
+            No music folder selected
+          </p>
+          <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">
+            Choose where your local audio files live. You can change it anytime in Settings.
+          </p>
+          {canPickMusicFolder() ? (
+            <button
+              type="button"
+              disabled={folderPickBusy}
+              onClick={() => void chooseMusicFolderFromPanel()}
+              className="mt-7 inline-flex w-full max-w-xs items-center justify-center rounded-lg border border-sky-600/70 bg-sky-700 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-600 disabled:opacity-50"
+            >
+              {folderPickBusy ? "Opening…" : "Choose Music Folder"}
+            </button>
+          ) : (
+            <p className="mt-4 max-w-md text-xs text-amber-200/90">
+              Update SyncBiz Desktop to choose a folder from here, or use Settings below.
+            </p>
+          )}
+          <Link
+            href="/settings"
+            className={`inline-flex text-sm font-medium text-slate-400 underline decoration-slate-600 underline-offset-2 transition hover:text-slate-200 ${canPickMusicFolder() ? "mt-4" : "mt-6"}`}
+          >
+            Open Settings
+          </Link>
+          {folderPickError ? <p className="mt-3 max-w-md text-xs text-rose-400">{folderPickError}</p> : null}
+        </div>
+      ) : (
+        <>
+          <nav
+            aria-label="Folder path"
+            className="flex min-w-0 flex-col gap-2 border-b border-slate-800/75 pb-2 sm:flex-row sm:items-stretch sm:gap-3"
+          >
+            <button
+              type="button"
+              disabled={!segments.length}
+              onClick={navigateUp}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-semibold text-slate-100 transition enabled:hover:border-slate-600 enabled:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-35 sm:self-auto"
+            >
+              <IconChevronLeft className="h-4 w-4 text-slate-400" />
+              Up
+            </button>
+            <div
+              className="min-w-0 flex-1 rounded-md border border-slate-800/90 bg-slate-900/55 px-2.5 py-1.5"
+              title={`${rootPath}${relSubpath ? `${rootPath.includes("\\") ? "\\" : "/"}${relSubpath.replace(/\//g, rootPath.includes("\\") ? "\\" : "/")}` : ""}`}
+            >
+              <p className="text-[9px] font-medium uppercase tracking-[0.18em] text-slate-600">Location</p>
+              <div className="mt-0.5 font-mono text-xs font-medium leading-snug text-slate-100 sm:text-[0.8125rem] sm:leading-snug">
+                {segments.length === 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => navigateToSegment(-1)}
+                    className="break-all text-left text-sky-300/95 transition hover:text-sky-200"
+                  >
+                    {rootPath}
+                  </button>
+                ) : (
+                  <span className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
+                    <button
+                      type="button"
+                      className="shrink-0 text-sky-300/95 transition hover:text-sky-200"
+                      onClick={() => navigateToSegment(-1)}
+                    >
+                      Root
+                    </button>
+                    {segments.map((seg, i) => (
+                      <span key={`${seg}-${i}`} className="flex min-w-0 flex-wrap items-baseline gap-x-1">
+                        <span className="text-slate-600" aria-hidden>
+                          /
+                        </span>
+                        <button
+                          type="button"
+                          className={`min-w-0 max-w-full break-all text-left ${
+                            i === segments.length - 1 ? "text-slate-100" : "text-sky-300/95 hover:text-sky-200"
+                          } transition`}
+                          onClick={() => navigateToSegment(i)}
+                        >
+                          {seg}
+                        </button>
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </div>
+            </div>
+          </nav>
+
+          <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-800/90 bg-slate-950">
+            {listLoading || list === null ? (
+              <p className="p-8 text-center text-sm font-medium text-slate-500">Loading…</p>
+            ) : list.status === "error" ? (
+              <p className="p-8 text-center text-sm text-rose-400">{list.message}</p>
+            ) : list.status === "no_root" ? (
+              <p className="p-8 text-center text-sm text-slate-500">Could not read folder.</p>
+            ) : list.dirs.length === 0 && list.files.length === 0 ? (
+              <p className="p-8 text-center text-sm font-medium text-slate-500">Empty folder.</p>
+            ) : (
+              <div className="p-3 sm:p-4">
+                {list.dirs.length > 0 ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {list.dirs.map((d) => (
+                      <article
+                        key={d.path}
+                        className={`${folderCardClass} overflow-hidden border-l-[3px] ${folderAccentClass(d.path)}`}
+                      >
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          draggable
+                          onDragStart={(e) => setMusicLibraryDragData(e.dataTransfer, { kind: "folder", path: d.path })}
+                          onClick={() => setRelSubpath([...segments, d.name].join("/"))}
+                          onKeyDown={(ev) => {
+                            if (ev.key === "Enter" || ev.key === " ") {
+                              ev.preventDefault();
+                              setRelSubpath([...segments, d.name].join("/"));
+                            }
+                          }}
+                          className="cursor-pointer px-5 pb-4 pt-5 outline-none transition-colors hover:bg-slate-900/40 active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/35"
+                        >
+                          <div className="flex gap-4">
+                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-sky-500/22 bg-slate-900/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_0_14px_-2px_rgba(56,189,248,0.22)]">
+                              <IconFolderGlyph className="h-8 w-8 text-sky-300/90 drop-shadow-[0_0_7px_rgba(125,211,252,0.4)]" />
+                            </div>
+                            <div className="min-w-0 flex-1 pt-1">
+                              <p className="text-lg font-semibold leading-snug tracking-tight text-slate-50 sm:text-xl">
+                                {d.name}
+                              </p>
+                              <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.2em] text-slate-500">
+                                Folder · tap to open
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <div
+                          className="flex flex-wrap gap-1.5 border-t border-slate-800/80 px-5 py-2.5"
+                          onClick={(ev) => ev.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            disabled={scanBusy === d.path || addFlowBusy}
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              openAddModal({ kind: "folder", path: d.path, defaultName: d.name });
+                            }}
+                            className={ghostBtn}
+                          >
+                            Add to Playlist
+                          </button>
+                          <button
+                            type="button"
+                            disabled={Boolean(scanBusy)}
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              void scanAndPlayFolder(d.path);
+                            }}
+                            className={playOutlineBtn}
+                          >
+                            {scanBusy === d.path ? "…" : "Play"}
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+
+                {list.files.length > 0 ? (
+                  <div className={list.dirs.length > 0 ? "mt-6" : ""}>
+                    <p className="mb-3 px-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                      Tracks
+                    </p>
+                    <ul className="flex flex-col gap-2">
+                      {list.files.map((f) => (
+                        <li
+                          key={f.path}
+                          className="flex min-w-0 items-center gap-3 rounded-lg border border-slate-800/90 bg-slate-900/40 px-3.5 py-3 sm:gap-4 sm:px-4"
+                        >
+                          <button
+                            type="button"
+                            draggable
+                            onDragStart={(e) => setMusicLibraryDragData(e.dataTransfer, { kind: "file", path: f.path })}
+                            onDoubleClick={() => void playFile(f.path)}
+                            className="flex min-w-0 flex-1 cursor-grab items-center gap-3 text-left active:cursor-grabbing sm:gap-4"
+                          >
+                            <MusicLibraryTrackThumb absolutePath={f.path} />
+                            <span className="min-w-0 flex-1 break-words text-base font-medium leading-snug text-slate-100 sm:text-[1.02rem]">
+                              {f.name}
+                            </span>
+                          </button>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            <button
+                              type="button"
+                              disabled={scanBusy === f.path || addFlowBusy}
+                              onClick={() => openAddModal({ kind: "file", path: f.path, defaultName: f.name.replace(/\.[^/.]+$/, "") })}
+                              className={`${ghostBtn} px-2.5 py-2 text-[10px]`}
+                            >
+                              Add to Playlist
+                            </button>
+                            <button
+                              type="button"
+                              disabled={Boolean(scanBusy)}
+                              onClick={() => void playFile(f.path)}
+                              className="flex h-10 min-w-[4.75rem] shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-50 transition hover:border-slate-600 hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-45"
+                            >
+                              {scanBusy === f.path ? "…" : "Play"}
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+          <p className="text-center text-[11px] text-slate-600">
+            Drag to player or Drop Next: temporary playback only · Add to Playlist saves to your library · files stay local
+          </p>
+        </>
+      )}
+
+      {addModalTarget ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !addFlowBusy) resetAddModal();
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mml-add-title"
+            className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-slate-700/90 bg-slate-950 shadow-2xl"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="shrink-0 border-b border-slate-800/80 px-4 py-3">
+              <h3 id="mml-add-title" className="text-sm font-semibold tracking-tight text-slate-100">
+                Add to Playlist
+              </h3>
+              <p className="mt-0.5 truncate text-xs text-slate-500" title={addModalTarget.defaultName}>
+                {addModalTarget.kind === "folder" ? "Folder" : "File"} · {addModalTarget.defaultName}
+              </p>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              {addFeedback.phase === "loading" ? (
+                <p className="py-6 text-center text-sm font-medium text-sky-200/90">{addFeedback.message}</p>
+              ) : addFeedback.phase === "ok" ? (
+                <div className="space-y-3 py-1">
+                  <p className="text-sm leading-relaxed text-emerald-200/95">{addFeedback.message}</p>
+                  <button
+                    type="button"
+                    onClick={resetAddModal}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-900 py-2 text-sm font-semibold text-slate-100 transition hover:border-slate-500 hover:bg-slate-800"
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : addFeedback.phase === "error" ? (
+                <div className="space-y-3 py-1">
+                  <p className="text-sm leading-relaxed text-rose-300/95">{addFeedback.message}</p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={addFlowBusy}
+                      onClick={() => {
+                        setAddFeedback({ phase: "idle" });
+                        setAddModalStep("menu");
+                      }}
+                      className="flex-1 rounded-lg border border-slate-600 bg-slate-900 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      disabled={addFlowBusy}
+                      onClick={resetAddModal}
+                      className="flex-1 rounded-lg border border-slate-700 py-2 text-xs font-semibold text-slate-400 transition hover:text-slate-200 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : addModalStep === "menu" ? (
+                <div className="flex flex-col gap-2.5">
+                  {!hasUserPlaylists ? (
+                    <p className="rounded-lg border border-slate-800/90 bg-slate-900/40 px-3 py-2 text-xs leading-relaxed text-slate-400">
+                      No saved playlists yet. Use <span className="font-semibold text-slate-300">Create new playlist</span>{" "}
+                      to add one to your library.
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={addFlowBusy}
+                    onClick={() => {
+                      setAddModalStep("create");
+                      setCreateNameDraft(addModalTarget.defaultName);
+                      setAddFeedback({ phase: "idle" });
+                    }}
+                    className="rounded-lg border border-cyan-500/35 bg-cyan-950/30 px-3 py-2.5 text-left text-sm font-semibold text-cyan-100 transition hover:border-cyan-400/50 hover:bg-cyan-900/25 disabled:opacity-50"
+                  >
+                    Create new playlist
+                    <span className="mt-0.5 block text-[11px] font-normal text-cyan-200/60">
+                      Save as a new library playlist (name editable)
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!hasUserPlaylists || addFlowBusy}
+                    onClick={() => {
+                      setAddModalStep("existing");
+                      setPickedPlaylistKey(null);
+                      setAddFeedback({ phase: "idle" });
+                    }}
+                    className="rounded-lg border border-slate-600/60 bg-slate-900/50 px-3 py-2.5 text-left text-sm font-semibold text-slate-100 transition enabled:hover:border-slate-500 enabled:hover:bg-slate-800/60 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Add to existing playlist
+                    <span className="mt-0.5 block text-[11px] font-normal text-slate-500">
+                      Append local tracks to a playlist you already have
+                    </span>
+                  </button>
+                </div>
+              ) : addModalStep === "create" ? (
+                <div className="space-y-3">
+                  <div>
+                    <label htmlFor="mml-new-pl-name" className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                      Playlist name
+                    </label>
+                    <input
+                      id="mml-new-pl-name"
+                      type="text"
+                      value={createNameDraft}
+                      onChange={(e) => setCreateNameDraft(e.target.value)}
+                      disabled={addFlowBusy}
+                      className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none ring-0 placeholder:text-slate-600 focus:border-sky-500/50 disabled:opacity-50"
+                      placeholder={addModalTarget.defaultName}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={addFlowBusy}
+                      onClick={() => {
+                        setAddModalStep("menu");
+                        setAddFeedback({ phase: "idle" });
+                      }}
+                      className="flex-1 rounded-lg border border-slate-600 bg-slate-900 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      disabled={addFlowBusy}
+                      onClick={() => void runCreateSavedPlaylist()}
+                      className="flex-1 rounded-lg border border-sky-500/45 bg-sky-800/80 py-2 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
+                    >
+                      Create playlist
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-[11px] text-slate-500">Select a playlist, then add tracks.</p>
+                  <ul className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-slate-800/80 bg-slate-950/50 p-1">
+                    {userPlaylists.map((p) => (
+                      <li key={p.key}>
+                        <button
+                          type="button"
+                          disabled={addFlowBusy}
+                          onClick={() => setPickedPlaylistKey(p.key)}
+                          className={`w-full rounded-md px-2.5 py-2 text-left text-sm transition ${
+                            pickedPlaylistKey === p.key
+                              ? "bg-sky-900/35 text-sky-100 ring-1 ring-sky-500/40"
+                              : "text-slate-200 hover:bg-slate-800/70"
+                          } disabled:opacity-50`}
+                        >
+                          {p.label}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={addFlowBusy}
+                      onClick={() => {
+                        setAddModalStep("menu");
+                        setPickedPlaylistKey(null);
+                        setAddFeedback({ phase: "idle" });
+                      }}
+                      className="flex-1 rounded-lg border border-slate-600 bg-slate-900 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      disabled={addFlowBusy || !pickedPlaylistKey}
+                      onClick={() => void runAppendToExistingPlaylist()}
+                      className="flex-1 rounded-lg border border-sky-500/45 bg-sky-800/80 py-2 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:opacity-45"
+                    >
+                      Add tracks
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}

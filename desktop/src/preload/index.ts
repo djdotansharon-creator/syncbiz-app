@@ -14,6 +14,8 @@ import type {
   MvpStatusSnapshot,
   PickMusicFolderResult,
   ScanLocalAudioFolderResult,
+  ListMusicLibraryDirResult,
+  GetLocalAudioCoverResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import type { SyncBizDesktopMvp } from "../shared/mvp-desktop-api";
@@ -58,6 +60,10 @@ const api: SyncBizDesktopMvp = {
   getMusicFolder: (): Promise<MusicFolderSnapshot> => ipcRenderer.invoke(MVP_IPC.GET_MUSIC_FOLDER),
   pickMusicFolder: (): Promise<PickMusicFolderResult> => ipcRenderer.invoke(MVP_IPC.PICK_MUSIC_FOLDER),
   clearMusicFolder: (): Promise<MusicFolderSnapshot> => ipcRenderer.invoke(MVP_IPC.CLEAR_MUSIC_FOLDER),
+  listMusicLibraryDir: (subPath: string): Promise<ListMusicLibraryDirResult> =>
+    ipcRenderer.invoke(MVP_IPC.LIST_MUSIC_LIBRARY_DIR, subPath),
+  getLocalAudioCover: (absolutePath: string): Promise<GetLocalAudioCoverResult> =>
+    ipcRenderer.invoke(MVP_IPC.GET_LOCAL_AUDIO_COVER, absolutePath),
   onStatus: (callback) => {
     const handler = (_: unknown, status: MvpStatusSnapshot) => {
       callback(status);

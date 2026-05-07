@@ -29,6 +29,10 @@ export const MVP_IPC = {
   PICK_MUSIC_FOLDER: "mvp:pick-music-folder",
   /** Clear persisted music folder path. */
   CLEAR_MUSIC_FOLDER: "mvp:clear-music-folder",
+  /** Non-recursive listing under the saved music folder (single directory level). */
+  LIST_MUSIC_LIBRARY_DIR: "mvp:list-music-library-dir",
+  /** First embedded picture from an audio file as a data URL, or null. */
+  GET_LOCAL_AUDIO_COVER: "mvp:get-local-audio-cover",
 } as const;
 
 /** Result of scanning a folder for audio files (IPC from main). */
@@ -55,6 +59,17 @@ export type PickMusicFolderResult =
 export type MusicFolderSnapshot = {
   path: string | null;
 };
+
+/** Immediate children of one directory under the configured music root (Desktop only). */
+export type ListMusicLibraryDirResult =
+  | { status: "ok"; dirs: { name: string; path: string }[]; files: { name: string; path: string }[] }
+  | { status: "error"; message: string }
+  | { status: "no_root" };
+
+/** Embedded artwork as data URL, or absent. */
+export type GetLocalAudioCoverResult =
+  | { status: "ok"; dataUrl: string | null }
+  | { status: "error"; message: string };
 
 /** Local mock console — same commands as remote WS COMMAND (no MPV). */
 export type LocalMockTransportPayload = {

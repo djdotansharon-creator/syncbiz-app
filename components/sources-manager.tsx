@@ -14,10 +14,12 @@ import {
 import {
   useCenterModule,
   isJinglesModule,
+  isMyMusicLibraryModule,
   isDjCreatorHubModule,
   isEditCurrentModule,
 } from "@/lib/center-module-context";
 import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
+import { MyMusicLibraryWorkspacePanel } from "@/components/my-music-library-workspace-panel";
 import { EditCurrentWorkspacePanel } from "@/components/edit-current-workspace-panel";
 import { DjCreatorHubPanel } from "@/components/dj-creator-hub-panel";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -49,6 +51,7 @@ import {
   appendSourcesToPlaylistTracks,
   reconcilePlaylistTracksForMerge,
 } from "@/lib/playlist-append-sources";
+import { resolveMyMusicLibraryDropFromDataTransfer } from "@/lib/music-library-drag";
 import {
   coalesceScheduleContributorBlocksWithTracks,
   mergeScheduleContributorBlocksAfterAppend,
@@ -712,6 +715,21 @@ function SourcesManagerInner({
 
   const djHubRailActive = isDjCreatorHubModule(activeCenterModule);
 
+  const selectionKeyForMyMusicDismissRef = useRef<string>(
+    JSON.stringify({ type: "library_view", id: "all_library" } satisfies LibrarySelection),
+  );
+  useEffect(() => {
+    const key = JSON.stringify(selection);
+    if (!isMyMusicLibraryModule(activeCenterModule)) {
+      selectionKeyForMyMusicDismissRef.current = key;
+      return;
+    }
+    if (selectionKeyForMyMusicDismissRef.current !== key) {
+      setActiveCenterModule(null);
+    }
+    selectionKeyForMyMusicDismissRef.current = key;
+  }, [selection, activeCenterModule, setActiveCenterModule]);
+
   const routeEmbedded = useMemo((): SourcesEmbeddedCenter | null => {
     if (!playerWorkspaceMode) return null;
     const sm = /^\/sources\/([^/]+)\/edit$/.exec(pathname);
@@ -1315,7 +1333,10 @@ function SourcesManagerInner({
       if (!externalKey.startsWith("external:")) return;
       e.preventDefault();
       e.stopPropagation();
-      const resolved = resolveDroppedUnifiedSources(e);
+      let resolved = resolveDroppedUnifiedSources(e);
+      if (resolved.length === 0) {
+        resolved = await resolveMyMusicLibraryDropFromDataTransfer(e.dataTransfer);
+      }
       if (resolved.length === 0) return;
       const unifiedId = externalKey.slice("external:".length);
       const shell = sourcesById.get(unifiedId);
@@ -1358,17 +1379,21 @@ function SourcesManagerInner({
 
   /** GET → merge → PUT append for user syncbiz playlists (`syncbiz:…` keys). Shared by rail drop and playlist tiles. */
   const appendUnifiedSourcesToSyncbizPlaylistKey = useCallback(
-    async (playlistKey: string, resolved: UnifiedSource[], hint?: ScheduleAppendContributorHint | null) => {
-      if (resolved.length === 0) return;
-      if (!playlistKey.startsWith("syncbiz:")) return;
+    async (
+      playlistKey: string,
+      resolved: UnifiedSource[],
+      hint?: ScheduleAppendContributorHint | null,
+    ): Promise<boolean> => {
+      if (resolved.length === 0) return false;
+      if (!playlistKey.startsWith("syncbiz:")) return false;
       const unifiedId = playlistKey.slice("syncbiz:".length);
       const shell = sourcesById.get(unifiedId);
       const playlistId = shell?.playlist?.id;
-      if (!shell?.playlist || !playlistId) return;
+      if (!shell?.playlist || !playlistId) return false;
 
       try {
         const getRes = await fetch(`/api/playlists/${playlistId}`);
-        if (!getRes.ok) return;
+        if (!getRes.ok) return false;
         const currentRaw = (await getRes.json()) as Playlist;
         const ordered0 = reconcilePlaylistTracksForMerge(currentRaw);
         const sanitizedBlocks = coalesceScheduleContributorBlocksWithTracks(currentRaw, ordered0);
@@ -1378,7 +1403,7 @@ function SourcesManagerInner({
         const prevOrdered = reconcilePlaylistTracksForMerge(current);
         const prevIdsFull = new Set(prevOrdered.map((t) => t.id));
         const { tracks, order, addedCount } = appendSourcesToPlaylistTracks(current, resolvedFresh);
-        if (addedCount === 0) return;
+        if (addedCount === 0) return false;
 
         const finalIdSet = new Set(tracks.map((t) => t.id));
         const prevIdsSurviving = new Set([...prevIdsFull].filter((id) => finalIdSet.has(id)));
@@ -1402,7 +1427,7 @@ function SourcesManagerInner({
         });
         if (!putRes.ok) {
           console.error("[syncbiz playlist append] PUT failed", await putRes.text().catch(() => ""));
-          return;
+          return false;
         }
         const updated = (await putRes.json()) as Playlist;
         setSources((prev) =>
@@ -1411,11 +1436,34 @@ function SourcesManagerInner({
           ),
         );
         savePlaylistToLocal(updated);
+        return true;
       } catch (err) {
         console.error("[syncbiz playlist append]", err);
+        return false;
       }
     },
     [sourcesById, setSources, savePlaylistToLocal],
+  );
+
+  const myMusicPlaylistPickerOptions = useMemo(
+    () => userPlaylistContainers.map((p) => ({ key: p.key, label: p.label })),
+    [userPlaylistContainers],
+  );
+
+  const appendLocalUnifiedFromMyMusic = useCallback(
+    async (playlistKey: string, items: UnifiedSource[]) => {
+      const hint: ScheduleAppendContributorHint = {
+        type: "direct",
+        label:
+          items.length === 1
+            ? (items[0]?.title ?? "").trim() || "Item"
+            : `Local items (${items.length})`,
+      };
+      const ok = await appendUnifiedSourcesToSyncbizPlaylistKey(playlistKey, items, hint);
+      if (!ok) throw new Error("Could not update playlist.");
+      window.dispatchEvent(new Event("library-updated"));
+    },
+    [appendUnifiedSourcesToSyncbizPlaylistKey],
   );
 
   /** Add-to-playlist (+) from leaf cards: syncbiz (Your / Scheduled) or Ready (`external:`) shells. */
@@ -1479,6 +1527,9 @@ function SourcesManagerInner({
           container.subtype === "syncbiz_playlist" ? "syncbiz_playlist" : "external_playlist",
           container.key,
         );
+      }
+      if (resolved.length === 0) {
+        resolved = await resolveMyMusicLibraryDropFromDataTransfer(e.dataTransfer);
       }
       const hint: ScheduleAppendContributorHint | null =
         container && (container.subtype === "syncbiz_playlist" || container.subtype === "external_playlist")
@@ -1557,6 +1608,9 @@ function SourcesManagerInner({
         }
         let resolved = resolveDroppedUnifiedSources(e);
         if (resolved.length === 0) {
+          resolved = await resolveMyMusicLibraryDropFromDataTransfer(e.dataTransfer);
+        }
+        if (resolved.length === 0) {
           resolved = resolveSourcesForSelection(
             droppedPlaylist.subtype === "syncbiz_playlist" ? "syncbiz_playlist" : "external_playlist",
             droppedPlaylist.key,
@@ -1576,7 +1630,10 @@ function SourcesManagerInner({
         return;
       }
 
-      const resolved = resolveDroppedUnifiedSources(e);
+      let resolved = resolveDroppedUnifiedSources(e);
+      if (resolved.length === 0) {
+        resolved = await resolveMyMusicLibraryDropFromDataTransfer(e.dataTransfer);
+      }
       if (resolved.length === 0) return;
       if (boundKey && boundKey.startsWith("syncbiz:")) {
         const directHint: ScheduleAppendContributorHint = {
@@ -1602,6 +1659,7 @@ function SourcesManagerInner({
       openDaypartTile,
       flashPlaylistTileMessage,
       t.playlistTileTrackDropBindingOnly,
+      resolveMyMusicLibraryDropFromDataTransfer,
     ],
   );
 
@@ -2348,6 +2406,13 @@ function SourcesManagerInner({
             </div>
           ) : isJinglesModule(activeCenterModule) ? (
             <JinglesWorkspacePanel onClose={() => setActiveCenterModule(null)} />
+          ) : isMyMusicLibraryModule(activeCenterModule) ? (
+            <MyMusicLibraryWorkspacePanel
+              onClose={() => setActiveCenterModule(null)}
+              onAddToLibrary={handleAdd}
+              userPlaylists={myMusicPlaylistPickerOptions}
+              onAppendLocalUnifiedToPlaylist={appendLocalUnifiedFromMyMusic}
+            />
           ) : isDjCreatorHubModule(activeCenterModule) ? (
             <DjCreatorHubPanel
               playlists={djCreatorHubSources}

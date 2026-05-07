@@ -24,6 +24,7 @@
     "dist:publish": "npm run build && electron-builder --publish always"
   },
   "dependencies": {
+    "music-metadata": "^11.12.3",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "ws": "^8.18.0"

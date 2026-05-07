@@ -27,9 +27,14 @@ import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { HeaderDeviceIndicators } from "@/components/header-device-indicators";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
-import { CenterModuleContext, type CenterModule, isJinglesModule } from "@/lib/center-module-context";
+import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule } from "@/lib/center-module-context";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { useTopNavPins } from "@/lib/use-top-nav-pins";
+import {
+  buildEphemeralLocalQueueFromPaths,
+  ephemeralLocalSourceWithCover,
+} from "@/lib/ephemeral-local-music-playback";
+import { SYNCBIZ_MUSIC_LIBRARY_DRAG_MIME, type MusicLibraryDragPayload } from "@/lib/music-library-drag";
 
 const pillLink =
   "rounded-xl border border-slate-700/80 bg-slate-900/90 px-3.5 py-2 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] transition-all duration-100 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950";
@@ -342,9 +347,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { playSource, setQueue } = usePlayback();
   const [playerDropActive, setPlayerDropActive] = useState(false);
   const [activeCenterModule, setActiveCenterModule] = useState<CenterModule>(null);
+  const [inDesktopApp, setInDesktopApp] = useState(false);
   const [mainMenuOpen, setMainMenuOpen] = useState(false);
   const mainMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const { isPinned: isCategoryPinned, togglePin: toggleCategoryPin } = useTopNavPins();
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setInDesktopApp(Boolean(window.syncbizDesktop));
+  }, []);
   // The floating main menu exposes every nav entry *except* Library and Radio
   // (permanent pins to the top bar) and Favorites (surfaced via library
   // filters, per user request). Each remaining item carries a Pin toggle so
@@ -507,6 +517,43 @@ export function AppShell({ children }: { children: ReactNode }) {
     e.preventDefault();
     e.stopPropagation();
     setPlayerDropActive(false);
+
+    const mmlRaw = e.dataTransfer.getData(SYNCBIZ_MUSIC_LIBRARY_DRAG_MIME);
+    if (mmlRaw) {
+      try {
+        const payload = JSON.parse(mmlRaw) as MusicLibraryDragPayload;
+        const p = payload.path?.trim();
+        if (p && (payload.kind === "folder" || payload.kind === "file")) {
+          const api = typeof window !== "undefined" ? window.syncbizDesktop : undefined;
+          if (payload.kind === "folder" && api?.scanLocalAudioFolder) {
+            const scan = await api.scanLocalAudioFolder(p);
+            if (scan.status === "ok" && scan.files.length > 0) {
+              const queue = buildEphemeralLocalQueueFromPaths(scan.files);
+              setQueue(queue, { force: true });
+              playSource(queue[0]!);
+            }
+            return;
+          }
+          if (payload.kind === "file") {
+            let cover: string | null = null;
+            if (api?.getLocalAudioCover) {
+              try {
+                const cov = await api.getLocalAudioCover(p);
+                if (cov.status === "ok") cover = cov.dataUrl;
+              } catch {
+                cover = null;
+              }
+            }
+            const ephemeral = ephemeralLocalSourceWithCover(p, cover ?? null);
+            setQueue([ephemeral], { force: true });
+            playSource(ephemeral);
+            return;
+          }
+        }
+      } catch {
+        // Ignore malformed payload.
+      }
+    }
 
     const queueSourcesJson = e.dataTransfer.getData("application/syncbiz-queue-sources");
     if (queueSourcesJson) {
@@ -860,40 +907,96 @@ export function AppShell({ children }: { children: ReactNode }) {
                       <p className="mt-1 text-[11px] text-slate-300/80">Live operator trigger area</p>
                     </header>
                     <div className="grid grid-cols-2 gap-2">
-                      {[
-                        { key: "jingles" as const, title: "Jingles", tone: "border-sky-400/30 bg-sky-500/10 text-sky-100", activeTone: "border-sky-400/70 bg-sky-500/25 text-sky-100 ring-1 ring-sky-400/40", dot: "bg-sky-300" },
-                        { key: null, title: "Birthdays", tone: "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100", activeTone: "", dot: "bg-fuchsia-300" },
-                        { key: null, title: "Broadcasts", tone: "border-amber-400/30 bg-amber-500/10 text-amber-100", activeTone: "", dot: "bg-amber-300" },
-                        { key: null, title: "Announcements", tone: "border-rose-400/30 bg-rose-500/10 text-rose-100", activeTone: "", dot: "bg-rose-300" },
-                      ].map((group) => {
-                        // Only the jingles pad uses this button — equality
-                        // compare against the string literal keeps the
-                        // check narrow and side-steps the richer object
-                        // shapes that `CenterModule` now supports (e.g.
-                        // the player's edit-current target).
-                        const isActive = group.key === "jingles" && isJinglesModule(activeCenterModule);
+                      {(
+                        [
+                          {
+                            key: "jingles" as const,
+                            title: "Jingles",
+                            tone: "border-sky-400/30 bg-sky-500/10 text-sky-100",
+                            activeTone:
+                              "border-sky-400/70 bg-sky-500/25 text-sky-100 ring-1 ring-sky-400/40",
+                            dot: "bg-sky-300",
+                          },
+                          {
+                            key: null,
+                            title: "Birthdays",
+                            tone: "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100",
+                            activeTone: "",
+                            dot: "bg-fuchsia-300",
+                          },
+                          {
+                            key: "my-music-library" as const,
+                            title: "My Music Library",
+                            tone: "border-amber-400/30 bg-amber-500/10 text-amber-100",
+                            activeTone:
+                              "border-amber-400/70 bg-amber-500/25 text-amber-100 ring-1 ring-amber-400/40",
+                            dot: "bg-amber-300",
+                          },
+                          {
+                            key: null,
+                            title: "Announcements",
+                            tone: "border-rose-400/30 bg-rose-500/10 text-rose-100",
+                            activeTone: "",
+                            dot: "bg-rose-300",
+                          },
+                        ] as const
+                      ).map((group) => {
+                        const isMusicPad = group.key === "my-music-library";
+                        const isJinglesPad = group.key === "jingles";
+                        const isActive =
+                          (isJinglesPad && isJinglesModule(activeCenterModule)) ||
+                          (isMusicPad && isMyMusicLibraryModule(activeCenterModule));
+                        const padDisabled = group.key === null || (isMusicPad && !inDesktopApp);
                         return (
                           <button
                             key={group.title}
                             type="button"
-                            className={`rounded-xl border px-2.5 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition ${isActive ? group.activeTone : group.tone}`}
-                            disabled={group.key === null}
-                            aria-disabled={group.key === null}
-                            aria-pressed={group.key !== null ? isActive : undefined}
+                            className={`rounded-xl border px-2.5 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition ${
+                              isActive && group.activeTone ? group.activeTone : group.tone
+                            } ${padDisabled ? "opacity-70" : ""}`}
+                            disabled={padDisabled}
+                            aria-disabled={padDisabled}
+                            aria-pressed={!padDisabled && (isJinglesPad || isMusicPad) ? isActive : undefined}
                             onClick={
-                              group.key === "jingles"
+                              isJinglesPad
                                 ? () =>
-                                    setActiveCenterModule((v) =>
-                                      isJinglesModule(v) ? null : "jingles",
-                                    )
-                                : undefined
+                                    setActiveCenterModule((v) => (isJinglesModule(v) ? null : "jingles"))
+                                : isMusicPad && inDesktopApp
+                                  ? () =>
+                                      setActiveCenterModule((v) =>
+                                        isMyMusicLibraryModule(v) ? null : "my-music-library",
+                                      )
+                                  : undefined
                             }
                           >
                             <p className="text-xs font-semibold tracking-tight">{group.title}</p>
-                            <p className="mt-1 flex items-center gap-1 text-[10px] opacity-90">
-                              <span className={`h-1.5 w-1.5 rounded-full ${group.dot}`} />
-                              {group.key !== null ? (isActive ? "Close console" : "Open console") : "Soon"}
-                            </p>
+                            {isMusicPad && !inDesktopApp ? (
+                              <div className="mt-1 space-y-1">
+                                <p className="text-[10px] leading-snug text-slate-400/95">
+                                  Available in SyncBiz Desktop
+                                </p>
+                                <a
+                                  href="/api/desktop/download"
+                                  className="inline-block text-[10px] font-medium text-sky-300/95 underline decoration-sky-500/45 underline-offset-2 hover:text-sky-200"
+                                  onClick={(ev) => ev.stopPropagation()}
+                                >
+                                  Download Desktop
+                                </a>
+                              </div>
+                            ) : isMusicPad && inDesktopApp ? (
+                              isActive ? (
+                                <p className="mt-2 text-[10px] font-medium text-slate-400/95">Close panel</p>
+                              ) : null
+                            ) : (
+                              <p className="mt-1 flex flex-wrap items-center gap-1 text-[10px] opacity-90">
+                                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />
+                                {isJinglesPad
+                                  ? isActive
+                                    ? "Close console"
+                                    : "Open console"
+                                  : "Soon"}
+                              </p>
+                            )}
                           </button>
                         );
                       })}

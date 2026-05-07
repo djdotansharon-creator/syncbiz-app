@@ -34,6 +34,15 @@ type DesktopPickMusicFolderResult =
   | { status: "canceled" }
   | { status: "error"; message: string };
 
+type ListMusicLibraryDirIpcResult =
+  | { status: "ok"; dirs: { name: string; path: string }[]; files: { name: string; path: string }[] }
+  | { status: "error"; message: string }
+  | { status: "no_root" };
+
+type GetLocalAudioCoverIpcResult =
+  | { status: "ok"; dataUrl: string | null }
+  | { status: "error"; message: string };
+
 type SyncBizDesktopBridgePreload = {
   getConfig: () => Promise<{ deviceId: string }>;
   localMockTransport: (payload: DesktopLocalMockPayload) => Promise<unknown>;
@@ -48,6 +57,10 @@ type SyncBizDesktopBridgePreload = {
   getMusicFolder?: () => Promise<DesktopMusicFolderSnapshot>;
   pickMusicFolder?: () => Promise<DesktopPickMusicFolderResult>;
   clearMusicFolder?: () => Promise<DesktopMusicFolderSnapshot>;
+  /** One-level browse under the configured music folder (Desktop preload with list IPC). */
+  listMusicLibraryDir?: (subPath: string) => Promise<ListMusicLibraryDirIpcResult>;
+  /** Embedded cover art (`data:image/...`) or null from main-process parse. */
+  getLocalAudioCover?: (absolutePath: string) => Promise<GetLocalAudioCoverIpcResult>;
 };
 
 declare global {
