@@ -151,10 +151,8 @@ function scoreOf(c: MusicDiscoveryCandidate): number {
   return typeof c.score === "number" && Number.isFinite(c.score) ? c.score : 0;
 }
 
-/**
- * Dedupe by `dedupeKey` (keep best score), apply per-origin caps, then global cap.
- */
-function dedupeSortAndCap(candidates: MusicDiscoveryCandidate[], maxPerOrigin: number, totalCap: number): MusicDiscoveryCandidate[] {
+/** Dedupe by dedupeKey (keep best score), sort by score descending. */
+function dedupeAndSortCandidates(candidates: MusicDiscoveryCandidate[]): MusicDiscoveryCandidate[] {
   const best = new Map<string, MusicDiscoveryCandidate>();
   for (const c of candidates) {
     const key = c.dedupeKey.trim();
@@ -164,8 +162,17 @@ function dedupeSortAndCap(candidates: MusicDiscoveryCandidate[], maxPerOrigin: n
       best.set(key, c);
     }
   }
-  const merged = [...best.values()].sort((a, b) => scoreOf(b) - scoreOf(a));
+  return [...best.values()].sort((a, b) => scoreOf(b) - scoreOf(a));
+}
 
+/**
+ * Apply per-origin caps and global totalCap (walk merged list in score order).
+ */
+function applyOriginAndTotalCap(
+  merged: MusicDiscoveryCandidate[],
+  maxPerOrigin: number,
+  totalCap: number
+): MusicDiscoveryCandidate[] {
   const originCount = new Map<MusicDiscoveryCandidateOrigin, number>();
   const limited: MusicDiscoveryCandidate[] = [];
   for (const c of merged) {
@@ -176,6 +183,76 @@ function dedupeSortAndCap(candidates: MusicDiscoveryCandidate[], maxPerOrigin: n
     if (limited.length >= totalCap) break;
   }
   return limited;
+}
+
+/**
+ * Global score ordering + totalCap can exhaust the budget on workspace + external_web before any
+ * syncbiz_catalog row is reached, even when /api/catalog/search returned items. Ensure catalog hits
+ * from the deduped merge appear (evict lowest-scoring workspace first, then radio, then Discover).
+ */
+function ensureCatalogCandidatesSurface(
+  merged: MusicDiscoveryCandidate[],
+  limited: MusicDiscoveryCandidate[],
+  maxPerOrigin: number,
+  totalCap: number
+): MusicDiscoveryCandidate[] {
+  const catalogMerged = merged.filter(
+    (c) => c.origin === "syncbiz_catalog" && c.dedupeKey.trim() && (c.playbackUrl ?? "").trim()
+  );
+  if (catalogMerged.length === 0) return limited;
+
+  const limKeys = new Set(limited.map((c) => c.dedupeKey));
+  const missing = catalogMerged.filter((c) => !limKeys.has(c.dedupeKey)).slice(0, maxPerOrigin);
+  if (missing.length === 0) return limited;
+
+  const evictRank = (o: MusicDiscoveryCandidateOrigin): number => {
+    if (o === "workspace_playlist" || o === "workspace_source" || o === "ready_pack") return 0;
+    if (o === "radio") return 1;
+    if (o === "external_web") return 2;
+    return 3;
+  };
+
+  const out = [...limited];
+  const keys = new Set(out.map((c) => c.dedupeKey));
+
+  for (const cat of missing) {
+    if (keys.has(cat.dedupeKey)) continue;
+    if (out.length < totalCap) {
+      out.push(cat);
+      keys.add(cat.dedupeKey);
+      continue;
+    }
+    let evict = -1;
+    let bestRank = Infinity;
+    let worstScore = Infinity;
+    for (let i = 0; i < out.length; i++) {
+      const c = out[i];
+      if (c.origin === "syncbiz_catalog") continue;
+      const r = evictRank(c.origin);
+      const s = scoreOf(c);
+      if (evict < 0 || r < bestRank || (r === bestRank && s < worstScore)) {
+        evict = i;
+        bestRank = r;
+        worstScore = s;
+      }
+    }
+    if (evict < 0) break;
+    keys.delete(out[evict].dedupeKey);
+    out.splice(evict, 1);
+    out.push(cat);
+    keys.add(cat.dedupeKey);
+  }
+  return out;
+}
+
+/**
+ * Dedupe by `dedupeKey` (keep best score), apply per-origin caps, then global cap.
+ * Guarantees syncbiz_catalog rows from the merge are not silently dropped when the API returned them.
+ */
+function dedupeSortAndCap(candidates: MusicDiscoveryCandidate[], maxPerOrigin: number, totalCap: number): MusicDiscoveryCandidate[] {
+  const merged = dedupeAndSortCandidates(candidates);
+  const limited = applyOriginAndTotalCap(merged, maxPerOrigin, totalCap);
+  return ensureCatalogCandidatesSurface(merged, limited, maxPerOrigin, totalCap);
 }
 
 /**

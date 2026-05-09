@@ -62,6 +62,23 @@ export function searchInternal(sources: UnifiedSource[], query: string): Unified
   return rankLibrarySourcesMusicFirst(candidates, query.trim());
 }
 
+async function fetchDiscoveryJson(
+  path: string
+): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
+  try {
+    const r = await fetch(path, { credentials: "include", cache: "no-store" });
+    if (!r.ok) return { ok: false, status: r.status, data: {} };
+    const data = (await r.json()) as Record<string, unknown>;
+    return { ok: true, status: r.status, data };
+  } catch {
+    return { ok: false, status: 0, data: {} };
+  }
+}
+
+function asResultArray<T>(raw: unknown): T[] {
+  return Array.isArray(raw) ? (raw as T[]) : [];
+}
+
 /** External discovery – calls API. Extensible: add more providers to the response. */
 export async function searchExternal(query: string, genreFilter?: string): Promise<ExternalSearchResults> {
   if (!query.trim() || query.trim().length < 2) {
@@ -71,19 +88,20 @@ export async function searchExternal(query: string, genreFilter?: string): Promi
   const catalogUrl = genreFilter
     ? `/api/catalog/search?q=${q}&genre=${encodeURIComponent(genreFilter)}`
     : `/api/catalog/search?q=${q}`;
-  const [externalRes, catalogRes] = await Promise.allSettled([
-    fetch(`/api/sources/search?q=${q}`).then((r) => r.json()),
-    fetch(catalogUrl).then((r) => r.json()),
+  const [sourcesOutcome, catalogOutcome] = await Promise.all([
+    fetchDiscoveryJson(`/api/sources/search?q=${q}`),
+    fetchDiscoveryJson(catalogUrl),
   ]);
 
-  const externalData = externalRes.status === "fulfilled" ? externalRes.value : {};
-  const catalogData = catalogRes.status === "fulfilled" ? catalogRes.value : {};
+  const externalData = sourcesOutcome.data;
+  const catalogData = catalogOutcome.data;
 
-  return {
-    youtube: externalData.results || [],
-    radio: externalData.radioResults || [],
-    catalog: catalogData.items || [],
-  };
+  const youtube = asResultArray<YouTubeSearchResult>(externalData.results);
+  const radio = asResultArray<RadioSearchResult>(externalData.radioResults);
+  const catalogRaw = catalogData.items ?? (catalogData.data as Record<string, unknown> | undefined)?.items;
+  const catalog = asResultArray<CatalogSearchResult>(catalogRaw);
+
+  return { youtube, radio, catalog };
 }
 
 /** Run both internal and external search in parallel. */
