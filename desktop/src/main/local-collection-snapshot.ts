@@ -134,12 +134,17 @@ export function loadLocalCollectionSnapshot(userData: string, deviceId: string):
   }
 }
 
+/** Compact JSON keeps large libraries (500–1000+ tracks) smaller and faster to write than pretty-print. */
 export function saveLocalCollectionSnapshot(userData: string, snapshot: LocalCollectionSnapshotFile): void {
-  const dir = path.dirname(snapshotPath(userData, snapshot.deviceId));
-  mkdirSync(dir, { recursive: true });
-  const now = new Date().toISOString();
-  const toWrite: LocalCollectionSnapshotFile = { ...snapshot, updatedAt: now };
-  writeFileSync(snapshotPath(userData, snapshot.deviceId), JSON.stringify(toWrite, null, 2), "utf-8");
+  try {
+    const dir = path.dirname(snapshotPath(userData, snapshot.deviceId));
+    mkdirSync(dir, { recursive: true });
+    const now = new Date().toISOString();
+    const toWrite: LocalCollectionSnapshotFile = { ...snapshot, updatedAt: now };
+    writeFileSync(snapshotPath(userData, snapshot.deviceId), JSON.stringify(toWrite), "utf-8");
+  } catch (e) {
+    console.warn(LOG, "snapshot write failed (ignored)", e);
+  }
 }
 
 /**
@@ -171,7 +176,12 @@ export function ensureLocalCollectionSnapshot(
   }
 
   const prevRoot = snap.musicFolderRoot ? path.resolve(snap.musicFolderRoot) : null;
-  const rootChanged = (prevRoot ?? null) !== (rootNorm ?? null);
+  const nextRootResolved = rootNorm ? path.resolve(rootNorm) : null;
+  const rootChanged = (prevRoot ?? null) !== (nextRootResolved ?? null);
+  const deviceMatches = (snap.deviceId ?? "").trim() === (deviceId ?? "").trim();
+  if (!rootChanged && deviceMatches) {
+    return snap;
+  }
   snap = {
     ...snap,
     deviceId,
@@ -383,34 +393,94 @@ export async function enrichListMusicLibraryDirWithSnapshot(
   return { ...result, files };
 }
 
-async function statAndUpsert(
+/** Debounced + capped batching: one snapshot load + one disk write per burst (not one per track tag read). */
+const TAG_SNAPSHOT_BATCH_MS = 450;
+const TAG_SNAPSHOT_BATCH_MAX = 48;
+
+const pendingTagSnapshotWrites = new Map<
+  string,
+  { userData: string; config: DesktopRuntimeConfig; tags: LocalAudioTagFields }
+>();
+let tagSnapshotFlushTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function flushPendingTagSnapshots(): Promise<void> {
+  if (pendingTagSnapshotWrites.size === 0) return;
+  const entries = [...pendingTagSnapshotWrites.entries()];
+  pendingTagSnapshotWrites.clear();
+  try {
+    const groups = new Map<string, { userData: string; config: DesktopRuntimeConfig; paths: Map<string, LocalAudioTagFields> }>();
+    for (const [absKey, { userData, config, tags }] of entries) {
+      const gk = `${userData}\0${(config.deviceId ?? "").trim() || "unknown"}`;
+      let g = groups.get(gk);
+      if (!g) {
+        g = { userData, config, paths: new Map() };
+        groups.set(gk, g);
+      }
+      g.paths.set(absKey, tags);
+    }
+    for (const { userData, config, paths } of groups.values()) {
+      const snap = ensureLocalCollectionSnapshot(userData, config);
+      const rootNorm = normalizeMusicRoot(config.musicFolderPath ?? null);
+      if (!rootNorm) continue;
+      for (const [absPath, tagFields] of paths) {
+        if (!relativeFromMusicRoot(absPath, rootNorm)) continue;
+        let st;
+        try {
+          st = await stat(absPath);
+        } catch {
+          continue;
+        }
+        if (!st.isFile()) continue;
+        upsertLocalTrackIntoSnapshot(snap, {
+          absolutePath: absPath,
+          musicRootNorm: rootNorm,
+          size: st.size,
+          mtimeMs: Math.floor(st.mtimeMs),
+          tags: {
+            artist: tagFields.artist,
+            title: tagFields.title,
+            album: tagFields.album,
+            genre: tagFields.genre,
+            year: tagFields.year,
+            durationSec: tagFields.durationSec,
+          },
+          preserveTagsOnStatOnly: false,
+        });
+      }
+      saveLocalCollectionSnapshot(userData, snap);
+    }
+  } catch (e) {
+    console.warn(LOG, "tag snapshot batch flush failed", e);
+  }
+}
+
+/** After reading tags for the browse UI, refresh snapshot row (stats + tags). */
+export async function recordLocalAudioTagsInSnapshot(
   userData: string,
   config: DesktopRuntimeConfig,
   absolutePath: string,
-  options: { tags?: Partial<LocalAudioTagFields> | null; preserveTagsOnStatOnly?: boolean },
+  tags: LocalAudioTagFields,
 ): Promise<void> {
-  const rootNorm = normalizeMusicRoot(config.musicFolderPath ?? null);
-  if (!rootNorm) return;
-  if (!relativeFromMusicRoot(absolutePath, rootNorm)) return;
-
-  let st;
+  const key = path.resolve((absolutePath ?? "").trim());
+  if (!key) return;
   try {
-    st = await stat(absolutePath);
-  } catch {
-    return;
+    pendingTagSnapshotWrites.set(key, { userData, config, tags });
+    if (pendingTagSnapshotWrites.size >= TAG_SNAPSHOT_BATCH_MAX) {
+      if (tagSnapshotFlushTimer) {
+        clearTimeout(tagSnapshotFlushTimer);
+        tagSnapshotFlushTimer = undefined;
+      }
+      await flushPendingTagSnapshots();
+      return;
+    }
+    if (tagSnapshotFlushTimer) clearTimeout(tagSnapshotFlushTimer);
+    tagSnapshotFlushTimer = setTimeout(() => {
+      tagSnapshotFlushTimer = undefined;
+      void flushPendingTagSnapshots();
+    }, TAG_SNAPSHOT_BATCH_MS);
+  } catch (e) {
+    console.warn(LOG, "tags snapshot enqueue failed", e);
   }
-  if (!st.isFile()) return;
-
-  const snap = ensureLocalCollectionSnapshot(userData, config);
-  upsertLocalTrackIntoSnapshot(snap, {
-    absolutePath,
-    musicRootNorm: rootNorm,
-    size: st.size,
-    mtimeMs: Math.floor(st.mtimeMs),
-    tags: options.tags ?? undefined,
-    preserveTagsOnStatOnly: options.preserveTagsOnStatOnly,
-  });
-  saveLocalCollectionSnapshot(userData, snap);
 }
 
 /** After a successful one-level list under the music root, record visible audio files (stats only, preserve tags). */
@@ -486,28 +556,16 @@ export async function recordScanAudioFilesInSnapshot(
   }
 }
 
-/** After reading tags for the browse UI, refresh snapshot row (stats + tags). */
-export async function recordLocalAudioTagsInSnapshot(
-  userData: string,
-  config: DesktopRuntimeConfig,
-  absolutePath: string,
-  tags: LocalAudioTagFields,
-): Promise<void> {
-  try {
-    await statAndUpsert(userData, config, absolutePath, {
-      tags: {
-        artist: tags.artist,
-        title: tags.title,
-        album: tags.album,
-        genre: tags.genre,
-        year: tags.year,
-        durationSec: tags.durationSec,
-      },
-      preserveTagsOnStatOnly: false,
-    });
-  } catch (e) {
-    console.warn(LOG, "tags snapshot failed", e);
+/**
+ * Best-effort flush of debounced tag snapshot writes (e.g. before app quit).
+ * Does not throw.
+ */
+export async function flushLocalCollectionTagSnapshotWrites(): Promise<void> {
+  if (tagSnapshotFlushTimer) {
+    clearTimeout(tagSnapshotFlushTimer);
+    tagSnapshotFlushTimer = undefined;
   }
+  await flushPendingTagSnapshots();
 }
 
 function tokenizeSearchQuery(q: string): string[] {
