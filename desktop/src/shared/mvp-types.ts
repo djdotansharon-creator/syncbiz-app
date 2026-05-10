@@ -37,6 +37,8 @@ export const MVP_IPC = {
   GET_LOCAL_AUDIO_TAGS: "mvp:get-local-audio-tags",
   /** Dev-only inspector: return raw common.* values and log once in main. */
   INSPECT_LOCAL_AUDIO_TAGS_RAW: "mvp:inspect-local-audio-tags-raw",
+  /** Stage 4C: search local collection snapshot JSON in main only (metadata; no disk walk). */
+  SEARCH_LOCAL_COLLECTION_SNAPSHOT: "mvp:search-local-collection-snapshot",
 } as const;
 
 /** Result of scanning a folder for audio files (IPC from main). */
@@ -87,6 +89,25 @@ export type ListMusicLibraryDirResult =
   | { status: "ok"; dirs: { name: string; path: string }[]; files: ListMusicLibraryDirFileEntry[] }
   | { status: "error"; message: string }
   | { status: "no_root" };
+
+/** Stage 4C — one snapshot track match (metadata only; playback uses absolutePath on device). */
+export type LocalCollectionSearchHit = {
+  localId: string;
+  absolutePath: string;
+  relativePathFromRoot: string;
+  artist: string | null;
+  title: string | null;
+  genre: string | null;
+  year: string | null;
+  album: string | null;
+  durationSec: number | null;
+  /** Higher is a better token match (heuristic). */
+  score: number;
+};
+
+export type SearchLocalCollectionSnapshotResult =
+  | { status: "ok"; hits: LocalCollectionSearchHit[] }
+  | { status: "error"; message: string };
 
 /** Embedded artwork as data URL, or absent. */
 export type GetLocalAudioCoverResult =

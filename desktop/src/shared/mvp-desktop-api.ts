@@ -14,6 +14,7 @@ import type {
   GetLocalAudioCoverResult,
   GetLocalAudioTagsResult,
   InspectLocalAudioTagsRawResult,
+  SearchLocalCollectionSnapshotResult,
 } from "./mvp-types";
 
 /** Preload `contextBridge` contract (renderer uses `window.syncbizDesktop`). */
@@ -58,4 +59,6 @@ export type SyncBizDesktopMvp = {
   getLocalAudioTags: (absolutePath: string) => Promise<GetLocalAudioTagsResult>;
   /** Dev inspector — returns raw common.* values; logs once in main on each call. */
   inspectLocalAudioTagsRaw: (absolutePath: string) => Promise<InspectLocalAudioTagsRawResult>;
+  /** Stage 4C: search persisted local collection snapshot in main (no folder walk). */
+  searchLocalCollectionSnapshot: (query: string, limit?: number) => Promise<SearchLocalCollectionSnapshotResult>;
 };

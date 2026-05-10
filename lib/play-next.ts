@@ -69,6 +69,26 @@ export function createPlayNextLocalSource(absolutePath: string, cover?: string |
   };
 }
 
+/**
+ * Ephemeral local file for AI search / snapshot hits — uses display metadata without persisting.
+ * Still uses a fresh playnext-* id so queue semantics match other ephemeral locals.
+ */
+export function createEphemeralLocalSearchSource(
+  absolutePath: string,
+  opts?: { title?: string; genre?: string | null; cover?: string | null },
+): UnifiedSource {
+  const p = (absolutePath ?? "").trim();
+  return {
+    id: newPlayNextId(),
+    title: (opts?.title ?? "").trim() || titleFromLocalPath(p),
+    genre: (opts?.genre ?? "").trim() || "Mixed",
+    cover: opts?.cover ?? null,
+    type: "local",
+    url: p,
+    origin: "source",
+  };
+}
+
 /** Ephemeral http(s) item for Play Next — same in-memory contract as `createPlayNextLocalSource`. */
 export function createPlayNextUrlSource(rawUrl: string): UnifiedSource {
   const url = rawUrl.trim();

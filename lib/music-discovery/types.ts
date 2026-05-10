@@ -6,7 +6,7 @@
 import type { ExternalSearchResults } from "@/lib/search-service";
 import type { UnifiedSource } from "@/lib/source-types";
 
-/** Reserved for future indexed local bank; orchestrator must not emit this in Phase 1. */
+/** Local snapshot (Desktop); orchestrator emits when `deps.searchMusicBankLocal` is provided. */
 export type MusicDiscoveryCandidateOrigin =
   | "workspace_playlist"
   | "workspace_source"
@@ -49,6 +49,8 @@ export type MusicDiscoverySignals = {
   likeCount?: number | null;
   playCount?: number | null;
   matchedTokens?: string[];
+  /** music_bank_local: ID3-style genre for UnifiedSource display */
+  tagGenre?: string | null;
 };
 
 export type MusicDiscoveryCandidate = {
@@ -93,6 +95,11 @@ export type MusicDiscoveryDeps = {
    * Inject in tests or server contexts with absolute URLs.
    */
   searchExternal?: (query: string, genreFilter?: string) => Promise<ExternalSearchResults>;
+  /**
+   * Desktop only: search persisted local collection snapshot JSON (no folder walk, no tag reads).
+   * Returns candidates with `origin: "music_bank_local"`. Browser must omit.
+   */
+  searchMusicBankLocal?: (query: string, limit: number) => Promise<MusicDiscoveryCandidate[]>;
 };
 
 export type MusicDiscoveryInput = {

@@ -89,6 +89,23 @@ type InspectLocalAudioTagsRawIpcResult =
   | { status: "ok"; payload: InspectLocalAudioTagsRawIpcPayload }
   | { status: "error"; message: string };
 
+type LocalCollectionSearchHitIpc = {
+  localId: string;
+  absolutePath: string;
+  relativePathFromRoot: string;
+  artist: string | null;
+  title: string | null;
+  genre: string | null;
+  year: string | null;
+  album: string | null;
+  durationSec: number | null;
+  score: number;
+};
+
+type SearchLocalCollectionSnapshotIpcResult =
+  | { status: "ok"; hits: LocalCollectionSearchHitIpc[] }
+  | { status: "error"; message: string };
+
 type SyncBizDesktopBridgePreload = {
   getConfig: () => Promise<{ deviceId: string }>;
   localMockTransport: (payload: DesktopLocalMockPayload) => Promise<unknown>;
@@ -111,6 +128,8 @@ type SyncBizDesktopBridgePreload = {
   getLocalAudioTags?: (absolutePath: string) => Promise<GetLocalAudioTagsIpcResult>;
   /** Dev inspector — returns raw common.* values; logs once in main on each call. */
   inspectLocalAudioTagsRaw?: (absolutePath: string) => Promise<InspectLocalAudioTagsRawIpcResult>;
+  /** Stage 4C: search persisted local collection snapshot in main (no folder walk during search). */
+  searchLocalCollectionSnapshot?: (query: string, limit?: number) => Promise<SearchLocalCollectionSnapshotIpcResult>;
 };
 
 declare global {

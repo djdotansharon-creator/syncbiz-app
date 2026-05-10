@@ -14,6 +14,7 @@ import type {
   DesktopRuntimeConfig,
   ListMusicLibraryDirResult,
   LocalAudioTagFields,
+  LocalCollectionSearchHit,
 } from "../shared/mvp-types";
 
 export const LOCAL_COLLECTION_SCHEMA_VERSION = 1;
@@ -507,4 +508,68 @@ export async function recordLocalAudioTagsInSnapshot(
   } catch (e) {
     console.warn(LOG, "tags snapshot failed", e);
   }
+}
+
+function tokenizeSearchQuery(q: string): string[] {
+  return q
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)
+    .map((w) => w.replace(/^[^a-z0-9\u0590-\u05ff]+|[^a-z0-9\u0590-\u05ff]+$/gi, ""))
+    .filter((w) => w.length >= 2);
+}
+
+/**
+ * Search in-memory snapshot rows only — no readdir, no stat, no tag reads.
+ */
+export function searchLocalCollectionSnapshotInMemory(
+  snapshot: LocalCollectionSnapshotFile | null,
+  query: string,
+  limit: number,
+): LocalCollectionSearchHit[] {
+  if (!snapshot || Object.keys(snapshot.tracks).length === 0) return [];
+  const tokens = tokenizeSearchQuery(query);
+  if (tokens.length === 0) return [];
+
+  const cap = Math.min(100, Math.max(1, limit));
+  const scored: LocalCollectionSearchHit[] = [];
+
+  for (const row of Object.values(snapshot.tracks)) {
+    const name = path.basename(row.absolutePath);
+    const fields = [row.artist, row.title, row.genre, row.year, row.album, row.relativePathFromRoot, name];
+    const hay = fields
+      .map((x) => (x ?? "").toLowerCase())
+      .join(" ");
+
+    let score = 0;
+    for (const t of tokens) {
+      if (!hay.includes(t)) continue;
+      score += 8;
+      if (row.artist?.toLowerCase().includes(t)) score += 4;
+      if (row.title?.toLowerCase().includes(t)) score += 4;
+      if (row.album?.toLowerCase().includes(t)) score += 2;
+      if (row.genre?.toLowerCase().includes(t)) score += 2;
+      if (row.year?.toLowerCase().includes(t)) score += 2;
+      if (name.toLowerCase().includes(t)) score += 3;
+      if (row.relativePathFromRoot.toLowerCase().includes(t)) score += 1;
+    }
+
+    if (score <= 0) continue;
+
+    scored.push({
+      localId: row.localId,
+      absolutePath: row.absolutePath,
+      relativePathFromRoot: row.relativePathFromRoot,
+      artist: row.artist,
+      title: row.title,
+      genre: row.genre,
+      year: row.year,
+      album: row.album,
+      durationSec: row.durationSec,
+      score,
+    });
+  }
+
+  scored.sort((a, b) => b.score - a.score || a.relativePathFromRoot.localeCompare(b.relativePathFromRoot));
+  return scored.slice(0, cap);
 }

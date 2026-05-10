@@ -12,6 +12,8 @@ import { ActionButtonEdit } from "@/components/ui/action-buttons";
 import { RadioIcon } from "@/components/ui/radio-icon";
 import { runMusicDiscovery } from "@/lib/music-discovery";
 import type { MusicDiscoveryCandidate } from "@/lib/music-discovery/types";
+import { titleFromLocalPath } from "@/lib/local-audio-path";
+import { createEphemeralLocalSearchSource } from "@/lib/play-next";
 import { radioToUnified } from "@/lib/radio-utils";
 import type {
   CatalogSearchResult,
@@ -41,6 +43,19 @@ function findDuplicateByUrl(sources: UnifiedSource[], url: string): UnifiedSourc
   return sources.find((s) => normalizeUrlForCompare(s.url) === norm) ?? null;
 }
 
+function localSnapshotHitDisplayTitle(hit: {
+  artist: string | null;
+  title: string | null;
+  absolutePath: string;
+}): string {
+  const tr = (hit.title ?? "").trim();
+  const ar = (hit.artist ?? "").trim();
+  if (ar && tr) return `${ar} — ${tr}`;
+  if (tr) return tr;
+  if (ar) return ar;
+  return titleFromLocalPath(hit.absolutePath);
+}
+
 async function fetchSources(): Promise<UnifiedSource[]> {
   const res = await fetch("/api/sources/unified", { cache: "no-store", credentials: "include" });
   if (!res.ok) return [];
@@ -52,11 +67,14 @@ function partitionDiscoveryCandidates(
   candidates: MusicDiscoveryCandidate[],
   unifiedById: Map<string, UnifiedSource>
 ): {
+  musicBankLocal: UnifiedSource[];
   local: UnifiedSource[];
   youtube: YouTubeSearchResult[];
   catalog: CatalogSearchResult[];
   radio: RadioSearchResult[];
 } {
+  const seenMusicBankLocal = new Set<string>();
+  const musicBankLocal: UnifiedSource[] = [];
   const seenLocal = new Set<string>();
   const local: UnifiedSource[] = [];
   const youtube: YouTubeSearchResult[] = [];
@@ -64,6 +82,22 @@ function partitionDiscoveryCandidates(
   const radio: RadioSearchResult[] = [];
 
   for (const c of candidates) {
+    if (c.origin === "music_bank_local" && c.playbackUrl) {
+      const key = ((c.trackId ?? "").trim() || c.dedupeKey).trim();
+      if (key && !seenMusicBankLocal.has(key)) {
+        seenMusicBankLocal.add(key);
+        const genreParts = [c.signals?.tagGenre, c.subtitle]
+          .map((x) => (x ?? "").trim())
+          .filter(Boolean);
+        musicBankLocal.push(
+          createEphemeralLocalSearchSource(c.playbackUrl.trim(), {
+            title: c.title,
+            genre: genreParts.length ? genreParts.join(" · ") : null,
+          }),
+        );
+      }
+      continue;
+    }
     if (c.unifiedSourceId) {
       const src = unifiedById.get(c.unifiedSourceId);
       if (src && !seenLocal.has(src.id)) {
@@ -108,7 +142,7 @@ function partitionDiscoveryCandidates(
       });
     }
   }
-  return { local, youtube, catalog, radio };
+  return { musicBankLocal, local, youtube, catalog, radio };
 }
 
 const inputBase =
@@ -121,6 +155,7 @@ export function AISearchBar() {
 
   const [query, setQuery] = useState("");
   const [sources, setSources] = useState<UnifiedSource[]>([]);
+  const [musicBankLocalResults, setMusicBankLocalResults] = useState<UnifiedSource[]>([]);
   const [localResults, setLocalResults] = useState<UnifiedSource[]>([]);
   const [youtubeResults, setYoutubeResults] = useState<YouTubeSearchResult[]>([]);
   const [catalogResults, setCatalogResults] = useState<CatalogSearchResult[]>([]);
@@ -133,15 +168,41 @@ export function AISearchBar() {
   const panelRef = useRef<HTMLDivElement>(null);
 
   const hasQuery = query.trim().length >= 2;
+  const hasMusicBankLocal = musicBankLocalResults.length > 0;
   const hasLocal = localResults.length > 0;
   const hasYoutube = youtubeResults.length > 0;
   const hasCatalog = catalogResults.length > 0;
   const hasRadio = radioResults.length > 0;
-  const hasResults = hasLocal || hasYoutube || hasCatalog || hasRadio;
+  const hasResults = hasMusicBankLocal || hasLocal || hasYoutube || hasCatalog || hasRadio;
+  const hasSectionAfterCatalog = hasMusicBankLocal || hasLocal || hasYoutube || hasRadio;
+  const hasSectionAfterMusicBank = hasLocal || hasYoutube || hasRadio;
+
+  const searchMusicBankLocal = useCallback(async (query: string, limit: number): Promise<MusicDiscoveryCandidate[]> => {
+    if (typeof window === "undefined") return [];
+    const inv = window.syncbizDesktop?.searchLocalCollectionSnapshot;
+    if (typeof inv !== "function") return [];
+    const res = await inv(query, limit);
+    if (res.status !== "ok") return [];
+    return res.hits.map((hit) => ({
+      origin: "music_bank_local" as const,
+      dedupeKey: `musicbank:${hit.localId}`,
+      title: localSnapshotHitDisplayTitle(hit),
+      subtitle:
+        [hit.album, hit.year]
+          .map((x) => (x ?? "").trim())
+          .filter(Boolean)
+          .join(" · ") || undefined,
+      playbackUrl: hit.absolutePath,
+      trackId: hit.localId,
+      score: 700 + Math.min(hit.score, 250),
+      signals: { tagGenre: hit.genre },
+    }));
+  }, []);
 
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q || q.length < 2) {
+      setMusicBankLocalResults([]);
       setLocalResults([]);
       setYoutubeResults([]);
       setCatalogResults([]);
@@ -157,14 +218,22 @@ export function AISearchBar() {
       const { candidates } = await runMusicDiscovery({
         query: { rawText: q },
         unifiedSources: unified,
+        deps: { searchMusicBankLocal },
       });
       const byId = new Map(unified.map((s) => [s.id, s]));
-      const { local, youtube, catalog, radio } = partitionDiscoveryCandidates(candidates, byId);
+      const { musicBankLocal, local, youtube, catalog, radio } = partitionDiscoveryCandidates(candidates, byId);
+      setMusicBankLocalResults(musicBankLocal);
       setLocalResults(local);
       setYoutubeResults(youtube);
       setCatalogResults(catalog);
       setRadioResults(radio);
-      if (local.length === 0 && youtube.length === 0 && catalog.length === 0 && radio.length === 0) {
+      if (
+        musicBankLocal.length === 0 &&
+        local.length === 0 &&
+        youtube.length === 0 &&
+        catalog.length === 0 &&
+        radio.length === 0
+      ) {
         setError(t.noSearchResults ?? "No results in library or YouTube.");
       }
     } catch {
@@ -172,10 +241,11 @@ export function AISearchBar() {
     } finally {
       setSearching(false);
     }
-  }, [query, t.noSearchResults, t.error]);
+  }, [query, t.noSearchResults, t.error, searchMusicBankLocal]);
 
   useEffect(() => {
     if (!hasQuery) {
+      setMusicBankLocalResults([]);
       setLocalResults([]);
       setYoutubeResults([]);
       setCatalogResults([]);
@@ -244,6 +314,7 @@ export function AISearchBar() {
         setYoutubeResults([]);
         setRadioResults([]);
         setCatalogResults([]);
+        setMusicBankLocalResults([]);
         setLocalResults([]);
         setShowResults(false);
       }
@@ -272,6 +343,7 @@ export function AISearchBar() {
         setYoutubeResults([]);
         setRadioResults([]);
         setCatalogResults([]);
+        setMusicBankLocalResults([]);
         setLocalResults([]);
         setShowResults(false);
       }
@@ -296,6 +368,7 @@ export function AISearchBar() {
         setCatalogResults([]);
         setYoutubeResults([]);
         setRadioResults([]);
+        setMusicBankLocalResults([]);
         setLocalResults([]);
         setShowResults(false);
       }
@@ -331,6 +404,7 @@ export function AISearchBar() {
         setCatalogResults([]);
         setYoutubeResults([]);
         setRadioResults([]);
+        setMusicBankLocalResults([]);
         setLocalResults([]);
         setShowResults(false);
       }
@@ -349,6 +423,8 @@ export function AISearchBar() {
         setQuery("");
         setCatalogResults([]);
         setRadioResults([]);
+        setMusicBankLocalResults([]);
+        setLocalResults([]);
         setShowResults(false);
         return;
       }
@@ -367,6 +443,7 @@ export function AISearchBar() {
         setYoutubeResults([]);
         setCatalogResults([]);
         setRadioResults([]);
+        setMusicBankLocalResults([]);
         setLocalResults([]);
         setShowResults(false);
       }
@@ -384,6 +461,7 @@ export function AISearchBar() {
         setQuery("");
         setCatalogResults([]);
         setRadioResults([]);
+        setMusicBankLocalResults([]);
         setShowResults(false);
         return;
       }
@@ -413,6 +491,7 @@ export function AISearchBar() {
         setYoutubeResults([]);
         setCatalogResults([]);
         setRadioResults([]);
+        setMusicBankLocalResults([]);
         setLocalResults([]);
         setShowResults(false);
       }
@@ -479,6 +558,7 @@ export function AISearchBar() {
             type="button"
             onClick={() => {
               setQuery("");
+              setMusicBankLocalResults([]);
               setLocalResults([]);
               setYoutubeResults([]);
               setCatalogResults([]);
@@ -515,7 +595,7 @@ export function AISearchBar() {
           ) : (
             <>
               {hasCatalog && (
-                <div className={`p-2 ${hasLocal || hasYoutube || hasRadio ? "border-b border-slate-800/60" : ""}`}>
+                <div className={`p-2 ${hasSectionAfterCatalog ? "border-b border-slate-800/60" : ""}`}>
                   <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-violet-400">From Catalog</p>
                   <div className="space-y-0.5">
                     {catalogResults.map((r) => (
@@ -557,6 +637,56 @@ export function AISearchBar() {
                             className="inline-flex h-8 items-center justify-center rounded-lg bg-violet-600 px-2.5 text-xs font-semibold text-white transition hover:bg-violet-500"
                           >
                             {t.playNow}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {hasMusicBankLocal && (
+                <div className={`p-2 ${hasSectionAfterMusicBank ? "border-b border-slate-800/60" : ""}`}>
+                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/90">
+                    My Music Library
+                  </p>
+                  <div className="space-y-0.5">
+                    {musicBankLocalResults.map((source) => (
+                      <div
+                        key={source.id}
+                        className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80"
+                      >
+                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                          <div className="flex h-full w-full items-center justify-center text-emerald-500/90">
+                            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                              <path d="M9 18V5l12-2v13" />
+                              <circle cx="6" cy="18" r="3" />
+                              <circle cx="18" cy="16" r="3" />
+                            </svg>
+                          </div>
+                          <span className="absolute bottom-0 right-0 rounded bg-emerald-700/95 px-1 py-0.5 text-[9px] font-medium text-white">
+                            DISK
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-slate-100">{source.title}</p>
+                          {source.genre && <p className="text-[10px] text-slate-500">{source.genre}</p>}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              playSource(source);
+                              setQuery("");
+                              setMusicBankLocalResults([]);
+                              setLocalResults([]);
+                              setYoutubeResults([]);
+                              setCatalogResults([]);
+                              setRadioResults([]);
+                              setShowResults(false);
+                            }}
+                            className="inline-flex h-8 items-center justify-center rounded-lg bg-[#1db954] px-2.5 text-xs font-medium text-white transition hover:bg-[#1ed760]"
+                          >
+                            {t.play ?? t.playNow}
                           </button>
                         </div>
                       </div>

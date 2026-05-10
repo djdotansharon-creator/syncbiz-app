@@ -15,6 +15,7 @@ import type {
   GetLocalAudioCoverResult,
   GetLocalAudioTagsResult,
   InspectLocalAudioTagsRawResult,
+  SearchLocalCollectionSnapshotResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import { DeviceWsManager } from "../device-websocket-client/device-ws-manager";
@@ -27,9 +28,11 @@ import { extractEmbeddedCoverDataUrlFromAudioFile } from "./extract-local-audio-
 import { extractLocalAudioTagFields, inspectLocalAudioTagsRaw } from "./extract-local-audio-tags";
 import {
   enrichListMusicLibraryDirWithSnapshot,
+  loadLocalCollectionSnapshot,
   recordListDirAudioFilesInSnapshot,
   recordLocalAudioTagsInSnapshot,
   recordScanAudioFilesInSnapshot,
+  searchLocalCollectionSnapshotInMemory,
 } from "./local-collection-snapshot";
 
 let manager: DeviceWsManager | null = null;
@@ -278,6 +281,30 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     cachedConfig = next;
     return { path: next.musicFolderPath ?? null };
   });
+
+  ipcMain.handle(
+    MVP_IPC.SEARCH_LOCAL_COLLECTION_SNAPSHOT,
+    (_e, query: unknown, limitRaw: unknown): SearchLocalCollectionSnapshotResult => {
+      const q = typeof query === "string" ? query.trim() : "";
+      let limit = 25;
+      if (typeof limitRaw === "number" && Number.isFinite(limitRaw)) {
+        limit = Math.min(100, Math.max(1, Math.trunc(limitRaw)));
+      }
+      if (q.length < 2) {
+        return { status: "ok", hits: [] };
+      }
+      try {
+        const cfg = loadRuntimeConfig(getUserData());
+        const deviceId = (cfg.deviceId ?? "").trim() || "unknown";
+        const snap = loadLocalCollectionSnapshot(getUserData(), deviceId);
+        const hits = searchLocalCollectionSnapshotInMemory(snap, q, limit);
+        return { status: "ok", hits };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { status: "error", message: msg };
+      }
+    },
+  );
 
   ipcMain.handle(
     MVP_IPC.LIST_MUSIC_LIBRARY_DIR,

@@ -207,6 +207,7 @@ function ensureCatalogCandidatesSurface(
 
   const evictRank = (o: MusicDiscoveryCandidateOrigin): number => {
     if (o === "workspace_playlist" || o === "workspace_source" || o === "ready_pack") return 0;
+    if (o === "music_bank_local") return 0;
     if (o === "radio") return 1;
     if (o === "external_web") return 2;
     return 3;
@@ -289,6 +290,29 @@ export async function runMusicDiscovery(input: MusicDiscoveryInput): Promise<Mus
       const msg = e instanceof Error ? e.message : String(e);
       runs.push({
         providerId: "workspace_internal",
+        ok: false,
+        durationMs: Date.now() - t0,
+        candidateCount: 0,
+        error: msg,
+      });
+    }
+  }
+
+  if (input.deps?.searchMusicBankLocal) {
+    const t0 = Date.now();
+    try {
+      const mapped = await input.deps.searchMusicBankLocal(q, opt.maxPerOrigin);
+      batch.push(...mapped);
+      runs.push({
+        providerId: "music_bank_local",
+        ok: true,
+        durationMs: Date.now() - t0,
+        candidateCount: mapped.length,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      runs.push({
+        providerId: "music_bank_local",
         ok: false,
         durationMs: Date.now() - t0,
         candidateCount: 0,
