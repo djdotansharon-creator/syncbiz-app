@@ -248,6 +248,10 @@ function ensureCatalogCandidatesSurface(
 /**
  * Dedupe by `dedupeKey` (keep best score), apply per-origin caps, then global cap.
  * Guarantees syncbiz_catalog rows from the merge are not silently dropped when the API returned them.
+ *
+ * Catalog rows are deliberately NOT removed when their playbackUrl matches a workspace row: catalog
+ * is the curated SyncBiz source (tags/curation/snapshots) and the AI search bar surfaces it ahead
+ * of "In your library" so the user can see the catalog edition even for content they have imported.
  */
 function dedupeSortAndCap(candidates: MusicDiscoveryCandidate[], maxPerOrigin: number, totalCap: number): MusicDiscoveryCandidate[] {
   const merged = dedupeAndSortCandidates(candidates);

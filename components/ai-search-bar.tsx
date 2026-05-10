@@ -514,8 +514,58 @@ export function AISearchBar() {
             </div>
           ) : (
             <>
+              {hasCatalog && (
+                <div className={`p-2 ${hasLocal || hasYoutube || hasRadio ? "border-b border-slate-800/60" : ""}`}>
+                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-violet-400">From Catalog</p>
+                  <div className="space-y-0.5">
+                    {catalogResults.map((r) => (
+                      <div key={r.id} className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80">
+                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                          {r.thumbnail ? (
+                            <img src={r.thumbnail} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-violet-400">
+                              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <path d="M9 18V5l12-2v13" />
+                                <circle cx="6" cy="18" r="3" />
+                                <circle cx="18" cy="16" r="3" />
+                              </svg>
+                            </div>
+                          )}
+                          <span className="absolute bottom-0 right-0 rounded bg-violet-600/90 px-1 py-0.5 text-[9px] font-medium text-white">CAT</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-slate-100">{r.title}</p>
+                          <p className="text-[10px] text-violet-400/80">
+                            Global Catalog
+                            {r.genres && r.genres.length > 0 && (
+                              <span className="ml-1.5 text-slate-400">• {r.genres[0]}</span>
+                            )}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void handleAddCatalog(r)}
+                            className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 px-2.5 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+                          >
+                            {t.addToLibrary}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handlePlayCatalog(r)}
+                            className="inline-flex h-8 items-center justify-center rounded-lg bg-violet-600 px-2.5 text-xs font-semibold text-white transition hover:bg-violet-500"
+                          >
+                            {t.playNow}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {hasLocal && (
-                <div className="border-b border-slate-800/60 p-2">
+                <div className={`p-2 ${hasYoutube || hasRadio ? "border-b border-slate-800/60" : ""}`}>
                   <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t.localResults}</p>
                   <div className="space-y-0.5">
                     {localResults.map((source) => (
@@ -578,7 +628,7 @@ export function AISearchBar() {
                 </div>
               )}
               {hasYoutube && (
-                <div className={`p-2 ${hasCatalog || hasRadio ? "border-b border-slate-800/60" : ""}`}>
+                <div className={`p-2 ${hasRadio ? "border-b border-slate-800/60" : ""}`}>
                   <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t.youtubeResults}</p>
                   <div className="space-y-0.5">
                     {youtubeResults.map((r, i) => (
@@ -628,56 +678,6 @@ export function AISearchBar() {
                             type="button"
                             onClick={() => void handlePlayYoutube(r)}
                             className="inline-flex h-8 items-center justify-center rounded-lg bg-[#1db954] px-2.5 text-xs font-semibold text-white transition hover:bg-[#1ed760]"
-                          >
-                            {t.playNow}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {hasCatalog && (
-                <div className={`p-2 ${hasRadio ? "border-b border-slate-800/60" : ""}`}>
-                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-violet-400">From Catalog</p>
-                  <div className="space-y-0.5">
-                    {catalogResults.map((r) => (
-                      <div key={r.id} className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80">
-                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
-                          {r.thumbnail ? (
-                            <img src={r.thumbnail} alt="" className="h-full w-full object-cover" />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center text-violet-400">
-                              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                                <path d="M9 18V5l12-2v13" />
-                                <circle cx="6" cy="18" r="3" />
-                                <circle cx="18" cy="16" r="3" />
-                              </svg>
-                            </div>
-                          )}
-                          <span className="absolute bottom-0 right-0 rounded bg-violet-600/90 px-1 py-0.5 text-[9px] font-medium text-white">CAT</span>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-slate-100">{r.title}</p>
-                          <p className="text-[10px] text-violet-400/80">
-                            Global Catalog
-                            {r.genres && r.genres.length > 0 && (
-                              <span className="ml-1.5 text-slate-400">• {r.genres[0]}</span>
-                            )}
-                          </p>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => void handleAddCatalog(r)}
-                            className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 px-2.5 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
-                          >
-                            {t.addToLibrary}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handlePlayCatalog(r)}
-                            className="inline-flex h-8 items-center justify-center rounded-lg bg-violet-600 px-2.5 text-xs font-semibold text-white transition hover:bg-violet-500"
                           >
                             {t.playNow}
                           </button>
