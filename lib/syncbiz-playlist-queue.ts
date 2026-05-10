@@ -1,6 +1,7 @@
-import { getPlaylistTracks } from "@/lib/playlist-types";
+import { getPlaylistTracks, type PlaylistType } from "@/lib/playlist-types";
 import type { UnifiedSource } from "@/lib/source-types";
 import { classifyLibraryEntityContract, unifiedFoundationHints } from "@/lib/source-types";
+import { derivePlaylistTrackCoverArt } from "@/lib/playlist-utils";
 
 /** Same storage key as `components/sources-manager.tsx`. */
 export const SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY = "syncbiz-playlist-item-assignments";
@@ -30,11 +31,19 @@ export function expandPlaylistEntityToItems(source: UnifiedSource): UnifiedSourc
   return tracks.map((track, index) => {
     const ttype = (track.type ?? source.type) as UnifiedSource["type"];
     const foundation = unifiedFoundationHints("source", ttype, track.url);
+    const leafArt =
+      `${track.cover ?? ""}`.trim() ||
+      derivePlaylistTrackCoverArt({
+        cover: track.cover,
+        url: track.url,
+        type: ttype as PlaylistType,
+      });
+
     const pseudo: UnifiedSource = {
       id: "",
       title: track.name || track.title || source.title,
       genre: source.genre || "Mixed",
-      cover: track.cover ?? null,
+      cover: leafArt || null,
       type: ttype,
       url: track.url,
       origin: "source",
@@ -53,7 +62,7 @@ export function expandPlaylistEntityToItems(source: UnifiedSource): UnifiedSourc
       id: `${source.id}:track:r${index}`,
       title: track.name || track.title || source.title,
       genre: source.genre || "Mixed",
-      cover: track.cover ?? source.cover ?? null,
+      cover: leafArt || source.cover || null,
       type: ttype,
       url: track.url,
       origin: "source",

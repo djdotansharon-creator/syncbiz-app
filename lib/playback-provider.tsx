@@ -42,6 +42,7 @@ import {
   syncbizAuditTransportTransitionStart,
 } from "./syncbiz-transport-audit";
 import { isValidPlaybackUrl, isValidLocalFilePlaybackPath } from "./url-validation";
+import { EPHEMERAL_LOCAL_PLAYLIST_PREFIX } from "./local-playlist-artwork";
 import {
   isPlayNextSourceId,
   playNextLog,
@@ -79,14 +80,13 @@ function unifiedToPlaybackTrack(source: UnifiedSource, trackIndex = 0): Playback
     const title = t?.name ?? (t as { title?: string })?.title ?? source.title;
     const type = (t?.type ?? source.type) as TrackSource;
     const url = canonicalYouTubeWatchUrlForPlayback(t?.url ?? source.url);
-    const cover =
-      derivePlaylistTrackCoverArt({
-        cover: t?.cover,
-        url: t?.url ?? source.url ?? "",
-        type: (t?.type ?? source.type) as PlaylistType,
-      }) ??
-      source.cover ??
-      null;
+    const leafCover = derivePlaylistTrackCoverArt({
+      cover: t?.cover,
+      url: t?.url ?? source.url ?? "",
+      type: (t?.type ?? source.type) as PlaylistType,
+    });
+    const plThumb = `${plAttach.thumbnail ?? ""}`.trim() || `${plAttach.cover ?? ""}`.trim() || null;
+    const cover = (leafCover && `${leafCover}`.trim()) || plThumb || source.cover || null;
     return {
       id: t?.id ?? `${source.id}-${trackIndex}`,
       title,
@@ -602,6 +602,7 @@ export function clearClientPlaybackCache(): void {
  */
 async function resolveSourceForRestore(s: UnifiedSource): Promise<UnifiedSource> {
   if (s.origin !== "playlist" || !s.playlist?.id) return s;
+  if (s.playlist.id.startsWith(EPHEMERAL_LOCAL_PLAYLIST_PREFIX)) return s;
   const t = s.playlist.tracks;
   if (Array.isArray(t) && t.length > 1) return s;
   try {
@@ -903,14 +904,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       });
 
       const sourceEffectiveTrackCount = source.playlist ? getPlaylistTracks(source.playlist).length : 0;
+      const isEphemeralLocalFolderSession = !!(
+        source.playlist?.id && source.playlist.id.startsWith(EPHEMERAL_LOCAL_PLAYLIST_PREFIX)
+      );
       const needsShellHydration =
         source.origin === "playlist" &&
         !!source.playlist?.id &&
-        !(source.playlist.tracks && source.playlist.tracks.length > 0);
+        !(source.playlist.tracks && source.playlist.tracks.length > 0) &&
+        !isEphemeralLocalFolderSession;
       const shouldProbeRicherPlaylist =
         source.origin === "playlist" &&
         !!source.playlist?.id &&
-        sourceEffectiveTrackCount <= 1;
+        sourceEffectiveTrackCount <= 1 &&
+        !isEphemeralLocalFolderSession;
 
       console.log("[SyncBiz Audit] playSource shell hydration check", {
         sourceId: source.id,
@@ -1508,8 +1514,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const tracks = playlist ? getPlaylistTracks(playlist) : [];
       const trackCount = tracks.length || 1;
 
-      if (trackCount > 1 && s.currentTrackIndex > 0) {
-        const nextIdx = s.currentTrackIndex - 1;
+      if (trackCount > 1) {
+        const nextIdx =
+          s.currentTrackIndex > 0 ? s.currentTrackIndex - 1 : trackCount - 1;
         const track = tracks[nextIdx];
         const url = track?.url ?? s.currentSource.url;
         const embedded = track ? canEmbedInCard(track.type) : false;

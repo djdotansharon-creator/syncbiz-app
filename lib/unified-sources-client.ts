@@ -10,6 +10,13 @@ import type { UnifiedSource, SourceProviderType } from "./source-types";
 import type { Playlist } from "./playlist-types";
 import { derivePlaylistUnifiedCoverArt, unifiedPlaylistSourceId } from "./playlist-utils";
 import type { ApiContentScope } from "./content-scope-filters";
+import {
+  LOCAL_PLAYLIST_ARTWORK_PLACEHOLDER,
+  MAX_EPHEMERAL_TRACK_COVERS_ON_DROP,
+  MAX_SAVED_LOCAL_PLAYLIST_TRACK_COVERS,
+  embedLocalTrackCoversUpToCap,
+  pickFirstEmbeddedLocalCover,
+} from "./local-playlist-artwork";
 
 function playlistToUnified(p: Playlist): UnifiedSource {
   const cover = derivePlaylistUnifiedCoverArt(p);
@@ -68,12 +75,12 @@ export async function fetchUnifiedSourcesWithFallback(options?: FetchUnifiedOpti
       radio.forEach((s) => s.radio && addRadioStationLocal(s.radio));
     }
     // Important: if API succeeds (even with empty list), trust tenant-scoped server result.
-    return dedupeById(items);
+    return dedupeById(await enrichDesktopLocalPlaylistCovers(items));
   } catch {
     const localPlaylists = getPlaylistsLocal().map(playlistToUnified);
     const localRadio = getRadioStationsLocal().map(radioToUnified);
     const merged = dedupeById([...localPlaylists, ...localRadio]);
-    return filterUnifiedSourcesByScope(merged, scope);
+    return dedupeById(await enrichDesktopLocalPlaylistCovers(filterUnifiedSourcesByScope(merged, scope)));
   }
 }
 
@@ -84,6 +91,75 @@ function dedupeById(items: UnifiedSource[]): UnifiedSource[] {
     seen.add(s.id);
     return true;
   });
+}
+
+async function enrichDesktopLocalPlaylistCovers(items: UnifiedSource[]): Promise<UnifiedSource[]> {
+  if (typeof window === "undefined") return items;
+  const api = window.syncbizDesktop;
+  if (!api) return items;
+  const scanFolder = api.scanLocalAudioFolder;
+  const getCover = api.getLocalAudioCover;
+  if (!getCover) return items;
+
+  return Promise.all(
+    items.map(async (s) => {
+      // Folder-scan source row (origin=source, type=local_playlist): scan the root and probe.
+      if (s.origin === "source") {
+        const src = s.source;
+        if (!src || src.type !== "local_playlist") return s;
+        if (s.cover && `${s.cover}`.trim()) return s;
+        if (!scanFolder) return { ...s, cover: LOCAL_PLAYLIST_ARTWORK_PLACEHOLDER };
+        const root = (s.url ?? "").trim();
+        if (!root) return { ...s, cover: LOCAL_PLAYLIST_ARTWORK_PLACEHOLDER };
+        let files: string[] = [];
+        try {
+          const scan = await scanFolder(root);
+          if (scan.status === "ok") files = scan.files;
+        } catch {
+          /* ignore */
+        }
+        const embedded = await pickFirstEmbeddedLocalCover((fp) => getCover(fp), files, 8);
+        const cover = embedded ?? LOCAL_PLAYLIST_ARTWORK_PLACEHOLDER;
+        return { ...s, cover };
+      }
+
+      // Saved local playlist (`POST /api/playlists`): fill per-track embedded art on the
+      // embedded `playlist.tracks` rows so expanded leaf tiles + now-playing hero differ per file.
+      if (s.origin === "playlist" && s.type === "local" && s.playlist?.tracks && s.playlist.tracks.length > 0) {
+        let tracks = s.playlist.tracks.map((t) => ({ ...t }));
+        const cap = Math.min(tracks.length, MAX_SAVED_LOCAL_PLAYLIST_TRACK_COVERS);
+        for (let i = 0; i < cap; i++) {
+          const t = tracks[i]!;
+          if ((t.type ?? "local") !== "local") continue;
+          const path = (t.url ?? "").trim();
+          if (!path || `${t.cover ?? ""}`.trim()) continue;
+          try {
+            const cov = await getCover(path);
+            if (cov.status === "ok" && cov.dataUrl?.trim()) {
+              tracks[i] = { ...t, cover: cov.dataUrl.trim() };
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        const playlist = { ...s.playlist, tracks };
+        const derivedShell = derivePlaylistUnifiedCoverArt(playlist);
+        const shellCover = (`${s.cover ?? ""}`.trim() || derivedShell || LOCAL_PLAYLIST_ARTWORK_PLACEHOLDER).trim();
+        const thumb = `${playlist.thumbnail ?? ""}`.trim() || shellCover;
+        return {
+          ...s,
+          cover: shellCover || s.cover,
+          playlist: {
+            ...playlist,
+            ...(thumb ? { thumbnail: thumb } : {}),
+            ...(!`${playlist.cover ?? ""}`.trim() && thumb ? { cover: thumb } : {}),
+          },
+        };
+      }
+
+      return s;
+    }),
+  );
 }
 
 export function savePlaylistToLocal(playlist: Playlist): void {

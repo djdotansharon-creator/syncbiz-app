@@ -56,6 +56,7 @@ import {
   registerIOSAudioElement,
   setIOSNeedsTapToResume,
 } from "@/lib/ios-audio-unlock";
+import { isValidLocalFilePlaybackPath } from "@/lib/url-validation";
 
 /** Crossfade runtime diagnostics – key transitions only, no 500ms spam */
 function xfadeLog(phase: string, data?: Record<string, unknown>) {
@@ -1923,19 +1924,53 @@ export function AudioPlayer() {
 
       if (prev !== "idle" && next === "idle" &&
           statusRef.current === "playing" && currentPlayUrlRef.current) {
-        // Ch-A just went idle while web player is still playing — could be test
-        // panel hijack ending, or natural end of clip. Schedule reload.
+        // Ch-A just went idle while web player is still playing.
+        //
+        // For local-file URLs (multi-track folder drops, saved local playlists), this is the
+        // natural end of the clip — the only reliable end-of-track signal we get through MPV
+        // for this transport. Advance via the provider so NEXT logic, the live queue
+        // highlightIndex, and the rotating-art track all stay in sync. If the provider chose
+        // a same-URL restart (single-track session), force a fresh loadfile so the file
+        // replays from 0 (PLAY alone won't restart an idle MPV).
+        //
+        // For non-local URLs, the original heuristic still applies: a 1.5s reload guards
+        // against the test panel hijack briefly stealing Ch-A. (Streams/YouTube have their
+        // own ENDED handlers earlier in this file.)
+        const cur = currentPlayUrlRef.current;
         if (mpvRecoverTimerRef.current) clearTimeout(mpvRecoverTimerRef.current);
-        mpvRecoverTimerRef.current = setTimeout(() => {
-          mpvRecoverTimerRef.current = null;
-          // Re-check: still playing, still idle (didn't recover on its own via replace)
-          if (statusRef.current === "playing" &&
-              currentPlayUrlRef.current &&
-              mpvChAStatusRef.current === "idle") {
-            mpvLastUrlRef.current = null; // force routing effect to treat as new
-            void desktop.mpvPlayUrl(currentPlayUrlRef.current);
+        mpvRecoverTimerRef.current = null;
+
+        if (isValidLocalFilePlaybackPath(cur)) {
+          const urlBeforeNext = cur;
+          try {
+            nextRef.current({ auditTransportCase: "ended_auto" });
+          } catch (err) {
+            console.warn("[SyncBiz:mpv-natural-end] next() threw", err);
           }
-        }, 1500);
+          // Single-track session restart guard: if next() kept the same URL,
+          // routing effect won't re-fire — push a fresh loadfile here.
+          mpvRecoverTimerRef.current = setTimeout(() => {
+            mpvRecoverTimerRef.current = null;
+            if (statusRef.current === "playing" &&
+                currentPlayUrlRef.current &&
+                currentPlayUrlRef.current === urlBeforeNext &&
+                mpvChAStatusRef.current === "idle") {
+              mpvLastUrlRef.current = null;
+              void desktop.mpvPlayUrl(currentPlayUrlRef.current);
+            }
+          }, 80);
+        } else {
+          mpvRecoverTimerRef.current = setTimeout(() => {
+            mpvRecoverTimerRef.current = null;
+            // Re-check: still playing, still idle (didn't recover on its own via replace)
+            if (statusRef.current === "playing" &&
+                currentPlayUrlRef.current &&
+                mpvChAStatusRef.current === "idle") {
+              mpvLastUrlRef.current = null; // force routing effect to treat as new
+              void desktop.mpvPlayUrl(currentPlayUrlRef.current);
+            }
+          }, 1500);
+        }
       } else if (next !== "idle" && mpvRecoverTimerRef.current) {
         // Ch-A is active again — loadfile replace transition settled; cancel reload
         clearTimeout(mpvRecoverTimerRef.current);
@@ -2183,9 +2218,13 @@ export function AudioPlayer() {
   //    → routing effect fires → mpvPlayUrl(newUrl). This is the only correct path for
   //    within-playlist track navigation.
   //  - Single station with a populated catalog → catalog PREV/NEXT + PLAY via localMockTransport.
+  const desktopSessionTrackCount = (() => {
+    const pl =
+      currentSource != null ? effectivePlaybackPlaylistAttachment(currentSource) ?? currentPlaylist : null;
+    return pl ? getPlaylistTracks(pl).length : 0;
+  })();
   const desktopHasProviderNav =
-    isDesktopMode &&
-    ((currentSource?.playlist?.tracks?.length ?? 0) > 1 || queue.length > 1);
+    isDesktopMode && (desktopSessionTrackCount > 1 || queue.length > 1);
 
   const onPrev = isDesktopMode
     ? () => {

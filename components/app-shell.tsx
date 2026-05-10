@@ -31,10 +31,23 @@ import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibra
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { useTopNavPins } from "@/lib/use-top-nav-pins";
 import {
+  buildEphemeralLocalFolderPlaylist,
   buildEphemeralLocalQueueFromPaths,
   ephemeralLocalSourceWithCover,
 } from "@/lib/ephemeral-local-music-playback";
+import {
+  LOCAL_PLAYLIST_ARTWORK_PLACEHOLDER,
+  MAX_EPHEMERAL_TRACK_COVERS_ON_DROP,
+  embedLocalTrackCoversUpToCap,
+  pickFirstEmbeddedLocalCover,
+} from "@/lib/local-playlist-artwork";
+import {
+  collectElectronFilePathsFromDataTransfer,
+  resolveDesktopFolderDropPath,
+  titleFromLocalPath,
+} from "@/lib/local-audio-path";
 import { SYNCBIZ_MUSIC_LIBRARY_DRAG_MIME, type MusicLibraryDragPayload } from "@/lib/music-library-drag";
+import { derivePlaylistUnifiedCoverArt, unifiedPlaylistSourceId } from "@/lib/playlist-utils";
 
 const pillLink =
   "rounded-xl border border-slate-700/80 bg-slate-900/90 px-3.5 py-2 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] transition-all duration-100 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950";
@@ -528,9 +541,35 @@ export function AppShell({ children }: { children: ReactNode }) {
           if (payload.kind === "folder" && api?.scanLocalAudioFolder) {
             const scan = await api.scanLocalAudioFolder(p);
             if (scan.status === "ok" && scan.files.length > 0) {
-              const queue = buildEphemeralLocalQueueFromPaths(scan.files);
-              setQueue(queue, { force: true });
-              playSource(queue[0]!);
+              const getCov = (fp: string) => api.getLocalAudioCover!(fp);
+              const perTrackCovers = api.getLocalAudioCover
+                ? await embedLocalTrackCoversUpToCap(getCov, scan.files, MAX_EPHEMERAL_TRACK_COVERS_ON_DROP)
+                : [];
+              const thumbFromRows = perTrackCovers.find((c) => c && c.trim()) ?? null;
+              const thumb =
+                thumbFromRows ??
+                (api.getLocalAudioCover
+                  ? await pickFirstEmbeddedLocalCover(getCov, scan.files, 6)
+                  : null) ??
+                LOCAL_PLAYLIST_ARTWORK_PLACEHOLDER;
+              const playlist = buildEphemeralLocalFolderPlaylist(scan.files, {
+                folderLabel: scan.playlistName ?? undefined,
+                thumbnail: thumb,
+                ...(perTrackCovers.length > 0 ? { perTrackCovers } : {}),
+              });
+              const unified: UnifiedSource = {
+                id: unifiedPlaylistSourceId(playlist.id),
+                title: playlist.name,
+                genre: playlist.genre || "Mixed",
+                cover: derivePlaylistUnifiedCoverArt(playlist),
+                type: "local",
+                url: playlist.url,
+                origin: "playlist",
+                playlist,
+                ...unifiedFoundationHints("playlist", "local", playlist.url),
+              };
+              setQueue([unified], { force: true });
+              playSource(unified, 0);
             }
             return;
           }
@@ -552,6 +591,62 @@ export function AppShell({ children }: { children: ReactNode }) {
         }
       } catch {
         // Ignore malformed payload.
+      }
+    }
+
+    const nativePaths = collectElectronFilePathsFromDataTransfer(e.dataTransfer);
+    if (nativePaths.length > 0) {
+      const api = typeof window !== "undefined" ? window.syncbizDesktop : undefined;
+      if (api?.scanLocalAudioFolder) {
+        const rootPath = resolveDesktopFolderDropPath(nativePaths);
+        const scan = await api.scanLocalAudioFolder(rootPath);
+        let files: string[] = [];
+        let label = rootPath.split(/[/\\]/).filter(Boolean).pop() ?? "Local";
+        if (scan.status === "ok" && scan.files.length > 0) {
+          files = scan.files;
+          label = scan.playlistName ?? label;
+        } else if (scan.status === "not_directory" && rootPath.trim()) {
+          files = [rootPath.trim()];
+          label = titleFromLocalPath(rootPath);
+        } else if (nativePaths.length === 1) {
+          const one = nativePaths[0]!.trim();
+          if (one) {
+            files = [one];
+            label = titleFromLocalPath(one);
+          }
+        }
+        if (files.length > 0) {
+          const getCov = (fp: string) => api.getLocalAudioCover!(fp);
+          const perTrackCovers = api.getLocalAudioCover
+            ? await embedLocalTrackCoversUpToCap(getCov, files, MAX_EPHEMERAL_TRACK_COVERS_ON_DROP)
+            : [];
+          const thumbFromRows = perTrackCovers.find((c) => c && c.trim()) ?? null;
+          const thumb =
+            thumbFromRows ??
+            (api.getLocalAudioCover
+              ? await pickFirstEmbeddedLocalCover(getCov, files, 6)
+              : null) ??
+            LOCAL_PLAYLIST_ARTWORK_PLACEHOLDER;
+          const playlist = buildEphemeralLocalFolderPlaylist(files, {
+            folderLabel: label,
+            thumbnail: thumb,
+            ...(perTrackCovers.length > 0 ? { perTrackCovers } : {}),
+          });
+          const unified: UnifiedSource = {
+            id: unifiedPlaylistSourceId(playlist.id),
+            title: playlist.name,
+            genre: playlist.genre || "Mixed",
+            cover: derivePlaylistUnifiedCoverArt(playlist),
+            type: "local",
+            url: playlist.url,
+            origin: "playlist",
+            playlist,
+            ...unifiedFoundationHints("playlist", "local", playlist.url),
+          };
+          setQueue([unified], { force: true });
+          playSource(unified, 0);
+          return;
+        }
       }
     }
 
