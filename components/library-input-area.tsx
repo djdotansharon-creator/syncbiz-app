@@ -34,10 +34,12 @@ import type { Playlist } from "@/lib/playlist-types";
 import {
   collectElectronFilePathsFromDataTransfer,
   isLocalPathLikelyFolderInWebBrowser,
+  isPlaylistContainerPath,
   normalizeLocalFilePathInput,
   resolveDesktopFolderDropPath,
   titleFromLocalPath,
 } from "@/lib/local-audio-path";
+import { createUnifiedPlaylistFromLocalScan } from "@/lib/local-music-library-playlist";
 
 const controlHeight = "h-10";
 const inputBase =
@@ -290,8 +292,50 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
         setUrlError(null);
         setYoutubeMixImportUrl(null);
         try {
-          const scanFolder =
-            typeof window !== "undefined" ? window.syncbizDesktop?.scanLocalAudioFolder : undefined;
+          const desktop = typeof window !== "undefined" ? window.syncbizDesktop : undefined;
+
+          // M3U / M3U8 / PLS are playlist containers, not audio tracks. Route to the
+          // desktop importer so the *resolved* local audio files (under the configured
+          // music folder) become the playlist's tracks. Saving the .m3u path itself as a
+          // single "url" track is the bug — it produced a 1-track playlist regardless of
+          // how many entries the file referenced.
+          if (isPlaylistContainerPath(localPath)) {
+            const importer = desktop?.importLocalM3uPlaylist;
+            if (typeof importer !== "function") {
+              setUrlError(tx.urlErrorLocalFolderDesktopOnly);
+              return;
+            }
+            const res = await importer(localPath);
+            if (res.status === "error") {
+              setUrlError(res.message || tx.urlErrorFailedAdd);
+              return;
+            }
+            if (res.files.length === 0) {
+              setUrlError(
+                res.unresolved.length === 0 && res.skipped === 0
+                  ? "No playable local tracks under your music folder were listed in this file."
+                  : "All listed tracks were skipped (outside music folder, missing, or not audio).",
+              );
+              return;
+            }
+            const unified = await createUnifiedPlaylistFromLocalScan(
+              {
+                playlistName: res.playlistName,
+                files: res.files,
+                trackDisplayNames: res.trackDisplayNames,
+              },
+              tx.defaultGenreMixed,
+            );
+            if (!unified) {
+              setUrlError(tx.urlErrorFailedAdd);
+              return;
+            }
+            onAdd(unified);
+            setUrlValue("");
+            return;
+          }
+
+          const scanFolder = desktop?.scanLocalAudioFolder;
           if (typeof scanFolder === "function") {
             const scan = await scanFolder(localPath);
             if (scan.status === "ok") {
