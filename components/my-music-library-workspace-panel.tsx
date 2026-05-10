@@ -178,7 +178,19 @@ async function inspectRawTagsAndLog(filePath: string): Promise<void> {
 
 type TrackSortKey = "artist" | "title" | "genre" | "year";
 
-type TrackTableFile = { name: string; path: string };
+type TrackTableFile = {
+  name: string;
+  path: string;
+  /** Stage 4B: from LIST_MUSIC_LIBRARY_DIR when snapshot matches file stats. */
+  snapshotTags?: {
+    artist: string | null;
+    title: string | null;
+    genre: string | null;
+    year: string | null;
+    album: string | null;
+    durationSec: number | null;
+  };
+};
 
 function getTagFieldForSort(
   file: TrackTableFile,
@@ -238,15 +250,19 @@ function TrackTableRow({
 }: TrackTableRowProps): ReactElement {
   const rowRef = useRef<HTMLTableRowElement>(null);
   const [loading, setLoading] = useState(false);
+  const tagsRef = useRef(tags);
+  tagsRef.current = tags;
 
   useEffect(() => {
-    if (tags) return undefined;
     if (!canGetLocalAudioTags()) return undefined;
     const el = rowRef.current;
     if (!el) return undefined;
     let cancelled = false;
+    let didRunLoad = false;
     const load = (): void => {
-      setLoading(true);
+      if (didRunLoad) return;
+      didRunLoad = true;
+      if (!tagsRef.current) setLoading(true);
       void (async () => {
         try {
           const api = window.syncbizDesktop!.getLocalAudioTags!;
@@ -278,7 +294,7 @@ function TrackTableRow({
       cancelled = true;
       obs.disconnect();
     };
-  }, [file.path, onTagsLoaded, tags]);
+  }, [file.path, onTagsLoaded]);
 
   const { artist, title: titleTagged } = resolvedArtistTitle(tags);
   const titleShown = titleTagged || file.name.replace(/\.[^/.]+$/, "");
@@ -374,6 +390,32 @@ function TrackTable({
   const [tagsByPath, setTagsByPath] = useState<Record<string, LocalAudioBrowseTags | null>>({});
   const [sortKey, setSortKey] = useState<TrackSortKey | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  useEffect(() => {
+    setTagsByPath((prev) => {
+      const next: Record<string, LocalAudioBrowseTags | null> = {};
+      const pathSet = new Set(files.map((f) => f.path));
+      for (const key of Object.keys(prev)) {
+        if (pathSet.has(key)) next[key] = prev[key];
+      }
+      for (const f of files) {
+        if (f.snapshotTags) {
+          next[f.path] = {
+            artist: f.snapshotTags.artist,
+            title: f.snapshotTags.title,
+            album: f.snapshotTags.album,
+            genre: f.snapshotTags.genre,
+            year: f.snapshotTags.year,
+            comment: null,
+            durationSec: f.snapshotTags.durationSec,
+            bpm: null,
+            rating: null,
+          };
+        }
+      }
+      return next;
+    });
+  }, [files]);
 
   const handleTagsLoaded = useCallback((path: string, tags: LocalAudioBrowseTags | null) => {
     setTagsByPath((prev) => (prev[path] === tags ? prev : { ...prev, [path]: tags }));
@@ -481,7 +523,11 @@ function folderAccentClass(path: string): string {
 }
 
 type ListResult =
-  | { status: "ok"; dirs: { name: string; path: string }[]; files: { name: string; path: string }[] }
+  | {
+      status: "ok";
+      dirs: { name: string; path: string }[];
+      files: TrackTableFile[];
+    }
   | { status: "error"; message: string }
   | { status: "no_root" };
 

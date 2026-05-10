@@ -26,6 +26,7 @@ import { listMusicLibraryDir } from "./list-music-library-dir";
 import { extractEmbeddedCoverDataUrlFromAudioFile } from "./extract-local-audio-cover";
 import { extractLocalAudioTagFields, inspectLocalAudioTagsRaw } from "./extract-local-audio-tags";
 import {
+  enrichListMusicLibraryDirWithSnapshot,
   recordListDirAudioFilesInSnapshot,
   recordLocalAudioTagsInSnapshot,
   recordScanAudioFilesInSnapshot,
@@ -283,7 +284,11 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     async (_e, subPath: string): Promise<ListMusicLibraryDirResult> => {
       const c = loadRuntimeConfig(getUserData());
       const root = c.musicFolderPath?.trim() ? c.musicFolderPath : null;
-      const result = await listMusicLibraryDir(root, typeof subPath === "string" ? subPath : "");
+      const listed = await listMusicLibraryDir(root, typeof subPath === "string" ? subPath : "");
+      const result =
+        listed.status === "ok"
+          ? await enrichListMusicLibraryDirWithSnapshot(getUserData(), c, listed)
+          : listed;
       if (result.status === "ok" && result.files.length > 0) {
         void recordListDirAudioFilesInSnapshot(getUserData(), c, result.files);
       }

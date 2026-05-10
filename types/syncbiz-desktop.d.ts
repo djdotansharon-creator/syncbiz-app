@@ -34,8 +34,23 @@ type DesktopPickMusicFolderResult =
   | { status: "canceled" }
   | { status: "error"; message: string };
 
+type DesktopListMusicLibrarySnapshotTags = {
+  artist: string | null;
+  title: string | null;
+  genre: string | null;
+  year: string | null;
+  album: string | null;
+  durationSec: number | null;
+};
+
+type DesktopListMusicLibraryFileEntry = {
+  name: string;
+  path: string;
+  snapshotTags?: DesktopListMusicLibrarySnapshotTags;
+};
+
 type ListMusicLibraryDirIpcResult =
-  | { status: "ok"; dirs: { name: string; path: string }[]; files: { name: string; path: string }[] }
+  | { status: "ok"; dirs: { name: string; path: string }[]; files: DesktopListMusicLibraryFileEntry[] }
   | { status: "error"; message: string }
   | { status: "no_root" };
 

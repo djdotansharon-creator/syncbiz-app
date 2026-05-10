@@ -10,7 +10,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
-import type { DesktopRuntimeConfig, LocalAudioTagFields } from "../shared/mvp-types";
+import type {
+  DesktopRuntimeConfig,
+  ListMusicLibraryDirResult,
+  LocalAudioTagFields,
+} from "../shared/mvp-types";
 
 export const LOCAL_COLLECTION_SCHEMA_VERSION = 1;
 
@@ -287,6 +291,95 @@ export function getSnapshotStats(snapshot: LocalCollectionSnapshotFile): LocalCo
     updatedAt: snapshot.updatedAt,
     musicFolderRoot: snapshot.musicFolderRoot,
   };
+}
+
+/** Subset stored on list rows for My Music Library (Stage 4B). */
+export type ListDirSnapshotTagFields = {
+  artist: string | null;
+  title: string | null;
+  genre: string | null;
+  year: string | null;
+  album: string | null;
+  durationSec: number | null;
+};
+
+/**
+ * Return snapshot metadata for a file only when disk size/mtime match the snapshot row
+ * (otherwise treat cache as stale and let the UI use live tag read).
+ */
+export function getFreshSnapshotTagsForFile(
+  snapshot: LocalCollectionSnapshotFile,
+  musicRootNorm: string,
+  absolutePath: string,
+  size: number,
+  mtimeMs: number,
+): ListDirSnapshotTagFields | null {
+  const rel = relativeFromMusicRoot(absolutePath, musicRootNorm);
+  if (!rel) return null;
+
+  const id = computeLocalTrackCanonicalIdV1(rel, size, mtimeMs);
+  let row: LocalCollectionTrackRecord | undefined = snapshot.tracks[id];
+  if (!row || path.resolve(row.absolutePath) !== path.resolve(absolutePath)) {
+    row = undefined;
+    for (const r of Object.values(snapshot.tracks)) {
+      if (
+        path.resolve(r.absolutePath) === path.resolve(absolutePath) &&
+        r.size === size &&
+        r.mtimeMs === mtimeMs
+      ) {
+        row = r;
+        break;
+      }
+    }
+  }
+  if (!row) return null;
+  if (row.size !== size || row.mtimeMs !== mtimeMs) return null;
+  if (path.resolve(row.absolutePath) !== path.resolve(absolutePath)) return null;
+
+  return {
+    artist: row.artist,
+    title: row.title,
+    genre: row.genre,
+    year: row.year,
+    album: row.album,
+    durationSec: row.durationSec,
+  };
+}
+
+/**
+ * Attach `snapshotTags` to list rows when the on-disk file matches a snapshot entry.
+ * If snapshot is missing or has no tracks, returns `result` unchanged.
+ */
+export async function enrichListMusicLibraryDirWithSnapshot(
+  userData: string,
+  config: DesktopRuntimeConfig,
+  result: ListMusicLibraryDirResult,
+): Promise<ListMusicLibraryDirResult> {
+  if (result.status !== "ok") return result;
+  const deviceId = (config.deviceId ?? "").trim() || "unknown";
+  const snap = loadLocalCollectionSnapshot(userData, deviceId);
+  const rootNorm = normalizeMusicRoot(config.musicFolderPath ?? null);
+  if (!snap || !rootNorm || Object.keys(snap.tracks).length === 0) {
+    return result;
+  }
+
+  const files = await Promise.all(
+    result.files.map(async (f) => {
+      const p = (f.path ?? "").trim();
+      if (!p) return f;
+      try {
+        const st = await stat(p);
+        if (!st.isFile()) return f;
+        const size = st.size;
+        const mtimeMs = Math.floor(st.mtimeMs);
+        const subset = getFreshSnapshotTagsForFile(snap, rootNorm, p, size, mtimeMs);
+        return subset ? { ...f, snapshotTags: subset } : f;
+      } catch {
+        return f;
+      }
+    }),
+  );
+  return { ...result, files };
 }
 
 async function statAndUpsert(

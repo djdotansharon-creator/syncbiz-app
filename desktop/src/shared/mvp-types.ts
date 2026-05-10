@@ -64,9 +64,27 @@ export type MusicFolderSnapshot = {
   path: string | null;
 };
 
+/** One audio file row from LIST_MUSIC_LIBRARY_DIR (Stage 4B: optional snapshot cache). */
+export type ListMusicLibraryDirFileEntry = {
+  name: string;
+  path: string;
+  /**
+   * When the local collection snapshot has a row for this path and current size/mtime match,
+   * main attaches the last-known tag fields (still refreshed via getLocalAudioTags in the UI).
+   */
+  snapshotTags?: {
+    artist: string | null;
+    title: string | null;
+    genre: string | null;
+    year: string | null;
+    album: string | null;
+    durationSec: number | null;
+  };
+};
+
 /** Immediate children of one directory under the configured music root (Desktop only). */
 export type ListMusicLibraryDirResult =
-  | { status: "ok"; dirs: { name: string; path: string }[]; files: { name: string; path: string }[] }
+  | { status: "ok"; dirs: { name: string; path: string }[]; files: ListMusicLibraryDirFileEntry[] }
   | { status: "error"; message: string }
   | { status: "no_root" };
 
