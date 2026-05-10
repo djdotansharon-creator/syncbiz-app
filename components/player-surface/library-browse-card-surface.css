@@ -260,3 +260,15 @@
 .sb-lbc-error {
   color: #f87171;
 }
+
+/* Saved folder playlists (DB local_playlist): teal frame — distinct from URL/stream tiles */
+.library-source-card.library-source-card--local-disk .sb-lbc-shell {
+  box-shadow:
+    inset 0 0 0 1px rgba(45, 212, 191, 0.45),
+    0 0 20px rgba(13, 148, 136, 0.12);
+}
+.library-source-card.library-source-card--local-disk .sb-lbc-shell-selected {
+  box-shadow:
+    inset 0 0 0 1px rgba(45, 212, 191, 0.65),
+    0 0 26px rgba(13, 148, 136, 0.2);
+}

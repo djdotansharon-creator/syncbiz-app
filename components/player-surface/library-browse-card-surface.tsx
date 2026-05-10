@@ -2,7 +2,7 @@
 
 import { useState, useEffect, type ReactNode } from "react";
 import type { LibraryBrowseCardSurfaceProps } from "@/lib/player-surface/library-browse-types";
-import { isSafeHttpCoverUrl } from "@/lib/player-surface/cover-url";
+import { isSafeLibraryCoverUrl } from "@/lib/player-surface/cover-url";
 
 function DefaultArt({
   artworkUrl,
@@ -77,7 +77,7 @@ export function LibraryBrowseCardSurface(props: LibraryBrowseCardSurfaceProps) {
   } = props;
 
   const safeUrl =
-    artworkUrl && isSafeHttpCoverUrl(artworkUrl) ? artworkUrl : null;
+    artworkUrl && isSafeLibraryCoverUrl(artworkUrl) ? artworkUrl : null;
 
   const inner = (
     <>

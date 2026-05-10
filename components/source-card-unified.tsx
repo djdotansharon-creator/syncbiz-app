@@ -511,6 +511,8 @@ export function SourceCard({
     />
   );
 
+  const isDiskLocalPlaylist = source.origin === "source" && source.source?.type === "local_playlist";
+
   return (
     <>
     <article
@@ -522,14 +524,14 @@ export function SourceCard({
         showLeafLibraryChips ? "library-source-card-leaf" : ""
       } ${active ? "library-playing-active" : ""} ${
         draggable ? "cursor-grab active:cursor-grabbing" : ""
-      }`}
+      }${isDiskLocalPlaylist ? " library-source-card--local-disk" : ""}`}
     >
       {useBranchTileShell ? (
         <BranchLibraryBrowseCard
           interaction="embeddedDiv"
           item={branchListItem!}
           selected={active}
-          className="min-h-0 flex-1 flex flex-col"
+          className={`min-h-0 flex-1 flex flex-col${isDiskLocalPlaylist ? " library-browse-card--local-disk" : ""}`}
           titleAside={titleAsideNode}
           originBadgeClassName={libraryKindBadgeArtClass(kindBadge)}
           artTopRightSlot={leafArtProviderCorner ?? undefined}
