@@ -21,6 +21,11 @@ import {
 } from "@/lib/local-music-library-playlist";
 import { buildEphemeralLocalQueueFromPaths } from "@/lib/ephemeral-local-music-playback";
 import { setMusicLibraryDragData } from "@/lib/music-library-drag";
+import {
+  getNativePathForDroppedFile,
+  getPlaylistContainerPathFromDataTransfer,
+  isPlaylistContainerPath,
+} from "@/lib/local-audio-path";
 
 export type MyMusicPlaylistPickerOption = { key: string; label: string };
 
@@ -51,6 +56,10 @@ function canPickMusicFolder(): boolean {
 
 function canGetLocalAudioTags(): boolean {
   return typeof window !== "undefined" && typeof window.syncbizDesktop?.getLocalAudioTags === "function";
+}
+
+function canImportM3u(): boolean {
+  return typeof window !== "undefined" && typeof window.syncbizDesktop?.importLocalM3uPlaylist === "function";
 }
 
 /** Mirrors desktop `LocalAudioTagFields` (preload IPC); duplicated here so Next doesn’t depend on desktop package. */
@@ -561,6 +570,17 @@ export function MyMusicLibraryWorkspacePanel({
   const [addFeedback, setAddFeedback] = useState<AddToPlaylistFeedback>({ phase: "idle" });
   const [addFlowBusy, setAddFlowBusy] = useState(false);
 
+  const [m3uImportBusy, setM3uImportBusy] = useState(false);
+  const [m3uImportSummary, setM3uImportSummary] = useState<{
+    imported: number;
+    unresolved: number;
+    skipped: number;
+    error?: string;
+  } | null>(null);
+  const [m3uDropHighlight, setM3uDropHighlight] = useState(false);
+  const m3uFileInputRef = useRef<HTMLInputElement | null>(null);
+  const m3uDragDepthRef = useRef(0);
+
   const hasUserPlaylists = userPlaylists.length > 0;
 
   const refreshRoot = useCallback(async () => {
@@ -791,6 +811,105 @@ export function MyMusicLibraryWorkspacePanel({
     }
   }, [addModalTarget, pickedPlaylistKey, onAppendLocalUnifiedToPlaylist]);
 
+  const runM3uImport = useCallback(
+    async (absolutePath: string) => {
+      const trimmed = absolutePath.trim();
+      if (!trimmed) return;
+      if (!isPlaylistContainerPath(trimmed)) {
+        setM3uImportSummary({
+          imported: 0,
+          unresolved: 0,
+          skipped: 0,
+          error: "Choose a .m3u, .m3u8, or .pls playlist file.",
+        });
+        return;
+      }
+      if (typeof window.syncbizDesktop?.importLocalM3uPlaylist !== "function") {
+        setM3uImportSummary({
+          imported: 0,
+          unresolved: 0,
+          skipped: 0,
+          error: "Update SyncBiz Desktop to import playlist files.",
+        });
+        return;
+      }
+      if (!rootPath?.trim()) {
+        setM3uImportSummary({
+          imported: 0,
+          unresolved: 0,
+          skipped: 0,
+          error: "Choose a music folder first (imports only include tracks inside it).",
+        });
+        return;
+      }
+      setM3uImportBusy(true);
+      setM3uImportSummary(null);
+      try {
+        const res = await window.syncbizDesktop.importLocalM3uPlaylist(trimmed);
+        if (res.status === "error") {
+          setM3uImportSummary({ imported: 0, unresolved: 0, skipped: 0, error: res.message });
+          return;
+        }
+        if (res.files.length === 0) {
+          setM3uImportSummary({
+            imported: 0,
+            unresolved: res.unresolved.length,
+            skipped: res.skipped,
+            error:
+              res.unresolved.length === 0 && res.skipped === 0
+                ? "No playable local tracks under your music folder were listed in this file."
+                : undefined,
+          });
+          return;
+        }
+        const unified = await createUnifiedPlaylistFromLocalScan(
+          {
+            playlistName: res.playlistName,
+            files: res.files,
+            trackDisplayNames: res.trackDisplayNames,
+          },
+          defaultGenre,
+        );
+        if (!unified) {
+          setM3uImportSummary({
+            imported: res.imported,
+            unresolved: res.unresolved.length,
+            skipped: res.skipped,
+            error: "Could not save playlist. Check your connection and try again.",
+          });
+          return;
+        }
+        onAddToLibrary(unified);
+        setM3uImportSummary({
+          imported: res.imported,
+          unresolved: res.unresolved.length,
+          skipped: res.skipped,
+        });
+      } catch (e) {
+        setM3uImportSummary({
+          imported: 0,
+          unresolved: 0,
+          skipped: 0,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      } finally {
+        setM3uImportBusy(false);
+      }
+    },
+    [defaultGenre, onAddToLibrary, rootPath],
+  );
+
+  const onM3uFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const f = e.target.files?.[0];
+      e.target.value = "";
+      if (!f) return;
+      const p = getNativePathForDroppedFile(f);
+      if (p) void runM3uImport(p);
+    },
+    [runM3uImport],
+  );
+
   useEffect(() => {
     if (!addModalTarget) return;
     const onKey = (e: KeyboardEvent) => {
@@ -878,7 +997,44 @@ export function MyMusicLibraryWorkspacePanel({
           {folderPickError ? <p className="mt-3 max-w-md text-xs text-rose-400">{folderPickError}</p> : null}
         </div>
       ) : (
-        <>
+        <div
+          className={`flex min-h-0 flex-1 flex-col gap-3 ${m3uDropHighlight ? "rounded-lg ring-2 ring-cyan-500/45 ring-inset" : ""}`}
+          onDragEnter={(e) => {
+            if (!canImportM3u() || m3uImportBusy) return;
+            e.preventDefault();
+            m3uDragDepthRef.current += 1;
+            setM3uDropHighlight(true);
+          }}
+          onDragLeave={() => {
+            m3uDragDepthRef.current = Math.max(0, m3uDragDepthRef.current - 1);
+            if (m3uDragDepthRef.current === 0) setM3uDropHighlight(false);
+          }}
+          onDragOver={(e) => {
+            if (!canImportM3u() || m3uImportBusy) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }}
+          onDrop={(e) => {
+            m3uDragDepthRef.current = 0;
+            setM3uDropHighlight(false);
+            e.preventDefault();
+            if (!canImportM3u() || m3uImportBusy) return;
+            const playlistPath = getPlaylistContainerPathFromDataTransfer(e.dataTransfer);
+            if (playlistPath) {
+              e.stopPropagation();
+              void runM3uImport(playlistPath);
+            }
+          }}
+        >
+          <input
+            ref={m3uFileInputRef}
+            type="file"
+            accept=".m3u,.m3u8,.pls,application/vnd.apple.mpegurl,audio/mpegurl"
+            className="sr-only"
+            aria-hidden
+            tabIndex={-1}
+            onChange={onM3uFileInputChange}
+          />
           <nav
             aria-label="Folder path"
             className="flex min-w-0 flex-col gap-2 border-b border-slate-800/75 pb-2 sm:flex-row sm:items-stretch sm:gap-3"
@@ -892,6 +1048,17 @@ export function MyMusicLibraryWorkspacePanel({
               <IconChevronLeft className="h-4 w-4 text-slate-400" />
               Up
             </button>
+            {canImportM3u() ? (
+              <button
+                type="button"
+                disabled={m3uImportBusy || addFlowBusy}
+                onClick={() => m3uFileInputRef.current?.click()}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-semibold text-slate-100 transition hover:border-slate-600 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto"
+                title="Import .m3u / .m3u8 / .pls. Only tracks inside your music folder are added."
+              >
+                {m3uImportBusy ? "Importing…" : "Import playlist"}
+              </button>
+            ) : null}
             <div
               className="min-w-0 flex-1 rounded-md border border-slate-800/90 bg-slate-900/55 px-2.5 py-1.5"
               title={`${rootPath}${relSubpath ? `${rootPath.includes("\\") ? "\\" : "/"}${relSubpath.replace(/\//g, rootPath.includes("\\") ? "\\" : "/")}` : ""}`}
@@ -936,6 +1103,37 @@ export function MyMusicLibraryWorkspacePanel({
               </div>
             </div>
           </nav>
+
+          {m3uImportSummary ? (
+            <div
+              className={`rounded-lg border px-3 py-2.5 text-sm ${
+                m3uImportSummary.error
+                  ? "border-rose-500/35 bg-rose-500/[0.06] text-rose-100/95"
+                  : "border-cyan-500/30 bg-cyan-500/[0.07] text-cyan-50/95"
+              }`}
+              role="status"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <p className="min-w-0 leading-relaxed">
+                  <span className="font-semibold">Playlist import:</span> {m3uImportSummary.imported} imported
+                  {m3uImportSummary.unresolved > 0
+                    ? ` · ${m3uImportSummary.unresolved} unresolved`
+                    : ""}
+                  {m3uImportSummary.skipped > 0 ? ` · ${m3uImportSummary.skipped} skipped (duplicates)` : ""}
+                  {m3uImportSummary.error ? (
+                    <span className="mt-1 block text-xs opacity-95">{m3uImportSummary.error}</span>
+                  ) : null}
+                </p>
+                <button
+                  type="button"
+                  className="shrink-0 rounded border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/90 hover:bg-white/10"
+                  onClick={() => setM3uImportSummary(null)}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-800/90 bg-slate-950">
             {listLoading || list === null ? (
@@ -1042,8 +1240,11 @@ export function MyMusicLibraryWorkspacePanel({
           </div>
           <p className="text-center text-[11px] text-slate-600">
             Drag to player or Drop Next: temporary playback only · Add to Playlist saves to your library · files stay local
+            {canImportM3u()
+              ? " · Drop .m3u / .m3u8 / .pls here to import (tracks must be under your music folder)"
+              : ""}
           </p>
-        </>
+        </div>
       )}
 
       {addModalTarget ? (

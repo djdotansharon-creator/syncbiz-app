@@ -106,6 +106,25 @@ type SearchLocalCollectionSnapshotIpcResult =
   | { status: "ok"; hits: LocalCollectionSearchHitIpc[] }
   | { status: "error"; message: string };
 
+type ImportLocalM3uUnresolvedReasonIpc =
+  | "missing"
+  | "not_audio"
+  | "outside_root"
+  | "remote_url"
+  | "invalid_path";
+
+type ImportLocalM3uPlaylistIpcResult =
+  | {
+      status: "ok";
+      playlistName: string;
+      files: string[];
+      trackDisplayNames: string[];
+      imported: number;
+      unresolved: Array<{ ref: string; reason: ImportLocalM3uUnresolvedReasonIpc }>;
+      skipped: number;
+    }
+  | { status: "error"; message: string };
+
 type SyncBizDesktopBridgePreload = {
   getConfig: () => Promise<{ deviceId: string }>;
   localMockTransport: (payload: DesktopLocalMockPayload) => Promise<unknown>;
@@ -130,6 +149,8 @@ type SyncBizDesktopBridgePreload = {
   inspectLocalAudioTagsRaw?: (absolutePath: string) => Promise<InspectLocalAudioTagsRawIpcResult>;
   /** Stage 4C: search persisted local collection snapshot in main (no folder walk during search). */
   searchLocalCollectionSnapshot?: (query: string, limit?: number) => Promise<SearchLocalCollectionSnapshotIpcResult>;
+  /** Stage 5B: M3U/M3U8 → resolved paths under Music Folder (+ snapshot refresh in main). */
+  importLocalM3uPlaylist?: (absolutePath: string) => Promise<ImportLocalM3uPlaylistIpcResult>;
 };
 
 declare global {

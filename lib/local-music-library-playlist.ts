@@ -10,18 +10,23 @@ import { unifiedFoundationHints } from "@/lib/source-types";
 export type LocalMusicLibraryScanShape = {
   playlistName: string;
   files: string[];
+  /** Same length as `files` when set (e.g. M3U #EXTINF titles). */
+  trackDisplayNames?: string[];
 };
 
 export async function createUnifiedPlaylistFromLocalScan(
   scan: LocalMusicLibraryScanShape,
   defaultGenre: string,
 ): Promise<UnifiedSource | null> {
-  const tracks = scan.files.map((filePath) => ({
-    id: crypto.randomUUID(),
-    name: titleFromLocalPath(filePath),
-    type: "local" as const,
-    url: filePath,
-  }));
+  const tracks = scan.files.map((filePath, i) => {
+    const fromM3u = scan.trackDisplayNames?.[i]?.trim();
+    return {
+      id: crypto.randomUUID(),
+      name: fromM3u && fromM3u.length > 0 ? fromM3u : titleFromLocalPath(filePath),
+      type: "local" as const,
+      url: filePath,
+    };
+  });
   const res = await fetch("/api/playlists", {
     method: "POST",
     credentials: "include",

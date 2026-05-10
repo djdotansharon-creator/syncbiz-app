@@ -16,8 +16,10 @@ import type {
   GetLocalAudioTagsResult,
   InspectLocalAudioTagsRawResult,
   SearchLocalCollectionSnapshotResult,
+  ImportLocalM3uPlaylistResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
+import { importLocalM3uPlaylist } from "./import-local-m3u-playlist";
 import { DeviceWsManager } from "../device-websocket-client/device-ws-manager";
 import { fetchBranchLibrarySummary } from "./branch-library-fetch";
 import { loadRuntimeConfig, patchRuntimeConfig } from "./runtime-config-service";
@@ -281,6 +283,17 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     cachedConfig = next;
     return { path: next.musicFolderPath ?? null };
   });
+
+  ipcMain.handle(
+    MVP_IPC.IMPORT_LOCAL_M3U_PLAYLIST,
+    async (_e, filePath: unknown): Promise<ImportLocalM3uPlaylistResult> => {
+      if (typeof filePath !== "string" || !filePath.trim()) {
+        return { status: "error", message: "Empty playlist path." };
+      }
+      const cfg = loadRuntimeConfig(getUserData());
+      return importLocalM3uPlaylist(getUserData(), cfg, filePath.trim());
+    },
+  );
 
   ipcMain.handle(
     MVP_IPC.SEARCH_LOCAL_COLLECTION_SNAPSHOT,

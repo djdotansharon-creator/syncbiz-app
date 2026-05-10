@@ -15,6 +15,7 @@ import type {
   GetLocalAudioTagsResult,
   InspectLocalAudioTagsRawResult,
   SearchLocalCollectionSnapshotResult,
+  ImportLocalM3uPlaylistResult,
 } from "./mvp-types";
 
 /** Preload `contextBridge` contract (renderer uses `window.syncbizDesktop`). */
@@ -61,4 +62,6 @@ export type SyncBizDesktopMvp = {
   inspectLocalAudioTagsRaw: (absolutePath: string) => Promise<InspectLocalAudioTagsRawResult>;
   /** Stage 4C: search persisted local collection snapshot in main (no folder walk). */
   searchLocalCollectionSnapshot: (query: string, limit?: number) => Promise<SearchLocalCollectionSnapshotResult>;
+  /** Stage 5B: parse M3U/M3U8; returns resolved paths under Music Folder for library POST. */
+  importLocalM3uPlaylist: (absolutePath: string) => Promise<ImportLocalM3uPlaylistResult>;
 };

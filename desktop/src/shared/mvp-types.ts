@@ -39,7 +39,35 @@ export const MVP_IPC = {
   INSPECT_LOCAL_AUDIO_TAGS_RAW: "mvp:inspect-local-audio-tags-raw",
   /** Stage 4C: search local collection snapshot JSON in main only (metadata; no disk walk). */
   SEARCH_LOCAL_COLLECTION_SNAPSHOT: "mvp:search-local-collection-snapshot",
+  /** Stage 5B: parse M3U/M3U8/PLS paths under Music Folder; refresh snapshot; returns paths for POST /api/playlists. */
+  IMPORT_LOCAL_M3U_PLAYLIST: "mvp:import-local-m3u-playlist",
 } as const;
+
+/** Why a playlist line was not imported (V1: Music Folder + scan-local audio ext only). */
+export type ImportLocalM3uUnresolvedReason =
+  | "missing"
+  | "not_audio"
+  | "outside_root"
+  | "remote_url"
+  | "invalid_path";
+
+export type ImportLocalM3uUnresolvedEntry = {
+  ref: string;
+  reason: ImportLocalM3uUnresolvedReason;
+};
+
+export type ImportLocalM3uPlaylistResult =
+  | {
+      status: "ok";
+      playlistName: string;
+      files: string[];
+      /** Parallel to files; from #EXTINF when present, else derived filename. */
+      trackDisplayNames: string[];
+      imported: number;
+      unresolved: ImportLocalM3uUnresolvedEntry[];
+      skipped: number;
+    }
+  | { status: "error"; message: string };
 
 /** Result of scanning a folder for audio files (IPC from main). */
 export type ScanLocalAudioFolderResult =
