@@ -25,6 +25,11 @@ import { scanLocalAudioFolder } from "./scan-local-audio-folder";
 import { listMusicLibraryDir } from "./list-music-library-dir";
 import { extractEmbeddedCoverDataUrlFromAudioFile } from "./extract-local-audio-cover";
 import { extractLocalAudioTagFields, inspectLocalAudioTagsRaw } from "./extract-local-audio-tags";
+import {
+  recordListDirAudioFilesInSnapshot,
+  recordLocalAudioTagsInSnapshot,
+  recordScanAudioFilesInSnapshot,
+} from "./local-collection-snapshot";
 
 let manager: DeviceWsManager | null = null;
 let cachedConfig: DesktopRuntimeConfig | null = null;
@@ -215,7 +220,12 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     if (typeof dir !== "string" || !dir.trim()) {
       return { status: "error", message: "Empty path" };
     }
-    return scanLocalAudioFolder(dir);
+    const result = await scanLocalAudioFolder(dir);
+    if (result.status === "ok" && result.files.length > 0) {
+      const cfg = loadRuntimeConfig(getUserData());
+      void recordScanAudioFilesInSnapshot(getUserData(), cfg, result.files);
+    }
+    return result;
   });
 
   ipcMain.handle(MVP_IPC.GET_AUTOSTART, (): AutoStartState => readAutoStartState());
@@ -273,7 +283,11 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     async (_e, subPath: string): Promise<ListMusicLibraryDirResult> => {
       const c = loadRuntimeConfig(getUserData());
       const root = c.musicFolderPath?.trim() ? c.musicFolderPath : null;
-      return listMusicLibraryDir(root, typeof subPath === "string" ? subPath : "");
+      const result = await listMusicLibraryDir(root, typeof subPath === "string" ? subPath : "");
+      if (result.status === "ok" && result.files.length > 0) {
+        void recordListDirAudioFilesInSnapshot(getUserData(), c, result.files);
+      }
+      return result;
     },
   );
 
@@ -300,7 +314,10 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
         return { status: "error", message: "Empty path" };
       }
       try {
-        const tags = await extractLocalAudioTagFields(filePath.trim());
+        const trimmed = filePath.trim();
+        const tags = await extractLocalAudioTagFields(trimmed);
+        const cfg = loadRuntimeConfig(getUserData());
+        void recordLocalAudioTagsInSnapshot(getUserData(), cfg, trimmed, tags);
         return { status: "ok", tags };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
