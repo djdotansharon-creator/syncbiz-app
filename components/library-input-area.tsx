@@ -20,6 +20,7 @@ import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { inferGenre } from "@/lib/infer-genre";
 import { searchAll, searchExternal, type YouTubeSearchResult, type RadioSearchResult } from "@/lib/search-service";
+import { createEphemeralLocalSearchSource } from "@/lib/play-next";
 import { radioToUnified } from "@/lib/radio-utils";
 import {
   pickUnifiedFoundationFields,
@@ -69,6 +70,54 @@ function logDesktopLibraryIngestDrop(e: React.DragEvent, payload: string | null)
     hasGetPath: typeof window.syncbizDesktop?.getPathForFile === "function",
     resolvedIngestPath: payload,
   });
+}
+
+/** Compose a display title for a local snapshot hit (artist — title, falling back to filename). */
+function localSnapshotHitDisplayTitle(hit: {
+  artist: string | null;
+  title: string | null;
+  absolutePath: string;
+}): string {
+  const tr = (hit.title ?? "").trim();
+  const ar = (hit.artist ?? "").trim();
+  if (ar && tr) return `${ar} — ${tr}`;
+  if (tr) return tr;
+  if (ar) return ar;
+  return titleFromLocalPath(hit.absolutePath);
+}
+
+/**
+ * Desktop-only: search the persisted local collection snapshot via the preload bridge
+ * and convert hits into ephemeral UnifiedSources (no playlist creation, no folder scan,
+ * no tag read). Returns [] in browser/SSR or when the bridge is missing.
+ */
+async function searchMusicBankLocalSnapshot(query: string, limit: number): Promise<UnifiedSource[]> {
+  if (typeof window === "undefined") return [];
+  const inv = window.syncbizDesktop?.searchLocalCollectionSnapshot;
+  if (typeof inv !== "function") return [];
+  try {
+    const res = await inv(query, limit);
+    if (res.status !== "ok") return [];
+    const seen = new Set<string>();
+    const out: UnifiedSource[] = [];
+    for (const hit of res.hits) {
+      const abs = (hit.absolutePath ?? "").trim();
+      if (!abs) continue;
+      const key = (hit.localId ?? "").trim() || abs;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const genre = (hit.genre ?? "").trim() || null;
+      out.push(
+        createEphemeralLocalSearchSource(abs, {
+          title: localSnapshotHitDisplayTitle(hit),
+          genre,
+        }),
+      );
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 async function parseUrl(url: string): Promise<ParseUrlJson | null> {
@@ -149,6 +198,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
   const [youtubeMixImportUrl, setYoutubeMixImportUrl] = useState<string | null>(null);
 
   const [query, setQuery] = useState("");
+  const [musicBankLocalResults, setMusicBankLocalResults] = useState<UnifiedSource[]>([]);
   const [localResults, setLocalResults] = useState<UnifiedSource[]>([]);
   const [youtubeResults, setYoutubeResults] = useState<YouTubeSearchResult[]>([]);
   const [radioResults, setRadioResults] = useState<RadioSearchResult[]>([]);
@@ -160,14 +210,16 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
   const searchQueryRef = useRef("");
 
   const hasQuery = query.trim().length >= 2;
+  const hasMusicBankLocal = musicBankLocalResults.length > 0;
   const hasLocal = localResults.length > 0;
   const hasYoutube = youtubeResults.length > 0;
   const hasRadio = radioResults.length > 0;
-  const hasResults = hasLocal || hasYoutube || hasRadio;
+  const hasResults = hasMusicBankLocal || hasLocal || hasYoutube || hasRadio;
 
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q || q.length < 2) {
+      setMusicBankLocalResults([]);
       setLocalResults([]);
       setYoutubeResults([]);
       setRadioResults([]);
@@ -178,14 +230,19 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
     setYoutubeResults([]);
     setRadioResults([]);
     try {
-      const { internal, external } = await searchAll(sources, q);
+      const [allRes, mblRes] = await Promise.all([
+        searchAll(sources, q),
+        searchMusicBankLocalSnapshot(q, 25),
+      ]);
       if (searchQueryRef.current === q) {
-        setLocalResults(internal);
-        setYoutubeResults(external.youtube);
-        setRadioResults(external.radio);
+        setLocalResults(allRes.internal);
+        setYoutubeResults(allRes.external.youtube);
+        setRadioResults(allRes.external.radio);
+        setMusicBankLocalResults(mblRes);
       }
     } catch {
       if (searchQueryRef.current === q) {
+        setMusicBankLocalResults([]);
         setLocalResults([]);
         setYoutubeResults([]);
         setRadioResults([]);
@@ -197,6 +254,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
 
   useEffect(() => {
     if (!hasQuery) {
+      setMusicBankLocalResults([]);
       setLocalResults([]);
       setYoutubeResults([]);
       setRadioResults([]);
@@ -868,6 +926,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
               type="button"
               onClick={() => {
                 setQuery("");
+                setMusicBankLocalResults([]);
                 setLocalResults([]);
                 setYoutubeResults([]);
                 setRadioResults([]);
@@ -928,6 +987,55 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
             </div>
           ) : (
             <>
+              {hasMusicBankLocal && (
+                <div className="border-b border-slate-800/60 p-2">
+                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/90">
+                    My Music Library
+                  </p>
+                  <div className="space-y-0.5">
+                    {musicBankLocalResults.map((source) => (
+                      <div
+                        key={source.id}
+                        className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80"
+                      >
+                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                          <div className="flex h-full w-full items-center justify-center text-emerald-500/90">
+                            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                              <path d="M9 18V5l12-2v13" />
+                              <circle cx="6" cy="18" r="3" />
+                              <circle cx="18" cy="16" r="3" />
+                            </svg>
+                          </div>
+                          <span className="absolute bottom-0 right-0 rounded bg-emerald-700/95 px-1 py-0.5 text-[9px] font-medium text-white">
+                            DISK
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-slate-100">{source.title}</p>
+                          {source.genre && <p className="text-[10px] text-slate-500">{source.genre}</p>}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              effectivePlaySource(source);
+                              setQuery("");
+                              setMusicBankLocalResults([]);
+                              setLocalResults([]);
+                              setYoutubeResults([]);
+                              setRadioResults([]);
+                              setShowResults(false);
+                            }}
+                            className="inline-flex h-8 items-center justify-center rounded-lg bg-[#1db954] px-2.5 text-xs font-medium text-white transition hover:bg-[#1ed760]"
+                          >
+                            {t.play}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {hasLocal && (
                 <div className="border-b border-slate-800/60 p-2">
                   <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t.localResults}</p>
