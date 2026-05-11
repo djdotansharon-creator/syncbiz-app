@@ -13,7 +13,7 @@ import { searchExternal, type YouTubeSearchResult } from "@/lib/search-service";
 import { resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { formatDuration } from "@/lib/format-utils";
 import { getPlaylistTracks, type Playlist, type PlaylistTrack } from "@/lib/playlist-types";
-import { getYouTubeVideoId } from "@/lib/playlist-utils";
+import { canonicalYouTubeWatchUrlForPlayback, getYouTubeThumbnail, getYouTubeVideoId } from "@/lib/playlist-utils";
 import { unifiedSourceFromFetchedPlaylist } from "@/lib/local-music-library-playlist";
 import type { UnifiedSource } from "@/lib/source-types";
 import type { M3uYoutubeResolveContextState } from "@/lib/m3u-youtube-resolve-shared";
@@ -223,6 +223,64 @@ export function M3uYoutubeResolveModal({
     }
     setApplyBusy(true);
     try {
+      /**
+       * `create_youtube_only` (Spotify import): there is no existing playlist row and there
+       * are no local tracks. Build a YouTube-only `tracks` array directly from the picks (in
+       * `playlistOrder` order) and POST a fresh playlist. We deliberately persist nothing
+       * Spotify-specific — only the resolved YouTube watch URLs go to the DB.
+       */
+      if (context.mode === "create_youtube_only") {
+        const sortedOrders = [...picks.keys()].sort((a, b) => a - b);
+        const tracks: PlaylistTrack[] = sortedOrders.map((ord) => {
+          const pick = picks.get(ord)!;
+          const watchUrl = canonicalYouTubeWatchUrlForPlayback(pick.url).trim();
+          if (!getYouTubeVideoId(watchUrl)) {
+            throw new Error("Spotify import: a picked candidate is not a single YouTube video URL.");
+          }
+          const thumb = (pick.cover && pick.cover.trim()) || getYouTubeThumbnail(watchUrl);
+          return {
+            id: crypto.randomUUID(),
+            name: pick.title.trim() || "YouTube video",
+            type: "youtube",
+            url: watchUrl,
+            cover: thumb || undefined,
+            durationSeconds: pick.durationSeconds,
+            viewCount: pick.viewCount,
+          };
+        });
+        if (tracks.length === 0) {
+          throw new Error("Spotify import: no picks selected.");
+        }
+        const firstUrl = tracks[0]!.url;
+        const firstCover = tracks[0]?.cover ?? "";
+        const postRes = await fetch("/api/playlists", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: context.playlistName,
+            url: firstUrl,
+            genre: defaultGenre,
+            type: "youtube",
+            thumbnail: firstCover,
+            tracks,
+          }),
+        });
+        if (!postRes.ok) {
+          const errBody = await postRes.json().catch(() => ({}));
+          const msg =
+            typeof (errBody as { error?: string }).error === "string"
+              ? (errBody as { error: string }).error
+              : "Could not save playlist.";
+          throw new Error(msg);
+        }
+        const created = (await postRes.json()) as Playlist;
+        const unified = unifiedSourceFromFetchedPlaylist(created, defaultGenre);
+        onPlaylistMerged(unified);
+        await Promise.resolve(onApplied(countPicks));
+        return;
+      }
+
       const getRes = await fetch(`/api/playlists/${encodeURIComponent(context.playlistId)}`, {
         credentials: "include",
         cache: "no-store",
@@ -262,7 +320,18 @@ export function M3uYoutubeResolveModal({
     } finally {
       setApplyBusy(false);
     }
-  }, [context.playlistId, context.files, context.resolvedSourceOrders, countPicks, defaultGenre, onApplied, onPlaylistMerged, picksByOrder]);
+  }, [
+    context.mode,
+    context.playlistId,
+    context.playlistName,
+    context.files,
+    context.resolvedSourceOrders,
+    countPicks,
+    defaultGenre,
+    onApplied,
+    onPlaylistMerged,
+    picksByOrder,
+  ]);
 
   const bulkControlsDisabled = applyBusy || bulkFinding || applySafeBusy;
 
@@ -287,10 +356,14 @@ export function M3uYoutubeResolveModal({
         >
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-800 px-5 py-4">
           <div className="min-w-0">
-            <p className="text-base font-semibold text-slate-100">Missing tracks on YouTube</p>
+            <p className="text-base font-semibold text-slate-100">
+              {context.mode === "create_youtube_only"
+                ? "Match tracks on YouTube"
+                : "Missing tracks on YouTube"}
+            </p>
             <p className="mt-1 text-xs leading-snug text-slate-400">
-              {context.playlistName} — Auto find all searches every unresolved row. Apply safe matches only pre-fills
-              high-confidence hits; review the rest manually.
+              {context.sourceLabel ?? context.playlistName} — Auto find all searches every unresolved row.
+              Apply safe matches only pre-fills high-confidence hits; review the rest manually.
             </p>
             <div
               className="mt-3 flex flex-wrap gap-x-3 gap-y-1 rounded-lg border border-slate-800/90 bg-slate-900/50 px-3 py-2 font-mono text-[11px] text-slate-300"

@@ -63,6 +63,17 @@ import {
   ExternalMusicYoutubePickerPanel,
   type ExternalMusicYtResolvePack,
 } from "@/components/external-music-youtube-picker";
+import {
+  fetchSpotifyPlaylistPreview,
+  normalizeSpotifyShareInput,
+  parseSpotifyPlaylistOrAlbumUrl,
+  spotifyTracksToUnresolvedRows,
+} from "@/lib/spotify-playlist-import-client";
+import { PlainTracklistPasteModal } from "@/components/plain-tracklist-paste-modal";
+import {
+  PASTED_TRACKLIST_MAX,
+  pastedTracklistRowsToUnresolvedRows,
+} from "@/lib/plain-tracklist-parser";
 
 /** Animated shell phase for M3U / URL ingest (`sb-library-ingest-shell--*` in CSS). */
 function libraryUrlIngestPhaseClass(phase: string | null): string {
@@ -267,6 +278,13 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
   } | null>(null);
   const [m3uYoutubeResolveContext, setM3uYoutubeResolveContext] = useState<M3uYoutubeResolveContextState | null>(null);
   const [youtubeResolveOpen, setYoutubeResolveOpen] = useState(false);
+  const [pasteTracklistOpen, setPasteTracklistOpen] = useState(false);
+  /**
+   * Set when a Spotify playlist comes back 403/`playlist_blocked`. Surfaces an inline
+   * "Paste tracklist" button next to the error so the operator can jump straight into
+   * the Stage 6D-Lite flow without re-typing the URL or hunting for the top-level button.
+   */
+  const [spotifyBlockedShowPasteCta, setSpotifyBlockedShowPasteCta] = useState(false);
 
   const [query, setQuery] = useState("");
   const [musicBankLocalResults, setMusicBankLocalResults] = useState<UnifiedSource[]>([]);
@@ -358,7 +376,14 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
   const ingestingRef = useRef(false);
   const ingestUrl = useCallback(
     async (url: string) => {
-      const trimmed = url.trim();
+      /**
+       * Normalize any Spotify URI-scheme share (`spotify:album:<id>` /
+       * `spotify:playlist:<id>`) to the canonical HTTPS URL up front. After this line every
+       * downstream check — `classifyMusicUrlIngest`, `parseSpotifyPlaylistOrAlbumUrl`,
+       * the legacy URL branches — sees a uniform `https://open.spotify.com/...` shape and
+       * routes albums into the new preview flow exactly the same way as pasted HTTPS links.
+       */
+      const trimmed = normalizeSpotifyShareInput(url.trim());
       if (!trimmed) return;
       const localPath = normalizeLocalFilePathInput(trimmed);
       if (localPath) {
@@ -546,6 +571,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
       ingestingRef.current = true;
       setUrlIngesting(true);
       setUrlError(null);
+      setSpotifyBlockedShowPasteCta(false);
       setYoutubeMixImportUrl(null);
       setExternalMusicResolveHint(null);
       setExternalYtResolvePack(null);
@@ -553,6 +579,62 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
         const musicUrlIngest = classifyMusicUrlIngest(trimmed);
 
         if (musicUrlIngest.intent === "unsupported_playlist_or_album") {
+          /**
+           * Spotify playlist/album → Spotify Web API client-credentials preview → feed every
+           * track into the existing M3U YouTube resolver modal in `create_youtube_only` mode.
+           * No audio upload, no CatalogItem (type=youtube + non-local urls skip catalog for
+           * local files only — and we don't write Spotify URLs anywhere). Album/playlist URLs
+           * from other services still get the legacy "unsupported" error below.
+           */
+          const spotifyHit =
+            musicUrlIngest.provider === "spotify" ? parseSpotifyPlaylistOrAlbumUrl(trimmed) : null;
+          if (spotifyHit) {
+            setUrlIngestPhase("Reading Spotify playlist…");
+            const preview = await fetchSpotifyPlaylistPreview(trimmed);
+            if (preview.status === "not_configured") {
+              setUrlError("Spotify import is not configured.");
+              return;
+            }
+            if (preview.status === "playlist_blocked") {
+              /**
+               * Personalized / Made-For-You / private / collaborative playlists 403 under
+               * Client Credentials. Surfaces the exact product-approved copy; OAuth-based
+               * read for user-scoped playlists is deferred to Stage 6D-B. The renderer also
+               * flips `spotifyBlockedShowPasteCta` so the operator gets a one-click jump
+               * into the Stage 6D-Lite paste-tracklist modal next to the error.
+               */
+              setUrlError(
+                preview.message ||
+                  "Spotify blocked access to this playlist. You can paste the tracklist manually, try a Spotify album, or connect Spotify account later.",
+              );
+              setSpotifyBlockedShowPasteCta(true);
+              return;
+            }
+            if (preview.status === "error") {
+              setUrlError(preview.message || tx.urlErrorFailedAdd);
+              return;
+            }
+            const unresolvedRows = spotifyTracksToUnresolvedRows(preview.tracks);
+            if (unresolvedRows.length === 0) {
+              setUrlError("No tracks were returned for this Spotify link.");
+              return;
+            }
+            const kindLabel = preview.kind === "album" ? "Spotify album" : "Spotify playlist";
+            const ownerSuffix = preview.ownerName?.trim() ? ` — ${preview.ownerName.trim()}` : "";
+            setM3uYoutubeResolveContext({
+              playlistId: "",
+              playlistName: preview.name,
+              files: [],
+              trackDisplayNames: [],
+              resolvedSourceOrders: [],
+              unresolvedRows,
+              mode: "create_youtube_only",
+              sourceLabel: `${kindLabel}${ownerSuffix} (${preview.tracks.length} tracks)`,
+            });
+            setUrlValue("");
+            setUrlIngestPhase(null);
+            return;
+          }
           setUrlError(
             "Album or playlist links from this service are not supported yet. Paste a single-track link, or use YouTube, SoundCloud, or a radio/stream URL.",
           );
@@ -866,6 +948,49 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
     });
   }, []);
 
+  /**
+   * Stage 6D-Lite — bridge between the paste-tracklist textarea modal and the
+   * shared bulk YouTube resolver. The resolver is reused unchanged in
+   * `create_youtube_only` mode: it does the YouTube search per row, picks a
+   * candidate, and POSTs a new YouTube playlist on apply. Nothing here writes
+   * any audio, any Spotify URL, or any CatalogItem.
+   */
+  const handlePasteTracklistSubmit = useCallback(
+    ({
+      playlistName,
+      parsed,
+    }: {
+      playlistName: string;
+      parsed: { rows: { artist: string; title: string }[]; totalLines: number; truncated: boolean };
+    }) => {
+      const unresolvedRows = pastedTracklistRowsToUnresolvedRows(parsed.rows);
+      if (unresolvedRows.length === 0) {
+        setPasteTracklistOpen(false);
+        setUrlError("Paste at least one tracklist line.");
+        return;
+      }
+      setUrlError(null);
+      setSpotifyBlockedShowPasteCta(false);
+      setM3uImportBanner(null);
+      const suffix = parsed.truncated
+        ? ` (${unresolvedRows.length} of ${parsed.totalLines}, capped at ${PASTED_TRACKLIST_MAX})`
+        : ` (${unresolvedRows.length} tracks)`;
+      setM3uYoutubeResolveContext({
+        playlistId: "",
+        playlistName,
+        files: [],
+        trackDisplayNames: [],
+        resolvedSourceOrders: [],
+        unresolvedRows,
+        mode: "create_youtube_only",
+        sourceLabel: `Pasted tracklist${suffix}`,
+      });
+      setPasteTracklistOpen(false);
+      setYoutubeResolveOpen(true);
+    },
+    [],
+  );
+
   const handleUrlSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (externalYtResolvePack != null || externalYtSaveBusy) return;
@@ -925,6 +1050,19 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
     const raw = (uriList || plain || "").trim();
     const first = raw.split(/[\r\n]+/)[0]?.trim() ?? "";
     if (!first) return null;
+    /**
+     * Spotify Desktop drops `spotify:album:<id>` / `spotify:playlist:<id>` in `text/uri-list`,
+     * and only puts the canonical `https://open.spotify.com/...` link in `text/plain`. Because
+     * `text/uri-list` wins above, the bare URI scheme reached `normalizeLocalFilePathInput` and
+     * came back `null` — the drop silently no-op'd and (depending on which other handler ran)
+     * surfaced as the legacy "Album or playlist links from this service are not supported yet."
+     * fallback. Convert the URI scheme to the HTTPS share link here so the rest of the
+     * pipeline (classify → preview → modal) is unchanged.
+     */
+    const spotifyNormalized = normalizeSpotifyShareInput(first);
+    if (spotifyNormalized !== first && (spotifyNormalized.startsWith("http://") || spotifyNormalized.startsWith("https://"))) {
+      return spotifyNormalized;
+    }
     if (first.startsWith("http://") || first.startsWith("https://")) return first;
     return normalizeLocalFilePathInput(first);
   };
@@ -1174,6 +1312,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
                 setExternalYtResolvePack(null);
                 setExternalYtSaveBusy(false);
                 setUrlError(null);
+                setSpotifyBlockedShowPasteCta(false);
                 setM3uImportBanner(null);
                 setM3uYoutubeResolveContext(null);
                 setYoutubeResolveOpen(false);
@@ -1215,6 +1354,22 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
                   : t.add ?? "Add"}
             </button>
           </div>
+
+          {/* Paste tracklist – Stage 6D-Lite opener */}
+          <button
+            type="button"
+            onClick={() => {
+              setUrlError(null);
+              setSpotifyBlockedShowPasteCta(false);
+              setM3uImportBanner(null);
+              setPasteTracklistOpen(true);
+            }}
+            disabled={urlIngesting || externalYtSaveBusy}
+            title="Paste a plain-text tracklist (up to 50 lines) and pick a YouTube match for each"
+            className={`${controlHeight} shrink-0 rounded-xl border border-slate-700/70 bg-slate-800/70 px-3 text-xs font-semibold text-slate-200 transition hover:border-[#1ed760]/55 hover:text-white disabled:opacity-40`}
+          >
+            Paste tracklist
+          </button>
 
           {/* Search Library / YouTube + Mic */}
           <div
@@ -1319,7 +1474,26 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
           {urlIngestPhase}
         </p>
       ) : null}
-      {urlError && <p className="mt-1.5 text-xs text-amber-400">{urlError}</p>}
+      {urlError ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <p className="min-w-0 flex-1 text-xs text-amber-400">{urlError}</p>
+          {spotifyBlockedShowPasteCta ? (
+            <button
+              type="button"
+              onClick={() => {
+                setUrlError(null);
+                setSpotifyBlockedShowPasteCta(false);
+                setM3uImportBanner(null);
+                setPasteTracklistOpen(true);
+              }}
+              disabled={urlIngesting || externalYtSaveBusy}
+              className="shrink-0 rounded-lg bg-gradient-to-b from-[#1ed760] to-[#1db954] px-3 py-1 text-xs font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+            >
+              Paste tracklist
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {externalYtResolvePack ? (
         <ExternalMusicYoutubePickerPanel
           pack={externalYtResolvePack}
@@ -1417,6 +1591,13 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
           onClose={() => setYoutubeResolveOpen(false)}
           onPlaylistMerged={notifyM3uPlaylistMerged}
           onApplied={handleM3uYoutubeResolveApplied}
+        />
+      ) : null}
+      {pasteTracklistOpen ? (
+        <PlainTracklistPasteModal
+          defaultPlaylistName="Pasted tracklist"
+          onCancel={() => setPasteTracklistOpen(false)}
+          onSubmit={handlePasteTracklistSubmit}
         />
       ) : null}
 

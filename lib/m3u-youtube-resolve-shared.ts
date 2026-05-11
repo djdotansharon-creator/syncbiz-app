@@ -13,13 +13,27 @@ export type M3uUnresolvedImportRow = {
   suggestedSearchQuery: string;
 };
 
+/**
+ * Save mode for the resolver modal.
+ * - `merge_with_locals` (default): existing M3U import flow — playlist already exists with
+ *   N local rows; Apply does GET → merge YouTube picks alongside locals → PUT.
+ * - `create_youtube_only`: Spotify playlist/album import — no playlist exists yet, no locals.
+ *   Apply builds a YouTube-only tracks array from picks and POSTs a new playlist.
+ */
+export type M3uYoutubeResolveSaveMode = "merge_with_locals" | "create_youtube_only";
+
 export type M3uYoutubeResolveContextState = {
+  /** Empty string in `create_youtube_only` mode — playlist is created on Apply. */
   playlistId: string;
   playlistName: string;
   files: string[];
   trackDisplayNames: string[];
   resolvedSourceOrders: number[];
   unresolvedRows: M3uUnresolvedImportRow[];
+  /** Defaults to `merge_with_locals` when omitted. */
+  mode?: M3uYoutubeResolveSaveMode;
+  /** Header subtitle hint (e.g. "Spotify playlist — Owner"). Omitted for M3U import. */
+  sourceLabel?: string;
 };
 
 /** OK payload from Electron `importLocalM3uPlaylist` (renderer-safe mirror). */
