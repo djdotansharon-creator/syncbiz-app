@@ -29,7 +29,6 @@ import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { useLocale, useTranslations } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
-import { RadioIcon } from "@/components/ui/radio-icon";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { SourcesPlaybackProvider, useSourcesPlayback } from "@/lib/sources-playback-context";
 import { usePlayback } from "@/lib/playback-provider";
@@ -96,6 +95,8 @@ import {
 } from "@/lib/library-side-action-styles";
 import { libraryTilePresentationForUnifiedSource } from "@/lib/player-surface/library-tile-presentation";
 import { resolveLibraryKindBadge } from "@/lib/library-display-classification";
+import { inferTrackSourceChip } from "@/lib/track-source-chip";
+import { CompactSourceBadge, TrackMediaPlaceholder } from "@/components/track-source-visual";
 import {
   LibraryLeafListMetadataStrip,
   ListContainerMetadataStrip,
@@ -1674,6 +1675,23 @@ function SourcesManagerInner({
     [setSources]
   );
 
+  const handlePlaylistUpdatedFromMyMusic = useCallback(
+    (s: UnifiedSource) => {
+      if (s.origin !== "playlist" || !s.playlist) return;
+      savePlaylistToLocal(s.playlist);
+      startTransition(() => {
+        setSources((prev) => {
+          const ix = prev.findIndex((x) => x.id === s.id);
+          if (ix < 0) return prev;
+          const next = [...prev];
+          next[ix] = s;
+          return next;
+        });
+      });
+    },
+    [savePlaylistToLocal, setSources],
+  );
+
   const handleRemove = useCallback(
     (id: string, origin?: UnifiedSource["origin"]) => {
       setSources((prev) => prev.filter((s) => s.id !== id));
@@ -2410,6 +2428,7 @@ function SourcesManagerInner({
             <MyMusicLibraryWorkspacePanel
               onClose={() => setActiveCenterModule(null)}
               onAddToLibrary={handleAdd}
+              onPlaylistUpdated={handlePlaylistUpdatedFromMyMusic}
               userPlaylists={myMusicPlaylistPickerOptions}
               onAppendLocalUnifiedToPlaylist={appendLocalUnifiedFromMyMusic}
             />
@@ -2431,7 +2450,7 @@ function SourcesManagerInner({
             />
           ) : showLibraryCenter ? (<>
           <div className="library-sources-input-shell">
-            <LibraryInputArea onAdd={handleAdd} playSourceOverride={playSourceOverride} />
+            <LibraryInputArea onAdd={handleAdd} playSourceOverride={playSourceOverride} onPlaylistUpdated={handlePlaylistUpdatedFromMyMusic} />
           </div>
           <div className="library-command-rail mt-3.5 flex min-w-0 flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-slate-800/35 bg-slate-950/25 px-3 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md sm:gap-3 lg:overflow-x-auto">
             <div className="library-command-rail-browse flex min-w-0 flex-wrap items-center gap-2 sm:gap-2.5 lg:flex-nowrap lg:min-w-0">
@@ -3103,7 +3122,7 @@ function SourcesManagerInner({
                               itemDeleteContext={getItemDeleteContext(source)}
                               libraryTilePresentation={libraryPresentation}
                               explicitArtUrl={
-                                libraryPresentation === "rich"
+                                libraryPresentation === "rich" && !leafBar
                                   ? deriveSyncbizPlaylistCover(
                                       source,
                                       playlistItemAssignments[`syncbiz:${source.id}`] ?? [],
@@ -3157,7 +3176,7 @@ function SourcesManagerInner({
                             onDeleteFromLibrary={deleteLibraryItem}
                             libraryDeleteEligible={libraryRowEligibleForLibraryDelete(source, displaySources)}
                             explicitArtUrl={
-                              libraryPresentation === "rich"
+                              libraryPresentation === "rich" && !leafBar
                                 ? deriveSyncbizPlaylistCover(
                                     source,
                                     playlistItemAssignments[`syncbiz:${source.id}`] ?? [],
@@ -3550,6 +3569,7 @@ function SourceRow({
   const showDeleteControl = canDel || itemDeleteContext.kind === "in_playlist";
   const useExplicitPlaylistArt = explicitArtUrl !== undefined;
   const thumbCover = useExplicitPlaylistArt ? explicitArtUrl : source.cover;
+  const rowProvenanceChip = inferTrackSourceChip(source);
 
   useEffect(() => {
     setMounted(true);
@@ -3609,22 +3629,11 @@ function SourceRow({
       ) : useExplicitPlaylistArt ? (
         <LibraryPlaylistCoverFallback className="h-full w-full" />
       ) : (
-        <div
-          className={`flex h-full w-full items-center justify-center ${
-            source.origin === "radio" ? "text-rose-400/70" : "text-[color:var(--lib-text-secondary)]"
-          }`}
-        >
-          {source.origin === "radio" ? (
-            <RadioIcon className="h-7 w-7" />
-          ) : (
-            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M9 18V5l12-2v13" />
-              <circle cx="6" cy="18" r="3" />
-              <circle cx="18" cy="16" r="3" />
-            </svg>
-          )}
-        </div>
+        <TrackMediaPlaceholder chip={rowProvenanceChip} className="h-full w-full" showCornerBadge={false} />
       )}
+      <span className="pointer-events-none absolute bottom-0.5 left-0.5 z-[1]">
+        <CompactSourceBadge chip={rowProvenanceChip} />
+      </span>
       <div className="absolute bottom-0 right-0 p-0.5">
         <SourceLogo type={source.type} origin={source.origin} size="sm" />
       </div>

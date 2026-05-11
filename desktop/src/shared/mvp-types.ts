@@ -74,6 +74,8 @@ export type ImportLocalM3uPlaylistResult =
       status: "ok";
       playlistName: string;
       files: string[];
+      /** Parallel to files; source row index in playlist order (Stage 5C-C merge with YouTube). */
+      resolvedSourceOrders: number[];
       /** Parallel to files; from #EXTINF when present, else derived filename. */
       trackDisplayNames: string[];
       imported: number;

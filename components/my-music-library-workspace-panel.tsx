@@ -19,6 +19,9 @@ import {
   createUnifiedPlaylistFromLocalFile,
   createUnifiedPlaylistFromLocalScan,
 } from "@/lib/local-music-library-playlist";
+import { M3uYoutubeResolveModal } from "@/components/m3u-youtube-resolve-modal";
+import { buildM3uYoutubeResolveContext, unresolvedM3uSummaryHint } from "@/lib/m3u-youtube-resolve-shared";
+import type { M3uYoutubeResolveContextState } from "@/lib/m3u-youtube-resolve-shared";
 import { buildEphemeralLocalQueueFromPaths } from "@/lib/ephemeral-local-music-playback";
 import { setMusicLibraryDragData } from "@/lib/music-library-drag";
 import {
@@ -60,16 +63,6 @@ function canGetLocalAudioTags(): boolean {
 
 function canImportM3u(): boolean {
   return typeof window !== "undefined" && typeof window.syncbizDesktop?.importLocalM3uPlaylist === "function";
-}
-
-/** Stage 5C-A: first-row search hint for import banner (debug / future YouTube resolution). */
-function unresolvedM3uSummaryHint(
-  entries: readonly { suggestedSearchQuery: string }[],
-): string | undefined {
-  if (entries.length === 0) return undefined;
-  const first = entries[0]!.suggestedSearchQuery.trim();
-  if (!first) return undefined;
-  return entries.length === 1 ? first : `${first} (+${entries.length - 1} more)`;
 }
 
 /** Mirrors desktop `LocalAudioTagFields` (preload IPC); duplicated here so Next doesn’t depend on desktop package. */
@@ -555,11 +548,14 @@ export function MyMusicLibraryWorkspacePanel({
   onAddToLibrary,
   userPlaylists,
   onAppendLocalUnifiedToPlaylist,
+  onPlaylistUpdated,
 }: {
   onClose: () => void;
   onAddToLibrary: (source: UnifiedSource) => void;
   userPlaylists: MyMusicPlaylistPickerOption[];
   onAppendLocalUnifiedToPlaylist: (playlistKey: string, items: UnifiedSource[]) => Promise<void>;
+  /** After mixed local+YouTube patch (Stage 5C-C). Optional — library grid updates when provided. */
+  onPlaylistUpdated?: (source: UnifiedSource) => void;
 }): ReactElement {
   const { t } = useTranslations();
   const { playSource, setQueue } = usePlayback();
@@ -592,6 +588,9 @@ export function MyMusicLibraryWorkspacePanel({
   const [m3uDropHighlight, setM3uDropHighlight] = useState(false);
   const m3uFileInputRef = useRef<HTMLInputElement | null>(null);
   const m3uDragDepthRef = useRef(0);
+  /** Stage 5C-C: PATCH target after “Find missing on YouTube”. */
+  const [youtubeResolveOpen, setYoutubeResolveOpen] = useState(false);
+  const [m3uYoutubeResolveContext, setM3uYoutubeResolveContext] = useState<M3uYoutubeResolveContextState | null>(null);
 
   const hasUserPlaylists = userPlaylists.length > 0;
 
@@ -856,23 +855,36 @@ export function MyMusicLibraryWorkspacePanel({
       }
       setM3uImportBusy(true);
       setM3uImportSummary(null);
+      setM3uYoutubeResolveContext(null);
+      setYoutubeResolveOpen(false);
       try {
         const res = await window.syncbizDesktop.importLocalM3uPlaylist(trimmed);
         if (res.status === "error") {
           setM3uImportSummary({ imported: 0, unresolved: 0, skipped: 0, error: res.message });
           return;
         }
-        if (res.files.length === 0) {
+        const hasTracks = res.files.length > 0;
+        const hasUnresolved = res.unresolved.length > 0;
+        if (!hasTracks && !hasUnresolved && res.skipped === 0) {
           setM3uImportSummary({
             imported: 0,
-            unresolved: res.unresolved.length,
-            skipped: res.skipped,
-            unresolvedHint: unresolvedM3uSummaryHint(res.unresolved),
-            error:
-              res.unresolved.length === 0 && res.skipped === 0
-                ? "No playable local tracks under your music folder were listed in this file."
-                : undefined,
+            unresolved: 0,
+            skipped: 0,
+            unresolvedHint: undefined,
+            error: "No playable local tracks under your music folder were listed in this file.",
           });
+          setM3uYoutubeResolveContext(null);
+          return;
+        }
+        if (!hasTracks && !hasUnresolved && res.skipped > 0) {
+          setM3uImportSummary({
+            imported: 0,
+            unresolved: 0,
+            skipped: res.skipped,
+            unresolvedHint: undefined,
+            error: "All listed tracks were skipped (outside music folder, missing, or not audio).",
+          });
+          setM3uYoutubeResolveContext(null);
           return;
         }
         const unified = await createUnifiedPlaylistFromLocalScan(
@@ -880,6 +892,7 @@ export function MyMusicLibraryWorkspacePanel({
             playlistName: res.playlistName,
             files: res.files,
             trackDisplayNames: res.trackDisplayNames,
+            ...(!hasTracks ? { playlistSourcePath: trimmed } : {}),
           },
           defaultGenre,
         );
@@ -891,6 +904,7 @@ export function MyMusicLibraryWorkspacePanel({
             unresolvedHint: unresolvedM3uSummaryHint(res.unresolved),
             error: "Could not save playlist. Check your connection and try again.",
           });
+          setM3uYoutubeResolveContext(null);
           return;
         }
         onAddToLibrary(unified);
@@ -900,6 +914,7 @@ export function MyMusicLibraryWorkspacePanel({
           skipped: res.skipped,
           unresolvedHint: unresolvedM3uSummaryHint(res.unresolved),
         });
+        setM3uYoutubeResolveContext(buildM3uYoutubeResolveContext(unified, res));
       } catch (e) {
         setM3uImportSummary({
           imported: 0,
@@ -913,6 +928,27 @@ export function MyMusicLibraryWorkspacePanel({
     },
     [defaultGenre, onAddToLibrary, rootPath],
   );
+
+  const notifyYoutubePlaylistMerged = useCallback(
+    (u: UnifiedSource) => {
+      onPlaylistUpdated?.(u);
+    },
+    [onPlaylistUpdated],
+  );
+
+  const handleYoutubeResolveApplied = useCallback((mergedCount: number) => {
+    setYoutubeResolveOpen(false);
+    setM3uYoutubeResolveContext(null);
+    setM3uImportSummary((prev) => {
+      if (!prev || mergedCount <= 0) return prev;
+      const nextUnresolved = Math.max(0, prev.unresolved - mergedCount);
+      return {
+        ...prev,
+        unresolved: nextUnresolved,
+        unresolvedHint: nextUnresolved > 0 ? prev.unresolvedHint : undefined,
+      };
+    });
+  }, []);
 
   const onM3uFileInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1148,14 +1184,43 @@ export function MyMusicLibraryWorkspacePanel({
                     </span>
                   ) : null}
                 </p>
-                <button
-                  type="button"
-                  className="shrink-0 rounded border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/90 hover:bg-white/10"
-                  onClick={() => setM3uImportSummary(null)}
-                >
-                  Dismiss
-                </button>
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  {m3uYoutubeResolveContext && m3uImportSummary.unresolved > 0 && !m3uImportSummary.error ? (
+                    <button
+                      type="button"
+                      disabled={m3uImportBusy}
+                      onClick={() => setYoutubeResolveOpen(true)}
+                      className="rounded-lg bg-gradient-to-b from-[#1ed760]/90 to-[#1db954]/90 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                    >
+                      Find missing on YouTube
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="shrink-0 rounded border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/90 hover:bg-white/10"
+                    onClick={() => setM3uImportSummary(null)}
+                  >
+                    Dismiss
+                  </button>
+                </div>
               </div>
+            </div>
+          ) : m3uYoutubeResolveContext?.unresolvedRows.length ? (
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800/85 bg-slate-900/50 px-3 py-2.5 text-sm">
+              <span className="text-slate-300">
+                {m3uYoutubeResolveContext.playlistName}
+                <span className="ml-2 font-mono text-xs text-slate-500">
+                  ({m3uYoutubeResolveContext.unresolvedRows.length} unresolved)
+                </span>
+              </span>
+              <button
+                type="button"
+                disabled={m3uImportBusy}
+                onClick={() => setYoutubeResolveOpen(true)}
+                className="shrink-0 rounded-lg bg-gradient-to-b from-[#1ed760]/90 to-[#1db954]/90 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+              >
+                Find missing on YouTube
+              </button>
             </div>
           ) : null}
 
@@ -1459,6 +1524,15 @@ export function MyMusicLibraryWorkspacePanel({
             </div>
           </div>
         </div>
+      ) : null}
+      {youtubeResolveOpen && m3uYoutubeResolveContext ? (
+        <M3uYoutubeResolveModal
+          context={m3uYoutubeResolveContext}
+          defaultGenre={defaultGenre}
+          onClose={() => setYoutubeResolveOpen(false)}
+          onPlaylistMerged={notifyYoutubePlaylistMerged}
+          onApplied={handleYoutubeResolveApplied}
+        />
       ) : null}
     </div>
   );

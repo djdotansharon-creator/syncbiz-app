@@ -139,6 +139,8 @@ function playlistTitleFromPath(playlistPath: string): string {
 type PathParseState = {
   resolvedFiles: string[];
   trackDisplayNames: string[];
+  /** Parallel to resolvedFiles — source `#playlistOrder` when each path became a resolved track (Stage 5C-C ordering). */
+  resolvedSourceOrders: number[];
   unresolved: ImportLocalM3uUnresolvedEntry[];
   skipped: number;
   seenKeys: Set<string>;
@@ -297,6 +299,7 @@ async function tryAddAudioFromPathLine(
   state.seenKeys.add(k);
 
   state.resolvedFiles.push(abs);
+  state.resolvedSourceOrders.push(playlistOrder);
   const name =
     (pendingTitle && pendingTitle.trim()) ||
     displayNameFromAbsolute(abs);
@@ -357,6 +360,7 @@ async function importM3uLikeContent(
   playlistName: string;
   files: string[];
   trackDisplayNames: string[];
+  resolvedSourceOrders: number[];
   imported: number;
   unresolved: ImportLocalM3uUnresolvedEntry[];
   skipped: number;
@@ -371,6 +375,7 @@ async function importM3uLikeContent(
   const state: PathParseState = {
     resolvedFiles: [],
     trackDisplayNames: [],
+    resolvedSourceOrders: [],
     unresolved: [],
     skipped: 0,
     seenKeys: new Set(),
@@ -420,6 +425,7 @@ async function importM3uLikeContent(
     playlistName,
     files: state.resolvedFiles,
     trackDisplayNames: state.trackDisplayNames,
+    resolvedSourceOrders: state.resolvedSourceOrders,
     imported: state.resolvedFiles.length,
     unresolved: state.unresolved,
     skipped: state.skipped,
@@ -434,6 +440,7 @@ async function importPlsContent(
   playlistName: string;
   files: string[];
   trackDisplayNames: string[];
+  resolvedSourceOrders: number[];
   imported: number;
   unresolved: ImportLocalM3uUnresolvedEntry[];
   skipped: number;
@@ -443,6 +450,7 @@ async function importPlsContent(
   const state: PathParseState = {
     resolvedFiles: [],
     trackDisplayNames: [],
+    resolvedSourceOrders: [],
     unresolved: [],
     skipped: 0,
     seenKeys: new Set(),
@@ -468,6 +476,7 @@ async function importPlsContent(
     playlistName,
     files: state.resolvedFiles,
     trackDisplayNames: state.trackDisplayNames,
+    resolvedSourceOrders: state.resolvedSourceOrders,
     imported: state.resolvedFiles.length,
     unresolved: state.unresolved,
     skipped: state.skipped,

@@ -1,0 +1,112 @@
+/* Library Add strip — subtle animated edge + scan line (no backdrop blur on page). */
+@keyframes sb-ingest-border-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+@keyframes sb-ingest-wave-shimmy {
+  0% {
+    transform: translateX(-50%) translateX(-8%);
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: translateX(-50%) translateX(8%);
+    opacity: 0.28;
+  }
+}
+
+.sb-library-ingest-shell {
+  --sb-ingest-edge: rgb(148 163 184 / 0.44);
+}
+
+.sb-library-ingest-shell--read {
+  --sb-ingest-edge: rgb(34 211 238 / 0.55);
+}
+
+.sb-library-ingest-shell--resolve {
+  --sb-ingest-edge: rgb(251 191 36 / 0.52);
+}
+
+.sb-library-ingest-shell--youtube {
+  --sb-ingest-edge: rgb(251 113 133 / 0.55);
+}
+
+.sb-library-ingest-shell--save {
+  --sb-ingest-edge: rgb(74 222 128 / 0.55);
+}
+
+.sb-library-ingest-shell--neutral {
+  --sb-ingest-edge: rgb(148 163 184 / 0.44);
+}
+
+.sb-library-ingest-shell--busy {
+  isolation: isolate;
+}
+
+.sb-library-ingest-shell--busy::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    color-mix(in srgb, var(--sb-ingest-edge) 55%, transparent) 28%,
+    color-mix(in srgb, var(--sb-ingest-edge) 90%, transparent) 50%,
+    color-mix(in srgb, var(--sb-ingest-edge) 55%, transparent) 72%,
+    transparent 100%
+  );
+  background-size: 220% 220%;
+  animation: sb-ingest-border-flow 4s linear infinite;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.92;
+}
+
+.sb-library-ingest-shell--busy::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: calc(0.75rem - 1px);
+  z-index: 0;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.05),
+    0 0 20px color-mix(in srgb, var(--sb-ingest-edge) 15%, transparent);
+}
+
+.sb-library-ingest-wave {
+  pointer-events: none;
+  position: absolute;
+  left: 50%;
+  bottom: 1px;
+  height: 2px;
+  width: min(72%, 420px);
+  transform: translateX(-50%);
+  z-index: 1;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--sb-ingest-edge) 75%, transparent),
+    transparent
+  );
+  animation: sb-ingest-wave-shimmy 2.8s ease-in-out infinite;
+}
+
+.sb-library-ingest-inner {
+  position: relative;
+  z-index: 2;
+}

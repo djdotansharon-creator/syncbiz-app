@@ -127,6 +127,7 @@ type ImportLocalM3uPlaylistIpcResult =
       status: "ok";
       playlistName: string;
       files: string[];
+      resolvedSourceOrders: number[];
       trackDisplayNames: string[];
       imported: number;
       unresolved: ImportLocalM3uUnresolvedEntryIpc[];

@@ -43,6 +43,7 @@ export async function resolveYouTubePlayableUrlForSearch(url: string): Promise<s
   }
 }
 
+/** Persist a playable URL (`direct_playable` ingest). Prefer Library Add flow for pasted links that need Stage 6B upstream classification. */
 export async function createPlaylistFromUrl(
   url: string,
   meta?: CreatePlaylistFromSearchMeta,

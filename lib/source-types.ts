@@ -23,6 +23,36 @@ import {
 
 export type SourceProviderType = "youtube" | "soundcloud" | "spotify" | "local" | "stream-url" | "winamp";
 
+/** Stage 6B — Library paste/drop routing for external music links (foundation). */
+export type MusicStreamingProvider =
+  | "spotify"
+  | "apple_music"
+  | "beatport"
+  | "juno_download"
+  | "deezer"
+  | "tidal"
+  | "amazon_music"
+  | "qobuz"
+  | "beatsource"
+  | "bandcamp"
+  | "shazam"
+  | "soundcloud"
+  | "youtube"
+  | "youtube_music"
+  | "generic_music_url";
+
+export type MusicUrlIngestIntent =
+  | "direct_playable"
+  | "resolve_to_youtube"
+  | "unsupported_playlist_or_album"
+  | "unknown";
+
+/** URL-only classification — no candidate picker yet. */
+export type MusicUrlIngestClassification = {
+  provider: MusicStreamingProvider;
+  intent: MusicUrlIngestIntent;
+};
+
 /** Library architecture contract: top-level entity kind. */
 export type LibraryEntityKind = "collection" | "item";
 
@@ -170,6 +200,8 @@ export type ParseUrlJson = {
   durationSeconds?: number;
   artist?: string;
   song?: string;
+  /** Stage 6B: Library paste classifier (mirrors `classifyMusicUrlIngest`). */
+  musicUrlIngest?: MusicUrlIngestClassification;
 } & Partial<UnifiedSourceFoundation>;
 
 /**

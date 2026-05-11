@@ -4,6 +4,10 @@
  * 2. External: discovery from YouTube, Radio Browser, global catalog
  *
  * Extensible for additional external providers.
+ *
+ * Stage 6B note: pasted provider URLs from Spotify/TIDAL/etc. are classified upstream in
+ * `classifyMusicUrlIngest`; those links are routed out of blind `POST /api/playlists` in the Library Add strip.
+ * Stage 6C: eligible storefront track links open a YouTube candidate picker that calls this function.
  */
 
 import { getPlaylistTracks } from "@/lib/playlist-types";
