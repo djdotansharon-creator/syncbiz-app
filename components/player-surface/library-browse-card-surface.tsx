@@ -2,6 +2,8 @@
 
 import { useState, useEffect, type ReactNode } from "react";
 import type { LibraryBrowseCardSurfaceProps } from "@/lib/player-surface/library-browse-types";
+import type { TrackSourceChip } from "@/lib/track-source-chip";
+import { CompactSourceBadge, TrackMediaPlaceholder } from "@/components/track-source-visual";
 import { isSafeLibraryCoverUrl } from "@/lib/player-surface/cover-url";
 
 function DefaultArt({
@@ -9,11 +11,13 @@ function DefaultArt({
   originBadgeLabel,
   originBadgeClassName = "",
   topRightSlot,
+  mediaPlaceholderChip,
 }: {
   artworkUrl: string | null;
   originBadgeLabel: string;
   originBadgeClassName?: string;
   topRightSlot?: ReactNode;
+  mediaPlaceholderChip?: TrackSourceChip;
 }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -28,14 +32,23 @@ function DefaultArt({
         <span className={`sb-lbc-origin ${originBadgeClassName}`.trim()}>{originBadgeLabel}</span>
       ) : null}
       {showImg ? (
-        <img
-          src={artworkUrl!}
-          alt=""
-          className="sb-lbc-art-img"
-          loading="lazy"
-          decoding="async"
-          onError={() => setFailed(true)}
-        />
+        <>
+          <img
+            src={artworkUrl!}
+            alt=""
+            className="sb-lbc-art-img"
+            loading="lazy"
+            decoding="async"
+            onError={() => setFailed(true)}
+          />
+          {mediaPlaceholderChip ? (
+            <span className="pointer-events-none absolute bottom-2 left-2 z-[2]">
+              <CompactSourceBadge chip={mediaPlaceholderChip} />
+            </span>
+          ) : null}
+        </>
+      ) : mediaPlaceholderChip ? (
+        <TrackMediaPlaceholder chip={mediaPlaceholderChip} className="absolute inset-0" showCornerBadge={false} />
       ) : (
         <div className="sb-lbc-fallback" aria-hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -58,6 +71,7 @@ export function LibraryBrowseCardSurface(props: LibraryBrowseCardSurfaceProps) {
   const {
     as,
     artworkUrl,
+    mediaPlaceholderChip,
     originBadgeLabel = "",
     originBadgeClassName = "",
     artSlot,
@@ -87,6 +101,7 @@ export function LibraryBrowseCardSurface(props: LibraryBrowseCardSurfaceProps) {
           originBadgeLabel={originBadgeLabel}
           originBadgeClassName={originBadgeClassName}
           topRightSlot={artTopRightSlot}
+          mediaPlaceholderChip={mediaPlaceholderChip}
         />
       )}
       <div className="sb-lbc-body">

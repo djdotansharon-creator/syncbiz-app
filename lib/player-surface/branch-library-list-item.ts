@@ -1,6 +1,7 @@
 /** Shape used by shared branch library grid — matches `BranchLibraryItem` from desktop MVP types. */
 
 import { formatDuration } from "@/lib/format-utils";
+import type { TrackSourceChip } from "@/lib/track-source-chip";
 
 export type BranchLibraryListItem = {
   id: string;
@@ -14,6 +15,8 @@ export type BranchLibraryListItem = {
   type: string;
   genre: string;
   cover: string | null;
+  /** Provenance chip for overlays / placeholders when artwork is absent. */
+  mediaPlaceholderChip?: TrackSourceChip;
 };
 
 export function branchLibraryItemMetaLine(it: BranchLibraryListItem): string {

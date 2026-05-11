@@ -62,7 +62,7 @@ export function expandPlaylistEntityToItems(source: UnifiedSource): UnifiedSourc
       id: `${source.id}:track:r${index}`,
       title: track.name || track.title || source.title,
       genre: source.genre || "Mixed",
-      cover: leafArt || source.cover || null,
+      cover: leafArt || null,
       type: ttype,
       url: track.url,
       origin: "source",

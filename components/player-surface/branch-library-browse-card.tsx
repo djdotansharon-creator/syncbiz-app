@@ -65,6 +65,7 @@ export function BranchLibraryBrowseCard(props: BranchLibraryBrowseCardProps) {
         type="button"
         className={className}
         artworkUrl={item.cover}
+        mediaPlaceholderChip={item.mediaPlaceholderChip}
         originBadgeLabel={originBadge}
         originBadgeClassName={originBadgeClassName}
         title={item.title}
@@ -82,6 +83,7 @@ export function BranchLibraryBrowseCard(props: BranchLibraryBrowseCardProps) {
       as="div"
       className={className}
       artworkUrl={item.cover}
+      mediaPlaceholderChip={item.mediaPlaceholderChip}
       originBadgeLabel={originBadge}
       originBadgeClassName={originBadgeClassName}
       artTopRightSlot={artTopRightSlot}

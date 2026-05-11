@@ -38,6 +38,8 @@ import { unifiedSourceToBranchLibraryListItem } from "@/lib/player-surface/unifi
 import { fetchLeafDisplayMetadataRefresh, type LeafDisplayMetaPatch } from "@/lib/library-leaf-display-refresh-client";
 import { ListContainerMetadataStrip } from "@/components/library-list-container-meta-strip";
 import { getLibraryListContainerMetaStripModel } from "@/lib/library-list-container-display";
+import { CompactSourceBadge, TrackMediaPlaceholder } from "@/components/track-source-visual";
+import { inferTrackSourceChip } from "@/lib/track-source-chip";
 import "@/components/player-surface/library-browse-card-surface.css";
 
 function EyeIcon({ className }: { className?: string }) {
@@ -406,6 +408,7 @@ export function SourceCard({
   const kindBadge = resolveLibraryKindBadge(source);
   const badgeText = libraryKindBadgeUpper(kindBadge);
   const showLeafLibraryChips = kindBadge !== "LIST" && kindBadge !== "RADIO";
+  const provenanceChip = inferTrackSourceChip(source);
 
   const sourceForLeafDisplay = useMemo(() => {
     const p = displayMetaPatch;
@@ -605,12 +608,8 @@ export function SourceCard({
               </div>
             )}
             {!cardCover && !useExplicitPlaylistArt && (
-              <div className="library-card-placeholder-bg relative flex h-full w-full items-center justify-center">
-                <svg className="h-14 w-14 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M9 18V5l12-2v13" />
-                  <circle cx="6" cy="18" r="3" />
-                  <circle cx="18" cy="16" r="3" />
-                </svg>
+              <div className="relative h-full w-full">
+                <TrackMediaPlaceholder chip={provenanceChip} className="h-full w-full" showCornerBadge={false} />
                 {!showLeafLibraryChips && durationSec > 0 && (
                   <span className="library-pill-overlay library-pill-overlay-soft absolute bottom-2 right-2 rounded-md px-2 py-0.5 text-[10px] font-medium tabular-nums backdrop-blur-md">
                     {formatDuration(durationSec)}
@@ -618,6 +617,11 @@ export function SourceCard({
                 )}
               </div>
             )}
+            {showLeafLibraryChips ? (
+              <span className="pointer-events-none absolute bottom-2 left-2 z-[11]">
+                <CompactSourceBadge chip={provenanceChip} />
+              </span>
+            ) : null}
           </div>
         }
         title={source.title}
