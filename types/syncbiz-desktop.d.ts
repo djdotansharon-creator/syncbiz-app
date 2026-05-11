@@ -113,6 +113,15 @@ type ImportLocalM3uUnresolvedReasonIpc =
   | "remote_url"
   | "invalid_path";
 
+type ImportLocalM3uUnresolvedEntryIpc = {
+  ref: string;
+  reason: ImportLocalM3uUnresolvedReasonIpc;
+  playlistOrder: number;
+  displayTitle: string | null;
+  durationSec: number | null;
+  suggestedSearchQuery: string;
+};
+
 type ImportLocalM3uPlaylistIpcResult =
   | {
       status: "ok";
@@ -120,7 +129,7 @@ type ImportLocalM3uPlaylistIpcResult =
       files: string[];
       trackDisplayNames: string[];
       imported: number;
-      unresolved: Array<{ ref: string; reason: ImportLocalM3uUnresolvedReasonIpc }>;
+      unresolved: ImportLocalM3uUnresolvedEntryIpc[];
       skipped: number;
     }
   | { status: "error"; message: string };

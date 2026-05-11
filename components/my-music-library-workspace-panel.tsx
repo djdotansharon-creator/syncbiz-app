@@ -62,6 +62,16 @@ function canImportM3u(): boolean {
   return typeof window !== "undefined" && typeof window.syncbizDesktop?.importLocalM3uPlaylist === "function";
 }
 
+/** Stage 5C-A: first-row search hint for import banner (debug / future YouTube resolution). */
+function unresolvedM3uSummaryHint(
+  entries: readonly { suggestedSearchQuery: string }[],
+): string | undefined {
+  if (entries.length === 0) return undefined;
+  const first = entries[0]!.suggestedSearchQuery.trim();
+  if (!first) return undefined;
+  return entries.length === 1 ? first : `${first} (+${entries.length - 1} more)`;
+}
+
 /** Mirrors desktop `LocalAudioTagFields` (preload IPC); duplicated here so Next doesn’t depend on desktop package. */
 type LocalAudioBrowseTags = {
   artist: string | null;
@@ -576,6 +586,8 @@ export function MyMusicLibraryWorkspacePanel({
     unresolved: number;
     skipped: number;
     error?: string;
+    /** First unresolved row’s suggested query (and count of additional). */
+    unresolvedHint?: string;
   } | null>(null);
   const [m3uDropHighlight, setM3uDropHighlight] = useState(false);
   const m3uFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -855,6 +867,7 @@ export function MyMusicLibraryWorkspacePanel({
             imported: 0,
             unresolved: res.unresolved.length,
             skipped: res.skipped,
+            unresolvedHint: unresolvedM3uSummaryHint(res.unresolved),
             error:
               res.unresolved.length === 0 && res.skipped === 0
                 ? "No playable local tracks under your music folder were listed in this file."
@@ -875,6 +888,7 @@ export function MyMusicLibraryWorkspacePanel({
             imported: res.imported,
             unresolved: res.unresolved.length,
             skipped: res.skipped,
+            unresolvedHint: unresolvedM3uSummaryHint(res.unresolved),
             error: "Could not save playlist. Check your connection and try again.",
           });
           return;
@@ -884,6 +898,7 @@ export function MyMusicLibraryWorkspacePanel({
           imported: res.imported,
           unresolved: res.unresolved.length,
           skipped: res.skipped,
+          unresolvedHint: unresolvedM3uSummaryHint(res.unresolved),
         });
       } catch (e) {
         setM3uImportSummary({
@@ -1122,6 +1137,15 @@ export function MyMusicLibraryWorkspacePanel({
                   {m3uImportSummary.skipped > 0 ? ` · ${m3uImportSummary.skipped} skipped (duplicates)` : ""}
                   {m3uImportSummary.error ? (
                     <span className="mt-1 block text-xs opacity-95">{m3uImportSummary.error}</span>
+                  ) : null}
+                  {m3uImportSummary.unresolvedHint ? (
+                    <span
+                      className={`mt-1 block font-mono text-[11px] leading-snug ${
+                        m3uImportSummary.error ? "text-rose-100/75" : "text-cyan-100/70"
+                      }`}
+                    >
+                      Unresolved query: {m3uImportSummary.unresolvedHint}
+                    </span>
                   ) : null}
                 </p>
                 <button

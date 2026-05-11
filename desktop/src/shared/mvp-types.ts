@@ -51,9 +51,22 @@ export type ImportLocalM3uUnresolvedReason =
   | "remote_url"
   | "invalid_path";
 
+/**
+ * One playlist entry that could not be resolved to a local audio file under the Music Folder.
+ * Stage 5C-A: enriched for future YouTube search (no search in this stage).
+ */
 export type ImportLocalM3uUnresolvedEntry = {
+  /** Original path/URL line from the playlist (capped for IPC size). */
   ref: string;
   reason: ImportLocalM3uUnresolvedReason;
+  /** 0-based position among all track entries processed in playlist file order. */
+  playlistOrder: number;
+  /** `#EXTINF` title after the comma, or PLS `TitleN=`, when present. */
+  displayTitle: string | null;
+  /** Seconds from `#EXTINF` before the comma, or PLS `LengthN=`, when known and positive. */
+  durationSec: number | null;
+  /** Best-effort query string for a future YouTube search (title, else path/filename, else ref). */
+  suggestedSearchQuery: string;
 };
 
 export type ImportLocalM3uPlaylistResult =

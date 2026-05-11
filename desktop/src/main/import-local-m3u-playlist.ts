@@ -6,10 +6,16 @@ import { readFileSync, existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DesktopRuntimeConfig, ImportLocalM3uPlaylistResult, ImportLocalM3uUnresolvedEntry } from "../shared/mvp-types";
+import type {
+  DesktopRuntimeConfig,
+  ImportLocalM3uPlaylistResult,
+  ImportLocalM3uUnresolvedEntry,
+  ImportLocalM3uUnresolvedReason,
+} from "../shared/mvp-types";
 import { recordScanAudioFilesInSnapshot } from "./local-collection-snapshot";
 
 const LOG = "[SyncBiz:import-playlist-file]";
+const UNRESOLVED_REF_CAP = 2000;
 
 /** Match desktop `scan-local-audio-folder` (V1). */
 const AUDIO_EXTS = new Set([".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg"]);
@@ -71,15 +77,58 @@ function resolvePathLine(raw: string, playlistDir: string): { kind: "absolute"; 
   return { kind: "absolute", absolute: abs };
 }
 
-/** Title after first comma (per M3U EXTINF); duration may be absent in some files. */
-function parseExtInfTitle(line: string): string | null {
+/** Parse `#EXTINF:duration,title` (duration may be `-1` / `0` for unknown). */
+function parseExtInfLine(line: string): { title: string | null; durationSec: number | null } {
   const trimmed = line.trim();
-  if (!/^#EXTINF:/i.test(trimmed)) return null;
+  if (!/^#EXTINF:/i.test(trimmed)) return { title: null, durationSec: null };
   const body = trimmed.slice("#EXTINF:".length).trim();
   const comma = body.indexOf(",");
-  if (comma === -1) return null;
-  const title = body.slice(comma + 1).trim();
-  return title.length > 0 ? title : null;
+  if (comma === -1) {
+    return { title: null, durationSec: parseExtInfDurationSegment(body) };
+  }
+  const durRaw = body.slice(0, comma).trim();
+  const titlePart = body.slice(comma + 1).trim();
+  return {
+    durationSec: parseExtInfDurationSegment(durRaw),
+    title: titlePart.length > 0 ? titlePart : null,
+  };
+}
+
+/** M3U: positive integer seconds only; `-1` / `0` / blank → unknown (`null`). */
+function parseExtInfDurationSegment(raw: string): number | null {
+  const t = raw.trim();
+  if (!t) return null;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
+function displayNameFromPathHint(p: string): string {
+  const base = path.basename(p.trim());
+  const noExt = base.replace(/\.[^.]+$/, "");
+  return (noExt || base || "Track").trim() || "Track";
+}
+
+function buildSuggestedSearchQuery(
+  displayTitle: string | null,
+  pathHint: string | null,
+  refFallback: string,
+): string {
+  const dt = displayTitle?.trim();
+  if (dt) return dt;
+  const raw = (pathHint ?? "").trim() || refFallback.trim();
+  if (!raw) return "Track";
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const u = new URL(raw);
+      const last = u.pathname.split("/").filter(Boolean).pop();
+      if (last && last.length > 2) return decodeURIComponent(last.replace(/\.[^.]+$/, ""));
+    } catch {
+      /* ignore */
+    }
+    return raw.slice(0, 200);
+  }
+  return displayNameFromPathHint(raw);
 }
 
 function playlistTitleFromPath(playlistPath: string): string {
@@ -93,7 +142,43 @@ type PathParseState = {
   unresolved: ImportLocalM3uUnresolvedEntry[];
   skipped: number;
   seenKeys: Set<string>;
+  /** Next 0-based playlist position for each file/URL row; incremented at start of each try. */
+  nextPlaylistOrder: number;
 };
+
+function pushUnresolved(
+  state: PathParseState,
+  opts: {
+    rawRef: string;
+    trimmedPathLine: string;
+    reason: ImportLocalM3uUnresolvedReason;
+    playlistOrder: number;
+    displayTitle: string | null;
+    durationSec: number | null;
+    pathHintForSearch: string | null;
+  },
+): void {
+  const combined = opts.trimmedPathLine.trim() || opts.rawRef.trim();
+  const ref = combined.slice(0, UNRESOLVED_REF_CAP);
+  const normalizedTitle =
+    opts.displayTitle && opts.displayTitle.trim().length > 0 ? opts.displayTitle.trim() : null;
+  state.unresolved.push({
+    ref,
+    reason: opts.reason,
+    playlistOrder: opts.playlistOrder,
+    displayTitle: normalizedTitle,
+    durationSec: opts.durationSec,
+    suggestedSearchQuery: buildSuggestedSearchQuery(normalizedTitle, opts.pathHintForSearch, ref),
+  });
+}
+
+/** PLS `LengthN` — positive integer seconds; `0`/`-1`/invalid → unknown. */
+function parsePlsLengthSeconds(raw: string | undefined): number | null {
+  if (!raw || !raw.trim()) return null;
+  const n = parseInt(raw.trim(), 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
 
 async function tryAddAudioFromPathLine(
   state: PathParseState,
@@ -102,22 +187,48 @@ async function tryAddAudioFromPathLine(
   playlistDir: string,
   rootNorm: string,
   pendingTitle: string | null,
+  pendingDurationSec: number | null,
 ): Promise<void> {
+  const playlistOrder = state.nextPlaylistOrder++;
+
   const trimmed = pathLine.trim();
-  const refForMsg = rawRef.slice(0, 400);
 
   if (!trimmed) {
-    state.unresolved.push({ ref: refForMsg, reason: "invalid_path" });
+    pushUnresolved(state, {
+      rawRef,
+      trimmedPathLine: trimmed,
+      reason: "invalid_path",
+      playlistOrder,
+      displayTitle: pendingTitle,
+      durationSec: pendingDurationSec,
+      pathHintForSearch: null,
+    });
     return;
   }
 
   const resolvedPath = resolvePathLine(trimmed, playlistDir);
   if (resolvedPath.kind === "remote") {
-    state.unresolved.push({ ref: refForMsg, reason: "remote_url" });
+    pushUnresolved(state, {
+      rawRef,
+      trimmedPathLine: trimmed,
+      reason: "remote_url",
+      playlistOrder,
+      displayTitle: pendingTitle,
+      durationSec: pendingDurationSec,
+      pathHintForSearch: trimmed,
+    });
     return;
   }
   if (resolvedPath.kind === "bad") {
-    state.unresolved.push({ ref: refForMsg, reason: "invalid_path" });
+    pushUnresolved(state, {
+      rawRef,
+      trimmedPathLine: trimmed,
+      reason: "invalid_path",
+      playlistOrder,
+      displayTitle: pendingTitle,
+      durationSec: pendingDurationSec,
+      pathHintForSearch: null,
+    });
     return;
   }
 
@@ -127,22 +238,54 @@ async function tryAddAudioFromPathLine(
   try {
     st = await stat(abs);
   } catch {
-    state.unresolved.push({ ref: refForMsg, reason: "missing" });
+    pushUnresolved(state, {
+      rawRef,
+      trimmedPathLine: trimmed,
+      reason: "missing",
+      playlistOrder,
+      displayTitle: pendingTitle,
+      durationSec: pendingDurationSec,
+      pathHintForSearch: abs,
+    });
     return;
   }
 
   if (!st.isFile()) {
-    state.unresolved.push({ ref: refForMsg, reason: "missing" });
+    pushUnresolved(state, {
+      rawRef,
+      trimmedPathLine: trimmed,
+      reason: "missing",
+      playlistOrder,
+      displayTitle: pendingTitle,
+      durationSec: pendingDurationSec,
+      pathHintForSearch: abs,
+    });
     return;
   }
 
   if (!AUDIO_EXTS.has(extOf(abs))) {
-    state.unresolved.push({ ref: refForMsg, reason: "not_audio" });
+    pushUnresolved(state, {
+      rawRef,
+      trimmedPathLine: trimmed,
+      reason: "not_audio",
+      playlistOrder,
+      displayTitle: pendingTitle,
+      durationSec: pendingDurationSec,
+      pathHintForSearch: abs,
+    });
     return;
   }
 
   if (!isUnderMusicRoot(abs, rootNorm)) {
-    state.unresolved.push({ ref: refForMsg, reason: "outside_root" });
+    pushUnresolved(state, {
+      rawRef,
+      trimmedPathLine: trimmed,
+      reason: "outside_root",
+      playlistOrder,
+      displayTitle: pendingTitle,
+      durationSec: pendingDurationSec,
+      pathHintForSearch: abs,
+    });
     return;
   }
 
@@ -160,10 +303,13 @@ async function tryAddAudioFromPathLine(
   state.trackDisplayNames.push(name);
 }
 
-function parsePlsFileEntries(text: string): Array<{ rawRef: string; pathLine: string; title: string | null }> {
+function parsePlsFileEntries(
+  text: string,
+): Array<{ rawRef: string; pathLine: string; title: string | null; lengthSec: number | null }> {
   const lines = splitPlaylistLines(text);
   const files = new Map<number, string>();
   const titles = new Map<number, string>();
+  const lengths = new Map<number, string>();
   for (const line of lines) {
     const t = line.trim();
     if (!t || t.startsWith("#")) continue;
@@ -175,6 +321,11 @@ function parsePlsFileEntries(text: string): Array<{ rawRef: string; pathLine: st
     const titleM = t.match(/^Title\s*(\d+)\s*=\s*(.+)$/i);
     if (titleM) {
       titles.set(parseInt(titleM[1], 10), titleM[2].trim());
+      continue;
+    }
+    const lenM = t.match(/^Length\s*(\d+)\s*=\s*(.+)$/i);
+    if (lenM) {
+      lengths.set(parseInt(lenM[1], 10), lenM[2].trim());
     }
   }
   const indices = [...files.keys()].sort((a, b) => a - b);
@@ -182,6 +333,7 @@ function parsePlsFileEntries(text: string): Array<{ rawRef: string; pathLine: st
     rawRef: `File${i}=${files.get(i)!.slice(0, 200)}`,
     pathLine: files.get(i)!,
     title: titles.get(i) ?? null,
+    lengthSec: parsePlsLengthSeconds(lengths.get(i)),
   }));
 }
 
@@ -214,6 +366,7 @@ async function importM3uLikeContent(
 
   let explicitPlaylistName: string | null = null;
   let pendingTitle: string | null = null;
+  let pendingDurationSec: number | null = null;
 
   const state: PathParseState = {
     resolvedFiles: [],
@@ -221,6 +374,7 @@ async function importM3uLikeContent(
     unresolved: [],
     skipped: 0,
     seenKeys: new Set(),
+    nextPlaylistOrder: 0,
   };
 
   for (const line of lines) {
@@ -235,15 +389,27 @@ async function importM3uLikeContent(
     }
 
     if (/^#EXTINF/i.test(trimmed)) {
-      pendingTitle = parseExtInfTitle(trimmed);
+      const ext = parseExtInfLine(trimmed);
+      pendingTitle = ext.title;
+      pendingDurationSec = ext.durationSec;
       continue;
     }
 
     if (trimmed.startsWith("#")) continue;
 
     const titleForRow = pendingTitle;
+    const durationForRow = pendingDurationSec;
     pendingTitle = null;
-    await tryAddAudioFromPathLine(state, trimmed, trimmed, playlistDir, rootNorm, titleForRow);
+    pendingDurationSec = null;
+    await tryAddAudioFromPathLine(
+      state,
+      trimmed,
+      trimmed,
+      playlistDir,
+      rootNorm,
+      titleForRow,
+      durationForRow,
+    );
   }
 
   const playlistName =
@@ -280,10 +446,19 @@ async function importPlsContent(
     unresolved: [],
     skipped: 0,
     seenKeys: new Set(),
+    nextPlaylistOrder: 0,
   };
 
   for (const e of entries) {
-    await tryAddAudioFromPathLine(state, e.rawRef, e.pathLine, playlistDir, rootNorm, e.title);
+    await tryAddAudioFromPathLine(
+      state,
+      e.rawRef,
+      e.pathLine,
+      playlistDir,
+      rootNorm,
+      e.title,
+      e.lengthSec,
+    );
   }
 
   const fromMeta = parsePlsPlaylistName(text);
