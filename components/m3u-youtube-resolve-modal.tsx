@@ -60,6 +60,31 @@ export function M3uYoutubeResolveModal({
   const [applySafeBusy, setApplySafeBusy] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
+  /**
+   * Two-step save phase so the operator sees activity during the single POST to
+   * `/api/playlists`. The server-side cost is catalog `findOrCreate` per track plus the
+   * Prisma write, which can run 2–3s on a 13-track album — we cannot speed that up from
+   * the renderer (Catalog/Prisma are out of scope), but flipping `savePhase` from "prep"
+   * to "server" together with a per-second elapsed counter makes the busy state legible
+   * instead of looking frozen on a generic "Saving…".
+   */
+  const [savePhase, setSavePhase] = useState<"prep" | "server" | null>(null);
+  const [saveElapsedSec, setSaveElapsedSec] = useState(0);
+
+  useEffect(() => {
+    if (!applyBusy) {
+      if (saveElapsedSec !== 0) setSaveElapsedSec(0);
+      return;
+    }
+    setSaveElapsedSec(0);
+    const startedAt = Date.now();
+    const id = window.setInterval(() => {
+      setSaveElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+    }, 500);
+    return () => window.clearInterval(id);
+    // saveElapsedSec intentionally omitted — including it would restart the timer on every tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyBusy]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -222,6 +247,7 @@ export function M3uYoutubeResolveModal({
       picks.set(ord, pick);
     }
     setApplyBusy(true);
+    setSavePhase("prep");
     try {
       /**
        * `create_youtube_only` (Spotify import): there is no existing playlist row and there
@@ -253,6 +279,7 @@ export function M3uYoutubeResolveModal({
         }
         const firstUrl = tracks[0]!.url;
         const firstCover = tracks[0]?.cover ?? "";
+        setSavePhase("server");
         const postRes = await fetch("/api/playlists", {
           method: "POST",
           credentials: "include",
@@ -297,6 +324,7 @@ export function M3uYoutubeResolveModal({
         picksByPlaylistOrder: picks,
       });
 
+      setSavePhase("server");
       const putRes = await fetch(`/api/playlists/${encodeURIComponent(context.playlistId)}`, {
         method: "PUT",
         credentials: "include",
@@ -319,6 +347,7 @@ export function M3uYoutubeResolveModal({
       setApplyError(e instanceof Error ? e.message : "Save failed.");
     } finally {
       setApplyBusy(false);
+      setSavePhase(null);
     }
   }, [
     context.mode,
@@ -463,6 +492,21 @@ export function M3uYoutubeResolveModal({
               const safe = cands.length > 0 && isSafeAutoPick(row, cands);
               const bestTier =
                 cands.length > 0 ? classifyTopCandidates(row, cands).bestResult?.tier : undefined;
+              /**
+               * Spotify album rows already arrive with strong upstream signal (Spotify-provided
+               * artist + title). Showing 3 candidates per row clutters the picker — collapse to
+               * a single "best" candidate (the one `narrowYoutubeCandidatesForM3uRow` already
+               * placed in slot 0, which prefers Official Video / Official Audio / Topic / VEVO
+               * via `youtubeOfficialDisplayRank`, then falls back to confidence + views). The
+               * row's status badge still labels weak confidence as Needs review / Not found, so
+               * the user is never silently forced into a wrong match.
+               *
+               * Scoring helpers below (`isSafeAutoPick`, `classifyTopCandidates`) keep operating
+               * on the FULL `cands` array — narrowing the visible list does not change which
+               * rows qualify as Safe auto-ready or what Apply safe matches picks.
+               */
+              const isSpotifyRow = row.reason === "spotify_track";
+              const visibleCands = isSpotifyRow ? cands.slice(0, 1) : cands;
               const statusBadge =
                 picksByOrder[row.playlistOrder]
                   ? { label: "Selected", cls: "border-[#1ed760]/50 text-[#1ed760]/95" }
@@ -475,8 +519,16 @@ export function M3uYoutubeResolveModal({
                         : bestTier === "safe"
                           ? { label: "Ambiguous top 2", cls: "border-amber-500/45 text-amber-200/90" }
                           : bestTier === "review"
-                            ? { label: "Review", cls: "border-amber-500/45 text-amber-200/90" }
-                            : { label: "Uncertain", cls: "border-slate-600 text-slate-400" };
+                            ? {
+                                label: isSpotifyRow ? "Needs review" : "Review",
+                                cls: "border-amber-500/45 text-amber-200/90",
+                              }
+                            : {
+                                label: isSpotifyRow ? "Not found — search manually" : "Uncertain",
+                                cls: isSpotifyRow
+                                  ? "border-rose-500/40 text-rose-200/85"
+                                  : "border-slate-600 text-slate-400",
+                              };
 
               return (
                 <li key={`u-${row.playlistOrder}-${row.reason}`} className="rounded-xl border border-slate-800/90 bg-slate-900/40 p-3">
@@ -524,16 +576,16 @@ export function M3uYoutubeResolveModal({
                     <p className="mt-2 text-xs text-rose-300/95">{searchErrByOrder[row.playlistOrder]}</p>
                   ) : null}
 
-                  {cands.length > 0 ? (
+                  {visibleCands.length > 0 ? (
                     <ul className="mt-3 flex flex-col gap-1">
-                      {cands.map((c, idx) => {
+                      {visibleCands.map((c, idx) => {
                         const pick = picksByOrder[row.playlistOrder];
                         const candId = getYouTubeVideoId(c.url);
                         const picked =
                           Boolean(pick && candId && candId === getYouTubeVideoId(pick.url));
                         return (
                           <li key={`${row.playlistOrder}-${c.url}`}>
-                            {idx === 1 && primaryWasOfficialRanking && cands.length > 1 ? (
+                            {idx === 1 && primaryWasOfficialRanking && visibleCands.length > 1 ? (
                               <p className="mb-1 mt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                                 Alternatives
                               </p>
@@ -591,24 +643,42 @@ export function M3uYoutubeResolveModal({
           </ul>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-800 bg-slate-950/95 px-4 py-3 sm:px-5">
-          <button
-            type="button"
-            disabled={bulkControlsDisabled}
-            onClick={() => void onClose()}
-            className="rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 disabled:opacity-45"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={countPicks === 0 || applyBusy || bulkFinding || applySafeBusy}
-            title={countPicks === 0 ? "Choose at least one YouTube result" : undefined}
-            onClick={() => void applyChoices()}
-            className="rounded-lg bg-gradient-to-b from-[#1ed760] to-[#1db954] px-5 py-2 text-sm font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
-          >
-            {applyBusy ? "Saving…" : `Add picks to playlist (${countPicks})`}
-          </button>
+        <div className="flex shrink-0 flex-col gap-1 border-t border-slate-800 bg-slate-950/95 px-4 py-3 sm:px-5">
+          {applyBusy ? (
+            <p
+              className="text-[11px] leading-snug text-slate-400"
+              role="status"
+              aria-live="polite"
+            >
+              {savePhase === "server"
+                ? `Creating playlist on server (linking ${countPicks} track${countPicks === 1 ? "" : "s"} to your catalog)…`
+                : `Preparing ${countPicks} pick${countPicks === 1 ? "" : "s"}…`}
+              {saveElapsedSec >= 2 ? (
+                <span className="ml-1 font-mono text-slate-500">· {saveElapsedSec}s</span>
+              ) : null}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              disabled={bulkControlsDisabled}
+              onClick={() => void onClose()}
+              className="rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 disabled:opacity-45"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={countPicks === 0 || applyBusy || bulkFinding || applySafeBusy}
+              title={countPicks === 0 ? "Choose at least one YouTube result" : undefined}
+              onClick={() => void applyChoices()}
+              className="rounded-lg bg-gradient-to-b from-[#1ed760] to-[#1db954] px-5 py-2 text-sm font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+            >
+              {applyBusy
+                ? `Saving ${countPicks} track${countPicks === 1 ? "" : "s"}…`
+                : `Add picks to playlist (${countPicks})`}
+            </button>
+          </div>
         </div>
       </div>
       </div>
