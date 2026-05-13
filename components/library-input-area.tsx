@@ -374,6 +374,30 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
   }, []);
 
   const ingestingRef = useRef(false);
+
+  /**
+   * Single entry point for any code path that mutates `urlValue` in response to user
+   * input (typed change, panel-level paste, drag-and-drop). Clearing stale resolver
+   * states here is what keeps the Add button clickable after a previous flow left
+   * `externalYtResolvePack` non-null — without this the disabled condition at the
+   * submit button latches on. `externalYtSaveBusy` is only ever flipped on by
+   * `handleConfirmExternalYtPick`, which can only run while the picker is mounted
+   * (i.e. while `externalYtResolvePack != null`); clearing the pack here means no
+   * save is observably in-flight, so resetting the busy flag alongside is safe.
+   */
+  const applyUrlInputValue = useCallback((next: string) => {
+    setYoutubeMixImportUrl(null);
+    setExternalMusicResolveHint(null);
+    setExternalYtResolvePack(null);
+    setExternalYtSaveBusy(false);
+    setUrlError(null);
+    setSpotifyBlockedShowPasteCta(false);
+    setM3uImportBanner(null);
+    setM3uYoutubeResolveContext(null);
+    setYoutubeResolveOpen(false);
+    setUrlValue(next);
+  }, []);
+
   const ingestUrl = useCallback(
     async (url: string) => {
       /**
@@ -621,6 +645,17 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
             }
             const kindLabel = preview.kind === "album" ? "Spotify album" : "Spotify playlist";
             const ownerSuffix = preview.ownerName?.trim() ? ` — ${preview.ownerName.trim()}` : "";
+            /**
+             * `M3uYoutubeResolveModal` only mounts when BOTH `youtubeResolveOpen === true`
+             * AND `m3uYoutubeResolveContext != null` (see render gate below). The previous
+             * version of this branch set the context but never flipped `youtubeResolveOpen`,
+             * so a perfectly good Spotify album preview silently no-op'd: the input cleared
+             * via `setUrlValue("")`, the busy phase ended, and the modal stayed hidden.
+             * Mirror the paste-tracklist success path — open the picker explicitly.
+             */
+            setUrlError(null);
+            setSpotifyBlockedShowPasteCta(false);
+            setM3uImportBanner(null);
             setM3uYoutubeResolveContext({
               playlistId: "",
               playlistName: preview.name,
@@ -631,6 +666,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
               mode: "create_youtube_only",
               sourceLabel: `${kindLabel}${ownerSuffix} (${preview.tracks.length} tracks)`,
             });
+            setYoutubeResolveOpen(true);
             setUrlValue("");
             setUrlIngestPhase(null);
             return;
@@ -1069,10 +1105,10 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
 
   const handleDropUrl = useCallback(
     (url: string) => {
-      setUrlValue(url);
+      applyUrlInputValue(url);
       void ingestUrl(url);
     },
-    [ingestUrl]
+    [applyUrlInputValue, ingestUrl]
   );
 
   const handleIngestDrop = (e: React.DragEvent) => {
@@ -1243,7 +1279,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
           if (normalizeLocalFilePathInput(text) || text.startsWith("http://") || text.startsWith("https://")) {
             e.preventDefault();
             e.stopPropagation();
-            setUrlValue(text);
+            applyUrlInputValue(text);
             void ingestUrl(text);
           }
         }}
@@ -1307,16 +1343,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
               autoComplete="off"
               value={urlValue}
               onChange={(e) => {
-                setYoutubeMixImportUrl(null);
-                setExternalMusicResolveHint(null);
-                setExternalYtResolvePack(null);
-                setExternalYtSaveBusy(false);
-                setUrlError(null);
-                setSpotifyBlockedShowPasteCta(false);
-                setM3uImportBanner(null);
-                setM3uYoutubeResolveContext(null);
-                setYoutubeResolveOpen(false);
-                setUrlValue(e.target.value);
+                applyUrlInputValue(e.target.value);
               }}
               onDragOver={(e) => {
                 if (
@@ -1354,22 +1381,6 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
                   : t.add ?? "Add"}
             </button>
           </div>
-
-          {/* Paste tracklist – Stage 6D-Lite opener */}
-          <button
-            type="button"
-            onClick={() => {
-              setUrlError(null);
-              setSpotifyBlockedShowPasteCta(false);
-              setM3uImportBanner(null);
-              setPasteTracklistOpen(true);
-            }}
-            disabled={urlIngesting || externalYtSaveBusy}
-            title="Paste a plain-text tracklist (up to 50 lines) and pick a YouTube match for each"
-            className={`${controlHeight} shrink-0 rounded-xl border border-slate-700/70 bg-slate-800/70 px-3 text-xs font-semibold text-slate-200 transition hover:border-[#1ed760]/55 hover:text-white disabled:opacity-40`}
-          >
-            Paste tracklist
-          </button>
 
           {/* Search Library / YouTube + Mic */}
           <div

@@ -23,9 +23,12 @@
  * Spotify gates personalized playlists (Daily Mix, Discover Weekly, Release Radar, every
  * "Made for <user>" playlist) and any private/collaborative playlist behind a user-scoped
  * OAuth token. The Client-Credentials grant is application-scoped and Spotify rejects
- * those reads with `HTTP 403`. We DO NOT scrape Spotify's web UI, download Spotify
- * audio, or try to bypass that ACL. Instead we surface a clear inline message and
- * point the operator at album import. See Stage 6D-B note below.
+ * those reads with `HTTP 403` — and, observed in the wild for Daily Mix / Made-For-You ids
+ * with the `37i9dQZF1E` prefix, sometimes `HTTP 404`. We treat both statuses as
+ * `playlist_blocked` when the id matches that personalized prefix. We DO NOT scrape
+ * Spotify's web UI, download Spotify audio, or try to bypass that ACL. Instead we
+ * surface a clear inline message and point the operator at album import. See Stage 6D-B
+ * note below.
  *
  * Stage 6D-B (future, not in this stage):
  *   Connect Spotify account with OAuth (Authorization Code + PKCE) so the renderer can
@@ -79,9 +82,10 @@ export type SpotifyPlaylistPreviewResult =
 
 /**
  * Tagged error thrown deep inside `fetchPlaylistPreview` when Spotify rejects a playlist
- * read with `HTTP 403` under the Client-Credentials grant. The POST handler unwraps it
- * into a structured `playlist_blocked` response — the renderer matches on status to show
- * the exact required inline error string instead of a generic "Spotify request failed".
+ * read with `HTTP 403` (or `HTTP 404` for personalized `37i9dQZF1E*` ids) under the
+ * Client-Credentials grant. The POST handler unwraps it into a structured
+ * `playlist_blocked` response — the renderer matches on status to show the exact required
+ * inline error string instead of a generic "Spotify request failed".
  */
 class SpotifyPlaylistBlockedError extends Error {
   reason: SpotifyPlaylistBlockedReason;
@@ -199,7 +203,20 @@ async function fetchPlaylistPreview(
     `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}?fields=name,owner(display_name),tracks(total)`,
     { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000), cache: "no-store" },
   );
-  if (metaRes.status === 404) throw new Error("Playlist not found or not public.");
+  if (metaRes.status === 404) {
+    /**
+     * Personalized playlists (Daily Mix, Discover Weekly, every "Made For <user>") sit
+     * behind the `37i9dQZF1E` id prefix and Spotify returns `HTTP 404` for them under
+     * Client Credentials — not 403, even though the cause is the same ACL gate. Treat
+     * that exact prefix-on-404 as `playlist_blocked/personalized` so the renderer shows
+     * the same "Spotify blocked access…" copy + Paste tracklist CTA it already shows
+     * for 403. Non-personalized ids on 404 stay a real "not found" (deleted/private).
+     */
+    if (isLikelyPersonalizedSpotifyPlaylistId(playlistId)) {
+      throw new SpotifyPlaylistBlockedError("personalized");
+    }
+    throw new Error("Playlist not found or not public.");
+  }
   if (metaRes.status === 403) {
     /**
      * Spotify routinely 403s personalized / Made-For-You / private / collaborative playlist
@@ -236,6 +253,16 @@ async function fetchPlaylistPreview(
       throw new SpotifyPlaylistBlockedError(
         isLikelyPersonalizedSpotifyPlaylistId(playlistId) ? "personalized" : "private_or_blocked",
       );
+    }
+    if (res.status === 404 && isLikelyPersonalizedSpotifyPlaylistId(playlistId)) {
+      /**
+       * Some personalized ids 200 on the metadata call (with stripped owner/name) but
+       * 404 the `/tracks` page. Same gate, same fix: route the personalized prefix on
+       * 404 into `playlist_blocked/personalized` so the renderer keeps the inline copy
+       * + Paste tracklist CTA. Non-personalized 404 here = playlist deleted mid-fetch,
+       * keep the generic error so we don't lie about why.
+       */
+      throw new SpotifyPlaylistBlockedError("personalized");
     }
     if (!res.ok) throw new Error(`Spotify playlist tracks: HTTP ${res.status}`);
     const data = (await res.json()) as { items?: unknown };
