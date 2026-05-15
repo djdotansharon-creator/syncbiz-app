@@ -936,9 +936,10 @@ export function MyMusicLibraryWorkspacePanel({
     [onPlaylistUpdated],
   );
 
-  const handleYoutubeResolveApplied = useCallback((mergedCount: number) => {
+  const handleYoutubeResolveApplied = useCallback((mergedOrders: readonly number[]) => {
     setYoutubeResolveOpen(false);
     setM3uYoutubeResolveContext(null);
+    const mergedCount = mergedOrders.length;
     setM3uImportSummary((prev) => {
       if (!prev || mergedCount <= 0) return prev;
       const nextUnresolved = Math.max(0, prev.unresolved - mergedCount);

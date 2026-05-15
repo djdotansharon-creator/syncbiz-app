@@ -17,10 +17,19 @@ export type M3uUnresolvedImportRow = {
  * Save mode for the resolver modal.
  * - `merge_with_locals` (default): existing M3U import flow — playlist already exists with
  *   N local rows; Apply does GET → merge YouTube picks alongside locals → PUT.
- * - `create_youtube_only`: Spotify playlist/album import — no playlist exists yet, no locals.
- *   Apply builds a YouTube-only tracks array from picks and POSTs a new playlist.
+ * - `create_youtube_only`: Spotify playlist/album import (legacy) and paste-tracklist flow —
+ *   no playlist exists yet, no locals. Apply builds a YouTube-only tracks array from picks
+ *   and POSTs a new playlist.
+ * - `append_to_existing_youtube`: Stage 6D-Auto fallback. The Spotify auto-build flow
+ *   already created a YouTube playlist for the resolved rows; this mode opens the modal
+ *   for the *missing* rows so the operator can manually pick matches and APPEND them to
+ *   that just-created playlist (GET → push picks at end → PUT). No order preservation
+ *   beyond append — the resolved rows already preserved Spotify order at create time.
  */
-export type M3uYoutubeResolveSaveMode = "merge_with_locals" | "create_youtube_only";
+export type M3uYoutubeResolveSaveMode =
+  | "merge_with_locals"
+  | "create_youtube_only"
+  | "append_to_existing_youtube";
 
 export type M3uYoutubeResolveContextState = {
   /** Empty string in `create_youtube_only` mode — playlist is created on Apply. */
@@ -28,6 +37,17 @@ export type M3uYoutubeResolveContextState = {
   playlistName: string;
   files: string[];
   trackDisplayNames: string[];
+  /**
+   * Dual-purpose, semantic depends on `mode`:
+   * - `merge_with_locals`: index into `files` for each persisted local track position
+   *   (length = files.length).
+   * - `append_to_existing_youtube`: `playlistOrder` of every already-resolved track, in
+   *   the order they currently sit in the playlist (length = current track count).
+   *   Used by the modal to interleave newly-picked missing rows by their original
+   *   Spotify `playlistOrder` instead of appending blindly at the end. Empty or
+   *   misaligned arrays make the modal fall back to append.
+   * - `create_youtube_only`: unused; pass `[]`.
+   */
   resolvedSourceOrders: number[];
   unresolvedRows: M3uUnresolvedImportRow[];
   /** Defaults to `merge_with_locals` when omitted. */

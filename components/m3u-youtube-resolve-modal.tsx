@@ -45,7 +45,14 @@ export function M3uYoutubeResolveModal({
   defaultGenre: string;
   onClose: () => void;
   onPlaylistMerged: (u: UnifiedSource) => void;
-  onApplied: (mergedCount: number) => void | Promise<void>;
+  /**
+   * Fires after a successful Apply, before the modal closes itself. Receives the
+   * `playlistOrder` values that were actually merged so the caller can do precise
+   * bookkeeping (e.g. the Spotify Auto-Build summary needs to know *which* missing
+   * rows were resolved, not just how many — the operator may pick a non-contiguous
+   * subset of the missing list).
+   */
+  onApplied: (mergedOrders: readonly number[]) => void | Promise<void>;
 }): ReactElement {
   const rows = useMemo(
     () => [...context.unresolvedRows].sort((a, b) => a.playlistOrder - b.playlistOrder),
@@ -246,9 +253,111 @@ export function M3uYoutubeResolveModal({
       if (!Number.isFinite(ord)) continue;
       picks.set(ord, pick);
     }
+    /**
+     * Stable list of the actual `playlistOrder` values being applied (ascending). Passed to
+     * `onApplied` so callers can do row-precise bookkeeping (e.g. the Spotify Auto-Build
+     * summary needs to know *which* missing rows resolved when the operator picks a
+     * non-contiguous subset). Length always equals `countPicks`.
+     */
+    const mergedOrders = [...picks.keys()].sort((a, b) => a - b);
     setApplyBusy(true);
     setSavePhase("prep");
     try {
+      /**
+       * `append_to_existing_youtube` (Stage 6D-Auto fallback): the Spotify auto-build flow
+       * already created a YouTube playlist for rows it could resolve confidently; this
+       * branch handles the operator manually picking matches for the rows that fell into
+       * the "missing" bucket and merging them back into that playlist.
+       *
+       * Order preservation:
+       *   We interleave by original `playlistOrder` whenever `context.resolvedSourceOrders`
+       *   aligns with the existing playlist length (it carries the `playlistOrder` of every
+       *   already-resolved track, in playlist position). Each existing track is paired with
+       *   its known order, each new pick with its pick-key order, and the combined list is
+       *   re-sorted ascending before PUT. Falls back to append-at-end when alignment fails
+       *   (playlist was edited between create and review, or context shape is empty), so the
+       *   modal can still recover.
+       */
+      if (context.mode === "append_to_existing_youtube") {
+        const newTracksByOrder = new Map<number, PlaylistTrack>();
+        for (const ord of mergedOrders) {
+          const pick = picks.get(ord)!;
+          const watchUrl = canonicalYouTubeWatchUrlForPlayback(pick.url).trim();
+          if (!getYouTubeVideoId(watchUrl)) {
+            throw new Error("Spotify auto-build append: a picked candidate is not a single YouTube video URL.");
+          }
+          const thumb = (pick.cover && pick.cover.trim()) || getYouTubeThumbnail(watchUrl);
+          newTracksByOrder.set(ord, {
+            id: crypto.randomUUID(),
+            name: pick.title.trim() || "YouTube video",
+            type: "youtube",
+            url: watchUrl,
+            cover: thumb || undefined,
+            durationSeconds: pick.durationSeconds,
+            viewCount: pick.viewCount,
+          });
+        }
+        if (newTracksByOrder.size === 0) {
+          throw new Error("Spotify auto-build append: no picks selected.");
+        }
+        const getRes = await fetch(`/api/playlists/${encodeURIComponent(context.playlistId)}`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!getRes.ok) throw new Error("Could not reload playlist.");
+        const current = (await getRes.json()) as Playlist;
+        const existing = getPlaylistTracks(current);
+        const resolvedOrders = context.resolvedSourceOrders;
+        const canInterleave =
+          Array.isArray(resolvedOrders) &&
+          resolvedOrders.length === existing.length &&
+          resolvedOrders.every((n) => typeof n === "number" && Number.isFinite(n));
+        let merged: PlaylistTrack[];
+        if (canInterleave) {
+          type Slotted = { order: number; track: PlaylistTrack };
+          const slots: Slotted[] = existing.map((track, i) => ({
+            order: resolvedOrders[i]!,
+            track,
+          }));
+          for (const ord of mergedOrders) {
+            slots.push({ order: ord, track: newTracksByOrder.get(ord)! });
+          }
+          slots.sort((a, b) => a.order - b.order);
+          merged = slots.map((s) => s.track);
+        } else {
+          /**
+           * Fallback for the edge cases where order metadata isn't trustworthy
+           * (operator edited the playlist between create and review, or the
+           * caller didn't populate `resolvedSourceOrders`). Append at end so the
+           * resolver still makes progress instead of failing the PUT.
+           */
+          merged = [...existing, ...mergedOrders.map((ord) => newTracksByOrder.get(ord)!)];
+        }
+        setSavePhase("server");
+        const putRes = await fetch(`/api/playlists/${encodeURIComponent(context.playlistId)}`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tracks: merged,
+            order: merged.map((t) => t.id),
+          }),
+        });
+        if (!putRes.ok) {
+          const errBody = await putRes.json().catch(() => ({}));
+          const msg =
+            typeof (errBody as { error?: string }).error === "string"
+              ? (errBody as { error: string }).error
+              : "Could not save playlist.";
+          throw new Error(msg);
+        }
+        const updated = (await putRes.json()) as Playlist;
+        const unified = unifiedSourceFromFetchedPlaylist(updated, defaultGenre);
+        onPlaylistMerged(unified);
+        await Promise.resolve(onApplied(mergedOrders));
+        return;
+      }
+
       /**
        * `create_youtube_only` (Spotify import): there is no existing playlist row and there
        * are no local tracks. Build a YouTube-only `tracks` array directly from the picks (in
@@ -304,7 +413,7 @@ export function M3uYoutubeResolveModal({
         const created = (await postRes.json()) as Playlist;
         const unified = unifiedSourceFromFetchedPlaylist(created, defaultGenre);
         onPlaylistMerged(unified);
-        await Promise.resolve(onApplied(countPicks));
+        await Promise.resolve(onApplied(mergedOrders));
         return;
       }
 
@@ -342,7 +451,7 @@ export function M3uYoutubeResolveModal({
       const updated = (await putRes.json()) as Playlist;
       const unified = unifiedSourceFromFetchedPlaylist(updated, defaultGenre);
       onPlaylistMerged(unified);
-      await Promise.resolve(onApplied(countPicks));
+      await Promise.resolve(onApplied(mergedOrders));
     } catch (e) {
       setApplyError(e instanceof Error ? e.message : "Save failed.");
     } finally {

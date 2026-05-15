@@ -67,8 +67,13 @@ import {
   fetchSpotifyPlaylistPreview,
   normalizeSpotifyShareInput,
   parseSpotifyPlaylistOrAlbumUrl,
+  runSpotifyAutoBuildYoutubeSearch,
+  saveAutoBuiltYoutubePlaylist,
   spotifyTracksToUnresolvedRows,
+  type SpotifyAutoBuildResolvedPick,
 } from "@/lib/spotify-playlist-import-client";
+import { unifiedSourceFromFetchedPlaylist } from "@/lib/local-music-library-playlist";
+import type { M3uUnresolvedImportRow } from "@/lib/m3u-youtube-resolve-shared";
 import { PlainTracklistPasteModal } from "@/components/plain-tracklist-paste-modal";
 import {
   PASTED_TRACKLIST_MAX,
@@ -78,7 +83,7 @@ import {
 /** Animated shell phase for M3U / URL ingest (`sb-library-ingest-shell--*` in CSS). */
 function libraryUrlIngestPhaseClass(phase: string | null): string {
   const p = (phase ?? "").toLowerCase();
-  if (p.includes("reading playlist")) return "sb-library-ingest-shell--read";
+  if (p.startsWith("reading")) return "sb-library-ingest-shell--read";
   if (p.includes("resolving")) return "sb-library-ingest-shell--resolve";
   if (p.includes("youtube")) return "sb-library-ingest-shell--youtube";
   if (p.includes("creating")) return "sb-library-ingest-shell--save";
@@ -285,6 +290,34 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
    * the Stage 6D-Lite flow without re-typing the URL or hunting for the top-level button.
    */
   const [spotifyBlockedShowPasteCta, setSpotifyBlockedShowPasteCta] = useState(false);
+  /**
+   * Stage 6D-Auto — completion summary surfaced after `runSpotifyAutoBuildYoutubeSearch`
+   * plus `saveAutoBuiltYoutubePlaylist` succeed. Carries the just-created playlist id +
+   * the unresolved rows so the operator can opt into the legacy resolver modal for the
+   * missing tracks (mode `append_to_existing_youtube`). Cleared when the operator
+   * dismisses the banner or opens the modal.
+   */
+  const [spotifyAutoBuildSummary, setSpotifyAutoBuildSummary] = useState<{
+    /**
+     * Empty string when `resolvedCount === 0` — auto-build produced no resolved rows,
+     * so no playlist was POSTed and the "Review missing tracks" CTA opens the resolver
+     * in `create_youtube_only` mode (which will POST a fresh playlist on Apply).
+     * Non-empty string when at least one row resolved — CTA opens the resolver in
+     * `append_to_existing_youtube` mode against this id.
+     */
+    playlistId: string;
+    playlistName: string;
+    resolvedCount: number;
+    totalCount: number;
+    missing: M3uUnresolvedImportRow[];
+    /**
+     * `playlistOrder` values for the already-resolved tracks, in playlist position.
+     * Threaded through `context.resolvedSourceOrders` so the resolver can interleave
+     * reviewed missing tracks by original Spotify order instead of appending at end.
+     */
+    resolvedOrders: number[];
+    sourceLabel: string;
+  } | null>(null);
 
   const [query, setQuery] = useState("");
   const [musicBankLocalResults, setMusicBankLocalResults] = useState<UnifiedSource[]>([]);
@@ -395,6 +428,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
     setM3uImportBanner(null);
     setM3uYoutubeResolveContext(null);
     setYoutubeResolveOpen(false);
+    setSpotifyAutoBuildSummary(null);
     setUrlValue(next);
   }, []);
 
@@ -613,20 +647,33 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
           const spotifyHit =
             musicUrlIngest.provider === "spotify" ? parseSpotifyPlaylistOrAlbumUrl(trimmed) : null;
           if (spotifyHit) {
-            setUrlIngestPhase("Reading Spotify playlist…");
+            /**
+             * Stage 6D-Auto — Spotify album / public playlist Auto-Build mode.
+             *
+             * The Spotify preview gives us artist + title + order with high fidelity, so
+             * surfacing the big "Match tracks on YouTube" picker for every row is too much
+             * friction. Instead:
+             *   1. fetch the Spotify tracklist;
+             *   2. search YouTube for each row and auto-apply the top *valid* candidate
+             *      (`runSpotifyAutoBuildYoutubeSearch` already prefers the existing
+             *      official-first / Topic / VEVO / confidence ranking inside the narrower);
+             *   3. POST a YouTube-only playlist with the resolved rows in Spotify order.
+             *
+             * Missing rows (rows the scorer rejected) are stashed in
+             * `spotifyAutoBuildSummary` so the operator can opt into the legacy modal for
+             * manual review via the "Review missing tracks" CTA — the big resolver remains
+             * fallback only, never the default Spotify flow.
+             *
+             * Blocked playlists (personalized / Made-For-You / private) still 403/404 and
+             * route into the paste-tracklist CTA below, unchanged from Stage 6D-B.
+             */
+            setUrlIngestPhase("Reading Spotify…");
             const preview = await fetchSpotifyPlaylistPreview(trimmed);
             if (preview.status === "not_configured") {
               setUrlError("Spotify import is not configured.");
               return;
             }
             if (preview.status === "playlist_blocked") {
-              /**
-               * Personalized / Made-For-You / private / collaborative playlists 403 under
-               * Client Credentials. Surfaces the exact product-approved copy; OAuth-based
-               * read for user-scoped playlists is deferred to Stage 6D-B. The renderer also
-               * flips `spotifyBlockedShowPasteCta` so the operator gets a one-click jump
-               * into the Stage 6D-Lite paste-tracklist modal next to the error.
-               */
               setUrlError(
                 preview.message ||
                   "Spotify blocked access to this playlist. You can paste the tracklist manually, try a Spotify album, or connect Spotify account later.",
@@ -645,29 +692,63 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
             }
             const kindLabel = preview.kind === "album" ? "Spotify album" : "Spotify playlist";
             const ownerSuffix = preview.ownerName?.trim() ? ` — ${preview.ownerName.trim()}` : "";
-            /**
-             * `M3uYoutubeResolveModal` only mounts when BOTH `youtubeResolveOpen === true`
-             * AND `m3uYoutubeResolveContext != null` (see render gate below). The previous
-             * version of this branch set the context but never flipped `youtubeResolveOpen`,
-             * so a perfectly good Spotify album preview silently no-op'd: the input cleared
-             * via `setUrlValue("")`, the busy phase ended, and the modal stayed hidden.
-             * Mirror the paste-tracklist success path — open the picker explicitly.
-             */
+            const sourceLabelBase = `${kindLabel}${ownerSuffix}`;
+
             setUrlError(null);
             setSpotifyBlockedShowPasteCta(false);
             setM3uImportBanner(null);
-            setM3uYoutubeResolveContext({
-              playlistId: "",
-              playlistName: preview.name,
-              files: [],
-              trackDisplayNames: [],
-              resolvedSourceOrders: [],
-              unresolvedRows,
-              mode: "create_youtube_only",
-              sourceLabel: `${kindLabel}${ownerSuffix} (${preview.tracks.length} tracks)`,
-            });
-            setYoutubeResolveOpen(true);
+            setSpotifyAutoBuildSummary(null);
             setUrlValue("");
+
+            setUrlIngestPhase(`Finding YouTube matches 0/${unresolvedRows.length}…`);
+            const outcome = await runSpotifyAutoBuildYoutubeSearch({
+              rows: unresolvedRows,
+              onProgress: (p) => {
+                if (p.phase === "searching") {
+                  setUrlIngestPhase(`Finding YouTube matches ${p.done}/${p.total}…`);
+                }
+              },
+            });
+
+            /**
+             * 0/N resolved → there is nothing safe to save automatically. Per product:
+             * the big resolver must be user-triggered fallback only, never opened
+             * automatically. Surface the inline summary "No YouTube matches found.
+             * 0/N tracks added." with a "Review missing tracks" CTA; the operator
+             * opens the resolver themselves when they want to manually pick.
+             */
+            if (outcome.resolved.length === 0) {
+              setSpotifyAutoBuildSummary({
+                playlistId: "",
+                playlistName: preview.name,
+                resolvedCount: 0,
+                totalCount: unresolvedRows.length,
+                missing: outcome.missing,
+                resolvedOrders: [],
+                sourceLabel: sourceLabelBase,
+              });
+              setUrlIngestPhase(null);
+              return;
+            }
+
+            setUrlIngestPhase("Creating playlist…");
+            const created = await saveAutoBuiltYoutubePlaylist({
+              playlistName: preview.name,
+              defaultGenre: tx.defaultGenreMixed,
+              resolved: outcome.resolved as readonly SpotifyAutoBuildResolvedPick[],
+            });
+            const unified = unifiedSourceFromFetchedPlaylist(created, tx.defaultGenreMixed);
+            onPlaylistUpdated?.(unified);
+
+            setSpotifyAutoBuildSummary({
+              playlistId: created.id,
+              playlistName: created.name,
+              resolvedCount: outcome.resolved.length,
+              totalCount: unresolvedRows.length,
+              missing: outcome.missing,
+              resolvedOrders: outcome.resolved.map((r) => r.order),
+              sourceLabel: sourceLabelBase,
+            });
             setUrlIngestPhase(null);
             return;
           }
@@ -970,9 +1051,10 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
     [onPlaylistUpdated],
   );
 
-  const handleM3uYoutubeResolveApplied = useCallback((mergedCount: number) => {
+  const handleM3uYoutubeResolveApplied = useCallback((mergedOrders: readonly number[]) => {
     setYoutubeResolveOpen(false);
     setM3uYoutubeResolveContext(null);
+    const mergedCount = mergedOrders.length;
     setM3uImportBanner((prev) => {
       if (!prev || mergedCount <= 0) return prev;
       const nextUnresolved = Math.max(0, prev.unresolved - mergedCount);
@@ -982,7 +1064,58 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
         unresolvedHint: nextUnresolved > 0 ? prev.unresolvedHint : undefined,
       };
     });
+    /**
+     * Spotify Auto-Build summary bookkeeping after the resolver applies:
+     *   - 0-resolved fallback (`prev.playlistId === ""`): the resolver POSTed a fresh
+     *     playlist via `create_youtube_only`. The summary represented "nothing created"
+     *     which is no longer true; just clear it (the library refresh from
+     *     `onPlaylistUpdated` is the visible feedback).
+     *   - Append fallback (`prev.playlistId !== ""`): filter `missing` by the exact
+     *     `playlistOrder` set the operator picked (NOT slice(mergedCount) — picks can
+     *     be non-contiguous). Bump `resolvedCount` and `resolvedOrders` so a subsequent
+     *     review respects the new playlist contents. Clear the summary once everything
+     *     is accounted for.
+     */
+    setSpotifyAutoBuildSummary((prev) => {
+      if (!prev || mergedCount <= 0) return prev;
+      if (!prev.playlistId) return null;
+      const mergedSet = new Set(mergedOrders);
+      const remaining = prev.missing.filter((r) => !mergedSet.has(r.playlistOrder));
+      const nextResolved = Math.min(prev.totalCount, prev.resolvedCount + mergedCount);
+      if (remaining.length === 0 && nextResolved >= prev.totalCount) return null;
+      const nextResolvedOrders = [...prev.resolvedOrders, ...mergedOrders].sort((a, b) => a - b);
+      return {
+        ...prev,
+        resolvedCount: nextResolved,
+        missing: remaining,
+        resolvedOrders: nextResolvedOrders,
+      };
+    });
   }, []);
+
+  const handleReviewMissingAutoBuildTracks = useCallback(() => {
+    const summary = spotifyAutoBuildSummary;
+    if (!summary || summary.missing.length === 0) return;
+    /**
+     * Mode pivots on whether a playlist already exists for this Auto-Build run:
+     *   - `playlistId === ""` → 0-resolved fallback. The resolver POSTs a new YouTube
+     *     playlist via `create_youtube_only` on Apply.
+     *   - `playlistId !== ""` → resolved > 0; missing rows are merged into the existing
+     *     playlist via `append_to_existing_youtube` with order-preserving interleave.
+     */
+    const isAppend = summary.playlistId !== "";
+    setM3uYoutubeResolveContext({
+      playlistId: summary.playlistId,
+      playlistName: summary.playlistName,
+      files: [],
+      trackDisplayNames: [],
+      resolvedSourceOrders: isAppend ? summary.resolvedOrders : [],
+      unresolvedRows: summary.missing,
+      mode: isAppend ? "append_to_existing_youtube" : "create_youtube_only",
+      sourceLabel: `${summary.sourceLabel} — review ${summary.missing.length} missing track${summary.missing.length === 1 ? "" : "s"}`,
+    });
+    setYoutubeResolveOpen(true);
+  }, [spotifyAutoBuildSummary]);
 
   /**
    * Stage 6D-Lite — bridge between the paste-tracklist textarea modal and the
@@ -1486,24 +1619,58 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
         </p>
       ) : null}
       {urlError ? (
-        <div className="mt-1.5 flex flex-wrap items-center gap-2">
-          <p className="min-w-0 flex-1 text-xs text-amber-400">{urlError}</p>
-          {spotifyBlockedShowPasteCta ? (
-            <button
-              type="button"
-              onClick={() => {
-                setUrlError(null);
-                setSpotifyBlockedShowPasteCta(false);
-                setM3uImportBanner(null);
-                setPasteTracklistOpen(true);
-              }}
-              disabled={urlIngesting || externalYtSaveBusy}
-              className="shrink-0 rounded-lg bg-gradient-to-b from-[#1ed760] to-[#1db954] px-3 py-1 text-xs font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
-            >
-              Paste tracklist
-            </button>
-          ) : null}
-        </div>
+        spotifyBlockedShowPasteCta ? (
+          /**
+           * Spotify-blocked variant — Spotify returned the playlist metadata (name + owner)
+           * but blocked the `/tracks` endpoint with HTTP 403 even when the playlist is marked
+           * `public: true`. Confirmed against the live API: this is a Spotify ACL gate, not
+           * a code bug, and there is no non-OAuth read path. Keep the blocked message verbatim
+           * but lift the Paste tracklist CTA out of the small inline amber row into a full
+           * bordered panel so the operator's recovery path is impossible to miss.
+           */
+          <div
+            className="mt-1.5 rounded-lg border border-rose-500/35 bg-rose-500/[0.07] px-3 py-2.5 text-sm leading-relaxed text-rose-50/95"
+            role="status"
+            aria-live="polite"
+          >
+            <p className="min-w-0">
+              <span className="font-semibold">Spotify blocked this playlist.</span>{" "}
+              {urlError}
+            </p>
+            <p className="mt-1 text-[11px] leading-snug text-rose-100/75">
+              Paste the tracklist (one track per line) and we’ll build a YouTube playlist from it.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setUrlError(null);
+                  setSpotifyBlockedShowPasteCta(false);
+                  setM3uImportBanner(null);
+                  setPasteTracklistOpen(true);
+                }}
+                disabled={urlIngesting || externalYtSaveBusy}
+                className="rounded-lg bg-gradient-to-b from-[#1ed760] to-[#1db954] px-4 py-2 text-sm font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+              >
+                Paste tracklist
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUrlError(null);
+                  setSpotifyBlockedShowPasteCta(false);
+                }}
+                className="rounded border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/90 hover:bg-white/10"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <p className="min-w-0 flex-1 text-xs text-amber-400">{urlError}</p>
+          </div>
+        )
       ) : null}
       {externalYtResolvePack ? (
         <ExternalMusicYoutubePickerPanel
@@ -1530,6 +1697,67 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
             >
               Dismiss
             </button>
+          </div>
+        </div>
+      ) : null}
+      {spotifyAutoBuildSummary ? (
+        <div
+          className={`mt-1.5 rounded-lg border px-3 py-2.5 text-sm leading-relaxed ${
+            spotifyAutoBuildSummary.resolvedCount === 0
+              ? "border-rose-500/35 bg-rose-500/[0.07] text-rose-50/95"
+              : "border-[#1ed760]/35 bg-[#1ed760]/[0.07] text-emerald-50/95"
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <p className="min-w-0 flex-1">
+              {spotifyAutoBuildSummary.resolvedCount === 0 ? (
+                <>
+                  <span className="font-semibold">No YouTube matches found.</span>{" "}
+                  0/{spotifyAutoBuildSummary.totalCount} tracks added.
+                  <span className="mt-1 block font-medium text-white/95">
+                    “{spotifyAutoBuildSummary.playlistName}” — {spotifyAutoBuildSummary.sourceLabel}
+                  </span>
+                  <span className="mt-1 block font-mono text-[11px] leading-snug text-rose-100/75">
+                    Review the missing tracks to pick YouTube matches manually.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold">Created playlist:</span>{" "}
+                  {spotifyAutoBuildSummary.resolvedCount}/{spotifyAutoBuildSummary.totalCount} tracks added
+                  <span className="mt-1 block font-medium text-white/95">
+                    “{spotifyAutoBuildSummary.playlistName}” — {spotifyAutoBuildSummary.sourceLabel}
+                  </span>
+                  {spotifyAutoBuildSummary.missing.length > 0 ? (
+                    <span className="mt-1 block font-mono text-[11px] leading-snug text-emerald-100/75">
+                      {spotifyAutoBuildSummary.missing.length} track
+                      {spotifyAutoBuildSummary.missing.length === 1 ? "" : "s"} skipped — no confident YouTube match.
+                    </span>
+                  ) : null}
+                </>
+              )}
+            </p>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              {spotifyAutoBuildSummary.missing.length > 0 ? (
+                <button
+                  type="button"
+                  disabled={urlIngesting}
+                  onClick={handleReviewMissingAutoBuildTracks}
+                  className="rounded-lg bg-gradient-to-b from-[#1ed760] to-[#1db954] px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                >
+                  Review missing tracks
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="shrink-0 rounded border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/90 hover:bg-white/10"
+                onClick={() => setSpotifyAutoBuildSummary(null)}
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
