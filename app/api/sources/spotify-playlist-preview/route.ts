@@ -40,6 +40,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserFromApiRequest } from "@/lib/auth-helpers";
+import { getValidSpotifyAccessToken } from "@/lib/spotify-connection-store";
 
 /** Pinned to Node — `Buffer` + outbound `fetch` to api.spotify.com need server runtime. */
 export const runtime = "nodejs";
@@ -70,13 +72,20 @@ export type SpotifyPlaylistPreviewResult =
   | { status: "not_configured" }
   | {
       /**
-       * Spotify returned HTTP 403 reading a playlist via Client Credentials. The most common
-       * cause is a personalized / Made-For-You / private / collaborative playlist that
-       * requires per-operator OAuth (see Stage 6D-B note at the top of this file).
+       * Spotify returned HTTP 403/404 reading a playlist via Client Credentials. The most
+       * common cause is a personalized / Made-For-You / private / collaborative playlist.
+       *
+       * Stage 6E-A: when the session user has NOT connected Spotify (or needs to reconnect)
+       * `connectAvailable: true` tells the renderer to surface a "Connect Spotify" CTA next
+       * to "Paste tracklist". When the user IS connected but Spotify still refused the read
+       * with their own token, `connectAvailable: false` (connecting won't help — they lack
+       * access to that playlist; paste-tracklist remains the fallback).
        */
       status: "playlist_blocked";
       reason: SpotifyPlaylistBlockedReason;
       message: string;
+      connectAvailable: boolean;
+      needsReauth?: boolean;
     }
   | { status: "error"; message: string };
 
@@ -394,6 +403,24 @@ export async function POST(req: NextRequest): Promise<NextResponse<SpotifyPlayli
     return NextResponse.json({ status: "error", message: msg }, { status: 502 });
   }
 
+  /** Stable blocked-response builder so every exit point sends identical copy. */
+  const blocked = (
+    reason: SpotifyPlaylistBlockedReason,
+    connectAvailable: boolean,
+    needsReauth?: boolean,
+  ): NextResponse<SpotifyPlaylistPreviewResult> =>
+    NextResponse.json(
+      {
+        status: "playlist_blocked",
+        reason,
+        message:
+          "Spotify blocked access to this playlist. You can paste the tracklist manually, try a Spotify album, or connect Spotify account later.",
+        connectAvailable,
+        ...(needsReauth ? { needsReauth: true } : {}),
+      },
+      { status: 200 },
+    );
+
   try {
     const result =
       parsed.kind === "playlist"
@@ -407,22 +434,49 @@ export async function POST(req: NextRequest): Promise<NextResponse<SpotifyPlayli
     }
     return NextResponse.json({ status: "ok", kind: parsed.kind, ...result });
   } catch (e) {
-    /**
-     * Personalized / Made-For-You / private / collaborative playlists are gated behind
-     * user OAuth; Client Credentials reads return HTTP 403. Surface a stable structured
-     * status (`playlist_blocked`) carrying the exact required inline string so the
-     * renderer never has to template against ad-hoc error text.
-     */
     if (e instanceof SpotifyPlaylistBlockedError) {
-      return NextResponse.json(
-        {
-          status: "playlist_blocked",
-          reason: e.reason,
-          message:
-            "Spotify blocked access to this playlist. You can paste the tracklist manually, try a Spotify album, or connect Spotify account later.",
-        },
-        { status: 200 },
-      );
+      /**
+       * Stage 6E-A — Client Credentials is gated. Albums never block, so this only ever
+       * runs for `kind === "playlist"`. If the session user has connected Spotify, retry
+       * the SAME `fetchPlaylistPreview` with their user-scoped token (which carries the
+       * `playlist-read-private` / `playlist-read-collaborative` scopes). On success the
+       * shape is identical to the Client-Credentials path, so the renderer's Auto-Build
+       * flow continues unchanged. Tokens never leave the server; only track metadata is
+       * returned.
+       */
+      if (parsed.kind === "playlist") {
+        const user = await getCurrentUserFromApiRequest(req);
+        if (!user) {
+          /** Not authenticated to this API — UI should prompt login then connect. */
+          return blocked(e.reason, true);
+        }
+        const tok = await getValidSpotifyAccessToken(user.id);
+        if (tok.status === "ok") {
+          try {
+            const retry = await fetchPlaylistPreview(parsed.id, tok.accessToken);
+            if (retry.tracks.length > 0) {
+              return NextResponse.json({ status: "ok", kind: "playlist", ...retry });
+            }
+            /** User token worked but playlist is empty — nothing to Auto-Build. */
+            return NextResponse.json(
+              { status: "error", message: "No playable tracks were returned by Spotify for this link." },
+              { status: 502 },
+            );
+          } catch (retryErr) {
+            if (retryErr instanceof SpotifyPlaylistBlockedError) {
+              /** Connected, but this user genuinely lacks access — connecting again won't help. */
+              return blocked(retryErr.reason, false);
+            }
+            const m = retryErr instanceof Error ? retryErr.message : "Spotify request failed.";
+            return NextResponse.json({ status: "error", message: m }, { status: 502 });
+          }
+        }
+        if (tok.status === "needs_reauth") return blocked(e.reason, true, true);
+        if (tok.status === "none") return blocked(e.reason, true);
+        /** `not_configured`: encryption key missing — connecting can't be honored yet. */
+        return blocked(e.reason, false);
+      }
+      return blocked(e.reason, false);
     }
     const msg = e instanceof Error ? e.message : "Spotify request failed.";
     return NextResponse.json({ status: "error", message: msg }, { status: 502 });

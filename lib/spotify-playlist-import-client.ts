@@ -91,12 +91,23 @@ export type SpotifyPlaylistPreviewClientResult =
     }
   | { status: "not_configured" }
   /**
-   * Spotify returned `HTTP 403` reading the playlist under Client Credentials —
-   * typically a personalized / Made-For-You / private / collaborative playlist that
-   * needs per-operator OAuth (see Stage 6D-B note in the route file). The renderer
-   * shows `message` verbatim; `reason` is for analytics / future labelling only.
+   * Spotify returned `HTTP 403/404` reading the playlist under Client Credentials —
+   * typically a personalized / Made-For-You / private / collaborative playlist. The
+   * renderer shows `message` verbatim; `reason` is for analytics / labelling.
+   *
+   * Stage 6E-A: `connectAvailable === true` → the session user has not connected
+   * Spotify (or must reconnect); the renderer shows a "Connect Spotify" CTA next to
+   * "Paste tracklist". `false` → the user IS connected but still lacks access to this
+   * playlist (connecting again won't help; paste-tracklist remains the fallback).
+   * `needsReauth === true` → stored token is revoked/undecryptable; CTA says "Reconnect".
    */
-  | { status: "playlist_blocked"; reason: SpotifyPlaylistBlockedReason; message: string }
+  | {
+      status: "playlist_blocked";
+      reason: SpotifyPlaylistBlockedReason;
+      message: string;
+      connectAvailable?: boolean;
+      needsReauth?: boolean;
+    }
   | { status: "error"; message: string };
 
 export async function fetchSpotifyPlaylistPreview(url: string): Promise<SpotifyPlaylistPreviewClientResult> {

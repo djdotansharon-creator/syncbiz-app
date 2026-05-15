@@ -291,6 +291,15 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
    */
   const [spotifyBlockedShowPasteCta, setSpotifyBlockedShowPasteCta] = useState(false);
   /**
+   * Stage 6E-A — when a blocked playlist could be unlocked by connecting Spotify
+   * (`connectAvailable` from the preview route) the rose panel also shows a
+   * "Connect Spotify" / "Reconnect Spotify" button. `connectAvailable: false`
+   * means the user is already connected but lacks access to that specific
+   * playlist, so only Paste tracklist is offered.
+   */
+  const [spotifyConnectAvailable, setSpotifyConnectAvailable] = useState(false);
+  const [spotifyNeedsReauth, setSpotifyNeedsReauth] = useState(false);
+  /**
    * Stage 6D-Auto — completion summary surfaced after `runSpotifyAutoBuildYoutubeSearch`
    * plus `saveAutoBuiltYoutubePlaylist` succeed. Carries the just-created playlist id +
    * the unresolved rows so the operator can opt into the legacy resolver modal for the
@@ -425,6 +434,8 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
     setExternalYtSaveBusy(false);
     setUrlError(null);
     setSpotifyBlockedShowPasteCta(false);
+    setSpotifyConnectAvailable(false);
+    setSpotifyNeedsReauth(false);
     setM3uImportBanner(null);
     setM3uYoutubeResolveContext(null);
     setYoutubeResolveOpen(false);
@@ -679,6 +690,20 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
                   "Spotify blocked access to this playlist. You can paste the tracklist manually, try a Spotify album, or connect Spotify account later.",
               );
               setSpotifyBlockedShowPasteCta(true);
+              /**
+               * Stage 6E-A — if connecting Spotify could unlock this playlist, remember
+               * the URL so the post-OAuth return can auto-retry the import, and surface
+               * the Connect/Reconnect button in the rose panel.
+               */
+              setSpotifyConnectAvailable(preview.connectAvailable === true);
+              setSpotifyNeedsReauth(preview.needsReauth === true);
+              if (preview.connectAvailable === true && typeof window !== "undefined") {
+                try {
+                  window.sessionStorage.setItem("sb_spotify_pending_url", trimmed);
+                } catch {
+                  /* sessionStorage unavailable (private mode) — connect still works, just no auto-retry */
+                }
+              }
               return;
             }
             if (preview.status === "error") {
@@ -1196,6 +1221,52 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
     );
   }, []);
 
+  /**
+   * Stage 6E-A — handle the post-OAuth return. The callback route redirects to
+   * `/sources?spotify=<status>`. On `connected` we transparently re-run the
+   * import for the URL the user was blocked on (stashed in sessionStorage when
+   * the blocked response arrived) so connecting feels like a single action.
+   * Other statuses surface a short inline message. The query param is stripped
+   * via replaceState so a refresh never re-triggers the retry.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const spotify = params.get("spotify");
+    if (!spotify) return;
+    params.delete("spotify");
+    const cleaned = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+    window.history.replaceState(null, "", cleaned);
+
+    if (spotify === "connected") {
+      let pending: string | null = null;
+      try {
+        pending = window.sessionStorage.getItem("sb_spotify_pending_url");
+        window.sessionStorage.removeItem("sb_spotify_pending_url");
+      } catch {
+        pending = null;
+      }
+      if (pending && pending.trim()) {
+        setUrlValue(pending);
+        void ingestUrl(pending);
+      }
+      return;
+    }
+    if (spotify === "denied") {
+      setUrlError("Spotify connection was cancelled. You can paste the tracklist instead.");
+      return;
+    }
+    if (spotify === "not_configured") {
+      setUrlError("Spotify Connect is not configured on this server yet.");
+      return;
+    }
+    if (spotify === "state_error" || spotify === "exchange_failed" || spotify === "profile_failed" || spotify === "save_failed") {
+      setUrlError("Spotify connection failed. Please try again, or paste the tracklist.");
+      return;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const isDraggingIngestPayload = (e: React.DragEvent) => {
     const types = e.dataTransfer?.types ?? [];
     if (types.includes("Files")) return true;
@@ -1638,9 +1709,32 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
               {urlError}
             </p>
             <p className="mt-1 text-[11px] leading-snug text-rose-100/75">
-              Paste the tracklist (one track per line) and we’ll build a YouTube playlist from it.
+              {spotifyConnectAvailable
+                ? spotifyNeedsReauth
+                  ? "Your Spotify connection expired. Reconnect to read this playlist, or paste the tracklist (one track per line)."
+                  : "Connect your Spotify account to read private/blocked playlists, or paste the tracklist (one track per line)."
+                : "Paste the tracklist (one track per line) and we’ll build a YouTube playlist from it."}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
+              {spotifyConnectAvailable ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    /**
+                     * Stage 6E-A — pending URL was already stashed in sessionStorage when
+                     * the blocked response arrived; full-page nav to the OAuth start route
+                     * (cannot be fetch()'d — it 302s cross-origin to accounts.spotify.com).
+                     */
+                    if (typeof window !== "undefined") {
+                      window.location.href = "/api/auth/spotify/start";
+                    }
+                  }}
+                  disabled={urlIngesting || externalYtSaveBusy}
+                  className="rounded-lg bg-gradient-to-b from-[#1ed760] to-[#1db954] px-4 py-2 text-sm font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                >
+                  {spotifyNeedsReauth ? "Reconnect Spotify" : "Connect Spotify"}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
@@ -1650,7 +1744,11 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
                   setPasteTracklistOpen(true);
                 }}
                 disabled={urlIngesting || externalYtSaveBusy}
-                className="rounded-lg bg-gradient-to-b from-[#1ed760] to-[#1db954] px-4 py-2 text-sm font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                className={
+                  spotifyConnectAvailable
+                    ? "rounded-lg border border-[#1ed760]/45 bg-[#1ed760]/[0.06] px-4 py-2 text-sm font-semibold text-emerald-50/95 transition hover:bg-[#1ed760]/[0.12] disabled:opacity-40"
+                    : "rounded-lg bg-gradient-to-b from-[#1ed760] to-[#1db954] px-4 py-2 text-sm font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                }
               >
                 Paste tracklist
               </button>
@@ -1659,6 +1757,8 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
                 onClick={() => {
                   setUrlError(null);
                   setSpotifyBlockedShowPasteCta(false);
+                  setSpotifyConnectAvailable(false);
+                  setSpotifyNeedsReauth(false);
                 }}
                 className="rounded border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/90 hover:bg-white/10"
               >

@@ -282,6 +282,7 @@ model User {
   platformAuditActions PlatformAuditLog[]     @relation("PlatformAuditActor")
   catalogTaxonomyTagsCreated CatalogItemTaxonomyTag[] @relation("CatalogTaxonomyTagCreatedBy")
   catalogItemsArchivedByMe CatalogItem[]           @relation("CatalogItemArchivedBy")
+  spotifyConnection    SpotifyConnection?
 }
 
 model Workspace {
@@ -962,4 +963,36 @@ model AiDjPlaylist {
   playlist Playlist?   @relation(fields: [playlistId], references: [id], onDelete: SetNull)
 
   @@index([sessionId])
+}
+
+/// Stage 6E-A — per-user Spotify OAuth connection used ONLY to read playlist
+/// tracklists (title, artist, album, duration, order) when Spotify blocks the
+/// playlist under the application-scoped Client-Credentials grant. Tracks then
+/// flow into the existing YouTube Auto-Build; no Spotify URL is ever persisted
+/// as a playback source, no audio is downloaded, no Spotify playback occurs.
+///
+/// Tokens are never stored in plaintext: `encryptedTokenBlob` is an AES-256-GCM
+/// ciphertext of `{ accessToken, refreshToken }` and `tokenIv` is its random
+/// 12-byte IV. Decryption requires the server-only `SPOTIFY_TOKEN_ENCRYPTION_KEY`.
+/// Connection is per-User (one human = one Spotify account), shared across every
+/// workspace that user belongs to — matching Spotify's own account model.
+model SpotifyConnection {
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  spotifyUserId      String
+  spotifyDisplayName String?
+  /// AES-256-GCM ciphertext of JSON { accessToken, refreshToken }. Auth tag appended.
+  encryptedTokenBlob Bytes
+  /// Random 12-byte IV for the GCM cipher above.
+  tokenIv            Bytes
+  /// Exact space-delimited scopes Spotify granted (verified at use time).
+  scope              String
+  /// Access-token expiry; store refreshes opportunistically before this.
+  expiresAt          DateTime
+  connectedAt        DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
 }
