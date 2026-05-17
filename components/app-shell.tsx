@@ -27,6 +27,7 @@ import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { HeaderDeviceIndicators } from "@/components/header-device-indicators";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
+import { DesktopUpdatePill } from "@/components/desktop-update-pill";
 import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule } from "@/lib/center-module-context";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { useTopNavPins } from "@/lib/use-top-nav-pins";
@@ -851,6 +852,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="flex min-w-0 flex-1 basis-0 items-center justify-end gap-1.5 sm:gap-2">
               <div className="me-0.5 min-w-0 shrink-0 border-e border-slate-600/60 pe-2 sm:pe-3">
                 <DesktopDownloadButton />
+                <DesktopUpdatePill />
               </div>
               <HeaderDeviceIndicators />
               <span className="hidden items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/80 px-2.5 py-1 text-xs text-slate-400 sm:flex">

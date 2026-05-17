@@ -17,6 +17,8 @@ export const MVP_IPC = {
   MPV_PLAY_INTERRUPT: "mvp:mpv-play-interrupt",
   SET_DUCK_PERCENT: "mvp:set-duck-percent",
   MPV_SEEK_TO: "mvp:mpv-seek-to",
+  /** Running desktop app version (`app.getVersion()`) for the update-available check. */
+  GET_APP_VERSION: "mvp:get-app-version",
   /** Main process: list audio files in a directory (Desktop only). */
   SCAN_LOCAL_AUDIO_FOLDER: "mvp:scan-local-audio-folder",
   /** Read OS login-item state via app.getLoginItemSettings. */

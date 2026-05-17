@@ -22,6 +22,8 @@ import type {
 export type SyncBizDesktopMvp = {
   getConfig: () => Promise<DesktopRuntimeConfig>;
   getStatus: () => Promise<MvpStatusSnapshot>;
+  /** Running desktop app SemVer (`app.getVersion()`), for the in-app update check. */
+  getAppVersion: () => Promise<string>;
   saveConfig: (patch: MvpConfigPatch) => Promise<DesktopRuntimeConfig>;
   connectCloud: () => Promise<MvpStatusSnapshot>;
   disconnectCloud: () => Promise<MvpStatusSnapshot>;

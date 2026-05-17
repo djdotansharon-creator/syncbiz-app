@@ -128,6 +128,8 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     return fallbackSnapshotFromConfig(c);
   });
 
+  ipcMain.handle(MVP_IPC.GET_APP_VERSION, (): string => app.getVersion());
+
   ipcMain.handle(MVP_IPC.SAVE_CONFIG, (_e, patch: MvpConfigPatch): DesktopRuntimeConfig => {
     const cur = loadRuntimeConfig(getUserData());
     const next = patchRuntimeConfig(getUserData(), cur, patch);
