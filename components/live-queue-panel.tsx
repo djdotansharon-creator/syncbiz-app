@@ -5,6 +5,7 @@ import type { PlaylistTrack } from "@/lib/playlist-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { getPlaylistSessionTracks, usePlayback } from "@/lib/playback-provider";
 import { isPlayNextSourceId } from "@/lib/play-next";
+import { resolveMyMusicLibraryDropFromDataTransfer } from "@/lib/music-library-drag";
 import {
   collectElectronFilePathsFromDataTransfer,
   getNativePathForDroppedFile,
@@ -362,13 +363,19 @@ export function LiveQueuePanel() {
    * React drop handler fire for the same native event.
    */
   const ingestDataTransfer = useCallback(
-    (dt: DataTransfer | null, sourcePath: string) => {
+    async (dt: DataTransfer | null, sourcePath: string): Promise<boolean> => {
       if (!dt) return false;
       if (processedDtRef.current.has(dt)) {
         console.debug("[SyncBiz:play-next-skip-dup]", { sourcePath });
         return true;
       }
       processedDtRef.current.add(dt);
+
+      const localLibrary = await resolveMyMusicLibraryDropFromDataTransfer(dt);
+      if (localLibrary.length > 0) {
+        addPlayNextSources(localLibrary);
+        return true;
+      }
 
       const fromSyncbiz = extractPlayNextItemsFromSyncbizDrag(dt);
       if (fromSyncbiz.sources.length > 0) {
@@ -428,7 +435,7 @@ export function LiveQueuePanel() {
       e.preventDefault();
       e.stopPropagation();
       setOverDrop(false);
-      ingestDataTransfer(e.dataTransfer, sourcePath);
+      void ingestDataTransfer(e.dataTransfer, sourcePath);
     },
     [ingestDataTransfer],
   );
@@ -455,12 +462,14 @@ export function LiveQueuePanel() {
       if (!dt) return;
       if (!isInsidePanel(e.target)) return;
       e.preventDefault();
-      const consumed = ingestDataTransfer(dt, "window");
-      const types = [...dt.types];
-      const hasSyncbiz = types.some((t) => t.startsWith("application/syncbiz-"));
-      if (!consumed && hasSyncbiz) {
-        showHint("Couldn't read that library item. Try dropping a different track.");
-      }
+      void (async () => {
+        const consumed = await ingestDataTransfer(dt, "window");
+        const types = [...dt.types];
+        const hasSyncbiz = types.some((t) => t.startsWith("application/syncbiz-"));
+        if (!consumed && hasSyncbiz) {
+          showHint("Couldn't read that library item. Try dropping a different track.");
+        }
+      })();
     };
     const onWinDragOver = (e: DragEvent) => {
       const dt = e.dataTransfer;

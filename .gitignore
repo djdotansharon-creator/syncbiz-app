@@ -61,8 +61,12 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# local claude settings (per-machine)
-.claude/settings.local.json
+# Local agent / IDE artifacts (never commit)
+.claude/
+
+# Playwright E2E output (reports + per-run failure dirs)
+playwright-report/
+test-results/
 
 # desktop runtime binaries (mpv.exe, yt-dlp.exe) — too large for git (100+ MB)
 # these are fetched/vendored outside of version control

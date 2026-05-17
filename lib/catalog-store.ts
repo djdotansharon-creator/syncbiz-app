@@ -12,6 +12,8 @@ import { awaitCatalogYoutubeSnapshotFirstAttempt } from "./catalog-source-refres
 import { catalogDiscoveryActiveWhere } from "./catalog-discovery-scope";
 
 export function normalizeCatalogUrlKey(url: string, type: PlaylistType): string {
+  /** Local paths must never become catalog dedupe keys or create CatalogItem rows. */
+  if (type === "local") return "";
   const u = (url ?? "").trim();
   if (!u) return "";
   if (type === "youtube") {
@@ -45,6 +47,9 @@ export async function findOrCreateCatalogItem(input: {
   title: string;
   thumbnailUrl: string;
 }): Promise<{ id: string; created: boolean }> {
+  if (input.type === "local") {
+    throw new Error("findOrCreateCatalogItem: local file paths are not catalog-backed");
+  }
   const raw = input.urlKey.trim();
   if (!raw) throw new Error("urlKey is required");
 

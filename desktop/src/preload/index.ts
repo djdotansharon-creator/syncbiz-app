@@ -3,14 +3,23 @@
  */
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
+  AutoStartState,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
   DesktopSignInResult,
   LocalMockTransportPayload,
+  MusicFolderSnapshot,
   MvpConfigPatch,
   MvpStatusSnapshot,
+  PickMusicFolderResult,
   ScanLocalAudioFolderResult,
+  ListMusicLibraryDirResult,
+  GetLocalAudioCoverResult,
+  GetLocalAudioTagsResult,
+  InspectLocalAudioTagsRawResult,
+  SearchLocalCollectionSnapshotResult,
+  ImportLocalM3uPlaylistResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import type { SyncBizDesktopMvp } from "../shared/mvp-desktop-api";
@@ -20,6 +29,7 @@ console.log("[SyncBiz desktop] preload: loading");
 const api: SyncBizDesktopMvp = {
   getConfig: () => ipcRenderer.invoke(MVP_IPC.GET_CONFIG),
   getStatus: () => ipcRenderer.invoke(MVP_IPC.GET_STATUS),
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke(MVP_IPC.GET_APP_VERSION),
   saveConfig: (patch) => ipcRenderer.invoke(MVP_IPC.SAVE_CONFIG, patch),
   connectCloud: () => ipcRenderer.invoke(MVP_IPC.WS_CONNECT),
   disconnectCloud: () => ipcRenderer.invoke(MVP_IPC.WS_DISCONNECT),
@@ -49,6 +59,24 @@ const api: SyncBizDesktopMvp = {
       return "";
     }
   },
+  getAutoStart: (): Promise<AutoStartState> => ipcRenderer.invoke(MVP_IPC.GET_AUTOSTART),
+  setAutoStart: (enabled: boolean): Promise<AutoStartState> =>
+    ipcRenderer.invoke(MVP_IPC.SET_AUTOSTART, enabled),
+  getMusicFolder: (): Promise<MusicFolderSnapshot> => ipcRenderer.invoke(MVP_IPC.GET_MUSIC_FOLDER),
+  pickMusicFolder: (): Promise<PickMusicFolderResult> => ipcRenderer.invoke(MVP_IPC.PICK_MUSIC_FOLDER),
+  clearMusicFolder: (): Promise<MusicFolderSnapshot> => ipcRenderer.invoke(MVP_IPC.CLEAR_MUSIC_FOLDER),
+  listMusicLibraryDir: (subPath: string): Promise<ListMusicLibraryDirResult> =>
+    ipcRenderer.invoke(MVP_IPC.LIST_MUSIC_LIBRARY_DIR, subPath),
+  getLocalAudioCover: (absolutePath: string): Promise<GetLocalAudioCoverResult> =>
+    ipcRenderer.invoke(MVP_IPC.GET_LOCAL_AUDIO_COVER, absolutePath),
+  getLocalAudioTags: (absolutePath: string): Promise<GetLocalAudioTagsResult> =>
+    ipcRenderer.invoke(MVP_IPC.GET_LOCAL_AUDIO_TAGS, absolutePath),
+  inspectLocalAudioTagsRaw: (absolutePath: string): Promise<InspectLocalAudioTagsRawResult> =>
+    ipcRenderer.invoke(MVP_IPC.INSPECT_LOCAL_AUDIO_TAGS_RAW, absolutePath),
+  searchLocalCollectionSnapshot: (query: string, limit?: number): Promise<SearchLocalCollectionSnapshotResult> =>
+    ipcRenderer.invoke(MVP_IPC.SEARCH_LOCAL_COLLECTION_SNAPSHOT, query, limit),
+  importLocalM3uPlaylist: (absolutePath: string): Promise<ImportLocalM3uPlaylistResult> =>
+    ipcRenderer.invoke(MVP_IPC.IMPORT_LOCAL_M3U_PLAYLIST, absolutePath),
   onStatus: (callback) => {
     const handler = (_: unknown, status: MvpStatusSnapshot) => {
       callback(status);

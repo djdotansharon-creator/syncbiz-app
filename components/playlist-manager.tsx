@@ -14,6 +14,7 @@ import { DENSE_PLAYLIST_MANAGER_ROW_GRID_CLASS } from "@/lib/player-surface/dens
 import { PlaylistIconBadge } from "@/components/playlist-icon-badge";
 import { PlaylistPlayerProvider, usePlaylistPlayer } from "@/lib/playlist-player-context";
 import type { Playlist } from "@/lib/playlist-types";
+import { derivePlaylistUnifiedCoverArt } from "@/lib/playlist-utils";
 
 type ViewMode = "grid" | "list";
 
@@ -220,11 +221,7 @@ function PlaylistRow({
     return () => ctrl.abort();
   }, [active, localOrStream, status, playlist.url]);
 
-  const thumbnail =
-    playlist.thumbnail ||
-    (playlist.type === "youtube"
-      ? `https://img.youtube.com/vi/${playlist.url.match(/(?:v=|\/)([^&\s?/]+)/)?.[1]}/default.jpg`
-      : null);
+  const thumbnail = derivePlaylistUnifiedCoverArt(playlist);
 
   async function handleStopLocal() {
     await fetch("/api/commands/stop-local", { method: "POST" });

@@ -226,6 +226,25 @@ function isEligibleConnectedPlaybackCandidate(d: DeviceConnection, userId: strin
   );
 }
 
+/**
+ * Desktop-priority arbitration helpers.
+ *
+ * `branch_desktop_station` (Electron / dedicated player) is the only purpose
+ * eligible to own `primaryMasterByBranch`. Web stations may become MASTER as a
+ * fallback (cold start / no desktop / post-grace) but never write a primary
+ * reservation. A connected desktop station auto-takes MASTER from any
+ * non-desktop holder on REGISTER; a desktop primary alive within grace blocks
+ * non-desktop promotions.
+ */
+function isDesktopStation(d: DeviceConnection | null | undefined): boolean {
+  return d?.registrationIntent?.devicePurpose === "branch_desktop_station";
+}
+
+/** Always-on, structured lease-transition log so MASTER changes are visible in production stdout. */
+function logLeaseEvent(event: string, data: Record<string, unknown>): void {
+  console.log(`[SyncBiz WS][lease] ${event}`, JSON.stringify(data));
+}
+
 function demoteOtherMasters(userId: string, branchId: string, exceptDeviceId: string, newMasterId: string): void {
   devices.forEach((d) => {
     if (d.id === exceptDeviceId) return;
@@ -239,16 +258,25 @@ function demoteOtherMasters(userId: string, branchId: string, exceptDeviceId: st
 }
 
 function tryPromoteConnectedControlOnMasterLoss(userId: string, branchId: string): string | null {
-  let candidate: DeviceConnection | null = null;
+  // Desktop priority: prefer a desktop_station CONTROL over a web_station CONTROL.
+  let desktopCandidate: DeviceConnection | null = null;
+  let webCandidate: DeviceConnection | null = null;
   devices.forEach((d) => {
     if (!isEligibleConnectedPlaybackCandidate(d, userId, branchId)) return;
     if (d.mode !== "CONTROL") return;
-    if (!candidate || d.connectedAt < candidate.connectedAt) {
-      candidate = d;
+    if (isDesktopStation(d)) {
+      if (!desktopCandidate || d.connectedAt < desktopCandidate.connectedAt) {
+        desktopCandidate = d;
+      }
+    } else {
+      if (!webCandidate || d.connectedAt < webCandidate.connectedAt) {
+        webCandidate = d;
+      }
     }
   });
-  if (!candidate) return null;
-  const selected: DeviceConnection = candidate as DeviceConnection;
+  const pick = desktopCandidate ?? webCandidate;
+  if (!pick) return null;
+  const selected: DeviceConnection = pick as DeviceConnection;
 
   const key = branchKey(userId, branchId);
   devices.forEach((d) => {
@@ -269,16 +297,30 @@ function tryPromoteConnectedControlOnMasterLoss(userId: string, branchId: string
 
   selected.mode = "MASTER";
   masterByBranch.set(key, selected.id);
-  // NOTE: primaryMasterByBranch intentionally NOT overwritten here.
-  // This promotion is a TEMPORARY takeover after the designated primary dropped.
-  // Keeping `primaryMasterByBranch` pointing at the original primary lets it
-  // reclaim MASTER when it reconnects (see REGISTER "device matches primary
-  // reservation" branch). Explicit transfer still goes through SET_MASTER.
+  // primaryMasterByBranch policy:
+  //   - If an existing primary is set, leave it (lets the designated desktop primary reclaim
+  //     within grace; the takeover holder is temporary).
+  //   - If no primary is set AND we're promoting a desktop_station, write primary so that
+  //     desktop now owns the reservation going forward (e.g. web fallback MASTER died and
+  //     a desktop CONTROL took over — desktop should be the new primary).
+  //   - If no primary AND we're promoting a web_station, do NOT write primary (web is
+  //     fallback only; primary is desktop-only).
+  if (!primaryMasterByBranch.has(key) && isDesktopStation(selected)) {
+    primaryMasterByBranch.set(key, selected.id);
+  }
   masterDisconnectedAt.delete(key);
   persistMasterLease();
   if (selected.ws.readyState === 1) {
     selected.ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "MASTER" } as ServerMessage));
   }
+  logLeaseEvent("promote", {
+    userId,
+    branchId,
+    deviceId: selected.id,
+    purpose: selected.registrationIntent?.devicePurpose ?? "unknown",
+    triggeredBy: "tryPromoteConnectedControlOnMasterLoss",
+    primaryAfter: primaryMasterByBranch.get(key) ?? null,
+  });
   return selected.id;
 }
 
@@ -586,10 +628,27 @@ wss.on("connection", (ws) => {
         let secondaryDesktop = false;
         const key = branchKey(userId, branchId);
         const primaryId = primaryMasterByBranch.get(key);
-        let reservedMasterId: string | null = null;
         let masterDecisionReason = "";
 
+        const wantsDesktop = registrationIntent?.devicePurpose === "branch_desktop_station";
+        const primaryConn = primaryId ? devices.get(primaryId) : undefined;
+        const primaryIsActiveDesktop =
+          !!primaryConn && primaryConn.ws.readyState === 1 && isDesktopStation(primaryConn);
+        const primaryReservedDesktopWithinGrace = (() => {
+          if (!primaryId) return false;
+          if (primaryConn) return false;
+          const disconnectedAt = masterDisconnectedAt.get(key);
+          if (!disconnectedAt) return false;
+          if (Date.now() - disconnectedAt > MASTER_GRACE_MS) return false;
+          // Going forward only desktop_station writes primary; legacy state may have web ids
+          // here but we can't tell once the device entry is gone. Treat offline-but-within-grace
+          // primary as desktop-equivalent — worst case is a one-time legacy stall up to ~90s.
+          return true;
+        })();
+        const desktopPrimaryHolds = primaryIsActiveDesktop || primaryReservedDesktopWithinGrace;
+
         if (isMobile) {
+          // Mobile must never own primary. Clean up any stale ownership.
           if (masterByBranch.get(key) === deviceId) {
             masterByBranch.delete(key);
             masterDisconnectedAt.delete(key);
@@ -597,42 +656,76 @@ wss.on("connection", (ws) => {
             persistMasterLease();
           }
           masterDecisionReason = "mobile: never claim primary MASTER lease";
-        } else if (primaryId) {
-          if (deviceId === primaryId) {
+        } else if (deviceId === primaryId) {
+          // Primary reclaim. Block legacy non-desktop primary if a desktop is currently MASTER
+          // (heals legacy state by re-pointing primary at the active desktop).
+          const currentMasterId = masterByBranch.get(key);
+          const currentMaster =
+            currentMasterId && currentMasterId !== deviceId ? devices.get(currentMasterId) : undefined;
+          const desktopActiveMaster =
+            !!currentMaster &&
+            currentMaster.ws.readyState === 1 &&
+            currentMaster.mode === "MASTER" &&
+            isDesktopStation(currentMaster);
+          if (!wantsDesktop && desktopActiveMaster) {
+            primaryMasterByBranch.set(key, currentMaster.id);
+            persistMasterLease();
+            masterDecisionReason =
+              "non-desktop primary blocked: desktop currently MASTER -> CONTROL (primary healed to desktop)";
+          } else {
             mode = "MASTER";
             masterDisconnectedAt.delete(key);
-            // Demote any takeover holder before this primary reclaims the lease.
             demoteOtherMasters(userId, branchId, deviceId, deviceId);
             masterByBranch.set(key, deviceId);
             persistMasterLease();
-            masterDecisionReason = "desktop: device matches primary reservation -> MASTER (demoted any takeover holder)";
-          } else {
-            // Only flag secondaryDesktop for Electron desktop stations — not for browser tabs.
-            // Browser tabs are expected to be CONTROL; showing the "second desktop" warning
-            // in a browser is incorrect and causes spurious modal interference.
-            secondaryDesktop =
-              registrationIntent?.devicePurpose === "branch_desktop_station" &&
-              devices.has(primaryId);
-            masterDecisionReason = "desktop: different device than primary reservation -> CONTROL";
+            masterDecisionReason = wantsDesktop
+              ? "desktop: device matches primary reservation -> MASTER (demoted any takeover holder)"
+              : "non-desktop: device matches primary reservation -> MASTER (legacy primary)";
           }
-        } else {
-          reservedMasterId = getReservedMasterForBranch(userId, branchId);
-          if (deviceId === reservedMasterId) {
+        } else if (wantsDesktop) {
+          // Desktop priority:
+          //   - If another desktop already holds/reserves primary, this desktop is secondary -> CONTROL.
+          //   - Otherwise (no primary, or primary points at a non-desktop / fallback web MASTER),
+          //     take MASTER and write primary to this desktop.
+          if (desktopPrimaryHolds) {
+            secondaryDesktop = true;
+            masterDecisionReason = "another desktop holds/reserves primary -> CONTROL (secondary)";
+          } else {
             mode = "MASTER";
             masterDisconnectedAt.delete(key);
+            demoteOtherMasters(userId, branchId, deviceId, deviceId);
             masterByBranch.set(key, deviceId);
             primaryMasterByBranch.set(key, deviceId);
             persistMasterLease();
-            masterDecisionReason = "desktop: reserved master within grace -> MASTER";
-          } else if (reservedMasterId) {
-            secondaryDesktop = registrationIntent?.devicePurpose === "branch_desktop_station";
-            masterDecisionReason = "desktop: reserved master within grace (other device) -> CONTROL";
+            masterDecisionReason = primaryId
+              ? "desktop priority: took MASTER from non-desktop primary"
+              : "desktop: no active desktop primary -> MASTER";
+          }
+        } else {
+          // Web station (or unknown-purpose): only fallback when no desktop owns/reserves primary
+          // AND no other device is currently MASTER. Never writes primary.
+          if (desktopPrimaryHolds) {
+            masterDecisionReason = "desktop primary holds/reserves -> CONTROL";
           } else {
-            mode = "MASTER";
-            masterByBranch.set(key, deviceId);
-            primaryMasterByBranch.set(key, deviceId);
-            persistMasterLease();
-            masterDecisionReason = "desktop: no primary/reservation -> first eligible -> MASTER";
+            const currentMasterId = masterByBranch.get(key);
+            const currentMaster =
+              currentMasterId && currentMasterId !== deviceId ? devices.get(currentMasterId) : undefined;
+            const someoneElseAlreadyMaster =
+              !!currentMaster && currentMaster.ws.readyState === 1 && currentMaster.mode === "MASTER";
+            if (someoneElseAlreadyMaster) {
+              masterDecisionReason = "existing MASTER present (no steal) -> CONTROL";
+            } else {
+              mode = "MASTER";
+              masterDisconnectedAt.delete(key);
+              masterByBranch.set(key, deviceId);
+              // Web fallback NEVER writes primary. If a stale legacy primary points at an
+              // offline non-desktop, clear it so future desktops aren't blocked.
+              if (primaryId && !primaryConn) {
+                primaryMasterByBranch.delete(key);
+              }
+              persistMasterLease();
+              masterDecisionReason = "web fallback: no desktop primary, no active MASTER -> MASTER";
+            }
           }
         }
 
@@ -650,20 +743,20 @@ wss.on("connection", (ws) => {
           registrationIntent,
         });
         console.log("[SyncBiz WS] register device", { deviceId, userId, branchId, mode });
-        if (process.env.NODE_ENV === "development") {
-          console.info("[SyncBiz WS] register device decision", {
-            userId,
-            branchId,
-            deviceId,
-            isMobile,
-            key,
-            primaryId,
-            reservedMasterId,
-            secondaryDesktop,
-            mode,
-            reason: masterDecisionReason,
-          });
-        }
+        logLeaseEvent("register", {
+          userId,
+          branchId,
+          deviceId,
+          isMobile,
+          purpose: registrationIntent?.devicePurpose ?? "unknown",
+          primaryBefore: primaryId ?? null,
+          primaryAfter: primaryMasterByBranch.get(key) ?? null,
+          masterAfter: masterByBranch.get(key) ?? null,
+          secondaryDesktop,
+          mode,
+          reason: masterDecisionReason,
+          triggeredBy: "REGISTER",
+        });
         const sessionCode = getOrCreateSessionCode(userId);
         const reply: ServerMessage = { type: "REGISTERED", deviceId, sessionCode };
         ws.send(JSON.stringify(reply));
@@ -805,28 +898,64 @@ wss.on("connection", (ws) => {
       const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
       const key = branchKey(userId, branchId);
       const primaryId = primaryMasterByBranch.get(key);
+      const requesterIsDesktop = isDesktopStation(conn);
 
-      if (process.env.NODE_ENV === "development") {
-        console.info("[SyncBiz WS] SET_MASTER attempt", {
+      // Mobile must NEVER become primary branch MASTER. Reject SET_MASTER from mobile.
+      if (isMobile) {
+        logLeaseEvent("set_master_blocked", {
           userId,
           branchId,
           deviceId,
-          isMobile,
-          primaryId,
-          primaryMatchesDevice: primaryId ? primaryId === deviceId : null,
-          masterByBranchCurrent: masterByBranch.get(key) ?? null,
+          reason: "mobile",
+          triggeredBy: "SET_MASTER",
         });
+        return;
       }
 
-      // Mobile must NEVER become primary branch MASTER. Reject SET_MASTER from mobile.
-      if (isMobile) return;
+      // Desktop priority: a non-desktop SET_MASTER cannot steal MASTER from an active desktop.
+      const currentMasterId = masterByBranch.get(key);
+      const currentMaster =
+        currentMasterId && currentMasterId !== deviceId ? devices.get(currentMasterId) : undefined;
+      const desktopActiveMaster =
+        !!currentMaster &&
+        currentMaster.ws.readyState === 1 &&
+        currentMaster.mode === "MASTER" &&
+        isDesktopStation(currentMaster);
+      if (!requesterIsDesktop && desktopActiveMaster) {
+        logLeaseEvent("set_master_blocked", {
+          userId,
+          branchId,
+          deviceId,
+          purpose: conn?.registrationIntent?.devicePurpose ?? "unknown",
+          reason: "non-desktop SET_MASTER blocked by active desktop MASTER",
+          activeDesktopMasterId: currentMaster.id,
+          triggeredBy: "SET_MASTER",
+        });
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: "ERROR", message: "Desktop player is currently MASTER" } as ServerMessage));
+        }
+        return;
+      }
 
       demoteOtherMasters(userId, branchId, deviceId, deviceId);
       masterByBranch.set(key, deviceId);
-      primaryMasterByBranch.set(key, deviceId);
+      // Only desktop_station owns primary. Web SET_MASTER takes MASTER without writing primary
+      // so a desktop arriving later will auto-take MASTER per arbitration rules.
+      if (requesterIsDesktop) {
+        primaryMasterByBranch.set(key, deviceId);
+      }
       masterDisconnectedAt.delete(key);
       persistMasterLease();
       if (conn) conn.mode = "MASTER";
+      logLeaseEvent("set_master", {
+        userId,
+        branchId,
+        deviceId,
+        purpose: conn?.registrationIntent?.devicePurpose ?? "unknown",
+        primaryBefore: primaryId ?? null,
+        primaryAfter: primaryMasterByBranch.get(key) ?? null,
+        triggeredBy: "SET_MASTER",
+      });
       if (ws.readyState === 1) {
         ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "MASTER" } as ServerMessage));
       }
@@ -850,6 +979,13 @@ wss.on("connection", (ws) => {
       if (ws.readyState === 1) {
         ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL" } as ServerMessage));
       }
+      logLeaseEvent("set_control", {
+        userId,
+        branchId,
+        deviceId,
+        purpose: conn?.registrationIntent?.devicePurpose ?? "unknown",
+        triggeredBy: "SET_CONTROL",
+      });
       broadcastDeviceList();
       return;
     }
@@ -904,54 +1040,68 @@ wss.on("connection", (ws) => {
         const key = branchKey(userId, branchId);
         const designatedMasterId = masterByBranch.get(key);
         let shouldTryAutoPromote = false;
+        let masterDeathReason = "";
         if (designatedMasterId === deviceId) {
           if (conn.isMobile) {
+            // Mobile should never have been MASTER; clean up unconditionally.
             masterByBranch.delete(key);
             masterDisconnectedAt.delete(key);
             shouldTryAutoPromote = true;
-          } else {
+            masterDeathReason = "mobile MASTER cleanup";
+          } else if (isDesktopStation(conn)) {
+            // Desktop primary: keep grace window so a brief reconnect reclaims MASTER.
+            // Browser/web CONTROL must NOT auto-promote during grace; only another
+            // desktop CONTROL may take over immediately on a true-loss close.
             masterDisconnectedAt.set(key, Date.now());
-            // Asymmetric failover policy (fixes desktop<->browser ping-pong):
-            //
-            //   - Dying master was a WEB_STATION (browser): a true-loss close
-            //     (1001 "going away" / 4006 heartbeat timeout) hands control
-            //     over immediately. A connected desktop CONTROL will reclaim
-            //     MASTER without a delay.
-            //
-            //   - Dying master was a DESKTOP_STATION (Electron): do NOT promote
-            //     a web-station CONTROL on any transient close. Electron may
-            //     reload its renderer / refresh the WS token and reconnect
-            //     within 1-2s; promoting the browser only to demote it again
-            //     when Electron reclaims primary is exactly the "flipping"
-            //     behavior the user is hitting. We let the 90s grace window
-            //     handle true abandonment instead.
-            //
-            //     Exception: if another DESKTOP_STATION is connected as CONTROL
-            //     (rare two-desktop scenario), promote that desktop immediately.
-            //
-            //   - Unknown purpose: fall back to the previous code-based rule.
             if (isTrueMasterLossCloseCode(code)) {
-              const diedPurpose = conn.registrationIntent?.devicePurpose;
-              if (diedPurpose === "branch_web_station") {
-                shouldTryAutoPromote = true;
-              } else if (diedPurpose === "branch_desktop_station") {
-                let hasOtherDesktopControl = false;
-                for (const d of devices.values()) {
-                  if (d.id === deviceId) continue;
-                  if (!isEligibleConnectedPlaybackCandidate(d, userId, branchId)) continue;
-                  if (d.mode !== "CONTROL") continue;
-                  if (d.registrationIntent?.devicePurpose === "branch_desktop_station") {
-                    hasOtherDesktopControl = true;
-                    break;
-                  }
+              let hasOtherDesktopControl = false;
+              for (const d of devices.values()) {
+                if (d.id === deviceId) continue;
+                if (!isEligibleConnectedPlaybackCandidate(d, userId, branchId)) continue;
+                if (d.mode !== "CONTROL") continue;
+                if (isDesktopStation(d)) {
+                  hasOtherDesktopControl = true;
+                  break;
                 }
-                shouldTryAutoPromote = hasOtherDesktopControl;
-              } else {
-                shouldTryAutoPromote = true;
               }
+              shouldTryAutoPromote = hasOtherDesktopControl;
+              masterDeathReason = hasOtherDesktopControl
+                ? "desktop MASTER true-loss with desktop CONTROL available -> promote"
+                : "desktop MASTER true-loss, no desktop CONTROL -> grace window, web stays CONTROL";
+            } else {
+              masterDeathReason = "desktop MASTER ambiguous close -> grace window";
+            }
+          } else {
+            // Web/fallback MASTER: no grace window — fallback ownership is not reserved.
+            // Drop the lease immediately; a true-loss close attempts auto-promote so a
+            // desktop CONTROL (if any) takes over without delay.
+            masterByBranch.delete(key);
+            masterDisconnectedAt.delete(key);
+            if (primaryMasterByBranch.get(key) === deviceId) {
+              // Defensive: legacy state may have a web id in primary. Clear it.
+              primaryMasterByBranch.delete(key);
+            }
+            if (isTrueMasterLossCloseCode(code)) {
+              shouldTryAutoPromote = true;
+              masterDeathReason = "web fallback MASTER true-loss -> immediate promote attempt";
+            } else {
+              masterDeathReason = "web fallback MASTER ambiguous close -> immediate cleanup, no promote";
             }
           }
           persistMasterLease();
+          logLeaseEvent("master_death", {
+            userId,
+            branchId,
+            deviceId,
+            purpose: conn.registrationIntent?.devicePurpose ?? "unknown",
+            isMobile: conn.isMobile === true,
+            closeCode: code,
+            shouldTryAutoPromote,
+            primaryAfter: primaryMasterByBranch.get(key) ?? null,
+            masterAfter: masterByBranch.get(key) ?? null,
+            triggeredBy: "ws_close",
+            reason: masterDeathReason,
+          });
         }
         devices.delete(deviceId);
         deviceState.delete(deviceId);

@@ -15,11 +15,16 @@ import {
   getYouTubeVideoId,
   isYouTubeMixUrl,
   isYouTubeMultiTrackUrl,
+  classifyMusicUrlIngest,
+  canonicalYouTubeWatchUrlForPlayback,
+  isShazamUrl,
+  isWeakStorefrontParsedTitle,
 } from "@/lib/playlist-utils";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { inferGenre } from "@/lib/infer-genre";
 import { searchAll, searchExternal, type YouTubeSearchResult, type RadioSearchResult } from "@/lib/search-service";
+import { createEphemeralLocalSearchSource } from "@/lib/play-next";
 import { radioToUnified } from "@/lib/radio-utils";
 import {
   pickUnifiedFoundationFields,
@@ -33,10 +38,57 @@ import type { Playlist } from "@/lib/playlist-types";
 import {
   collectElectronFilePathsFromDataTransfer,
   isLocalPathLikelyFolderInWebBrowser,
+  isPlaylistContainerPath,
   normalizeLocalFilePathInput,
   resolveDesktopFolderDropPath,
   titleFromLocalPath,
 } from "@/lib/local-audio-path";
+import { createUnifiedPlaylistFromLocalScan } from "@/lib/local-music-library-playlist";
+import { M3uYoutubeResolveModal } from "@/components/m3u-youtube-resolve-modal";
+import {
+  buildM3uYoutubeResolveContext,
+  unresolvedM3uSummaryHint,
+  type M3uYoutubeResolveContextState,
+} from "@/lib/m3u-youtube-resolve-shared";
+import "@/components/library-input-ingest-effects.css";
+import { CompactSourceBadge, TrackMediaPlaceholder } from "@/components/track-source-visual";
+import { inferTrackSourceChip } from "@/lib/track-source-chip";
+import {
+  tryBuildExternalMusicYoutubeSearchQuery,
+  isMusicUrlYoutubePickerProvider,
+  narrowExternalMusicYoutubeDisplay,
+  pseudoM3uRowForExternalMusicPaste,
+} from "@/lib/external-music-youtube-resolve";
+import {
+  ExternalMusicYoutubePickerPanel,
+  type ExternalMusicYtResolvePack,
+} from "@/components/external-music-youtube-picker";
+import {
+  fetchSpotifyPlaylistPreview,
+  normalizeSpotifyShareInput,
+  parseSpotifyPlaylistOrAlbumUrl,
+  runSpotifyAutoBuildYoutubeSearch,
+  saveAutoBuiltYoutubePlaylist,
+  spotifyTracksToUnresolvedRows,
+  type SpotifyAutoBuildResolvedPick,
+} from "@/lib/spotify-playlist-import-client";
+import { unifiedSourceFromFetchedPlaylist } from "@/lib/local-music-library-playlist";
+import type { M3uUnresolvedImportRow } from "@/lib/m3u-youtube-resolve-shared";
+import { PlainTracklistPasteModal } from "@/components/plain-tracklist-paste-modal";
+import {
+  PASTED_TRACKLIST_MAX,
+  pastedTracklistRowsToUnresolvedRows,
+} from "@/lib/plain-tracklist-parser";
+
+/** Animated shell phase for M3U / URL ingest (`sb-library-ingest-shell--*` in CSS). */
+function libraryUrlIngestPhaseClass(phase: string | null): string {
+  const p = (phase ?? "").toLowerCase();
+  if (p.startsWith("reading")) return "sb-library-ingest-shell--read";
+  if (p.includes("resolving")) return "sb-library-ingest-shell--resolve";
+  if (p.includes("youtube")) return "sb-library-ingest-shell--youtube";
+  if (p.includes("creating")) return "sb-library-ingest-shell--save";
+  return "sb-library-ingest-shell--neutral";
+}
 
 const controlHeight = "h-10";
 const inputBase =
@@ -71,9 +123,77 @@ function logDesktopLibraryIngestDrop(e: React.DragEvent, payload: string | null)
   });
 }
 
+/** Compose a display title for a local snapshot hit (artist — title, falling back to filename). */
+function localSnapshotHitDisplayTitle(hit: {
+  artist: string | null;
+  title: string | null;
+  absolutePath: string;
+}): string {
+  const tr = (hit.title ?? "").trim();
+  const ar = (hit.artist ?? "").trim();
+  if (ar && tr) return `${ar} — ${tr}`;
+  if (tr) return tr;
+  if (ar) return ar;
+  return titleFromLocalPath(hit.absolutePath);
+}
+
+/**
+ * Desktop-only: search the persisted local collection snapshot via the preload bridge
+ * and convert hits into ephemeral UnifiedSources (no playlist creation, no folder scan,
+ * no tag read). Returns [] in browser/SSR or when the bridge is missing.
+ */
+async function searchMusicBankLocalSnapshot(query: string, limit: number): Promise<UnifiedSource[]> {
+  if (typeof window === "undefined") return [];
+  const inv = window.syncbizDesktop?.searchLocalCollectionSnapshot;
+  if (typeof inv !== "function") return [];
+  try {
+    const res = await inv(query, limit);
+    if (res.status !== "ok") return [];
+    const seen = new Set<string>();
+    const out: UnifiedSource[] = [];
+    for (const hit of res.hits) {
+      const abs = (hit.absolutePath ?? "").trim();
+      if (!abs) continue;
+      const key = (hit.localId ?? "").trim() || abs;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const genre = (hit.genre ?? "").trim() || null;
+      out.push(
+        createEphemeralLocalSearchSource(abs, {
+          title: localSnapshotHitDisplayTitle(hit),
+          genre,
+        }),
+      );
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 async function parseUrl(url: string): Promise<ParseUrlJson | null> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 2500);
+  try {
+    const res = await fetch("/api/sources/parse-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/** Storefront / OG + noembed parsing can exceed the default fast parse cap. */
+async function parseUrlStorefront(url: string): Promise<ParseUrlJson | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 14_000);
   try {
     const res = await fetch("/api/sources/parse-url", {
       method: "POST",
@@ -132,9 +252,11 @@ type Props = {
   onAdd: (source: UnifiedSource) => void;
   /** When in CONTROL mode, use this to send PLAY_SOURCE to MASTER instead of local play. */
   playSourceOverride?: (source: UnifiedSource) => void;
+  /** After M3U YouTube merges, refresh the playlist tile in Sources (same as My Music). */
+  onPlaylistUpdated?: (source: UnifiedSource) => void;
 };
 
-export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
+export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated }: Props) {
   const router = useRouter();
   const { t } = useTranslations();
   const { locale } = useLocale();
@@ -145,10 +267,69 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
 
   const [urlValue, setUrlValue] = useState("");
   const [urlIngesting, setUrlIngesting] = useState(false);
+  const [urlIngestPhase, setUrlIngestPhase] = useState<string | null>(null);
   const [urlError, setUrlError] = useState<string | null>(null);
   const [youtubeMixImportUrl, setYoutubeMixImportUrl] = useState<string | null>(null);
+  const [externalMusicResolveHint, setExternalMusicResolveHint] = useState<string | null>(null);
+  const [externalYtResolvePack, setExternalYtResolvePack] = useState<ExternalMusicYtResolvePack | null>(null);
+  const [externalYtSaveBusy, setExternalYtSaveBusy] = useState(false);
+  const [m3uImportBanner, setM3uImportBanner] = useState<{
+    imported: number;
+    unresolved: number;
+    skipped: number;
+    unresolvedHint?: string;
+    playlistName?: string;
+    error?: string;
+  } | null>(null);
+  const [m3uYoutubeResolveContext, setM3uYoutubeResolveContext] = useState<M3uYoutubeResolveContextState | null>(null);
+  const [youtubeResolveOpen, setYoutubeResolveOpen] = useState(false);
+  const [pasteTracklistOpen, setPasteTracklistOpen] = useState(false);
+  /**
+   * Set when a Spotify playlist comes back 403/`playlist_blocked`. Surfaces an inline
+   * "Paste tracklist" button next to the error so the operator can jump straight into
+   * the Stage 6D-Lite flow without re-typing the URL or hunting for the top-level button.
+   */
+  const [spotifyBlockedShowPasteCta, setSpotifyBlockedShowPasteCta] = useState(false);
+  /**
+   * Stage 6E-A — when a blocked playlist could be unlocked by connecting Spotify
+   * (`connectAvailable` from the preview route) the rose panel also shows a
+   * "Connect Spotify" / "Reconnect Spotify" button. `connectAvailable: false`
+   * means the user is already connected but lacks access to that specific
+   * playlist, so only Paste tracklist is offered.
+   */
+  const [spotifyConnectAvailable, setSpotifyConnectAvailable] = useState(false);
+  const [spotifyNeedsReauth, setSpotifyNeedsReauth] = useState(false);
+  /**
+   * Stage 6D-Auto — completion summary surfaced after `runSpotifyAutoBuildYoutubeSearch`
+   * plus `saveAutoBuiltYoutubePlaylist` succeed. Carries the just-created playlist id +
+   * the unresolved rows so the operator can opt into the legacy resolver modal for the
+   * missing tracks (mode `append_to_existing_youtube`). Cleared when the operator
+   * dismisses the banner or opens the modal.
+   */
+  const [spotifyAutoBuildSummary, setSpotifyAutoBuildSummary] = useState<{
+    /**
+     * Empty string when `resolvedCount === 0` — auto-build produced no resolved rows,
+     * so no playlist was POSTed and the "Review missing tracks" CTA opens the resolver
+     * in `create_youtube_only` mode (which will POST a fresh playlist on Apply).
+     * Non-empty string when at least one row resolved — CTA opens the resolver in
+     * `append_to_existing_youtube` mode against this id.
+     */
+    playlistId: string;
+    playlistName: string;
+    resolvedCount: number;
+    totalCount: number;
+    missing: M3uUnresolvedImportRow[];
+    /**
+     * `playlistOrder` values for the already-resolved tracks, in playlist position.
+     * Threaded through `context.resolvedSourceOrders` so the resolver can interleave
+     * reviewed missing tracks by original Spotify order instead of appending at end.
+     */
+    resolvedOrders: number[];
+    sourceLabel: string;
+  } | null>(null);
 
   const [query, setQuery] = useState("");
+  const [musicBankLocalResults, setMusicBankLocalResults] = useState<UnifiedSource[]>([]);
   const [localResults, setLocalResults] = useState<UnifiedSource[]>([]);
   const [youtubeResults, setYoutubeResults] = useState<YouTubeSearchResult[]>([]);
   const [radioResults, setRadioResults] = useState<RadioSearchResult[]>([]);
@@ -160,14 +341,23 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
   const searchQueryRef = useRef("");
 
   const hasQuery = query.trim().length >= 2;
+  const hasMusicBankLocal = musicBankLocalResults.length > 0;
   const hasLocal = localResults.length > 0;
   const hasYoutube = youtubeResults.length > 0;
   const hasRadio = radioResults.length > 0;
-  const hasResults = hasLocal || hasYoutube || hasRadio;
+  const hasResults = hasMusicBankLocal || hasLocal || hasYoutube || hasRadio;
+
+  const ingestStripBusy = urlIngesting || searching || externalYtSaveBusy;
+  const ingestShellPhaseClass = ingestStripBusy
+    ? urlIngesting
+      ? libraryUrlIngestPhaseClass(urlIngestPhase)
+      : "sb-library-ingest-shell--read"
+    : "";
 
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q || q.length < 2) {
+      setMusicBankLocalResults([]);
       setLocalResults([]);
       setYoutubeResults([]);
       setRadioResults([]);
@@ -178,14 +368,19 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
     setYoutubeResults([]);
     setRadioResults([]);
     try {
-      const { internal, external } = await searchAll(sources, q);
+      const [allRes, mblRes] = await Promise.all([
+        searchAll(sources, q),
+        searchMusicBankLocalSnapshot(q, 25),
+      ]);
       if (searchQueryRef.current === q) {
-        setLocalResults(internal);
-        setYoutubeResults(external.youtube);
-        setRadioResults(external.radio);
+        setLocalResults(allRes.internal);
+        setYoutubeResults(allRes.external.youtube);
+        setRadioResults(allRes.external.radio);
+        setMusicBankLocalResults(mblRes);
       }
     } catch {
       if (searchQueryRef.current === q) {
+        setMusicBankLocalResults([]);
         setLocalResults([]);
         setYoutubeResults([]);
         setRadioResults([]);
@@ -197,6 +392,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
 
   useEffect(() => {
     if (!hasQuery) {
+      setMusicBankLocalResults([]);
       setLocalResults([]);
       setYoutubeResults([]);
       setRadioResults([]);
@@ -220,9 +416,43 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
   }, []);
 
   const ingestingRef = useRef(false);
+
+  /**
+   * Single entry point for any code path that mutates `urlValue` in response to user
+   * input (typed change, panel-level paste, drag-and-drop). Clearing stale resolver
+   * states here is what keeps the Add button clickable after a previous flow left
+   * `externalYtResolvePack` non-null — without this the disabled condition at the
+   * submit button latches on. `externalYtSaveBusy` is only ever flipped on by
+   * `handleConfirmExternalYtPick`, which can only run while the picker is mounted
+   * (i.e. while `externalYtResolvePack != null`); clearing the pack here means no
+   * save is observably in-flight, so resetting the busy flag alongside is safe.
+   */
+  const applyUrlInputValue = useCallback((next: string) => {
+    setYoutubeMixImportUrl(null);
+    setExternalMusicResolveHint(null);
+    setExternalYtResolvePack(null);
+    setExternalYtSaveBusy(false);
+    setUrlError(null);
+    setSpotifyBlockedShowPasteCta(false);
+    setSpotifyConnectAvailable(false);
+    setSpotifyNeedsReauth(false);
+    setM3uImportBanner(null);
+    setM3uYoutubeResolveContext(null);
+    setYoutubeResolveOpen(false);
+    setSpotifyAutoBuildSummary(null);
+    setUrlValue(next);
+  }, []);
+
   const ingestUrl = useCallback(
     async (url: string) => {
-      const trimmed = url.trim();
+      /**
+       * Normalize any Spotify URI-scheme share (`spotify:album:<id>` /
+       * `spotify:playlist:<id>`) to the canonical HTTPS URL up front. After this line every
+       * downstream check — `classifyMusicUrlIngest`, `parseSpotifyPlaylistOrAlbumUrl`,
+       * the legacy URL branches — sees a uniform `https://open.spotify.com/...` shape and
+       * routes albums into the new preview flow exactly the same way as pasted HTTPS links.
+       */
+      const trimmed = normalizeSpotifyShareInput(url.trim());
       if (!trimmed) return;
       const localPath = normalizeLocalFilePathInput(trimmed);
       if (localPath) {
@@ -231,9 +461,89 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
         setUrlIngesting(true);
         setUrlError(null);
         setYoutubeMixImportUrl(null);
+        setExternalMusicResolveHint(null);
+        setExternalYtResolvePack(null);
         try {
-          const scanFolder =
-            typeof window !== "undefined" ? window.syncbizDesktop?.scanLocalAudioFolder : undefined;
+          const desktop = typeof window !== "undefined" ? window.syncbizDesktop : undefined;
+
+          // M3U / M3U8 / PLS are playlist containers, not audio tracks. Route to the
+          // desktop importer so the *resolved* local audio files (under the configured
+          // music folder) become the playlist's tracks. Saving the .m3u path itself as a
+          // single "url" track is the bug — it produced a 1-track playlist regardless of
+          // how many entries the file referenced.
+          if (isPlaylistContainerPath(localPath)) {
+            const importer = desktop?.importLocalM3uPlaylist;
+            if (typeof importer !== "function") {
+              setUrlError(tx.urlErrorLocalFolderDesktopOnly);
+              return;
+            }
+            setM3uImportBanner(null);
+            setM3uYoutubeResolveContext(null);
+            setYoutubeResolveOpen(false);
+            setUrlIngestPhase("Reading playlist…");
+            let phaseTimer: number | undefined;
+            try {
+              phaseTimer = window.setTimeout(() => {
+                setUrlIngestPhase("Resolving local files…");
+              }, 380);
+              const res = await importer(localPath);
+              if (phaseTimer !== undefined) {
+                window.clearTimeout(phaseTimer);
+                phaseTimer = undefined;
+              }
+
+              if (res.status === "error") {
+                setUrlError(res.message || tx.urlErrorFailedAdd);
+                return;
+              }
+
+              const hasTracks = res.files.length > 0;
+              const hasUnresolved = res.unresolved.length > 0;
+
+              if (!hasTracks && !hasUnresolved && res.skipped === 0) {
+                setUrlError("No playable local tracks under your music folder were listed in this file.");
+                return;
+              }
+              if (!hasTracks && !hasUnresolved && res.skipped > 0) {
+                setUrlError(
+                  "All listed tracks were skipped (outside music folder, missing, or not audio). Nothing was imported.",
+                );
+                return;
+              }
+
+              setUrlIngestPhase("Creating playlist…");
+
+              const unified = await createUnifiedPlaylistFromLocalScan(
+                {
+                  playlistName: res.playlistName,
+                  files: res.files,
+                  trackDisplayNames: res.trackDisplayNames,
+                  ...(!hasTracks ? { playlistSourcePath: localPath } : {}),
+                },
+                tx.defaultGenreMixed,
+              );
+              if (!unified) {
+                setUrlError(tx.urlErrorFailedAdd);
+                return;
+              }
+              onAdd(unified);
+              setUrlError(null);
+              setUrlValue("");
+              setM3uImportBanner({
+                imported: res.imported,
+                unresolved: res.unresolved.length,
+                skipped: res.skipped,
+                unresolvedHint: unresolvedM3uSummaryHint(res.unresolved),
+                playlistName: res.playlistName,
+              });
+              setM3uYoutubeResolveContext(buildM3uYoutubeResolveContext(unified, res));
+              return;
+            } finally {
+              if (phaseTimer !== undefined) window.clearTimeout(phaseTimer);
+            }
+          }
+
+          const scanFolder = desktop?.scanLocalAudioFolder;
           if (typeof scanFolder === "function") {
             const scan = await scanFolder(localPath);
             if (scan.status === "ok") {
@@ -318,6 +628,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
         } finally {
           ingestingRef.current = false;
           setUrlIngesting(false);
+          setUrlIngestPhase(null);
         }
         return;
       }
@@ -329,11 +640,220 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
       ingestingRef.current = true;
       setUrlIngesting(true);
       setUrlError(null);
+      setSpotifyBlockedShowPasteCta(false);
       setYoutubeMixImportUrl(null);
+      setExternalMusicResolveHint(null);
+      setExternalYtResolvePack(null);
       try {
+        const musicUrlIngest = classifyMusicUrlIngest(trimmed);
+
+        if (musicUrlIngest.intent === "unsupported_playlist_or_album") {
+          /**
+           * Spotify playlist/album → Spotify Web API client-credentials preview → feed every
+           * track into the existing M3U YouTube resolver modal in `create_youtube_only` mode.
+           * No audio upload, no CatalogItem (type=youtube + non-local urls skip catalog for
+           * local files only — and we don't write Spotify URLs anywhere). Album/playlist URLs
+           * from other services still get the legacy "unsupported" error below.
+           */
+          const spotifyHit =
+            musicUrlIngest.provider === "spotify" ? parseSpotifyPlaylistOrAlbumUrl(trimmed) : null;
+          if (spotifyHit) {
+            /**
+             * Stage 6D-Auto — Spotify album / public playlist Auto-Build mode.
+             *
+             * The Spotify preview gives us artist + title + order with high fidelity, so
+             * surfacing the big "Match tracks on YouTube" picker for every row is too much
+             * friction. Instead:
+             *   1. fetch the Spotify tracklist;
+             *   2. search YouTube for each row and auto-apply the top *valid* candidate
+             *      (`runSpotifyAutoBuildYoutubeSearch` already prefers the existing
+             *      official-first / Topic / VEVO / confidence ranking inside the narrower);
+             *   3. POST a YouTube-only playlist with the resolved rows in Spotify order.
+             *
+             * Missing rows (rows the scorer rejected) are stashed in
+             * `spotifyAutoBuildSummary` so the operator can opt into the legacy modal for
+             * manual review via the "Review missing tracks" CTA — the big resolver remains
+             * fallback only, never the default Spotify flow.
+             *
+             * Blocked playlists (personalized / Made-For-You / private) still 403/404 and
+             * route into the paste-tracklist CTA below, unchanged from Stage 6D-B.
+             */
+            setUrlIngestPhase("Reading Spotify…");
+            const preview = await fetchSpotifyPlaylistPreview(trimmed);
+            if (preview.status === "not_configured") {
+              setUrlError("Spotify import is not configured.");
+              return;
+            }
+            if (preview.status === "playlist_blocked") {
+              setUrlError(
+                preview.message ||
+                  "Spotify blocked access to this playlist. You can paste the tracklist manually, try a Spotify album, or connect Spotify account later.",
+              );
+              setSpotifyBlockedShowPasteCta(true);
+              /**
+               * Stage 6E-A — if connecting Spotify could unlock this playlist, remember
+               * the URL so the post-OAuth return can auto-retry the import, and surface
+               * the Connect/Reconnect button in the rose panel.
+               */
+              setSpotifyConnectAvailable(preview.connectAvailable === true);
+              setSpotifyNeedsReauth(preview.needsReauth === true);
+              if (preview.connectAvailable === true && typeof window !== "undefined") {
+                try {
+                  window.sessionStorage.setItem("sb_spotify_pending_url", trimmed);
+                } catch {
+                  /* sessionStorage unavailable (private mode) — connect still works, just no auto-retry */
+                }
+              }
+              return;
+            }
+            if (preview.status === "error") {
+              setUrlError(preview.message || tx.urlErrorFailedAdd);
+              return;
+            }
+            const unresolvedRows = spotifyTracksToUnresolvedRows(preview.tracks);
+            if (unresolvedRows.length === 0) {
+              setUrlError("No tracks were returned for this Spotify link.");
+              return;
+            }
+            const kindLabel = preview.kind === "album" ? "Spotify album" : "Spotify playlist";
+            const ownerSuffix = preview.ownerName?.trim() ? ` — ${preview.ownerName.trim()}` : "";
+            const sourceLabelBase = `${kindLabel}${ownerSuffix}`;
+
+            setUrlError(null);
+            setSpotifyBlockedShowPasteCta(false);
+            setM3uImportBanner(null);
+            setSpotifyAutoBuildSummary(null);
+            setUrlValue("");
+
+            setUrlIngestPhase(`Finding YouTube matches 0/${unresolvedRows.length}…`);
+            const outcome = await runSpotifyAutoBuildYoutubeSearch({
+              rows: unresolvedRows,
+              onProgress: (p) => {
+                if (p.phase === "searching") {
+                  setUrlIngestPhase(`Finding YouTube matches ${p.done}/${p.total}…`);
+                }
+              },
+            });
+
+            /**
+             * 0/N resolved → there is nothing safe to save automatically. Per product:
+             * the big resolver must be user-triggered fallback only, never opened
+             * automatically. Surface the inline summary "No YouTube matches found.
+             * 0/N tracks added." with a "Review missing tracks" CTA; the operator
+             * opens the resolver themselves when they want to manually pick.
+             */
+            if (outcome.resolved.length === 0) {
+              setSpotifyAutoBuildSummary({
+                playlistId: "",
+                playlistName: preview.name,
+                resolvedCount: 0,
+                totalCount: unresolvedRows.length,
+                missing: outcome.missing,
+                resolvedOrders: [],
+                sourceLabel: sourceLabelBase,
+              });
+              setUrlIngestPhase(null);
+              return;
+            }
+
+            setUrlIngestPhase("Creating playlist…");
+            const created = await saveAutoBuiltYoutubePlaylist({
+              playlistName: preview.name,
+              defaultGenre: tx.defaultGenreMixed,
+              resolved: outcome.resolved as readonly SpotifyAutoBuildResolvedPick[],
+            });
+            const unified = unifiedSourceFromFetchedPlaylist(created, tx.defaultGenreMixed);
+            onPlaylistUpdated?.(unified);
+
+            setSpotifyAutoBuildSummary({
+              playlistId: created.id,
+              playlistName: created.name,
+              resolvedCount: outcome.resolved.length,
+              totalCount: unresolvedRows.length,
+              missing: outcome.missing,
+              resolvedOrders: outcome.resolved.map((r) => r.order),
+              sourceLabel: sourceLabelBase,
+            });
+            setUrlIngestPhase(null);
+            return;
+          }
+          setUrlError(
+            "Album or playlist links from this service are not supported yet. Paste a single-track link, or use YouTube, SoundCloud, or a radio/stream URL.",
+          );
+          return;
+        }
+
+        if (musicUrlIngest.intent === "resolve_to_youtube" && musicUrlIngest.provider !== "shazam") {
+          if (!isMusicUrlYoutubePickerProvider(musicUrlIngest.provider)) {
+            setExternalMusicResolveHint("This music link should be resolved to YouTube.");
+            return;
+          }
+
+          setUrlIngestPhase("Reading link…");
+          const fromPickApi = await parseUrlStorefront(trimmed);
+          let parsedPick: ParseUrlJson =
+            fromPickApi ??
+            ({
+              title: "",
+              cover: null,
+              genre: tx.defaultGenreMixed,
+              type: "stream-url",
+              isRadio: false,
+              ...parseUrlFoundationHints({
+                rawUrl: trimmed,
+                inferredType: "stream-url",
+                isRadio: false,
+                isShazam: false,
+              }),
+            } as ParseUrlJson);
+
+          const queryResult = tryBuildExternalMusicYoutubeSearchQuery(parsedPick, trimmed);
+          if (!queryResult.ok) {
+            setUrlError("Could not identify the track from this link");
+            return;
+          }
+          const q = queryResult.query.trim();
+
+          /** Picker subtitle: prefer readable title derived from successful query when parse-url stayed weak */
+          if (!parsedPick.title?.trim() || isWeakStorefrontParsedTitle(parsedPick.title)) {
+            parsedPick = { ...parsedPick, title: q, genre: parsedPick.genre || tx.defaultGenreMixed };
+          }
+
+          setUrlIngestPhase("Searching YouTube…");
+          const { youtube } = await searchExternal(q);
+          const pseudoRow = pseudoM3uRowForExternalMusicPaste({
+            parsed: parsedPick,
+            searchQuery: q,
+            originalUrl: trimmed,
+          });
+          const { display } = narrowExternalMusicYoutubeDisplay(
+            youtube.filter((r): r is YouTubeSearchResult & { type: "youtube" } => r.type === "youtube"),
+            pseudoRow,
+          );
+          if (display.length === 0) {
+            setUrlError(tx.urlErrorYoutubeNotFound);
+            return;
+          }
+
+          setExternalYtResolvePack({
+            sourceUrl: trimmed,
+            parsed: parsedPick,
+            searchQuery: q,
+            candidates: display,
+          });
+          return;
+        }
+
+        const ingestHttpsUrl =
+          musicUrlIngest.provider === "youtube" || musicUrlIngest.provider === "youtube_music"
+            ? getYouTubeVideoId(trimmed)
+              ? canonicalYouTubeWatchUrlForPlayback(trimmed)
+              : trimmed
+            : trimmed;
+
         const type = inferPlaylistType(trimmed);
         const isRadio = type === "winamp" || !!trimmed.match(/\.(m3u8?|pls|aac|mp3)(\?|$)/i);
-        const isShazam = /shazam\.com\/song\//i.test(trimmed);
+        const isShazam = isShazamUrl(trimmed);
 
         /** Fallback only when `/api/sources/parse-url` fails — must not replace full resolve for normal ingest. */
         const fastPathMeta = {
@@ -367,6 +887,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
           } as ParseUrlJson);
 
         if (isShazam) {
+          setUrlIngestPhase("Searching YouTube…");
           const searchQuery = parsed?.artist && parsed?.song
             ? `${parsed.artist} ${parsed.song}`
             : parsed?.title ?? "";
@@ -380,6 +901,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
             first.type === "youtube"
               ? await resolveYouTubePlayableUrlForSearch(first.url)
               : first.url;
+          setUrlIngestPhase("Creating playlist…");
           const res = await fetch("/api/playlists", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -408,6 +930,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
             setUrlValue("");
           } else setUrlError(tx.urlErrorFailedAdd);
         } else if (isRadio) {
+          setUrlIngestPhase("Creating playlist…");
           const res = await fetch("/api/radio", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -443,10 +966,15 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
             setYoutubeMixImportUrl(trimmed);
             return;
           }
-          const playableUrl =
+          let playableUrl =
             apiType === "youtube"
-              ? await resolveYouTubePlayableUrlForSearch(trimmed)
+              ? ingestHttpsUrl
               : trimmed;
+          if (apiType === "youtube") {
+            setUrlIngestPhase("Searching YouTube…");
+            playableUrl = await resolveYouTubePlayableUrlForSearch(playableUrl);
+          }
+          setUrlIngestPhase("Creating playlist…");
           const res = await fetch("/api/playlists", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -481,13 +1009,185 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
       } finally {
         ingestingRef.current = false;
         setUrlIngesting(false);
+        setUrlIngestPhase(null);
       }
     },
     [onAdd, router, tx]
   );
 
+  const handleDismissExternalYtPick = useCallback(() => {
+    setExternalYtResolvePack(null);
+  }, []);
+
+  const handleConfirmExternalYtPick = useCallback(
+    async (pack: ExternalMusicYtResolvePack, candidate: YouTubeSearchResult) => {
+      setExternalYtSaveBusy(true);
+      setUrlError(null);
+      try {
+        const resolvedUrl =
+          candidate.type === "youtube"
+            ? await resolveYouTubePlayableUrlForSearch(candidate.url)
+            : candidate.url;
+        const name = candidate.title.trim() || pack.parsed.title?.trim() || tx.defaultUntitled;
+        const genreLine =
+          pack.parsed.genre?.trim() || (name ? inferGenre(name) : null) || tx.defaultGenreMixed;
+        const res = await fetch("/api/playlists", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            url: resolvedUrl,
+            genre: genreLine,
+            type: "youtube",
+            thumbnail: candidate.cover?.trim() || pack.parsed.cover || "",
+            viewCount: candidate.viewCount,
+            durationSeconds: candidate.durationSeconds,
+          }),
+        });
+        if (res.ok) {
+          const created = (await res.json()) as Playlist;
+          onAdd({
+            id: `pl-${created.id}`,
+            title: created.name,
+            genre: created.genre || tx.defaultGenreMixed,
+            cover: created.thumbnail || null,
+            type: "youtube",
+            url: created.url,
+            origin: "playlist",
+            playlist: created,
+            ...pickUnifiedFoundationFields(pack.parsed as Record<string, unknown>),
+          });
+          setUrlValue("");
+          setExternalYtResolvePack(null);
+        } else setUrlError(tx.urlErrorFailedAdd);
+      } catch {
+        setUrlError(tx.urlErrorFailedAdd);
+      } finally {
+        setExternalYtSaveBusy(false);
+      }
+    },
+    [onAdd, tx]
+  );
+
+  const notifyM3uPlaylistMerged = useCallback(
+    (source: UnifiedSource) => {
+      onPlaylistUpdated?.(source);
+    },
+    [onPlaylistUpdated],
+  );
+
+  const handleM3uYoutubeResolveApplied = useCallback((mergedOrders: readonly number[]) => {
+    setYoutubeResolveOpen(false);
+    setM3uYoutubeResolveContext(null);
+    const mergedCount = mergedOrders.length;
+    setM3uImportBanner((prev) => {
+      if (!prev || mergedCount <= 0) return prev;
+      const nextUnresolved = Math.max(0, prev.unresolved - mergedCount);
+      return {
+        ...prev,
+        unresolved: nextUnresolved,
+        unresolvedHint: nextUnresolved > 0 ? prev.unresolvedHint : undefined,
+      };
+    });
+    /**
+     * Spotify Auto-Build summary bookkeeping after the resolver applies:
+     *   - 0-resolved fallback (`prev.playlistId === ""`): the resolver POSTed a fresh
+     *     playlist via `create_youtube_only`. The summary represented "nothing created"
+     *     which is no longer true; just clear it (the library refresh from
+     *     `onPlaylistUpdated` is the visible feedback).
+     *   - Append fallback (`prev.playlistId !== ""`): filter `missing` by the exact
+     *     `playlistOrder` set the operator picked (NOT slice(mergedCount) — picks can
+     *     be non-contiguous). Bump `resolvedCount` and `resolvedOrders` so a subsequent
+     *     review respects the new playlist contents. Clear the summary once everything
+     *     is accounted for.
+     */
+    setSpotifyAutoBuildSummary((prev) => {
+      if (!prev || mergedCount <= 0) return prev;
+      if (!prev.playlistId) return null;
+      const mergedSet = new Set(mergedOrders);
+      const remaining = prev.missing.filter((r) => !mergedSet.has(r.playlistOrder));
+      const nextResolved = Math.min(prev.totalCount, prev.resolvedCount + mergedCount);
+      if (remaining.length === 0 && nextResolved >= prev.totalCount) return null;
+      const nextResolvedOrders = [...prev.resolvedOrders, ...mergedOrders].sort((a, b) => a - b);
+      return {
+        ...prev,
+        resolvedCount: nextResolved,
+        missing: remaining,
+        resolvedOrders: nextResolvedOrders,
+      };
+    });
+  }, []);
+
+  const handleReviewMissingAutoBuildTracks = useCallback(() => {
+    const summary = spotifyAutoBuildSummary;
+    if (!summary || summary.missing.length === 0) return;
+    /**
+     * Mode pivots on whether a playlist already exists for this Auto-Build run:
+     *   - `playlistId === ""` → 0-resolved fallback. The resolver POSTs a new YouTube
+     *     playlist via `create_youtube_only` on Apply.
+     *   - `playlistId !== ""` → resolved > 0; missing rows are merged into the existing
+     *     playlist via `append_to_existing_youtube` with order-preserving interleave.
+     */
+    const isAppend = summary.playlistId !== "";
+    setM3uYoutubeResolveContext({
+      playlistId: summary.playlistId,
+      playlistName: summary.playlistName,
+      files: [],
+      trackDisplayNames: [],
+      resolvedSourceOrders: isAppend ? summary.resolvedOrders : [],
+      unresolvedRows: summary.missing,
+      mode: isAppend ? "append_to_existing_youtube" : "create_youtube_only",
+      sourceLabel: `${summary.sourceLabel} — review ${summary.missing.length} missing track${summary.missing.length === 1 ? "" : "s"}`,
+    });
+    setYoutubeResolveOpen(true);
+  }, [spotifyAutoBuildSummary]);
+
+  /**
+   * Stage 6D-Lite — bridge between the paste-tracklist textarea modal and the
+   * shared bulk YouTube resolver. The resolver is reused unchanged in
+   * `create_youtube_only` mode: it does the YouTube search per row, picks a
+   * candidate, and POSTs a new YouTube playlist on apply. Nothing here writes
+   * any audio, any Spotify URL, or any CatalogItem.
+   */
+  const handlePasteTracklistSubmit = useCallback(
+    ({
+      playlistName,
+      parsed,
+    }: {
+      playlistName: string;
+      parsed: { rows: { artist: string; title: string }[]; totalLines: number; truncated: boolean };
+    }) => {
+      const unresolvedRows = pastedTracklistRowsToUnresolvedRows(parsed.rows);
+      if (unresolvedRows.length === 0) {
+        setPasteTracklistOpen(false);
+        setUrlError("Paste at least one tracklist line.");
+        return;
+      }
+      setUrlError(null);
+      setSpotifyBlockedShowPasteCta(false);
+      setM3uImportBanner(null);
+      const suffix = parsed.truncated
+        ? ` (${unresolvedRows.length} of ${parsed.totalLines}, capped at ${PASTED_TRACKLIST_MAX})`
+        : ` (${unresolvedRows.length} tracks)`;
+      setM3uYoutubeResolveContext({
+        playlistId: "",
+        playlistName,
+        files: [],
+        trackDisplayNames: [],
+        resolvedSourceOrders: [],
+        unresolvedRows,
+        mode: "create_youtube_only",
+        sourceLabel: `Pasted tracklist${suffix}`,
+      });
+      setPasteTracklistOpen(false);
+      setYoutubeResolveOpen(true);
+    },
+    [],
+  );
+
   const handleUrlSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (externalYtResolvePack != null || externalYtSaveBusy) return;
     void ingestUrl(urlValue);
   };
 
@@ -521,6 +1221,52 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
     );
   }, []);
 
+  /**
+   * Stage 6E-A — handle the post-OAuth return. The callback route redirects to
+   * `/sources?spotify=<status>`. On `connected` we transparently re-run the
+   * import for the URL the user was blocked on (stashed in sessionStorage when
+   * the blocked response arrived) so connecting feels like a single action.
+   * Other statuses surface a short inline message. The query param is stripped
+   * via replaceState so a refresh never re-triggers the retry.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const spotify = params.get("spotify");
+    if (!spotify) return;
+    params.delete("spotify");
+    const cleaned = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+    window.history.replaceState(null, "", cleaned);
+
+    if (spotify === "connected") {
+      let pending: string | null = null;
+      try {
+        pending = window.sessionStorage.getItem("sb_spotify_pending_url");
+        window.sessionStorage.removeItem("sb_spotify_pending_url");
+      } catch {
+        pending = null;
+      }
+      if (pending && pending.trim()) {
+        setUrlValue(pending);
+        void ingestUrl(pending);
+      }
+      return;
+    }
+    if (spotify === "denied") {
+      setUrlError("Spotify connection was cancelled. You can paste the tracklist instead.");
+      return;
+    }
+    if (spotify === "not_configured") {
+      setUrlError("Spotify Connect is not configured on this server yet.");
+      return;
+    }
+    if (spotify === "state_error" || spotify === "exchange_failed" || spotify === "profile_failed" || spotify === "save_failed") {
+      setUrlError("Spotify connection failed. Please try again, or paste the tracklist.");
+      return;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const isDraggingIngestPayload = (e: React.DragEvent) => {
     const types = e.dataTransfer?.types ?? [];
     if (types.includes("Files")) return true;
@@ -544,16 +1290,29 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
     const raw = (uriList || plain || "").trim();
     const first = raw.split(/[\r\n]+/)[0]?.trim() ?? "";
     if (!first) return null;
+    /**
+     * Spotify Desktop drops `spotify:album:<id>` / `spotify:playlist:<id>` in `text/uri-list`,
+     * and only puts the canonical `https://open.spotify.com/...` link in `text/plain`. Because
+     * `text/uri-list` wins above, the bare URI scheme reached `normalizeLocalFilePathInput` and
+     * came back `null` — the drop silently no-op'd and (depending on which other handler ran)
+     * surfaced as the legacy "Album or playlist links from this service are not supported yet."
+     * fallback. Convert the URI scheme to the HTTPS share link here so the rest of the
+     * pipeline (classify → preview → modal) is unchanged.
+     */
+    const spotifyNormalized = normalizeSpotifyShareInput(first);
+    if (spotifyNormalized !== first && (spotifyNormalized.startsWith("http://") || spotifyNormalized.startsWith("https://"))) {
+      return spotifyNormalized;
+    }
     if (first.startsWith("http://") || first.startsWith("https://")) return first;
     return normalizeLocalFilePathInput(first);
   };
 
   const handleDropUrl = useCallback(
     (url: string) => {
-      setUrlValue(url);
+      applyUrlInputValue(url);
       void ingestUrl(url);
     },
-    [ingestUrl]
+    [applyUrlInputValue, ingestUrl]
   );
 
   const handleIngestDrop = (e: React.DragEvent) => {
@@ -724,7 +1483,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
           if (normalizeLocalFilePathInput(text) || text.startsWith("http://") || text.startsWith("https://")) {
             e.preventDefault();
             e.stopPropagation();
-            setUrlValue(text);
+            applyUrlInputValue(text);
             void ingestUrl(text);
           }
         }}
@@ -747,14 +1506,18 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
           setDragOver(false);
           setHasLinkInDrag(false);
         }}
-        className={`relative overflow-hidden rounded-xl border transition-all duration-200 ${
+        className={`relative overflow-hidden rounded-xl border transition-all duration-200 sb-library-ingest-shell ${
+          ingestStripBusy ? `sb-library-ingest-shell--busy ${ingestShellPhaseClass}` : ""
+        } ${
           dragOver && hasLinkInDrag
             ? "border-[#1ed760]/80 bg-[#1ed760]/10 shadow-[0_0_24px_rgba(30,215,96,0.2)]"
             : "border-slate-800/80 bg-slate-950/98 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.08)] hover:border-slate-700/80"
         }`}
       >
-        {/* Single compact control row – Add centered */}
-        <form
+        {ingestStripBusy ? <div className="sb-library-ingest-wave" aria-hidden /> : null}
+        <div className="sb-library-ingest-inner">
+          {/* Single compact control row – Add centered */}
+          <form
           noValidate
           onSubmit={handleUrlSubmit}
           className="flex flex-nowrap items-center gap-2.5 px-3 py-2"
@@ -784,9 +1547,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
               autoComplete="off"
               value={urlValue}
               onChange={(e) => {
-                setYoutubeMixImportUrl(null);
-                setUrlError(null);
-                setUrlValue(e.target.value);
+                applyUrlInputValue(e.target.value);
               }}
               onDragOver={(e) => {
                 if (
@@ -800,15 +1561,28 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
               }}
               onDrop={handleIngestDrop}
               placeholder={t.addUrlOrPathPlaceholder ?? t.addUrlPlaceholder ?? "Add URL or local path…"}
-              disabled={urlIngesting}
+              disabled={urlIngesting || externalYtSaveBusy}
               className={`${inputBase} ${controlHeight} pl-9 pr-3`}
             />
           </div>
 
           {/* Add button – centered */}
           <div className="flex shrink-0 justify-center">
-            <button type="submit" disabled={urlIngesting || !urlValue.trim()} className={`${addBtn} ${controlHeight}`}>
-              {urlIngesting ? (t.adding ?? "Adding…") : t.add ?? "Add"}
+            <button
+              type="submit"
+              disabled={
+                urlIngesting ||
+                externalYtSaveBusy ||
+                externalYtResolvePack != null ||
+                !urlValue.trim()
+              }
+              className={`${addBtn} ${controlHeight}`}
+            >
+              {externalYtSaveBusy
+                ? "Saving…"
+                : urlIngesting
+                  ? urlIngestPhase ?? (t.adding ?? "Adding…")
+                  : t.add ?? "Add"}
             </button>
           </div>
 
@@ -862,12 +1636,14 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
             className={`${controlHeight} flex-1 bg-transparent py-2 pr-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none`}
             aria-label={t.search}
             autoComplete="off"
+            disabled={urlIngesting}
           />
           {query && (
             <button
               type="button"
               onClick={() => {
                 setQuery("");
+                setMusicBankLocalResults([]);
                 setLocalResults([]);
                 setYoutubeResults([]);
                 setRadioResults([]);
@@ -905,13 +1681,262 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
           )}
           </div>
         </form>
+        </div>
       </div>
 
-      {urlError && <p className="mt-1.5 text-xs text-amber-400">{urlError}</p>}
+      {urlIngestPhase ? (
+        <p className="mt-1.5 text-sm font-medium text-cyan-300/95" role="status" aria-live="polite">
+          {urlIngestPhase}
+        </p>
+      ) : null}
+      {urlError ? (
+        spotifyBlockedShowPasteCta ? (
+          /**
+           * Spotify-blocked variant — Spotify returned the playlist metadata (name + owner)
+           * but blocked the `/tracks` endpoint with HTTP 403 even when the playlist is marked
+           * `public: true`. Confirmed against the live API: this is a Spotify ACL gate, not
+           * a code bug, and there is no non-OAuth read path. Keep the blocked message verbatim
+           * but lift the Paste tracklist CTA out of the small inline amber row into a full
+           * bordered panel so the operator's recovery path is impossible to miss.
+           */
+          <div
+            className="mt-1.5 rounded-lg border border-rose-500/35 bg-rose-500/[0.07] px-3 py-2.5 text-sm leading-relaxed text-rose-50/95"
+            role="status"
+            aria-live="polite"
+          >
+            <p className="min-w-0">
+              <span className="font-semibold">Spotify blocked this playlist.</span>{" "}
+              {urlError}
+            </p>
+            <p className="mt-1 text-[11px] leading-snug text-rose-100/75">
+              {spotifyConnectAvailable
+                ? spotifyNeedsReauth
+                  ? "Your Spotify connection expired. Reconnect to read this playlist, or paste the tracklist (one track per line)."
+                  : "Connect your Spotify account to read private/blocked playlists, or paste the tracklist (one track per line)."
+                : "Paste the tracklist (one track per line) and we’ll build a YouTube playlist from it."}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {spotifyConnectAvailable ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    /**
+                     * Stage 6E-A — pending URL was already stashed in sessionStorage when
+                     * the blocked response arrived; full-page nav to the OAuth start route
+                     * (cannot be fetch()'d — it 302s cross-origin to accounts.spotify.com).
+                     */
+                    if (typeof window !== "undefined") {
+                      window.location.href = "/api/auth/spotify/start";
+                    }
+                  }}
+                  disabled={urlIngesting || externalYtSaveBusy}
+                  className="rounded-lg bg-gradient-to-b from-[#1ed760] to-[#1db954] px-4 py-2 text-sm font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                >
+                  {spotifyNeedsReauth ? "Reconnect Spotify" : "Connect Spotify"}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  setUrlError(null);
+                  setSpotifyBlockedShowPasteCta(false);
+                  setM3uImportBanner(null);
+                  setPasteTracklistOpen(true);
+                }}
+                disabled={urlIngesting || externalYtSaveBusy}
+                className={
+                  spotifyConnectAvailable
+                    ? "rounded-lg border border-[#1ed760]/45 bg-[#1ed760]/[0.06] px-4 py-2 text-sm font-semibold text-emerald-50/95 transition hover:bg-[#1ed760]/[0.12] disabled:opacity-40"
+                    : "rounded-lg bg-gradient-to-b from-[#1ed760] to-[#1db954] px-4 py-2 text-sm font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                }
+              >
+                Paste tracklist
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUrlError(null);
+                  setSpotifyBlockedShowPasteCta(false);
+                  setSpotifyConnectAvailable(false);
+                  setSpotifyNeedsReauth(false);
+                }}
+                className="rounded border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/90 hover:bg-white/10"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <p className="min-w-0 flex-1 text-xs text-amber-400">{urlError}</p>
+          </div>
+        )
+      ) : null}
+      {externalYtResolvePack ? (
+        <ExternalMusicYoutubePickerPanel
+          pack={externalYtResolvePack}
+          saveBusy={externalYtSaveBusy}
+          onDismiss={handleDismissExternalYtPick}
+          onPick={(candidate) => {
+            void handleConfirmExternalYtPick(externalYtResolvePack, candidate);
+          }}
+        />
+      ) : null}
+      {externalMusicResolveHint ? (
+        <div
+          className="mt-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/[0.07] px-3 py-2.5 text-sm leading-relaxed text-cyan-50/95"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <p className="min-w-0 flex-1">{externalMusicResolveHint}</p>
+            <button
+              type="button"
+              className="shrink-0 rounded border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/90 hover:bg-white/10"
+              onClick={() => setExternalMusicResolveHint(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {spotifyAutoBuildSummary ? (
+        <div
+          className={`mt-1.5 rounded-lg border px-3 py-2.5 text-sm leading-relaxed ${
+            spotifyAutoBuildSummary.resolvedCount === 0
+              ? "border-rose-500/35 bg-rose-500/[0.07] text-rose-50/95"
+              : "border-[#1ed760]/35 bg-[#1ed760]/[0.07] text-emerald-50/95"
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <p className="min-w-0 flex-1">
+              {spotifyAutoBuildSummary.resolvedCount === 0 ? (
+                <>
+                  <span className="font-semibold">No YouTube matches found.</span>{" "}
+                  0/{spotifyAutoBuildSummary.totalCount} tracks added.
+                  <span className="mt-1 block font-medium text-white/95">
+                    “{spotifyAutoBuildSummary.playlistName}” — {spotifyAutoBuildSummary.sourceLabel}
+                  </span>
+                  <span className="mt-1 block font-mono text-[11px] leading-snug text-rose-100/75">
+                    Review the missing tracks to pick YouTube matches manually.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold">Created playlist:</span>{" "}
+                  {spotifyAutoBuildSummary.resolvedCount}/{spotifyAutoBuildSummary.totalCount} tracks added
+                  <span className="mt-1 block font-medium text-white/95">
+                    “{spotifyAutoBuildSummary.playlistName}” — {spotifyAutoBuildSummary.sourceLabel}
+                  </span>
+                  {spotifyAutoBuildSummary.missing.length > 0 ? (
+                    <span className="mt-1 block font-mono text-[11px] leading-snug text-emerald-100/75">
+                      {spotifyAutoBuildSummary.missing.length} track
+                      {spotifyAutoBuildSummary.missing.length === 1 ? "" : "s"} skipped — no confident YouTube match.
+                    </span>
+                  ) : null}
+                </>
+              )}
+            </p>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              {spotifyAutoBuildSummary.missing.length > 0 ? (
+                <button
+                  type="button"
+                  disabled={urlIngesting}
+                  onClick={handleReviewMissingAutoBuildTracks}
+                  className="rounded-lg bg-gradient-to-b from-[#1ed760] to-[#1db954] px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                >
+                  Review missing tracks
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="shrink-0 rounded border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/90 hover:bg-white/10"
+                onClick={() => setSpotifyAutoBuildSummary(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {m3uImportBanner ? (
+        <div
+          className={`mt-1.5 rounded-lg border px-3 py-2.5 text-sm ${
+            m3uImportBanner.error
+              ? "border-rose-500/35 bg-rose-500/[0.06] text-rose-100/95"
+              : "border-cyan-500/30 bg-cyan-500/[0.07] text-cyan-50/95"
+          }`}
+          role="status"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <p className="min-w-0 leading-relaxed">
+              <span className="font-semibold">Playlist import:</span> {m3uImportBanner.imported} imported
+              {m3uImportBanner.unresolved > 0 ? ` · ${m3uImportBanner.unresolved} missing / unresolved` : ""}
+              {m3uImportBanner.skipped > 0 ? ` · ${m3uImportBanner.skipped} skipped` : ""}
+              {m3uImportBanner.playlistName ? (
+                <span className="mt-1 block font-medium text-white/95">“{m3uImportBanner.playlistName}”</span>
+              ) : null}
+              {m3uImportBanner.error ? (
+                <span className="mt-1 block text-xs opacity-95">{m3uImportBanner.error}</span>
+              ) : null}
+              {m3uImportBanner.unresolvedHint ? (
+                <span
+                  className={`mt-1 block font-mono text-[11px] leading-snug ${
+                    m3uImportBanner.error ? "text-rose-100/75" : "text-cyan-100/70"
+                  }`}
+                >
+                  Unresolved hint: {m3uImportBanner.unresolvedHint}
+                </span>
+              ) : null}
+            </p>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              {m3uYoutubeResolveContext && m3uImportBanner.unresolved > 0 && !m3uImportBanner.error ? (
+                <button
+                  type="button"
+                  disabled={urlIngesting}
+                  onClick={() => setYoutubeResolveOpen(true)}
+                  className="rounded-lg bg-gradient-to-b from-[#1ed760]/90 to-[#1db954]/90 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                >
+                  Find missing on YouTube
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="shrink-0 rounded border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/90 hover:bg-white/10"
+                onClick={() => {
+                  setM3uImportBanner(null);
+                  setM3uYoutubeResolveContext(null);
+                  setYoutubeResolveOpen(false);
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {youtubeMixImportUrl ? (
         <YouTubeMixImportPanelShell
           sourceUrl={youtubeMixImportUrl}
           onDismiss={() => setYoutubeMixImportUrl(null)}
+        />
+      ) : null}
+      {youtubeResolveOpen && m3uYoutubeResolveContext ? (
+        <M3uYoutubeResolveModal
+          context={m3uYoutubeResolveContext}
+          defaultGenre={tx.defaultGenreMixed}
+          onClose={() => setYoutubeResolveOpen(false)}
+          onPlaylistMerged={notifyM3uPlaylistMerged}
+          onApplied={handleM3uYoutubeResolveApplied}
+        />
+      ) : null}
+      {pasteTracklistOpen ? (
+        <PlainTracklistPasteModal
+          defaultPlaylistName="Pasted tracklist"
+          onCancel={() => setPasteTracklistOpen(false)}
+          onSubmit={handlePasteTracklistSubmit}
         />
       ) : null}
 
@@ -928,27 +1953,70 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
             </div>
           ) : (
             <>
+              {hasMusicBankLocal && (
+                <div className="border-b border-slate-800/60 p-2">
+                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/90">
+                    My Music Library
+                  </p>
+                  <div className="space-y-0.5">
+                    {musicBankLocalResults.map((source) => (
+                      <div
+                        key={source.id}
+                        className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80"
+                      >
+                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                          {source.cover ? (
+                            <img src={source.cover} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <TrackMediaPlaceholder chip="LOCAL" className="h-full w-full" showCornerBadge={false} />
+                          )}
+                          <span className="pointer-events-none absolute bottom-0.5 left-0.5">
+                            <CompactSourceBadge chip="LOCAL" />
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-slate-100">{source.title}</p>
+                          {source.genre && <p className="text-[10px] text-slate-500">{source.genre}</p>}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              effectivePlaySource(source);
+                              setQuery("");
+                              setMusicBankLocalResults([]);
+                              setLocalResults([]);
+                              setYoutubeResults([]);
+                              setRadioResults([]);
+                              setShowResults(false);
+                            }}
+                            className="inline-flex h-8 items-center justify-center rounded-lg bg-[#1db954] px-2.5 text-xs font-medium text-white transition hover:bg-[#1ed760]"
+                          >
+                            {t.play}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {hasLocal && (
                 <div className="border-b border-slate-800/60 p-2">
                   <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t.localResults}</p>
                   <div className="space-y-0.5">
-                    {localResults.map((source) => (
+                    {localResults.map((source) => {
+                      const libChip = inferTrackSourceChip(source);
+                      return (
                       <div key={source.id} className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80">
                         <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
                           {source.cover ? (
                             <img src={source.cover} alt="" className="h-full w-full object-cover" />
                           ) : (
-                            <div className="flex h-full w-full items-center justify-center text-slate-500">
-                              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                                <path d="M9 18V5l12-2v13" />
-                                <circle cx="6" cy="18" r="3" />
-                                <circle cx="18" cy="16" r="3" />
-                              </svg>
-                            </div>
+                            <TrackMediaPlaceholder chip={libChip} className="h-full w-full" showCornerBadge={false} />
                           )}
-                          <div className="absolute bottom-0 right-0 p-0.5">
-                            <SourceLogo type={source.type} origin={source.origin} size="sm" />
-                          </div>
+                          <span className="pointer-events-none absolute bottom-0.5 left-0.5">
+                            <CompactSourceBadge chip={libChip} />
+                          </span>
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-slate-100">{source.title}</p>
@@ -980,7 +2048,8 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
                           )}
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -994,11 +2063,12 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
                           {r.cover ? (
                             <img src={r.cover} alt="" className="h-full w-full object-cover" />
                           ) : (
-                            <div className="flex h-full w-full items-center justify-center text-rose-400">
-                              <RadioIcon className="h-5 w-5" />
-                            </div>
+                            <TrackMediaPlaceholder chip="RADIO" className="h-full w-full" showCornerBadge={false} />
                           )}
-                          <span className="absolute bottom-0 right-0 rounded bg-rose-500/90 px-1 py-0.5 text-[9px] font-medium text-white">
+                          <span className="pointer-events-none absolute bottom-0.5 left-0.5 z-[1]">
+                            <CompactSourceBadge chip="RADIO" />
+                          </span>
+                          <span className="absolute bottom-0.5 right-0.5 rounded bg-rose-500/92 px-1 py-[1px] text-[8px] font-semibold uppercase tracking-wide text-white">
                             {t.live ?? "LIVE"}
                           </span>
                         </div>
@@ -1041,13 +2111,11 @@ export function LibraryInputArea({ onAdd, playSourceOverride }: Props) {
                           {r.cover ? (
                             <img src={r.cover} alt="" className="h-full w-full object-cover" />
                           ) : (
-                            <div className="flex h-full w-full items-center justify-center text-slate-500">
-                              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z" />
-                              </svg>
-                            </div>
+                            <TrackMediaPlaceholder chip="YT" className="h-full w-full" showCornerBadge={false} />
                           )}
-                          <span className="absolute bottom-0 right-0 rounded bg-[#ff0000]/90 px-1 py-0.5 text-[9px] font-medium text-white">YT</span>
+                          <span className="pointer-events-none absolute bottom-0.5 left-0.5">
+                            <CompactSourceBadge chip="YT" />
+                          </span>
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-slate-100">{r.title}</p>

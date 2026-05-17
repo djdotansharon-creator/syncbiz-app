@@ -89,3 +89,30 @@ Affinity branches and Catalog Programming **do not** block Stage 6 closure if th
 
 - **Music Programming Coverage** — documented orthogonal dimensions (genre, style, business-fit, daypart, energy, URL type, editorial) and **coverage pack** rule (combine, do not merge); clarified informal “Stage 7” vs roadmap Stage 7 placeholder.
 - **Roadmap authored** in-repo as `docs/CATALOG-DJ-CREATOR-ROADMAP.md` to replace ad-hoc stage references scattered across comments.
+
+---
+
+## 10. Catalog Operating System V1 — Stages 7–11 (informal cluster)
+
+This cluster is **separate from** the 11-stage product table above. The numbers are conversational labels for sequential editor-tooling work that landed on the `wip/dj-creator-v1` branch. Renumber / re-anchor when the master plan locks them.
+
+| # | Stage | Name | Status | What exists | Where |
+|---|-------|------|--------|-------------|-------|
+| 7 | **7**  | Music Programming Coverage health report | **Done** | Pack-level loose / strict counts, dimension gaps, energy band hits, URL shape mix, editor action text. Read-only. CLI: `npm run catalog-coverage:report`, `npm run catalog-coverage:work-queue`. | `lib/recommendations/catalog-coverage-health.ts`, `catalog-coverage-targets.json`, `/admin/platform/catalog-coverage` |
+| 8 | **8**  | Coverage → Catalog Tagging editor workflow | **Done** | Coverage candidate "Open in tagging" deep link carries pack id + label + missing dimensions + energy hint + URL type/shape; editor renders programming-coverage banner with dimension jump buttons and a return link; client-side scroll-into-view on deep link. | `app/admin/platform/catalog-coverage/page.tsx`, `app/admin/platform/catalog-tagging/page.tsx`, `components/admin/catalog-tagging-scroll-to-editor.tsx`, `components/admin/catalog-item-taxonomy-editor.tsx` |
+| 9 | **9**  | Catalog Item Readiness / quality gate | **Done** | Pure helper classifies each item as `ready` / `partial` / `needs-work` from saved taxonomy categories + manual energy + URL type + duration/provider. Surfaced as live editor panel and per-row pill. | `lib/recommendations/catalog-item-readiness.ts` |
+| 10 | **10** | Catalog Usage Eligibility diagnostics | **Done** | Pure helper translates readiness into per-flow flags (DJ Creator strict, DJ Creator loose, Coverage strict, admin/search). Surfaced as editor panel, row chip, and coverage candidate chip. **Not yet consumed by runtime selection.** | `lib/recommendations/catalog-item-eligibility.ts` |
+| 11 | **11** | Catalog Operating System V1 finalization | **Done** | Admin-facing operating guide; small help copy on coverage dashboard + tagging editor linking to the guide. No code behavior change. | `docs/CATALOG-OPERATING-SYSTEM-V1.md`, `app/admin/platform/catalog-coverage/page.tsx`, `components/admin/catalog-item-taxonomy-editor.tsx` |
+
+**Hard rules applied across this cluster:** no DB writes, no auto-tagging, no scoring/filtering changes, no Prisma migrations, no changes to mobile / `server/index.ts` / desktop packaging / Railway config / playback behavior.
+
+### 10.1 Future work carried out of V1
+
+- Wire `assessCatalogItemEligibility` into DJ Creator strict packs and Coverage strict matching behind a flag.
+- Bulk readiness CLI (counts per provider / workspace / pack).
+- Auto-suggest dictionary slugs for `Missing · X` (still no auto-apply).
+- Extend readiness to require energy *within pack band* once Stage 6.2 lands.
+- Wizard preflight: show how many `LIMITED` candidates exist before commit.
+- Decision: should `BLOCKED` items receive an archive nudge?
+
+See `docs/CATALOG-OPERATING-SYSTEM-V1.md §8` for the full carry-forward list.

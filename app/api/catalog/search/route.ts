@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
+import { getCurrentUserFromApiRequest } from "@/lib/auth-helpers";
 import { catalogDiscoveryActiveWhere } from "@/lib/catalog-discovery-scope";
 
 const LIMIT = 12;
 
 export async function GET(req: NextRequest) {
-  const user = await getCurrentUserFromCookies();
+  const user = await getCurrentUserFromApiRequest(req);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
 
   // Match any word in the query against the title (case-insensitive)
   const words = q.split(/\s+/).filter((w) => w.length > 1);
+  if (words.length === 0) return NextResponse.json({ items: [] });
 
   const items = await prisma.catalogItem.findMany({
     where: {

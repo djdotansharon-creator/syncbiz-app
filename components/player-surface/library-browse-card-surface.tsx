@@ -1,15 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import type { LibraryBrowseCardSurfaceProps } from "@/lib/player-surface/library-browse-types";
-import { isSafeHttpCoverUrl } from "@/lib/player-surface/cover-url";
+import type { TrackSourceChip } from "@/lib/track-source-chip";
+import { CompactSourceBadge, TrackMediaPlaceholder } from "@/components/track-source-visual";
+import { isSafeLibraryCoverUrl } from "@/lib/player-surface/cover-url";
 
 function DefaultArt({
   artworkUrl,
   originBadgeLabel,
+  originBadgeClassName = "",
+  topRightSlot,
+  mediaPlaceholderChip,
 }: {
   artworkUrl: string | null;
   originBadgeLabel: string;
+  originBadgeClassName?: string;
+  topRightSlot?: ReactNode;
+  mediaPlaceholderChip?: TrackSourceChip;
 }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -20,16 +28,27 @@ function DefaultArt({
 
   return (
     <div className="sb-lbc-art">
-      {originBadgeLabel.trim() ? <span className="sb-lbc-origin">{originBadgeLabel}</span> : null}
+      {originBadgeLabel.trim() ? (
+        <span className={`sb-lbc-origin ${originBadgeClassName}`.trim()}>{originBadgeLabel}</span>
+      ) : null}
       {showImg ? (
-        <img
-          src={artworkUrl!}
-          alt=""
-          className="sb-lbc-art-img"
-          loading="lazy"
-          decoding="async"
-          onError={() => setFailed(true)}
-        />
+        <>
+          <img
+            src={artworkUrl!}
+            alt=""
+            className="sb-lbc-art-img"
+            loading="lazy"
+            decoding="async"
+            onError={() => setFailed(true)}
+          />
+          {mediaPlaceholderChip ? (
+            <span className="pointer-events-none absolute bottom-2 left-2 z-[2]">
+              <CompactSourceBadge chip={mediaPlaceholderChip} />
+            </span>
+          ) : null}
+        </>
+      ) : mediaPlaceholderChip ? (
+        <TrackMediaPlaceholder chip={mediaPlaceholderChip} className="absolute inset-0" showCornerBadge={false} />
       ) : (
         <div className="sb-lbc-fallback" aria-hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -39,6 +58,11 @@ function DefaultArt({
           </svg>
         </div>
       )}
+      {topRightSlot ? (
+        <div className="pointer-events-none absolute right-2 top-2 z-[2] [&_button]:pointer-events-auto [&_span]:pointer-events-auto">
+          {topRightSlot}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -47,8 +71,11 @@ export function LibraryBrowseCardSurface(props: LibraryBrowseCardSurfaceProps) {
   const {
     as,
     artworkUrl,
+    mediaPlaceholderChip,
     originBadgeLabel = "",
+    originBadgeClassName = "",
     artSlot,
+    artTopRightSlot,
     title,
     metaLine,
     metaSlot,
@@ -64,11 +91,19 @@ export function LibraryBrowseCardSurface(props: LibraryBrowseCardSurfaceProps) {
   } = props;
 
   const safeUrl =
-    artworkUrl && isSafeHttpCoverUrl(artworkUrl) ? artworkUrl : null;
+    artworkUrl && isSafeLibraryCoverUrl(artworkUrl) ? artworkUrl : null;
 
   const inner = (
     <>
-      {artSlot ?? <DefaultArt artworkUrl={safeUrl} originBadgeLabel={originBadgeLabel} />}
+      {artSlot ?? (
+        <DefaultArt
+          artworkUrl={safeUrl}
+          originBadgeLabel={originBadgeLabel}
+          originBadgeClassName={originBadgeClassName}
+          topRightSlot={artTopRightSlot}
+          mediaPlaceholderChip={mediaPlaceholderChip}
+        />
+      )}
       <div className="sb-lbc-body">
         <div className="sb-lbc-title-row">
           <h3 className="sb-lbc-title">{title}</h3>

@@ -1,5 +1,10 @@
 import { getPlaylistTracks, type Playlist, type PlaylistTrack, type PlaylistType } from "./playlist-types";
 import type { UnifiedSource } from "./source-types";
+import type { MusicStreamingProvider, MusicUrlIngestClassification, MusicUrlIngestIntent } from "./source-types";
+
+function ingestIntentForProvider(provider: MusicStreamingProvider, intent: MusicUrlIngestIntent): MusicUrlIngestClassification {
+  return { provider, intent };
+}
 
 /**
  * UnifiedSource / queue ids for playlists: stored `Playlist.id` is already `pl-*`.
@@ -184,6 +189,179 @@ export function extractShazamSongFromPath(url: string): string | null {
   }
 }
 
+/** Best-effort host without leading `www.`. */
+function normalizedHostname(url: URL): string {
+  return url.hostname.replace(/^www\./i, "").toLowerCase();
+}
+
+/**
+ * Stage 6B: classify external music URLs for Library paste/drop (no resolution / no picker).
+ * Callers gate Shazam (`isShazamUrl`) for the legacy YouTube-resolve flow before treating as generic resolve.
+ */
+export function classifyMusicUrlIngest(raw: string): MusicUrlIngestClassification {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return ingestIntentForProvider("generic_music_url", "unknown");
+  }
+
+  const host = normalizedHostname(u);
+  const lowerPath = `${u.pathname}`.toLowerCase();
+  const search = `${u.search}`;
+
+  /** After known hosts fail: generic https “page” ingest (inherits legacy stream-url fallback). */
+  const genericHttpsStream = (): MusicUrlIngestClassification => {
+    if (u.protocol === "http:" || u.protocol === "https:") {
+      const t = inferPlaylistType(raw.trim());
+      if (t === "stream-url") return ingestIntentForProvider("generic_music_url", "unknown");
+    }
+    return ingestIntentForProvider("generic_music_url", "unknown");
+  };
+
+  // Shazam (UI keeps dedicated branch; classifier tags provider for callers / parse-url)
+  if (host.includes("shazam.com") && /\/song\//i.test(lowerPath)) {
+    return ingestIntentForProvider("shazam", "resolve_to_youtube");
+  }
+
+  // YouTube / YouTube Music
+  if (host === "music.youtube.com") {
+    return ingestIntentForProvider("youtube_music", "direct_playable");
+  }
+  if (host === "youtu.be" || host.endsWith(".youtube.com") || host.endsWith(".youtube.googleapis.com")) {
+    return ingestIntentForProvider("youtube", "direct_playable");
+  }
+  if (host.includes("youtube.com")) {
+    return ingestIntentForProvider("youtube", "direct_playable");
+  }
+
+  // SoundCloud
+  if (host.includes("soundcloud.com")) {
+    return ingestIntentForProvider("soundcloud", "direct_playable");
+  }
+
+  // Spotify
+  if (
+    host === "open.spotify.com" ||
+    host === "spotify.com" ||
+    host.endsWith(".spotify.com") ||
+    host === "spotify.link" ||
+    host.endsWith(".spotify.link") ||
+    host === "toi.link"
+  ) {
+    if (/^\/intl-[^/]+/i.test(lowerPath)) {
+      const rest = lowerPath.replace(/^\/intl-[^/]+/i, "");
+      const pathForKind = rest || lowerPath;
+      if (/\/album\//i.test(pathForKind) || /\/playlist\//i.test(pathForKind) || /\/show\//i.test(pathForKind) || /\/episode\//i.test(pathForKind) || /\/collection\//i.test(pathForKind)) {
+        return ingestIntentForProvider("spotify", "unsupported_playlist_or_album");
+      }
+      if (/\/artist\//i.test(pathForKind)) return ingestIntentForProvider("spotify", "unsupported_playlist_or_album");
+      return ingestIntentForProvider("spotify", "resolve_to_youtube");
+    }
+    if (/\/album\//i.test(lowerPath) || /\/playlist\//i.test(lowerPath) || /\/show\//i.test(lowerPath) || /\/episode\//i.test(lowerPath) || /\/collection\//i.test(lowerPath)) {
+      return ingestIntentForProvider("spotify", "unsupported_playlist_or_album");
+    }
+    if (/\/artist\//i.test(lowerPath)) return ingestIntentForProvider("spotify", "unsupported_playlist_or_album");
+    return ingestIntentForProvider("spotify", "resolve_to_youtube");
+  }
+
+  // Apple Music (primary host + regional `music.apple.*`)
+  const isAppleMusicDomain = host.includes("music.apple.");
+  const isLegacyItunesWeb = host.endsWith("itunes.apple.com") && /\/(album|song|playlist)\//i.test(lowerPath);
+
+  if (isAppleMusicDomain || isLegacyItunesWeb) {
+    if (/\/playlist\//i.test(lowerPath)) return ingestIntentForProvider("apple_music", "unsupported_playlist_or_album");
+    const albumFocusedTrack = Boolean(search && /\/album\//i.test(lowerPath) && /\bi=/i.test(search));
+    if (/\/album\//i.test(lowerPath)) {
+      if (albumFocusedTrack) return ingestIntentForProvider("apple_music", "resolve_to_youtube");
+      return ingestIntentForProvider("apple_music", "unsupported_playlist_or_album");
+    }
+    if (/\/(artist|browse)\//i.test(lowerPath)) return ingestIntentForProvider("apple_music", "unsupported_playlist_or_album");
+    if (/\/song\//i.test(lowerPath)) return ingestIntentForProvider("apple_music", "resolve_to_youtube");
+    return ingestIntentForProvider("apple_music", "resolve_to_youtube");
+  }
+
+  const beatHosts = ["beatport.com", "beatsource.com"];
+  if (beatHosts.some((h) => host === h || host.endsWith("." + h))) {
+    const prov: MusicStreamingProvider = host.includes("beatsource") ? "beatsource" : "beatport";
+    if (/\/releases?\//i.test(lowerPath)) return ingestIntentForProvider(prov, "unsupported_playlist_or_album");
+    if (/\/label\//i.test(lowerPath) || /\/chart\//i.test(lowerPath)) return ingestIntentForProvider(prov, "unsupported_playlist_or_album");
+    return ingestIntentForProvider(prov, "resolve_to_youtube");
+  }
+
+  // Juno Download / Juno UK store
+  const isJunoDownload = host === "junodownload.com" || host.endsWith(".junodownload.com");
+  if (isJunoDownload || host.endsWith(".juno.co.uk")) {
+    if (/\/albums?\//i.test(lowerPath)) {
+      return ingestIntentForProvider(isJunoDownload ? "juno_download" : "generic_music_url", "unsupported_playlist_or_album");
+    }
+    if (isJunoDownload) return ingestIntentForProvider("juno_download", "resolve_to_youtube");
+    return ingestIntentForProvider("generic_music_url", "resolve_to_youtube");
+  }
+
+  const isDeezer = host.endsWith(".deezer.com") || host === "deezer.page.link";
+  if (host.includes("deezer.com") || isDeezer) {
+    if (/\/playlist\//i.test(lowerPath) || /\/album\//i.test(lowerPath) || /\/episode\//i.test(lowerPath) || /\/podcast\//i.test(lowerPath)) {
+      return ingestIntentForProvider("deezer", "unsupported_playlist_or_album");
+    }
+    if (/\/artist\//i.test(lowerPath)) return ingestIntentForProvider("deezer", "unsupported_playlist_or_album");
+    return ingestIntentForProvider("deezer", "resolve_to_youtube");
+  }
+
+  const isTidal = host === "tidal.com" || host.endsWith(".tidal.com");
+  if (isTidal || host === "listen.tidal.com") {
+    if (
+      /(\/browse)?\/playlist\//i.test(lowerPath) ||
+      /\/album\//i.test(lowerPath) ||
+      /\/artist\//i.test(lowerPath)
+    ) {
+      return ingestIntentForProvider("tidal", "unsupported_playlist_or_album");
+    }
+    if (/\b\/mix\/?/i.test(lowerPath)) return ingestIntentForProvider("tidal", "unsupported_playlist_or_album");
+    return ingestIntentForProvider("tidal", "resolve_to_youtube");
+  }
+
+  const amazonMusicHints =
+    host.startsWith("music.amazon.") ||
+    host.endsWith(".music.amazon.") ||
+    (host.endsWith(".amazon.com") &&
+      (/^\/music(?:\/|$|\?)/i.test(lowerPath) || /\/stores\/music\/?/i.test(lowerPath)));
+
+  if (amazonMusicHints || (host.endsWith(".amazon.") && /\.amazon\.[a-z.]+$/i.test(host) && (/^\/(?:[\w-]+\/)?(?:album|albums|playlist|playlists)/i.test(lowerPath)))) {
+    const prov: MusicStreamingProvider = "amazon_music";
+    const looksAlbumOrPlaylist =
+      /\/playlist\/?/i.test(lowerPath) ||
+      /albums\b/i.test(lowerPath) ||
+      /\/browse\/featured-playlists\b/i.test(lowerPath);
+    const looksStation = /stations?\b/i.test(lowerPath);
+    const looksAlbumOnly = /\b(album\/|\/album\b)/i.test(lowerPath);
+    const looksSingleTrack =
+      /\b(track|tracks|song|dmusic|SINGLE)\b/i.test(lowerPath + search) ||
+      /asin=/i.test(search) ||
+      /trackasin=/i.test(search);
+    if (looksAlbumOrPlaylist || looksStation || (looksAlbumOnly && !looksSingleTrack && !/[?&](i|song|songId|songID)=/i.test(search))) {
+      return ingestIntentForProvider(prov, "unsupported_playlist_or_album");
+    }
+    return ingestIntentForProvider(prov, "resolve_to_youtube");
+  }
+
+  const isQobuz = host.endsWith(".qobuz.com");
+  if (isQobuz) {
+    if (/\/album\/?/i.test(lowerPath)) return ingestIntentForProvider("qobuz", "unsupported_playlist_or_album");
+    if (/\/playlist\/?/i.test(lowerPath)) return ingestIntentForProvider("qobuz", "unsupported_playlist_or_album");
+    if (/\/track\b/i.test(lowerPath)) return ingestIntentForProvider("qobuz", "resolve_to_youtube");
+    return ingestIntentForProvider("qobuz", "resolve_to_youtube");
+  }
+
+  const isBandcampHost = host === "bandcamp.com" || host.endsWith(".bandcamp.com");
+  if (isBandcampHost) {
+    if (/\/album\//i.test(lowerPath)) return ingestIntentForProvider("bandcamp", "unsupported_playlist_or_album");
+    return ingestIntentForProvider("bandcamp", "resolve_to_youtube");
+  }
+
+  return genericHttpsStream();
+}
+
 /** Infer playlist type from URL or path. */
 export function inferPlaylistType(url: string): PlaylistType {
   const u = url.toLowerCase().trim();
@@ -193,4 +371,73 @@ export function inferPlaylistType(url: string): PlaylistType {
   if (u.match(/\.(m3u8?|pls)(\?|$)/i)) return "winamp";
   if (u.startsWith("http://") || u.startsWith("https://")) return "stream-url";
   return "local";
+}
+
+/**
+ * True when parse-url titles are useless for storefront → YouTube search
+ * (“Spotify”, “Beatport”, bare host-shaped labels, placeholders).
+ */
+export function isWeakStorefrontParsedTitle(title: string | null | undefined): boolean {
+  const t = (title ?? "").trim();
+  if (!t) return true;
+  const low = t.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  if (low.length < 3) return true;
+  if (/^[a-z0-9.-]+\.[a-z]{2,}$/.test(low) && !/\s/.test(low)) return true;
+
+  const weakExact = new Set([
+    "spotify",
+    "open.spotify.com",
+    "spotify.com",
+    "beatport",
+    "www.beatport.com",
+    "beatport.com",
+    "beatsource",
+    "beatsource.com",
+    "www.beatsource.com",
+    "deezer",
+    "tidal",
+    "amazon music",
+    "qobuz",
+    "untitled",
+    "soundcloud track",
+    "youtube video",
+    "open.spotify",
+  ]);
+  if (weakExact.has(low)) return true;
+  if (/^youtube\s+[a-z0-9_-]{6,}$/i.test(t.trim())) return true;
+  return false;
+}
+
+/** Beatport / Beatsource `/track/{slug}/{id}` slug → readable query words (keeps remix tokens). */
+export function parseBeatportLikeTrackSlugFromUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const h = u.hostname.replace(/^www\./i, "").toLowerCase();
+    if (!h.endsWith("beatport.com") && !h.endsWith("beatsource.com")) return null;
+    const parts = u.pathname.split("/").filter(Boolean);
+    const ti = parts.findIndex((p) => p.toLowerCase() === "track");
+    if (ti < 0) return null;
+    const after = parts.slice(ti + 1);
+    if (after.length === 0) return null;
+    let slug = after[0]!;
+    if (after.length >= 2 && /^\d+$/.test(after[after.length - 1]!)) {
+      slug = after[after.length - 2]!;
+    }
+    if (!slug || slug.length < 2 || /^\d+$/.test(slug)) return null;
+    return beatportPathSegmentToWords(slug);
+  } catch {
+    return null;
+  }
+}
+
+/** URL path segment (hyphens) → space-separated phrase. */
+export function beatportPathSegmentToWords(segment: string): string {
+  try {
+    return decodeURIComponent(segment.replace(/\+/g, "%20"))
+      .replace(/-/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  } catch {
+    return segment.replace(/-/g, " ").replace(/\s+/g, " ").trim();
+  }
 }

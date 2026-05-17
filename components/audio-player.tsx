@@ -51,6 +51,12 @@ import {
 } from "@/lib/playback-resilience";
 import { resolveDeckSourceBadge, labelForPlaylistOriginBadge } from "@/lib/deck-source-badge";
 import { syncbizAuditPlayerCreationTarget, syncbizAuditTransportTransitionStart } from "@/lib/syncbiz-transport-audit";
+import {
+  isIOSAutoplayBlock,
+  registerIOSAudioElement,
+  setIOSNeedsTapToResume,
+} from "@/lib/ios-audio-unlock";
+import { isValidLocalFilePlaybackPath } from "@/lib/url-validation";
 
 /** Crossfade runtime diagnostics – key transitions only, no 500ms spam */
 function xfadeLog(phase: string, data?: Record<string, unknown>) {
@@ -998,6 +1004,29 @@ export function AudioPlayer() {
     [setLastMessage, locale]
   );
 
+  /**
+   * iPhone Safari rejects programmatic `audio.play()` outside the user-gesture
+   * activation window. When that happens, flip status back to paused so the
+   * UI doesn't claim audio is playing while it's silent, and surface the
+   * "Tap to resume" affordance via the iOS unlock module.
+   */
+  const handleAudioPlayRejection = useCallback(
+    (err: unknown, context?: string) => {
+      if (isIOSAutoplayBlock(err)) {
+        playbackLifecycleLog("ios_autoplay_block", { context, error: String(err) });
+        setIOSNeedsTapToResume(true);
+        try {
+          pause();
+        } catch {
+          /* ignore — pause is best-effort; UI still flips via state */
+        }
+        return;
+      }
+      handlePlaybackError(err, context);
+    },
+    [handlePlaybackError, pause]
+  );
+
   /** Best-effort resume when tab/app returns — does not override user pause (status must still be playing). */
   const nudgeResumePlayback = useCallback(() => {
     if (typeof document !== "undefined" && document.hidden) return;
@@ -1011,9 +1040,10 @@ export function AudioPlayer() {
     });
     try {
       if (isStreamUrlRef.current && audioRef.current?.paused) {
-        void audioRef.current.play().catch((e) =>
-          playbackLifecycleLog("resume_media_attempt", { result: "audio_reject", error: String(e) })
-        );
+        void audioRef.current.play().catch((e) => {
+          playbackLifecycleLog("resume_media_attempt", { result: "audio_reject", error: String(e) });
+          handleAudioPlayRejection(e, "nudgeResumePlayback");
+        });
       }
       if (isYouTubeRef.current && embedReadyRef.current) {
         const p = ytPlayerRef.current;
@@ -1029,7 +1059,7 @@ export function AudioPlayer() {
     } catch (e) {
       playbackLifecycleLog("resume_media_attempt", { result: "error", error: String(e) });
     }
-  }, []);
+  }, [handleAudioPlayRejection]);
 
   useEffect(() => {
     playbackLifecycleLog("platform_hint", {
@@ -1041,6 +1071,30 @@ export function AudioPlayer() {
           (navigator as Navigator & { standalone?: boolean }).standalone === true),
     });
   }, []);
+
+  // Make the live <audio> element discoverable by the iOS unlock module so
+  // mobile-now-playing-sheet can call audio.play() synchronously inside its
+  // tap handler. No-op on non-iOS UAs because primeIOSFromGesture short-circuits.
+  useEffect(() => {
+    registerIOSAudioElement(audioRef.current);
+    return () => registerIOSAudioElement(null);
+  }, []);
+
+  // Clear the "Tap to resume" flag whenever audio actually starts playing or
+  // the user explicitly pauses/stops, so the affordance only appears when
+  // iOS actually blocked us.
+  useEffect(() => {
+    if (status === "playing") {
+      const audio = audioRef.current;
+      if (!audio) return;
+      const onPlaying = () => setIOSNeedsTapToResume(false);
+      audio.addEventListener("playing", onPlaying);
+      return () => audio.removeEventListener("playing", onPlaying);
+    }
+    if (status === "paused" || status === "stopped" || status === "idle") {
+      setIOSNeedsTapToResume(false);
+    }
+  }, [status]);
 
   useEffect(() => {
     if (isControlMirror) return;
@@ -1117,12 +1171,12 @@ export function AudioPlayer() {
     const audio = audioRef.current;
     if (!audio || !isStreamUrl) return;
     if (status === "playing") {
-      if (audio.paused) audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
+      if (audio.paused) audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
     } else {
       audio.pause();
       if (status === "stopped") audio.currentTime = 0;
     }
-  }, [status, isStreamUrl, handlePlaybackError]);
+  }, [status, isStreamUrl, handleAudioPlayRejection]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -1283,14 +1337,14 @@ export function AudioPlayer() {
           hls.attachMedia(audio);
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             if (cancelled) return;
-            if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
+            if (statusRef.current === "playing") audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
           });
         } else if (audio.canPlayType("application/vnd.apple.mpegurl")) {
           audio.src = currentPlayUrl;
-          if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
+          if (statusRef.current === "playing") audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
         } else {
           audio.src = currentPlayUrl;
-          if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
+          if (statusRef.current === "playing") audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
         }
       });
       return () => {
@@ -1318,9 +1372,9 @@ export function AudioPlayer() {
     const onError = () => handlePlaybackError("audio load failed", "audio.error");
     audio.addEventListener("error", onError);
     audio.src = currentPlayUrl;
-    if (statusRef.current === "playing") audio.play().catch((e) => handlePlaybackError(e, "audio.play"));
+    if (statusRef.current === "playing") audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
     return () => audio.removeEventListener("error", onError);
-  }, [isStreamUrl, currentPlayUrl, handlePlaybackError, locale]);
+  }, [isStreamUrl, currentPlayUrl, handlePlaybackError, handleAudioPlayRejection, locale]);
 
   useEffect(() => {
     const p = ytPlayerRef.current;
@@ -1870,19 +1924,53 @@ export function AudioPlayer() {
 
       if (prev !== "idle" && next === "idle" &&
           statusRef.current === "playing" && currentPlayUrlRef.current) {
-        // Ch-A just went idle while web player is still playing — could be test
-        // panel hijack ending, or natural end of clip. Schedule reload.
+        // Ch-A just went idle while web player is still playing.
+        //
+        // For local-file URLs (multi-track folder drops, saved local playlists), this is the
+        // natural end of the clip — the only reliable end-of-track signal we get through MPV
+        // for this transport. Advance via the provider so NEXT logic, the live queue
+        // highlightIndex, and the rotating-art track all stay in sync. If the provider chose
+        // a same-URL restart (single-track session), force a fresh loadfile so the file
+        // replays from 0 (PLAY alone won't restart an idle MPV).
+        //
+        // For non-local URLs, the original heuristic still applies: a 1.5s reload guards
+        // against the test panel hijack briefly stealing Ch-A. (Streams/YouTube have their
+        // own ENDED handlers earlier in this file.)
+        const cur = currentPlayUrlRef.current;
         if (mpvRecoverTimerRef.current) clearTimeout(mpvRecoverTimerRef.current);
-        mpvRecoverTimerRef.current = setTimeout(() => {
-          mpvRecoverTimerRef.current = null;
-          // Re-check: still playing, still idle (didn't recover on its own via replace)
-          if (statusRef.current === "playing" &&
-              currentPlayUrlRef.current &&
-              mpvChAStatusRef.current === "idle") {
-            mpvLastUrlRef.current = null; // force routing effect to treat as new
-            void desktop.mpvPlayUrl(currentPlayUrlRef.current);
+        mpvRecoverTimerRef.current = null;
+
+        if (isValidLocalFilePlaybackPath(cur)) {
+          const urlBeforeNext = cur;
+          try {
+            nextRef.current({ auditTransportCase: "ended_auto" });
+          } catch (err) {
+            console.warn("[SyncBiz:mpv-natural-end] next() threw", err);
           }
-        }, 1500);
+          // Single-track session restart guard: if next() kept the same URL,
+          // routing effect won't re-fire — push a fresh loadfile here.
+          mpvRecoverTimerRef.current = setTimeout(() => {
+            mpvRecoverTimerRef.current = null;
+            if (statusRef.current === "playing" &&
+                currentPlayUrlRef.current &&
+                currentPlayUrlRef.current === urlBeforeNext &&
+                mpvChAStatusRef.current === "idle") {
+              mpvLastUrlRef.current = null;
+              void desktop.mpvPlayUrl(currentPlayUrlRef.current);
+            }
+          }, 80);
+        } else {
+          mpvRecoverTimerRef.current = setTimeout(() => {
+            mpvRecoverTimerRef.current = null;
+            // Re-check: still playing, still idle (didn't recover on its own via replace)
+            if (statusRef.current === "playing" &&
+                currentPlayUrlRef.current &&
+                mpvChAStatusRef.current === "idle") {
+              mpvLastUrlRef.current = null; // force routing effect to treat as new
+              void desktop.mpvPlayUrl(currentPlayUrlRef.current);
+            }
+          }, 1500);
+        }
       } else if (next !== "idle" && mpvRecoverTimerRef.current) {
         // Ch-A is active again — loadfile replace transition settled; cancel reload
         clearTimeout(mpvRecoverTimerRef.current);
@@ -2130,9 +2218,13 @@ export function AudioPlayer() {
   //    → routing effect fires → mpvPlayUrl(newUrl). This is the only correct path for
   //    within-playlist track navigation.
   //  - Single station with a populated catalog → catalog PREV/NEXT + PLAY via localMockTransport.
+  const desktopSessionTrackCount = (() => {
+    const pl =
+      currentSource != null ? effectivePlaybackPlaylistAttachment(currentSource) ?? currentPlaylist : null;
+    return pl ? getPlaylistTracks(pl).length : 0;
+  })();
   const desktopHasProviderNav =
-    isDesktopMode &&
-    ((currentSource?.playlist?.tracks?.length ?? 0) > 1 || queue.length > 1);
+    isDesktopMode && (desktopSessionTrackCount > 1 || queue.length > 1);
 
   const onPrev = isDesktopMode
     ? () => {

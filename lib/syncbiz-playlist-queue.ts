@@ -1,5 +1,7 @@
-import { getPlaylistTracks } from "@/lib/playlist-types";
+import { getPlaylistTracks, type PlaylistType } from "@/lib/playlist-types";
 import type { UnifiedSource } from "@/lib/source-types";
+import { classifyLibraryEntityContract, unifiedFoundationHints } from "@/lib/source-types";
+import { derivePlaylistTrackCoverArt } from "@/lib/playlist-utils";
 
 /** Same storage key as `components/sources-manager.tsx`. */
 export const SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY = "syncbiz-playlist-item-assignments";
@@ -26,18 +28,56 @@ export function expandPlaylistEntityToItems(source: UnifiedSource): UnifiedSourc
   const tracks = getPlaylistTracks(source.playlist);
   if (tracks.length === 0) return [];
   /** `r${index}` disambiguates rows when duplicate `track.id` exists (e.g. two `src-010` refs). */
-  return tracks.map((track, index) => ({
-    id: `${source.id}:track:r${index}`,
-    title: track.name || track.title || source.title,
-    genre: source.genre || "Mixed",
-    cover: track.cover ?? source.cover ?? null,
-    type: (track.type ?? source.type) as UnifiedSource["type"],
-    url: track.url,
-    origin: "source",
-    contentNodeKind: "single_track",
-    /** Lets PlaybackProvider resolve URL/embed via parent tracks + playSource(_, trackIndex). */
-    playlist: source.playlist,
-  }));
+  return tracks.map((track, index) => {
+    const ttype = (track.type ?? source.type) as UnifiedSource["type"];
+    const foundation = unifiedFoundationHints("source", ttype, track.url);
+    const leafArt =
+      `${track.cover ?? ""}`.trim() ||
+      derivePlaylistTrackCoverArt({
+        cover: track.cover,
+        url: track.url,
+        type: ttype as PlaylistType,
+      });
+
+    const pseudo: UnifiedSource = {
+      id: "",
+      title: track.name || track.title || source.title,
+      genre: source.genre || "Mixed",
+      cover: leafArt || null,
+      type: ttype,
+      url: track.url,
+      origin: "source",
+      leafDurationSeconds: track.durationSeconds,
+      viewCount: track.viewCount,
+      likeCount: track.likeCount,
+      publishedAt: track.publishedAt,
+      curationRating: track.curationRating,
+      catalogItemId: track.catalogItemId,
+      ...foundation,
+    };
+    const contract = classifyLibraryEntityContract(pseudo);
+    const leafKind =
+      contract.entityKind === "item" && contract.itemSubtype === "mix_set" ? ("mix_set" as const) : ("single_track" as const);
+    return {
+      id: `${source.id}:track:r${index}`,
+      title: track.name || track.title || source.title,
+      genre: source.genre || "Mixed",
+      cover: leafArt || null,
+      type: ttype,
+      url: track.url,
+      origin: "source",
+      /** Lets PlaybackProvider resolve URL/embed via parent tracks + playSource(_, trackIndex). */
+      playlist: source.playlist,
+      leafDurationSeconds: track.durationSeconds,
+      viewCount: track.viewCount,
+      likeCount: track.likeCount,
+      publishedAt: track.publishedAt,
+      curationRating: track.curationRating,
+      catalogItemId: track.catalogItemId,
+      ...foundation,
+      contentNodeKind: leafKind,
+    };
+  });
 }
 
 /** Index of this leaf inside `getPlaylistTracks(item.playlist)` (expanded-queue rows only). */

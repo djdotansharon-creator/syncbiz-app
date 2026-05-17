@@ -67,6 +67,11 @@ export type PlaylistTrack = {
    * callers should show "—" rather than treating missing as zero.
    */
   durationSeconds?: number;
+  /** Hydrated from catalog for library chips (optional). */
+  viewCount?: number;
+  likeCount?: number;
+  publishedAt?: string;
+  curationRating?: number | null;
 };
 
 /** Contributor sections for composite scheduled playlists (persisted JSON). */
@@ -102,6 +107,12 @@ export type Playlist = {
   catalogItemId?: string;
   /** View count (from YouTube etc.) – stored when adding from search. */
   viewCount?: number;
+  /** Like count – hydrated from catalog snapshot for library display when linked. */
+  likeCount?: number;
+  /** ISO timestamp – hydrated from catalog snapshot when linked. */
+  publishedAt?: string;
+  /** Hydrated from CatalogItem when linked (editorial; 0 = unset in DB default). */
+  curationRating?: number | null;
   /** Duration in seconds (from YouTube etc.) – stored when adding/refreshing. */
   durationSeconds?: number;
   /** Optional tracks array. If present, playlist has multiple tracks. */

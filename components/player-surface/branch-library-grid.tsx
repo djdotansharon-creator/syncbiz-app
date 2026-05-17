@@ -2,6 +2,16 @@
 
 import { BranchLibraryBrowseCard } from "@/components/player-surface/branch-library-browse-card";
 import type { BranchLibraryListItem } from "@/lib/player-surface/branch-library-list-item";
+import { libraryKindBadgeArtClass } from "@/lib/library-display-classification";
+
+function branchListBadgeArtClass(item: BranchLibraryListItem): string {
+  const b = item.kindBadge;
+  if (b === "LIST") return libraryKindBadgeArtClass("LIST");
+  if (b === "SINGLE") return libraryKindBadgeArtClass("SINGLE");
+  if (b === "SET") return libraryKindBadgeArtClass("SET");
+  if (b === "Radio") return libraryKindBadgeArtClass("RADIO");
+  return "";
+}
 
 export type BranchLibraryGridProps = {
   items: BranchLibraryListItem[];
@@ -34,6 +44,7 @@ export function BranchLibraryGrid({
           item={it}
           selected={selectedId === it.id}
           onSelect={onSelect}
+          originBadgeClassName={branchListBadgeArtClass(it)}
         />
       ))}
     </>

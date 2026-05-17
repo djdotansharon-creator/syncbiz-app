@@ -15,6 +15,7 @@ import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { type UnifiedSource, type SourceProviderType, unifiedLibraryIdForDbSourceId } from "@/lib/source-types";
 import { unifiedFoundationHints } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
+import { getPlaylistTracks } from "@/lib/playlist-types";
 import type { Source } from "@/lib/types";
 import { getSourceArtworkUrl, detectProvider } from "@/lib/player-utils";
 import {
@@ -23,6 +24,7 @@ import {
   unifiedPlaylistSourceId,
 } from "@/lib/playlist-utils";
 import { inferGenre } from "@/lib/infer-genre";
+import { enrichPlaylistsWithCatalogForUnified, enrichUnifiedSourcesByCatalogUrl } from "@/lib/unified-catalog-enrichment";
 
 function resolveAccountScope(userTenantId: string): string {
   return userTenantId === "tnt-default" ? "acct-demo-001" : userTenantId;
@@ -30,6 +32,8 @@ function resolveAccountScope(userTenantId: string): string {
 
 function playlistToUnified(p: Playlist): UnifiedSource {
   const cover = derivePlaylistUnifiedCoverArt(p);
+  const tracks = getPlaylistTracks(p);
+  const sole = tracks.length === 1 ? tracks[0] : null;
   return {
     id: unifiedPlaylistSourceId(p.id),
     title: p.name,
@@ -39,6 +43,13 @@ function playlistToUnified(p: Playlist): UnifiedSource {
     url: p.url,
     origin: "playlist",
     playlist: p,
+    viewCount: p.viewCount ?? sole?.viewCount,
+    likeCount: p.likeCount ?? sole?.likeCount,
+    publishedAt: p.publishedAt ?? sole?.publishedAt,
+    curationRating: p.curationRating ?? sole?.curationRating,
+    ...(sole && typeof sole.durationSeconds === "number" && sole.durationSeconds > 0
+      ? { leafDurationSeconds: sole.durationSeconds }
+      : {}),
     ...unifiedFoundationHints("playlist", p.type as SourceProviderType, p.url),
     ...(p.libraryPlacement === "ready_external"
       ? { contentNodeKind: "external_playlist" as const }
@@ -104,29 +115,41 @@ export async function GET(request: NextRequest) {
 
     const items: UnifiedSource[] = [];
 
-    for (const p of playlists) {
-      if (!playlistMatchesApiScope(p, scope)) continue;
-      const branchId = resolveMediaBranchId(p);
-      if (await hasBranchAccess(user.id, branchId)) {
-        items.push(playlistToUnified(p));
-      }
+    const scopedPlaylists = playlists.filter((p) => playlistMatchesApiScope(p, scope));
+    const playlistGate = await Promise.all(
+      scopedPlaylists.map((p) =>
+        hasBranchAccess(user.id, resolveMediaBranchId(p)).then((ok) => (ok ? p : null)),
+      ),
+    );
+    const okPlaylists = playlistGate.filter((p): p is Playlist => p != null);
+    await enrichPlaylistsWithCatalogForUnified(okPlaylists);
+    for (const p of okPlaylists) {
+      items.push(playlistToUnified(p));
     }
+
     if (scope === "branch") {
-      for (const r of radioStations) {
-        const branchId = resolveMediaBranchId(r);
-        if (await hasBranchAccess(user.id, branchId)) {
-          items.push(radioToUnified(r));
-        }
+      const radioGate = await Promise.all(
+        radioStations.map((r) =>
+          hasBranchAccess(user.id, resolveMediaBranchId(r)).then((ok) => (ok ? r : null)),
+        ),
+      );
+      for (const r of radioGate) {
+        if (r) items.push(radioToUnified(r));
       }
-      for (const s of filteredDbSources) {
-        const branchId = (s as Source).branchId ?? "default";
-        if (await hasBranchAccess(user.id, branchId)) {
-          items.push(dbSourceToUnified(s));
-        }
+
+      const sourceGate = await Promise.all(
+        filteredDbSources.map((s) => {
+          const branchId = (s as Source).branchId ?? "default";
+          return hasBranchAccess(user.id, branchId).then((ok) => (ok ? s : null));
+        }),
+      );
+      for (const s of sourceGate) {
+        if (s) items.push(dbSourceToUnified(s));
       }
     }
 
     items.sort((a, b) => getSourceCreatedAtMs(b) - getSourceCreatedAtMs(a));
+    await enrichUnifiedSourcesByCatalogUrl(items);
     return NextResponse.json(items);
   } catch (e) {
     console.error("[api/sources/unified] GET error:", e);

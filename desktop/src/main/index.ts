@@ -4,12 +4,14 @@ import { app, BrowserWindow } from "electron";
 
 import { registerMvpIpc } from "./ipc-mvp";
 import { startEmbeddedNextServer, type EmbeddedNextHandle } from "./embedded-next-server";
+import { flushLocalCollectionTagSnapshotWrites } from "./local-collection-snapshot";
 import { PlaybackOrchestrator } from "./playback-orchestrator";
 import { ensureRuntimeBinaries, scheduleBackgroundUpdateCheck } from "./runtime-binaries";
 
 let mainWindow: BrowserWindow | null = null;
 let embeddedNext: EmbeddedNextHandle | null = null;
 let orchestrator: PlaybackOrchestrator | undefined;
+let desktopQuitAfterTagSnapshotFlush = false;
 
 function getMainWindow(): BrowserWindow | null {
   return mainWindow;
@@ -190,7 +192,19 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (e) => {
+  if (!desktopQuitAfterTagSnapshotFlush) {
+    e.preventDefault();
+    desktopQuitAfterTagSnapshotFlush = true;
+    void flushLocalCollectionTagSnapshotWrites()
+      .catch(() => undefined)
+      .finally(() => {
+        orchestrator?.kill();
+        shutdownEmbeddedNext();
+        app.quit();
+      });
+    return;
+  }
   orchestrator?.kill();
   shutdownEmbeddedNext();
 });

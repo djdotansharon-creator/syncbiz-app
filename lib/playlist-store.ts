@@ -48,6 +48,7 @@ function playlistTrackIdFromItem(item: {
 
 /** Maps PlaylistTrack.catalogItemId ↔ PlaylistItem.catalogId (FK to CatalogItem). */
 function catalogIdFromTrack(t: PlaylistTrack): string | null {
+  if (t.type === "local") return null;
   const v = (t.catalogItemId ?? "").trim();
   return v || null;
 }
@@ -179,7 +180,7 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
       url: normalized.url ?? "",
       thumbnail: normalized.thumbnail ?? "",
       branchId: normalized.branchId ?? null,
-      catalogItemId: normalized.catalogItemId ?? null,
+      catalogItemId: normalized.type === "local" ? null : normalized.catalogItemId ?? null,
       viewCount: normalized.viewCount ?? null,
       durationSeconds: normalized.durationSeconds ?? null,
       adminNotes: normalized.adminNotes ?? null,
@@ -223,7 +224,12 @@ export async function updatePlaylist(id: string, data: Partial<Playlist>): Promi
   const updateData: Parameters<typeof prisma.playlist.update>[0]["data"] = {};
   if (data.name !== undefined) updateData.name = data.name;
   if (data.genre !== undefined) updateData.genre = data.genre;
-  if (data.type !== undefined) updateData.playlistType = data.type;
+  if (data.type !== undefined) {
+    updateData.playlistType = data.type;
+    if (data.type === "local") {
+      updateData.catalogItemId = null;
+    }
+  }
   if (data.url !== undefined) updateData.url = data.url;
   if (data.thumbnail !== undefined) updateData.thumbnail = data.thumbnail;
   if (data.viewCount !== undefined) updateData.viewCount = data.viewCount;

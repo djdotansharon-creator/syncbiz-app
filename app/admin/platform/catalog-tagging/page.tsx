@@ -24,6 +24,13 @@ import { CatalogWorkbenchTopDashboard } from "@/components/admin/catalog-workben
 import { CatalogMetadataBackfillPanel } from "@/components/admin/catalog-metadata-backfill-panel";
 import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/auth/guards";
+import type { PackTagDimension } from "@/lib/recommendations/catalog-coverage-health";
+import { assessCatalogItemReadiness } from "@/lib/recommendations/catalog-item-readiness";
+import {
+  assessCatalogItemEligibility,
+  eligibilityShortSummary,
+} from "@/lib/recommendations/catalog-item-eligibility";
+import { CatalogTaggingScrollToEditor } from "@/components/admin/catalog-tagging-scroll-to-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -243,6 +250,30 @@ async function gatherDuplicateHints(selected: {
     .slice(0, 50);
 }
 
+const VALID_COVERAGE_PACK_DIMS = new Set<PackTagDimension>([
+  "genre",
+  "style",
+  "businessFit",
+  "daypart",
+  "vibe",
+  "catalogProgramming",
+]);
+
+function parseCoverageMissingDims(raw: string | undefined): PackTagDimension[] {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  const out: PackTagDimension[] = [];
+  for (const part of raw.split(",")) {
+    const p = part.trim() as PackTagDimension;
+    if (VALID_COVERAGE_PACK_DIMS.has(p)) out.push(p);
+  }
+  return out;
+}
+
+function parseCoverageEnergyHint(raw: string | undefined): "needs" | "ok" | "unset" | null {
+  if (raw === "needs" || raw === "ok" || raw === "unset") return raw;
+  return null;
+}
+
 function catalogTaggingHref(parts: {
   q?: string;
   catalogItemId?: string;
@@ -290,6 +321,13 @@ export default async function CatalogTaggingAdminPage({
     filter?: string;
     provider?: string;
     includeArchived?: string;
+    fromCoverage?: string;
+    coveragePack?: string;
+    coveragePackLabel?: string;
+    coverageMissing?: string;
+    coverageEnergy?: string;
+    coverageUrlType?: string;
+    coverageUrlShape?: string;
   }>;
 }) {
   await requireSuperAdmin();
@@ -302,6 +340,24 @@ export default async function CatalogTaggingAdminPage({
   const includeArchived =
     typeof sp.includeArchived === "string" &&
     (sp.includeArchived === "1" || sp.includeArchived.toLowerCase() === "true");
+
+  const fromCoverageRaw = typeof sp.fromCoverage === "string" ? sp.fromCoverage.trim().toLowerCase() : "";
+  const fromProgrammingCoverage =
+    fromCoverageRaw === "1" || fromCoverageRaw === "true" || fromCoverageRaw === "yes";
+  const coveragePackId = typeof sp.coveragePack === "string" ? sp.coveragePack.trim() : "";
+  const coveragePackLabel = typeof sp.coveragePackLabel === "string" ? sp.coveragePackLabel.trim() : "";
+  const coverageMissingDims = parseCoverageMissingDims(sp.coverageMissing);
+  const coverageEnergyHint = parseCoverageEnergyHint(
+    typeof sp.coverageEnergy === "string" ? sp.coverageEnergy.trim().toLowerCase() : undefined,
+  );
+  const coverageUrlType =
+    typeof sp.coverageUrlType === "string" && sp.coverageUrlType.trim().length > 0
+      ? sp.coverageUrlType.trim()
+      : null;
+  const coverageUrlShape =
+    typeof sp.coverageUrlShape === "string" && sp.coverageUrlShape.trim().length > 0
+      ? sp.coverageUrlShape.trim()
+      : null;
 
   const clauses: Prisma.CatalogItemWhereInput[] = [];
   if (!includeArchived) {
@@ -378,7 +434,7 @@ export default async function CatalogTaggingAdminPage({
           take: SLUG_PREVIEW,
           orderBy: { taxonomyTag: { slug: "asc" } },
           select: {
-            taxonomyTag: { select: { slug: true } },
+            taxonomyTag: { select: { slug: true, category: true } },
           },
         },
       },
@@ -408,6 +464,18 @@ export default async function CatalogTaggingAdminPage({
         })
       : Promise.resolve(null),
   ]);
+
+  const coverageWorkbenchContext =
+    fromProgrammingCoverage && selected
+      ? {
+          packId: coveragePackId || "(unspecified pack)",
+          packLabelEn: coveragePackLabel || coveragePackId || "Programming coverage",
+          missingDimensions: coverageMissingDims,
+          energyHint: coverageEnergyHint,
+          inferredUrlType: coverageUrlType,
+          urlShape: coverageUrlShape,
+        }
+      : null;
 
   const baseParams = { q, filter: filterMode, provider: providerQ, includeArchived };
 
@@ -732,7 +800,11 @@ export default async function CatalogTaggingAdminPage({
         </div>
 
         {selected ? (
-          <div className="rounded-lg border border-sky-900/60 bg-gradient-to-b from-sky-950/30 to-neutral-950/80 p-5 ring-1 ring-sky-500/20">
+          <div
+            id="catalog-tagging-editor-focus"
+            className="rounded-lg border border-sky-900/60 bg-gradient-to-b from-sky-950/30 to-neutral-950/80 p-5 ring-1 ring-sky-500/20 scroll-mt-4"
+          >
+            {catalogItemId ? <CatalogTaggingScrollToEditor catalogItemId={catalogItemId} /> : null}
             <p className="text-[11px] font-semibold uppercase tracking-wider text-sky-400/90">
               Editing tags for this catalog item
             </p>
@@ -980,10 +1052,15 @@ export default async function CatalogTaggingAdminPage({
           catalogTitle={selected?.title ?? ""}
           catalogUrl={selected?.url ?? ""}
           catalogProvider={selected?.provider ?? null}
+          catalogDurationSec={selected?.durationSec ?? null}
+          catalogThumbnail={selected?.thumbnail ?? null}
+          catalogManualEnergyRating={selected?.manualEnergyRating ?? null}
+          catalogArchivedAt={selected?.archivedAt ?? null}
           playlistHintTexts={playlistHintTexts}
           metadataHaystackParts={metadataHaystackPartsForTaxonomy}
           nextUntaggedHref={nextUntaggedHref}
           metadataSuggestions={metadataSuggestionsFromSnapshot}
+          coverageWorkbenchContext={coverageWorkbenchContext}
         />
 
         {selected ? (
@@ -1086,6 +1163,50 @@ export default async function CatalogTaggingAdminPage({
               const href = catalogTaggingHref({ ...baseParams, catalogItemId: row.id });
               const rowYtHref = youtubeAuditionHrefForCatalog(row.url, row.provider, row.videoId);
               const rowDur = formatCatalogDuration(row.durationSec);
+              const rowReadiness = assessCatalogItemReadiness({
+                url: row.url,
+                provider: row.provider,
+                durationSec: row.durationSec,
+                thumbnail: row.thumbnail,
+                manualEnergyRating: row.manualEnergyRating,
+                linkedCategories: row.taxonomyLinks.map((l) => l.taxonomyTag.category),
+              });
+              const rowEligibility = assessCatalogItemEligibility({
+                readiness: rowReadiness,
+                archivedAt: row.archivedAt,
+              });
+              const readinessBadgeClass =
+                rowReadiness.status === "ready"
+                  ? "border-emerald-700/55 bg-emerald-950/40 text-emerald-100"
+                  : rowReadiness.status === "partial"
+                    ? "border-amber-700/55 bg-amber-950/40 text-amber-100"
+                    : "border-rose-800/55 bg-rose-950/45 text-rose-100";
+              const readinessBadgeLabel =
+                rowReadiness.status === "ready"
+                  ? "READY"
+                  : rowReadiness.status === "partial"
+                    ? "PARTIAL"
+                    : "NEEDS WORK";
+              const eligibilityTooltip = [
+                eligibilityShortSummary(rowEligibility),
+                ...rowEligibility.blockedReasons,
+              ].join("\n");
+              const eligibilityChipClass =
+                rowEligibility.eligibilityLevel === "eligible"
+                  ? null
+                  : rowEligibility.eligibilityLevel === "limited"
+                    ? "border-amber-700/55 bg-amber-950/40 text-amber-100"
+                    : rowEligibility.eligibilityLevel === "blocked"
+                      ? "border-rose-800/55 bg-rose-950/45 text-rose-100"
+                      : "border-neutral-600 bg-neutral-900 text-neutral-500";
+              const eligibilityChipLabel =
+                rowEligibility.eligibilityLevel === "eligible"
+                  ? null
+                  : rowEligibility.eligibilityLevel === "limited"
+                    ? "LIMITED"
+                    : rowEligibility.eligibilityLevel === "blocked"
+                      ? "BLOCKED"
+                      : "ARCHIVED";
               return (
                 <li key={row.id}>
                   <div
@@ -1115,9 +1236,18 @@ export default async function CatalogTaggingAdminPage({
                     <div className="min-w-0 flex-1 space-y-1.5">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium leading-snug text-neutral-100">{row.title}</p>
-                        {row.archivedAt ? (
-                          <span className="rounded border border-neutral-600 bg-neutral-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-                            Archived
+                        <span
+                          title={rowReadiness.summary}
+                          className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${readinessBadgeClass}`}
+                        >
+                          {readinessBadgeLabel}
+                        </span>
+                        {eligibilityChipLabel && eligibilityChipClass ? (
+                          <span
+                            title={eligibilityTooltip}
+                            className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${eligibilityChipClass}`}
+                          >
+                            {eligibilityChipLabel}
                           </span>
                         ) : null}
                       </div>

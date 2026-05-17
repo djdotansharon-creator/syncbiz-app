@@ -15,8 +15,43 @@ import type {
   ResolveMediaKind,
 } from "./types";
 import { classifyResolveFoundation } from "./url-resolve-classify";
+import { getPlaylistTracks } from "./playlist-types";
+import {
+  leafContractSubtypeFromContentNode,
+  shouldClassifyLeafUrlAsMixSet,
+} from "./library-leaf-mix-heuristics";
 
 export type SourceProviderType = "youtube" | "soundcloud" | "spotify" | "local" | "stream-url" | "winamp";
+
+/** Stage 6B — Library paste/drop routing for external music links (foundation). */
+export type MusicStreamingProvider =
+  | "spotify"
+  | "apple_music"
+  | "beatport"
+  | "juno_download"
+  | "deezer"
+  | "tidal"
+  | "amazon_music"
+  | "qobuz"
+  | "beatsource"
+  | "bandcamp"
+  | "shazam"
+  | "soundcloud"
+  | "youtube"
+  | "youtube_music"
+  | "generic_music_url";
+
+export type MusicUrlIngestIntent =
+  | "direct_playable"
+  | "resolve_to_youtube"
+  | "unsupported_playlist_or_album"
+  | "unknown";
+
+/** URL-only classification — no candidate picker yet. */
+export type MusicUrlIngestClassification = {
+  provider: MusicStreamingProvider;
+  intent: MusicUrlIngestIntent;
+};
 
 /** Library architecture contract: top-level entity kind. */
 export type LibraryEntityKind = "collection" | "item";
@@ -84,6 +119,15 @@ export type UnifiedSource = {
   viewCount?: number;
   /** Optional catalog row id (e.g. expanded playlist tracks with persisted catalog links). */
   catalogItemId?: string;
+  /**
+   * UI-only duration for expanded playlist track rows (`:track:`) — playback still uses parent `playlist` + index.
+   */
+  leafDurationSeconds?: number;
+  /** Enriched catalog / snapshot fields (optional; batch-filled by unified API). */
+  likeCount?: number;
+  publishedAt?: string;
+  /** SyncBiz CatalogItem.curationRating when linked. */
+  curationRating?: number | null;
   /** Raw data for playback logic */
   playlist?: Playlist;
   source?: Source;
@@ -112,6 +156,24 @@ export function libraryCardEffectiveViewCount(source: UnifiedSource): number | u
   return v;
 }
 
+export function libraryCardEffectiveLikeCount(source: UnifiedSource): number | undefined {
+  const v = source.likeCount ?? source.playlist?.likeCount;
+  if (v == null || typeof v !== "number" || !Number.isFinite(v) || v < 0) return undefined;
+  return v;
+}
+
+export function libraryCardEffectivePublishedAt(source: UnifiedSource): string | undefined {
+  const p = source.publishedAt ?? source.playlist?.publishedAt;
+  if (typeof p !== "string" || !p.trim()) return undefined;
+  return p.trim();
+}
+
+export function libraryCardEffectiveCuration(source: UnifiedSource): number | null | undefined {
+  const c = source.curationRating ?? source.playlist?.curationRating;
+  if (c == null) return undefined;
+  return c;
+}
+
 /**
  * Library card footer meta row: show when there is a real genre, view count, or duration-in-meta rule.
  * When shown, `libraryCardDisplayGenre` supplies the left label (fallback "Mixed"), not `source.type`.
@@ -138,6 +200,8 @@ export type ParseUrlJson = {
   durationSeconds?: number;
   artist?: string;
   song?: string;
+  /** Stage 6B: Library paste classifier (mirrors `classifyMusicUrlIngest`). */
+  musicUrlIngest?: MusicUrlIngestClassification;
 } & Partial<UnifiedSourceFoundation>;
 
 /**
@@ -206,26 +270,23 @@ export type StoredSourceJson = {
  * Classify UnifiedSource into the locked Library model:
  * collections/containers vs media items.
  */
-export function classifyLibraryEntityContract(source: UnifiedSource): LibraryEntityContract {
-  /**
-   * Persisted workspace playlists: foundation hints parsed from `url` (e.g. `mix_set` for YouTube watch
-   * URLs) must not downgrade the library contract — the entity is still a playlist container unless the
-   * stored URL clearly represents an external shell (YT list=, Spotify album/playlist, SC sets).
-   */
-  if (
-    source.origin === "playlist" &&
-    source.playlist &&
-    source.playlist.libraryPlacement !== "ready_external"
-  ) {
-    const u = (source.url ?? "").toLowerCase();
-    const isExternalPlaylistShell =
-      (u.includes("youtube.com") && u.includes("list=")) ||
-      (u.includes("open.spotify.com") && (u.includes("/playlist/") || u.includes("/album/"))) ||
-      (u.includes("soundcloud.com") && u.includes("/sets/"));
-    if (isExternalPlaylistShell) {
-      return { entityKind: "collection", collectionSubtype: "external_playlist" };
-    }
-    return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };
+function playlistIsExternalShellUrl(url: string): boolean {
+  const u = url.toLowerCase();
+  return (
+    (u.includes("youtube.com") && u.includes("list=")) ||
+    (u.includes("open.spotify.com") && (u.includes("/playlist/") || u.includes("/album/"))) ||
+    (u.includes("soundcloud.com") && u.includes("/sets/"))
+  );
+}
+
+function classifyLibraryLeafEntityContract(source: UnifiedSource): LibraryEntityContract {
+  const fromKind = leafContractSubtypeFromContentNode(source);
+  if (fromKind === "radio_stream") return { entityKind: "item", itemSubtype: "radio_stream" };
+  if (fromKind === "ai_asset") return { entityKind: "item", itemSubtype: "ai_asset" };
+  if (fromKind === "mix_set") return { entityKind: "item", itemSubtype: "mix_set" };
+
+  if (shouldClassifyLeafUrlAsMixSet(source)) {
+    return { entityKind: "item", itemSubtype: "mix_set" };
   }
 
   const kind = source.contentNodeKind;
@@ -235,20 +296,7 @@ export function classifyLibraryEntityContract(source: UnifiedSource): LibraryEnt
   if (kind === "external_playlist") {
     return { entityKind: "collection", collectionSubtype: "external_playlist" };
   }
-  if (kind === "mix_set") {
-    return { entityKind: "item", itemSubtype: "mix_set" };
-  }
-  if (kind === "radio_stream" || source.origin === "radio") {
-    return { entityKind: "item", itemSubtype: "radio_stream" };
-  }
-  if (kind === "ai_asset") {
-    return { entityKind: "item", itemSubtype: "ai_asset" };
-  }
-  if (kind === "single_track" || kind === "track") {
-    return { entityKind: "item", itemSubtype: "single_track" };
-  }
 
-  // Stable fallback rules for legacy rows.
   const u = (source.url ?? "").toLowerCase();
   const isExternalPlaylist =
     (u.includes("youtube.com") && u.includes("list=")) ||
@@ -264,4 +312,55 @@ export function classifyLibraryEntityContract(source: UnifiedSource): LibraryEnt
     return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };
   }
   return { entityKind: "item", itemSubtype: "single_track" };
+}
+
+export function classifyLibraryEntityContract(source: UnifiedSource): LibraryEntityContract {
+  if (
+    source.origin === "playlist" &&
+    source.playlist &&
+    source.playlist.libraryPlacement !== "ready_external"
+  ) {
+    if (playlistIsExternalShellUrl(source.url ?? "")) {
+      return { entityKind: "collection", collectionSubtype: "external_playlist" };
+    }
+    const trackCount = getPlaylistTracks(source.playlist).length;
+    if (trackCount <= 1) {
+      return classifyLibraryLeafEntityContract(source);
+    }
+    return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };
+  }
+
+  const kind = source.contentNodeKind;
+  if (kind === "syncbiz_playlist") {
+    return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };
+  }
+  if (kind === "external_playlist") {
+    return { entityKind: "collection", collectionSubtype: "external_playlist" };
+  }
+  if (kind === "mix_set") {
+    return classifyLibraryLeafEntityContract(source);
+  }
+  if (kind === "radio_stream" || source.origin === "radio") {
+    return { entityKind: "item", itemSubtype: "radio_stream" };
+  }
+  if (kind === "ai_asset") {
+    return { entityKind: "item", itemSubtype: "ai_asset" };
+  }
+  if (kind === "single_track" || kind === "track") {
+    return classifyLibraryLeafEntityContract(source);
+  }
+
+  // Stable fallback rules for legacy rows.
+  const u = (source.url ?? "").toLowerCase();
+  const isExternalPlaylist =
+    (u.includes("youtube.com") && u.includes("list=")) ||
+    (u.includes("open.spotify.com") && (u.includes("/playlist/") || u.includes("/album/"))) ||
+    (u.includes("soundcloud.com") && u.includes("/sets/"));
+  if (isExternalPlaylist) {
+    return { entityKind: "collection", collectionSubtype: "external_playlist" };
+  }
+  if (source.origin === "playlist" && source.playlist?.libraryPlacement === "ready_external") {
+    return { entityKind: "collection", collectionSubtype: "external_playlist" };
+  }
+  return classifyLibraryLeafEntityContract(source);
 }

@@ -1,20 +1,41 @@
-import { BrowserWindow, ipcMain, app } from "electron";
+import { BrowserWindow, ipcMain, app, dialog } from "electron";
 import type {
+  AutoStartState,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
   DesktopSignInResult,
   LocalMockTransportPayload,
+  MusicFolderSnapshot,
   MvpConfigPatch,
   MvpStatusSnapshot,
+  PickMusicFolderResult,
   ScanLocalAudioFolderResult,
+  ListMusicLibraryDirResult,
+  GetLocalAudioCoverResult,
+  GetLocalAudioTagsResult,
+  InspectLocalAudioTagsRawResult,
+  SearchLocalCollectionSnapshotResult,
+  ImportLocalM3uPlaylistResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
+import { importLocalM3uPlaylist } from "./import-local-m3u-playlist";
 import { DeviceWsManager } from "../device-websocket-client/device-ws-manager";
 import { fetchBranchLibrarySummary } from "./branch-library-fetch";
 import { loadRuntimeConfig, patchRuntimeConfig } from "./runtime-config-service";
 import type { PlaybackOrchestrator } from "./playback-orchestrator";
 import { scanLocalAudioFolder } from "./scan-local-audio-folder";
+import { listMusicLibraryDir } from "./list-music-library-dir";
+import { extractEmbeddedCoverDataUrlFromAudioFile } from "./extract-local-audio-cover";
+import { extractLocalAudioTagFields, inspectLocalAudioTagsRaw } from "./extract-local-audio-tags";
+import {
+  enrichListMusicLibraryDirWithSnapshot,
+  loadLocalCollectionSnapshot,
+  recordListDirAudioFilesInSnapshot,
+  recordLocalAudioTagsInSnapshot,
+  recordScanAudioFilesInSnapshot,
+  searchLocalCollectionSnapshotInMemory,
+} from "./local-collection-snapshot";
 
 let manager: DeviceWsManager | null = null;
 let cachedConfig: DesktopRuntimeConfig | null = null;
@@ -106,6 +127,8 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     const c = loadRuntimeConfig(getUserData());
     return fallbackSnapshotFromConfig(c);
   });
+
+  ipcMain.handle(MVP_IPC.GET_APP_VERSION, (): string => app.getVersion());
 
   ipcMain.handle(MVP_IPC.SAVE_CONFIG, (_e, patch: MvpConfigPatch): DesktopRuntimeConfig => {
     const cur = loadRuntimeConfig(getUserData());
@@ -205,8 +228,184 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     if (typeof dir !== "string" || !dir.trim()) {
       return { status: "error", message: "Empty path" };
     }
-    return scanLocalAudioFolder(dir);
+    const result = await scanLocalAudioFolder(dir);
+    if (result.status === "ok" && result.files.length > 0) {
+      const cfg = loadRuntimeConfig(getUserData());
+      void recordScanAudioFilesInSnapshot(getUserData(), cfg, result.files);
+    }
+    return result;
   });
+
+  ipcMain.handle(MVP_IPC.GET_AUTOSTART, (): AutoStartState => readAutoStartState());
+
+  ipcMain.handle(MVP_IPC.SET_AUTOSTART, (_e, enabled: unknown): AutoStartState => {
+    const want = enabled === true;
+    try {
+      app.setLoginItemSettings({ openAtLogin: want });
+    } catch (err) {
+      console.error("[SyncBiz desktop] setLoginItemSettings failed:", err);
+    }
+    return readAutoStartState();
+  });
+
+  ipcMain.handle(MVP_IPC.GET_MUSIC_FOLDER, (): MusicFolderSnapshot => {
+    const c = loadRuntimeConfig(getUserData());
+    return { path: c.musicFolderPath ?? null };
+  });
+
+  ipcMain.handle(MVP_IPC.PICK_MUSIC_FOLDER, async (): Promise<PickMusicFolderResult> => {
+    const win = getWindow();
+    let result: Electron.OpenDialogReturnValue;
+    try {
+      const opts: Electron.OpenDialogOptions = {
+        title: "Choose music folder",
+        properties: ["openDirectory"],
+      };
+      result = win
+        ? await dialog.showOpenDialog(win, opts)
+        : await dialog.showOpenDialog(opts);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { status: "error", message: msg };
+    }
+    if (result.canceled || result.filePaths.length === 0) {
+      return { status: "canceled" };
+    }
+    const chosen = result.filePaths[0];
+    const cur = loadRuntimeConfig(getUserData());
+    const next = patchRuntimeConfig(getUserData(), cur, { musicFolderPath: chosen });
+    cachedConfig = next;
+    return { status: "ok", path: next.musicFolderPath ?? chosen };
+  });
+
+  ipcMain.handle(MVP_IPC.CLEAR_MUSIC_FOLDER, (): MusicFolderSnapshot => {
+    const cur = loadRuntimeConfig(getUserData());
+    // Empty string clears in patchRuntimeConfig.
+    const next = patchRuntimeConfig(getUserData(), cur, { musicFolderPath: "" });
+    cachedConfig = next;
+    return { path: next.musicFolderPath ?? null };
+  });
+
+  ipcMain.handle(
+    MVP_IPC.IMPORT_LOCAL_M3U_PLAYLIST,
+    async (_e, filePath: unknown): Promise<ImportLocalM3uPlaylistResult> => {
+      if (typeof filePath !== "string" || !filePath.trim()) {
+        return { status: "error", message: "Empty playlist path." };
+      }
+      const cfg = loadRuntimeConfig(getUserData());
+      return importLocalM3uPlaylist(getUserData(), cfg, filePath.trim());
+    },
+  );
+
+  ipcMain.handle(
+    MVP_IPC.SEARCH_LOCAL_COLLECTION_SNAPSHOT,
+    (_e, query: unknown, limitRaw: unknown): SearchLocalCollectionSnapshotResult => {
+      const q = typeof query === "string" ? query.trim() : "";
+      let limit = 25;
+      if (typeof limitRaw === "number" && Number.isFinite(limitRaw)) {
+        limit = Math.min(100, Math.max(1, Math.trunc(limitRaw)));
+      }
+      if (q.length < 2) {
+        return { status: "ok", hits: [] };
+      }
+      try {
+        const cfg = loadRuntimeConfig(getUserData());
+        const deviceId = (cfg.deviceId ?? "").trim() || "unknown";
+        const snap = loadLocalCollectionSnapshot(getUserData(), deviceId);
+        const hits = searchLocalCollectionSnapshotInMemory(snap, q, limit);
+        return { status: "ok", hits };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { status: "error", message: msg };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    MVP_IPC.LIST_MUSIC_LIBRARY_DIR,
+    async (_e, subPath: string): Promise<ListMusicLibraryDirResult> => {
+      const c = loadRuntimeConfig(getUserData());
+      const root = c.musicFolderPath?.trim() ? c.musicFolderPath : null;
+      const listed = await listMusicLibraryDir(root, typeof subPath === "string" ? subPath : "");
+      const result =
+        listed.status === "ok"
+          ? await enrichListMusicLibraryDirWithSnapshot(getUserData(), c, listed)
+          : listed;
+      if (result.status === "ok" && result.files.length > 0) {
+        void recordListDirAudioFilesInSnapshot(getUserData(), c, result.files);
+      }
+      return result;
+    },
+  );
+
+  ipcMain.handle(
+    MVP_IPC.GET_LOCAL_AUDIO_COVER,
+    async (_e, filePath: unknown): Promise<GetLocalAudioCoverResult> => {
+      if (typeof filePath !== "string" || !filePath.trim()) {
+        return { status: "error", message: "Empty path" };
+      }
+      try {
+        const dataUrl = await extractEmbeddedCoverDataUrlFromAudioFile(filePath.trim());
+        return { status: "ok", dataUrl };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { status: "error", message: msg };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    MVP_IPC.GET_LOCAL_AUDIO_TAGS,
+    async (_e, filePath: unknown): Promise<GetLocalAudioTagsResult> => {
+      if (typeof filePath !== "string" || !filePath.trim()) {
+        return { status: "error", message: "Empty path" };
+      }
+      try {
+        const trimmed = filePath.trim();
+        const tags = await extractLocalAudioTagFields(trimmed);
+        const cfg = loadRuntimeConfig(getUserData());
+        void recordLocalAudioTagsInSnapshot(getUserData(), cfg, trimmed, tags);
+        return { status: "ok", tags };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { status: "error", message: msg };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    MVP_IPC.INSPECT_LOCAL_AUDIO_TAGS_RAW,
+    async (_e, filePath: unknown): Promise<InspectLocalAudioTagsRawResult> => {
+      if (typeof filePath !== "string" || !filePath.trim()) {
+        return { status: "error", message: "Empty path" };
+      }
+      try {
+        const payload = await inspectLocalAudioTagsRaw(filePath.trim());
+        return { status: "ok", payload };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { status: "error", message: msg };
+      }
+    },
+  );
+}
+
+function readAutoStartState(): AutoStartState {
+  // Linux: openAtLogin is supported on AppImage and a few configurations, but not
+  // universally. Electron returns `false` for `executableWillLaunchAtLogin` on
+  // unsupported setups; we surface a `supported` flag so the UI can disable the
+  // toggle rather than silently no-op.
+  const supported = process.platform === "win32" || process.platform === "darwin";
+  try {
+    const settings = app.getLoginItemSettings();
+    return {
+      enabled: Boolean(settings.openAtLogin),
+      supported,
+    };
+  } catch (err) {
+    console.error("[SyncBiz desktop] getLoginItemSettings failed:", err);
+    return { enabled: false, supported };
+  }
 }
 
 function fallbackSnapshot(): MvpStatusSnapshot {

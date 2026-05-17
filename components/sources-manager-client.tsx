@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { ReactNode } from "react";
 import type { UnifiedSource } from "@/lib/source-types";
 
 /**
@@ -23,6 +24,8 @@ export type SourcesManagerClientProps = {
   initialSources: UnifiedSource[];
   pageTitle?: string;
   pageSubtitle?: string;
+  playerWorkspaceMode?: boolean;
+  workspaceRouteCenter?: ReactNode;
 };
 
 export function SourcesManagerClient(props: SourcesManagerClientProps) {

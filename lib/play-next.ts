@@ -57,14 +57,34 @@ function newPlayNextId(): string {
 }
 
 /** Ephemeral in-memory / playback-state only; never written to the library API. */
-export function createPlayNextLocalSource(absolutePath: string): UnifiedSource {
+export function createPlayNextLocalSource(absolutePath: string, cover?: string | null): UnifiedSource {
   return {
     id: newPlayNextId(),
     title: titleFromLocalPath(absolutePath),
     genre: "Mixed",
-    cover: null,
+    cover: cover ?? null,
     type: "local",
     url: absolutePath,
+    origin: "source",
+  };
+}
+
+/**
+ * Ephemeral local file for AI search / snapshot hits — uses display metadata without persisting.
+ * Still uses a fresh playnext-* id so queue semantics match other ephemeral locals.
+ */
+export function createEphemeralLocalSearchSource(
+  absolutePath: string,
+  opts?: { title?: string; genre?: string | null; cover?: string | null },
+): UnifiedSource {
+  const p = (absolutePath ?? "").trim();
+  return {
+    id: newPlayNextId(),
+    title: (opts?.title ?? "").trim() || titleFromLocalPath(p),
+    genre: (opts?.genre ?? "").trim() || "Mixed",
+    cover: opts?.cover ?? null,
+    type: "local",
+    url: p,
     origin: "source",
   };
 }

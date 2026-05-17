@@ -8,6 +8,11 @@
 const AUDIO_LIKE =
   /\.(mp3|m4a|aac|flac|wav|ogg|opus|wma|aifc?|m3u8?|pls)(\?.*)?$/i;
 
+/** .m3u / .m3u8 / .pls are playlist containers (desktop importer), not a single audio track. */
+export function isPlaylistContainerPath(p: string): boolean {
+  return /\.(m3u8?|pls)$/i.test((p ?? "").trim());
+}
+
 /**
  * In the web browser we cannot list directory contents. If a path is clearly
  * a folder (trailing separator, or last segment has no audio-like extension), block
@@ -159,8 +164,11 @@ export function collectElectronFilePathsFromDataTransfer(dataTransfer: DataTrans
     seen.add(k);
     out.push(t);
   };
-  for (let i = 0; i < dataTransfer.files.length; i++) {
-    add(getNativePathForDroppedFile(dataTransfer.files[i]!));
+  const filesArr = Array.from({ length: dataTransfer.files.length }, (_, i) => dataTransfer.files[i]!);
+  const playlistNamed = filesArr.filter((f) => isPlaylistContainerPath(f.name));
+  const otherNamed = filesArr.filter((f) => !isPlaylistContainerPath(f.name));
+  for (const f of [...playlistNamed, ...otherNamed]) {
+    add(getNativePathForDroppedFile(f));
   }
   for (let i = 0; i < dataTransfer.items.length; i++) {
     const it = dataTransfer.items[i];
@@ -171,7 +179,8 @@ export function collectElectronFilePathsFromDataTransfer(dataTransfer: DataTrans
   // getPathForFile are empty — resolve via normalizeLocalFilePathInput.
   const uriList = dataTransfer.getData("text/uri-list");
   if (uriList) {
-    for (const line of uriList.split(/\r?\n/)) {
+    const normalizedUris = uriList.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    for (const line of normalizedUris.split("\n")) {
       const L = line.trim();
       if (!L || L.startsWith("#")) continue;
       const first = (L.split(/\s+/)[0] ?? L).trim();
@@ -181,6 +190,43 @@ export function collectElectronFilePathsFromDataTransfer(dataTransfer: DataTrans
     }
   }
   return out;
+}
+
+/**
+ * Native path to a dropped .m3u/.m3u8/.pls when available. Extra fallbacks for Explorer/OS
+ * combinations where `getPathForFile` is empty but `text/plain` or `text/uri-list` carries the path.
+ */
+export function getPlaylistContainerPathFromDataTransfer(dataTransfer: DataTransfer): string | undefined {
+  const collected = collectElectronFilePathsFromDataTransfer(dataTransfer);
+  const fromCollected = collected.find((p) => isPlaylistContainerPath(p));
+  if (fromCollected) return fromCollected;
+
+  const plainRaw = (dataTransfer.getData("text/plain") ?? "").trim();
+  if (plainRaw && isPlaylistContainerPath(plainRaw)) {
+    const n = normalizeLocalFilePathInput(plainRaw);
+    if (n) return n;
+  }
+
+  const uriList = dataTransfer.getData("text/uri-list");
+  if (uriList) {
+    const lines = uriList.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    for (const line of lines) {
+      const L = line.trim();
+      if (!L || L.startsWith("#")) continue;
+      const first = (L.split(/\s+/)[0] ?? L).trim();
+      if (!first.toLowerCase().startsWith("file:")) continue;
+      const p = normalizeLocalFilePathInput(first);
+      if (p && isPlaylistContainerPath(p)) return p;
+    }
+  }
+
+  for (let i = 0; i < dataTransfer.files.length; i++) {
+    const f = dataTransfer.files[i]!;
+    if (!isPlaylistContainerPath(f.name)) continue;
+    const p = getNativePathForDroppedFile(f);
+    if (p) return p;
+  }
+  return undefined;
 }
 
 /**

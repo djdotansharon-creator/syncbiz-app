@@ -7,6 +7,12 @@ import { useStationController } from "@/lib/station-controller-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { useLocalPlaybackTime } from "@/lib/playback-time-store";
 import {
+  isIOS,
+  primeIOSFromGesture,
+  setIOSNeedsTapToResume,
+  useIOSNeedsTapToResume,
+} from "@/lib/ios-audio-unlock";
+import {
   PlaybackTransportIconNext,
   PlaybackTransportIconPause,
   PlaybackTransportIconPlay,
@@ -55,6 +61,28 @@ function useDerivedPlayer(): Derived {
   const station = useStationController();
   const playback = usePlayback();
   const localTime = useLocalPlaybackTime();
+
+  // iOS Safari first-gesture unlock primer.
+  // The <audio> element used in mobile PLAYER mode lives in a hidden
+  // container in app-shell, so the user can never tap it directly. iOS
+  // requires audio.play() to run synchronously inside a gesture handler
+  // for the very first activation of an element. We attach a one-shot
+  // pointerdown listener at the document level whenever mobileRole is
+  // "player" so the FIRST tap anywhere on the mobile surface (typically a
+  // track tile or the Play button) primes the audio element.
+  // No-op on non-iOS UAs because primeIOSFromGesture short-circuits.
+  useEffect(() => {
+    if (mobileRole !== "player") return;
+    if (typeof window === "undefined") return;
+    if (!isIOS()) return;
+    const onFirstGesture = () => {
+      primeIOSFromGesture();
+    };
+    window.addEventListener("pointerdown", onFirstGesture, { once: true, capture: true });
+    return () => {
+      window.removeEventListener("pointerdown", onFirstGesture, { capture: true } as EventListenerOptions);
+    };
+  }, [mobileRole]);
 
   if (mobileRole === "controller") {
     const rs = station.remoteState;
@@ -118,8 +146,16 @@ function useDerivedPlayer(): Derived {
     volume: playback.volume,
     onPlayPause: () => {
       if (!src) return;
-      if (isPlaying) playback.pause();
-      else playback.play();
+      if (isPlaying) {
+        playback.pause();
+        return;
+      }
+      // iOS Safari: call audio.play() *synchronously* inside this gesture
+      // handler so the <audio> element is activated before AudioPlayer's
+      // status-driven useEffect runs. No-op on non-iOS UAs.
+      primeIOSFromGesture();
+      setIOSNeedsTapToResume(false);
+      playback.play();
     },
     onStop: () => {
       if (src) playback.stop();
@@ -196,6 +232,7 @@ export const MOBILE_TRANSPORT_PRIMARY =
  */
 export function MobileNowPlayingSheet({ open, onClose }: Props) {
   const d = useDerivedPlayer();
+  const needsTapToResume = useIOSNeedsTapToResume() && d.mode === "player";
 
   useEffect(() => {
     if (!open) return;
@@ -240,6 +277,24 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
           open ? "translate-y-0" : "translate-y-full"
         }`}
       >
+        {needsTapToResume && (
+          <button
+            type="button"
+            onClick={() => {
+              // Synchronous prime + clear flag inside the gesture so iOS
+              // re-arms the audio element before AudioPlayer's effect runs.
+              primeIOSFromGesture();
+              setIOSNeedsTapToResume(false);
+              d.onPlayPause();
+            }}
+            className="mx-3 mt-3 flex items-center justify-center gap-2 rounded-xl border border-amber-400/50 bg-amber-500/10 px-3 py-2.5 text-sm font-semibold text-amber-100 shadow-[0_0_24px_-6px_rgba(251,191,36,0.45)] transition active:scale-[0.99]"
+            aria-live="polite"
+          >
+            <span aria-hidden>⚠</span>
+            <span>Safari blocked audio — tap to resume</span>
+          </button>
+        )}
+
         <div className="flex items-center justify-between px-4 pt-3 pb-1">
           <span className="rounded-full border border-slate-700/70 bg-slate-900/70 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-200">
             {d.mode === "controller" ? "Controller" : "Player"}

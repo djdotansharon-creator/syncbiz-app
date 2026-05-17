@@ -1,4 +1,5 @@
 import type { Playlist, PlaylistTrack, PlaylistType, ScheduleContributorBlock } from "./playlist-types";
+import { getYouTubeVideoId } from "./playlist-utils";
 
 const VALID_TYPES: PlaylistType[] = [
   "soundcloud",
@@ -12,6 +13,35 @@ const VALID_TYPES: PlaylistType[] = [
 function isHttpUrl(u: string): boolean {
   const t = u.trim();
   return t.startsWith("http://") || t.startsWith("https://");
+}
+
+/**
+ * Allowed exception to “no HTTP + non-HTTP” mixing: filesystem `local` rows + HTTPS YouTube videos only.
+ * Rejects local+SoundCloud, YouTube URLs declared as wrong type, YouTube playlists without a video id, etc.
+ */
+function assertLocalPlusYoutubeMixAllowed(tracks: PlaylistTrack[]): void {
+  for (const t of tracks) {
+    const http = isHttpUrl(t.url);
+    if (http) {
+      if (t.type !== "youtube") {
+        throw new PlaylistPersistError(
+          "MIXED_URL_SCHEMES",
+          "HTTP(S) tracks in a mixed playlist must use type youtube (YouTube watch/embed URLs only).",
+        );
+      }
+      if (!getYouTubeVideoId(t.url)) {
+        throw new PlaylistPersistError(
+          "MIXED_URL_SCHEMES",
+          "Mixed playlists support only youtube.com/youtu.be single-video URLs alongside local files.",
+        );
+      }
+    } else if (t.type !== "local") {
+      throw new PlaylistPersistError(
+        "MIXED_URL_SCHEMES",
+        "Non-HTTP tracks in a mixed playlist must use type local (filesystem paths only).",
+      );
+    }
+  }
 }
 
 function trackDisplayName(t: PlaylistTrack): string {
@@ -37,7 +67,8 @@ export function isPlaylistPersistError(e: unknown): e is PlaylistPersistError {
 
 /**
  * Canonical shape before every disk write: explicit tracks (≥1), valid order for multi-track,
- * no mixed HTTP vs non-HTTP track URLs.
+ * normally no mixed HTTP vs non-HTTP URLs — exception: local filesystem + YouTube video URLs only
+ * ({@link assertLocalPlusYoutubeMixAllowed}).
  */
 export function normalizePlaylistForPersist(playlist: Playlist): Playlist {
   const id = (playlist.id ?? "").trim();
@@ -96,10 +127,7 @@ export function normalizePlaylistForPersist(playlist: Playlist): Playlist {
   const hasHttp = httpFlags.some(Boolean);
   const hasNonHttp = httpFlags.some((f) => !f);
   if (hasHttp && hasNonHttp) {
-    throw new PlaylistPersistError(
-      "MIXED_URL_SCHEMES",
-      "Tracks cannot mix HTTP(S) URLs with non-HTTP URLs (e.g. local://).",
-    );
+    assertLocalPlusYoutubeMixAllowed(tracks);
   }
 
   let order: string[] | undefined = playlist.order;

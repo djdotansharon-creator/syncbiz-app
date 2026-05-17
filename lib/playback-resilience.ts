@@ -46,7 +46,8 @@ export type PlaybackLifecyclePhase =
   | "wake_lock_failed"
   | "wake_lock_implicit_release"
   | "resume_media_attempt"
-  | "audio_unexpected_pause";
+  | "audio_unexpected_pause"
+  | "ios_autoplay_block";
 
 export type WakeLockRef = { current: WakeLockSentinel | null };
 

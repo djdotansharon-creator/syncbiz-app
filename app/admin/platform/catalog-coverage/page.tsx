@@ -10,6 +10,12 @@ import { prisma } from "@/lib/prisma";
 import { generateCatalogCoverageHealthReport } from "@/lib/recommendations/catalog-coverage-health";
 import { generateCatalogEditorWorkQueueReport } from "@/lib/recommendations/catalog-coverage-work-queue";
 import { parseCatalogCoverageTargetsBundle } from "@/lib/recommendations/catalog-coverage-targets.types";
+import { assessCatalogItemReadiness } from "@/lib/recommendations/catalog-item-readiness";
+import {
+  assessCatalogItemEligibility,
+  eligibilityShortSummary,
+  type CatalogItemUsageEligibility,
+} from "@/lib/recommendations/catalog-item-eligibility";
 
 export const dynamic = "force-dynamic";
 
@@ -59,7 +65,7 @@ export default async function CatalogCoverageDashboardPage() {
       archivedAt: true,
       taxonomyLinks: {
         select: {
-          taxonomyTag: { select: { slug: true } },
+          taxonomyTag: { select: { slug: true, category: true } },
         },
       },
     },
@@ -67,6 +73,20 @@ export default async function CatalogCoverageDashboardPage() {
 
   const health = generateCatalogCoverageHealthReport(parsed.data, items);
   const workQueue = generateCatalogEditorWorkQueueReport(parsed.data, items, { candidateLimit: 5 });
+
+  /** Stage 10 — derive global eligibility per item for diagnostic display in candidate rows. */
+  const eligibilityById = new Map<string, CatalogItemUsageEligibility>();
+  for (const it of items) {
+    const readiness = assessCatalogItemReadiness({
+      url: it.url,
+      provider: it.provider,
+      durationSec: it.durationSec,
+      thumbnail: it.thumbnail,
+      manualEnergyRating: it.manualEnergyRating,
+      linkedCategories: it.taxonomyLinks.map((l) => l.taxonomyTag.category),
+    });
+    eligibilityById.set(it.id, assessCatalogItemEligibility({ readiness, archivedAt: it.archivedAt }));
+  }
 
   return (
     <div className="space-y-8">
@@ -88,6 +108,14 @@ export default async function CatalogCoverageDashboardPage() {
           shape. Does not change scoring or DJ Creator. CLI:{" "}
           <code className="text-xs text-neutral-500">npm run catalog-coverage:report</code>,{" "}
           <code className="text-xs text-neutral-500">npm run catalog-coverage:work-queue</code>.
+        </p>
+        <p className="mt-2 max-w-3xl text-xs text-neutral-500">
+          Workflow: pick a weak pack, open a candidate in tagging, fix the missing dimensions and energy / URL type,
+          return here. <code className="text-[11px] text-neutral-600">LIMITED</code> /{" "}
+          <code className="text-[11px] text-neutral-600">BLOCKED</code> chips on candidates show global eligibility
+          across DJ Creator and Coverage strict flows. See{" "}
+          <code className="text-[11px] text-neutral-600">docs/CATALOG-OPERATING-SYSTEM-V1.md</code> for the
+          end-to-end editor guide.
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Link href="/admin/platform/catalog-tagging" className={btnSecondary}>
@@ -225,27 +253,53 @@ export default async function CatalogCoverageDashboardPage() {
                   Close candidates (tag next)
                 </h3>
                 <ul className="mt-2 space-y-3">
-                  {(wp?.candidates ?? []).map((c) => (
-                    <li key={c.catalogItemId} className="rounded border border-neutral-800/80 bg-neutral-950/40 p-2 text-xs">
-                      <div className="font-medium text-neutral-200">
-                        <Link
-                          href={`/admin/platform/catalog-tagging?catalogItemId=${encodeURIComponent(c.catalogItemId)}`}
-                          className="text-sky-400 hover:underline"
-                        >
-                          Open in tagging
-                        </Link>
-                        <span className="text-neutral-600"> · </span>
-                        {c.title.length > 70 ? `${c.title.slice(0, 70)}…` : c.title}
-                      </div>
-                      <div className="mt-1 font-mono text-[10px] text-neutral-600 break-all">{c.url}</div>
-                      <div className="mt-1 text-neutral-500">
-                        Missing: {c.missingTagDimensions.join(", ") || "—"} · Energy:{" "}
-                        {c.needsEnergyAttention ? "needs band" : c.hasManualEnergy ? "ok" : "unset"} · Meta:{" "}
-                        {c.hasBasicMetadata ? "ok" : "thin"} · {c.inferredUrlType ?? "?"}/{c.urlShape}
-                      </div>
-                      <p className="mt-1 text-[11px] text-neutral-400">{c.suggestedEditorAction}</p>
-                    </li>
-                  ))}
+                  {(wp?.candidates ?? []).map((c) => {
+                    const elig = eligibilityById.get(c.catalogItemId) ?? null;
+                    const eligPillClass =
+                      elig?.eligibilityLevel === "limited"
+                        ? "border-amber-700/55 bg-amber-950/40 text-amber-100"
+                        : elig?.eligibilityLevel === "blocked"
+                          ? "border-rose-800/55 bg-rose-950/45 text-rose-100"
+                          : null;
+                    const eligPillLabel =
+                      elig?.eligibilityLevel === "limited"
+                        ? "LIMITED"
+                        : elig?.eligibilityLevel === "blocked"
+                          ? "BLOCKED"
+                          : null;
+                    const eligTooltip = elig
+                      ? [eligibilityShortSummary(elig), ...elig.blockedReasons].join("\n")
+                      : "";
+                    return (
+                      <li key={c.catalogItemId} className="rounded border border-neutral-800/80 bg-neutral-950/40 p-2 text-xs">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium text-neutral-200">
+                          <Link
+                            href={`/admin/platform/catalog-tagging?catalogItemId=${encodeURIComponent(c.catalogItemId)}&fromCoverage=1&coveragePack=${encodeURIComponent(hp.packId)}&coveragePackLabel=${encodeURIComponent(hp.labelEn)}&coverageMissing=${encodeURIComponent(c.missingTagDimensions.join(","))}&coverageEnergy=${encodeURIComponent(c.needsEnergyAttention ? "needs" : c.hasManualEnergy ? "ok" : "unset")}${c.inferredUrlType ? `&coverageUrlType=${encodeURIComponent(c.inferredUrlType)}` : ""}&coverageUrlShape=${encodeURIComponent(c.urlShape)}`}
+                            className="text-sky-400 hover:underline"
+                          >
+                            Open in tagging
+                          </Link>
+                          <span className="text-neutral-600">·</span>
+                          <span className="min-w-0 truncate">{c.title.length > 70 ? `${c.title.slice(0, 70)}…` : c.title}</span>
+                          {eligPillLabel && eligPillClass ? (
+                            <span
+                              title={eligTooltip}
+                              className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${eligPillClass}`}
+                            >
+                              {eligPillLabel}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-1 font-mono text-[10px] text-neutral-600 break-all">{c.url}</div>
+                        <div className="mt-1 text-neutral-500">
+                          Missing: {c.missingTagDimensions.join(", ") || "—"} · Energy:{" "}
+                          {c.needsEnergyAttention ? "needs band" : c.hasManualEnergy ? "ok" : "unset"} · Meta:{" "}
+                          {c.hasBasicMetadata ? "ok" : "thin"} · {c.inferredUrlType ?? "?"}/{c.urlShape}
+                        </div>
+                        <p className="mt-1 text-[11px] text-neutral-400">{c.suggestedEditorAction}</p>
+                      </li>
+                    );
+                  })}
                   {(wp?.candidates.length ?? 0) === 0 ? (
                     <li className="text-neutral-600">No loose non-strict rows in cap — run work-queue CLI for more.</li>
                   ) : null}

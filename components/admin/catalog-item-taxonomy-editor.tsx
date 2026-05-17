@@ -4,6 +4,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { MusicTaxonomyCategory } from "@prisma/client";
+import type { PackTagDimension } from "@/lib/recommendations/catalog-coverage-health";
+import {
+  assessCatalogItemReadiness,
+  CATALOG_READINESS_DIMENSION_SHORT,
+  type CatalogReadinessStatus,
+} from "@/lib/recommendations/catalog-item-readiness";
+import {
+  assessCatalogItemEligibility,
+  eligibilityLevelLabel,
+  type CatalogItemUsageEligibility,
+  type CatalogEligibilityLevel,
+} from "@/lib/recommendations/catalog-item-eligibility";
 import {
   computeCatalogTagSuggestions,
   inferCatalogLanguageSignals,
@@ -26,7 +38,33 @@ type LinkRow = {
   taxonomyTag: Pick<TaxonomyTagRow, "id" | "slug" | "category" | "labelEn" | "labelHe">;
 };
 
-/** Tab order matches Stage 5.5 UX brief — maps to MusicTaxonomyCategory. */
+/** Stage 8 — URL snapshot from programming coverage dashboard (read-only hints). */
+export type CatalogCoverageWorkbenchContext = {
+  packId: string;
+  packLabelEn: string;
+  missingDimensions: PackTagDimension[];
+  energyHint: "needs" | "ok" | "unset" | null;
+  inferredUrlType: string | null;
+  urlShape: string | null;
+};
+
+const COVERAGE_DIM_TO_CATEGORY: Record<PackTagDimension, MusicTaxonomyCategory> = {
+  genre: "MAIN_SOUND_GENRE",
+  style: "STYLE_TAGS",
+  businessFit: "BUSINESS_FIT",
+  daypart: "DAYPART_FIT",
+  vibe: "VIBE_ENERGY",
+  catalogProgramming: "CATALOG_PROGRAMMING",
+};
+
+const COVERAGE_DIM_SHORT_LABEL: Record<PackTagDimension, string> = {
+  genre: "Genre",
+  style: "Style / feel",
+  businessFit: "Business fit",
+  daypart: "Daypart",
+  vibe: "Vibe / energy",
+  catalogProgramming: "Catalog programming",
+};
 const CATEGORY_TABS: { id: MusicTaxonomyCategory | "ALL"; label: string }[] = [
   { id: "ALL", label: "All" },
   { id: "BUSINESS_FIT", label: "Business Fit" },
@@ -106,21 +144,34 @@ export function CatalogItemTaxonomyEditor({
   catalogTitle = "",
   catalogUrl = "",
   catalogProvider = null,
+  catalogDurationSec = null,
+  catalogThumbnail = null,
+  catalogManualEnergyRating = null,
+  catalogArchivedAt = null,
   playlistHintTexts = [],
   metadataHaystackParts = [],
   nextUntaggedHref = null,
   metadataSuggestions = [],
+  coverageWorkbenchContext = null,
 }: {
   catalogItemId: string | null;
   catalogTitle?: string;
   catalogUrl?: string;
   catalogProvider?: string | null;
+  /** Stage 9 — used by the live readiness gate. */
+  catalogDurationSec?: number | null;
+  catalogThumbnail?: string | null;
+  catalogManualEnergyRating?: number | null;
+  /** Stage 10 — archive hides items from discovery-driven eligibility. */
+  catalogArchivedAt?: Date | string | null;
   playlistHintTexts?: string[];
   /** Snapshot description, hashtags, channel title — strengthens deterministic hints only. */
   metadataHaystackParts?: string[];
   nextUntaggedHref?: string | null;
   /** Stage 5.9 — merged into deterministic suggestions (still pending → save only). */
   metadataSuggestions?: CatalogTagSuggestion[];
+  /** Stage 8 — programming coverage dashboard deep-link context (display + tab jumps only). */
+  coverageWorkbenchContext?: CatalogCoverageWorkbenchContext | null;
 }) {
   const router = useRouter();
   const [links, setLinks] = useState<LinkRow[]>([]);
@@ -220,6 +271,36 @@ export function CatalogItemTaxonomyEditor({
     }
     return s;
   }, [links]);
+
+  /** Stage 9 — live readiness gate from saved links + persisted item fields. */
+  const readiness = useMemo(() => {
+    if (!catalogItemId) return null;
+    return assessCatalogItemReadiness({
+      url: catalogUrl,
+      provider: catalogProvider,
+      durationSec: catalogDurationSec,
+      thumbnail: catalogThumbnail,
+      manualEnergyRating: catalogManualEnergyRating,
+      linkedCategories: links.map((l) => l.taxonomyTag.category),
+    });
+  }, [
+    catalogItemId,
+    catalogUrl,
+    catalogProvider,
+    catalogDurationSec,
+    catalogThumbnail,
+    catalogManualEnergyRating,
+    links,
+  ]);
+
+  /** Stage 10 — derived eligibility (surfaces + archive). Visibility/diagnostic only. */
+  const eligibility = useMemo(
+    () =>
+      readiness
+        ? assessCatalogItemEligibility({ readiness, archivedAt: catalogArchivedAt ?? null })
+        : null,
+    [readiness, catalogArchivedAt],
+  );
 
   /** Tags available to pick: ACTIVE, not yet assigned — assignment hides from picker. */
   const pickPool = useMemo(() => {
@@ -448,8 +529,90 @@ export function CatalogItemTaxonomyEditor({
         </p>
       ) : null}
 
+      {coverageWorkbenchContext ? (
+        <div className="space-y-3 rounded-lg border border-teal-800/55 bg-teal-950/25 px-3 py-3 ring-1 ring-teal-500/20">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0 space-y-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-teal-200/95">
+                Programming coverage work
+              </p>
+              <p className="text-sm font-medium text-neutral-100">{coverageWorkbenchContext.packLabelEn}</p>
+              <p className="font-mono text-[10px] text-neutral-500 break-all">{coverageWorkbenchContext.packId}</p>
+            </div>
+            <Link
+              href="/admin/platform/catalog-coverage"
+              className="shrink-0 rounded border border-teal-700/70 bg-teal-950/50 px-3 py-1.5 text-xs font-medium text-teal-50 hover:bg-teal-900/55"
+            >
+              ← Coverage dashboard
+            </Link>
+          </div>
+          {coverageWorkbenchContext.missingDimensions.length > 0 ? (
+            <div>
+              <p className="text-[11px] font-medium text-neutral-400">Missing taxonomy dimensions (for this pack)</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {coverageWorkbenchContext.missingDimensions.map((dim) => (
+                  <button
+                    key={dim}
+                    type="button"
+                    title={`Open dictionary tab: ${taxonomyCategoryLabel(COVERAGE_DIM_TO_CATEGORY[dim])}`}
+                    className="rounded-full border border-teal-700/55 bg-neutral-950/60 px-2.5 py-1 text-[11px] font-medium text-teal-50 hover:bg-teal-950/55"
+                    onClick={() => setCategoryTab(COVERAGE_DIM_TO_CATEGORY[dim])}
+                  >
+                    {COVERAGE_DIM_SHORT_LABEL[dim]}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[10px] leading-snug text-neutral-500">
+                Jumps to the matching taxonomy category tab below — choose dictionary tags explicitly; nothing is applied automatically.
+              </p>
+            </div>
+          ) : (
+            <p className="text-[11px] text-neutral-400">
+              No missing pack tag dimensions were passed for this deep link — use assigned tags and suggestions as usual.
+            </p>
+          )}
+          <div className="rounded border border-neutral-800/80 bg-neutral-950/45 px-2.5 py-2 text-[11px] text-neutral-400 space-y-1">
+            <p>
+              <span className="text-neutral-600">Manual energy (coverage hint): </span>
+              {coverageWorkbenchContext.energyHint === "needs" ? (
+                <span className="text-amber-200/95">Out of band or unset for pack targets — use Energy rating panel above.</span>
+              ) : coverageWorkbenchContext.energyHint === "unset" ? (
+                <span className="text-amber-200/95">Unset — set manual energy when this pack expects a band.</span>
+              ) : coverageWorkbenchContext.energyHint === "ok" ? (
+                <span className="text-emerald-200/90">In range at snapshot (re-check after edits).</span>
+              ) : (
+                <span className="text-neutral-500">—</span>
+              )}
+            </p>
+            <p>
+              <span className="text-neutral-600">URL type / shape (read-only): </span>
+              <span className="font-mono text-neutral-300">
+                {coverageWorkbenchContext.inferredUrlType ?? "?"}
+              </span>
+              <span className="text-neutral-600"> · </span>
+              <span className="font-mono text-neutral-300">{coverageWorkbenchContext.urlShape ?? "—"}</span>
+              <span className="text-neutral-600"> · provider </span>
+              <span className="font-mono text-neutral-300">{catalogProvider?.trim() ? catalogProvider : "—"}</span>
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-neutral-800 pb-3">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Current item</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-100">{catalogTitle.trim() || "—"}</span>
+      </div>
+
+      {readiness ? <CatalogReadinessPanel readiness={readiness} /> : null}
+      {eligibility ? <CatalogEligibilityPanel eligibility={eligibility} /> : null}
+      {readiness || eligibility ? (
+        <p className="-mt-1 text-[11px] leading-snug text-neutral-500">
+          Readiness and eligibility are diagnostic only — no scoring or DJ Creator behavior change in V1. End-to-end
+          guide: <code className="text-[10.5px] text-neutral-600">docs/CATALOG-OPERATING-SYSTEM-V1.md</code>.
+        </p>
+      ) : null}
+
       <div>
-        <h3 className="text-sm font-medium text-neutral-200">Assigned tags ({links.length})</h3>
         <p className="mt-1 text-[11px] text-neutral-600">
           Removing unlinks this dictionary tag from this catalog row only — other assignments stay untouched.
         </p>
@@ -512,10 +675,10 @@ export function CatalogItemTaxonomyEditor({
             Clear pending
           </button>
           <Link
-            href="/admin/platform/recommendation-coverage"
+            href="/admin/platform/catalog-coverage"
             className="inline-flex items-center rounded border border-neutral-600 bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-neutral-800"
           >
-            Back to coverage
+            Programming coverage
           </Link>
         </div>
       </div>
@@ -843,4 +1006,120 @@ function youtubeAuditionHref(url: string, provider: string | null, videoId: stri
     return null;
   }
   return null;
+}
+
+const READINESS_BADGE_CLASSES: Record<CatalogReadinessStatus, string> = {
+  ready: "border-emerald-700/55 bg-emerald-950/35 text-emerald-100",
+  partial: "border-amber-700/55 bg-amber-950/35 text-amber-100",
+  "needs-work": "border-rose-800/60 bg-rose-950/40 text-rose-100",
+};
+
+const READINESS_BADGE_LABEL: Record<CatalogReadinessStatus, string> = {
+  ready: "Ready",
+  partial: "Partial",
+  "needs-work": "Needs work",
+};
+
+function CatalogReadinessPanel({
+  readiness,
+}: {
+  readiness: ReturnType<typeof assessCatalogItemReadiness>;
+}) {
+  return (
+    <div
+      className={`flex flex-wrap items-start justify-between gap-3 rounded-md border px-3 py-2.5 text-xs ${
+        READINESS_BADGE_CLASSES[readiness.status]
+      }`}
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded border border-current/40 bg-black/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider">
+            {READINESS_BADGE_LABEL[readiness.status]}
+          </span>
+          <span className="text-[11px] opacity-90">{readiness.summary}</span>
+        </div>
+        {readiness.hardMissing.length > 0 ? (
+          <div className="flex flex-wrap gap-1 pt-0.5">
+            {readiness.hardMissing.map((k) => (
+              <span
+                key={`miss-${k}`}
+                className="rounded-full border border-current/40 bg-black/25 px-2 py-0.5 text-[10px] font-medium"
+              >
+                Missing · {CATALOG_READINESS_DIMENSION_SHORT[k]}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {readiness.warnings.length > 0 ? (
+          <div className="flex flex-wrap gap-1 pt-0.5">
+            {readiness.warnings.map((k) => (
+              <span
+                key={`warn-${k}`}
+                className="rounded-full border border-current/30 bg-black/15 px-2 py-0.5 text-[10px] font-medium opacity-80"
+              >
+                Warning · {CATALOG_READINESS_DIMENSION_SHORT[k]}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+const ELIGIBILITY_PANEL_CLASSES: Record<CatalogEligibilityLevel, string> = {
+  eligible: "border-emerald-700/55 bg-emerald-950/30 text-emerald-100",
+  limited: "border-amber-700/55 bg-amber-950/30 text-amber-100",
+  blocked: "border-rose-800/60 bg-rose-950/35 text-rose-100",
+  archived: "border-neutral-600 bg-neutral-900/85 text-neutral-400",
+};
+
+function EligibilityFlagPill({ ok, label }: { ok: boolean; label: string }) {
+  const cls = ok
+    ? "border-emerald-700/55 bg-emerald-950/40 text-emerald-100"
+    : "border-rose-800/55 bg-rose-950/45 text-rose-100";
+  return (
+    <span
+      className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${cls}`}
+    >
+      {label} · {ok ? "✓" : "✗"}
+    </span>
+  );
+}
+
+function CatalogEligibilityPanel({ eligibility }: { eligibility: CatalogItemUsageEligibility }) {
+  return (
+    <div
+      className={`flex flex-col gap-2 rounded-md border px-3 py-2.5 text-xs ${
+        ELIGIBILITY_PANEL_CLASSES[eligibility.eligibilityLevel]
+      }`}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded border border-current/40 bg-black/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider">
+          {eligibilityLevelLabel(eligibility.eligibilityLevel)}
+        </span>
+        <span className="text-[11px] opacity-90">{eligibility.recommendedEditorAction}</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        <EligibilityFlagPill ok={eligibility.canUseInDjCreator} label="DJ Creator" />
+        <EligibilityFlagPill ok={eligibility.canUseInCoverage} label="Coverage packs" />
+        <EligibilityFlagPill ok={eligibility.canUseInSmartSearch} label="Smart search" />
+        <EligibilityFlagPill ok={eligibility.canShowInLibraryDiscovery} label="Library discovery" />
+      </div>
+      {eligibility.blockedReasons.length > 0 ? (
+        <ul className="list-disc space-y-0.5 pl-5 text-[11px] opacity-90">
+          {eligibility.blockedReasons.map((r, i) => (
+            <li key={`eligi-r-${i}`}>{r}</li>
+          ))}
+        </ul>
+      ) : null}
+      {eligibility.warnings.length > 0 ? (
+        <ul className="list-disc space-y-0.5 pl-5 text-[11px] opacity-75">
+          {eligibility.warnings.map((w, i) => (
+            <li key={`eligi-w-${i}`}>{w}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
 }

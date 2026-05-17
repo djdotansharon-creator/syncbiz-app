@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { TrackSourceChip } from "@/lib/track-source-chip";
 
 /** Presentational library tile — shared by branch desktop grid and web SourceCard body. */
 export type LibraryBrowseCardSurfaceProps = {
@@ -6,10 +7,16 @@ export type LibraryBrowseCardSurfaceProps = {
   as: "button" | "div";
   /** Shown when `artSlot` is not provided (desktop). */
   artworkUrl?: string | null;
+  /** Fallback art + compact provenance badge when artwork is missing; optional badge overlay when shown. */
+  mediaPlaceholderChip?: TrackSourceChip;
   /** Top-left badge on default art (desktop). Omit or "" when `artSlot` provides custom art (web). */
   originBadgeLabel?: string;
+  /** Optional Tailwind classes merged onto the top-left badge (LIST/SINGLE/SET/Radio colors). */
+  originBadgeClassName?: string;
   /** Replace default art block (web: HydrationSafeImage + overlays). */
   artSlot?: ReactNode;
+  /** Top-right overlay on art (e.g. stream provider mark on leaf library cards). */
+  artTopRightSlot?: ReactNode;
   title: string;
   /** Primary subtitle line under title (ignored when `metaSlot` set). */
   metaLine: string;

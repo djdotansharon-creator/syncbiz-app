@@ -1,18 +1,29 @@
 import type {
+  AutoStartState,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
   DesktopSignInResult,
   LocalMockTransportPayload,
+  MusicFolderSnapshot,
   MvpConfigPatch,
   MvpStatusSnapshot,
+  PickMusicFolderResult,
   ScanLocalAudioFolderResult,
+  ListMusicLibraryDirResult,
+  GetLocalAudioCoverResult,
+  GetLocalAudioTagsResult,
+  InspectLocalAudioTagsRawResult,
+  SearchLocalCollectionSnapshotResult,
+  ImportLocalM3uPlaylistResult,
 } from "./mvp-types";
 
 /** Preload `contextBridge` contract (renderer uses `window.syncbizDesktop`). */
 export type SyncBizDesktopMvp = {
   getConfig: () => Promise<DesktopRuntimeConfig>;
   getStatus: () => Promise<MvpStatusSnapshot>;
+  /** Running desktop app SemVer (`app.getVersion()`), for the in-app update check. */
+  getAppVersion: () => Promise<string>;
   saveConfig: (patch: MvpConfigPatch) => Promise<DesktopRuntimeConfig>;
   connectCloud: () => Promise<MvpStatusSnapshot>;
   disconnectCloud: () => Promise<MvpStatusSnapshot>;
@@ -33,4 +44,26 @@ export type SyncBizDesktopMvp = {
   scanLocalAudioFolder: (dir: string) => Promise<ScanLocalAudioFolderResult>;
   /** Native absolute path for a dropped/selected `File` (replaces deprecated `file.path` in modern Electron). */
   getPathForFile: (file: File) => string;
+  /** Read the OS auto-start (login item) state for SyncBiz. */
+  getAutoStart: () => Promise<AutoStartState>;
+  /** Toggle the OS auto-start (login item) state for SyncBiz. */
+  setAutoStart: (enabled: boolean) => Promise<AutoStartState>;
+  /** Read the persisted music folder path (or null when unset). */
+  getMusicFolder: () => Promise<MusicFolderSnapshot>;
+  /** Open native folder picker; on confirm, persist + return chosen path. */
+  pickMusicFolder: () => Promise<PickMusicFolderResult>;
+  /** Clear the persisted music folder path. */
+  clearMusicFolder: () => Promise<MusicFolderSnapshot>;
+  /** List folders + supported audio files in one directory under the saved music root. */
+  listMusicLibraryDir: (subPath: string) => Promise<ListMusicLibraryDirResult>;
+  /** Embedded cover as `data:image/...;base64,...` or null. */
+  getLocalAudioCover: (absolutePath: string) => Promise<GetLocalAudioCoverResult>;
+  /** ID3/tag metadata for browse rows (lazy; desktop main process only). */
+  getLocalAudioTags: (absolutePath: string) => Promise<GetLocalAudioTagsResult>;
+  /** Dev inspector — returns raw common.* values; logs once in main on each call. */
+  inspectLocalAudioTagsRaw: (absolutePath: string) => Promise<InspectLocalAudioTagsRawResult>;
+  /** Stage 4C: search persisted local collection snapshot in main (no folder walk). */
+  searchLocalCollectionSnapshot: (query: string, limit?: number) => Promise<SearchLocalCollectionSnapshotResult>;
+  /** Stage 5B: parse M3U/M3U8; returns resolved paths under Music Folder for library POST. */
+  importLocalM3uPlaylist: (absolutePath: string) => Promise<ImportLocalM3uPlaylistResult>;
 };

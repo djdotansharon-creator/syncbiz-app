@@ -11,8 +11,10 @@ import "@/components/player-surface/library-browse-card-surface.css";
 
 export type BranchLibraryBrowseCardInteraction = "gridButton" | "embeddedDiv";
 
+type OriginBadgeOpts = { originBadgeClassName?: string };
+
 export type BranchLibraryBrowseCardProps =
-  | {
+  | ({
       item: BranchLibraryListItem;
       selected: boolean;
       interaction: "gridButton";
@@ -21,8 +23,8 @@ export type BranchLibraryBrowseCardProps =
       titleAside?: undefined;
       children?: undefined;
       "aria-label"?: string;
-    }
-  | {
+    } & OriginBadgeOpts)
+  | ({
       item: BranchLibraryListItem;
       selected: boolean;
       interaction: "embeddedDiv";
@@ -31,7 +33,11 @@ export type BranchLibraryBrowseCardProps =
       titleAside?: ReactNode;
       children?: ReactNode;
       "aria-label"?: string;
-    };
+      /** Top-right overlay on artwork (leaf provider mark). */
+      artTopRightSlot?: ReactNode;
+      /** When set, replaces default meta line under title (e.g. genre + chip row). */
+      surfaceMetaSlot?: ReactNode;
+    } & OriginBadgeOpts);
 
 export function BranchLibraryBrowseCard(props: BranchLibraryBrowseCardProps) {
   const {
@@ -42,9 +48,15 @@ export function BranchLibraryBrowseCard(props: BranchLibraryBrowseCardProps) {
     titleAside,
     children,
     "aria-label": ariaLabel,
+    originBadgeClassName = "",
   } = props;
   const metaLine = branchLibraryItemMetaLine(item);
-  const originBadge = libraryOriginBadgeLabel(item.origin);
+  const originBadge = item.kindBadge?.trim() ? item.kindBadge : libraryOriginBadgeLabel(item.origin);
+  const surfaceMetaSlot =
+    interaction === "embeddedDiv" && "surfaceMetaSlot" in props ? props.surfaceMetaSlot : undefined;
+
+  const artTopRightSlot =
+    interaction === "embeddedDiv" && "artTopRightSlot" in props ? props.artTopRightSlot : undefined;
 
   if (interaction === "gridButton") {
     return (
@@ -53,7 +65,9 @@ export function BranchLibraryBrowseCard(props: BranchLibraryBrowseCardProps) {
         type="button"
         className={className}
         artworkUrl={item.cover}
+        mediaPlaceholderChip={item.mediaPlaceholderChip}
         originBadgeLabel={originBadge}
+        originBadgeClassName={originBadgeClassName}
         title={item.title}
         metaLine={metaLine}
         selected={selected}
@@ -69,10 +83,13 @@ export function BranchLibraryBrowseCard(props: BranchLibraryBrowseCardProps) {
       as="div"
       className={className}
       artworkUrl={item.cover}
+      mediaPlaceholderChip={item.mediaPlaceholderChip}
       originBadgeLabel={originBadge}
+      originBadgeClassName={originBadgeClassName}
+      artTopRightSlot={artTopRightSlot}
       title={item.title}
-      metaLine={metaLine}
-      metaSlot={undefined}
+      metaLine={surfaceMetaSlot ? "" : metaLine}
+      metaSlot={surfaceMetaSlot}
       titleAside={titleAside}
       selected={selected}
     >
