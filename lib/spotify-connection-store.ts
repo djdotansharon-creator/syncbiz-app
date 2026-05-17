@@ -220,11 +220,29 @@ export type ValidTokenResult =
  * Resolve a usable access token for the user, refreshing opportunistically.
  * `none` = user never connected; `needs_reauth` = refresh token revoked or the
  * encryption key changed (UI surfaces "Reconnect Spotify"); `not_configured` =
- * the encryption key env var is missing.
+ * the encryption key env var is missing OR the connection store is unusable
+ * (the `SpotifyConnection` migration has not been applied yet, or the DB is
+ * unreachable). The route maps `not_configured` to `playlist_blocked` with
+ * `connectAvailable: false`, so a half-finished setup degrades to the blocked
+ * panel instead of an unhandled HTTP 500.
  */
 export async function getValidSpotifyAccessToken(userId: string): Promise<ValidTokenResult> {
   if (!isSpotifyCryptoConfigured()) return { status: "not_configured" };
-  const row = await prisma.spotifyConnection.findUnique({ where: { userId } });
+  let row: Awaited<ReturnType<typeof prisma.spotifyConnection.findUnique>>;
+  try {
+    row = await prisma.spotifyConnection.findUnique({ where: { userId } });
+  } catch {
+    /**
+     * Reaching Prisma threw before Stage 6E is fully provisioned — almost
+     * always "relation \"SpotifyConnection\" does not exist" because
+     * `20260515120000_spotify_connection` has not been applied to this
+     * DATABASE_URL yet (also covers a transient DB outage). Connecting can't
+     * succeed until the table exists, so degrade to `not_configured`
+     * (→ blocked + connectAvailable:false) rather than letting the throw
+     * escape the preview route as HTTP 500.
+     */
+    return { status: "not_configured" };
+  }
   if (!row) return { status: "none" };
 
   let tokens: StoredTokens;
