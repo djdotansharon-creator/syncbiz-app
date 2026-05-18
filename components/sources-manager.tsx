@@ -2083,11 +2083,16 @@ function SourcesManagerInner({
        * Bottom row column widths mirror the top deck row (see app-shell
        * `library-player-route-bridge` grid) so the left Ready-Playlists
        * column sits directly under the top-left Reserved slot, and the
-       * right Library column sits under Command Pads. Sizes match 1:1
-       * at `xl` (260) and `2xl` (280). `lg` keeps the older compact
-       * widths because the top deck collapses to a single column there.
+       * right Library column sits under Command Pads. Sizes now match
+       * the deck at all breakpoints:
+       *   lg  220/1fr/220  (deck: 280/1fr/240) — tablet landscape 1024px+
+       *   xl  260/1fr/260  (deck: 300/1fr/260) — desktop 1280px+
+       *   2xl 280/1fr/280  (deck: 320/1fr/280) — wide desktop 1536px+
+       * Previously the lg widths were 186/206 (compact) because the top
+       * deck was still single-column at lg. Commit 21f97b7 activated the
+       * 3-column deck at lg, so workspace rails now widen to match.
        */}
-      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:grid-cols-[186px_minmax(0,1fr)_206px] xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)_260px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px]">
+      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:grid-cols-[220px_minmax(0,1fr)_220px] xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)_260px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px]">
         <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl border-cyan-500/35 p-2.5 shadow-[0_10px_28px_rgba(0,0,0,0.34)] lg:col-start-1 lg:row-start-1 lg:justify-self-stretch">
           <div className="space-y-4">
             <section>
