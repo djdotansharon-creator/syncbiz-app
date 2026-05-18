@@ -5,10 +5,53 @@ import "@/components/player-surface/playback-dock-surface.css";
 import { buildBrowserPlaybackDockProps } from "@/lib/player-surface/map-browser-playback-dock";
 import { usePlaybackOptional } from "@/lib/playback-provider";
 import { useTranslations } from "@/lib/locale-context";
+import { useDevicePlayer } from "@/lib/device-player-context";
 
 export function PlaybackBar() {
   const playback = usePlaybackOptional();
+  const deviceCtx = useDevicePlayer();
   const { t } = useTranslations();
+
+  const isControlMirror = Boolean(
+    deviceCtx?.isBranchConnected &&
+      deviceCtx.deviceMode === "CONTROL" &&
+      !deviceCtx.isMobileLocalPlayback,
+  );
+
+  // CONTROL mode: display the active MASTER's live state and route all
+  // transport commands back to the master via the WS channel.
+  if (isControlMirror) {
+    const ms = deviceCtx!.masterState;
+    const hasSource = !!(ms?.currentSource || ms?.currentTrack);
+    const hasPrevNext = (ms?.queue?.length ?? 0) > 1;
+    const titleText = ms
+      ? (ms.currentTrack?.title ?? ms.currentSource?.title ?? t.noSourceSelected)
+      : t.noSourceSelected;
+    const statusSubtext = ms
+      ? ms.status === "playing"
+        ? t.playing
+        : ms.status === "paused"
+          ? t.paused
+          : t.stopped
+      : t.noSourceSelected;
+    return (
+      <PlaybackDockSurface
+        {...buildBrowserPlaybackDockProps({
+          title: titleText,
+          subtitle: statusSubtext,
+          volume: ms?.volume ?? 80,
+          onVolumeChange: deviceCtx!.setVolumeOrSend,
+          hasSource,
+          hasPrevNext,
+          play: deviceCtx!.playOrSend,
+          pause: deviceCtx!.pauseOrSend,
+          stop: deviceCtx!.stopOrSend,
+          prev: deviceCtx!.prevOrSend,
+          next: deviceCtx!.nextOrSend,
+        })}
+      />
+    );
+  }
 
   if (!playback) {
     return <PlaybackDockSurface variant="empty" message={t.noSourceSelected} />;

@@ -13,7 +13,7 @@ import {
   registrationIntentBranchDevice,
   registrationIntentOwnerGlobal,
 } from "@/lib/syncbiz-device-model";
-import { isPhoneUa } from "@/lib/ua-detection";
+import { isPhoneUa, isTabletUa } from "@/lib/ua-detection";
 
 export function getWsUrl(): string {
   if (typeof window === "undefined") return "";
@@ -105,10 +105,12 @@ export function useRemoteControlWs(
 
     ws.onopen = () => {
       const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-      // Tablets (iPad, Android tablet) are treated as large-screen web clients,
-      // not phones. isMobile stays false so they are eligible for web-fallback
-      // MASTER if no desktop is active, and never misidentified as phone-class.
-      const isMobile = isPhoneUa(ua);
+      const isPhone = isPhoneUa(ua);
+      // Tablets share the server-side "never steal MASTER" behaviour with phones
+      // (isMobile: true prevents web-fallback MASTER promotion). The registration
+      // intent uses isPhone only so tablets receive platform:"web" in the metadata
+      // rather than "mobile", keeping the architectural distinction clear.
+      const isMobile = isTabletUa(ua) || isPhone;
       const msg: ClientMessage =
         role === "device"
           ? {
@@ -120,14 +122,14 @@ export function useRemoteControlWs(
               branchId: "default",
               registrationIntent: options?.isDesktopApp
                 ? registrationIntentBranchDesktopApp()
-                : registrationIntentBranchDevice(isMobile),
+                : registrationIntentBranchDevice(isPhone),
             }
           : {
               type: "REGISTER",
               role: "controller",
               authToken,
               branchId: "default",
-              registrationIntent: registrationIntentBranchController(isMobile),
+              registrationIntent: registrationIntentBranchController(isPhone),
             };
       ws.send(JSON.stringify(msg));
     };
@@ -406,14 +408,14 @@ export function useRemoteController(options?: {
 
     ws.onopen = () => {
       const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-      const isMobile = isPhoneUa(ua);
+      const isPhone = isPhoneUa(ua);
       ws.send(
         JSON.stringify({
           type: "REGISTER",
           role: "controller",
           authToken,
           branchId: "default",
-          registrationIntent: registrationIntentBranchController(isMobile),
+          registrationIntent: registrationIntentBranchController(isPhone),
         } as ClientMessage)
       );
     };
