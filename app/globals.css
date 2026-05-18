@@ -1921,12 +1921,32 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   outline-offset: 2px;
 }
 
-/* Safety: when the browser is in OS fullscreen, expand the shell to fill
-   the full viewport (matches what :fullscreen does by default, but we
-   re-state it for the wrapped element so child min-h-screen still works). */
-:fullscreen.control-room,
-:-webkit-full-screen.control-room {
-  width: 100vw;
-  height: 100vh;
-  overflow-y: auto;
+/* Sticky-header opacity hardening.
+   The default header uses bg-slate-950/98 and the deck card inside uses
+   bg-slate-950/70 — both slightly translucent, which on tablet-landscape
+   lets library/playlist content scrolling beneath the sticky header bleed
+   THROUGH the deck card and visually read as "library overlaps the deck".
+   In Control Room mode we make both fully opaque and lift the header above
+   any unexpected high-z-index library element. We also drop backdrop-blur
+   so nothing further alters the visual stacking. */
+.control-room > div > header.sources-app-header,
+.control-room header.sources-app-header {
+  background-color: #020617 !important; /* slate-950 fully opaque */
+  z-index: 60 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.control-room .library-deck-unified {
+  background-color: #020617 !important; /* slate-950 fully opaque */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Defensive: keep main content firmly *below* the header in the stacking
+   order so nothing inside library/playlists/jingles consoles can ever
+   draw over the deck. */
+.control-room main.library-main-below-deck,
+.control-room main {
+  position: relative;
+  z-index: 0;
 }

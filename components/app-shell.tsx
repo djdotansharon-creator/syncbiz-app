@@ -438,10 +438,20 @@ export function AppShell({ children }: { children: ReactNode }) {
     } catch {
       // ignore persistence errors
     }
+    // iOS / iPadOS Safari overlay an unavoidable native "Done"/X exit button on
+    // top of the page whenever an element enters Fullscreen via
+    // webkitRequestFullscreen. That floating control sits over the player and
+    // is not styleable or removable from JS. To honour SyncBiz UX ("one toggle,
+    // no floating X"), we skip the native call on iOS/iPadOS and rely on the
+    // internal Control Room compact layout alone — which is what actually fixes
+    // the tablet-landscape fit. Desktop Chrome / Edge / Firefox / macOS Safari
+    // do NOT show such an overlay, so they keep getting native fullscreen.
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+    const isIOSLike =
+      /iPad|iPhone|iPod/.test(ua) ||
+      (/Macintosh/.test(ua) && typeof navigator !== "undefined" && navigator.maxTouchPoints > 1);
     if (next) {
-      // Try native fullscreen — purely additive. Internal Control Room layout
-      // still applies if the API is missing or rejected (iOS Safari, iframes
-      // without allowfullscreen, browser permission denied, etc.).
+      if (isIOSLike) return; // internal Control Room only — no native fullscreen
       const el = shellRef.current as
         | (HTMLDivElement & {
             webkitRequestFullscreen?: () => Promise<void> | void;
