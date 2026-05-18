@@ -950,12 +950,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                     // Command Pads (right) keep their original width to avoid disturbing the
                     // existing pad grid; only the left aside grew, balanced against the
                     // flexible 1fr middle column.
-                    "grid min-w-0 xl:grid-cols-[300px_minmax(0,1fr)_260px] xl:h-[220px] 2xl:grid-cols-[320px_minmax(0,1fr)_280px] 2xl:h-[240px]"
+                    // lg: (1024 px) = minimum iPad landscape width → 3-column deck activates for
+                    // every iPad in landscape (iPad mini 1024 px, Air/standard 1080-1180 px,
+                    // Pro 12.9" 1366 px). Portrait tablets (<1024 px) keep the single-column deck.
+                    "grid min-w-0 lg:grid-cols-[280px_minmax(0,1fr)_240px] lg:h-[220px] xl:grid-cols-[300px_minmax(0,1fr)_260px] 2xl:grid-cols-[320px_minmax(0,1fr)_280px] 2xl:h-[240px]"
                   : "grid grid-cols-1"
               }
             >
               {isMediaThemeRoute ? (
-                <aside className="library-deck-slot-aside relative z-[60] isolate hidden h-full min-h-0 overflow-hidden xl:block xl:border-e xl:border-slate-800/60">
+                <aside className="library-deck-slot-aside relative z-[60] isolate hidden h-full min-h-0 overflow-hidden lg:block lg:border-e lg:border-slate-800/60">
                   <div className="flex h-full min-h-0 flex-col overflow-hidden p-2.5">
                     <LiveQueuePanel />
                   </div>
@@ -989,7 +992,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <AudioPlayer />
               </div>
               {isMediaThemeRoute ? (
-                <aside className="library-deck-pads-aside relative z-[60] isolate hidden h-full overflow-hidden xl:block xl:border-s xl:border-slate-800/60">
+                <aside className="library-deck-pads-aside relative z-[60] isolate hidden h-full overflow-hidden lg:block lg:border-s lg:border-slate-800/60">
                   <div className="flex h-full flex-col overflow-hidden p-3">
                     <header className="pb-2">
                       <div className="flex items-center justify-between">
