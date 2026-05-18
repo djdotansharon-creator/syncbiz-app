@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { parseSessionValue } from "@/lib/auth-session";
+import { isPhoneUa } from "@/lib/ua-detection";
 
 const COOKIE_NAME = "syncbiz-session";
 
@@ -38,9 +39,14 @@ function isProtected(pathname: string): boolean {
   return PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
+/**
+ * Returns true only for phone-class devices. Tablets (iPad, Android tablets)
+ * are excluded so they receive the desktop/large-screen UI instead of being
+ * redirected to the /mobile/* phone shell.
+ */
 function isMobileUserAgent(req: NextRequest): boolean {
   const ua = req.headers.get("user-agent") ?? "";
-  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Opera Mobi|Silk|Mobile/i.test(ua);
+  return isPhoneUa(ua);
 }
 
 /**

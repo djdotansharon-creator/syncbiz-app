@@ -13,6 +13,7 @@ import {
   registrationIntentBranchDevice,
   registrationIntentOwnerGlobal,
 } from "@/lib/syncbiz-device-model";
+import { isPhoneUa } from "@/lib/ua-detection";
 
 export function getWsUrl(): string {
   if (typeof window === "undefined") return "";
@@ -104,7 +105,10 @@ export function useRemoteControlWs(
 
     ws.onopen = () => {
       const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Opera Mobi|Silk|Mobile/i.test(ua);
+      // Tablets (iPad, Android tablet) are treated as large-screen web clients,
+      // not phones. isMobile stays false so they are eligible for web-fallback
+      // MASTER if no desktop is active, and never misidentified as phone-class.
+      const isMobile = isPhoneUa(ua);
       const msg: ClientMessage =
         role === "device"
           ? {
@@ -402,7 +406,7 @@ export function useRemoteController(options?: {
 
     ws.onopen = () => {
       const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Opera Mobi|Silk|Mobile/i.test(ua);
+      const isMobile = isPhoneUa(ua);
       ws.send(
         JSON.stringify({
           type: "REGISTER",
