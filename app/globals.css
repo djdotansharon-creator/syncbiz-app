@@ -1813,3 +1813,120 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   color: rgb(250, 250, 250) !important;
 }
 
+/* ─── Control Room / Full Screen mode (tablet/desktop) ────────────────────
+   Visual-only compaction layer applied when the user enables Control Room
+   mode (with or without native browser Fullscreen). MUST stay independent
+   from MASTER/CONTROL state, WS registration, and tenant/auth logic — only
+   header chrome and deck spacing change here. Mobile (`/mobile/*`) shells
+   render their own layout and never see this class.
+
+   Two attribute hooks:
+     .control-room              — internal compact layout (always when on)
+     .is-native-fullscreen      — additional polish when the browser is
+                                  actually in OS fullscreen (paint the
+                                  shell solid so the OS background can't
+                                  bleed through at the edges).
+   ----------------------------------------------------------------------- */
+
+.control-room.is-native-fullscreen {
+  background: #020617; /* slate-950 — guarantees opaque fill in OS fullscreen */
+}
+
+/* Row 1 — main header bar: tighten vertical rhythm and shrink the logo so
+   the meta chip (time/user/company) and the right cluster (indicators +
+   gear + fullscreen) fit on a single tablet-landscape row. We keep all
+   children visible (logo, title, MASTER/CONTROL indicators stay) — only
+   the secondary subtitle row is hidden because the row title alone is
+   enough information for a controller view. */
+.control-room .sources-app-header-row1,
+.control-room header > div.sources-app-header-row1 {
+  padding-top: 0.375rem !important;   /* py-3 → ~py-1.5 */
+  padding-bottom: 0.375rem !important;
+  gap: 0.5rem !important;
+}
+.control-room .sources-app-header-row1 a[aria-label="SyncBiz"] > span:first-child {
+  height: 1.75rem;
+  width: 1.75rem;
+  font-size: 0.8125rem;
+}
+.control-room .sources-app-header-row1 a[aria-label="SyncBiz"] > div {
+  display: none; /* hide "SyncBiz / Audio scheduling" double label */
+}
+.control-room .sources-app-header-row1 h1 {
+  font-size: 0.875rem;
+  line-height: 1.1;
+}
+.control-room .sources-app-header-row1 h1 + p {
+  display: none; /* subtitle is redundant in compact mode */
+}
+
+/* Row 2 — nav pills: trim padding so pills sit tight under the header. */
+.control-room .sources-app-header-row2 {
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
+}
+.control-room .sources-app-header-row2 nav a.source-nav-pill,
+.control-room .sources-app-header-row2 nav a {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+/* Row 3 — deck (Live Queue · Player · Command Pads): shave outer padding
+   and lift the deck height a notch so the player workspace gets more
+   vertical room without crowding the queue / pads asides. The grid
+   template itself isn't touched — we just compact the wrapper so the
+   3-column layout (active from lg ≥ 1024 px, i.e. iPad landscape) keeps
+   working unchanged. */
+.control-room .library-player-route-bridge {
+  padding-bottom: 0.25rem !important;
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+}
+@media (min-width: 1024px) {
+  .control-room .library-deck-unified > .grid {
+    height: 240px;
+  }
+}
+@media (min-width: 1536px) {
+  .control-room .library-deck-unified > .grid {
+    height: 264px;
+  }
+}
+
+/* Live Queue and Command Pads asides: trim inner padding so the panel
+   contents (track rows, pad buttons) get more breathing room. */
+.control-room .library-deck-slot-aside > div {
+  padding: 0.375rem !important;
+}
+.control-room .library-deck-pads-aside > div {
+  padding: 0.5rem !important;
+}
+.control-room .library-deck-pads-aside header {
+  padding-bottom: 0.375rem;
+}
+
+/* Main content below the deck (library/search, schedules, etc.) — tighten
+   the vertical gap so the library/search panel is closer to the deck. */
+.control-room main.library-main-below-deck,
+.control-room main {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+}
+
+/* Fullscreen toggle button: a tiny accent when active so it's obvious the
+   compact mode is on. */
+.control-room-toggle:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.55);
+  outline-offset: 2px;
+}
+
+/* Safety: when the browser is in OS fullscreen, expand the shell to fill
+   the full viewport (matches what :fullscreen does by default, but we
+   re-state it for the wrapped element so child min-h-screen still works). */
+:fullscreen.control-room,
+:-webkit-full-screen.control-room {
+  width: 100vw;
+  height: 100vh;
+  overflow-y: auto;
+}

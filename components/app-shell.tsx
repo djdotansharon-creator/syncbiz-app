@@ -177,6 +177,26 @@ function IconAccess() {
     </svg>
   );
 }
+function IconFullscreenEnter() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 9V4h5" />
+      <path d="M20 9V4h-5" />
+      <path d="M4 15v5h5" />
+      <path d="M20 15v5h-5" />
+    </svg>
+  );
+}
+function IconFullscreenExit() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M9 4v5H4" />
+      <path d="M15 4v5h5" />
+      <path d="M9 20v-5H4" />
+      <path d="M15 20v-5h5" />
+    </svg>
+  );
+}
 function IconArchitecture() {
   return (
     <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -365,10 +385,98 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [mainMenuOpen, setMainMenuOpen] = useState(false);
   const mainMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const { isPinned: isCategoryPinned, togglePin: toggleCategoryPin } = useTopNavPins();
+  // Control Room / Full Screen mode — visual-only compaction for tablet/desktop.
+  // Two independent layers:
+  //   1. isNativeFullscreen — actual browser Fullscreen API state.
+  //   2. isControlRoomMode  — SyncBiz internal compact layout (works even when
+  //      the Fullscreen API is unavailable or rejected). We persist the user's
+  //      preference for the *internal* mode only, never the OS fullscreen state.
+  const shellRef = React.useRef<HTMLDivElement | null>(null);
+  const [isControlRoomMode, setIsControlRoomMode] = useState(false);
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
     setInDesktopApp(Boolean(window.syncbizDesktop));
   }, []);
+  // Restore Control Room preference on mount. We deliberately do NOT auto-trigger
+  // requestFullscreen here — browsers require a user gesture, and re-entering OS
+  // fullscreen silently on every refresh would be surprising.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = window.localStorage.getItem("syncbiz-control-room-mode");
+      if (saved === "1") setIsControlRoomMode(true);
+    } catch {
+      // localStorage may be blocked (private mode, sandbox); ignore silently.
+    }
+  }, []);
+  // Mirror the browser's actual fullscreen state into React. If the user exits
+  // via Esc/F11, isNativeFullscreen flips back to false but isControlRoomMode
+  // stays unchanged — they're independent layers.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handler = () => {
+      const fsEl =
+        document.fullscreenElement ??
+        (document as Document & { webkitFullscreenElement?: Element | null }).webkitFullscreenElement ??
+        null;
+      setIsNativeFullscreen(Boolean(fsEl));
+    };
+    handler();
+    document.addEventListener("fullscreenchange", handler);
+    document.addEventListener("webkitfullscreenchange", handler as EventListener);
+    return () => {
+      document.removeEventListener("fullscreenchange", handler);
+      document.removeEventListener("webkitfullscreenchange", handler as EventListener);
+    };
+  }, []);
+  const toggleControlRoom = React.useCallback(async () => {
+    const next = !isControlRoomMode;
+    setIsControlRoomMode(next);
+    try {
+      window.localStorage.setItem("syncbiz-control-room-mode", next ? "1" : "0");
+    } catch {
+      // ignore persistence errors
+    }
+    if (next) {
+      // Try native fullscreen — purely additive. Internal Control Room layout
+      // still applies if the API is missing or rejected (iOS Safari, iframes
+      // without allowfullscreen, browser permission denied, etc.).
+      const el = shellRef.current as
+        | (HTMLDivElement & {
+            webkitRequestFullscreen?: () => Promise<void> | void;
+          })
+        | null;
+      if (el) {
+        try {
+          if (typeof el.requestFullscreen === "function") {
+            await el.requestFullscreen();
+          } else if (typeof el.webkitRequestFullscreen === "function") {
+            await el.webkitRequestFullscreen();
+          }
+        } catch {
+          // Native fullscreen unavailable or rejected — keep internal mode on.
+        }
+      }
+    } else {
+      const doc = document as Document & {
+        webkitExitFullscreen?: () => Promise<void> | void;
+        webkitFullscreenElement?: Element | null;
+      };
+      const fsEl = document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+      if (fsEl) {
+        try {
+          if (typeof document.exitFullscreen === "function") {
+            await document.exitFullscreen();
+          } else if (typeof doc.webkitExitFullscreen === "function") {
+            await doc.webkitExitFullscreen();
+          }
+        } catch {
+          // Ignore — we've already cleared the internal flag.
+        }
+      }
+    }
+  }, [isControlRoomMode]);
   // The floating main menu exposes every nav entry *except* Library and Radio
   // (permanent pins to the top bar) and Favorites (surfaced via library
   // filters, per user request). Each remaining item carries a Pin toggle so
@@ -772,7 +880,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <CenterModuleContext.Provider value={{ active: activeCenterModule, setActive: setActiveCenterModule }}>
-    <div className="flex min-h-screen bg-slate-950 text-slate-50">
+    <div
+      ref={shellRef}
+      className={`flex min-h-screen bg-slate-950 text-slate-50${
+        isControlRoomMode ? " control-room" : ""
+      }${isNativeFullscreen ? " is-native-fullscreen" : ""}`}
+      data-control-room={isControlRoomMode ? "true" : undefined}
+      data-native-fullscreen={isNativeFullscreen ? "true" : undefined}
+    >
       {/*
        * Desktop sidebar intentionally removed. All its navigation entries now
        * live in the top bar (Library + Radio pinned) and in the floating
@@ -859,6 +974,28 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 {t.agentsHealthy}
               </span>
+              <button
+                type="button"
+                onClick={() => void toggleControlRoom()}
+                aria-pressed={isControlRoomMode}
+                aria-label={
+                  isControlRoomMode
+                    ? (t.exitControlRoom ?? "Exit Full Screen")
+                    : (t.enterControlRoom ?? "Full Screen")
+                }
+                title={
+                  isControlRoomMode
+                    ? (t.exitControlRoom ?? "Exit Full Screen / Control Room")
+                    : (t.enterControlRoom ?? "Full Screen / Control Room")
+                }
+                className={`control-room-toggle inline-flex h-8 w-8 items-center justify-center rounded-full border transition ${
+                  isControlRoomMode
+                    ? "border-cyan-400/60 bg-cyan-500/15 text-cyan-100 shadow-[0_0_18px_rgba(34,211,238,0.28)]"
+                    : "border-slate-800 bg-slate-900/80 text-slate-300 hover:border-slate-700 hover:bg-slate-800 hover:text-slate-100"
+                }`}
+              >
+                {isControlRoomMode ? <IconFullscreenExit /> : <IconFullscreenEnter />}
+              </button>
               <div className="relative">
                 <button
                   ref={mainMenuTriggerRef}

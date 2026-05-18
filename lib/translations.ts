@@ -197,6 +197,8 @@ const TRANSLATIONS = {
 
     agentsHealthy: "Agents healthy",
     mainMenu: "Main menu",
+    enterControlRoom: "Full Screen",
+    exitControlRoom: "Exit Full Screen",
     downloadDesktopApp: "Desktop",
     downloadDesktopAppTitle: "Download SyncBiz Player",
     downloadDesktopFromGitHub: "All installers on GitHub",
@@ -610,6 +612,8 @@ const TRANSLATIONS = {
 
     agentsHealthy: "סוכנים תקינים",
     mainMenu: "תפריט ראשי",
+    enterControlRoom: "מסך מלא",
+    exitControlRoom: "צא ממסך מלא",
     downloadDesktopApp: "דסקטופ",
     downloadDesktopAppTitle: "הורדת SyncBiz Player",
     downloadDesktopFromGitHub: "כל קבצי ההתקנה ב-GitHub",
