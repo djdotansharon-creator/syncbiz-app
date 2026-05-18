@@ -338,13 +338,12 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       } else if (command === "PLAY_SOURCE" && cmd.payload?.source) {
         const payload = cmd.payload.source as PlaySourcePayload;
         const trackIdx = typeof cmd.payload.trackIndex === "number" ? cmd.payload.trackIndex : 0;
-        fetchUnifiedSourcesWithFallback()
-          .then((items) => {
-            const full = items.find((s) => s.id === payload.id);
-            if (full) playSource(full, trackIdx);
-            else playSource(payloadToUnifiedSource(payload), trackIdx);
-          })
-          .catch(() => playSource(payloadToUnifiedSource(payload), trackIdx));
+        // Play immediately from the payload for zero-latency start.
+        // The payload carries id/url/title/type — sufficient to begin playback and
+        // emit an immediate loading/playing STATE_UPDATE to the CONTROL.
+        // Removed the blocking fetchUnifiedSourcesWithFallback() call that caused
+        // 15+ second delays on Railway before the first track could start.
+        playSource(payloadToUnifiedSource(payload), trackIdx);
       }
     },
     [play, pause, stop, next, prev, playSource, seekTo, setVolume, setShuffle, setAutoMix]

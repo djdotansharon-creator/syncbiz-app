@@ -2051,10 +2051,29 @@ export function AudioPlayer() {
     : isControlMirror ? (ms?.status ?? "idle") : status;
   const displayTrack = isControlMirror ? ms?.currentTrack : currentTrack;
   const displaySource = isControlMirror ? ms?.currentSource : currentSource;
+
+  // CONTROL mirror: tick every 250 ms so the progress bar advances smoothly
+  // between STATE_UPDATE snapshots (which arrive ~1s from Desktop / ~1s from browser MASTER).
+  // The tick only runs when in CONTROL mirror mode and MASTER is playing.
+  const [, setControlMirrorTick] = useState(0);
+  useEffect(() => {
+    if (!isControlMirror || ms?.status !== "playing") return;
+    const id = setInterval(() => setControlMirrorTick((n) => n + 1), 250);
+    return () => clearInterval(id);
+  }, [isControlMirror, ms?.status]);
+
+  // Interpolate CONTROL position between STATE_UPDATE snapshots using positionAt timestamp.
   const displayPosition = isDesktopMode
     ? desktopMpvSnap.position
     : isControlMirror
-      ? (typeof ms?.position === "number" && Number.isFinite(ms.position) ? ms.position : Number.NaN)
+      ? (() => {
+          const pos = ms?.position;
+          const at = ms?.positionAt;
+          if (typeof pos !== "number" || !Number.isFinite(pos)) return Number.NaN;
+          if (ms?.status !== "playing" || typeof at !== "number" || !Number.isFinite(at)) return pos;
+          const dur = typeof ms?.duration === "number" && Number.isFinite(ms.duration) ? ms.duration : Infinity;
+          return Math.min(pos + (Date.now() - at) / 1000, dur);
+        })()
       : position;
   const displayDuration = isDesktopMode
     ? desktopMpvSnap.duration
