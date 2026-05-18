@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from "react";
 import { useLocale, useTranslations, labels } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { LibraryItemContextDeleteModal } from "@/components/library-item-context-delete-modal";
@@ -220,6 +220,8 @@ type Props = {
   leafUnifiedBar?: boolean;
   /** Opens add-to-playlist picker (required when `leafUnifiedBar`). */
   onAddToPlaylistPress?: () => void;
+  /** Optional ⋯ AI tools slot on LIST shell tiles (outside leaf rows). */
+  playlistAiMenuSlot?: ReactNode;
   /**
    * `rich` = full web tile (custom art, view counts, duration pills).
    * `branch` = shared `BranchLibraryBrowseCard` shell (same structure as desktop branch library grid).
@@ -346,6 +348,7 @@ export function SourceCard({
   expandedTrackInMainLibrary = false,
   leafUnifiedBar = false,
   onAddToPlaylistPress,
+  playlistAiMenuSlot,
   libraryTilePresentation = "rich",
 }: Props) {
   const { t } = useTranslations();
@@ -490,6 +493,7 @@ export function SourceCard({
           </svg>
         </button>
       )}
+      {playlistAiMenuSlot}
       {showLeafLibraryChips ? null : <SourceLogo type={source.type} origin={source.origin} size="md" />}
     </>
   );

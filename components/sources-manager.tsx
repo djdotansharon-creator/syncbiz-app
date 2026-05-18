@@ -39,6 +39,7 @@ import { LibraryItemContextDeleteModal } from "@/components/library-item-context
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { LibrarySourceItemActions } from "@/components/library-source-item-actions";
 import { LibraryInputArea } from "@/components/library-input-area";
+import { PlaylistAiShellMenu } from "@/components/playlist-ai-shell-menu";
 import { DjCreatorAiShell } from "@/components/dj-creator-ai-shell";
 import { EditPlaylistForm } from "@/components/edit-playlist-form";
 import { EditSourceForm } from "@/components/edit-source-form";
@@ -1692,6 +1693,21 @@ function SourcesManagerInner({
     [savePlaylistToLocal, setSources],
   );
 
+  const handleAiPlaylistFromSearchPrompt = useCallback(async (promptText: string) => {
+    const res = await fetch("/api/playlists/ai-build", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ mode: "prompt", prompt: promptText, branchId: "default", count: 50 }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) {
+      window.alert(typeof data.error === "string" ? data.error : "AI playlist build failed");
+      return;
+    }
+    window.dispatchEvent(new Event("library-updated"));
+  }, []);
+
   const handleRemove = useCallback(
     (id: string, origin?: UnifiedSource["origin"]) => {
       setSources((prev) => prev.filter((s) => s.id !== id));
@@ -2455,7 +2471,12 @@ function SourcesManagerInner({
             />
           ) : showLibraryCenter ? (<>
           <div className="library-sources-input-shell">
-            <LibraryInputArea onAdd={handleAdd} playSourceOverride={playSourceOverride} onPlaylistUpdated={handlePlaylistUpdatedFromMyMusic} />
+            <LibraryInputArea
+              onAdd={handleAdd}
+              playSourceOverride={playSourceOverride}
+              onPlaylistUpdated={handlePlaylistUpdatedFromMyMusic}
+              onAiPlaylistFromSearchPrompt={handleAiPlaylistFromSearchPrompt}
+            />
           </div>
           <div className="library-command-rail mt-3.5 flex min-w-0 flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-slate-800/35 bg-slate-950/25 px-3 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md sm:gap-3 lg:overflow-x-auto">
             <div className="library-command-rail-browse flex min-w-0 flex-wrap items-center gap-2 sm:gap-2.5 lg:flex-nowrap lg:min-w-0">
@@ -3101,6 +3122,17 @@ function SourcesManagerInner({
                           const pe = getPlaylistEntitySubtypeKey(source);
                           const leafBar = isLeafLibraryUnifiedCard(source, selection);
                           const libraryPresentation = libraryTilePresentationForUnifiedSource(source);
+                          const playlistAiMenuSlot =
+                            pe?.subtype === "syncbiz_playlist" &&
+                            source.origin === "playlist" &&
+                            source.playlist?.id &&
+                            !leafBar ? (
+                              <PlaylistAiShellMenu
+                                playlistId={source.playlist.id}
+                                playlistName={source.title}
+                                branchId={source.playlist.branchId ?? "default"}
+                              />
+                            ) : undefined;
                           return (
                           <div key={source.id} className={LIBRARY_SOURCE_CARD_CELL_CLASS}>
                             <SourceCard
@@ -3145,6 +3177,7 @@ function SourcesManagerInner({
                               libraryDeleteEligible={libraryRowEligibleForLibraryDelete(source, displaySources)}
                               leafUnifiedBar={leafBar}
                               onAddToPlaylistPress={leafBar ? () => setAddToPlaylistLeaf(source) : undefined}
+                              playlistAiMenuSlot={playlistAiMenuSlot}
                             />
                           </div>
                           );

@@ -118,6 +118,7 @@ export async function GET(req: NextRequest) {
     rows: data.rows.map((r) => ({
       catalogItemId: r.catalogItemId,
       title: r.title,
+      artist: r.artist ?? undefined,
       url: r.url,
       thumbnail: r.thumbnail,
       provider: r.provider,

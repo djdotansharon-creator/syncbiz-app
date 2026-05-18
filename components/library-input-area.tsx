@@ -254,9 +254,16 @@ type Props = {
   playSourceOverride?: (source: UnifiedSource) => void;
   /** After M3U YouTube merges, refresh the playlist tile in Sources (same as My Music). */
   onPlaylistUpdated?: (source: UnifiedSource) => void;
+  /** Build catalog-first AI playlist from the library search query (prompt mode). */
+  onAiPlaylistFromSearchPrompt?: (prompt: string) => void | Promise<void>;
 };
 
-export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated }: Props) {
+export function LibraryInputArea({
+  onAdd,
+  playSourceOverride,
+  onPlaylistUpdated,
+  onAiPlaylistFromSearchPrompt,
+}: Props) {
   const router = useRouter();
   const { t } = useTranslations();
   const { locale } = useLocale();
@@ -335,6 +342,7 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
   const [radioResults, setRadioResults] = useState<RadioSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [listening, setListening] = useState(false);
+  const [aiPlaylistBusy, setAiPlaylistBusy] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -1679,6 +1687,33 @@ export function LibraryInputArea({ onAdd, playSourceOverride, onPlaylistUpdated 
               </svg>
             </button>
           )}
+          {onAiPlaylistFromSearchPrompt ? (
+            <button
+              type="button"
+              disabled={aiPlaylistBusy || urlIngesting || !hasQuery || !query.trim()}
+              onClick={(e) => {
+                e.preventDefault();
+                const q = query.trim();
+                if (!onAiPlaylistFromSearchPrompt || q.length < 2) return;
+                void (async () => {
+                  try {
+                    setAiPlaylistBusy(true);
+                    await onAiPlaylistFromSearchPrompt(q);
+                  } finally {
+                    setAiPlaylistBusy(false);
+                  }
+                })();
+              }}
+              title="Build AI playlist from SyncBiz catalog using this search prompt"
+              className={`shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-semibold leading-none transition-colors ${
+                aiPlaylistBusy
+                  ? "border border-slate-600 text-slate-500"
+                  : "border border-cyan-500/35 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/18"
+              } disabled:pointer-events-none disabled:opacity-40`}
+            >
+              {aiPlaylistBusy ? "Building…" : "Build AI Playlist"}
+            </button>
+          ) : null}
           </div>
         </form>
         </div>

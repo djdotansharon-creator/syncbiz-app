@@ -33,6 +33,8 @@ const POP_LOG_WEIGHT = 0.004;
 
 export type SmartCatalogSearchResultRow = CatalogFitScoreRow & {
   url: string;
+  /** CatalogItem.artist when set. */
+  artist: string | null;
   /** CatalogItem.thumbnail — HTTPS URL or null (not a stored file). */
   thumbnail: string | null;
   provider: string | null;
@@ -228,6 +230,11 @@ export async function runSmartCatalogSearch(args: {
   daypartOverride: DaypartSlug | null;
   limit: number;
   /**
+   * Optional hard cap for returned rows (defaults to 100 for public API shape).
+   * Server-side AI builders may request a larger pool before client-side filtering.
+   */
+  maxResultLimit?: number;
+  /**
    * Optional: when non-empty, exclude catalog rows whose full taxonomy slug set
    * intersects this list (DJ Creator matched-rule avoidStyleSlugs). No effect on scoring.
    */
@@ -275,6 +282,7 @@ export async function runSmartCatalogSearch(args: {
     select: {
       id: true,
       title: true,
+      artist: true,
       url: true,
       provider: true,
       durationSec: true,
@@ -343,7 +351,8 @@ export async function runSmartCatalogSearch(args: {
 
   const metaById = new Map(catalogRowsRaw.map((r) => [r.id, r] as const));
 
-  const limit = Math.min(100, Math.max(1, args.limit));
+  const cap = Math.min(Math.max(1, args.maxResultLimit ?? 100), 200);
+  const limit = Math.min(cap, Math.max(1, args.limit));
   const rescoreCap = Math.min(rankedAfterAvoid.length, Math.max(limit * 5, 80));
   let rankedRescorePool = rankedAfterAvoid.slice(0, rescoreCap);
 
@@ -400,6 +409,7 @@ export async function runSmartCatalogSearch(args: {
     return {
       ...row,
       url: meta.url,
+      artist: meta.artist ?? null,
       thumbnail: meta.thumbnail,
       provider: meta.provider,
       durationSec: meta.durationSec,
