@@ -1,11 +1,15 @@
+# syncbiz-ws — build context must be repository root (not /server alone).
+# Railway: Root Directory = / (empty), Dockerfile path = server/Dockerfile
+# (or RAILWAY_DOCKERFILE_PATH=server/Dockerfile). Do not COPY root package.json — it runs prisma postinstall.
+
 FROM node:20-alpine
 
-WORKDIR /app
+WORKDIR /app/server
 
-COPY package.json package-lock.json ./
+COPY server/package.json server/package-lock.json ./
 RUN npm ci
 
-COPY . .
+COPY server/ .
 RUN npm run build
 
 EXPOSE 3001

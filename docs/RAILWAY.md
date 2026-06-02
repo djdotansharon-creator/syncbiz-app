@@ -67,8 +67,9 @@ Next service:
 
 WS service (`syncbiz-ws`, Dockerfile in `server/`):
 
-- Railway **Root Directory:** `/server` (isolated service; WS types are self-contained under `server/`)
-- Build: Docker (`server/Dockerfile`) runs `npm ci && npm run build`
+- Railway **Root Directory:** `/` (repo root — not `/server`). Set **Dockerfile path** to `server/Dockerfile` (or `RAILWAY_DOCKERFILE_PATH=server/Dockerfile`).
+- The Dockerfile copies `server/package.json` explicitly so `npm ci` does not pick up the root Next.js `postinstall` (`prisma generate`).
+- Build: `npm ci && npm run build` (tsc, server-local types under `server/`).
 - Start: `npm run start` → `node dist/index.js`
 - Port: `3001`
 
