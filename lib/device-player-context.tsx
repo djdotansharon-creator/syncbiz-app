@@ -26,6 +26,7 @@ import type { UnifiedSource } from "@/lib/source-types";
 import { deviceModeAllowsLocalPlayback } from "@/lib/device-mode-guard";
 import { getAutoMix, setAutoMix, onAutoMixChanged } from "@/lib/mix-preferences";
 import { useMobileRole } from "@/lib/mobile-role-context";
+import { isStreamerDeviceMode } from "@/lib/streamer-device-mode";
 
 type DevicePlayerContextValue = {
   /** True when this tab registers as a branch WS device (see `resolveDeviceRoleActive`). */
@@ -76,6 +77,8 @@ type DevicePlayerContextValue = {
    * if the branch device is CONTROL (station MASTER elsewhere). Not the same as `deviceMode === "MASTER"`.
    */
   isMobileLocalPlayback: boolean;
+  /** GOtv / Android TV dedicated branch player (`/streamer`). */
+  isStreamerDevice: boolean;
 };
 
 const DevicePlayerContext = createContext<DevicePlayerContextValue | null>(null);
@@ -89,7 +92,7 @@ const DevicePlayerContext = createContext<DevicePlayerContextValue | null>(null)
  * the user is in Controller vs Player mode; eligibility here is only about whether local
  * playback is physically allowed on this route, not about which mode is active.
  */
-const ELIGIBLE_BROWSER_PLAYER_ROUTES = ["/player", "/remote-player", "/sources", "/mobile"] as const;
+const ELIGIBLE_BROWSER_PLAYER_ROUTES = ["/player", "/remote-player", "/streamer", "/sources", "/mobile"] as const;
 
 function isEligibleBrowserPlayerRoute(pathname: string): boolean {
   return ELIGIBLE_BROWSER_PLAYER_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
@@ -138,6 +141,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const { mobileRole } = useMobileRole();
   const isMobileLocalPlayback =
     (pathname === "/mobile" || pathname?.startsWith("/mobile/")) && mobileRole === "player";
+  const isStreamerDevice = isStreamerDeviceMode(pathname);
   /** Server: unknown. Client: read immediately so Electron is not treated as `null` until after first paint (that hid Settings branch UI). */
   const [isElectronShell, setIsElectronShell] = useState<boolean | null>(() =>
     typeof window === "undefined" ? null : readSyncBizElectronRenderer(),
@@ -412,6 +416,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       onGuestRecommendation,
       onAuthError,
       isDesktopApp: isElectronShell === true,
+      isStreamerDevice,
     }
   );
 
@@ -434,6 +439,31 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       lastConnectedModeRef.current = deviceMode;
     }
   }, [status, deviceMode]);
+
+  // Dedicated streamer: reclaim MASTER after connect/reconnect when demoted (cabinet player must output audio).
+  // Server assigns streamer priority on REGISTER/SET_MASTER; this covers reconnect blips only.
+  const streamerMasterRequestedRef = useRef(false);
+  useEffect(() => {
+    if (status === "disconnected" || status === "error") {
+      streamerMasterRequestedRef.current = false;
+    }
+  }, [status]);
+  useEffect(() => {
+    if (!isStreamerDevice || !isActive) {
+      streamerMasterRequestedRef.current = false;
+      return;
+    }
+    if (status !== "connected" || effectiveDeviceMode === "MASTER") return;
+    if (streamerMasterRequestedRef.current) return;
+    streamerMasterRequestedRef.current = true;
+    sendSetMaster();
+  }, [isStreamerDevice, isActive, status, effectiveDeviceMode, sendSetMaster]);
+
+  useEffect(() => {
+    if (status === "connected" && effectiveDeviceMode === "MASTER") {
+      streamerMasterRequestedRef.current = false;
+    }
+  }, [status, effectiveDeviceMode]);
 
   // Secondary-desktop warning is valid only while this device effectively stays in CONTROL
   // because another device is currently MASTER. Clear stale modal state after handoff/promotion.
@@ -740,6 +770,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       guestLink,
       isObserverOnlyBrowser,
       isMobileLocalPlayback,
+      isStreamerDevice,
     }),
     [
       isActive,
@@ -769,6 +800,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       guestLink,
       isObserverOnlyBrowser,
       isMobileLocalPlayback,
+      isStreamerDevice,
     ]
   );
 

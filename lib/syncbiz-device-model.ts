@@ -25,6 +25,7 @@ export type SyncBizRuntimeMode = "remote_control" | "branch_playback" | "owner_p
  */
 export type SyncBizDevicePurpose =
   | "branch_desktop_station"
+  | "branch_streamer_station"
   | "branch_web_station"
   | "branch_mobile_controller"
   | "branch_web_controller"
@@ -61,6 +62,7 @@ const PLATFORMS = new Set<SyncBizPlatform>(["desktop", "mobile", "web"]);
 const RUNTIMES = new Set<SyncBizRuntimeMode>(["remote_control", "branch_playback", "owner_personal_playback"]);
 const PURPOSES = new Set<SyncBizDevicePurpose>([
   "branch_desktop_station",
+  "branch_streamer_station",
   "branch_web_station",
   "branch_mobile_controller",
   "branch_web_controller",
@@ -130,6 +132,17 @@ export function registrationIntentBranchDesktopApp(): SyncBizRegistrationIntent 
     platform: "desktop",
     runtimeMode: "branch_playback",
     devicePurpose: "branch_desktop_station",
+    leaseRoleHint: "none",
+    contentScope: "branch",
+  };
+}
+
+/** GOtv / Android TV / cabinet streamer — preferred branch MASTER on `/streamer`. */
+export function registrationIntentBranchStreamerDevice(): SyncBizRegistrationIntent {
+  return {
+    platform: "web",
+    runtimeMode: "branch_playback",
+    devicePurpose: "branch_streamer_station",
     leaseRoleHint: "none",
     contentScope: "branch",
   };

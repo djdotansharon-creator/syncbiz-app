@@ -222,22 +222,58 @@ function isEligibleConnectedPlaybackCandidate(d: DeviceConnection, userId: strin
   if (!intent) return true;
   return (
     intent.runtimeMode === "branch_playback" &&
-    (intent.devicePurpose === "branch_desktop_station" || intent.devicePurpose === "branch_web_station")
+    (intent.devicePurpose === "branch_desktop_station" ||
+      intent.devicePurpose === "branch_streamer_station" ||
+      intent.devicePurpose === "branch_web_station")
   );
 }
 
 /**
- * Desktop-priority arbitration helpers.
- *
- * `branch_desktop_station` (Electron / dedicated player) is the only purpose
- * eligible to own `primaryMasterByBranch`. Web stations may become MASTER as a
- * fallback (cold start / no desktop / post-grace) but never write a primary
- * reservation. A connected desktop station auto-takes MASTER from any
- * non-desktop holder on REGISTER; a desktop primary alive within grace blocks
- * non-desktop promotions.
+ * Branch MASTER priority (deterministic):
+ *   1. branch_streamer_station — preferred dedicated branch MASTER
+ *   2. branch_desktop_station — fallback MASTER when no active/reserved streamer
+ *   3. branch_web_station — cold-start fallback only
+ *   4. mobile — never MASTER
  */
-function isDesktopStation(d: DeviceConnection | null | undefined): boolean {
+function isStreamerStation(d: DeviceConnection | null | undefined): boolean {
+  return d?.registrationIntent?.devicePurpose === "branch_streamer_station";
+}
+
+function isDesktopOnlyStation(d: DeviceConnection | null | undefined): boolean {
   return d?.registrationIntent?.devicePurpose === "branch_desktop_station";
+}
+
+function isDedicatedPlayerStation(d: DeviceConnection | null | undefined): boolean {
+  return isStreamerStation(d) || isDesktopOnlyStation(d);
+}
+
+/** Connected streamer actively holding MASTER for this branch. */
+function getActiveStreamerMaster(userId: string, branchId: string): DeviceConnection | null {
+  const key = branchKey(userId, branchId);
+  const masterId = masterByBranch.get(key);
+  if (!masterId) return null;
+  const conn = devices.get(masterId);
+  if (!conn || conn.ws.readyState !== 1 || conn.mode !== "MASTER" || conn.isMobile) return null;
+  return isStreamerStation(conn) ? conn : null;
+}
+
+/** Primary device id still reserved within disconnect grace (blocks fallback desktop MASTER). */
+function primaryReservedInGrace(userId: string, branchId: string): string | null {
+  const key = branchKey(userId, branchId);
+  const primaryId = primaryMasterByBranch.get(key);
+  if (!primaryId) return null;
+  if (devices.get(primaryId)?.ws.readyState === 1) return null;
+  const disconnectedAt = masterDisconnectedAt.get(key);
+  if (!disconnectedAt) return null;
+  if (Date.now() - disconnectedAt > MASTER_GRACE_MS) return null;
+  return primaryId;
+}
+
+/** True when streamer priority blocks desktop/web from claiming MASTER. */
+function streamerBlocksFallbackMaster(userId: string, branchId: string, requesterDeviceId: string): boolean {
+  if (getActiveStreamerMaster(userId, branchId)) return true;
+  const reserved = primaryReservedInGrace(userId, branchId);
+  return !!reserved && reserved !== requesterDeviceId;
 }
 
 /** Always-on, structured lease-transition log so MASTER changes are visible in production stdout. */
@@ -258,13 +294,18 @@ function demoteOtherMasters(userId: string, branchId: string, exceptDeviceId: st
 }
 
 function tryPromoteConnectedControlOnMasterLoss(userId: string, branchId: string): string | null {
-  // Desktop priority: prefer a desktop_station CONTROL over a web_station CONTROL.
+  // Streamer priority: prefer streamer CONTROL, then desktop CONTROL, then web fallback.
+  let streamerCandidate: DeviceConnection | null = null;
   let desktopCandidate: DeviceConnection | null = null;
   let webCandidate: DeviceConnection | null = null;
   devices.forEach((d) => {
     if (!isEligibleConnectedPlaybackCandidate(d, userId, branchId)) return;
     if (d.mode !== "CONTROL") return;
-    if (isDesktopStation(d)) {
+    if (isStreamerStation(d)) {
+      if (!streamerCandidate || d.connectedAt < streamerCandidate.connectedAt) {
+        streamerCandidate = d;
+      }
+    } else if (isDesktopOnlyStation(d)) {
       if (!desktopCandidate || d.connectedAt < desktopCandidate.connectedAt) {
         desktopCandidate = d;
       }
@@ -274,7 +315,7 @@ function tryPromoteConnectedControlOnMasterLoss(userId: string, branchId: string
       }
     }
   });
-  const pick = desktopCandidate ?? webCandidate;
+  const pick = streamerCandidate ?? desktopCandidate ?? webCandidate;
   if (!pick) return null;
   const selected: DeviceConnection = pick as DeviceConnection;
 
@@ -305,7 +346,7 @@ function tryPromoteConnectedControlOnMasterLoss(userId: string, branchId: string
   //     a desktop CONTROL took over — desktop should be the new primary).
   //   - If no primary AND we're promoting a web_station, do NOT write primary (web is
   //     fallback only; primary is desktop-only).
-  if (!primaryMasterByBranch.has(key) && isDesktopStation(selected)) {
+  if (!primaryMasterByBranch.has(key) && isDedicatedPlayerStation(selected)) {
     primaryMasterByBranch.set(key, selected.id);
   }
   masterDisconnectedAt.delete(key);
@@ -344,8 +385,14 @@ function getReservedMasterForUser(userId: string): string | null {
   return getReservedMasterForBranch(userId, DEFAULT_BRANCH_ID);
 }
 
-function broadcastLibraryUpdated(userId: string, branchId: string, entityType?: "playlist" | "source" | "radio", action?: "created" | "updated" | "deleted") {
-  const msg: ServerMessage = { type: "LIBRARY_UPDATED", branchId, entityType, action };
+function broadcastLibraryUpdated(
+  userId: string,
+  branchId: string,
+  entityType?: "playlist" | "source" | "radio",
+  action?: "created" | "updated" | "deleted",
+  entityId?: string,
+) {
+  const msg: ServerMessage = { type: "LIBRARY_UPDATED", branchId, entityType, action, entityId };
   const raw = JSON.stringify(msg);
   controllers.forEach((c) => {
     if ((c.userId ?? "") === userId && c.branchId === branchId && c.ws.readyState === 1) c.ws.send(raw);
@@ -522,11 +569,20 @@ const httpServer = createServer((req, res) => {
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", () => {
       try {
-        const data = body ? (JSON.parse(body) as { userId?: string; branchId?: string; entityType?: "playlist" | "source" | "radio"; action?: "created" | "updated" | "deleted" }) : {};
+        const data = body
+          ? (JSON.parse(body) as {
+              userId?: string;
+              branchId?: string;
+              entityType?: "playlist" | "source" | "radio";
+              action?: "created" | "updated" | "deleted";
+              entityId?: string;
+            })
+          : {};
         const userId = typeof data.userId === "string" ? data.userId.trim() : "";
         const branchId = (typeof data.branchId === "string" ? data.branchId.trim() : "") || DEFAULT_BRANCH_ID;
+        const entityId = typeof data.entityId === "string" ? data.entityId.trim() : undefined;
         if (userId) {
-          broadcastLibraryUpdated(userId, branchId, data.entityType, data.action);
+          broadcastLibraryUpdated(userId, branchId, data.entityType, data.action, entityId);
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true }));
         } else {
@@ -630,22 +686,11 @@ wss.on("connection", (ws) => {
         const primaryId = primaryMasterByBranch.get(key);
         let masterDecisionReason = "";
 
-        const wantsDesktop = registrationIntent?.devicePurpose === "branch_desktop_station";
+        const purpose = registrationIntent?.devicePurpose;
+        const isStreamerReg = purpose === "branch_streamer_station";
+        const isDesktopReg = purpose === "branch_desktop_station";
         const primaryConn = primaryId ? devices.get(primaryId) : undefined;
-        const primaryIsActiveDesktop =
-          !!primaryConn && primaryConn.ws.readyState === 1 && isDesktopStation(primaryConn);
-        const primaryReservedDesktopWithinGrace = (() => {
-          if (!primaryId) return false;
-          if (primaryConn) return false;
-          const disconnectedAt = masterDisconnectedAt.get(key);
-          if (!disconnectedAt) return false;
-          if (Date.now() - disconnectedAt > MASTER_GRACE_MS) return false;
-          // Going forward only desktop_station writes primary; legacy state may have web ids
-          // here but we can't tell once the device entry is gone. Treat offline-but-within-grace
-          // primary as desktop-equivalent — worst case is a one-time legacy stall up to ~90s.
-          return true;
-        })();
-        const desktopPrimaryHolds = primaryIsActiveDesktop || primaryReservedDesktopWithinGrace;
+        const activeStreamerMaster = getActiveStreamerMaster(userId, branchId);
 
         if (isMobile) {
           // Mobile must never own primary. Clean up any stale ownership.
@@ -657,39 +702,9 @@ wss.on("connection", (ws) => {
           }
           masterDecisionReason = "mobile: never claim primary MASTER lease";
         } else if (deviceId === primaryId) {
-          // Primary reclaim. Block legacy non-desktop primary if a desktop is currently MASTER
-          // (heals legacy state by re-pointing primary at the active desktop).
-          const currentMasterId = masterByBranch.get(key);
-          const currentMaster =
-            currentMasterId && currentMasterId !== deviceId ? devices.get(currentMasterId) : undefined;
-          const desktopActiveMaster =
-            !!currentMaster &&
-            currentMaster.ws.readyState === 1 &&
-            currentMaster.mode === "MASTER" &&
-            isDesktopStation(currentMaster);
-          if (!wantsDesktop && desktopActiveMaster) {
-            primaryMasterByBranch.set(key, currentMaster.id);
-            persistMasterLease();
-            masterDecisionReason =
-              "non-desktop primary blocked: desktop currently MASTER -> CONTROL (primary healed to desktop)";
-          } else {
-            mode = "MASTER";
-            masterDisconnectedAt.delete(key);
-            demoteOtherMasters(userId, branchId, deviceId, deviceId);
-            masterByBranch.set(key, deviceId);
-            persistMasterLease();
-            masterDecisionReason = wantsDesktop
-              ? "desktop: device matches primary reservation -> MASTER (demoted any takeover holder)"
-              : "non-desktop: device matches primary reservation -> MASTER (legacy primary)";
-          }
-        } else if (wantsDesktop) {
-          // Desktop priority:
-          //   - If another desktop already holds/reserves primary, this desktop is secondary -> CONTROL.
-          //   - Otherwise (no primary, or primary points at a non-desktop / fallback web MASTER),
-          //     take MASTER and write primary to this desktop.
-          if (desktopPrimaryHolds) {
+          if (isDesktopReg && activeStreamerMaster) {
             secondaryDesktop = true;
-            masterDecisionReason = "another desktop holds/reserves primary -> CONTROL (secondary)";
+            masterDecisionReason = "desktop primary reclaim blocked: streamer active MASTER -> CONTROL";
           } else {
             mode = "MASTER";
             masterDisconnectedAt.delete(key);
@@ -697,15 +712,60 @@ wss.on("connection", (ws) => {
             masterByBranch.set(key, deviceId);
             primaryMasterByBranch.set(key, deviceId);
             persistMasterLease();
-            masterDecisionReason = primaryId
-              ? "desktop priority: took MASTER from non-desktop primary"
-              : "desktop: no active desktop primary -> MASTER";
+            masterDecisionReason = isStreamerReg
+              ? "streamer primary reclaim -> MASTER"
+              : isDesktopReg
+                ? "desktop primary reclaim -> MASTER"
+                : "primary reclaim -> MASTER";
+          }
+        } else if (isStreamerReg) {
+          if (activeStreamerMaster && activeStreamerMaster.id !== deviceId) {
+            secondaryDesktop = true;
+            masterDecisionReason = "another streamer already MASTER -> CONTROL";
+          } else {
+            mode = "MASTER";
+            masterDisconnectedAt.delete(key);
+            demoteOtherMasters(userId, branchId, deviceId, deviceId);
+            masterByBranch.set(key, deviceId);
+            primaryMasterByBranch.set(key, deviceId);
+            persistMasterLease();
+            masterDecisionReason = "streamer priority -> MASTER (demoted fallback holders)";
+          }
+        } else if (isDesktopReg) {
+          if (streamerBlocksFallbackMaster(userId, branchId, deviceId)) {
+            secondaryDesktop = true;
+            masterDecisionReason = activeStreamerMaster
+              ? "streamer active MASTER -> desktop CONTROL"
+              : "streamer primary reserved in grace -> desktop CONTROL";
+          } else if (
+            primaryConn &&
+            primaryConn.ws.readyState === 1 &&
+            isDesktopOnlyStation(primaryConn) &&
+            primaryConn.id !== deviceId
+          ) {
+            secondaryDesktop = true;
+            masterDecisionReason = "another desktop holds primary -> CONTROL (secondary)";
+          } else {
+            mode = "MASTER";
+            masterDisconnectedAt.delete(key);
+            demoteOtherMasters(userId, branchId, deviceId, deviceId);
+            masterByBranch.set(key, deviceId);
+            primaryMasterByBranch.set(key, deviceId);
+            persistMasterLease();
+            masterDecisionReason = "desktop fallback: no active streamer -> MASTER";
           }
         } else {
-          // Web station (or unknown-purpose): only fallback when no desktop owns/reserves primary
-          // AND no other device is currently MASTER. Never writes primary.
-          if (desktopPrimaryHolds) {
-            masterDecisionReason = "desktop primary holds/reserves -> CONTROL";
+          // Web station: fallback only when streamer and desktop are not blocking.
+          if (streamerBlocksFallbackMaster(userId, branchId, deviceId)) {
+            masterDecisionReason = activeStreamerMaster
+              ? "streamer active MASTER -> web CONTROL"
+              : "streamer primary reserved in grace -> web CONTROL";
+          } else if (
+            primaryConn &&
+            primaryConn.ws.readyState === 1 &&
+            isDedicatedPlayerStation(primaryConn)
+          ) {
+            masterDecisionReason = "dedicated player holds/reserves primary -> web CONTROL";
           } else {
             const currentMasterId = masterByBranch.get(key);
             const currentMaster =
@@ -713,18 +773,16 @@ wss.on("connection", (ws) => {
             const someoneElseAlreadyMaster =
               !!currentMaster && currentMaster.ws.readyState === 1 && currentMaster.mode === "MASTER";
             if (someoneElseAlreadyMaster) {
-              masterDecisionReason = "existing MASTER present (no steal) -> CONTROL";
+              masterDecisionReason = "existing MASTER present (no steal) -> web CONTROL";
             } else {
               mode = "MASTER";
               masterDisconnectedAt.delete(key);
               masterByBranch.set(key, deviceId);
-              // Web fallback NEVER writes primary. If a stale legacy primary points at an
-              // offline non-desktop, clear it so future desktops aren't blocked.
               if (primaryId && !primaryConn) {
                 primaryMasterByBranch.delete(key);
               }
               persistMasterLease();
-              masterDecisionReason = "web fallback: no desktop primary, no active MASTER -> MASTER";
+              masterDecisionReason = "web fallback: no streamer/desktop MASTER -> MASTER";
             }
           }
         }
@@ -898,7 +956,9 @@ wss.on("connection", (ws) => {
       const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
       const key = branchKey(userId, branchId);
       const primaryId = primaryMasterByBranch.get(key);
-      const requesterIsDesktop = isDesktopStation(conn);
+      const requesterIsStreamer = isStreamerStation(conn);
+      const requesterIsDesktop = isDesktopOnlyStation(conn);
+      const requesterIsDedicated = isDedicatedPlayerStation(conn);
 
       // Mobile must NEVER become primary branch MASTER. Reject SET_MASTER from mobile.
       if (isMobile) {
@@ -912,36 +972,51 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      // Desktop priority: a non-desktop SET_MASTER cannot steal MASTER from an active desktop.
-      const currentMasterId = masterByBranch.get(key);
-      const currentMaster =
-        currentMasterId && currentMasterId !== deviceId ? devices.get(currentMasterId) : undefined;
-      const desktopActiveMaster =
-        !!currentMaster &&
-        currentMaster.ws.readyState === 1 &&
-        currentMaster.mode === "MASTER" &&
-        isDesktopStation(currentMaster);
-      if (!requesterIsDesktop && desktopActiveMaster) {
+      // Streamer priority: desktop/web cannot take MASTER while streamer holds priority.
+      if (requesterIsDesktop && streamerBlocksFallbackMaster(userId, branchId, deviceId)) {
         logLeaseEvent("set_master_blocked", {
           userId,
           branchId,
           deviceId,
           purpose: conn?.registrationIntent?.devicePurpose ?? "unknown",
-          reason: "non-desktop SET_MASTER blocked by active desktop MASTER",
-          activeDesktopMasterId: currentMaster.id,
+          reason: getActiveStreamerMaster(userId, branchId)
+            ? "desktop SET_MASTER blocked: streamer active MASTER"
+            : "desktop SET_MASTER blocked: streamer primary reserved in grace",
           triggeredBy: "SET_MASTER",
         });
         if (ws.readyState === 1) {
-          ws.send(JSON.stringify({ type: "ERROR", message: "Desktop player is currently MASTER" } as ServerMessage));
+          ws.send(JSON.stringify({ type: "ERROR", message: "Streamer has branch audio priority" } as ServerMessage));
+        }
+        return;
+      }
+
+      const currentMasterId = masterByBranch.get(key);
+      const currentMaster =
+        currentMasterId && currentMasterId !== deviceId ? devices.get(currentMasterId) : undefined;
+      const dedicatedActiveMaster =
+        !!currentMaster &&
+        currentMaster.ws.readyState === 1 &&
+        currentMaster.mode === "MASTER" &&
+        isDedicatedPlayerStation(currentMaster);
+      if (!requesterIsDedicated && dedicatedActiveMaster) {
+        logLeaseEvent("set_master_blocked", {
+          userId,
+          branchId,
+          deviceId,
+          purpose: conn?.registrationIntent?.devicePurpose ?? "unknown",
+          reason: "non-dedicated SET_MASTER blocked by active dedicated MASTER",
+          activeDedicatedMasterId: currentMaster.id,
+          triggeredBy: "SET_MASTER",
+        });
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: "ERROR", message: "Dedicated player is currently MASTER" } as ServerMessage));
         }
         return;
       }
 
       demoteOtherMasters(userId, branchId, deviceId, deviceId);
       masterByBranch.set(key, deviceId);
-      // Only desktop_station owns primary. Web SET_MASTER takes MASTER without writing primary
-      // so a desktop arriving later will auto-take MASTER per arbitration rules.
-      if (requesterIsDesktop) {
+      if (requesterIsStreamer || requesterIsDesktop) {
         primaryMasterByBranch.set(key, deviceId);
       }
       masterDisconnectedAt.delete(key);
@@ -1048,28 +1123,28 @@ wss.on("connection", (ws) => {
             masterDisconnectedAt.delete(key);
             shouldTryAutoPromote = true;
             masterDeathReason = "mobile MASTER cleanup";
-          } else if (isDesktopStation(conn)) {
-            // Desktop primary: keep grace window so a brief reconnect reclaims MASTER.
-            // Browser/web CONTROL must NOT auto-promote during grace; only another
-            // desktop CONTROL may take over immediately on a true-loss close.
+          } else if (isDedicatedPlayerStation(conn)) {
+            // Dedicated primary (streamer or desktop): keep grace window so a brief reconnect reclaims MASTER.
+            // Fallback desktop must NOT auto-promote during streamer grace; only another dedicated CONTROL may
+            // take over immediately on a true-loss close (streamer CONTROL preferred in tryPromote).
             masterDisconnectedAt.set(key, Date.now());
             if (isTrueMasterLossCloseCode(code)) {
-              let hasOtherDesktopControl = false;
+              let hasOtherDedicatedControl = false;
               for (const d of devices.values()) {
                 if (d.id === deviceId) continue;
                 if (!isEligibleConnectedPlaybackCandidate(d, userId, branchId)) continue;
                 if (d.mode !== "CONTROL") continue;
-                if (isDesktopStation(d)) {
-                  hasOtherDesktopControl = true;
+                if (isDedicatedPlayerStation(d)) {
+                  hasOtherDedicatedControl = true;
                   break;
                 }
               }
-              shouldTryAutoPromote = hasOtherDesktopControl;
-              masterDeathReason = hasOtherDesktopControl
-                ? "desktop MASTER true-loss with desktop CONTROL available -> promote"
-                : "desktop MASTER true-loss, no desktop CONTROL -> grace window, web stays CONTROL";
+              shouldTryAutoPromote = hasOtherDedicatedControl;
+              masterDeathReason = hasOtherDedicatedControl
+                ? "dedicated MASTER true-loss with dedicated CONTROL available -> promote"
+                : "dedicated MASTER true-loss, no dedicated CONTROL -> grace window";
             } else {
-              masterDeathReason = "desktop MASTER ambiguous close -> grace window";
+              masterDeathReason = "dedicated MASTER ambiguous close -> grace window";
             }
           } else {
             // Web/fallback MASTER: no grace window — fallback ownership is not reserved.

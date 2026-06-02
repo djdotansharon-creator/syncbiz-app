@@ -11,6 +11,7 @@ import {
   registrationIntentBranchController,
   registrationIntentBranchDesktopApp,
   registrationIntentBranchDevice,
+  registrationIntentBranchStreamerDevice,
   registrationIntentOwnerGlobal,
 } from "@/lib/syncbiz-device-model";
 import { isPhoneUa, isTabletUa } from "@/lib/ua-detection";
@@ -41,6 +42,8 @@ export function useRemoteControlWs(
     onAuthError?: () => void;
     /** True when running inside the Electron desktop shell. Sends branch_desktop_station intent so the server can prefer this device as MASTER over browser tabs. */
     isDesktopApp?: boolean;
+    /** Dedicated GOtv / Android TV branch player (`/streamer`). Overrides tablet/mobile UA so this device can own MASTER. */
+    isStreamerDevice?: boolean;
   }
 ) {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
@@ -106,11 +109,16 @@ export function useRemoteControlWs(
     ws.onopen = () => {
       const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
       const isPhone = isPhoneUa(ua);
+      const isDedicatedPlayer = options?.isDesktopApp === true || options?.isStreamerDevice === true;
       // Tablets share the server-side "never steal MASTER" behaviour with phones
-      // (isMobile: true prevents web-fallback MASTER promotion). The registration
-      // intent uses isPhone only so tablets receive platform:"web" in the metadata
-      // rather than "mobile", keeping the architectural distinction clear.
-      const isMobile = isTabletUa(ua) || isPhone;
+      // (isMobile: true prevents web-fallback MASTER promotion). Dedicated branch
+      // players (/streamer, Electron) always register as non-mobile regardless of UA.
+      const isMobile = isDedicatedPlayer ? false : isTabletUa(ua) || isPhone;
+      const registrationIntent = options?.isDesktopApp
+        ? registrationIntentBranchDesktopApp()
+        : options?.isStreamerDevice
+          ? registrationIntentBranchStreamerDevice()
+          : registrationIntentBranchDevice(isPhone);
       const msg: ClientMessage =
         role === "device"
           ? {
@@ -120,9 +128,7 @@ export function useRemoteControlWs(
               deviceId: deviceId ?? undefined,
               isMobile,
               branchId: "default",
-              registrationIntent: options?.isDesktopApp
-                ? registrationIntentBranchDesktopApp()
-                : registrationIntentBranchDevice(isPhone),
+              registrationIntent,
             }
           : {
               type: "REGISTER",

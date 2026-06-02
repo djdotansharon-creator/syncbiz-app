@@ -7,6 +7,7 @@ export type SyncBizPlatform = "desktop" | "mobile" | "web";
 export type SyncBizRuntimeMode = "remote_control" | "branch_playback" | "owner_personal_playback";
 export type SyncBizDevicePurpose =
   | "branch_desktop_station"
+  | "branch_streamer_station"
   | "branch_web_station"
   | "branch_mobile_controller"
   | "branch_web_controller"
@@ -27,6 +28,7 @@ const PLATFORMS = new Set<SyncBizPlatform>(["desktop", "mobile", "web"]);
 const RUNTIMES = new Set<SyncBizRuntimeMode>(["remote_control", "branch_playback", "owner_personal_playback"]);
 const PURPOSES = new Set<SyncBizDevicePurpose>([
   "branch_desktop_station",
+  "branch_streamer_station",
   "branch_web_station",
   "branch_mobile_controller",
   "branch_web_controller",

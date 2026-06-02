@@ -863,6 +863,23 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (url) await playDroppedUrl(url);
   };
 
+  // Dedicated branch streamer (GOtv / Android TV): minimal chrome, never mobile controller UI.
+  const isStreamerPath = pathname === "/streamer" || (pathname?.startsWith("/streamer/") ?? false);
+  if (isStreamerPath) {
+    return (
+      <>
+        <div className="min-h-screen bg-slate-950 text-slate-50">{children}</div>
+        <div
+          className="fixed bottom-0 right-0 z-0 opacity-0 pointer-events-none"
+          aria-hidden
+          style={{ width: 320, height: 180 }}
+        >
+          <AudioPlayer />
+        </div>
+      </>
+    );
+  }
+
   // Mobile: minimal layout. AudioPlayer must be in-viewport for mobile browsers to load/play
   // (off-screen -left-[9999px] causes iOS Safari etc. to skip loading iframes/audio)
   // Also use minimal layout for edit pages when return=/mobile (user came from mobile player).

@@ -21,6 +21,7 @@ const PROTECTED_PREFIXES = [
   "/architecture",
   "/remote",
   "/remote-player",
+  "/streamer",
   "/player",
   "/owner",
   "/mobile",
@@ -70,6 +71,15 @@ export function middleware(req: NextRequest) {
   const cookie = req.cookies.get(COOKIE_NAME)?.value;
   const email = cookie ? parseSessionValue(cookie) : null;
 
+  const deviceParam = req.nextUrl.searchParams.get("device");
+  const modeParam = req.nextUrl.searchParams.get("mode");
+  if (deviceParam === "streamer" && modeParam === "player" && !pathname.startsWith("/streamer")) {
+    const streamerUrl = new URL("/streamer", req.url);
+    streamerUrl.searchParams.set("device", "streamer");
+    streamerUrl.searchParams.set("mode", "player");
+    return NextResponse.redirect(streamerUrl);
+  }
+
   if (pathname === "/" && email) {
     if (isMobileUserAgent(req)) {
       return NextResponse.redirect(new URL("/mobile/home", req.url));
@@ -81,6 +91,7 @@ export function middleware(req: NextRequest) {
   if (
     isMobileUserAgent(req) &&
     !pathname.startsWith("/mobile") &&
+    !pathname.startsWith("/streamer") &&
     !isEditRoute &&
     isProtected(pathname) &&
     email
