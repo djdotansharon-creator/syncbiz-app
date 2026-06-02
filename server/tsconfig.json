@@ -4,14 +4,10 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "dist",
-    "rootDir": "..",
-    "baseUrl": "..",
-    "paths": {
-      "@/*": ["./*"]
-    },
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["*.ts", "../lib/remote-control/types.ts", "../lib/syncbiz-device-model.ts"]
+  "include": ["*.ts"]
 }

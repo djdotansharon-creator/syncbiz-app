@@ -40,7 +40,7 @@ import type {
   GuestRecommendationPayload,
   BranchSummary,
   DeviceInfo,
-} from "../lib/remote-control/types.js";
+} from "./ws-remote-control-types.js";
 import { sanitizeRegistrationIntent, type SyncBizRegistrationIntent } from "./syncbiz-device-model.js";
 import { loadLease, saveLease } from "./master-lease-store.js";
 import { verifyWsToken } from "./ws-token.js";

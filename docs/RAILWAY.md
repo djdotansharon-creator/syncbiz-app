@@ -65,11 +65,14 @@ Next service:
 - Start: `npm run start`
 - Port: `3000`
 
-WS service (repo root, not `/server` image build):
+WS service (`syncbiz-ws`, Dockerfile in `server/`):
 
-- Build: `npm --prefix server run build`
-- Start: `npm --prefix server run start`
+- Railway **Root Directory:** `/server` (isolated service; WS types are self-contained under `server/`)
+- Build: Docker (`server/Dockerfile`) runs `npm ci && npm run build`
+- Start: `npm run start` → `node dist/index.js`
 - Port: `3001`
+
+Next service (`syncbiz-app`) uses `output: "standalone"`. Prefer `node .next/standalone/server.js` over `next start` when configuring the production start command (standalone warning in deploy logs).
 
 ## Permissions fallback (only if write errors)
 
