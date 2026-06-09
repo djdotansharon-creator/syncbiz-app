@@ -68,6 +68,9 @@ export class PlaybackOrchestrator {
   private interruptHasStarted = false;
   private readonly interruptQueue: InterruptItem[] = [];
 
+  /** Mix/crossfade duration (seconds) — synced from renderer Settings; 6s fallback. */
+  private crossfadeSec = 6;
+
   /** Handle to the active volume-ramp timer. Cancelled before any new ramp starts. */
   private rampId: ReturnType<typeof setInterval> | null = null;
 
@@ -151,11 +154,43 @@ export class PlaybackOrchestrator {
 
   // ─── Channel A — music ───────────────────────────────────────────────────────
 
+  /** Sync mix duration from renderer Settings (3/6/9/12). */
+  setCrossfadeSec(seconds: number): void {
+    const n = Math.round(seconds);
+    if (n >= 3 && n <= 30) this.crossfadeSec = n;
+  }
+
+  getCrossfadeSec(): number {
+    return this.crossfadeSec;
+  }
+
   playMusic(url: string): void {
     const u = url.trim();
     if (!u) return;
     console.log(ORCH, "playMusic (→ MPV loadfile/replace)", { preview: u.slice(0, 200) });
     this.musicMpv.play(u);
+  }
+
+  /**
+   * Graceful source replacement: fade out → loadfile → fade in.
+   * Single MPV instance — no true overlap; avoids hard-cut on track/source change.
+   */
+  playMusicCrossfade(url: string, fadeSec: number): void {
+    const u = url.trim();
+    if (!u) return;
+    const steps = Math.max(4, Math.round(fadeSec * 4));
+    const stepMs = Math.max(20, Math.round((fadeSec * 1000) / steps));
+    const fromVol = this.isDucked
+      ? Math.max(0, Math.round((this.masterVolume * this.duckPercent) / 100))
+      : this.musicSt.volume;
+    const target = this.masterVolume;
+    console.log(ORCH, "playMusicCrossfade", { preview: u.slice(0, 200), fadeSec, steps });
+    this.rampMusicVolume(fromVol, 0);
+    setTimeout(() => {
+      if (this.killed) return;
+      this.musicMpv.play(u);
+      this.rampMusicVolume(0, this.isDucked ? Math.max(0, Math.round((target * this.duckPercent) / 100)) : target);
+    }, steps * stepMs + 40);
   }
 
   pauseMusic(): void {

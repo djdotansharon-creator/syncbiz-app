@@ -10,6 +10,7 @@ export interface YTPlayerAPI {
   playVideo: () => void;
   pauseVideo: () => void;
   stopVideo: () => void;
+  loadVideoById?: (videoId: string, startSeconds?: number) => void;
   destroy?: () => void;
   setVolume: (vol: number) => void;
   mute?: () => void;
@@ -30,9 +31,26 @@ function hasMethod(obj: unknown, method: string): obj is YTPlayerAPI {
   return obj != null && typeof obj === "object" && typeof (obj as Record<string, unknown>)[method] === "function";
 }
 
-/** Check if ref holds a ready YouTube player with methods. */
+/** True when the player's backing iframe is still mounted (avoids setVolume on destroyed embeds). */
+export function isYtPlayerIframeAlive(player: unknown): boolean {
+  if (player == null || typeof player !== "object") return false;
+  try {
+    const getIframe = (player as { getIframe?: () => HTMLIFrameElement | null }).getIframe;
+    if (typeof getIframe !== "function") return true;
+    const iframe = getIframe.call(player);
+    return !!iframe?.src && !!iframe.contentWindow;
+  } catch {
+    return false;
+  }
+}
+
+/** Check if ref holds a ready YouTube player with methods and a live iframe. */
 export function isYtPlayerReady(player: unknown): player is YTPlayerAPI {
-  return hasMethod(player, "getPlayerState") && hasMethod(player, "playVideo");
+  return (
+    hasMethod(player, "getPlayerState") &&
+    hasMethod(player, "playVideo") &&
+    isYtPlayerIframeAlive(player)
+  );
 }
 
 /** Safely call a YT player method. Returns false if not ready. */
@@ -78,6 +96,45 @@ export function safeUnMute(player: unknown): void {
 /** Safe playVideo. */
 export function safePlayVideo(player: unknown): void {
   safeYtCall(player, "playVideo");
+}
+
+/** Load a new video in an existing player (single-iframe sequential transition). */
+export function safeLoadVideoById(player: unknown, videoId: string, startSeconds = 0): void {
+  safeYtCall(player, "loadVideoById", videoId, startSeconds);
+}
+
+/** Wait until loadVideoById has activated the target video id. */
+export async function waitForYtVideoLoaded(
+  player: unknown,
+  videoId: string,
+  opts: { timeoutMs?: number; pollMs?: number; isAborted?: () => boolean } = {},
+): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? 15_000;
+  const pollMs = opts.pollMs ?? 50;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (opts.isAborted?.()) return false;
+    if (!isYtPlayerReady(player)) {
+      await new Promise<void>((r) => setTimeout(r, pollMs));
+      continue;
+    }
+    const data = safeGetVideoData(player);
+    if (data?.video_id === videoId) {
+      const st = safeGetPlayerState(player);
+      const YT = typeof window !== "undefined" ? window.YT : undefined;
+      if (
+        YT == null ||
+        st === YT.PlayerState.PLAYING ||
+        st === YT.PlayerState.BUFFERING ||
+        st === YT.PlayerState.PAUSED ||
+        st === YT.PlayerState.CUED
+      ) {
+        return true;
+      }
+    }
+    await new Promise<void>((r) => setTimeout(r, pollMs));
+  }
+  return false;
 }
 
 /** Safe pauseVideo. */
@@ -134,6 +191,46 @@ export function safeGetPlaylist(player: unknown): string[] {
 export function safeGetPlaylistIndex(player: unknown): number {
   const idx = safeYtCall<number>(player, "getPlaylistIndex");
   return typeof idx === "number" && idx >= 0 ? idx : 0;
+}
+
+/** True when player is actively playing or buffering (audible path). */
+export function isYtPlayerAudible(player: unknown): boolean {
+  const YT = typeof window !== "undefined" ? window.YT : undefined;
+  if (!isYtPlayerReady(player) || YT == null) return false;
+  const st = safeGetPlayerState(player);
+  return st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING;
+}
+
+/**
+ * Wait until YouTube player stays PLAYING/BUFFERING for minStableMs.
+ * Used before starting manual crossfade so incoming is stable at vol 0.
+ */
+export async function waitForYtStandbyStable(
+  player: unknown,
+  opts: {
+    minStableMs?: number;
+    timeoutMs?: number;
+    pollMs?: number;
+    isAborted?: () => boolean;
+  } = {},
+): Promise<boolean> {
+  const minStableMs = opts.minStableMs ?? 350;
+  const timeoutMs = opts.timeoutMs ?? 8000;
+  const pollMs = opts.pollMs ?? 50;
+  const deadline = Date.now() + timeoutMs;
+  let stableSince = 0;
+
+  while (Date.now() < deadline) {
+    if (opts.isAborted?.()) return false;
+    if (isYtPlayerAudible(player)) {
+      if (stableSince === 0) stableSince = Date.now();
+      if (Date.now() - stableSince >= minStableMs) return true;
+    } else {
+      stableSince = 0;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, pollMs));
+  }
+  return isYtPlayerAudible(player);
 }
 
 /** Safe getVideoData – returns { video_id, title, author } for current video. */

@@ -1,0 +1,15 @@
+export {
+  PRELOAD_LEAD_SEC,
+  STANDBY_READY_TIMEOUT_MS,
+  createDeckTransitionLock,
+  runDeckVolumeCrossfade,
+  preloadThresholdSec,
+  mixPointThresholdSec,
+  runDualVolumeCrossfade,
+  runVolumeFade,
+  mixCrossfadeGains,
+  type CrossfadeCurve,
+  type DeckId,
+  type DeckTransitionLock,
+  type VolumeCrossfadeCallbacks,
+} from "./deck-transition-engine";

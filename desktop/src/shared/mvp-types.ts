@@ -14,6 +14,9 @@ export const MVP_IPC = {
   DESKTOP_SIGN_IN: "mvp:desktop-sign-in",
   STATUS: "mvp:status",
   MPV_PLAY_URL: "mvp:mpv-play-url",
+  MPV_PLAY_URL_CROSSFADE: "mvp:mpv-play-url-crossfade",
+  /** Renderer syncs Settings mix duration (3/6/9/12) to main-process orchestrator. */
+  SET_MIX_DURATION: "mvp:set-mix-duration",
   MPV_PLAY_INTERRUPT: "mvp:mpv-play-interrupt",
   SET_DUCK_PERCENT: "mvp:set-duck-percent",
   MPV_SEEK_TO: "mvp:mpv-seek-to",
@@ -43,6 +46,23 @@ export const MVP_IPC = {
   SEARCH_LOCAL_COLLECTION_SNAPSHOT: "mvp:search-local-collection-snapshot",
   /** Stage 5B: parse M3U/M3U8/PLS paths under Music Folder; refresh snapshot; returns paths for POST /api/playlists. */
   IMPORT_LOCAL_M3U_PLAYLIST: "mvp:import-local-m3u-playlist",
+  /**
+   * Phase 1 hybrid AI playlist: return local snapshot candidates (richer than browse search;
+   * includes bpm/comment/rating). Results stay device-local — never become CatalogItems.
+   */
+  SEARCH_LOCAL_FOR_AI_PLAYLIST: "mvp:search-local-for-ai-playlist",
+  /** Open native file picker for Tag&Rename / PLP XLSX (user metadata; never uploaded). */
+  PICK_TAG_RENAME_XLSX_FILES: "mvp:pick-tag-rename-xlsx-files",
+  /** Parse XLSX rows (File Name = absolute path) and merge into local collection snapshot. */
+  IMPORT_TAG_RENAME_XLSX_FILES: "mvp:import-tag-rename-xlsx-files",
+  GET_LOCAL_METADATA_BANK: "mvp:get-local-metadata-bank",
+  PICK_LOCAL_METADATA_BANK_FOLDER: "mvp:pick-local-metadata-bank-folder",
+  REFRESH_LOCAL_METADATA_BANK: "mvp:refresh-local-metadata-bank",
+  /** Pilot: protected PlaylistPro + user-added music folder sources (Winamp Watch Folders model). */
+  LIST_MUSIC_LIBRARY_SOURCES: "mvp:list-music-library-sources",
+  ADD_ADDITIONAL_MUSIC_FOLDER: "mvp:add-additional-music-folder",
+  REMOVE_ADDITIONAL_MUSIC_FOLDER: "mvp:remove-additional-music-folder",
+  SCAN_MUSIC_LIBRARY: "mvp:scan-music-library",
 } as const;
 
 /** Why a playlist line was not imported (V1: Music Folder + scan-local audio ext only). */
@@ -86,6 +106,67 @@ export type ImportLocalM3uPlaylistResult =
     }
   | { status: "error"; message: string };
 
+/** Native multi-select for Tag&Rename / PLP-Playlist XLSX (user metadata; device-local only). */
+export type PickTagRenameXlsxFilesResult =
+  | { status: "ok"; filePaths: string[] }
+  | { status: "canceled" }
+  | { status: "error"; message: string };
+
+/** Merge Tag&Rename XLSX rows into the local collection snapshot (match on File Name column). */
+export type ImportTagRenameXlsxFilesResult =
+  | {
+      status: "ok";
+      filesProcessed: number;
+      rowsRead: number;
+      matched: number;
+      updated: number;
+      unmatched: number;
+      outsideMusicFolder: number;
+      missingOnDisk: number;
+      sampleUnmatchedPaths: string[];
+    }
+  | { status: "error"; message: string };
+
+export type LocalMetadataBankLastImportSummary = {
+  folderPath: string;
+  importedAt: string;
+  filesScanned: number;
+  filesProcessed: number;
+  rowsRead: number;
+  matched: number;
+  updated: number;
+  unmatched: number;
+  outsideMusicFolder: number;
+  missingOnDisk: number;
+};
+
+export type LocalMetadataBankStatusResult = {
+  folderPath: string | null;
+  lastImport: LocalMetadataBankLastImportSummary | null;
+};
+
+export type PickLocalMetadataBankFolderResult =
+  | { status: "ok"; path: string }
+  | { status: "canceled" }
+  | { status: "error"; message: string };
+
+export type RefreshLocalMetadataBankResult =
+  | {
+      status: "ok";
+      folderPath: string;
+      importedAt: string;
+      filesScanned: number;
+      filesProcessed: number;
+      rowsRead: number;
+      matched: number;
+      updated: number;
+      unmatched: number;
+      outsideMusicFolder: number;
+      missingOnDisk: number;
+      sampleUnmatchedPaths: string[];
+    }
+  | { status: "error"; message: string };
+
 /** Result of scanning a folder for audio files (IPC from main). */
 export type ScanLocalAudioFolderResult =
   | { status: "ok"; playlistName: string; files: string[] }
@@ -108,7 +189,11 @@ export type PickMusicFolderResult =
 
 /** Persisted music folder snapshot returned by GET_MUSIC_FOLDER / CLEAR_MUSIC_FOLDER. */
 export type MusicFolderSnapshot = {
+  /** Absolute path (Desktop main only); UI should prefer displayLabel. */
   path: string | null;
+  /** Safe label for settings UI — no drive letter when PlaylistPro is active. */
+  displayLabel?: string | null;
+  isPlaylistProLibrary?: boolean;
 };
 
 /** One audio file row from LIST_MUSIC_LIBRARY_DIR (Stage 4B: optional snapshot cache). */
@@ -154,6 +239,40 @@ export type SearchLocalCollectionSnapshotResult =
   | { status: "ok"; hits: LocalCollectionSearchHit[] }
   | { status: "error"; message: string };
 
+/**
+ * Phase 1 hybrid AI playlist — local snapshot candidate exposed to the AI build path.
+ * Includes the extended fields (comment, bpm, rating) so the server can rank against the prompt.
+ */
+export type LocalAiPlaylistCandidate = {
+  localId: string;
+  absolutePath: string;
+  relativePathFromRoot: string;
+  artist: string | null;
+  title: string | null;
+  album: string | null;
+  genre: string | null;
+  year: string | null;
+  comment: string | null;
+  durationSec: number | null;
+  bpm: number | null;
+  rating: number | null;
+  /** Higher is better; same heuristic as the snapshot search but with bpm/comment/rating tokens. */
+  score: number;
+  /** Dev/diagnostic: which intent groups and fields matched (Desktop local search). */
+  matchDebug?: {
+    groupsMatched: number;
+    groupsTotal: number;
+    fullMatch: boolean;
+    score: number;
+    reason: string;
+    groups: Array<{ label: string; matched: boolean; terms: string[]; fields: string[] }>;
+  };
+};
+
+export type SearchLocalForAiPlaylistResult =
+  | { status: "ok"; candidates: LocalAiPlaylistCandidate[] }
+  | { status: "error"; message: string };
+
 /** Embedded artwork as data URL, or absent. */
 export type GetLocalAudioCoverResult =
   | { status: "ok"; dataUrl: string | null }
@@ -173,6 +292,8 @@ export type LocalAudioTagFields = {
   bpm: number | null;
   /** Star rating 0–5 (averaged across rating sources); null when absent. */
   rating: number | null;
+  /** Tag&Rename track # when present in XLSX import. */
+  trackNumber?: string | null;
 };
 
 export type GetLocalAudioTagsResult =
@@ -208,6 +329,58 @@ export type LocalMockTransportPayload = {
 
 export type MvpConnectionState = "disconnected" | "connecting" | "connected" | "error";
 
+/**
+ * One indexed music folder source (PlaylistPro or user-added). Used by the
+ * Settings UI to render the Local Music card.
+ */
+export type MusicLibrarySource = {
+  /** Stable handle for UI ops (REMOVE_ADDITIONAL_MUSIC_FOLDER, SCAN_MUSIC_LIBRARY). */
+  id: string;
+  kind: "playlistpro" | "additional";
+  /** Absolute path (operator-visible only; normal UI shows `displayLabel`). */
+  path: string;
+  /** Friendly label ("PlaylistPro Library" or the folder basename). */
+  displayLabel: string;
+  /** Normal-user status: ready (path exists), missing (path on disk gone), unconfigured (no path). */
+  status: "ready" | "missing" | "unconfigured";
+  /** Indexed track count in the local collection snapshot for this root, when known. */
+  trackCount: number | null;
+  /** ISO timestamp of the most recent scan touching this root, when known. */
+  lastScanIso: string | null;
+  /** Protected sources (PlaylistPro) cannot be removed via the normal UI. */
+  removable: boolean;
+};
+
+export type MusicLibrarySourcesResult = {
+  /** Always present (may be unconfigured when PlaylistPro is not on disk). */
+  playlistPro: MusicLibrarySource;
+  additional: MusicLibrarySource[];
+};
+
+export type AddAdditionalMusicFolderResult =
+  | { status: "ok"; source: MusicLibrarySource }
+  | { status: "canceled" }
+  | { status: "already_added"; path: string }
+  | { status: "protected"; reason: "playlistpro_root" }
+  | { status: "error"; message: string };
+
+export type RemoveAdditionalMusicFolderResult =
+  | { status: "ok" }
+  | { status: "not_found" }
+  | { status: "protected"; reason: "playlistpro_root" }
+  | { status: "error"; message: string };
+
+export type ScanMusicLibrarySummary = {
+  path: string;
+  kind: "playlistpro" | "additional";
+  filesIndexed: number;
+  errorMessage: string | null;
+};
+
+export type ScanMusicLibraryResult =
+  | { status: "ok"; scannedAtIso: string; sources: ScanMusicLibrarySummary[] }
+  | { status: "error"; message: string };
+
 /** Persisted local config (userData JSON). Pilot: token stored in plaintext. */
 export type DesktopRuntimeConfig = {
   /** Stable device identity; required for WS REGISTER. */
@@ -234,6 +407,17 @@ export type DesktopRuntimeConfig = {
   desktopTokenExpiresAtIso?: string;
   /** User-selected music folder for local file browsing (Desktop only). */
   musicFolderPath?: string;
+  /**
+   * Tag&Rename / PLP-Playlist XLSX folder (device-only metadata bank).
+   * Never uploaded — scanned on "Refresh metadata bank" only.
+   */
+  localMetadataBankPath?: string;
+  /**
+   * Pilot: additional user-added music folders (Winamp Watch Folders model).
+   * PlaylistPro's `musicFolderPath` is a separate protected source and is NEVER
+   * stored here. Empty / missing means no extra folders.
+   */
+  additionalMusicFolders?: string[];
 };
 
 export type DesktopSignInResult =

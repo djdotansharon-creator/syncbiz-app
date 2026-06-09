@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain, app, dialog } from "electron";
 import type {
+  AddAdditionalMusicFolderResult,
   AutoStartState,
   BranchLibraryItem,
   BranchLibrarySummary,
@@ -7,21 +8,48 @@ import type {
   DesktopSignInResult,
   LocalMockTransportPayload,
   MusicFolderSnapshot,
+  MusicLibrarySourcesResult,
   MvpConfigPatch,
   MvpStatusSnapshot,
   PickMusicFolderResult,
+  RemoveAdditionalMusicFolderResult,
   ScanLocalAudioFolderResult,
+  ScanMusicLibraryResult,
   ListMusicLibraryDirResult,
   GetLocalAudioCoverResult,
   GetLocalAudioTagsResult,
   InspectLocalAudioTagsRawResult,
   SearchLocalCollectionSnapshotResult,
+  SearchLocalForAiPlaylistResult,
   ImportLocalM3uPlaylistResult,
+  PickTagRenameXlsxFilesResult,
+  ImportTagRenameXlsxFilesResult,
+  LocalMetadataBankStatusResult,
+  PickLocalMetadataBankFolderResult,
+  RefreshLocalMetadataBankResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
+import {
+  addAdditionalMusicFolder,
+  listMusicLibrarySources,
+  removeAdditionalMusicFolder,
+  scanMusicLibrary,
+} from "./additional-music-folders";
 import { importLocalM3uPlaylist } from "./import-local-m3u-playlist";
+import {
+  defaultTagRenameXlsxPickerPath,
+  importTagRenameXlsxFiles,
+} from "./import-tag-rename-xlsx";
+import {
+  defaultLocalMetadataBankPickerPath,
+  getLocalMetadataBankStatus,
+  refreshLocalMetadataBank,
+  setLocalMetadataBankFolder,
+} from "./local-metadata-bank";
 import { DeviceWsManager } from "../device-websocket-client/device-ws-manager";
 import { fetchBranchLibrarySummary } from "./branch-library-fetch";
+import { ensurePlaylistProRuntimeConfig } from "./playlistpro-config";
+import { musicFolderDisplayLabel } from "../shared/playlistpro-paths";
 import { loadRuntimeConfig, patchRuntimeConfig } from "./runtime-config-service";
 import type { PlaybackOrchestrator } from "./playback-orchestrator";
 import { scanLocalAudioFolder } from "./scan-local-audio-folder";
@@ -31,10 +59,12 @@ import { extractLocalAudioTagFields, inspectLocalAudioTagsRaw } from "./extract-
 import {
   enrichListMusicLibraryDirWithSnapshot,
   loadLocalCollectionSnapshot,
+  loadLocalCollectionSnapshotCached,
   recordListDirAudioFilesInSnapshot,
   recordLocalAudioTagsInSnapshot,
   recordScanAudioFilesInSnapshot,
   searchLocalCollectionSnapshotInMemory,
+  searchLocalForAiPlaylistInMemory,
 } from "./local-collection-snapshot";
 
 let manager: DeviceWsManager | null = null;
@@ -43,6 +73,22 @@ let orchestratorInstance: PlaybackOrchestrator | undefined;
 
 function getUserData(): string {
   return app.getPath("userData");
+}
+
+function loadEffectiveRuntimeConfig(): DesktopRuntimeConfig {
+  const raw = loadRuntimeConfig(getUserData());
+  const next = ensurePlaylistProRuntimeConfig(getUserData(), raw);
+  cachedConfig = next;
+  return next;
+}
+
+function musicFolderSnapshotFromConfig(c: DesktopRuntimeConfig): MusicFolderSnapshot {
+  const p = c.musicFolderPath?.trim() ? c.musicFolderPath.trim() : null;
+  return {
+    path: p,
+    displayLabel: musicFolderDisplayLabel(p) ?? (p ? p.replace(/^.*[\\/]/, "") || null : null),
+    isPlaylistProLibrary: Boolean(p && musicFolderDisplayLabel(p)),
+  };
 }
 
 function normalizeApiBase(url: string): string {
@@ -110,14 +156,14 @@ function broadcast(win: BrowserWindow | null, payload: MvpStatusSnapshot): void 
 
 export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrator?: PlaybackOrchestrator): void {
   orchestratorInstance = orchestrator;
-  cachedConfig = loadRuntimeConfig(getUserData());
+  cachedConfig = loadEffectiveRuntimeConfig();
   manager = new DeviceWsManager(cachedConfig, orchestratorInstance);
   manager.onStatus((s) => {
     broadcast(getWindow(), s);
   });
 
   ipcMain.handle(MVP_IPC.GET_CONFIG, (): DesktopRuntimeConfig => {
-    cachedConfig = loadRuntimeConfig(getUserData());
+    cachedConfig = loadEffectiveRuntimeConfig();
     if (manager) manager.setConfig(cachedConfig);
     return cachedConfig;
   });
@@ -206,6 +252,29 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     orchestratorInstance?.playMusic(u);
   });
 
+  ipcMain.handle(MVP_IPC.SET_MIX_DURATION, (_e, seconds: number): void => {
+    if (typeof seconds === "number" && Number.isFinite(seconds)) {
+      orchestratorInstance?.setCrossfadeSec(seconds);
+    }
+  });
+
+  ipcMain.handle(
+    MVP_IPC.MPV_PLAY_URL_CROSSFADE,
+    (_e, payload: { url?: string; fadeSec?: number }): void => {
+      const u = typeof payload?.url === "string" ? payload.url.trim() : "";
+      if (!u) return;
+      const fadeSec =
+        typeof payload?.fadeSec === "number" && Number.isFinite(payload.fadeSec)
+          ? Math.max(1, Math.min(30, payload.fadeSec))
+          : (orchestratorInstance?.getCrossfadeSec() ?? 6);
+      console.log("[SyncBiz:desktop-mpv:ipc] MPV_PLAY_URL_CROSSFADE", {
+        preview: u.slice(0, 160),
+        fadeSec,
+      });
+      orchestratorInstance?.playMusicCrossfade(u, fadeSec);
+    },
+  );
+
   ipcMain.handle(MVP_IPC.MPV_PLAY_INTERRUPT, (_e, url: string): void => {
     const u = typeof url === "string" ? url.trim() : "";
     if (!u) return;
@@ -249,8 +318,8 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   });
 
   ipcMain.handle(MVP_IPC.GET_MUSIC_FOLDER, (): MusicFolderSnapshot => {
-    const c = loadRuntimeConfig(getUserData());
-    return { path: c.musicFolderPath ?? null };
+    const c = loadEffectiveRuntimeConfig();
+    return musicFolderSnapshotFromConfig(c);
   });
 
   ipcMain.handle(MVP_IPC.PICK_MUSIC_FOLDER, async (): Promise<PickMusicFolderResult> => {
@@ -274,17 +343,179 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     const chosen = result.filePaths[0];
     const cur = loadRuntimeConfig(getUserData());
     const next = patchRuntimeConfig(getUserData(), cur, { musicFolderPath: chosen });
-    cachedConfig = next;
-    return { status: "ok", path: next.musicFolderPath ?? chosen };
+    cachedConfig = ensurePlaylistProRuntimeConfig(getUserData(), next);
+    return { status: "ok", path: cachedConfig.musicFolderPath ?? chosen };
   });
 
   ipcMain.handle(MVP_IPC.CLEAR_MUSIC_FOLDER, (): MusicFolderSnapshot => {
     const cur = loadRuntimeConfig(getUserData());
     // Empty string clears in patchRuntimeConfig.
     const next = patchRuntimeConfig(getUserData(), cur, { musicFolderPath: "" });
-    cachedConfig = next;
-    return { path: next.musicFolderPath ?? null };
+    cachedConfig = ensurePlaylistProRuntimeConfig(getUserData(), next);
+    return musicFolderSnapshotFromConfig(cachedConfig);
   });
+
+  ipcMain.handle(MVP_IPC.PICK_TAG_RENAME_XLSX_FILES, async (): Promise<PickTagRenameXlsxFilesResult> => {
+    const win = getWindow();
+    const defaultPath = defaultTagRenameXlsxPickerPath();
+    try {
+      const opts: Electron.OpenDialogOptions = {
+        title: "Import Tag&Rename metadata (XLSX)",
+        properties: ["openFile", "multiSelections"],
+        filters: [{ name: "Excel", extensions: ["xlsx", "xls"] }],
+        ...(defaultPath ? { defaultPath } : {}),
+      };
+      const result = win
+        ? await dialog.showOpenDialog(win, opts)
+        : await dialog.showOpenDialog(opts);
+      if (result.canceled || result.filePaths.length === 0) {
+        return { status: "canceled" };
+      }
+      return { status: "ok", filePaths: result.filePaths };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { status: "error", message: msg };
+    }
+  });
+
+  ipcMain.handle(
+    MVP_IPC.IMPORT_TAG_RENAME_XLSX_FILES,
+    async (_e, filePathsRaw: unknown): Promise<ImportTagRenameXlsxFilesResult> => {
+      const paths = Array.isArray(filePathsRaw)
+        ? filePathsRaw.filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+        : typeof filePathsRaw === "string" && filePathsRaw.trim()
+          ? [filePathsRaw.trim()]
+          : [];
+      if (paths.length === 0) {
+        return { status: "error", message: "No XLSX file paths provided." };
+      }
+      try {
+        const cfg = loadRuntimeConfig(getUserData());
+        return await importTagRenameXlsxFiles(getUserData(), cfg, paths);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { status: "error", message: msg };
+      }
+    },
+  );
+
+  ipcMain.handle(MVP_IPC.GET_LOCAL_METADATA_BANK, (): LocalMetadataBankStatusResult => {
+    const cfg = loadEffectiveRuntimeConfig();
+    return getLocalMetadataBankStatus(getUserData(), cfg);
+  });
+
+  ipcMain.handle(MVP_IPC.PICK_LOCAL_METADATA_BANK_FOLDER, async (): Promise<PickLocalMetadataBankFolderResult> => {
+    const win = getWindow();
+    const defaultPath = defaultLocalMetadataBankPickerPath();
+    try {
+      const opts: Electron.OpenDialogOptions = {
+        title: "Choose Local Metadata Bank folder",
+        properties: ["openDirectory"],
+        ...(defaultPath ? { defaultPath } : {}),
+      };
+      const result = win
+        ? await dialog.showOpenDialog(win, opts)
+        : await dialog.showOpenDialog(opts);
+      if (result.canceled || result.filePaths.length === 0) {
+        return { status: "canceled" };
+      }
+      const chosen = result.filePaths[0]!;
+      const cur = loadRuntimeConfig(getUserData());
+      setLocalMetadataBankFolder(getUserData(), cur, chosen);
+      cachedConfig = loadRuntimeConfig(getUserData());
+      return { status: "ok", path: chosen };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { status: "error", message: msg };
+    }
+  });
+
+  ipcMain.handle(
+    MVP_IPC.REFRESH_LOCAL_METADATA_BANK,
+    async (): Promise<RefreshLocalMetadataBankResult> => {
+      try {
+        const cfg = loadEffectiveRuntimeConfig();
+        return await refreshLocalMetadataBank(getUserData(), cfg);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { status: "error", message: msg };
+      }
+    },
+  );
+
+  // ----- Pilot: protected PlaylistPro + additional music folders -----
+
+  ipcMain.handle(
+    MVP_IPC.LIST_MUSIC_LIBRARY_SOURCES,
+    (): MusicLibrarySourcesResult => {
+      const cfg = loadEffectiveRuntimeConfig();
+      return listMusicLibrarySources(getUserData(), cfg);
+    },
+  );
+
+  ipcMain.handle(
+    MVP_IPC.ADD_ADDITIONAL_MUSIC_FOLDER,
+    async (): Promise<AddAdditionalMusicFolderResult> => {
+      const win = getWindow();
+      let result: Electron.OpenDialogReturnValue;
+      try {
+        const opts: Electron.OpenDialogOptions = {
+          title: "Add music folder",
+          properties: ["openDirectory"],
+        };
+        result = win
+          ? await dialog.showOpenDialog(win, opts)
+          : await dialog.showOpenDialog(opts);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { status: "error", message: msg };
+      }
+      if (result.canceled || result.filePaths.length === 0) {
+        return { status: "canceled" };
+      }
+      const chosen = result.filePaths[0]!;
+      const cur = loadEffectiveRuntimeConfig();
+      const { result: outcome, config: patched } = addAdditionalMusicFolder(
+        getUserData(),
+        cur,
+        chosen,
+      );
+      cachedConfig = patched;
+      if (manager) manager.setConfig(patched);
+      return outcome;
+    },
+  );
+
+  ipcMain.handle(
+    MVP_IPC.REMOVE_ADDITIONAL_MUSIC_FOLDER,
+    (_e, folderPath: unknown): RemoveAdditionalMusicFolderResult => {
+      if (typeof folderPath !== "string" || !folderPath.trim()) {
+        return { status: "error", message: "Empty path" };
+      }
+      const cur = loadEffectiveRuntimeConfig();
+      const { result, config: patched } = removeAdditionalMusicFolder(
+        getUserData(),
+        cur,
+        folderPath.trim(),
+      );
+      cachedConfig = patched;
+      if (manager) manager.setConfig(patched);
+      return result;
+    },
+  );
+
+  ipcMain.handle(
+    MVP_IPC.SCAN_MUSIC_LIBRARY,
+    async (): Promise<ScanMusicLibraryResult> => {
+      try {
+        const cfg = loadEffectiveRuntimeConfig();
+        return await scanMusicLibrary(getUserData(), cfg);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { status: "error", message: msg };
+      }
+    },
+  );
 
   ipcMain.handle(
     MVP_IPC.IMPORT_LOCAL_M3U_PLAYLIST,
@@ -311,7 +542,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       try {
         const cfg = loadRuntimeConfig(getUserData());
         const deviceId = (cfg.deviceId ?? "").trim() || "unknown";
-        const snap = loadLocalCollectionSnapshot(getUserData(), deviceId);
+        const snap = loadLocalCollectionSnapshotCached(getUserData(), deviceId);
         const hits = searchLocalCollectionSnapshotInMemory(snap, q, limit);
         return { status: "ok", hits };
       } catch (e) {
@@ -322,9 +553,33 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   );
 
   ipcMain.handle(
+    MVP_IPC.SEARCH_LOCAL_FOR_AI_PLAYLIST,
+    (_e, query: unknown, limitRaw: unknown): SearchLocalForAiPlaylistResult => {
+      const q = typeof query === "string" ? query.trim() : "";
+      let limit = 40;
+      if (typeof limitRaw === "number" && Number.isFinite(limitRaw)) {
+        limit = Math.min(80, Math.max(1, Math.trunc(limitRaw)));
+      }
+      if (q.length < 2) {
+        return { status: "ok", candidates: [] };
+      }
+      try {
+        const cfg = loadRuntimeConfig(getUserData());
+        const deviceId = (cfg.deviceId ?? "").trim() || "unknown";
+        const snap = loadLocalCollectionSnapshotCached(getUserData(), deviceId);
+        const candidates = searchLocalForAiPlaylistInMemory(snap, q, limit);
+        return { status: "ok", candidates };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { status: "error", message: msg };
+      }
+    },
+  );
+
+  ipcMain.handle(
     MVP_IPC.LIST_MUSIC_LIBRARY_DIR,
     async (_e, subPath: string): Promise<ListMusicLibraryDirResult> => {
-      const c = loadRuntimeConfig(getUserData());
+      const c = loadEffectiveRuntimeConfig();
       const root = c.musicFolderPath?.trim() ? c.musicFolderPath : null;
       const listed = await listMusicLibraryDir(root, typeof subPath === "string" ? subPath : "");
       const result =

@@ -3,6 +3,7 @@
  */
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
+  AddAdditionalMusicFolderResult,
   AutoStartState,
   BranchLibraryItem,
   BranchLibrarySummary,
@@ -10,16 +11,25 @@ import type {
   DesktopSignInResult,
   LocalMockTransportPayload,
   MusicFolderSnapshot,
+  MusicLibrarySourcesResult,
   MvpConfigPatch,
   MvpStatusSnapshot,
   PickMusicFolderResult,
+  RemoveAdditionalMusicFolderResult,
   ScanLocalAudioFolderResult,
+  ScanMusicLibraryResult,
   ListMusicLibraryDirResult,
   GetLocalAudioCoverResult,
   GetLocalAudioTagsResult,
   InspectLocalAudioTagsRawResult,
   SearchLocalCollectionSnapshotResult,
+  SearchLocalForAiPlaylistResult,
   ImportLocalM3uPlaylistResult,
+  PickTagRenameXlsxFilesResult,
+  ImportTagRenameXlsxFilesResult,
+  LocalMetadataBankStatusResult,
+  PickLocalMetadataBankFolderResult,
+  RefreshLocalMetadataBankResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import type { SyncBizDesktopMvp } from "../shared/mvp-desktop-api";
@@ -43,6 +53,10 @@ const api: SyncBizDesktopMvp = {
     ipcRenderer.invoke(MVP_IPC.DESKTOP_SIGN_IN, { email, password }),
   mpvPlayUrl: (url: string): Promise<void> =>
     ipcRenderer.invoke(MVP_IPC.MPV_PLAY_URL, url),
+  mpvPlayUrlCrossfade: (url: string, fadeSec: number): Promise<void> =>
+    ipcRenderer.invoke(MVP_IPC.MPV_PLAY_URL_CROSSFADE, { url, fadeSec }),
+  setMixDuration: (seconds: number): Promise<void> =>
+    ipcRenderer.invoke(MVP_IPC.SET_MIX_DURATION, seconds),
   mpvPlayInterrupt: (url: string): Promise<void> =>
     ipcRenderer.invoke(MVP_IPC.MPV_PLAY_INTERRUPT, url),
   setDuckPercent: (n: number): Promise<void> =>
@@ -75,8 +89,28 @@ const api: SyncBizDesktopMvp = {
     ipcRenderer.invoke(MVP_IPC.INSPECT_LOCAL_AUDIO_TAGS_RAW, absolutePath),
   searchLocalCollectionSnapshot: (query: string, limit?: number): Promise<SearchLocalCollectionSnapshotResult> =>
     ipcRenderer.invoke(MVP_IPC.SEARCH_LOCAL_COLLECTION_SNAPSHOT, query, limit),
+  searchLocalForAiPlaylist: (query: string, limit?: number): Promise<SearchLocalForAiPlaylistResult> =>
+    ipcRenderer.invoke(MVP_IPC.SEARCH_LOCAL_FOR_AI_PLAYLIST, query, limit),
   importLocalM3uPlaylist: (absolutePath: string): Promise<ImportLocalM3uPlaylistResult> =>
     ipcRenderer.invoke(MVP_IPC.IMPORT_LOCAL_M3U_PLAYLIST, absolutePath),
+  pickTagRenameXlsxFiles: (): Promise<PickTagRenameXlsxFilesResult> =>
+    ipcRenderer.invoke(MVP_IPC.PICK_TAG_RENAME_XLSX_FILES),
+  importTagRenameXlsxFiles: (filePaths: string[]): Promise<ImportTagRenameXlsxFilesResult> =>
+    ipcRenderer.invoke(MVP_IPC.IMPORT_TAG_RENAME_XLSX_FILES, filePaths),
+  getLocalMetadataBank: (): Promise<LocalMetadataBankStatusResult> =>
+    ipcRenderer.invoke(MVP_IPC.GET_LOCAL_METADATA_BANK),
+  pickLocalMetadataBankFolder: (): Promise<PickLocalMetadataBankFolderResult> =>
+    ipcRenderer.invoke(MVP_IPC.PICK_LOCAL_METADATA_BANK_FOLDER),
+  refreshLocalMetadataBank: (): Promise<RefreshLocalMetadataBankResult> =>
+    ipcRenderer.invoke(MVP_IPC.REFRESH_LOCAL_METADATA_BANK),
+  listMusicLibrarySources: (): Promise<MusicLibrarySourcesResult> =>
+    ipcRenderer.invoke(MVP_IPC.LIST_MUSIC_LIBRARY_SOURCES),
+  addAdditionalMusicFolder: (): Promise<AddAdditionalMusicFolderResult> =>
+    ipcRenderer.invoke(MVP_IPC.ADD_ADDITIONAL_MUSIC_FOLDER),
+  removeAdditionalMusicFolder: (folderPath: string): Promise<RemoveAdditionalMusicFolderResult> =>
+    ipcRenderer.invoke(MVP_IPC.REMOVE_ADDITIONAL_MUSIC_FOLDER, folderPath),
+  scanMusicLibrary: (): Promise<ScanMusicLibraryResult> =>
+    ipcRenderer.invoke(MVP_IPC.SCAN_MUSIC_LIBRARY),
   onStatus: (callback) => {
     const handler = (_: unknown, status: MvpStatusSnapshot) => {
       callback(status);

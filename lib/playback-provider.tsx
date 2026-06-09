@@ -53,12 +53,6 @@ import {
 import { fetchUnifiedSourcesWithFallback } from "./unified-sources-client";
 import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
 
-/** Desktop Electron shell: MPV is driven from AudioPlayer via `window.syncbizDesktop` — never POST legacy /api/commands/* OS shell routes. */
-function hasSyncBizDesktopBridge(): boolean {
-  if (typeof window === "undefined") return false;
-  return !!(window as Window & { syncbizDesktop?: unknown }).syncbizDesktop;
-}
-
 export type PlaybackStatus = "idle" | "playing" | "paused" | "stopped";
 
 export type TrackSource = "youtube" | "soundcloud" | "spotify" | "local" | "stream-url" | "winamp";
@@ -482,7 +476,7 @@ type PlaybackContextValue = PlaybackState & {
   isEmbedded: boolean;
   /** Next direct-audio URL for crossfade. Null if next is embedded or no next. */
   getNextStreamUrl: () => string | null;
-  /** Next embedded source for YouTube AutoMix crossfade. Null if no next YouTube. YouTube only in Phase 1. */
+  /** Next embedded source for YouTube deck preload/crossfade. Null if no next YouTube. */
   getNextEmbeddedSource: () => { type: "youtube"; url: string; videoId: string } | null;
   /**
    * True from provider mount until the persisted session has been restored
@@ -863,7 +857,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     persistRecoverySnapshot();
   }, [persistRecoverySnapshot]);
 
-  /** Stop embeds (YT/SC/HLS) before a new local/source handoff. Legacy POST /api/commands/stop-local (taskkill winamp) only when not in desktop MPV mode. */
+  /**
+   * Stop embeds (YT/SC/HLS) before a new local/source handoff. The previous fall-through
+   * to POST `/api/commands/stop-local` (taskkill winamp) is disabled for pilot — see
+   * lib/play-local.ts. Only the in-app player owns stop.
+   */
   const stopAllBeforePlay = useCallback(() => {
     if (!deviceModeAllowsLocalPlayback.current) return;
     try {
@@ -871,27 +869,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
-    if (hasSyncBizDesktopBridge()) return;
-    fetch("/api/commands/stop-local", { method: "POST" }).catch(() => {});
   }, []);
 
-  const playLocal = useCallback((url: string, browserPreference?: string) => {
-    const target = canonicalYouTubeWatchUrlForPlayback(url);
-    if (
-      typeof window !== "undefined" &&
-      window.location.pathname.startsWith("/mobile")
-    ) {
-      return;
-    }
-    if (hasSyncBizDesktopBridge()) {
-      // SyncBiz desktop: `currentPlayUrl` + AudioPlayer already route to MPV — do not open default app / shell.
-      return;
-    }
-    fetch("/api/commands/play-local", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target: target, browserPreference: browserPreference ?? "default" }),
-    }).catch(() => {});
+  /**
+   * `playLocal` is now a typed no-op. Desktop already routes through MPV via
+   * `currentPlayUrl` + AudioPlayer; in browser, shelling out is forbidden (would
+   * launch Winamp/OS default). Kept on the context value to preserve the public
+   * API for callers we don't want to touch in this minimal pilot patch.
+   */
+  const playLocal = useCallback((_url: string, _browserPreference?: string) => {
+    // intentionally empty — see lib/legacy-shellout-playback.ts header for rationale.
   }, []);
 
   const playSource = useCallback(
@@ -995,7 +982,25 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           isRadioOrStream ||
           (playlist && track ? canEmbedInCard(track.type) : resolved.type === "youtube" || resolved.type === "soundcloud");
 
-        stopAllBeforePlay();
+        const snap = playbackStateForAuditRef.current;
+        const sameActiveSession =
+          snap.currentSource?.id === resolved.id &&
+          snap.currentTrackIndex === idx &&
+          (snap.status === "playing" || snap.status === "paused") &&
+          hydrationPath !== "merged";
+        if (sameActiveSession) {
+          if (process.env.NODE_ENV === "development") {
+            console.info("[SyncBiz:master] playSource runPlay noop — same track already active", {
+              sourceId: resolved.id,
+              trackIndex: idx,
+              status: snap.status,
+            });
+          }
+          if (snap.status === "paused") {
+            setState((s) => ({ ...s, status: "playing", lastMessage: null }));
+          }
+          return;
+        }
 
         setState((s) => {
           console.log("[SyncBiz Audit] playlist load start", {
@@ -1502,10 +1507,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           nextQueueIndex: s.queueIndex,
           queueLength: s.queue.length,
         });
-        if (!embedded && url) {
-          stopAllBeforePlay();
-          playLocal(url);
-        }
         transportLockRef.current = false;
         return getAdvanceState(s, prevIdx);
       }
@@ -1520,10 +1521,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         const track = tracks[nextIdx];
         const url = track?.url ?? s.currentSource.url;
         const embedded = track ? canEmbedInCard(track.type) : false;
-        if (!embedded && url) {
-          stopAllBeforePlay();
-          playLocal(url);
-        }
         transportLockRef.current = false;
         console.log("[SyncBiz Audit] PREV provider invoked", {
           phase: "playlist_fallback_back",
@@ -1635,10 +1632,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         const plTrk = unifiedToPlaybackTrack(first, 0);
         const embedded = canEmbedInCard(plTrk.type);
         const url = plTrk.url;
-        if (!skipPlay && !embedded && url) {
-          stopAllBeforePlay();
-          playLocal(url);
-        }
         transportLockRef.current = false;
         const base: PlaybackState = {
           ...s,
@@ -1708,10 +1701,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             toSessionIndex: nextIdx,
             baselineIndex: b.currentTrackIndex,
           });
-          if (!skipPlay && !emb && trUrl) {
-            stopAllBeforePlay();
-            playLocal(trUrl);
-          }
           transportLockRef.current = false;
           emitScheduledQueueEndedAutoProof(back.id);
           return getAdvanceState(restored, nextIdx);
@@ -1740,10 +1729,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         const trUrl = track?.url ?? back.url;
         const emb = track ? canEmbedInCard(track.type) : false;
         playNextLog("return_to_session_fallback", { nextIdx });
-        if (!skipPlay && !emb && trUrl) {
-          stopAllBeforePlay();
-          playLocal(trUrl);
-        }
         transportLockRef.current = false;
         emitScheduledQueueEndedAutoProof(back.id);
         return getAdvanceState(restored, nextIdx);
@@ -1867,10 +1852,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           queueLength: s.queue.length,
           sourceId: s.currentSource.id,
         });
-        if (!skipPlay && !embedded && url) {
-          stopAllBeforePlay();
-          playLocal(url);
-        }
         transportLockRef.current = false;
         const nextState = getAdvanceState(s, nextIdx);
         logRuntimePlaybackAudit(nextState, {
@@ -1913,10 +1894,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const track = tracks[nextIdx];
       const url = track?.url ?? s.currentSource.url;
       const embedded = track ? canEmbedInCard(track.type) : false;
-      if (!skipPlay && !embedded && url) {
-        stopAllBeforePlay();
-        playLocal(url);
-      }
       transportLockRef.current = false;
       mvpLog("playback_next", { scope: "playlist", branch: `fallback_${branch}`, skipPlay });
       console.log("[SyncBiz Audit] queue advance result", {

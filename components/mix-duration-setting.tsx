@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { getMixDuration, setMixDuration, MIX_DURATIONS } from "@/lib/mix-preferences";
 
-/** Premium controller-style mix duration selector. Affects direct audio URL crossfade only. */
+/** Mix/crossfade duration (3/6/9/12s). Applies to all source transitions on MASTER playback. */
 export function MixDurationSetting() {
   const [value, setValue] = useState<number>(6);
 

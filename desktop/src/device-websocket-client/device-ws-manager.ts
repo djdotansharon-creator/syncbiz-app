@@ -227,22 +227,27 @@ export class DeviceWsManager {
     switch (cmd) {
       case "PLAY": {
         const url = (p?.url ?? "").trim();
+        const fadeSec = orch.getCrossfadeSec();
         if (url) {
-          // Explicit URL in command payload (e.g. remote WS COMMAND with url).
-          orch.playMusic(url);
+          if (orch.getState().music.status === "playing") {
+            orch.playMusicCrossfade(url, fadeSec);
+          } else {
+            orch.playMusic(url);
+          }
         } else {
           const mpvStatus = orch.getState().music.status;
           if (mpvStatus === "paused") {
-            // MPV has a file loaded and is paused — resume in-place.
             orch.resumeMusic();
           } else {
-            // MPV is idle or stopped — load from the currently selected source URL.
             const srcUrl = (this.mock.getState().currentSource?.url ?? "").trim();
             if (srcUrl) {
               console.log("[DeviceWsManager] PLAY → loadfile on Channel A:", srcUrl.slice(0, 100));
-              orch.playMusic(srcUrl);
+              if (mpvStatus === "playing") {
+                orch.playMusicCrossfade(srcUrl, fadeSec);
+              } else {
+                orch.playMusic(srcUrl);
+              }
             } else {
-              // No URL available — best-effort resume (no-op on idle MPV but safe to call).
               orch.resumeMusic();
             }
           }
@@ -251,7 +256,13 @@ export class DeviceWsManager {
       }
       case "PLAY_SOURCE": {
         const url = (p?.source?.url ?? "").trim();
-        if (url) orch.playMusic(url);
+        if (!url) break;
+        const fadeSec = orch.getCrossfadeSec();
+        if (orch.getState().music.status === "playing") {
+          orch.playMusicCrossfade(url, fadeSec);
+        } else {
+          orch.playMusic(url);
+        }
         break;
       }
       case "PAUSE":

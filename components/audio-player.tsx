@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource } from "@/lib/playback-provider";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { isPlayNextSourceId } from "@/lib/play-next";
 import { useLocale, useTranslations, labels } from "@/lib/locale-context";
+import { TrackMetaChips } from "@/components/track-meta-chips";
+import { getCachedAiPlaylistTracksMeta } from "@/lib/ai-playlist-track-meta-cache";
 import { getTranslations } from "@/lib/translations";
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
@@ -37,6 +39,9 @@ import {
   safeStopVideo,
   safeDestroyYtPlayer,
   safeSeekTo,
+  safeLoadVideoById,
+  waitForYtVideoLoaded,
+  waitForYtStandbyStable,
   type YTPlayerAPI,
 } from "@/lib/yt-player-utils";
 import { PlayerDeckTransportSurface } from "@/components/player-surface/player-deck-transport-surface";
@@ -44,6 +49,7 @@ import { PlayerUnitSurface } from "@/components/player-surface/player-unit-surfa
 import { PlayerVerticalVolume } from "@/components/player-surface/player-vertical-volume";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
+import { masterPlaybackDiag } from "@/lib/master-playback-diag";
 import {
   acquirePlaybackWakeLock,
   playbackLifecycleLog,
@@ -63,13 +69,20 @@ function xfadeLog(phase: string, data?: Record<string, unknown>) {
   console.log("[SyncBiz Xfade]", phase, data ?? "");
 }
 
+/** Temporary P0 QA instrumentation — remove after manual crossfade QA passes. */
+function p0XfadeDebug(phase: string, data?: Record<string, unknown>) {
+  console.log("[P0_XFADE_DEBUG]", phase, data ?? "");
+}
+
 /** YouTube AutoMix diagnostics – key transitions only. States: -1=unstarted 0=ended 1=playing 2=paused 3=buffering 5=cued */
 function ytXfadeLog(phase: string, data?: Record<string, unknown>) {
   console.log("[SyncBiz YT-Xfade]", phase, data ?? "");
 }
 
-/** Seconds before mix window to start preloading next YT player. YT iframe load typically takes 3–10s. */
-const YT_PRELOAD_BUFFER_SEC = 12;
+/** YT preload uses the same lead window as direct audio (Settings mix duration defines crossfade length). */
+const YT_PRELOAD_BUFFER_SEC = PRELOAD_LEAD_SEC;
+/** Hidden YT iframe preload may take longer than HTML audio standby — 20s before fallback. */
+const YT_PRELOAD_READY_TIMEOUT_MS = 20_000;
 import { useDevicePlayer } from "@/lib/device-player-context";
 import {
   setLocalPlaybackPosition,
@@ -77,6 +90,17 @@ import {
   resetLocalPlaybackTime,
 } from "@/lib/playback-time-store";
 import { getMixDuration, getAutoMix, setAutoMix as persistAutoMix, onMixDurationChanged, onAutoMixChanged } from "@/lib/mix-preferences";
+import {
+  PRELOAD_LEAD_SEC,
+  STANDBY_READY_TIMEOUT_MS,
+  createDeckTransitionLock,
+  runDeckVolumeCrossfade,
+  preloadThresholdSec,
+  mixPointThresholdSec,
+  runDualVolumeCrossfade,
+  runVolumeFade,
+  type DeckId,
+} from "@/lib/playback-transition";
 import type { SCWidget } from "@/types/yt-sc";
 
 function isHlsUrl(url: string | null): boolean {
@@ -109,124 +133,102 @@ type CrossfadeCallbacks = {
   getStatus: () => string;
 };
 
-/** Crossfade for direct audio: fade out current, fade in next, then advance state.
- * Returns abort function. On error/abort: cleanup only, call onError (do NOT advance). */
-function runCrossfade(
-  currentAudio: HTMLAudioElement,
+/** A/B deck crossfade: fade out active deck, fade in standby deck, then swap. */
+function runAbDeckCrossfade(
+  activeAudio: HTMLAudioElement,
+  standbyAudio: HTMLAudioElement,
   nextUrl: string,
   targetVolume: number,
   mixDurationSec: number,
-  callbacks: CrossfadeCallbacks
+  callbacks: CrossfadeCallbacks,
 ): () => void {
   const { onComplete, onError, isAborted, getStatus } = callbacks;
   xfadeLog("run_start", { nextUrl: nextUrl.slice(0, 60), mixSec: mixDurationSec });
-  const temp = document.createElement("audio");
-  temp.volume = 0;
-  temp.preload = "auto";
-  temp.src = nextUrl;
 
-  const startMs = Date.now();
-  const durationMs = mixDurationSec * 1000;
   let completed = false;
-  let rafId: number | null = null;
   let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  let crossfadeAbort: (() => void) | null = null;
 
   const cleanup = () => {
     if (loadTimeoutId != null) {
       clearTimeout(loadTimeoutId);
       loadTimeoutId = null;
     }
-    if (rafId != null) {
-      cancelAnimationFrame(rafId);
-      rafId = null;
-    }
-    temp.removeEventListener("canplay", onTempCanPlay);
-    temp.removeEventListener("error", onTempError);
-    temp.pause();
-    temp.removeAttribute("src");
-    temp.load();
+    standbyAudio.removeEventListener("canplay", onStandbyCanPlay);
+    standbyAudio.removeEventListener("error", onStandbyError);
   };
 
   const finish = (success: boolean) => {
     if (completed) return;
     completed = true;
     xfadeLog("finish", { success });
+    crossfadeAbort?.();
+    crossfadeAbort = null;
     if (!success) {
-      currentAudio.volume = targetVolume;
+      activeAudio.volume = targetVolume;
+      standbyAudio.pause();
+      standbyAudio.removeAttribute("src");
+      standbyAudio.load();
     }
     cleanup();
     if (success) onComplete();
     else onError();
   };
 
-  const onTempError = () => {
-    xfadeLog("temp_error", { nextUrl: nextUrl.slice(0, 50) });
+  const onStandbyError = () => {
+    xfadeLog("standby_error", { nextUrl: nextUrl.slice(0, 50) });
     finish(false);
   };
 
-  const onTempCanPlay = () => {
-    temp.removeEventListener("canplay", onTempCanPlay);
-    xfadeLog("temp_canplay");
-    temp.play().then(
-      () => xfadeLog("temp_play_ok"),
+  const startCrossfade = () => {
+    standbyAudio.removeEventListener("canplay", onStandbyCanPlay);
+    xfadeLog("standby_canplay");
+    standbyAudio.play().then(
+      () => xfadeLog("standby_play_ok"),
       () => {
-        xfadeLog("temp_play_fail");
+        xfadeLog("standby_play_fail");
         finish(false);
-      }
+      },
     );
-
-    let tickCount = 0;
-    const tick = () => {
-      if (isAborted()) {
-        xfadeLog("abort", { tickCount });
-        finish(false);
-        return;
-      }
-      const elapsed = Date.now() - startMs;
-      const frac = Math.min(1, elapsed / durationMs);
-
-      currentAudio.volume = Math.max(0, targetVolume * (1 - frac));
-      temp.volume = targetVolume * frac;
-
-      if (tickCount === 0) xfadeLog("tick_first", { currentVol: currentAudio.volume, tempVol: temp.volume });
-      tickCount++;
-
-      if (frac >= 1) {
-        xfadeLog("handoff_start", { tickCount, tempTime: temp.currentTime });
-        currentAudio.pause();
-        currentAudio.currentTime = 0;
-        currentAudio.volume = targetVolume;
-        const main = currentAudio;
-        main.src = nextUrl;
-        main.load();
-        main.volume = 0;
-        const onMainCanPlay = () => {
-          main.removeEventListener("canplay", onMainCanPlay);
-          if (completed) return;
-          main.currentTime = temp.currentTime;
-          main.volume = targetVolume;
-          const st = getStatus();
-          xfadeLog("main_canplay", { status: st, willPlay: st === "playing" });
-          if (st === "playing") main.play().catch(() => {});
-          finish(true);
-        };
-        main.addEventListener("canplay", onMainCanPlay);
-        return;
-      }
-      rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
+    crossfadeAbort = runDeckVolumeCrossfade(activeAudio, standbyAudio, targetVolume, mixDurationSec, {
+      onComplete: () => finish(true),
+      onError: () => finish(false),
+      isAborted,
+      getStatus,
+      onFadeTick: (outVol, inVol, frac) => {
+        p0XfadeDebug("deck_fade_tick", { outVol, inVol, frac, mixDurationSec });
+      },
+    });
   };
 
-  temp.addEventListener("canplay", onTempCanPlay);
-  temp.addEventListener("error", onTempError);
+  let fadeStarted = false;
+  const startCrossfadeOnce = () => {
+    if (fadeStarted || completed) return;
+    fadeStarted = true;
+    standbyAudio.removeEventListener("canplay", onStandbyCanPlay);
+    startCrossfade();
+  };
+
+  const onStandbyCanPlay = () => startCrossfadeOnce();
+
+  standbyAudio.volume = 0;
+  standbyAudio.preload = "auto";
+  if (standbyAudio.src !== nextUrl) {
+    standbyAudio.src = nextUrl;
+    standbyAudio.load();
+  }
+  standbyAudio.addEventListener("canplay", onStandbyCanPlay);
+  standbyAudio.addEventListener("error", onStandbyError);
+  if (standbyAudio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+    queueMicrotask(() => startCrossfadeOnce());
+  }
 
   loadTimeoutId = setTimeout(() => {
     if (!completed) {
-      xfadeLog("load_timeout");
-      finish(false);
+      xfadeLog("load_timeout_start_fade");
+      startCrossfadeOnce();
     }
-  }, 10000);
+  }, STANDBY_READY_TIMEOUT_MS);
 
   return () => finish(false);
 }
@@ -341,13 +343,20 @@ export function AudioPlayer() {
     getNextEmbeddedSource,
     playNextQueue,
     playNextBaseline,
+    lastPlayCommandVia,
+    playCommandEpoch,
   } = usePlayback();
 
+  // YouTube A/B decks. Both iframes stay mounted and their refs NEVER swap:
+  //   deck A → ytContainerRef / ytPlayerRef
+  //   deck B → ytContainerNextRef / ytPlayerNextRef
+  // ytActiveDeckRef is the only thing that moves — it points at the audible deck.
   const ytContainerRef = useRef<HTMLDivElement>(null);
   const ytContainerNextRef = useRef<HTMLDivElement>(null);
   const scIframeRef = useRef<HTMLIFrameElement>(null);
   const ytPlayerRef = useRef<YTPlayerAPI | null>(null);
   const ytPlayerNextRef = useRef<YTPlayerAPI | null>(null);
+  const ytActiveDeckRef = useRef<DeckId>("A");
   const scWidgetRef = useRef<SCWidget | null>(null);
   const currentVidRef = useRef<string | null>(null);
   const lastYtVidRef = useRef<string | null>(null);
@@ -355,7 +364,8 @@ export function AudioPlayer() {
   const embedType = currentPlayUrl ? getEmbedType(currentPlayUrl) : null;
   const isYouTube = embedType === "youtube";
   const isSoundCloud = embedType === "soundcloud" && currentPlayUrl && isSoundCloudUrl(currentPlayUrl);
-  const isStreamUrl = currentPlayUrl && !isYouTube && !isSoundCloud && (currentTrack?.type === "stream-url" || currentSource?.origin === "radio");
+  /** All non-embed browser playback: direct http(s), local paths, HLS, radio, etc. */
+  const isHtmlAudio = Boolean(currentPlayUrl && !isYouTube && !isSoundCloud);
   const vid = isYouTube && currentPlayUrl ? getYouTubeVideoId(currentPlayUrl) : null;
   const ytPlaylistId = isYouTube && currentPlayUrl ? getYouTubePlaylistId(currentPlayUrl) : null;
   const isYouTubeMix = isYouTube && currentPlayUrl ? isYouTubeMixUrl(currentPlayUrl) : false;
@@ -373,9 +383,17 @@ export function AudioPlayer() {
   };
   const [ytMultiTrackState, setYtMultiTrackState] = useState<YtMultiTrackState | null>(null);
 
+  const audioDeckARef = useRef<HTMLAudioElement | null>(null);
+  const audioDeckBRef = useRef<HTMLAudioElement | null>(null);
+  /** Points at the currently audible deck element (A or B). */
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const activeDeckRef = useRef<DeckId>("A");
+  const deckTransitionLock = useRef(createDeckTransitionLock()).current;
   const hlsRef = useRef<import("hls.js").default | null>(null);
+  const hlsDeckRef = useRef<DeckId | null>(null);
   const lastStreamUrlRef = useRef<string | null>(null);
+  const standbyPreloadedUrlRef = useRef<string | null>(null);
+  const streamTransitionAbortRef = useRef<(() => void) | null>(null);
   const lastKnownDurationRef = useRef<number>(0);
 
   const [position, setPosition] = useState(0);
@@ -430,7 +448,9 @@ export function AudioPlayer() {
   const ytCrossfadeStartedRef = useRef(false);
   const ytCrossfadeAbortRef = useRef(false);
   const ytCrossfadeCleanupRef = useRef<(() => void) | null>(null);
+  const ytCrossfadeDismissRef = useRef<(() => void) | null>(null);
   const ytOverlapActiveRef = useRef(false);
+  const ytOverlapFadeAbortRef = useRef<(() => void) | null>(null);
   const ytNextVideoIdRef = useRef<string | null>(null);
   const ytCurrentInNextSlotRef = useRef(false);
   const lastUiPositionRef = useRef(0);
@@ -444,19 +464,169 @@ export function AudioPlayer() {
   const truthAuditSnapshotDedupeMsRef = useRef(0);
   const isYouTubeRef = useRef(false);
   const isSoundCloudRef = useRef(false);
-  const isStreamUrlRef = useRef(false);
+  const isHtmlAudioRef = useRef(false);
+  const ytManualTransitionRef = useRef(false);
+  const ytManualFadeActiveRef = useRef(false);
+  const ytSequentialActiveRef = useRef(false);
+  const ytNaturalSequentialStartedRef = useRef(false);
+  const scManualTransitionRef = useRef(false);
+  const beginYtSequentialTransitionRef = useRef<
+    (nextVideoId: string, opts?: { natural?: boolean; onProviderAdvance?: () => void }) => void
+  >(() => {});
+  const beginYtDeckCrossfadeRef = useRef<
+    (nextVideoId: string, opts?: { natural?: boolean; onProviderAdvance?: () => void }) => void
+  >(() => {});
+  const beginScEmbedTransitionRef = useRef<(nextEmbedUrl: string) => void>(() => {});
+  const loadYouTubeRef = useRef<() => void>(() => {});
+  const ytForceColdLoadRef = useRef(false);
+  /** After handoff/promote, block loadYouTube cold reload of the same video id. */
+  const ytSuppressColdLoadVidRef = useRef<string | null>(null);
+  /** Canonical audible YT video after promote — cleared only on stop or a new target vid. */
+  const ytCanonicalActiveVidRef = useRef<string | null>(null);
+  /** Ignore late ENDED / spurious reload until this timestamp (ms). */
+  const ytHandoffGraceUntilRef = useRef(0);
+  /** Outgoing player destroyed during handoff — ignore its late ENDED. */
+  const ytOutgoingPlayerRef = useRef<YTPlayerAPI | null>(null);
+  const ytHandoffEpochRef = useRef(0);
+  const ytHandoffWatchdogClearRef = useRef<(() => void) | null>(null);
+  const playCommandEpochRef = useRef(0);
+  const lastPlayCommandViaRef = useRef<import("@/lib/playback-provider").PlayCommandVia>("unknown");
   const isControlMirrorRef = useRef(false);
   const embedReadyRef = useRef(false);
   volumeRef.current = volume;
   statusRef.current = status;
+  lastPlayCommandViaRef.current = lastPlayCommandVia;
+  playCommandEpochRef.current = playCommandEpoch;
   currentPlayUrlRef.current = currentPlayUrl ?? null;
   currentSourceIdRef.current = currentSource?.id ?? null;
   nextRef.current = next;
   isYouTubeRef.current = isYouTube;
   isSoundCloudRef.current = Boolean(isSoundCloud);
-  isStreamUrlRef.current = Boolean(isStreamUrl);
+  isHtmlAudioRef.current = isHtmlAudio;
   isControlMirrorRef.current = Boolean(isControlMirror);
   embedReadyRef.current = embedReady;
+
+  const markYtCanonicalActive = useCallback((videoId: string, reason: string) => {
+    ytCanonicalActiveVidRef.current = videoId;
+    ytSuppressColdLoadVidRef.current = videoId;
+    lastYtVidRef.current = videoId;
+    currentVidRef.current = videoId;
+    ytHandoffGraceUntilRef.current = Date.now() + 5000;
+    p0XfadeDebug("yt_canonical_active", { videoId, reason, graceMs: 5000, epoch: ytHandoffEpochRef.current });
+  }, []);
+
+  const clearYtCanonicalActive = useCallback((reason: string) => {
+    if (!ytCanonicalActiveVidRef.current && !ytSuppressColdLoadVidRef.current) return;
+    p0XfadeDebug("yt_canonical_cleared", {
+      reason,
+      was: ytCanonicalActiveVidRef.current,
+    });
+    ytCanonicalActiveVidRef.current = null;
+    ytSuppressColdLoadVidRef.current = null;
+    ytHandoffGraceUntilRef.current = 0;
+    ytOutgoingPlayerRef.current = null;
+    ytHandoffWatchdogClearRef.current?.();
+    ytHandoffWatchdogClearRef.current = null;
+  }, []);
+
+  const logYtHandoffState = useCallback((phase: string, extra?: Record<string, unknown>) => {
+    const activeIsA = ytActiveDeckRef.current === "A";
+    const active = activeIsA ? ytPlayerRef.current : ytPlayerNextRef.current;
+    const standby = activeIsA ? ytPlayerNextRef.current : ytPlayerRef.current;
+    const activeSt = isYtPlayerReady(active) ? safeGetPlayerState(active) : -1;
+    const standbySt = isYtPlayerReady(standby) ? safeGetPlayerState(standby) : -1;
+    p0XfadeDebug(phase, {
+      activeReady: isYtPlayerReady(active),
+      standbyReady: isYtPlayerReady(standby),
+      activeTime: isYtPlayerReady(active) ? safeGetCurrentTime(active) : null,
+      standbyTime: isYtPlayerReady(standby) ? safeGetCurrentTime(standby) : null,
+      activeState: activeSt,
+      standbyState: standbySt,
+      activeInNextSlot: ytCurrentInNextSlotRef.current,
+      activeSlot: ytCurrentInNextSlotRef.current ? "next_container" : "main_container",
+      canonical: ytCanonicalActiveVidRef.current,
+      currentVidRef: currentVidRef.current,
+      currentPlayUrl: currentPlayUrlRef.current?.slice(0, 120) ?? null,
+      currentSourceId: currentSourceIdRef.current,
+      status: statusRef.current,
+      embedReady: embedReadyRef.current,
+      handoffEpoch: ytHandoffEpochRef.current,
+      playCommandEpoch: playCommandEpochRef.current,
+      inHandoffGrace: Date.now() < ytHandoffGraceUntilRef.current,
+      ...extra,
+    });
+  }, []);
+
+  const destroyYtStandbyPlayer = useCallback(() => {
+    const standbyRef = ytActiveDeckRef.current === "A" ? ytPlayerNextRef : ytPlayerRef;
+    const np = standbyRef.current;
+    if (isYtPlayerReady(np)) {
+      safeDestroyYtPlayer(np);
+    }
+    standbyRef.current = null;
+    ytCurrentInNextSlotRef.current = false;
+  }, []);
+
+  const isYtHandoffGuardActive = useCallback(
+    (videoId?: string | null) =>
+      !!(
+        ytCanonicalActiveVidRef.current &&
+        Date.now() < ytHandoffGraceUntilRef.current &&
+        playCommandEpochRef.current === ytHandoffEpochRef.current &&
+        (!videoId || ytCanonicalActiveVidRef.current === videoId)
+      ),
+    [],
+  );
+
+  const guardedYtPlay = useCallback((player: unknown, reason: string) => {
+    const YT = typeof window !== "undefined" ? window.YT : undefined;
+    const st = safeGetPlayerState(player);
+    const canonical = ytCanonicalActiveVidRef.current;
+    const inGrace = Date.now() < ytHandoffGraceUntilRef.current;
+    if (
+      canonical &&
+      inGrace &&
+      YT != null &&
+      (st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING)
+    ) {
+      p0XfadeDebug("safePlayVideo_skipped_post_handoff", { reason, canonical, st });
+      return;
+    }
+    p0XfadeDebug("safePlayVideo_called", { reason, canonical, st });
+    safePlayVideo(player);
+  }, []);
+
+  const getDeckAudio = useCallback((deck: DeckId) => (deck === "A" ? audioDeckARef.current : audioDeckBRef.current), []);
+  const getActiveDeck = useCallback((): DeckId => activeDeckRef.current, []);
+  const getStandbyDeck = useCallback((): DeckId => (activeDeckRef.current === "A" ? "B" : "A"), []);
+  const syncAudioRefToActiveDeck = useCallback(() => {
+    audioRef.current = getDeckAudio(activeDeckRef.current);
+  }, [getDeckAudio]);
+  const swapActiveDeck = useCallback(() => {
+    activeDeckRef.current = activeDeckRef.current === "A" ? "B" : "A";
+    syncAudioRefToActiveDeck();
+    hlsDeckRef.current = activeDeckRef.current;
+  }, [syncAudioRefToActiveDeck]);
+
+  // ── YouTube A/B deck accessors — refs are fixed to a deck; only the pointer moves ──
+  const getYtActiveDeck = useCallback((): DeckId => ytActiveDeckRef.current, []);
+  const getYtStandbyDeck = useCallback(
+    (): DeckId => (ytActiveDeckRef.current === "A" ? "B" : "A"),
+    [],
+  );
+  const getYtPlayerRefForDeck = useCallback(
+    (deck: DeckId) => (deck === "A" ? ytPlayerRef : ytPlayerNextRef),
+    [],
+  );
+  const getYtContainerRefForDeck = useCallback(
+    (deck: DeckId) => (deck === "A" ? ytContainerRef : ytContainerNextRef),
+    [],
+  );
+  /** The currently audible/authoritative YouTube player (active deck). */
+  const getYtActivePlayer = useCallback(
+    () => getYtPlayerRefForDeck(ytActiveDeckRef.current).current,
+    [getYtPlayerRefForDeck],
+  );
 
   const logProviderEngineTruthSnapshot = useCallback((reason: string) => {
     if (typeof document === "undefined") return;
@@ -481,7 +651,7 @@ export function AudioPlayer() {
     let soundCloudWidgetPresent: boolean | null = null;
 
     if (isYouTubeRef.current) {
-      const p = ytPlayerRef.current;
+      const p = getYtActivePlayer();
       if (isYtPlayerReady(p)) {
         ytPlayerState = safeGetPlayerState(p);
         ytCurrentTime = safeGetCurrentTime(p);
@@ -492,7 +662,7 @@ export function AudioPlayer() {
       } else {
         engineSuggestsPlaying = false;
       }
-    } else if (isStreamUrlRef.current) {
+    } else if (isHtmlAudioRef.current) {
       const a = audioRef.current;
       if (a) {
         audioPaused = a.paused;
@@ -532,7 +702,7 @@ export function AudioPlayer() {
         : "LOCAL: displayStatus uses PlaybackProvider status",
       sourceYouTube: isYouTubeRef.current,
       sourceSoundCloud: isSoundCloudRef.current,
-      sourceStreamUrl: isStreamUrlRef.current,
+      sourceStreamUrl: isHtmlAudioRef.current,
       currentSourceId: currentSourceIdRef.current,
       currentPlayUrlPreview: currentPlayUrlRef.current?.slice(0, 120) ?? null,
       embedReady: embedReadyRef.current,
@@ -575,13 +745,91 @@ export function AudioPlayer() {
 
   /** Load YouTube player – deps exclude volume/status so volume changes never recreate the player */
   const loadYouTube = useCallback(() => {
-    if (!vid || !ytContainerRef.current) return;
-    if (lastYtVidRef.current === vid) {
-      lastYtVidRef.current = null;
+    p0XfadeDebug("loadYouTube_called", {
+      vid: vid ?? null,
+      canonical: ytCanonicalActiveVidRef.current,
+      suppress: ytSuppressColdLoadVidRef.current,
+      manual: ytManualTransitionRef.current,
+      currentVidRef: currentVidRef.current,
+      via: lastPlayCommandViaRef.current,
+    });
+    // Cold load always targets the ACTIVE deck — refs never swap, only the pointer.
+    const coldDeck = getYtActiveDeck();
+    const coldContainerRef = getYtContainerRefForDeck(coldDeck);
+    const coldPlayerRef = getYtPlayerRefForDeck(coldDeck);
+    if (!vid || !coldContainerRef.current) return;
+    if (ytManualTransitionRef.current || ytSequentialActiveRef.current) {
+      p0XfadeDebug("loadYouTube_skipped_manual_active", { vid });
       return;
     }
+    if (ytCanonicalActiveVidRef.current === vid || ytSuppressColdLoadVidRef.current === vid) {
+      p0XfadeDebug("suppress_duplicate_reload", {
+        vid,
+        via: lastPlayCommandViaRef.current,
+        canonical: ytCanonicalActiveVidRef.current,
+      });
+      return;
+    }
+    if (lastYtVidRef.current === vid && currentVidRef.current === vid) {
+      p0XfadeDebug("yt_load_suppressed_promoted", { vid, via: lastPlayCommandViaRef.current });
+      return;
+    }
+    if (vid && ytCanonicalActiveVidRef.current && vid !== ytCanonicalActiveVidRef.current) {
+      clearYtCanonicalActive("new_target_vid");
+    } else if (vid && ytSuppressColdLoadVidRef.current && vid !== ytSuppressColdLoadVidRef.current) {
+      ytSuppressColdLoadVidRef.current = null;
+    }
+    const oldPlayer = coldPlayerRef.current;
+    const oldVid = currentVidRef.current;
+    const midPlayback =
+      statusRef.current === "playing" || statusRef.current === "paused";
+    const canManualHandoff =
+      !ytForceColdLoadRef.current &&
+      midPlayback &&
+      oldVid &&
+      oldVid !== vid &&
+      !isYouTubeMix &&
+      !isYouTubeMultiTrack &&
+      !ytManualTransitionRef.current;
+    if (canManualHandoff && isYtPlayerReady(oldPlayer)) {
+      ytXfadeLog("manual_transition_delegated", { from: oldVid, to: vid });
+      p0XfadeDebug("transition_start", {
+        via: lastPlayCommandViaRef.current,
+        engine: "yt_deck_crossfade",
+        fromVid: oldVid,
+        toVid: vid,
+      });
+      beginYtDeckCrossfadeRef.current(vid);
+      return;
+    }
+    if (canManualHandoff && !isYtPlayerReady(oldPlayer)) {
+      p0XfadeDebug("yt_manual_deferred_retry", { vid, oldVid, via: lastPlayCommandViaRef.current });
+      queueMicrotask(() => {
+        if (
+          currentVidRef.current === oldVid &&
+          vid &&
+          currentVidRef.current !== vid &&
+          isYtPlayerReady(coldPlayerRef.current) &&
+          !ytManualTransitionRef.current &&
+          !ytSequentialActiveRef.current
+        ) {
+          beginYtDeckCrossfadeRef.current(vid);
+        }
+      });
+      return;
+    }
+    p0XfadeDebug("yt_cold_load", {
+      vid,
+      oldVid,
+      midPlayback,
+      ytForceCold: ytForceColdLoadRef.current,
+      playerReady: isYtPlayerReady(oldPlayer),
+      isMix: isYouTubeMix,
+      isMultiTrack: isYouTubeMultiTrack,
+      via: lastPlayCommandViaRef.current,
+    });
+    ytForceColdLoadRef.current = false;
     ytCurrentInNextSlotRef.current = false;
-    const oldPlayer = ytPlayerRef.current;
     if (isYtPlayerReady(oldPlayer)) {
       console.log("[SyncBiz Audit] YT destroy/reset", {
         reason: "loadYouTube_old_player",
@@ -592,7 +840,7 @@ export function AudioPlayer() {
       safeStopVideo(oldPlayer);
       safeDestroyYtPlayer(oldPlayer);
     }
-    ytPlayerRef.current = null;
+    coldPlayerRef.current = null;
     currentVidRef.current = vid;
     const playerVars: Record<string, string | number> = {
       enablejsapi: 1,
@@ -603,8 +851,12 @@ export function AudioPlayer() {
       playerVars.listType = "playlist";
     }
     const loadYT = () => {
-      if (!window.YT?.Player || !ytContainerRef.current || currentVidRef.current !== vid) return;
-      const hostEl = ytContainerRef.current;
+      if (ytCanonicalActiveVidRef.current === vid) {
+        p0XfadeDebug("cold_loadYT_aborted_canonical", { vid });
+        return;
+      }
+      if (!window.YT?.Player || !coldContainerRef.current || currentVidRef.current !== vid) return;
+      const hostEl = coldContainerRef.current;
       let iframeEl: HTMLIFrameElement | null = null;
       if (hostEl instanceof HTMLIFrameElement) {
         iframeEl = hostEl;
@@ -621,7 +873,7 @@ export function AudioPlayer() {
         hostTag: hostEl?.tagName,
         hasIframe: !!iframeEl,
         hasContentWindow: !!iframeEl?.contentWindow,
-        hasExistingPlayer: isYtPlayerReady(ytPlayerRef.current),
+        hasExistingPlayer: isYtPlayerReady(coldPlayerRef.current),
       });
       syncbizAuditPlayerCreationTarget({
         slot: "current",
@@ -629,13 +881,17 @@ export function AudioPlayer() {
         playlistId: ytPlaylistId,
         currentSourceId: currentSource?.id ?? null,
       });
-      new window.YT.Player(ytContainerRef.current, {
+      new window.YT.Player(coldContainerRef.current, {
         videoId: vid,
         width: 320,
         height: 180,
         playerVars,
         events: {
           onReady(evt) {
+            if (ytCanonicalActiveVidRef.current === vid) {
+              p0XfadeDebug("cold_onReady_aborted_post_handoff", { vid });
+              return;
+            }
             if (currentVidRef.current !== vid) {
               console.log("[SyncBiz Audit] YT onReady timing", {
                 embed: "current",
@@ -655,7 +911,7 @@ export function AudioPlayer() {
               return;
             }
             // Re-read DOM on ready for live diagnostics
-            const hostElLive = ytContainerRef.current;
+            const hostElLive = coldContainerRef.current;
             let iframeElLive: HTMLIFrameElement | null = null;
             if (hostElLive instanceof HTMLIFrameElement) {
               iframeElLive = hostElLive;
@@ -691,7 +947,7 @@ export function AudioPlayer() {
               playerState: initialState,
               statusRef: statusRef.current,
             });
-            ytPlayerRef.current = target;
+            coldPlayerRef.current = target;
             safeSetVolume(target, volumeRef.current);
             setEmbedReady(true);
             const willPlay = statusRef.current === "playing";
@@ -702,7 +958,7 @@ export function AudioPlayer() {
                 videoId: vid,
                 action: "safePlayVideo",
               });
-              safePlayVideo(target);
+              guardedYtPlay(target, "cold_onReady_status_playing");
               const stateAfterPlay = safeGetPlayerState(target);
               console.log("[SyncBiz Audit] YT first_state_after_ready", {
                 embed: "current",
@@ -752,7 +1008,7 @@ export function AudioPlayer() {
                 });
                 return;
               }
-              const p = ytPlayerRef.current;
+              const p = coldPlayerRef.current;
               if (!isYtPlayerReady(p)) {
                 console.log("[SyncBiz Audit] YT player state shortly_after_ready", {
                   msAfterReady: 300,
@@ -784,161 +1040,529 @@ export function AudioPlayer() {
     const first = document.getElementsByTagName("script")[0];
     first?.parentNode?.insertBefore(tag, first);
     window.onYouTubeIframeAPIReady = () => loadYT();
-  }, [vid, ytPlaylistId]);
+  }, [vid, ytPlaylistId, clearYtCanonicalActive, getActiveDeck, guardedYtPlay, getYtActiveDeck, getYtContainerRefForDeck, getYtPlayerRefForDeck]);
 
-  /** YouTube AutoMix Phase 1: preload next in hidden player. No volume fade. At mix point, start next; on current ENDED, handoff. */
-  const runYtPreload = useCallback(
-    (nextVideoId: string, callbacks: { onError: () => void; isAborted: () => boolean }): (() => void) => {
-      const currentPlayer = ytPlayerRef.current;
-      if (!isYtPlayerReady(currentPlayer)) {
-        ytXfadeLog("no_current");
-        callbacks.onError();
-        return () => {};
-      }
-      const preloadContainer = ytCurrentInNextSlotRef.current ? ytContainerRef.current : ytContainerNextRef.current;
-      if (!preloadContainer || !window.YT?.Player) {
-        ytXfadeLog("no_container");
-        callbacks.onError();
-        return () => {};
-      }
-      const hostEl = preloadContainer;
-      let iframeEl: HTMLIFrameElement | null = null;
-      if (hostEl instanceof HTMLIFrameElement) {
-        iframeEl = hostEl;
-      } else {
-        iframeEl = hostEl.querySelector("iframe");
-      }
-      console.log("[SyncBiz Audit] iframe ref state", {
-        embed: "next",
-        hasHost: !!hostEl,
-        hostTag: hostEl?.tagName,
-        hasIframe: !!iframeEl,
-        hasContentWindow: !!iframeEl?.contentWindow,
-        src: iframeEl?.src,
-      });
-      const oldNext = ytPlayerNextRef.current;
-      if (isYtPlayerReady(oldNext)) {
-        safeStopVideo(oldNext);
-        safeDestroyYtPlayer(oldNext);
-      }
-      ytPlayerNextRef.current = null;
-      const triggerTime = Date.now();
-      ytXfadeLog("preload_triggered", { nextVideoId, triggerTime });
-      let completed = false;
-      let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  useEffect(() => {
+    loadYouTubeRef.current = loadYouTube;
+  }, [loadYouTube]);
 
-      const cleanup = () => {
-        if (loadTimeoutId != null) {
-          clearTimeout(loadTimeoutId);
-          loadTimeoutId = null;
+  /**
+   * Sequential fallback — single active-deck iframe: fade out, loadVideoById, fade in.
+   * Used ONLY when the real A/B deck crossfade can't bring the standby up
+   * (standby failed to load or never reached PLAYING/BUFFERING).
+   */
+  const beginYtSequentialTransition = useCallback(
+    (
+      nextVideoId: string,
+      opts?: { natural?: boolean; onProviderAdvance?: () => void },
+    ) => {
+      if (ytSequentialActiveRef.current || ytManualTransitionRef.current) {
+        p0XfadeDebug("yt_sequential_skipped", { nextVideoId, reason: "already_active" });
+        return;
+      }
+      const player = getYtActivePlayer();
+      if (!isYtPlayerReady(player)) {
+        p0XfadeDebug("yt_sequential_skipped", { nextVideoId, reason: "player_not_ready" });
+        return;
+      }
+
+      destroyYtStandbyPlayer();
+      ytCrossfadeCleanupRef.current?.();
+      ytCrossfadeCleanupRef.current = null;
+      ytCrossfadeDismissRef.current?.();
+      ytCrossfadeDismissRef.current = null;
+      ytCrossfadeStartedRef.current = false;
+      ytOverlapFadeAbortRef.current?.();
+      ytOverlapFadeAbortRef.current = null;
+
+      const run = () => {
+        if (!deckTransitionLock.tryAcquire()) {
+          deckTransitionLock.queueAfter(() => run());
+          return;
         }
-      };
 
-      const abort = () => {
-        if (completed) return;
-        completed = true;
-        ytXfadeLog("preload_abort");
-        cleanup();
-        if (isYtPlayerReady(ytPlayerNextRef.current)) {
-          safeStopVideo(ytPlayerNextRef.current);
-          safeDestroyYtPlayer(ytPlayerNextRef.current);
-          ytPlayerNextRef.current = null;
-        }
-        callbacks.onError();
-      };
+        ytSequentialActiveRef.current = true;
+        ytManualTransitionRef.current = true;
+        ytManualFadeActiveRef.current = true;
 
-      try {
-        ytXfadeLog("next_hidden_yt_player_creating", { videoId: nextVideoId });
-        syncbizAuditPlayerCreationTarget({ slot: "preload_hidden", videoId: nextVideoId });
-        new window.YT.Player(preloadContainer, {
-          videoId: nextVideoId,
-          width: 320,
-          height: 180,
-          playerVars: { enablejsapi: 1, origin: typeof window !== "undefined" ? window.location.origin : "" },
-          events: {
-            onReady(evt: { target: YTPlayerAPI }) {
-              if (completed || callbacks.isAborted()) return;
-              const target = evt.target;
-              if (!isYtPlayerReady(target)) {
-                ytXfadeLog("next_not_ready");
-                abort();
-                return;
-              }
-              const readyLatencyMs = Date.now() - triggerTime;
-              ytXfadeLog("next_hidden_yt_player_ready", { readyLatencyMs });
-              ytPlayerNextRef.current = target;
-              safeSetVolume(target, 0);
-              safeMute(target);
-            },
-          },
+        const mixSec = Math.min(getMixDuration(), 12);
+        const maxUiVol = volumeRef.current;
+        let fadeAbort: (() => void) | null = null;
+
+        const finishSequential = (success: boolean) => {
+          fadeAbort?.();
+          fadeAbort = null;
+          ytManualFadeActiveRef.current = false;
+          ytManualTransitionRef.current = false;
+          ytSequentialActiveRef.current = false;
+          if (opts?.natural) {
+            ytNaturalSequentialStartedRef.current = false;
+            ytOverlapActiveRef.current = false;
+          }
+          deckTransitionLock.release();
+          if (success) {
+            markYtCanonicalActive(nextVideoId, opts?.natural ? "sequential_natural" : "sequential_manual");
+            setEmbedReady(true);
+            p0XfadeDebug("yt_sequential_complete", { nextVideoId, natural: !!opts?.natural });
+            return;
+          }
+          p0XfadeDebug("yt_sequential_failed", { nextVideoId, natural: !!opts?.natural });
+          const p = getYtActivePlayer();
+          if (isYtPlayerReady(p)) {
+            safeUnMute(p);
+            safeSetVolume(p, volumeRef.current);
+            if (statusRef.current === "playing") safePlayVideo(p);
+          }
+        };
+
+        const isAborted = () =>
+          statusRef.current === "stopped" || !ytSequentialActiveRef.current;
+
+        p0XfadeDebug("yt_sequential_fade_out_start", {
+          nextVideoId,
+          mixSec,
+          natural: !!opts?.natural,
+          via: lastPlayCommandViaRef.current,
         });
-      } catch (e) {
-        ytXfadeLog("error", { err: String(e) });
-        abort();
-        return () => {};
-      }
 
-      loadTimeoutId = setTimeout(() => {
-        if (!completed) {
-          ytXfadeLog("preload_timeout");
-          abort();
-        }
-      }, 12000);
+        fadeAbort = runDualVolumeCrossfade(
+          (outV) => safeSetVolume(player, outV),
+          () => {},
+          maxUiVol,
+          mixSec,
+          {
+            curve: "smoothstep",
+            minUpdateIntervalMs: 40,
+            isAborted,
+            onComplete: () => {
+              void (async () => {
+                if (isAborted()) {
+                  finishSequential(false);
+                  return;
+                }
+                p0XfadeDebug("yt_sequential_load", { nextVideoId });
+                currentVidRef.current = nextVideoId;
+                safeLoadVideoById(player, nextVideoId);
+                if (opts?.onProviderAdvance) opts.onProviderAdvance();
 
-      return () => abort();
+                const loaded = await waitForYtVideoLoaded(player, nextVideoId, {
+                  timeoutMs: 15_000,
+                  isAborted,
+                });
+                if (!loaded || isAborted()) {
+                  finishSequential(false);
+                  return;
+                }
+
+                safeUnMute(player);
+                safeSetVolume(player, 0);
+                if (statusRef.current === "playing") safePlayVideo(player);
+
+                p0XfadeDebug("yt_sequential_fade_in_start", { nextVideoId });
+                fadeAbort = runDualVolumeCrossfade(
+                  () => {},
+                  (inV) => safeSetVolume(player, inV),
+                  maxUiVol,
+                  mixSec,
+                  {
+                    curve: "smoothstep",
+                    minUpdateIntervalMs: 40,
+                    isAborted,
+                    onComplete: () => finishSequential(true),
+                    onError: () => finishSequential(false),
+                  },
+                );
+              })();
+            },
+            onError: () => finishSequential(false),
+          },
+        );
+      };
+
+      if (opts?.natural) ytNaturalSequentialStartedRef.current = true;
+      ytOverlapActiveRef.current = !!opts?.natural;
+      run();
     },
-    []
+    [deckTransitionLock, destroyYtStandbyPlayer, markYtCanonicalActive, getYtActivePlayer],
+  );
+  beginYtSequentialTransitionRef.current = beginYtSequentialTransition;
+
+  /**
+   * Create the standby-deck YouTube player and cue the next video at volume 0.
+   * The standby iframe is never destroyed during a transition; it becomes the
+   * active deck after the crossfade and is reused (loadVideoById) thereafter.
+   */
+  const createYtStandbyPlayer = useCallback(
+    (deck: DeckId, videoId: string) => {
+      if (!window.YT?.Player) return;
+      const containerRef = getYtContainerRefForDeck(deck);
+      const playerRef = getYtPlayerRefForDeck(deck);
+      const host = containerRef.current;
+      if (!host) return;
+      const playerVars: Record<string, string | number> = {
+        enablejsapi: 1,
+        origin: typeof window !== "undefined" ? window.location.origin : "",
+      };
+      syncbizAuditPlayerCreationTarget({
+        slot: "standby",
+        deck,
+        videoId,
+        currentSourceId: currentSourceIdRef.current,
+      });
+      new window.YT.Player(host, {
+        videoId,
+        width: 320,
+        height: 180,
+        playerVars,
+        events: {
+          onReady(evt) {
+            const target = evt.target;
+            if (!isYtPlayerReady(target)) return;
+            playerRef.current = target;
+            safeSetVolume(target, 0);
+            p0XfadeDebug("yt_standby_ready", { deck, videoId });
+          },
+        },
+      });
+    },
+    [getYtContainerRefForDeck, getYtPlayerRefForDeck],
   );
 
-  /** Handoff: promote next to current when overlap ends (current track ended). */
-  const doYtHandoff = useCallback((nextVideoId: string) => {
-    const np = ytPlayerNextRef.current;
-    if (!isYtPlayerReady(np)) {
-      ytXfadeLog("handoff_abort", { reason: "next_not_ready" });
-      return;
-    }
-    const npStateBefore = safeGetPlayerState(np);
-    ytXfadeLog("handoff_started", { nextPlayerStateBefore: npStateBefore });
-    const oldCurrent = ytPlayerRef.current;
-    if (isYtPlayerReady(oldCurrent)) {
-      safeStopVideo(oldCurrent);
-      safeDestroyYtPlayer(oldCurrent);
-    }
-    safeUnMute(np);
-    ytPlayerRef.current = np;
-    ytPlayerNextRef.current = null;
-    currentVidRef.current = nextVideoId;
-    lastYtVidRef.current = nextVideoId;
-    ytCurrentInNextSlotRef.current = !ytCurrentInNextSlotRef.current;
-    safeSetVolume(np, volumeRef.current);
-    safePlayVideo(np);
-    const npStateAfter = safeGetPlayerState(np);
-    ytXfadeLog("handoff_promoted", { nextPlayerStateAfter: npStateAfter });
-    syncbizAuditTransportTransitionStart({
-      phase: "doYtHandoff_before_provider_next_skipPlay",
-      nextVideoId,
-      auditTransportCase: "ended_auto",
-      skipPlay: true,
+  /**
+   * Real A/B deck crossfade (P0). Load the next video on the STANDBY deck at
+   * volume 0, wait until it is actually PLAYING/BUFFERING, then overlap-fade the
+   * active deck out and the standby deck in. On completion the deck pointer flips
+   * (refs never swap) and the old active deck is paused but kept alive.
+   *
+   * Failure semantics: if the standby never comes up we fall back to the
+   * single-iframe sequential fade; any abort restores the active deck and never
+   * resets the queue/session.
+   */
+  const beginYtDeckCrossfade = useCallback(
+    (
+      nextVideoId: string,
+      opts?: { natural?: boolean; onProviderAdvance?: () => void },
+    ) => {
+      if (ytSequentialActiveRef.current || ytManualTransitionRef.current) {
+        p0XfadeDebug("yt_deck_skipped", { nextVideoId, reason: "already_active" });
+        return;
+      }
+      const active = getYtActivePlayer();
+      if (!isYtPlayerReady(active)) {
+        p0XfadeDebug("yt_deck_skipped", { nextVideoId, reason: "active_not_ready" });
+        return;
+      }
+
+      // Mirror the sequential setup so the natural-next flag lifecycle is identical
+      // (notably the one-tick reset of ytCrossfadeStartedRef).
+      ytCrossfadeCleanupRef.current?.();
+      ytCrossfadeCleanupRef.current = null;
+      ytCrossfadeDismissRef.current?.();
+      ytCrossfadeDismissRef.current = null;
+      ytCrossfadeStartedRef.current = false;
+      ytOverlapFadeAbortRef.current?.();
+      ytOverlapFadeAbortRef.current = null;
+
+      const run = () => {
+        if (!deckTransitionLock.tryAcquire()) {
+          deckTransitionLock.queueAfter(() => run());
+          return;
+        }
+
+        // Reuse the existing "transition in progress" guards so every other
+        // effect (volume sync, loadYouTube, ENDED poll, stopAll) already knows
+        // to stand down — exactly as it did for the sequential transition.
+        ytSequentialActiveRef.current = true;
+        ytManualTransitionRef.current = true;
+        ytManualFadeActiveRef.current = true;
+
+        const mixSec = Math.min(getMixDuration(), 12);
+        const targetVol = volumeRef.current;
+        const activePlayer = getYtActivePlayer();
+        const standbyDeck = getYtStandbyDeck();
+        const standbyRef = getYtPlayerRefForDeck(standbyDeck);
+        let fadeAbort: (() => void) | null = null;
+        let providerAdvanced = false;
+
+        const clearTransitionFlags = () => {
+          fadeAbort?.();
+          fadeAbort = null;
+          ytManualFadeActiveRef.current = false;
+          ytManualTransitionRef.current = false;
+          ytSequentialActiveRef.current = false;
+          if (opts?.natural) {
+            ytNaturalSequentialStartedRef.current = false;
+            ytOverlapActiveRef.current = false;
+          }
+          deckTransitionLock.release();
+        };
+
+        const isAborted = () =>
+          statusRef.current === "stopped" || !ytSequentialActiveRef.current;
+
+        // Abort / hard failure that must NOT touch the queue/session: keep the
+        // current active deck audible, drop the standby. Pointer stays put.
+        const finishKeepActive = (reason: string) => {
+          clearTransitionFlags();
+          const a = getYtActivePlayer();
+          if (isYtPlayerReady(a)) {
+            safeUnMute(a);
+            safeSetVolume(a, volumeRef.current);
+            if (statusRef.current === "playing") safePlayVideo(a);
+          }
+          const sb = standbyRef.current;
+          if (isYtPlayerReady(sb)) {
+            safePauseVideo(sb);
+            safeSetVolume(sb, 0);
+          }
+          p0XfadeDebug("yt_deck_keep_active", { nextVideoId, reason });
+        };
+
+        // Standby could not come up — fall back to the single-iframe sequential
+        // fade on the active deck. Release our flags/lock first so it can run.
+        const fallbackSequential = (reason: string) => {
+          clearTransitionFlags();
+          p0XfadeDebug("yt_deck_fallback_sequential", { nextVideoId, reason });
+          beginYtSequentialTransitionRef.current(nextVideoId, opts);
+        };
+
+        const finishPromote = () => {
+          // FLIP the pointer — refs never swap; the audible deck is now `standbyDeck`.
+          ytActiveDeckRef.current = standbyDeck;
+          markYtCanonicalActive(nextVideoId, opts?.natural ? "deck_natural" : "deck_manual");
+          currentVidRef.current = nextVideoId;
+          lastYtVidRef.current = nextVideoId;
+          clearTransitionFlags();
+          // Old active is now the standby deck: keep it alive, silence + pause it.
+          if (isYtPlayerReady(activePlayer)) {
+            safePauseVideo(activePlayer);
+            safeSetVolume(activePlayer, 0);
+          }
+          setEmbedReady(true);
+          p0XfadeDebug("yt_deck_complete", {
+            nextVideoId,
+            natural: !!opts?.natural,
+            activeDeck: standbyDeck,
+          });
+        };
+
+        void (async () => {
+          // 1. Get the next video onto the standby deck — reuse its player if alive.
+          const existing = standbyRef.current;
+          if (isYtPlayerReady(existing)) {
+            safeSetVolume(existing, 0);
+            safeLoadVideoById(existing, nextVideoId);
+          } else {
+            createYtStandbyPlayer(standbyDeck, nextVideoId);
+          }
+
+          // 2. Wait for the standby player object to exist.
+          const readyDeadline = Date.now() + 15_000;
+          while (!isYtPlayerReady(standbyRef.current)) {
+            if (isAborted() || Date.now() > readyDeadline) {
+              finishKeepActive("standby_create_timeout");
+              return;
+            }
+            await new Promise<void>((r) => setTimeout(r, 50));
+          }
+          const standby = standbyRef.current;
+
+          // 3. Bring the standby up at volume 0 and require it to be actually
+          //    PLAYING/BUFFERING before we touch a single volume value.
+          safeSetVolume(standby, 0);
+          safeUnMute(standby);
+          safePlayVideo(standby);
+          const stable = await waitForYtStandbyStable(standby, {
+            timeoutMs: 8_000,
+            isAborted,
+          });
+          if (isAborted()) {
+            finishKeepActive("aborted_before_fade");
+            return;
+          }
+          if (!stable) {
+            fallbackSequential("standby_unstable");
+            return;
+          }
+
+          // 4. Advance the provider queue NOW (no play command) so it tracks the
+          //    incoming video — the transition flags keep loadYouTube standing down.
+          if (opts?.onProviderAdvance && !providerAdvanced) {
+            providerAdvanced = true;
+            opts.onProviderAdvance();
+          }
+
+          // 5. True overlap: fade active out while standby comes up. Equal-power.
+          p0XfadeDebug("yt_deck_crossfade_start", { nextVideoId, mixSec, standbyDeck });
+          fadeAbort = runDualVolumeCrossfade(
+            (outV) => safeSetVolume(activePlayer, outV),
+            (inV) => safeSetVolume(standby, inV),
+            targetVol,
+            mixSec,
+            {
+              curve: "equalPower",
+              minUpdateIntervalMs: 40,
+              isAborted,
+              onComplete: () => finishPromote(),
+              onError: () => finishKeepActive("crossfade_error"),
+            },
+          );
+        })();
+      };
+
+      if (opts?.natural) ytNaturalSequentialStartedRef.current = true;
+      ytOverlapActiveRef.current = !!opts?.natural;
+      run();
+    },
+    [
+      deckTransitionLock,
+      markYtCanonicalActive,
+      getYtActivePlayer,
+      getYtStandbyDeck,
+      getYtPlayerRefForDeck,
+      createYtStandbyPlayer,
+    ],
+  );
+  beginYtDeckCrossfadeRef.current = beginYtDeckCrossfade;
+
+
+  const mountSoundCloudWidget = useCallback((embedUrl: string) => {
+    if (!scIframeRef.current || !window.SC) return;
+    const widget = window.SC.Widget(scIframeRef.current);
+    scWidgetRef.current = widget;
+    widget.setVolume(volumeRef.current);
+    widget.bind("ready", () => {
+      if (lastScEmbedUrlRef.current !== embedUrl) return;
+      setEmbedReady(true);
+      if (statusRef.current === "playing") widget.play();
     });
-    nextRef.current({ skipPlay: true, auditTransportCase: "ended_auto" });
-    endedHandledRef.current = true;
-    ytOverlapActiveRef.current = false;
-    ytCrossfadeStartedRef.current = false;
-    ytXfadeLog("handoff_completed");
-    setTimeout(() => {
-      const finalState = safeGetPlayerState(ytPlayerRef.current);
-      ytXfadeLog("handoff_500ms_later", { playerState: finalState });
-    }, 500);
-    setTimeout(() => {
-      const finalState = safeGetPlayerState(ytPlayerRef.current);
-      ytXfadeLog("handoff_1500ms_later", { playerState: finalState });
-    }, 1500);
+    widget.bind("finish", () => {
+      if (endedHandledRef.current) return;
+      endedHandledRef.current = true;
+      syncbizAuditTransportTransitionStart({
+        phase: "soundcloud_finish_before_provider_next",
+        auditTransportCase: "ended_auto",
+      });
+      nextRef.current({ auditTransportCase: "ended_auto" });
+    });
   }, []);
+
+  const beginScEmbedTransition = useCallback(
+    (newEmbedUrl: string) => {
+      if (scManualTransitionRef.current) return;
+      const widget = scWidgetRef.current;
+      if (!widget || !scIframeRef.current) return;
+
+      const run = () => {
+        if (!deckTransitionLock.tryAcquire()) {
+          deckTransitionLock.queueAfter(() => run());
+          return;
+        }
+        scManualTransitionRef.current = true;
+        const mixSec = getMixDuration();
+        const maxUiVol = volumeRef.current;
+        let fadeAbort: (() => void) | null = null;
+
+        const finish = (success: boolean) => {
+          fadeAbort?.();
+          fadeAbort = null;
+          scManualTransitionRef.current = false;
+          deckTransitionLock.release();
+          if (success) lastScEmbedUrlRef.current = newEmbedUrl;
+        };
+
+        fadeAbort = runDualVolumeCrossfade(
+          (outV) => {
+            try {
+              widget.setVolume(outV);
+            } catch {
+              /* ignore */
+            }
+          },
+          () => {},
+          maxUiVol,
+          mixSec,
+          {
+            curve: "equalPower",
+            minUpdateIntervalMs: 40,
+            onComplete: () => {
+              try {
+                widget.unbind?.("finish");
+                widget.pause();
+              } catch {
+                /* ignore */
+              }
+              scWidgetRef.current = null;
+              const iframe = scIframeRef.current;
+              if (iframe) iframe.src = newEmbedUrl;
+              const loadSC = () => {
+                if (!scIframeRef.current || !window.SC) {
+                  finish(false);
+                  return;
+                }
+                mountSoundCloudWidget(newEmbedUrl);
+                const nw = scWidgetRef.current;
+                if (!nw) {
+                  finish(false);
+                  return;
+                }
+                nw.setVolume(0);
+                fadeAbort = runDualVolumeCrossfade(
+                  () => {},
+                  (inV) => {
+                    try {
+                      nw.setVolume(inV);
+                    } catch {
+                      /* ignore */
+                    }
+                  },
+                  maxUiVol,
+                  mixSec,
+                  {
+                    curve: "equalPower",
+                    minUpdateIntervalMs: 40,
+                    onComplete: () => finish(true),
+                    onError: () => finish(false),
+                    isAborted: () =>
+                      statusRef.current === "stopped" || !scManualTransitionRef.current,
+                  },
+                );
+                if (statusRef.current === "playing") nw.play();
+              };
+              if (window.SC) loadSC();
+              else finish(false);
+            },
+            onError: () => finish(false),
+            isAborted: () =>
+              statusRef.current === "stopped" || !scManualTransitionRef.current,
+          },
+        );
+      };
+      run();
+    },
+    [deckTransitionLock, mountSoundCloudWidget],
+  );
+  beginScEmbedTransitionRef.current = beginScEmbedTransition;
 
   /** Load SoundCloud widget – deps exclude next/volume/status to avoid recreation loops and jitter */
   const loadSoundCloud = useCallback(() => {
     if (!scEmbedUrl || !scIframeRef.current) return;
     if (lastScEmbedUrlRef.current === scEmbedUrl) return;
+
+    const prevUrl = lastScEmbedUrlRef.current;
+    const midPlayback =
+      statusRef.current === "playing" || statusRef.current === "paused";
+    if (
+      prevUrl &&
+      prevUrl !== scEmbedUrl &&
+      scWidgetRef.current &&
+      midPlayback &&
+      !scManualTransitionRef.current
+    ) {
+      beginScEmbedTransitionRef.current(scEmbedUrl);
+      return;
+    }
+
     lastScEmbedUrlRef.current = scEmbedUrl;
     const oldWidget = scWidgetRef.current;
     if (oldWidget) {
@@ -953,23 +1577,7 @@ export function AudioPlayer() {
     }
     const loadSC = () => {
       if (!scIframeRef.current || !window.SC || lastScEmbedUrlRef.current !== scEmbedUrl) return;
-      const widget = window.SC.Widget(scIframeRef.current);
-      scWidgetRef.current = widget;
-      widget.setVolume(volumeRef.current);
-      widget.bind("ready", () => {
-        if (lastScEmbedUrlRef.current !== scEmbedUrl) return;
-        setEmbedReady(true);
-        if (statusRef.current === "playing") widget.play();
-      });
-      widget.bind("finish", () => {
-        if (endedHandledRef.current) return;
-        endedHandledRef.current = true;
-        syncbizAuditTransportTransitionStart({
-          phase: "soundcloud_finish_before_provider_next",
-          auditTransportCase: "ended_auto",
-        });
-        nextRef.current({ auditTransportCase: "ended_auto" });
-      });
+      mountSoundCloudWidget(scEmbedUrl);
     };
     if (window.SC) {
       loadSC();
@@ -979,16 +1587,36 @@ export function AudioPlayer() {
     tag.src = "https://w.soundcloud.com/player/api.js";
     tag.onload = loadSC;
     document.body.appendChild(tag);
-  }, [scEmbedUrl]);
+  }, [scEmbedUrl, mountSoundCloudWidget]);
 
   useEffect(() => {
-    if (isYouTube) loadYouTube();
-    else if (isSoundCloud) loadSoundCloud();
-  }, [isYouTube, isSoundCloud, loadYouTube, loadSoundCloud]);
+    if (!isYouTube) return;
+    loadYouTube();
+  }, [isYouTube, loadYouTube]);
+
+  useEffect(() => {
+    if (!isSoundCloud) return;
+    loadSoundCloud();
+  }, [isSoundCloud, loadSoundCloud]);
 
   useEffect(() => {
     const vidFromUrl = isYouTube && currentPlayUrl ? getYouTubeVideoId(currentPlayUrl) : null;
-    if (isYouTube && vidFromUrl && lastYtVidRef.current === vidFromUrl) return;
+    if (
+      isYouTube &&
+      vidFromUrl &&
+      (ytCanonicalActiveVidRef.current === vidFromUrl ||
+        lastYtVidRef.current === vidFromUrl ||
+        ytSuppressColdLoadVidRef.current === vidFromUrl)
+    ) {
+      p0XfadeDebug("embed_state_reset_skipped_post_handoff", {
+        vid: vidFromUrl,
+        canonical: ytCanonicalActiveVidRef.current,
+      });
+      return;
+    }
+    if (isYouTube && vidFromUrl) {
+      p0XfadeDebug("currentPlayUrl_changed_embed_reset", { vid: vidFromUrl });
+    }
     setEmbedReady(false);
     setPosition(0);
     setDuration(0);
@@ -1027,31 +1655,223 @@ export function AudioPlayer() {
     [handlePlaybackError, pause]
   );
 
+  /** Load a stream URL on a specific deck (direct or HLS). Used for cold starts and post-crossfade handoff. */
+  const loadStreamOnDeck = useCallback(
+    (deck: DeckId, url: string, shouldPlay: boolean) => {
+      const audio = getDeckAudio(deck);
+      if (!audio) return;
+      const useHls = isHlsUrl(url);
+      if (hlsRef.current && hlsDeckRef.current !== deck) {
+        try {
+          hlsRef.current.destroy();
+        } catch {
+          /* ignore */
+        }
+        hlsRef.current = null;
+        hlsDeckRef.current = null;
+      }
+      if (useHls) {
+        void import("hls.js").then(({ default: Hls }) => {
+          if (Hls.isSupported()) {
+            if (hlsRef.current) {
+              try {
+                hlsRef.current.destroy();
+              } catch {
+                /* ignore */
+              }
+            }
+            const hls = new Hls();
+            hlsRef.current = hls;
+            hlsDeckRef.current = deck;
+            hls.on(Hls.Events.ERROR, (_e, data) => {
+              if (data.fatal) {
+                mvpLog("playback_error", { error: data.type, context: "hls" });
+                setLastMessage(getTranslations(locale).streamFailed);
+              }
+            });
+            hls.loadSource(url);
+            hls.attachMedia(audio);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+              if (shouldPlay && statusRef.current === "playing") {
+                audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
+              }
+            });
+          } else if (audio.canPlayType("application/vnd.apple.mpegurl")) {
+            audio.src = url;
+            if (shouldPlay && statusRef.current === "playing") {
+              audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
+            }
+          } else {
+            audio.src = url;
+            if (shouldPlay && statusRef.current === "playing") {
+              audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
+            }
+          }
+        });
+        return;
+      }
+      if (hlsRef.current) {
+        try {
+          hlsRef.current.destroy();
+        } catch {
+          /* ignore */
+        }
+        hlsRef.current = null;
+        hlsDeckRef.current = null;
+      }
+      p0XfadeDebug("loadStreamOnDeck_src_set", {
+        deck,
+        url: url.slice(0, 120),
+        shouldPlay,
+        status: statusRef.current,
+      });
+      audio.src = url;
+      if (shouldPlay && statusRef.current === "playing") {
+        audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
+      }
+    },
+    [getDeckAudio, handleAudioPlayRejection, locale],
+  );
+
+  /**
+   * Manual or provider-driven URL replacement: crossfade active → standby when possible.
+   * HLS uses fade-out → load → fade-in fallback (no true overlap).
+   */
+  const beginStreamUrlTransition = useCallback(
+    (nextUrl: string) => {
+      const run = () => {
+        syncAudioRefToActiveDeck();
+        p0XfadeDebug("transition_start", {
+          via: lastPlayCommandViaRef.current,
+          engine: "html_ab",
+          nextUrl: nextUrl.slice(0, 120),
+          activeDeck: getActiveDeck(),
+          standbyDeck: getStandbyDeck(),
+          status: statusRef.current,
+          prevUrl: lastStreamUrlRef.current?.slice(0, 120) ?? null,
+        });
+        if (!deckTransitionLock.tryAcquire()) {
+          deckTransitionLock.queueAfter(() => run());
+          return;
+        }
+        const active = getDeckAudio(getActiveDeck());
+        const standby = getDeckAudio(getStandbyDeck());
+        p0XfadeDebug("deck_elements", {
+          hasActive: !!active,
+          hasStandby: !!standby,
+          activeDeck: getActiveDeck(),
+          standbyDeck: getStandbyDeck(),
+        });
+        const targetVol = volumeRef.current / 100;
+        const mixSec = getMixDuration();
+        const useHls = isHlsUrl(nextUrl);
+
+        const releaseAndLoadDirect = () => {
+          lastStreamUrlRef.current = nextUrl;
+          standbyPreloadedUrlRef.current = null;
+          loadStreamOnDeck(getActiveDeck(), nextUrl, statusRef.current === "playing");
+          deckTransitionLock.release();
+        };
+
+        if (!active) {
+          releaseAndLoadDirect();
+          return;
+        }
+
+        streamTransitionAbortRef.current?.();
+        crossfadeCleanupRef.current?.();
+        crossfadeCleanupRef.current = null;
+        crossfadeStartedRef.current = false;
+        crossfadeAbortRef.current = true;
+
+        if (useHls || !standby) {
+          xfadeLog("hls_fade_fallback", { nextUrl: nextUrl.slice(0, 60) });
+          const fadeOut = runVolumeFade(active, targetVol, 0, mixSec, {
+            onComplete: () => {
+              active.pause();
+              active.currentTime = 0;
+              releaseAndLoadDirect();
+              if (statusRef.current === "playing") {
+                runVolumeFade(active, 0, targetVol, mixSec, {
+                  onComplete: () => {},
+                  isAborted: () => statusRef.current === "stopped",
+                });
+              }
+            },
+            isAborted: () => statusRef.current === "stopped",
+          });
+          streamTransitionAbortRef.current = fadeOut;
+          return;
+        }
+
+        streamTransitionAbortRef.current = runAbDeckCrossfade(
+          active,
+          standby,
+          nextUrl,
+          targetVol,
+          mixSec,
+          {
+            onComplete: () => {
+              swapActiveDeck();
+              lastStreamUrlRef.current = nextUrl;
+              standbyPreloadedUrlRef.current = null;
+              streamTransitionAbortRef.current = null;
+              deckTransitionLock.release();
+              xfadeLog("manual_handoff_complete", { nextUrl: nextUrl.slice(0, 60) });
+              p0XfadeDebug("transition_complete", {
+                nextUrl: nextUrl.slice(0, 80),
+                via: lastPlayCommandViaRef.current,
+                engine: "html_ab",
+                suppressedReload: true,
+              });
+            },
+            onError: () => {
+              releaseAndLoadDirect();
+              streamTransitionAbortRef.current = null;
+            },
+            isAborted: () => statusRef.current === "stopped",
+            getStatus: () => statusRef.current,
+          },
+        );
+      };
+      run();
+    },
+    [
+      deckTransitionLock,
+      getDeckAudio,
+      getActiveDeck,
+      getStandbyDeck,
+      loadStreamOnDeck,
+      swapActiveDeck,
+      syncAudioRefToActiveDeck,
+    ],
+  );
+
   /** Best-effort resume when tab/app returns — does not override user pause (status must still be playing). */
   const nudgeResumePlayback = useCallback(() => {
     if (typeof document !== "undefined" && document.hidden) return;
     if (isControlMirrorRef.current) return;
     if (statusRef.current !== "playing") return;
     playbackLifecycleLog("resume_media_attempt", {
-      isStreamUrl: isStreamUrlRef.current,
+      isHtmlAudio: isHtmlAudioRef.current,
       isYouTube: isYouTubeRef.current,
       isSoundCloud: isSoundCloudRef.current,
       embedReady: embedReadyRef.current,
     });
     try {
-      if (isStreamUrlRef.current && audioRef.current?.paused) {
+      if (isHtmlAudioRef.current && audioRef.current?.paused) {
         void audioRef.current.play().catch((e) => {
           playbackLifecycleLog("resume_media_attempt", { result: "audio_reject", error: String(e) });
           handleAudioPlayRejection(e, "nudgeResumePlayback");
         });
       }
       if (isYouTubeRef.current && embedReadyRef.current) {
-        const p = ytPlayerRef.current;
+        const p = getYtActivePlayer();
         console.log("[SyncBiz Audit] YT command target", {
           reason: "nudgeResumePlayback",
           hasPlayer: isYtPlayerReady(p),
         });
-        if (isYtPlayerReady(p)) safePlayVideo(p);
+        if (isYtPlayerReady(p)) guardedYtPlay(p, "nudgeResumePlayback");
       }
       if (isSoundCloudRef.current && scWidgetRef.current) {
         scWidgetRef.current.play();
@@ -1059,7 +1879,7 @@ export function AudioPlayer() {
     } catch (e) {
       playbackLifecycleLog("resume_media_attempt", { result: "error", error: String(e) });
     }
-  }, [handleAudioPlayRejection]);
+  }, [handleAudioPlayRejection, guardedYtPlay]);
 
   useEffect(() => {
     playbackLifecycleLog("platform_hint", {
@@ -1076,9 +1896,10 @@ export function AudioPlayer() {
   // mobile-now-playing-sheet can call audio.play() synchronously inside its
   // tap handler. No-op on non-iOS UAs because primeIOSFromGesture short-circuits.
   useEffect(() => {
+    syncAudioRefToActiveDeck();
     registerIOSAudioElement(audioRef.current);
     return () => registerIOSAudioElement(null);
-  }, []);
+  }, [syncAudioRefToActiveDeck]);
 
   // Clear the "Tap to resume" flag whenever audio actually starts playing or
   // the user explicitly pauses/stops, so the affordance only appears when
@@ -1169,22 +1990,43 @@ export function AudioPlayer() {
   // HTML5 audio play/pause – only call play() when paused to avoid redundant calls that can cause jumps
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !isStreamUrl) return;
+    if (!audio || !isHtmlAudio) return;
     if (status === "playing") {
       if (audio.paused) audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
     } else {
       audio.pause();
       if (status === "stopped") audio.currentTime = 0;
     }
-  }, [status, isStreamUrl, handleAudioPlayRejection]);
+  }, [status, isHtmlAudio, handleAudioPlayRejection]);
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !isStreamUrl) return;
+    if (!audio || !isHtmlAudio) return;
+    if (deckTransitionLock.isLocked() || streamTransitionAbortRef.current || crossfadeStartedRef.current) {
+      p0XfadeDebug("volume_sync_skipped_during_transition");
+      return;
+    }
     audio.volume = volume / 100;
-  }, [volume, isStreamUrl]);
+  }, [volume, isHtmlAudio, deckTransitionLock]);
 
   const stopAllEmbedded = useCallback(() => {
+    p0XfadeDebug("stopAllEmbedded_called", {
+      ytManual: ytManualTransitionRef.current,
+      scManual: scManualTransitionRef.current,
+      lock: deckTransitionLock.isLocked(),
+      canonical: ytCanonicalActiveVidRef.current,
+      inGrace: Date.now() < ytHandoffGraceUntilRef.current,
+    });
+    if (
+      ytManualTransitionRef.current ||
+      ytSequentialActiveRef.current ||
+      scManualTransitionRef.current ||
+      deckTransitionLock.isLocked() ||
+      isYtHandoffGuardActive()
+    ) {
+      p0XfadeDebug("stopAllEmbedded_skipped_transition_active");
+      return;
+    }
     if (ytPlayerRef.current && isYtPlayerReady(ytPlayerRef.current)) {
       safeStopVideo(ytPlayerRef.current);
       safeDestroyYtPlayer(ytPlayerRef.current);
@@ -1221,7 +2063,7 @@ export function AudioPlayer() {
       audio.removeAttribute("src");
       audio.load();
     }
-  }, []);
+  }, [isYtHandoffGuardActive]);
 
   useEffect(() => {
     const unregister = registerStopAllPlayers(stopAllEmbedded);
@@ -1231,8 +2073,11 @@ export function AudioPlayer() {
   useEffect(() => {
     const seekToLocal = (seconds: number) => {
       const sec = Math.max(0, seconds);
+      if (deviceCtx?.deviceMode === "MASTER") {
+        masterPlaybackDiag("seekTo programmatic", { seconds: sec, isYouTube, isSoundCloud, isHtmlAudio });
+      }
       if (isYouTube) {
-        const p = ytPlayerRef.current;
+        const p = getYtActivePlayer();
         if (isYtPlayerReady(p)) {
           safeSeekTo(p, sec, true);
           setPosition(sec);
@@ -1240,30 +2085,30 @@ export function AudioPlayer() {
       } else if (isSoundCloud && scWidgetRef.current) {
         scWidgetRef.current.seekTo(sec * 1000);
         setPosition(sec);
-      } else if (isStreamUrl && audioRef.current) {
+      } else if (isHtmlAudio && audioRef.current) {
         audioRef.current.currentTime = sec;
         setPosition(sec);
       }
     };
     return registerSeekCallback(seekToLocal);
-  }, [registerSeekCallback, isYouTube, isSoundCloud, isStreamUrl]);
+  }, [registerSeekCallback, isYouTube, isSoundCloud, isHtmlAudio]);
 
-  /** Stop/destroy previous embed when switching source or track – ensures clean transition before loading new media.
-   * Skip when lastYtVidRef is set (YT crossfade handoff) – promoted player is already in place. */
+  /** Tear down embeds only when leaving YouTube/SoundCloud — NOT on every URL/track change. */
   useEffect(() => {
     if (!isYouTube && !isSoundCloud) {
       lastScEmbedUrlRef.current = null;
-      return;
     }
-    return () => {
-      if (isYouTube && lastYtVidRef.current) return;
-      stopAllEmbedded();
-      lastScEmbedUrlRef.current = null;
-    };
-  }, [isYouTube, isSoundCloud, stopAllEmbedded, currentPlayUrl]);
+  }, [isYouTube, isSoundCloud]);
 
   useEffect(() => {
-    const p = ytPlayerRef.current;
+    if (isYouTube || isSoundCloud) return;
+    p0XfadeDebug("embed_teardown_non_embed_mode");
+    stopAllEmbedded();
+  }, [isYouTube, isSoundCloud, stopAllEmbedded]);
+
+  useEffect(() => {
+    const p = getYtActivePlayer();
+    const urlVid = isYouTube && currentPlayUrl ? getYouTubeVideoId(currentPlayUrl) : null;
     if (status === "playing") {
       if (isYtPlayerReady(p) && isYouTube) {
         console.log("[SyncBiz Audit] YT command target", {
@@ -1271,28 +2116,38 @@ export function AudioPlayer() {
           hasPlayer: true,
           videoUrl: currentPlayUrl,
         });
-        safePlayVideo(p);
+        guardedYtPlay(p, "status_effect_play");
       }
       else if (scWidgetRef.current && isSoundCloud) scWidgetRef.current.play();
     } else if (status === "paused" || status === "stopped") {
+      if (status === "stopped" && isYouTube) {
+        if (isYtHandoffGuardActive(urlVid)) {
+          p0XfadeDebug("status_stop_skipped_post_handoff", { urlVid });
+        } else {
+          clearYtCanonicalActive("status_stopped");
+        }
+      }
       if (isYtPlayerReady(p) && isYouTube) {
-        if (status === "stopped") safeStopVideo(p);
-        else safePauseVideo(p);
+        if (isYtHandoffGuardActive(urlVid)) {
+          p0XfadeDebug("status_pause_stop_skipped_post_handoff", { status, urlVid });
+        } else {
+          if (status === "stopped") safeStopVideo(p);
+          else safePauseVideo(p);
+        }
       } else if (scWidgetRef.current && isSoundCloud) {
         scWidgetRef.current.pause();
         if (status === "stopped") scWidgetRef.current.seekTo(0);
       }
     }
-  }, [status, isYouTube, isSoundCloud, embedReady]);
+  }, [status, isYouTube, isSoundCloud, embedReady, currentPlayUrl, guardedYtPlay, clearYtCanonicalActive, isYtHandoffGuardActive]);
 
-  // Set audio src when stream URL changes (with HLS.js for .m3u8).
-  // IMPORTANT: Do NOT include status in deps – re-running on status change causes src reset and playback jumps.
-  // Play/pause is handled by the separate effect below.
+  // Stream URL routing: A/B deck crossfade on replacement; cold load when idle/stopped.
+  // IMPORTANT: Do NOT include status in deps – play/pause is handled separately.
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (!isStreamUrl || !currentPlayUrl) {
+    syncAudioRefToActiveDeck();
+    if (!isHtmlAudio || !currentPlayUrl) {
       lastStreamUrlRef.current = null;
+      standbyPreloadedUrlRef.current = null;
       if (hlsRef.current) {
         try {
           hlsRef.current.destroy();
@@ -1300,89 +2155,112 @@ export function AudioPlayer() {
           /* ignore */
         }
         hlsRef.current = null;
+        hlsDeckRef.current = null;
       }
-      audio.removeAttribute("src");
-      audio.load();
+      for (const deck of ["A", "B"] as DeckId[]) {
+        const el = getDeckAudio(deck);
+        if (el) {
+          el.pause();
+          el.removeAttribute("src");
+          el.load();
+        }
+      }
       return;
     }
 
-    // Skip if URL unchanged – setting src again causes reload and playback restart
     if (lastStreamUrlRef.current === currentPlayUrl) return;
-    lastStreamUrlRef.current = currentPlayUrl;
 
-    const useHls = isHlsUrl(currentPlayUrl);
+    const prevUrl = lastStreamUrlRef.current;
+    const shouldCrossfade =
+      !!prevUrl &&
+      prevUrl !== currentPlayUrl &&
+      (statusRef.current === "playing" || statusRef.current === "paused");
 
-    if (useHls) {
-      let cancelled = false;
-      import("hls.js").then(({ default: Hls }) => {
-        if (cancelled) return;
-        if (Hls.isSupported()) {
-          if (hlsRef.current) {
-            try {
-              hlsRef.current.destroy();
-            } catch {
-              /* ignore */
-            }
-            hlsRef.current = null;
-          }
-          const hls = new Hls();
-          hlsRef.current = hls;
-          hls.on(Hls.Events.ERROR, (_e, data) => {
-            if (data.fatal) {
-              mvpLog("playback_error", { error: data.type, context: "hls" });
-              setLastMessage(getTranslations(locale).streamFailed);
-            }
-          });
-          hls.loadSource(currentPlayUrl);
-          hls.attachMedia(audio);
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            if (cancelled) return;
-            if (statusRef.current === "playing") audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
-          });
-        } else if (audio.canPlayType("application/vnd.apple.mpegurl")) {
-          audio.src = currentPlayUrl;
-          if (statusRef.current === "playing") audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
-        } else {
-          audio.src = currentPlayUrl;
-          if (statusRef.current === "playing") audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
-        }
+    if (shouldCrossfade) {
+      xfadeLog("url_change_transition", {
+        from: prevUrl.slice(0, 60),
+        to: currentPlayUrl.slice(0, 60),
       });
-      return () => {
-        cancelled = true;
-        if (hlsRef.current) {
-          try {
-            hlsRef.current.destroy();
-          } catch {
-            /* ignore */
-          }
-          hlsRef.current = null;
-        };
-      };
+      p0XfadeDebug("html_routing_crossfade", {
+        from: prevUrl.slice(0, 80),
+        to: currentPlayUrl.slice(0, 80),
+      });
+      beginStreamUrlTransition(currentPlayUrl);
+      return;
     }
 
-    // Non-HLS path
-    if (hlsRef.current) {
-      try {
-        hlsRef.current.destroy();
-      } catch {
-        /* ignore */
-      }
-      hlsRef.current = null;
-    }
-    const onError = () => handlePlaybackError("audio load failed", "audio.error");
-    audio.addEventListener("error", onError);
-    audio.src = currentPlayUrl;
-    if (statusRef.current === "playing") audio.play().catch((e) => handleAudioPlayRejection(e, "audio.play"));
-    return () => audio.removeEventListener("error", onError);
-  }, [isStreamUrl, currentPlayUrl, handlePlaybackError, handleAudioPlayRejection, locale]);
+    p0XfadeDebug("html_routing_cold_load", {
+      url: currentPlayUrl.slice(0, 80),
+      prevUrl: prevUrl?.slice(0, 80) ?? null,
+      status: statusRef.current,
+    });
+    lastStreamUrlRef.current = currentPlayUrl;
+    standbyPreloadedUrlRef.current = null;
+    loadStreamOnDeck(getActiveDeck(), currentPlayUrl, statusRef.current === "playing");
+  }, [isHtmlAudio, currentPlayUrl, beginStreamUrlTransition, loadStreamOnDeck, getDeckAudio, getActiveDeck, syncAudioRefToActiveDeck]);
 
   useEffect(() => {
-    const p = ytPlayerRef.current;
+    if (
+      ytManualTransitionRef.current ||
+      ytSequentialActiveRef.current ||
+      ytManualFadeActiveRef.current ||
+      ytOverlapActiveRef.current ||
+      ytOverlapFadeAbortRef.current ||
+      deckTransitionLock.isLocked()
+    ) {
+      p0XfadeDebug("embed_volume_sync_skipped_during_transition");
+      return;
+    }
+    const p = getYtActivePlayer();
     if (isYtPlayerReady(p) && isYouTube) safeSetVolume(p, volume);
     else if (scWidgetRef.current && isSoundCloud) scWidgetRef.current.setVolume(volume);
-  }, [volume, isYouTube, isSoundCloud]);
+  }, [volume, isYouTube, isSoundCloud, deckTransitionLock]);
 
   useEffect(() => {
+    const isDesktop = typeof window !== "undefined" && "syncbizDesktop" in window;
+    p0XfadeDebug("currentPlayUrl_changed", {
+      url: currentPlayUrl?.slice(0, 120) ?? null,
+      isHtmlAudio,
+      isYouTube,
+      isSoundCloud,
+      isDesktop,
+      isControlMirror,
+      deviceMode: deviceCtx?.deviceMode ?? null,
+      status,
+      trackType: currentTrack?.type ?? null,
+      lastStreamUrl: lastStreamUrlRef.current?.slice(0, 120) ?? null,
+      lock: deckTransitionLock.isLocked(),
+      canonical: ytCanonicalActiveVidRef.current,
+      suppress: ytSuppressColdLoadVidRef.current,
+      inHandoffGrace: Date.now() < ytHandoffGraceUntilRef.current,
+      via: lastPlayCommandViaRef.current,
+    });
+  }, [currentPlayUrl, isHtmlAudio, isYouTube, isSoundCloud, isControlMirror, deviceCtx?.deviceMode, status, currentTrack?.type, deckTransitionLock]);
+
+  useEffect(() => {
+    const urlVid = isYouTube && currentPlayUrl ? getYouTubeVideoId(currentPlayUrl) : null;
+    if (
+      urlVid &&
+      ytCanonicalActiveVidRef.current === urlVid &&
+      Date.now() < ytHandoffGraceUntilRef.current
+    ) {
+      p0XfadeDebug("url_reset_skipped_post_handoff", { urlVid });
+      return;
+    }
+    if (
+      deckTransitionLock.isLocked() ||
+      ytManualTransitionRef.current ||
+      ytSequentialActiveRef.current ||
+      scManualTransitionRef.current ||
+      streamTransitionAbortRef.current
+    ) {
+      p0XfadeDebug("url_reset_skipped_transition_active", {
+        url: currentPlayUrl?.slice(0, 80) ?? null,
+      });
+      endedHandledRef.current = false;
+      return;
+    }
+    p0XfadeDebug("url_reset_crossfade_state", { url: currentPlayUrl?.slice(0, 80) ?? null });
     endedHandledRef.current = false;
     crossfadeStartedRef.current = false;
     crossfadeAbortRef.current = false;
@@ -1396,6 +2274,10 @@ export function AudioPlayer() {
     ytNextVideoIdRef.current = null;
     ytCrossfadeCleanupRef.current?.();
     ytCrossfadeCleanupRef.current = null;
+    ytCrossfadeDismissRef.current?.();
+    ytCrossfadeDismissRef.current = null;
+    ytOverlapFadeAbortRef.current?.();
+    ytOverlapFadeAbortRef.current = null;
   }, [currentPlayUrl]);
 
   useEffect(() => {
@@ -1434,7 +2316,7 @@ export function AudioPlayer() {
   useEffect(() => {
     if (!isYouTubeMultiTrack || !isYouTube) return;
     const poll = () => {
-      const p = ytPlayerRef.current;
+      const p = getYtActivePlayer();
       if (!isYtPlayerReady(p)) return;
       const playlist = safeGetPlaylist(p);
       const idx = safeGetPlaylistIndex(p);
@@ -1468,10 +2350,17 @@ export function AudioPlayer() {
       truthAuditPollTickRef.current += 1;
       truthAuditLastPollWallMsRef.current = Date.now();
       if (isYouTube) {
-        const p = ytPlayerRef.current;
+        const p = getYtActivePlayer();
         if (isYtPlayerReady(p)) {
           const playerState = safeGetPlayerState(p);
           if (playerState === window.YT!.PlayerState.ENDED) {
+            if (Date.now() < ytHandoffGraceUntilRef.current) {
+              p0XfadeDebug("yt_ended_ignored_handoff_grace", {
+                canonical: ytCanonicalActiveVidRef.current,
+                currentVid: currentVidRef.current,
+              });
+              return;
+            }
             const overlapActiveOuter = !!ytOverlapActiveRef.current;
             const nextVidOuter = ytNextVideoIdRef.current;
             console.log("[SyncBiz Audit] YT ended outer_state", {
@@ -1523,10 +2412,17 @@ export function AudioPlayer() {
                 overlapActive,
                 nextVid,
               });
-              if (overlapActive && nextVid) {
-                ytXfadeLog("handoff_path_taken");
-                console.log("[SyncBiz Audit] YT AutoMix handoff_path_taken", { nextVid });
-                doYtHandoff(nextVid);
+              if (
+                ytSequentialActiveRef.current ||
+                ytNaturalSequentialStartedRef.current ||
+                overlapActive
+              ) {
+                p0XfadeDebug("yt_ended_ignored_sequential", {
+                  overlapActive,
+                  sequential: ytSequentialActiveRef.current,
+                  natural: ytNaturalSequentialStartedRef.current,
+                });
+                endedHandledRef.current = true;
               } else {
                 endedHandledRef.current = true;
                 if (ytCrossfadeStartedRef.current) {
@@ -1583,14 +2479,14 @@ export function AudioPlayer() {
                   // state with endedHandledRef=true, preventing any further advance forever.
                   // Fix: if the URL is still the same after next(), seek to 0 and replay.
                   if (currentPlayUrlRef.current === urlBeforeNext) {
-                    const p = ytPlayerRef.current;
+                    const p = getYtActivePlayer();
                     if (isYtPlayerReady(p)) {
                       console.log("[SyncBiz Audit] YT single-track restart — replaying from 0", {
                         url: urlBeforeNext,
                       });
                       endedHandledRef.current = false;
                       safeSeekTo(p, 0, true);
-                      safePlayVideo(p);
+                      guardedYtPlay(p, "single_track_restart");
                     }
                   }
                 }, 0);
@@ -1605,7 +2501,9 @@ export function AudioPlayer() {
                 reason: "playerState_not_ENDED",
               });
             }
-            endedHandledRef.current = false;
+            if (!(ytCanonicalActiveVidRef.current && Date.now() < ytHandoffGraceUntilRef.current)) {
+              endedHandledRef.current = false;
+            }
           }
           const pos = safeGetCurrentTime(p);
           const dur = safeGetDuration(p);
@@ -1619,7 +2517,6 @@ export function AudioPlayer() {
           }
           reportRecoveryProgress(pos);
           if (
-            autoMixRef.current &&
             statusRef.current === "playing" &&
             !isYouTubeMix &&
             !isYouTubeMultiTrack &&
@@ -1658,49 +2555,35 @@ export function AudioPlayer() {
                 nextVid,
               });
             }
-            if (pos >= preloadThreshold && nextVid && !ytCrossfadeStartedRef.current) {
-              const currState = safeGetPlayerState(p);
-              const secLeft = dur - pos;
-              ytXfadeLog("preload_trigger_reached", { pos, dur, mixSec, secLeft, nextVid, currentPlayerState: currState });
-              console.log("[SyncBiz Audit] YT AutoMix preload_trigger", {
+            if (pos >= preloadThreshold && !nextVid && nextEmbed) {
+              p0XfadeDebug("natural_preload_skipped_no_vid", {
                 pos,
                 dur,
-                mixSec,
-                secLeft,
-                nextVid,
-                currentPlayerState: currState,
+                nextUrl: nextUrl?.slice(0, 80) ?? null,
+                sessionNext: true,
               });
+            }
+            if (
+              pos >= mixPointThreshold &&
+              nextVid &&
+              !ytNaturalSequentialStartedRef.current &&
+              !ytSequentialActiveRef.current &&
+              !ytCrossfadeStartedRef.current
+            ) {
               ytCrossfadeStartedRef.current = true;
               ytNextVideoIdRef.current = nextVid;
-              ytCrossfadeAbortRef.current = false;
-              ytCrossfadeCleanupRef.current?.();
-              const abort = runYtPreload(nextVid, {
-                onError: () => {
-                  ytXfadeLog("preload_error");
-                  console.log("[SyncBiz Audit] YT AutoMix preload_error", { nextVid });
-                  ytCrossfadeStartedRef.current = false;
-                  ytNextVideoIdRef.current = null;
+              endedHandledRef.current = true;
+              p0XfadeDebug("yt_natural_deck_crossfade_start", { nextVid, pos, dur, mixSec });
+              beginYtDeckCrossfadeRef.current(nextVid, {
+                natural: true,
+                onProviderAdvance: () => {
+                  syncbizAuditTransportTransitionStart({
+                    phase: "yt_natural_sequential_provider_advance",
+                    auditTransportCase: "ended_auto",
+                  });
+                  nextRef.current({ skipPlay: true, auditTransportCase: "ended_auto" });
                 },
-                isAborted: () => ytCrossfadeAbortRef.current || statusRef.current !== "playing",
               });
-              ytCrossfadeCleanupRef.current = abort;
-            }
-
-            if (pos >= mixPointThreshold && nextVid && !ytOverlapActiveRef.current && isYtPlayerReady(ytPlayerNextRef.current) && ytNextVideoIdRef.current === nextVid) {
-              const np = ytPlayerNextRef.current;
-              const currState = safeGetPlayerState(p);
-              ytXfadeLog("mix_point_reached_starting_next", { pos, dur, mixSec, currentPlayerState: currState });
-              console.log("[SyncBiz Audit] YT AutoMix mix_point_reached_starting_next", {
-                pos,
-                dur,
-                mixSec,
-                nextVid,
-                currentPlayerState: currState,
-              });
-              safeUnMute(np);
-              safeSetVolume(np, volumeRef.current);
-              safePlayVideo(np);
-              ytOverlapActiveRef.current = true;
             }
           }
         }
@@ -1718,7 +2601,7 @@ export function AudioPlayer() {
             reportRecoveryProgress(p);
           });
         });
-      } else if (isStreamUrl && audioRef.current) {
+      } else if (isHtmlAudio && audioRef.current) {
         const a = audioRef.current;
         const t = a.currentTime;
         const d = a.duration;
@@ -1741,94 +2624,95 @@ export function AudioPlayer() {
             deviceCtx.reportPosition(t, d);
           }
           reportRecoveryProgress(t);
-          // Crossfade for direct audio URL only (no HLS): AutoMix ON + within mix window
           const mixSec = getMixDuration();
-          const threshold = Math.max(0, d - mixSec);
-          const inMixWindow = t >= threshold;
-          if (inMixWindow && !crossfadeInMixWindowRef.current) {
+          const preloadAt = preloadThresholdSec(d, mixSec);
+          const mixAt = mixPointThresholdSec(d, mixSec);
+          const nextUrl = getNextStreamUrl();
+          const canOverlap = !!(
+            nextUrl &&
+            currentPlayUrl &&
+            !isHlsUrl(currentPlayUrl) &&
+            !isHlsUrl(nextUrl)
+          );
+
+          if (canOverlap && t >= preloadAt && standbyPreloadedUrlRef.current !== nextUrl) {
+            const standby = getDeckAudio(getStandbyDeck());
+            if (standby && !crossfadeStartedRef.current) {
+              standbyPreloadedUrlRef.current = nextUrl;
+              standby.volume = 0;
+              standby.preload = "auto";
+              standby.src = nextUrl;
+              standby.load();
+              xfadeLog("standby_preload", { nextUrl: nextUrl.slice(0, 60), t, d, preloadAt });
+            }
+          }
+
+          if (t >= mixAt && !crossfadeInMixWindowRef.current) {
             crossfadeInMixWindowRef.current = true;
-            const nextUrl = getNextStreamUrl();
-            const ok = !!(
-              autoMixRef.current &&
-              statusRef.current === "playing" &&
-              currentPlayUrl &&
-              !isHlsUrl(currentPlayUrl) &&
-              !crossfadeStartedRef.current &&
-              nextUrl
-            );
             xfadeLog("mix_window_entered", {
               t,
               d,
               mixSec,
-              threshold,
+              mixAt,
               nextUrl: nextUrl ? "yes" : "no",
-              autoMix: autoMixRef.current,
               status: statusRef.current,
               hls: isHlsUrl(currentPlayUrl ?? ""),
-              willTrigger: ok,
             });
-            console.log("[SyncBiz Audit] Direct Xfade mix_window_entered", {
-              currentUrl: currentPlayUrl,
-              nextUrl,
+          }
+
+          if (
+            statusRef.current === "playing" &&
+            canOverlap &&
+            !crossfadeStartedRef.current &&
+            nextUrl &&
+            t >= mixAt
+          ) {
+            const standby = getDeckAudio(getStandbyDeck());
+            if (!standby) return;
+            xfadeLog("trigger", { t, d, mixSec, nextUrl: nextUrl.slice(0, 60) });
+            p0XfadeDebug("natural_crossfade_trigger", {
               t,
               d,
               mixSec,
-              willTrigger: ok,
+              nextUrl: nextUrl.slice(0, 80),
+              activeDeck: getActiveDeck(),
+              standbyDeck: getStandbyDeck(),
             });
-          }
-          if (
-            autoMixRef.current &&
-            statusRef.current === "playing" &&
-            currentPlayUrl &&
-            !isHlsUrl(currentPlayUrl) &&
-            !crossfadeStartedRef.current
-          ) {
-            const nextUrl = getNextStreamUrl();
-            if (nextUrl && t >= Math.max(0, d - mixSec)) {
-              xfadeLog("trigger", { t, d, mixSec, nextUrl: nextUrl.slice(0, 60) });
-              console.log("[SyncBiz Audit] Direct Xfade trigger", {
-                currentUrl: currentPlayUrl,
-                nextUrl,
-                t,
-                d,
-                mixSec,
-              });
-              crossfadeStartedRef.current = true;
-              crossfadeAbortRef.current = false;
-              crossfadeCleanupRef.current?.();
-              const abort = runCrossfade(a, nextUrl, volumeRef.current / 100, mixSec, {
-                onComplete: () => {
-                  xfadeLog("onComplete");
-                  console.log("[SyncBiz Audit] Direct Xfade onComplete", {
-                    nextUrl,
-                    statusAfter: statusRef.current,
-                  });
-                  lastStreamUrlRef.current = nextUrl;
-                  syncbizAuditTransportTransitionStart({
-                    phase: "direct_audio_xfade_onComplete_before_provider_next_skipPlay",
-                    auditTransportCase: "ended_auto",
-                    skipPlay: true,
-                    nextUrlPreview: nextUrl?.slice(0, 120) ?? null,
-                  });
-                  (nextRef.current as ((opts?: { skipPlay?: boolean; auditTransportCase?: "ended_auto" }) => void) | undefined)?.({
-                    skipPlay: true,
-                    auditTransportCase: "ended_auto",
-                  });
-                  endedHandledRef.current = true;
-                },
-                onError: () => {
-                  xfadeLog("onError");
-                  console.log("[SyncBiz Audit] Direct Xfade onError", {
-                    nextUrl,
-                    statusAtError: statusRef.current,
-                  });
-                  crossfadeStartedRef.current = false;
-                },
-                isAborted: () => crossfadeAbortRef.current || statusRef.current !== "playing",
-                getStatus: () => statusRef.current,
-              });
-              crossfadeCleanupRef.current = abort;
+            crossfadeStartedRef.current = true;
+            crossfadeAbortRef.current = false;
+            crossfadeCleanupRef.current?.();
+            if (!deckTransitionLock.tryAcquire()) {
+              crossfadeStartedRef.current = false;
+              return;
             }
+            const abort = runAbDeckCrossfade(a, standby, nextUrl, volumeRef.current / 100, mixSec, {
+              onComplete: () => {
+                swapActiveDeck();
+                lastStreamUrlRef.current = nextUrl;
+                standbyPreloadedUrlRef.current = null;
+                deckTransitionLock.release();
+                xfadeLog("onComplete");
+                syncbizAuditTransportTransitionStart({
+                  phase: "direct_audio_xfade_onComplete_before_provider_next_skipPlay",
+                  auditTransportCase: "ended_auto",
+                  skipPlay: true,
+                  nextUrlPreview: nextUrl?.slice(0, 120) ?? null,
+                });
+                (nextRef.current as ((opts?: { skipPlay?: boolean; auditTransportCase?: "ended_auto" }) => void) | undefined)?.({
+                  skipPlay: true,
+                  auditTransportCase: "ended_auto",
+                });
+                endedHandledRef.current = true;
+              },
+              onError: () => {
+                deckTransitionLock.release();
+                crossfadeStartedRef.current = false;
+                xfadeLog("onError");
+              },
+              isAborted: () => crossfadeAbortRef.current || statusRef.current !== "playing",
+              getStatus: () => statusRef.current,
+            });
+            crossfadeCleanupRef.current = abort;
           }
         }
       }
@@ -1836,11 +2720,11 @@ export function AudioPlayer() {
     poll();
     const id = setInterval(poll, 500);
     return () => clearInterval(id);
-  }, [currentSource, isYouTube, isSoundCloud, isStreamUrl, isYouTubeMix, isYouTubeMultiTrack, getNextEmbeddedSource, runYtPreload, deviceCtx?.isBranchConnected, deviceCtx?.deviceMode, doYtHandoff, updatePositionIfChanged, updateDurationIfChanged, updateBufferedIfChanged, reportRecoveryProgress]);
+  }, [currentSource, isYouTube, isSoundCloud, isHtmlAudio, isYouTubeMix, isYouTubeMultiTrack, getNextStreamUrl, getNextEmbeddedSource, deviceCtx?.isBranchConnected, deviceCtx?.deviceMode, updatePositionIfChanged, updateDurationIfChanged, updateBufferedIfChanged, reportRecoveryProgress, getDeckAudio, getStandbyDeck, swapActiveDeck, deckTransitionLock, guardedYtPlay]);
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !isStreamUrl) return;
+    if (!audio || !isHtmlAudio) return;
     const onEnded = () => {
       const d = lastKnownDurationRef.current;
       if (!Number.isFinite(d) || d <= 0) return;
@@ -1869,11 +2753,11 @@ export function AudioPlayer() {
     };
     audio.addEventListener("ended", onEnded);
     return () => audio.removeEventListener("ended", onEnded);
-  }, [isStreamUrl]);
+  }, [isHtmlAudio]);
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !isStreamUrl) return;
+    if (!audio || !isHtmlAudio) return;
     const onPause = () => {
       if (statusRef.current !== "playing") return;
       if (audio.ended) return;
@@ -1881,14 +2765,76 @@ export function AudioPlayer() {
         currentTime: audio.currentTime,
         readyState: audio.readyState,
       });
+      if (deviceCtx?.deviceMode === "MASTER") {
+        masterPlaybackDiag("media pause (unexpected)", {
+          currentTime: audio.currentTime,
+          readyState: audio.readyState,
+          paused: audio.paused,
+        });
+      }
     };
     audio.addEventListener("pause", onPause);
     return () => audio.removeEventListener("pause", onPause);
-  }, [isStreamUrl, currentPlayUrl]);
+  }, [isHtmlAudio, currentPlayUrl, deviceCtx?.deviceMode]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !isHtmlAudio || deviceCtx?.deviceMode !== "MASTER") return;
+    const logMedia = (event: string, extra?: Record<string, unknown>) => {
+      masterPlaybackDiag(`media ${event}`, {
+        currentTime: audio.currentTime,
+        duration: audio.duration,
+        paused: audio.paused,
+        readyState: audio.readyState,
+        ...extra,
+      });
+    };
+    const onPlay = () => logMedia("play");
+    const onPlaying = () => logMedia("playing");
+    const onWaiting = () => logMedia("waiting");
+    const onStalled = () => logMedia("stalled");
+    const onError = () => logMedia("error");
+    const onTimeUpdate = () => {
+      if (process.env.NODE_ENV !== "development") return;
+      const t = audio.currentTime;
+      if (!Number.isFinite(t)) return;
+      const last = (audio as HTMLAudioElement & { __sbLastDiagT?: number }).__sbLastDiagT ?? -1;
+      if (Math.abs(t - last) < 0.45) return;
+      (audio as HTMLAudioElement & { __sbLastDiagT?: number }).__sbLastDiagT = t;
+      logMedia("timeupdate");
+    };
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("playing", onPlaying);
+    audio.addEventListener("waiting", onWaiting);
+    audio.addEventListener("stalled", onStalled);
+    audio.addEventListener("error", onError);
+    audio.addEventListener("timeupdate", onTimeUpdate);
+    return () => {
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("playing", onPlaying);
+      audio.removeEventListener("waiting", onWaiting);
+      audio.removeEventListener("stalled", onStalled);
+      audio.removeEventListener("error", onError);
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+    };
+  }, [isHtmlAudio, currentPlayUrl, deviceCtx?.deviceMode]);
 
   // ── Desktop mode: route web UI playback through MPV Channel A ──────────────
   // Chromium audio is muted at the Electron level (setAudioMuted). These effects
   // mirror every play/pause/stop/URL change to the Orchestrator → MPV Ch-A.
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const desktop = (window as any).syncbizDesktop;
+    const sync = () => {
+      if (typeof desktop.setMixDuration === "function") {
+        void desktop.setMixDuration(getMixDuration());
+      }
+    };
+    sync();
+    return onMixDurationChanged(sync);
+  }, []);
 
   const mpvLastUrlRef = useRef<string | null>(null);
   // Tracks Ch-A MPV status from onStatus broadcasts (no re-render — refs only).
@@ -2015,8 +2961,25 @@ export function AudioPlayer() {
           if (statusRef.current !== "playing") return;
           if (currentPlayUrlRef.current !== latest) return;
           if (latest === mpvLastUrlRef.current) return;
+          const prevMpv = mpvLastUrlRef.current;
           mpvLastUrlRef.current = latest;
-          void desktop.mpvPlayUrl(latest);
+          const fadeSec = getMixDuration();
+          const mpvPlaying = mpvChAStatusRef.current === "playing";
+          const intentPlaying = statusRef.current === "playing";
+          const useCrossfade = !!(prevMpv && desktop.mpvPlayUrlCrossfade && (mpvPlaying || intentPlaying));
+          p0XfadeDebug("desktop_mpv_url_dispatch", {
+            latest: latest.slice(0, 120),
+            prevMpv: prevMpv?.slice(0, 120) ?? null,
+            fadeSec,
+            mpvPlaying,
+            intentPlaying,
+            useCrossfade,
+          });
+          if (useCrossfade) {
+            void desktop.mpvPlayUrlCrossfade(latest, fadeSec);
+          } else {
+            void desktop.mpvPlayUrl(latest);
+          }
         }, MPV_LOADFILE_COALESCE_MS);
       } else {
         // Same URL, resumed after pause — don't restart.
@@ -2072,7 +3035,9 @@ export function AudioPlayer() {
           if (typeof pos !== "number" || !Number.isFinite(pos)) return Number.NaN;
           if (ms?.status !== "playing" || typeof at !== "number" || !Number.isFinite(at)) return pos;
           const dur = typeof ms?.duration === "number" && Number.isFinite(ms.duration) ? ms.duration : Infinity;
-          return Math.min(pos + (Date.now() - at) / 1000, dur);
+          const ageMs = Date.now() - at;
+          if (ageMs > 1200) return pos;
+          return Math.min(pos + ageMs / 1000, dur);
         })()
       : position;
   const displayDuration = isDesktopMode
@@ -2108,6 +3073,34 @@ export function AudioPlayer() {
   const displayTitle = isControlMirror
     ? (ms?.currentTrack?.title ?? ms?.currentSource?.title ?? t.noSourceSelected)
     : (ytMultiTrackState?.currentTitle ?? currentTrack?.title ?? t.noSourceSelected);
+
+  /**
+   * Now Playing chips (Source / Genre / Mood) — resolved against the underlying
+   * `PlaylistTrack` so we get the per-track ID3/catalog taxonomy the AI builder
+   * recorded, not just the playlist-level vibe. In CONTROL-mirror mode we have
+   * no access to the underlying track list, so we fall back to the parent
+   * playlist taxonomy (still better than no chip).
+   */
+  const playerHeroPlaylist = useMemo(() => {
+    if (isControlMirror) return null;
+    if (currentSource) {
+      const attached = effectivePlaybackPlaylistAttachment(currentSource);
+      if (attached) return attached;
+    }
+    return currentPlaylist ?? null;
+  }, [isControlMirror, currentSource, currentPlaylist]);
+  const playerHeroTrack = useMemo(() => {
+    if (isControlMirror) return null;
+    const pl = playerHeroPlaylist;
+    if (!pl) return null;
+    const trackId = currentTrack?.id;
+    if (!trackId) return null;
+    return getPlaylistTracks(pl).find((x) => x.id === trackId) ?? null;
+  }, [isControlMirror, playerHeroPlaylist, currentTrack?.id]);
+  const playerHeroTrackMetaCache = useMemo(
+    () => (playerHeroPlaylist ? getCachedAiPlaylistTracksMeta(playerHeroPlaylist.id) : {}),
+    [playerHeroPlaylist],
+  );
   /*
    * NEXT TRACK label resolution. Old logic walked currentPlaylist -> queue and was wrong in
    * two common cases the operator hit on stage:
@@ -2126,7 +3119,14 @@ export function AudioPlayer() {
    *      next track, and that fallback is what the operator was reading as wrong.
    */
   const displayNextLabel = isControlMirror
-    ? (ms?.queue?.[(ms?.queueIndex ?? 0) + 1]?.title ?? null)
+    ? (ms?.nextSessionTrack?.title ??
+      (() => {
+        const rows = ms?.sessionTracks;
+        if (!rows?.length) return null;
+        const idx = typeof ms?.currentTrackIndex === "number" ? ms.currentTrackIndex : 0;
+        const nextIdx = rows.length === 1 ? 0 : idx < rows.length - 1 ? idx + 1 : 0;
+        return rows[nextIdx]?.title ?? null;
+      })())
     : (() => {
         if (ytMultiTrackState?.nextTitle) return ytMultiTrackState.nextTitle;
 
@@ -2170,7 +3170,7 @@ export function AudioPlayer() {
     // Desktop: catalog navigation — enabled when library has > 1 item, OR local playlist/queue also covers the case
     ? (desktopMpvSnap.catalogCount > 1 || (currentSource && queue.length > 1) || !!(currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1) || hasStagedPlayNext)
     : isControlMirror
-      ? ((ms?.queue?.length ?? 0) > 1)
+      ? ((ms?.sessionTracks?.length ?? 0) > 1 || (ms?.queue?.length ?? 0) > 1)
       : (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1) || hasStagedPlayNext;
   const displayCanSeek = isDesktopMode
     // Desktop: MPV reports duration when a file is loaded — that is the only condition needed.
@@ -2178,9 +3178,9 @@ export function AudioPlayer() {
     : isControlMirror
       ? (displayDuration > 0)
       : (!!currentSource &&
-          ((isYouTube && isYtPlayerReady(ytPlayerRef.current)) ||
+          ((isYouTube && isYtPlayerReady(getYtActivePlayer())) ||
             (!!scWidgetRef.current && isSoundCloud) ||
-            (isStreamUrl && Number.isFinite(duration) && duration > 0)));
+            (isHtmlAudio && Number.isFinite(duration) && duration > 0)));
   const displayBufferedPercent = isControlMirror ? 0 : bufferedPercent;
   const displayProgressPercent =
     Number.isFinite(displayPosition) &&
@@ -2361,7 +3361,30 @@ export function AudioPlayer() {
         });
         next();
       };
-  const onStop = isControlMirror ? () => { crossfadeAbortRef.current = true; crossfadeCleanupRef.current?.(); ytCrossfadeAbortRef.current = true; ytCrossfadeCleanupRef.current?.(); deviceCtx!.stopOrSend(); } : () => { crossfadeAbortRef.current = true; crossfadeCleanupRef.current?.(); ytCrossfadeAbortRef.current = true; ytCrossfadeCleanupRef.current?.(); stop(); };
+  const abortAllTransitions = useCallback(() => {
+    crossfadeAbortRef.current = true;
+    crossfadeCleanupRef.current?.();
+    crossfadeCleanupRef.current = null;
+    ytCrossfadeAbortRef.current = true;
+    ytCrossfadeCleanupRef.current?.();
+    ytCrossfadeCleanupRef.current = null;
+    streamTransitionAbortRef.current?.();
+    streamTransitionAbortRef.current = null;
+    ytManualTransitionRef.current = false;
+    ytSequentialActiveRef.current = false;
+    ytNaturalSequentialStartedRef.current = false;
+    scManualTransitionRef.current = false;
+    deckTransitionLock.forceReset();
+  }, [deckTransitionLock]);
+  const onStop = isControlMirror
+    ? () => {
+        abortAllTransitions();
+        deviceCtx!.stopOrSend();
+      }
+    : () => {
+        abortAllTransitions();
+        stop();
+      };
   const onPlayPause = isControlMirror
     ? (displayStatus === "playing" ? deviceCtx!.pauseOrSend : deviceCtx!.playOrSend)
     : (status === "playing" ? pause : () => { if (status === "paused" && currentSource) play(); else if (currentSource) playSource(currentSource); });
@@ -2369,15 +3392,15 @@ export function AudioPlayer() {
 
   const canSeek =
     currentSource &&
-    ((isYouTube && isYtPlayerReady(ytPlayerRef.current)) ||
+    ((isYouTube && isYtPlayerReady(getYtActivePlayer())) ||
       (isSoundCloud && !!scWidgetRef.current) ||
-      (isStreamUrl && Number.isFinite(duration) && duration > 0));
+      (isHtmlAudio && Number.isFinite(duration) && duration > 0));
 
   const seekTo = useCallback(
     (seconds: number) => {
       const sec = Math.max(0, seconds);
       if (isYouTube) {
-        const p = ytPlayerRef.current;
+        const p = getYtActivePlayer();
         if (isYtPlayerReady(p)) {
           safeSeekTo(p, sec, true);
           setPosition(sec);
@@ -2385,12 +3408,12 @@ export function AudioPlayer() {
       } else if (isSoundCloud && scWidgetRef.current) {
         scWidgetRef.current.seekTo(sec * 1000);
         setPosition(sec);
-      } else if (isStreamUrl && audioRef.current) {
+      } else if (isHtmlAudio && audioRef.current) {
         audioRef.current.currentTime = sec;
         setPosition(sec);
       }
     },
-    [isYouTube, isSoundCloud, isStreamUrl]
+    [isYouTube, isSoundCloud, isHtmlAudio]
   );
 
   const onSeekChange = useCallback(
@@ -2817,6 +3840,20 @@ export function AudioPlayer() {
                             {displayNextLabel ?? "—"}
                           </span>
                         </div>
+                        {/* Row 3: Source / Genre / Mood chips for the current track.
+                            Resolves against the underlying `PlaylistTrack` so we get
+                            per-track ID3 / catalog tags (not just playlist vibe). */}
+                        {playerHeroTrack ? (
+                          <TrackMetaChips
+                            track={playerHeroTrack}
+                            parentPlaylist={playerHeroPlaylist}
+                            trackMetaCache={playerHeroTrackMetaCache}
+                            density="hero"
+                            showSource
+                            showUnclassifiedFallback={false}
+                            className="min-w-0"
+                          />
+                        ) : null}
                       </div>
                       <div
                         className={`flex shrink-0 flex-col items-stretch gap-2 border-l pl-2 ${
@@ -2957,9 +3994,10 @@ export function AudioPlayer() {
       {isEmbedded && (
         <div key={embedType ?? "none"} className="pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0" aria-hidden>
           {/* Wrapper div prevents YT API DOM manipulation from conflicting with React unmount */}
+          {/* Persistent A/B decks — both iframes stay mounted; only the active pointer moves. */}
           <div style={{ display: isYouTube ? "block" : "none" }} className="h-full w-full">
             <div ref={ytContainerRef} className="h-full w-full" />
-            <div ref={ytContainerNextRef} className="absolute left-0 top-0 h-full w-full" aria-hidden />
+            <div ref={ytContainerNextRef} className="h-full w-full" />
           </div>
           <div style={{ display: isSoundCloud ? "block" : "none" }} className="h-full w-full">
             <iframe
@@ -2972,8 +4010,9 @@ export function AudioPlayer() {
           </div>
         </div>
       )}
-      {/* HTML5 audio for stream URLs (radio, m3u, etc.) – always mounted so ref stays valid */}
-      <audio ref={audioRef} className="hidden" playsInline />
+      {/* A/B decks for stream URLs — true overlap crossfade between direct audio elements */}
+      <audio ref={audioDeckARef} className="hidden" playsInline />
+      <audio ref={audioDeckBRef} className="hidden" playsInline />
 
       {shareOpen && currentSource && (
         <ShareModal
