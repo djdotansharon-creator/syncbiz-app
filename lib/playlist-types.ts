@@ -51,6 +51,20 @@ export type PlaylistLibraryPlacement = "ready_external";
 export const PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT = "youtube_mix_import" as const;
 export type PlaylistCreateSaveOrigin = typeof PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT;
 
+/**
+ * Provenance of per-track metadata chips (genre / mood / sub-genres).
+ *
+ * Surfaced to operators / pilot debug UI as "data came from ID3 / XLSX / catalog
+ * tags / playlist defaults / fallback" so reviewers can verify which source the
+ * AI used when scoring each row. Never shown in the normal track row chrome.
+ */
+export type PlaylistTrackMetadataSource =
+  | "local_id3"
+  | "local_xlsx"
+  | "catalog"
+  | "playlist"
+  | "fallback";
+
 /** Single track in a playlist. */
 export type PlaylistTrack = {
   id: string;
@@ -72,6 +86,21 @@ export type PlaylistTrack = {
   likeCount?: number;
   publishedAt?: string;
   curationRating?: number | null;
+  /**
+   * Per-track taxonomy chips. Not persisted to `PlaylistItem` (DB has no JSON column
+   * for it yet) — populated by the AI builder at build time so the renderer can show
+   * the genre/mood the AI actually selected. Reads at display time fall back to the
+   * parent playlist's taxonomy when these are absent.
+   *
+   * `genre` is a normalized free-form label (e.g. "Jazz", "Israeli Pop"). `mood`
+   * mirrors the playlist `mood` vocabulary. `subGenres` is an optional list of
+   * extra style tags. See `lib/playlist-track-display-meta.ts` for the resolver.
+   */
+  genre?: string;
+  mood?: string;
+  subGenres?: string[];
+  /** Operator-only: where genre/mood came from. Never shown in normal UI. */
+  metadataSource?: PlaylistTrackMetadataSource;
 };
 
 /** Contributor sections for composite scheduled playlists (persisted JSON). */
