@@ -15,6 +15,7 @@ export type RemoteCommand =
   | "PREV"
   | "LOAD_PLAYLIST"
   | "PLAY_SOURCE"
+  | "QUEUE_NEXT"
   | "SEEK"
   | "SET_VOLUME"
   | "SET_SHUFFLE"
@@ -29,6 +30,16 @@ export type DeviceType =
   | "mobile_controller"
   | "mobile_player"
   | "owner_global_controller";
+
+/** Minimal playlist session row mirrored to CONTROL clients. */
+export type SessionTrackMirror = {
+  id: string;
+  title: string;
+  cover: string | null;
+  durationSeconds?: number;
+  /** Optional playable URL (sent from CONTROL so MASTER can rebuild leaf rows). */
+  url?: string;
+};
 
 /** Serializable playback state for cross-device sync. */
 export type StationPlaybackState = {
@@ -49,6 +60,16 @@ export type StationPlaybackState = {
     playlistOriginBadge?: "dj_creator" | "ready" | "scheduled" | "my" | "branch";
   } | null;
   currentTrackIndex: number;
+  /** Active playlist session rows (same data MASTER Live Queue uses). */
+  sessionTracks?: SessionTrackMirror[];
+  /** Persisted playlist id when the session is playlist-backed (incl. AI playlists). */
+  sessionPlaylistId?: string | null;
+  /** Display title for the active session (playlist name or source title). */
+  sessionTitle?: string | null;
+  /** Next row within sessionTracks (in-order), when known. */
+  nextSessionTrack?: { title: string; cover: string | null } | null;
+  /** Staged Play Next rows on MASTER (mirrored to CONTROL). */
+  playNextQueue?: Array<{ id: string; title: string; cover: string | null }>;
   queue: Array<{ id: string; title: string; cover: string | null }>;
   queueIndex: number;
   /** Shuffle preference from MASTER (source of truth). */
@@ -81,6 +102,13 @@ export type PlaySourcePayload = {
   type: string;
   url: string;
   origin: "playlist" | "source" | "radio";
+  /** When set, MASTER hydrates full playlist before play (multi-track / AI playlists). */
+  playlistId?: string;
+  /**
+   * Session rows from CONTROL library (streamer may lack user cookie for GET /api/playlists).
+   * MASTER rebuilds playlist attachment when server fetch fails.
+   */
+  sessionTracks?: SessionTrackMirror[];
 } & Partial<UnifiedSourceFoundation>;
 
 /** Device mode: MASTER = active player, CONTROL = monitor/standby */
@@ -139,7 +167,28 @@ export type ClientMessage =
       registrationIntent?: SyncBizRegistrationIntent;
     }
   | { type: "BRANCH_LIST_REQUEST" }
-  | { type: "COMMAND"; targetDeviceId?: string; targetBranchId?: string; command: RemoteCommand; payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number } }
+  | {
+      type: "COMMAND";
+      commandId?: string;
+      targetDeviceId?: string;
+      targetBranchId?: string;
+      command: RemoteCommand;
+      payload?: {
+        url?: string;
+        source?: PlaySourcePayload;
+        position?: number;
+        volume?: number;
+        value?: boolean;
+        trackIndex?: number;
+      };
+    }
+  | {
+      type: "COMMAND_RESULT";
+      commandId: string;
+      ok: boolean;
+      error?: string;
+      executedAt?: number;
+    }
   | { type: "STATE_UPDATE"; state: StationPlaybackState }
   | { type: "SET_MASTER" }
   | { type: "SET_CONTROL" }
@@ -152,11 +201,43 @@ export type ServerMessage =
   | { type: "REGISTERED"; deviceId?: string; sessionCode?: string }
   | { type: "DEVICE_LIST"; devices: DeviceInfo[]; masterDeviceId?: string | null; sessionCode?: string }
   | { type: "STATE_UPDATE"; deviceId: string; state: StationPlaybackState }
-  | { type: "COMMAND"; command: RemoteCommand; payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number } }
+  | {
+      type: "COMMAND";
+      commandId?: string;
+      command: RemoteCommand;
+      payload?: {
+        url?: string;
+        source?: PlaySourcePayload;
+        position?: number;
+        volume?: number;
+        value?: boolean;
+        trackIndex?: number;
+      };
+    }
+  | {
+      type: "COMMAND_ACK";
+      commandId: string;
+      masterDeviceId?: string | null;
+      receivedAt: number;
+    }
+  | {
+      type: "COMMAND_RESULT";
+      commandId: string;
+      ok: boolean;
+      error?: string;
+      executedAt?: number;
+      failedAt?: number;
+    }
   | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string; secondaryDesktop?: boolean }
   | { type: "GUEST_RECOMMEND_RECEIVED"; recommendation: GuestRecommendationPayload }
   | { type: "GUEST_RECOMMEND_RESULT"; recommendationId: string; status: "approved" | "rejected" }
   | { type: "GUEST_RECOMMEND_SENT"; recommendationId: string }
   | { type: "BRANCH_LIST"; branches: BranchSummary[] }
-  | { type: "LIBRARY_UPDATED"; branchId: string; entityType?: "playlist" | "source" | "radio"; action?: "created" | "updated" | "deleted" }
+  | {
+      type: "LIBRARY_UPDATED";
+      branchId: string;
+      entityType?: "playlist" | "source" | "radio";
+      action?: "created" | "updated" | "deleted";
+      entityId?: string;
+    }
   | { type: "ERROR"; message: string };
