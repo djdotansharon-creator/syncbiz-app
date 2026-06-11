@@ -55,6 +55,11 @@ import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
 
 export type PlaybackStatus = "idle" | "playing" | "paused" | "stopped";
 
+/** Origin of the last play/transport command — surfaced for P0 transition diagnostics. */
+export type PlayCommandVia = "library" | "queue" | "url" | "natural" | "control" | "transport" | "unknown";
+
+export type PlaySourceOptions = { via?: PlayCommandVia };
+
 export type TrackSource = "youtube" | "soundcloud" | "spotify" | "local" | "stream-url" | "winamp";
 
 /** Normalized track for playback - from playlist or standalone source */
@@ -462,7 +467,11 @@ type PlaybackContextValue = PlaybackState & {
    * items already left the queue. No-op if the id isn't currently in the queue.
    */
   removePlayNextItem: (id: string) => void;
-  playSource: (source: UnifiedSource, trackIndex?: number) => void;
+  playSource: (source: UnifiedSource, trackIndex?: number, opts?: PlaySourceOptions) => void;
+  /** Last play command origin — for transition diagnostics in AudioPlayer. */
+  lastPlayCommandVia: PlayCommandVia;
+  /** Monotonic id incremented on each user playSource — handoff guards in AudioPlayer. */
+  playCommandEpoch: number;
   playSourceFromDb: (source: Source, opts?: { auditScheduledNonEmbedded?: boolean }) => void;
   playPlaylist: (playlist: Playlist, trackIndex?: number) => void;
   setQueue: (sources: UnifiedSource[], opts?: { force?: boolean }) => void;
@@ -663,6 +672,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
    *   - at the end of the restore `useEffect` otherwise (successful or not).
    */
   const [isRestoring, setIsRestoring] = useState<boolean>(() => hasRecoverableSnapshot());
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const playCommandViaRef = useRef<PlayCommandVia>("unknown");
+  const [lastPlayCommandVia, setLastPlayCommandVia] = useState<PlayCommandVia>("unknown");
+  const playCommandEpochRef = useRef(0);
+  const [playCommandEpoch, setPlayCommandEpoch] = useState(0);
 
   useEffect(() => {
     initDeviceId();
@@ -864,6 +879,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
    */
   const stopAllBeforePlay = useCallback(() => {
     if (!deviceModeAllowsLocalPlayback.current) return;
+    console.log("[P0_XFADE_DEBUG] stopAllBeforePlay_called", {
+      stack: new Error().stack?.split("\n").slice(1, 4).join(" | "),
+    });
     try {
       stopAllPlayersRef.current?.();
     } catch {
@@ -882,8 +900,22 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const playSource = useCallback(
-    (source: UnifiedSource, trackIndex = 0) => {
+    (source: UnifiedSource, trackIndex = 0, opts?: PlaySourceOptions) => {
       if (!deviceModeAllowsLocalPlayback.current) return;
+      const via = opts?.via ?? "unknown";
+      playCommandViaRef.current = via;
+      setLastPlayCommandVia(via);
+      playCommandEpochRef.current += 1;
+      setPlayCommandEpoch(playCommandEpochRef.current);
+      const targetUrl = getPlayUrl(source, trackIndex);
+      const targetVid = targetUrl ? getYouTubeVideoId(targetUrl) : null;
+      console.log("[P0_XFADE_DEBUG] playSource_command", {
+        via,
+        sourceId: source.id,
+        trackIndex,
+        targetVid,
+        stack: new Error().stack?.split("\n").slice(1, 4).join(" | "),
+      });
       syncbizAuditPlaySourceInvoked({
         sourceId: source.id,
         trackIndex,
@@ -1563,6 +1595,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         ? (opts as { auditTransportCase?: unknown }).auditTransportCase
         : undefined;
     const auditTransportCase: "ended_auto" | undefined = auditRaw === "ended_auto" ? "ended_auto" : undefined;
+    if (auditTransportCase === "ended_auto") {
+      playCommandViaRef.current = "natural";
+      setLastPlayCommandVia("natural");
+    }
     transportLockRef.current = true;
     syncbizAuditTransportTransitionStart({
       phase: "next_callback_entry",
@@ -1924,7 +1960,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const getNextStreamUrl = useCallback((): string | null => {
     return (() => {
-      const s = state;
+      const s = stateRef.current;
       if (!s.currentSource) return null;
 
       if (isPlayNextSourceId(s.currentSource.id) && s.playNextQueue.length > 0) {
@@ -1982,11 +2018,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const embedded = track ? canEmbedInCard(track.type) : false;
       return !embedded && url ? url : null;
     })();
-  }, [state, getShuffledIndex]);
+  }, [getShuffledIndex]);
 
   /** Next embedded source for YouTube AutoMix. Returns YouTube only (Phase 1). */
   const getNextEmbeddedSource = useCallback((): { type: "youtube"; url: string; videoId: string } | null => {
-    const s = state;
+    const s = stateRef.current;
     if (!s.currentSource) return null;
 
     const sessionTracks = getPlaylistSessionTracks(s);
@@ -2040,7 +2076,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       return videoId ? { type: "youtube", url, videoId } : null;
     }
     return null;
-  }, [state, getShuffledIndex]);
+  }, [getShuffledIndex]);
 
   const setVolume = useCallback((value: number) => {
     setState((s) => ({ ...s, volume: Math.max(0, Math.min(100, value)) }));
@@ -2273,6 +2309,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       getNextStreamUrl,
       getNextEmbeddedSource,
       isRestoring,
+      lastPlayCommandVia,
+      playCommandEpoch,
     }),
     [
       state,
@@ -2308,6 +2346,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       getNextStreamUrl,
       getNextEmbeddedSource,
       isRestoring,
+      lastPlayCommandVia,
+      playCommandEpoch,
     ],
   );
 
