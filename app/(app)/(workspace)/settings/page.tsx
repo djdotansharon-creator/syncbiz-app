@@ -3,8 +3,11 @@ import { ClearPlaybackCacheButton } from "@/components/clear-playback-cache-butt
 import {
   DesktopStartupSettingsCard,
   DesktopLocalMusicSettingsCard,
+  DesktopOperatorToolsToggle,
+  DesktopPlaylistProOperatorCard,
 } from "@/components/desktop-settings-controls";
 import { DeviceModeSettingsSwitch } from "@/components/device-mode-settings-switch";
+import { StreamerDeviceSettingsPanel } from "@/components/streamer-device-settings-panel";
 import { MixDurationSetting } from "@/components/mix-duration-setting";
 import { SettingsPreferencesControls } from "@/components/settings-preferences-controls";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
@@ -52,8 +55,20 @@ export default async function SettingsPage() {
         <PlaceholderCard title="Startup" description="Desktop app launches at login.">
           <DesktopStartupSettingsCard />
         </PlaceholderCard>
-        <PlaceholderCard title="Local Music" description="Folder for My Music Library on Desktop.">
+        <PlaceholderCard
+          title="Local Music"
+          description="PlaylistPro library on this device. Paths are resolved by Desktop only."
+        >
           <DesktopLocalMusicSettingsCard />
+        </PlaceholderCard>
+        <PlaceholderCard
+          title="Advanced / Operator"
+          description="Maintenance tools for PlaylistPro metadata. Hidden from normal library UI."
+        >
+          <div className="space-y-5">
+            <DesktopOperatorToolsToggle />
+            <DesktopPlaylistProOperatorCard />
+          </div>
         </PlaceholderCard>
         <PlaceholderCard
           title="Account preferences"
@@ -64,6 +79,16 @@ export default async function SettingsPage() {
           description="Additional controls will appear here in future releases."
         />
       </div>
+
+      <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
+        <h2 className="text-sm font-semibold text-slate-50">Branch streamer (GOtv / Android TV)</h2>
+        <p className="mt-0.5 text-xs text-slate-400">
+          Pair a dedicated TV player once — it stays logged in without browser passwords.
+        </p>
+        <div className="mt-4">
+          <StreamerDeviceSettingsPanel />
+        </div>
+      </section>
 
       <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
         <h2 className="text-sm font-semibold text-slate-50">Remote player</h2>

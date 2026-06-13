@@ -40,12 +40,25 @@ import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { LibrarySourceItemActions } from "@/components/library-source-item-actions";
 import { LibraryInputArea } from "@/components/library-input-area";
 import { PlaylistAiShellMenu } from "@/components/playlist-ai-shell-menu";
+import { shouldShowPlaylistAiPlaylistActions } from "@/lib/library-playlist-container";
 import { DjCreatorAiShell } from "@/components/dj-creator-ai-shell";
+import { isDjCreatorAiWorkspacePlaylist } from "@/lib/dj-creator-playlist-scope";
 import { EditPlaylistForm } from "@/components/edit-playlist-form";
 import { EditSourceForm } from "@/components/edit-source-form";
 import { GuestLinkButton, guestLinkLedButtonClass } from "@/components/guest-link-button";
 import { getFavorites, addFavorite as addFav, removeFavorite as removeFav } from "@/lib/favorites-store";
-import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal, removePlaylistFromLocal, removeRadioFromLocal } from "@/lib/unified-sources-client";
+import {
+  fetchUnifiedSourcesWithFallback,
+  unifiedSourceFromPlaylist,
+  savePlaylistToLocal,
+  saveRadioToLocal,
+  removePlaylistFromLocal,
+  removeRadioFromLocal,
+} from "@/lib/unified-sources-client";
+import { LIBRARY_UPDATED_EVENT, type LibraryUpdatedDetail } from "@/lib/library-updated-event";
+import { invalidatePlaylistLeafDisplayCache } from "@/lib/playlist-leaf-display-cache";
+import { unifiedPlaylistSourceId } from "@/lib/playlist-utils";
+import { addPlaylistLocal } from "@/lib/playlists-local-store";
 import { getPlaylistTracks, type Playlist, type ScheduleContributorBlock } from "@/lib/playlist-types";
 import {
   appendSourcesToPlaylistTracks,
@@ -261,6 +274,36 @@ export function SourcesManager({
     });
   }, []);
 
+  const patchPlaylistInSources = useCallback(
+    async (playlistId: string) => {
+      try {
+        const res = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}`, {
+          cache: "no-store",
+          credentials: "include",
+        });
+        if (!res.ok) {
+          refetchSources();
+          return;
+        }
+        const p = (await res.json()) as Playlist;
+        const shell = unifiedSourceFromPlaylist(p);
+        addPlaylistLocal(p);
+        invalidatePlaylistLeafDisplayCache(playlistId);
+        const unifiedId = shell.id;
+        setEffectiveSources((prev) => {
+          const idx = prev.findIndex((s) => s.id === unifiedId || s.playlist?.id === playlistId);
+          const next = idx >= 0 ? [...prev] : [shell, ...prev];
+          if (idx >= 0) next[idx] = shell;
+          prevIdsRef.current = next.map((s) => s.id).join(",");
+          return next;
+        });
+      } catch {
+        refetchSources();
+      }
+    },
+    [refetchSources],
+  );
+
   useEffect(() => {
     if (initialSources.length > 0) {
       const ids = initialSources.map((s) => s.id).join(",");
@@ -273,10 +316,30 @@ export function SourcesManager({
   }, [initialSources, refetchSources]);
 
   useEffect(() => {
-    const handler = () => refetchSources();
-    window.addEventListener("library-updated", handler);
-    return () => window.removeEventListener("library-updated", handler);
-  }, [refetchSources]);
+    const handler = (ev: Event) => {
+      const detail = (ev as CustomEvent<LibraryUpdatedDetail>).detail;
+      if (detail?.entityType === "playlist" && detail.entityId) {
+        if (detail.action === "updated" || detail.action === "created") {
+          void patchPlaylistInSources(detail.entityId);
+          return;
+        }
+        if (detail.action === "deleted") {
+          const uid = unifiedPlaylistSourceId(detail.entityId);
+          setEffectiveSources((prev) => {
+            const next = prev.filter((s) => s.id !== uid && s.playlist?.id !== detail.entityId);
+            prevIdsRef.current = next.map((s) => s.id).join(",");
+            return next;
+          });
+          removePlaylistFromLocal(detail.entityId);
+          invalidatePlaylistLeafDisplayCache(detail.entityId);
+          return;
+        }
+      }
+      refetchSources();
+    };
+    window.addEventListener(LIBRARY_UPDATED_EVENT, handler);
+    return () => window.removeEventListener(LIBRARY_UPDATED_EVENT, handler);
+  }, [refetchSources, patchPlaylistInSources]);
 
   return (
     <SourcesPlaybackProvider sources={effectiveSources}>
@@ -484,17 +547,7 @@ function isUserSyncbizPlaylistSource(source: UnifiedSource): boolean {
 }
 
 function isDjCreatorWorkspacePlaylistSource(source: UnifiedSource): boolean {
-  if (source.origin !== "playlist" || !source.playlist?.id) return false;
-  const genreDj = String((source.genre ?? source.playlist.genre ?? "")).trim() === "DJ Creator";
-  if (!genreDj) return false;
-  /** Ready/external disk imports use a separate rail — exclude from workspace DJ Creator hub. */
-  if (source.playlist.libraryPlacement === "ready_external") return false;
-  const contract = classifyLibraryEntityContract(source);
-  /** Shell-backed external playlists (YT list=, etc.) stay out of the DJ Creator workspace hub. */
-  if (contract.entityKind === "collection" && contract.collectionSubtype === "external_playlist") {
-    return false;
-  }
-  return true;
+  return isDjCreatorAiWorkspacePlaylist(source);
 }
 
 /** Disk-backed Ready Playlist from mix import (`libraryPlacement: "ready_external"`) — not URL-inferred groupings. */
@@ -755,10 +808,24 @@ function SourcesManagerInner({
 
   const showLibraryCenter = !playerWorkspaceMode || pathname === "/sources";
 
+  /**
+   * Close the embedded EditPlaylistForm / EditSourceForm.
+   *
+   * Pilot perf fix: previously called `router.refresh()`, which forced the
+   * Workspace RSC layout to re-run `fetchUnifiedSourcesForServerComponent()`
+   * AND re-trigger `enrichDesktopLocalPlaylistCovers` on the client. Combined
+   * with desktop folder scans, this caused ~30s freezes when the user just
+   * closed (or even cancelled) the editor. We rely on two cheaper paths
+   * instead:
+   *   - Save flow:   the API PUT broadcasts `library-updated` via WS, which
+   *                  the client listener turns into a single `refetchSources()`.
+   *   - Cancel flow: nothing changed → no refetch needed.
+   * Local in-memory `effectiveSources` already has the up-to-date shape from
+   * the save broadcast or remains valid as-is on cancel.
+   */
   const finishEmbeddedEditor = useCallback(() => {
     if (!routeEmbedded) return;
     router.push(routeEmbedded.returnTo);
-    router.refresh();
   }, [routeEmbedded, router]);
 
   useEffect(() => {
@@ -1196,7 +1263,7 @@ function SourcesManagerInner({
       setQueue(queue, { force: true });
       const ti = playlistLeafTrackIndexForQueueItem(queue[0]);
       if (playSourceOverride) playSourceOverride(queue[0], ti);
-      else playSource(queue[0], ti);
+      else playSource(queue[0], ti, { via: "library" });
     },
     [resolveSourcesForSelection, setQueue, playSourceOverride, playSource]
   );
@@ -1220,6 +1287,24 @@ function SourcesManagerInner({
     [resolveSourcesForSelection]
   );
 
+  /**
+   * DJ Creator hub: "Open playlist" / double-click → close the hub and select the
+   * playlist container so the user lands on the track list view (NOT playback).
+   * Edits are reached via the row's pencil button which links to `/playlists/{id}/edit`.
+   */
+  const handleDjHubOpenPlaylist = useCallback(
+    (s: UnifiedSource) => {
+      if (!s.playlist?.id) return;
+      setActiveCenterModule(null);
+      setSelection({
+        type: "collection_container",
+        subtype: "syncbiz_playlist",
+        key: `syncbiz:${s.id}`,
+      });
+    },
+    [setActiveCenterModule]
+  );
+
   /** Ready external drill-in: expanded rows must set session queue + correct leaf index (same contract as Play All). */
   const playSourceForLibraryCard = useCallback(
     (source: UnifiedSource) => {
@@ -1230,11 +1315,11 @@ function SourcesManagerInner({
         }
         const ti = source.id.includes(":track:") ? playlistLeafTrackIndexForQueueItem(source) : 0;
         if (playSourceOverride) playSourceOverride(source, ti);
-        else playSource(source, ti);
+        else playSource(source, ti, { via: "library" });
         return;
       }
       if (playSourceOverride) playSourceOverride(source);
-      else playSource(source);
+      else playSource(source, 0, { via: "library" });
     },
     [selection, resolveSourcesForSelection, setQueue, playSourceOverride, playSource],
   );
@@ -1693,20 +1778,14 @@ function SourcesManagerInner({
     [savePlaylistToLocal, setSources],
   );
 
-  const handleAiPlaylistFromSearchPrompt = useCallback(async (promptText: string) => {
-    const res = await fetch("/api/playlists/ai-build", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ mode: "prompt", prompt: promptText, branchId: "default", count: 50 }),
-    });
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    if (!res.ok) {
-      window.alert(typeof data.error === "string" ? data.error : "AI playlist build failed");
-      return;
-    }
-    window.dispatchEvent(new Event("library-updated"));
-  }, []);
+  const [djCreatorSeedPrompt, setDjCreatorSeedPrompt] = useState<string | null>(null);
+
+  const handleOpenDjCreatorWithSearchPrompt = useCallback((promptText: string) => {
+    const q = promptText.trim();
+    if (q.length < 2) return;
+    setDjCreatorSeedPrompt(q);
+    onDjCreatorOpenChange(true);
+  }, [onDjCreatorOpenChange]);
 
   const handleRemove = useCallback(
     (id: string, origin?: UnifiedSource["origin"]) => {
@@ -1877,19 +1956,19 @@ function SourcesManagerInner({
     (item: UnifiedSource) => {
       if (!activePlaylistKey) {
         if (playSourceOverride) playSourceOverride(item);
-        else playSource(item);
+        else playSource(item, 0, { via: "library" });
         return;
       }
       const queue = resolveSyncbizPlaylistPlayQueue(activePlaylistKey, sources, playlistItemAssignments);
       if (queue.length === 0 || !queue.some((q) => q.id === item.id)) {
         if (playSourceOverride) playSourceOverride(item);
-        else playSource(item);
+        else playSource(item, 0, { via: "library" });
         return;
       }
       setQueue(queue, { force: true });
       const ti = playlistLeafTrackIndexForQueueItem(item);
       if (playSourceOverride) playSourceOverride(item);
-      else playSource(item, ti);
+      else playSource(item, ti, { via: "library" });
     },
     [activePlaylistKey, sources, playlistItemAssignments, setQueue, playSourceOverride, playSource],
   );
@@ -2461,8 +2540,9 @@ function SourcesManagerInner({
                 setActiveCenterModule(null);
                 onDjCreatorOpenChange(true);
               }}
-              onPlayPlaylist={(s) => playCollectionSelection("syncbiz_playlist", `syncbiz:${s.id}`)}
               onPlaylistDragStart={handleDjHubPlaylistDragStart}
+              onOpenPlaylist={handleDjHubOpenPlaylist}
+              onSourcesChange={setSources}
             />
           ) : isEditCurrentModule(activeCenterModule) ? (
             <EditCurrentWorkspacePanel
@@ -2475,7 +2555,7 @@ function SourcesManagerInner({
               onAdd={handleAdd}
               playSourceOverride={playSourceOverride}
               onPlaylistUpdated={handlePlaylistUpdatedFromMyMusic}
-              onAiPlaylistFromSearchPrompt={handleAiPlaylistFromSearchPrompt}
+              onOpenDjCreatorWithSearchPrompt={handleOpenDjCreatorWithSearchPrompt}
             />
           </div>
           <div className="library-command-rail mt-3.5 flex min-w-0 flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-slate-800/35 bg-slate-950/25 px-3 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md sm:gap-3 lg:overflow-x-auto">
@@ -2951,7 +3031,11 @@ function SourcesManagerInner({
                             onRemove={() => {}}
                             draggable
                             onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [item])}
-                            onPlaySource={(s) => (playSourceOverride ?? playSource)(s)}
+                            onPlaySource={(s) =>
+                              playSourceOverride
+                                ? playSourceOverride(s)
+                                : playSource(s, 0, { via: "library" })
+                            }
                             onStop={stopOverride}
                             onPause={pauseOverride}
                             isActive={isMaster ? false : masterState?.currentSource?.id === item.id}
@@ -3123,10 +3207,9 @@ function SourcesManagerInner({
                           const leafBar = isLeafLibraryUnifiedCard(source, selection);
                           const libraryPresentation = libraryTilePresentationForUnifiedSource(source);
                           const playlistAiMenuSlot =
-                            pe?.subtype === "syncbiz_playlist" &&
-                            source.origin === "playlist" &&
+                            !leafBar &&
                             source.playlist?.id &&
-                            !leafBar ? (
+                            shouldShowPlaylistAiPlaylistActions(source) ? (
                               <PlaylistAiShellMenu
                                 playlistId={source.playlist.id}
                                 playlistName={source.title}
@@ -3250,7 +3333,12 @@ function SourcesManagerInner({
 
         <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl p-2.5 lg:col-start-3 lg:row-start-1 lg:justify-self-stretch">
           <div className="space-y-4">
-            <DjCreatorAiShell drawerOpen={djCreatorOpen} onDrawerOpenChange={onDjCreatorOpenChange} />
+            <DjCreatorAiShell
+              drawerOpen={djCreatorOpen}
+              onDrawerOpenChange={onDjCreatorOpenChange}
+              seedPrompt={djCreatorSeedPrompt}
+              onSeedPromptConsumed={() => setDjCreatorSeedPrompt(null)}
+            />
             <section>
               <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
                 Library

@@ -3,7 +3,12 @@ import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from
 import type { Playlist } from "@/lib/playlist-types";
 import { EntitlementLimitError } from "@/lib/entitlement-limits";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
-import { executeAiPlaylistBuild, type AiPlaylistBuildMode } from "@/lib/recommendations/ai-playlist-generation";
+import {
+  AiPlaylistNoStrongMatchesError,
+  executeAiPlaylistBuild,
+  parseAdditionalLocalCandidates,
+  type AiPlaylistBuildMode,
+} from "@/lib/recommendations/ai-playlist-generation";
 import { resolvePlaylistForAiSeed } from "@/lib/playlist-ai-access";
 
 const VALID_MODES = new Set<AiPlaylistBuildMode>(["prompt", "similar", "refine", "expand"]);
@@ -71,6 +76,14 @@ export async function POST(req: Request) {
     }
   }
 
+  /**
+   * Phase 1 hybrid: Desktop renderer attaches `additionalCandidates.localTracks` when the
+   * local snapshot has matches for the prompt. We safely parse/validate here — unknown keys
+   * are dropped, bad shapes ignored, and the rest of the build runs catalog-only.
+   * Local candidates NEVER become CatalogItems (enforced downstream by type === "local").
+   */
+  const additionalLocalCandidates = parseAdditionalLocalCandidates(body.additionalCandidates);
+
   try {
     const result = await executeAiPlaylistBuild({
       tenantId,
@@ -80,10 +93,18 @@ export async function POST(req: Request) {
       seedPlaylist,
       branchId,
       count,
+      additionalLocalCandidates,
     });
 
     const uid = await getUserIdFromSession();
-    if (uid) void notifyLibraryUpdated(uid, { branchId, entityType: "playlist", action: "created" });
+    if (uid) {
+      void notifyLibraryUpdated(uid, {
+        branchId,
+        entityType: "playlist",
+        action: "created",
+        entityId: result.playlistId,
+      });
+    }
 
     return NextResponse.json({
       kind: "syncbiz_ai_playlist_build_v1",
@@ -93,10 +114,41 @@ export async function POST(req: Request) {
       requestedCount: result.requestedCount,
       mode: result.mode,
       shortfallExplanation: result.shortfallExplanation,
+      shortfallHint: result.shortfallHint,
+      catalogCandidatesPooled: result.catalogCandidatesPooled,
+      localCandidatesReceived: result.localCandidatesReceived,
+      localTracksInPlaylist: result.localTracksInPlaylist,
+      catalogTracksInPlaylist: result.catalogTracksInPlaylist,
+      ...(result.recipeMode ? { recipeMode: result.recipeMode } : {}),
+      ...(result.laneBuildDebug ? { laneBuildDebug: result.laneBuildDebug } : {}),
+      ...(result.buildDiagnostics ? { buildDiagnostics: result.buildDiagnostics } : {}),
+      // Per-track display chips (genre / mood / subGenres / metadataSource)
+      // keyed by `PlaylistTrack.id`. Renderer caches this by `playlistId` for
+      // the session so the chips travel through edit/track list/Now Playing
+      // surfaces even though we don't persist taxonomy on `PlaylistItem` yet.
+      ...(result.tracksMeta ? { tracksMeta: result.tracksMeta } : {}),
     });
   } catch (e) {
     if (e instanceof EntitlementLimitError) {
       return NextResponse.json({ error: e.message }, { status: 403 });
+    }
+    if (e instanceof AiPlaylistNoStrongMatchesError) {
+      // 422 + structured payload: the renderer recognizes `kind: "no_strong_matches"`
+      // and shows a localized "no strong matches; refine the prompt or scan more
+      // local music" message instead of an opaque 500 error.
+      return NextResponse.json(
+        {
+          error: e.message,
+          kind: e.kind,
+          intentLabel: e.intentLabel,
+          shortfallHint: {
+            kind: "short_accurate",
+            matchedCount: e.matchedCount,
+            intentLabel: e.intentLabel,
+          },
+        },
+        { status: 422 },
+      );
     }
     console.error("[api/playlists/ai-build] error:", e);
     return NextResponse.json(

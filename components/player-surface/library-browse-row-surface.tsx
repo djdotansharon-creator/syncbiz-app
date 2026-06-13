@@ -48,7 +48,7 @@ export function LibraryBrowseRowSurface({
     const controlsStripClass = ["flex flex-nowrap items-center gap-2 shrink-0", cwClass].filter(Boolean).join(" ");
 
     return (
-      <div {...restRow} className={favRoot}>
+      <div {...restRow} draggable={draggable} className={favRoot}>
         <div className={thumbWrap}>{thumbSlot}</div>
         <div className="min-w-0 flex-1 flex items-center gap-3">
           {leadingSlot}
@@ -74,8 +74,13 @@ export function LibraryBrowseRowSurface({
   const activeCls = active ? "library-playing-row library-row-active-bg" : "library-row-hover";
   const rootClass = [LIBRARY_ROOT_BASE, activeCls, dragCls, rowClassName].filter(Boolean).join(" ");
 
+  // Pilot fix: `draggable` is the public prop on this surface, but HTML drag
+  // events (onDragStart) only fire when the underlying element has the
+  // `draggable` attribute set to true. Without this, AI playlist rows in the
+  // DJ Creator hub looked grabbable (cursor changed) but could not actually
+  // be dropped onto daypart playlist tiles in the scheduler.
   return (
-    <div {...restRow} className={rootClass}>
+    <div {...restRow} draggable={draggable} className={rootClass}>
       <div className="library-thumb-frame relative h-14 w-14 shrink-0 overflow-hidden rounded-xl ring-1 ring-[color:var(--lib-border-thumb)]">
         {thumbSlot}
       </div>

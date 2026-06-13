@@ -27,6 +27,8 @@ type DesktopAutoStartState = {
 
 type DesktopMusicFolderSnapshot = {
   path: string | null;
+  displayLabel?: string | null;
+  isPlaylistProLibrary?: boolean;
 };
 
 type DesktopPickMusicFolderResult =
@@ -106,6 +108,34 @@ type SearchLocalCollectionSnapshotIpcResult =
   | { status: "ok"; hits: LocalCollectionSearchHitIpc[] }
   | { status: "error"; message: string };
 
+type LocalAiPlaylistCandidateIpc = {
+  localId: string;
+  absolutePath: string;
+  relativePathFromRoot: string;
+  artist: string | null;
+  title: string | null;
+  album: string | null;
+  genre: string | null;
+  year: string | null;
+  comment: string | null;
+  durationSec: number | null;
+  bpm: number | null;
+  rating: number | null;
+  score: number;
+  matchDebug?: {
+    groupsMatched: number;
+    groupsTotal: number;
+    fullMatch: boolean;
+    score: number;
+    reason: string;
+    groups: Array<{ label: string; matched: boolean; terms: string[]; fields: string[] }>;
+  };
+};
+
+type SearchLocalForAiPlaylistIpcResult =
+  | { status: "ok"; candidates: LocalAiPlaylistCandidateIpc[] }
+  | { status: "error"; message: string };
+
 type ImportLocalM3uUnresolvedReasonIpc =
   | "missing"
   | "not_audio"
@@ -135,6 +165,105 @@ type ImportLocalM3uPlaylistIpcResult =
     }
   | { status: "error"; message: string };
 
+type PickTagRenameXlsxFilesIpcResult =
+  | { status: "ok"; filePaths: string[] }
+  | { status: "canceled" }
+  | { status: "error"; message: string };
+
+type LocalMetadataBankLastImportIpc = {
+  folderPath: string;
+  importedAt: string;
+  filesScanned: number;
+  filesProcessed: number;
+  rowsRead: number;
+  matched: number;
+  updated: number;
+  unmatched: number;
+  outsideMusicFolder: number;
+  missingOnDisk: number;
+};
+
+type LocalMetadataBankStatusIpcResult = {
+  folderPath: string | null;
+  lastImport: LocalMetadataBankLastImportIpc | null;
+};
+
+type PickLocalMetadataBankFolderIpcResult =
+  | { status: "ok"; path: string }
+  | { status: "canceled" }
+  | { status: "error"; message: string };
+
+type RefreshLocalMetadataBankIpcResult =
+  | {
+      status: "ok";
+      folderPath: string;
+      importedAt: string;
+      filesScanned: number;
+      filesProcessed: number;
+      rowsRead: number;
+      matched: number;
+      updated: number;
+      unmatched: number;
+      outsideMusicFolder: number;
+      missingOnDisk: number;
+      sampleUnmatchedPaths: string[];
+    }
+  | { status: "error"; message: string };
+
+type ImportTagRenameXlsxFilesIpcResult =
+  | {
+      status: "ok";
+      filesProcessed: number;
+      rowsRead: number;
+      matched: number;
+      updated: number;
+      unmatched: number;
+      outsideMusicFolder: number;
+      missingOnDisk: number;
+      sampleUnmatchedPaths: string[];
+    }
+  | { status: "error"; message: string };
+
+type DesktopMusicLibrarySource = {
+  id: string;
+  kind: "playlistpro" | "additional";
+  path: string;
+  displayLabel: string;
+  status: "ready" | "missing" | "unconfigured";
+  trackCount: number | null;
+  lastScanIso: string | null;
+  removable: boolean;
+};
+
+type DesktopMusicLibrarySourcesResult = {
+  playlistPro: DesktopMusicLibrarySource;
+  additional: DesktopMusicLibrarySource[];
+};
+
+type DesktopAddAdditionalMusicFolderResult =
+  | { status: "ok"; source: DesktopMusicLibrarySource }
+  | { status: "canceled" }
+  | { status: "already_added"; path: string }
+  | { status: "protected"; reason: "playlistpro_root" }
+  | { status: "error"; message: string };
+
+type DesktopRemoveAdditionalMusicFolderResult =
+  | { status: "ok" }
+  | { status: "not_found" }
+  | { status: "protected"; reason: "playlistpro_root" }
+  | { status: "error"; message: string };
+
+type DesktopScanMusicLibrarySummary = {
+  path: string;
+  kind: "playlistpro" | "additional";
+  filesIndexed: number;
+  errorMessage: string | null;
+};
+
+type DesktopScanMusicLibraryResult =
+  | { status: "ok"; scannedAtIso: string; sources: DesktopScanMusicLibrarySummary[] }
+  | { status: "error"; message: string };
+
 type SyncBizDesktopBridgePreload = {
   getConfig: () => Promise<{ deviceId: string }>;
   localMockTransport: (payload: DesktopLocalMockPayload) => Promise<unknown>;
@@ -159,8 +288,25 @@ type SyncBizDesktopBridgePreload = {
   inspectLocalAudioTagsRaw?: (absolutePath: string) => Promise<InspectLocalAudioTagsRawIpcResult>;
   /** Stage 4C: search persisted local collection snapshot in main (no folder walk during search). */
   searchLocalCollectionSnapshot?: (query: string, limit?: number) => Promise<SearchLocalCollectionSnapshotIpcResult>;
+  /**
+   * Phase 1 hybrid AI playlist — return richer local snapshot candidates (with bpm/comment/rating)
+   * for the renderer to forward to /api/playlists/ai-build as `additionalCandidates`. Browser without
+   * Desktop bridge returns undefined → AI build stays catalog-only.
+   */
+  searchLocalForAiPlaylist?: (query: string, limit?: number) => Promise<SearchLocalForAiPlaylistIpcResult>;
   /** Stage 5B: M3U/M3U8 → resolved paths under Music Folder (+ snapshot refresh in main). */
   importLocalM3uPlaylist?: (absolutePath: string) => Promise<ImportLocalM3uPlaylistIpcResult>;
+  /** Tag&Rename / PLP XLSX — native file picker (user metadata; device-local only). */
+  pickTagRenameXlsxFiles?: () => Promise<PickTagRenameXlsxFilesIpcResult>;
+  importTagRenameXlsxFiles?: (filePaths: string[]) => Promise<ImportTagRenameXlsxFilesIpcResult>;
+  getLocalMetadataBank?: () => Promise<LocalMetadataBankStatusIpcResult>;
+  pickLocalMetadataBankFolder?: () => Promise<PickLocalMetadataBankFolderIpcResult>;
+  refreshLocalMetadataBank?: () => Promise<RefreshLocalMetadataBankIpcResult>;
+  /** Pilot: protected PlaylistPro + user-added music folders (Winamp Watch Folders model). */
+  listMusicLibrarySources?: () => Promise<DesktopMusicLibrarySourcesResult>;
+  addAdditionalMusicFolder?: () => Promise<DesktopAddAdditionalMusicFolderResult>;
+  removeAdditionalMusicFolder?: (folderPath: string) => Promise<DesktopRemoveAdditionalMusicFolderResult>;
+  scanMusicLibrary?: () => Promise<DesktopScanMusicLibraryResult>;
 };
 
 declare global {

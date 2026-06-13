@@ -314,3 +314,29 @@ export function rankLibrarySourcesMusicFirst(sources: UnifiedSource[], query: st
   const kept = scored.filter((x) => x.score >= best - 28 && x.score >= -42).map((x) => x.s);
   return kept.length > 0 ? kept : scored.slice(0, Math.min(8, scored.length)).map((x) => x.s);
 }
+
+/**
+ * Main Search: hide weak "In your library" rows when Smart Catalog already has strong coverage.
+ */
+export function filterLibraryResultsForMainSearch(
+  sources: UnifiedSource[],
+  query: string,
+  catalogHitCount: number,
+): UnifiedSource[] {
+  const ranked = rankLibrarySourcesMusicFirst(sources, query);
+  if (ranked.length === 0) return [];
+  if (catalogHitCount < 3) return ranked.slice(0, 10);
+  const scored = ranked.map((s) => ({
+    s,
+    score: scoreMusicRelevance({
+      title: s.title,
+      query,
+      auxiliaryText: libraryAuxiliaryText(s),
+    }),
+  }));
+  const best = scored[0]?.score ?? 0;
+  const strong = scored
+    .filter((x) => x.score >= Math.max(10, best - 20) && x.score >= 2)
+    .map((x) => x.s);
+  return strong.slice(0, 8);
+}

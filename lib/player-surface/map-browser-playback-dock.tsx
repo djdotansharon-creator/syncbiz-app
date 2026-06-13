@@ -13,7 +13,15 @@ export function buildBrowserPlaybackDockProps(input: {
   stop: () => void;
   prev: () => void;
   next: () => void;
+  pendingTransport?: Partial<{
+    prev: boolean;
+    next: boolean;
+    play: boolean;
+    pause: boolean;
+    stop: boolean;
+  }>;
 }): Extract<PlaybackDockSurfaceProps, { variant: "active" }> {
+  const pending = input.pendingTransport ?? {};
   return {
     variant: "active",
     title: input.title,
@@ -26,11 +34,11 @@ export function buildBrowserPlaybackDockProps(input: {
       onPlay: input.play,
       onPause: input.pause,
       onNext: input.next,
-      prevDisabled: !input.hasPrevNext,
-      nextDisabled: !input.hasPrevNext,
-      stopDisabled: !input.hasSource,
-      playDisabled: !input.hasSource,
-      pauseDisabled: !input.hasSource,
+      prevDisabled: !input.hasPrevNext || !!pending.prev,
+      nextDisabled: !input.hasPrevNext || !!pending.next,
+      stopDisabled: !input.hasSource || !!pending.stop,
+      playDisabled: !input.hasSource || !!pending.play,
+      pauseDisabled: !input.hasSource || !!pending.pause,
     },
   };
 }

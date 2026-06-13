@@ -10,6 +10,7 @@ import {
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
+import { legacyPlayLocalDisabled } from "@/lib/legacy-shellout-playback";
 import { supportsEmbedded, getSourceArtworkUrl, getSourceIconType } from "@/lib/player-utils";
 import { SourceIconBadge } from "@/components/source-icon-badge";
 import { DenseDataRowSurface } from "@/components/player-surface/dense-data-row-surface";
@@ -85,15 +86,13 @@ export function SourceRow({ source }: SourceRowProps) {
       playSourceFromDb(source);
       const target = (source.target ?? source.uriOrPath ?? "").trim();
       if (target) {
-        const res = await fetch("/api/commands/play-local", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            target,
-            browserPreference: source.browserPreference ?? "default",
-          }),
+        await legacyPlayLocalDisabled({
+          target,
+          browserPreference: source.browserPreference ?? "default",
         });
-        setLastMessage(res.ok ? "Local playback command sent" : `Failed: ${(await res.json().catch(() => ({}))).error ?? "Unknown error"}`);
+        setLastMessage(
+          "Local playback runs in the SyncBiz in-app player (Desktop MPV).",
+        );
       }
       router.refresh();
     } finally {

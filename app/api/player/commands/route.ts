@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/store";
-import { runLocalPlaylist, runStopLocal } from "@/lib/play-local";
 import {
   getAllDevicePlayerStates,
   updateDevicePlayerState,
 } from "@/lib/player-command-store";
 import type { BrowserPreference } from "@/lib/types";
+
+/**
+ * Pilot rule: this route no longer shells out to Winamp / OS default app.
+ * The `play` and `stop` actions previously ran `cmd /c start "" "<path>"` /
+ * `taskkill /IM winamp.exe /F` via `runLocalPlaylist` / `runStopLocal`. Those
+ * are removed. Device player state is still tracked so the existing UI keeps
+ * working; actual audio output is owned by `PlaybackProvider` (Desktop MPV or
+ * browser embed) and the MASTER device on the WebSocket bus.
+ */
 
 type PlayerAction = "play" | "pause" | "resume" | "stop" | "seek" | "volume" | "next" | "prev" | "status";
 
@@ -42,17 +50,6 @@ export async function POST(req: NextRequest) {
     if (!target) {
       return NextResponse.json({ error: "target is required for play" }, { status: 400 });
     }
-    const result = await runLocalPlaylist(target, browserPreference);
-    if (!result.success) {
-      db.addLog({
-        timestamp: new Date().toISOString(),
-        level: "error",
-        message: `Player page play failed: ${result.error} (target: ${target}, browser: ${browserPreference})`,
-        deviceId,
-      });
-      return NextResponse.json({ error: result.error }, { status: 500 });
-    }
-
     const state = updateDevicePlayerState(deviceId, {
       status: "playing",
       target,
@@ -63,23 +60,13 @@ export async function POST(req: NextRequest) {
     db.addLog({
       timestamp: new Date().toISOString(),
       level: "info",
-      message: `Player page play: ${target} on ${deviceId} (${browserPreference})`,
+      message: `Player page play (state only, no shell-out): ${target} on ${deviceId} (${browserPreference})`,
       deviceId,
     });
-    return NextResponse.json({ ok: true, state });
+    return NextResponse.json({ ok: true, state, shellOutDisabled: true });
   }
 
   if (action === "stop") {
-    const result = await runStopLocal();
-    if (!result.success) {
-      db.addLog({
-        timestamp: new Date().toISOString(),
-        level: "error",
-        message: `Player page stop failed: ${result.error}`,
-        deviceId,
-      });
-      return NextResponse.json({ error: result.error }, { status: 500 });
-    }
     const state = updateDevicePlayerState(deviceId, {
       status: "stopped",
       currentTime: 0,
@@ -88,10 +75,10 @@ export async function POST(req: NextRequest) {
     db.addLog({
       timestamp: new Date().toISOString(),
       level: "info",
-      message: `Player page stop on ${deviceId}`,
+      message: `Player page stop (state only, no taskkill): ${deviceId}`,
       deviceId,
     });
-    return NextResponse.json({ ok: true, state });
+    return NextResponse.json({ ok: true, state, shellOutDisabled: true });
   }
 
   const statusMap: Record<PlayerAction, "playing" | "paused" | "stopped"> = {

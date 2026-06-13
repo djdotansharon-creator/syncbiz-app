@@ -2,12 +2,14 @@
  * Convert UnifiedSource to PlaySourcePayload for PLAY_SOURCE command.
  * Must carry a non-empty playback `url` — remote payloads omit `playlist`, so when the top-level
  * `url` is empty but tracks exist, we take the first playable track URL.
+ * Includes sessionTracks so GOtv MASTER can mirror the queue without user-session API fetch.
  */
 
 import type { PlaySourcePayload } from "./types";
 import type { UnifiedSource } from "@/lib/source-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { canonicalYouTubeWatchUrlForPlayback } from "@/lib/playlist-utils";
+import { playlistToSessionTrackMirrors } from "@/lib/remote-control/hydrate-play-source";
 
 export function unifiedSourceToPayload(source: UnifiedSource): PlaySourcePayload {
   let url = (source.url ?? "").trim();
@@ -19,6 +21,14 @@ export function unifiedSourceToPayload(source: UnifiedSource): PlaySourcePayload
       break;
     }
   }
+  const playlistId =
+    source.origin === "playlist" && source.playlist?.id ? source.playlist.id.trim() : undefined;
+
+  const sessionTracks =
+    source.origin === "playlist" && source.playlist
+      ? playlistToSessionTrackMirrors(source.playlist, source.id)
+      : undefined;
+
   return {
     id: source.id,
     title: source.title,
@@ -27,5 +37,7 @@ export function unifiedSourceToPayload(source: UnifiedSource): PlaySourcePayload
     type: source.type,
     url,
     origin: source.origin,
+    ...(playlistId ? { playlistId } : {}),
+    ...(sessionTracks && sessionTracks.length > 0 ? { sessionTracks } : {}),
   };
 }

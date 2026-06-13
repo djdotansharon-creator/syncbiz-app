@@ -15,6 +15,10 @@ import type { Source } from "./types";
 import { getPlaylistTracks } from "./playlist-types";
 import { canEmbedInCard } from "./playlist-utils";
 import { supportsEmbedded } from "./player-utils";
+import {
+  legacyPlayLocalDisabled,
+  legacyStopLocalDisabled,
+} from "./legacy-shellout-playback";
 
 export type LibraryPlaybackStatus = "idle" | "playing" | "paused" | "stopped";
 
@@ -90,7 +94,7 @@ export function LibraryPlaybackProvider({
   const isEmbedded = currentItem ? isEmbeddedItem(currentItem) : false;
 
   const stopPrevious = useCallback(() => {
-    fetch("/api/commands/stop-local", { method: "POST" }).catch(() => {});
+    legacyStopLocalDisabled().catch(() => {});
   }, []);
 
   const playItem = useCallback(
@@ -108,11 +112,7 @@ export function LibraryPlaybackProvider({
           return;
         }
         stopPrevious();
-        fetch("/api/commands/play-local", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target: url }),
-        }).catch(() => {});
+        legacyPlayLocalDisabled({ target: url }).catch(() => {});
       } else {
         const target = sourceToTarget(item.data);
         if (supportsEmbedded(item.data)) {
@@ -120,13 +120,9 @@ export function LibraryPlaybackProvider({
           return;
         }
         stopPrevious();
-        fetch("/api/commands/play-local", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            target,
-            browserPreference: item.data.browserPreference ?? "default",
-          }),
+        legacyPlayLocalDisabled({
+          target,
+          browserPreference: item.data.browserPreference ?? "default",
         }).catch(() => {});
       }
     },
@@ -136,20 +132,19 @@ export function LibraryPlaybackProvider({
   const pause = useCallback(() => setStatus("paused"), []);
   const stop = useCallback(() => {
     setStatus("stopped");
-    fetch("/api/commands/stop-local", { method: "POST" }).catch(() => {});
+    legacyStopLocalDisabled().catch(() => {});
   }, []);
 
   const playLocalForCurrent = useCallback(() => {
     if (!currentItem) return;
     const url = getPlayUrl(currentItem, currentTrackIndex);
     if (!url) return;
-    fetch("/api/commands/play-local", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        target: url,
-        browserPreference: currentItem.kind === "source" ? currentItem.data.browserPreference ?? "default" : undefined,
-      }),
+    legacyPlayLocalDisabled({
+      target: url,
+      browserPreference:
+        currentItem.kind === "source"
+          ? currentItem.data.browserPreference ?? "default"
+          : undefined,
     }).catch(() => {});
   }, [currentItem, currentTrackIndex, getPlayUrl]);
 
@@ -169,11 +164,7 @@ export function LibraryPlaybackProvider({
       const track = tracks[nextIdx];
       if (track && !canEmbedInCard(track.type)) {
         stopPrevious();
-        fetch("/api/commands/play-local", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target: track.url }),
-        }).catch(() => {});
+        legacyPlayLocalDisabled({ target: track.url }).catch(() => {});
       }
     } else {
       const idx = items.findIndex((i) => i === currentItem);
@@ -193,11 +184,7 @@ export function LibraryPlaybackProvider({
       const track = tracks[nextIdx];
       if (track && !canEmbedInCard(track.type)) {
         stopPrevious();
-        fetch("/api/commands/play-local", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target: track.url }),
-        }).catch(() => {});
+        legacyPlayLocalDisabled({ target: track.url }).catch(() => {});
       }
     } else {
       const idx = items.findIndex((i) => i === currentItem);

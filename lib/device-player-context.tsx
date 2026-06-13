@@ -17,16 +17,34 @@ import { useRemoteControlWs } from "@/lib/remote-control/ws-client";
 import { SecondaryDesktopModal } from "@/components/secondary-desktop-modal";
 import { GuestRecommendationModal } from "@/components/guest-recommendation-modal";
 import { urlToUnifiedSource } from "@/lib/remote-control/url-to-source";
+import { hydratePlaySourceFromPayload } from "@/lib/remote-control/hydrate-play-source";
 import { payloadToUnifiedSource } from "@/lib/remote-control/payload-to-source";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
+import { masterPlaybackDiag } from "@/lib/master-playback-diag";
+import { createPlayNextFromUnifiedSource } from "@/lib/play-next";
+import type { UnifiedSource } from "@/lib/source-types";
+import {
+  nextCommandId,
+  playSourceDedupeKey,
+  isTransportCommand,
+  REMOTE_COMMAND_TIMEOUT_MS,
+  TRANSPORT_DEBOUNCE_MS,
+  type TrackedRemoteCommand,
+} from "@/lib/remote-control/command-tracker";
 import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
-import type { UnifiedSource } from "@/lib/source-types";
+import { getPlaylistTracks } from "@/lib/playlist-types";
+import { getPlaylistSessionTracks } from "@/lib/playback-provider";
 import { deviceModeAllowsLocalPlayback } from "@/lib/device-mode-guard";
 import { getAutoMix, setAutoMix, onAutoMixChanged } from "@/lib/mix-preferences";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { isStreamerDeviceMode } from "@/lib/streamer-device-mode";
+import {
+  hasStreamerDeviceToken,
+  readStreamerDeviceBranchId,
+  readStreamerDeviceToken,
+} from "@/lib/streamer-device-client";
 
 type DevicePlayerContextValue = {
   /** True when this tab registers as a branch WS device (see `resolveDeviceRoleActive`). */
@@ -47,10 +65,17 @@ type DevicePlayerContextValue = {
   reportPosition: (position: number, duration: number) => void;
   sendSetMaster: () => void;
   sendSetControl: () => void;
-  /** Send command to master (when in CONTROL mode). */
-  sendCommandToMaster: (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number }) => void;
+  /** Send command to master (when in CONTROL mode). Returns commandId when sent. */
+  sendCommandToMaster: (
+    command: RemoteCommand,
+    payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number },
+  ) => string | null;
   /** Play source locally (MASTER) or send to master (CONTROL). */
   playSourceOrSend: (source: UnifiedSource, trackIndex?: number) => void;
+  /** Append Play Next on MASTER or send QUEUE_NEXT when CONTROL. */
+  queueNextOrSend: (source: UnifiedSource) => void;
+  queueNextFromPathsOrSend: (paths: string[]) => void;
+  queueNextFromUrlsOrSend: (urls: string[]) => void;
   /** Play/pause/stop/next/prev - local when MASTER, send to master when CONTROL. */
   playOrSend: () => void;
   pauseOrSend: () => void;
@@ -79,6 +104,12 @@ type DevicePlayerContextValue = {
   isMobileLocalPlayback: boolean;
   /** GOtv / Android TV dedicated branch player (`/streamer`). */
   isStreamerDevice: boolean;
+  /** CONTROL: user-visible remote command status (loading / error). */
+  remoteCommandMessage: string | null;
+  /** CONTROL: true while a PLAY_SOURCE is in flight to MASTER. */
+  isPlaySourceRemotePending: boolean;
+  /** CONTROL: per-transport button pending (only that control is "busy"). */
+  isRemoteCommandPending: (command: RemoteCommand) => boolean;
 };
 
 const DevicePlayerContext = createContext<DevicePlayerContextValue | null>(null);
@@ -156,6 +187,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
 
   const [userId, setUserId] = useState<string | undefined>(undefined);
   const [authLoaded, setAuthLoaded] = useState(false);
+  const [streamerPaired, setStreamerPaired] = useState(false);
+  const [streamerBranchId, setStreamerBranchId] = useState("default");
   const [wsToken, setWsToken] = useState<string | null>(null);
   const [tokenRefreshTrigger, setTokenRefreshTrigger] = useState(0);
   const [secondaryDesktopModalOpen, setSecondaryDesktopModalOpen] = useState(false);
@@ -165,6 +198,12 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const branchDiagSnapshotRef = useRef<string>("");
 
   useEffect(() => {
+    if (isStreamerDevice) {
+      setStreamerPaired(hasStreamerDeviceToken());
+      setStreamerBranchId(readStreamerDeviceBranchId());
+      setAuthLoaded(true);
+      return;
+    }
     fetch("/api/auth/me")
       .then((r) => r.json())
       .then((data: { email?: string | null }) => {
@@ -175,10 +214,57 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         setUserId("");
         setAuthLoaded(true);
       });
-  }, []);
+  }, [isStreamerDevice]);
 
   useEffect(() => {
-    if (!isActive || !authLoaded || !(userId ?? "").trim()) {
+    if (!isActive || !authLoaded) {
+      setWsToken(null);
+      return;
+    }
+
+    if (isStreamerDevice) {
+      const deviceToken = readStreamerDeviceToken();
+      if (!deviceToken) {
+        setWsToken(null);
+        return;
+      }
+      let cancelled = false;
+      const fetchStreamerToken = (retry = false) => {
+        fetch("/api/streamer/ws-token", {
+          headers: { Authorization: `Bearer ${deviceToken}` },
+        })
+          .then((r) => {
+            if (cancelled) return;
+            if (r.status === 401) {
+              setWsToken(null);
+              setStreamerPaired(false);
+              return;
+            }
+            if (!r.ok && !retry) {
+              setTimeout(() => fetchStreamerToken(true), 1000);
+              return;
+            }
+            if (!r.ok) return;
+            return r.json();
+          })
+          .then((data: { token?: string; branchId?: string } | undefined) => {
+            if (cancelled || !data?.token) return;
+            setWsToken(data.token);
+            if (data.branchId) {
+              setStreamerBranchId(data.branchId);
+            }
+          })
+          .catch(() => {
+            if (!cancelled) setWsToken(null);
+          });
+      };
+      fetchStreamerToken();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!(userId ?? "").trim()) {
       setWsToken(null);
       return;
     }
@@ -227,7 +313,13 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     };
     fetchToken();
     return () => { cancelled = true; };
-  }, [isActive, authLoaded, userId, tokenRefreshTrigger]);
+  }, [isActive, authLoaded, userId, isStreamerDevice, tokenRefreshTrigger]);
+
+  const effectiveUserId = isStreamerDevice
+    ? streamerPaired
+      ? "streamer-device"
+      : ""
+    : (userId ?? "").trim();
 
   useEffect(() => {
     if (!isActive || typeof document === "undefined" || typeof window === "undefined") return;
@@ -261,11 +353,16 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     setShuffle,
     status: playStatus,
     currentSource,
+    currentPlaylist,
     currentTrackIndex,
     queue,
     queueIndex,
     volume,
     isRestoring,
+    playNextQueue,
+    addPlayNextFromPaths,
+    addPlayNextFromUrls,
+    addPlayNextSources,
   } = usePlayback();
   const [masterConfirmOpen, setMasterConfirmOpen] = useState(false);
   const [masterState, setMasterState] = useState<StationPlaybackState | null>(null);
@@ -274,6 +371,85 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const prevEffectiveModeRef = useRef<DeviceMode>("MASTER");
   const pendingMasterAdoptionRef = useRef(false);
   const reportedPositionRef = useRef<{ position: number; duration: number } | null>(null);
+  const lastRemotePlayKeyRef = useRef<string | null>(null);
+  const remotePlayInFlightRef = useRef(false);
+  const sendCommandResultRef = useRef<(commandId: string, ok: boolean, error?: string) => void>(() => {});
+  const trackedCommandsRef = useRef<Map<string, TrackedRemoteCommand>>(new Map());
+  const playSourcePendingKeyRef = useRef<string | null>(null);
+  const lastTransportSentRef = useRef<{ command: RemoteCommand; at: number } | null>(null);
+  const [remoteCommandMessage, setRemoteCommandMessage] = useState<string | null>(null);
+  const [pendingRemoteCommands, setPendingRemoteCommands] = useState<Set<RemoteCommand>>(() => new Set());
+  const [playSourceRemotePending, setPlaySourceRemotePending] = useState(false);
+
+  const settleTrackedCommand = useCallback(
+    (commandId: string, outcome: TrackedRemoteCommand["outcome"], error?: string) => {
+      const tracked = trackedCommandsRef.current.get(commandId);
+      if (!tracked) return;
+      tracked.outcome = outcome;
+      tracked.finishedAt = Date.now();
+      if (error) tracked.error = error;
+      trackedCommandsRef.current.set(commandId, tracked);
+      if (tracked.dedupeKey && playSourcePendingKeyRef.current === tracked.dedupeKey) {
+        playSourcePendingKeyRef.current = null;
+        setPlaySourceRemotePending(false);
+      }
+      setPendingRemoteCommands((prev) => {
+        if (!prev.has(tracked.command)) return prev;
+        const next = new Set(prev);
+        next.delete(tracked.command);
+        return next;
+      });
+      if (outcome === "failed" || outcome === "timeout") {
+        setRemoteCommandMessage(error ?? "Command failed on streamer");
+      } else if (outcome === "success" && tracked.command === "PLAY_SOURCE") {
+        setRemoteCommandMessage(null);
+      }
+    },
+    [],
+  );
+
+  const finishRemoteCommand = useCallback(
+    (commandId: string | undefined, ok: boolean, error?: string) => {
+      if (!commandId) return;
+      sendCommandResultRef.current(commandId, ok, error);
+      settleTrackedCommand(commandId, ok ? "success" : "failed", error);
+      if (process.env.NODE_ENV === "development") {
+        console.info("[SyncBiz:remote-cmd] master finished", { commandId, ok, error });
+      }
+    },
+    [settleTrackedCommand],
+  );
+
+  const onCommandAck = useCallback(
+    (ack: { commandId: string; masterDeviceId?: string | null; receivedAt: number }) => {
+      const tracked = trackedCommandsRef.current.get(ack.commandId);
+      if (tracked) {
+        tracked.outcome = "ack";
+        tracked.ackAt = ack.receivedAt;
+        tracked.masterDeviceId = ack.masterDeviceId ?? undefined;
+        trackedCommandsRef.current.set(ack.commandId, tracked);
+      }
+      if (process.env.NODE_ENV === "development") {
+        console.info("[SyncBiz:remote-cmd] ack", ack);
+      }
+    },
+    [],
+  );
+
+  const onCommandResult = useCallback(
+    (result: { commandId: string; ok: boolean; error?: string }) => {
+      settleTrackedCommand(result.commandId, result.ok ? "success" : "failed", result.error);
+      if (result.ok) {
+        setRemoteCommandMessage((msg) =>
+          msg?.startsWith("Loading") || msg?.startsWith("Session list") ? null : msg,
+        );
+      }
+      if (process.env.NODE_ENV === "development") {
+        console.info("[SyncBiz:remote-cmd] result", result);
+      }
+    },
+    [settleTrackedCommand],
+  );
 
   const reportPosition = useCallback((position: number, duration: number) => {
     if (Number.isFinite(position) && Number.isFinite(duration)) {
@@ -287,73 +463,167 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
 
   const onCommand = useCallback(
     (cmd: {
+      commandId?: string;
       command: string;
       payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number };
     }) => {
       const command = cmd.command as RemoteCommand;
-      if (command === "PLAY") play();
-      else if (command === "PAUSE") pause();
-      else if (command === "STOP") stop();
+      masterPlaybackDiag("remote command received", {
+        command,
+        commandId: cmd.commandId ?? null,
+        hasSource: !!cmd.payload?.source,
+        hasUrl: !!cmd.payload?.url,
+        trackIndex: cmd.payload?.trackIndex,
+        seekPosition: cmd.payload?.position,
+      });
+      const finish = (ok: boolean, error?: string) => finishRemoteCommand(cmd.commandId, ok, error);
+      const runSync = (fn: () => void) => {
+        try {
+          fn();
+          finish(true);
+        } catch (e) {
+          finish(false, String(e));
+        }
+      };
+      if (command === "PLAY") runSync(() => play());
+      else if (command === "PAUSE") runSync(() => pause());
+      else if (command === "STOP") runSync(() => stop());
       else if (command === "NEXT") {
-        console.log("[SyncBiz Audit] NEXT path resolved", {
-          context: "remote_command",
-          deviceMode,
-          currentSourceId: currentSource?.id,
-          currentTrackIndex,
-          queueIndex,
-          queueLength: queue.length,
-        });
-        next();
-        console.log("[SyncBiz Audit] state after manual next", {
-          context: "remote_command",
-          deviceMode,
-          currentSourceId: currentSource?.id,
-          currentTrackIndex,
-          queueIndex,
-          queueLength: queue.length,
-        });
+        try {
+          next();
+          finishRemoteCommand(cmd.commandId, true);
+        } catch (e) {
+          finishRemoteCommand(cmd.commandId, false, String(e));
+        }
       } else if (command === "PREV") {
-        console.log("[SyncBiz Audit] PREV path resolved", {
-          context: "remote_command",
-          deviceMode,
-          currentSourceId: currentSource?.id,
-          currentTrackIndex,
-          queueIndex,
-          queueLength: queue.length,
-        });
-        prev();
-        console.log("[SyncBiz Audit] state after manual prev", {
-          context: "remote_command",
-          deviceMode,
-          currentSourceId: currentSource?.id,
-          currentTrackIndex,
-          queueIndex,
-          queueLength: queue.length,
-        });
+        try {
+          prev();
+          finishRemoteCommand(cmd.commandId, true);
+        } catch (e) {
+          finishRemoteCommand(cmd.commandId, false, String(e));
+        }
       }
-      else if (command === "SET_SHUFFLE" && typeof cmd.payload?.value === "boolean") setShuffle(cmd.payload.value);
-      else if (command === "SET_AUTOMIX" && typeof cmd.payload?.value === "boolean") setAutoMix(cmd.payload.value);
+      else if (command === "SET_SHUFFLE" && typeof cmd.payload?.value === "boolean") {
+        runSync(() => setShuffle(cmd.payload!.value as boolean));
+      }
+      else if (command === "SET_AUTOMIX" && typeof cmd.payload?.value === "boolean") {
+        runSync(() => setAutoMix(cmd.payload!.value as boolean));
+      }
       else if (command === "SEEK" && typeof cmd.payload?.position === "number") {
-        seekTo(cmd.payload.position);
+        runSync(() => {
+          masterPlaybackDiag("seek", { position: cmd.payload!.position });
+          seekTo(cmd.payload!.position as number);
+        });
+      } else if (command === "QUEUE_NEXT") {
+        const commandId = cmd.commandId;
+        void (async () => {
+          try {
+            if (typeof cmd.payload?.url === "string" && cmd.payload.url.trim()) {
+              addPlayNextFromUrls([cmd.payload.url.trim()]);
+              finishRemoteCommand(commandId, true);
+              return;
+            }
+            const payload = cmd.payload?.source as PlaySourcePayload | undefined;
+            if (!payload) {
+              finishRemoteCommand(commandId, false, "QUEUE_NEXT requires source or url");
+              return;
+            }
+            const base = payloadToUnifiedSource(payload);
+            const cloned = createPlayNextFromUnifiedSource(base);
+            if (!cloned) {
+              finishRemoteCommand(commandId, false, "Not playable for Play Next");
+              return;
+            }
+            addPlayNextSources([cloned]);
+            masterPlaybackDiag("QUEUE_NEXT applied", { title: cloned.title, id: cloned.id });
+            finishRemoteCommand(commandId, true);
+          } catch (e) {
+            finishRemoteCommand(commandId, false, String(e));
+          }
+        })();
       } else if (command === "SET_VOLUME" && typeof cmd.payload?.volume === "number") {
-        setVolume(Math.max(0, Math.min(100, cmd.payload.volume)));
+        runSync(() => setVolume(Math.max(0, Math.min(100, cmd.payload!.volume as number))));
       } else if (command === "LOAD_PLAYLIST" && cmd.payload?.url) {
-        playSource(urlToUnifiedSource(cmd.payload.url));
+        runSync(() => playSource(urlToUnifiedSource(cmd.payload!.url as string)));
       } else if (command === "PLAY_SOURCE" && cmd.payload?.source) {
         const payload = cmd.payload.source as PlaySourcePayload;
         const trackIdx = typeof cmd.payload.trackIndex === "number" ? cmd.payload.trackIndex : 0;
-        // Play immediately from the payload for zero-latency start.
-        // The payload carries id/url/title/type — sufficient to begin playback and
-        // emit an immediate loading/playing STATE_UPDATE to the CONTROL.
-        // Removed the blocking fetchUnifiedSourcesWithFallback() call that caused
-        // 15+ second delays on Railway before the first track could start.
-        playSource(payloadToUnifiedSource(payload), trackIdx);
+        const commandId = cmd.commandId;
+        const dedupeKey = playSourceDedupeKey(payload.id, payload.playlistId, trackIdx);
+        if (
+          dedupeKey === lastRemotePlayKeyRef.current &&
+          currentSource?.id === payload.id &&
+          currentTrackIndex === trackIdx &&
+          (playStatus === "playing" || playStatus === "paused")
+        ) {
+          masterPlaybackDiag("PLAY_SOURCE dedupe skip", { dedupeKey, trackIdx });
+          if (playStatus === "paused") {
+            try {
+              play();
+            } catch {
+              /* ignore */
+            }
+          }
+          finishRemoteCommand(commandId, true);
+          return;
+        }
+        if (remotePlayInFlightRef.current && dedupeKey === lastRemotePlayKeyRef.current) {
+          finishRemoteCommand(commandId, true);
+          return;
+        }
+        lastRemotePlayKeyRef.current = dedupeKey;
+        remotePlayInFlightRef.current = true;
+        void (async () => {
+          try {
+            const resolved = await hydratePlaySourceFromPayload(payload);
+            const hydratedLen = resolved.playlist ? getPlaylistTracks(resolved.playlist).length : 0;
+            if (process.env.NODE_ENV === "development") {
+              console.info("[SyncBiz:remote-cmd] MASTER hydrated PLAY_SOURCE", {
+                playlistId: payload.playlistId ?? null,
+                hydratedTrackCount: hydratedLen,
+                payloadSessionTracksLen: payload.sessionTracks?.length ?? 0,
+              });
+            }
+            if (payload.playlistId && hydratedLen === 0 && (payload.sessionTracks?.length ?? 0) > 0) {
+              finishRemoteCommand(commandId, false, "Failed to load playlist on streamer");
+              return;
+            }
+            masterPlaybackDiag("PLAY_SOURCE playSource", {
+              sourceId: resolved.id,
+              trackIdx,
+              playlistId: payload.playlistId ?? null,
+            });
+            playSource(resolved, trackIdx);
+            finishRemoteCommand(commandId, true);
+          } catch (e) {
+            finishRemoteCommand(commandId, false, String(e));
+          } finally {
+            remotePlayInFlightRef.current = false;
+          }
+        })();
       }
     },
-    [play, pause, stop, next, prev, playSource, seekTo, setVolume, setShuffle, setAutoMix]
+    [
+      play,
+      pause,
+      stop,
+      next,
+      prev,
+      playSource,
+      addPlayNextFromPaths,
+      addPlayNextFromUrls,
+      addPlayNextSources,
+      seekTo,
+      setVolume,
+      setShuffle,
+      setAutoMix,
+      finishRemoteCommand,
+      currentSource?.id,
+      currentTrackIndex,
+      playStatus,
+    ]
   );
 
-  const effectiveUserId = (userId ?? "").trim();
   const onDeviceMode = useCallback(
     (mode: DeviceMode) => {
       console.log("[SyncBiz Audit] Device mode change", {
@@ -366,7 +636,32 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     },
     [stopForControlHandoff, isMobileLocalPlayback],
   );
-  const onStateUpdate = useCallback((state: StationPlaybackState) => setMasterState(state), []);
+  const clearRemotePlayPendingIfSessionReady = useCallback((state: StationPlaybackState) => {
+    const len = state.sessionTracks?.length ?? 0;
+    if (len > 0) {
+      setRemoteCommandMessage(null);
+      setPlaySourceRemotePending(false);
+      playSourcePendingKeyRef.current = null;
+    }
+    if (process.env.NODE_ENV === "development") {
+      console.info("[SyncBiz:remote-cmd] CONTROL received STATE_UPDATE", {
+        sessionTracksLen: len,
+        sessionPlaylistId: state.sessionPlaylistId ?? null,
+        currentTrackIndex: state.currentTrackIndex,
+      });
+    }
+  }, []);
+
+  const deviceModeRef = useRef<DeviceMode>("MASTER");
+
+  const onStateUpdate = useCallback(
+    (state: StationPlaybackState) => {
+      if (deviceModeRef.current === "MASTER") return;
+      setMasterState(state);
+      clearRemotePlayPendingIfSessionReady(state);
+    },
+    [clearRemotePlayPendingIfSessionReady],
+  );
   const onSecondaryDesktop = useCallback(() => setSecondaryDesktopModalOpen(true), []);
   const onGuestRecommendation = useCallback((rec: GuestRecommendationPayload) => setPendingGuestRecommendation(rec), []);
 
@@ -399,6 +694,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     sendSetControl,
     sendState,
     sendCommand,
+    sendCommandResult,
     masterDeviceId,
     hasExistingMaster,
     sessionCode,
@@ -415,10 +711,34 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       onSecondaryDesktop,
       onGuestRecommendation,
       onAuthError,
+      onCommandAck,
+      onCommandResult,
       isDesktopApp: isElectronShell === true,
       isStreamerDevice,
+      branchId: isStreamerDevice ? streamerBranchId : undefined,
     }
   );
+
+  useEffect(() => {
+    deviceModeRef.current = deviceMode;
+  }, [deviceMode]);
+
+  useEffect(() => {
+    sendCommandResultRef.current = sendCommandResult;
+  }, [sendCommandResult]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const now = Date.now();
+      for (const [commandId, tracked] of trackedCommandsRef.current) {
+        if (tracked.outcome !== "pending" && tracked.outcome !== "ack") continue;
+        if (now - tracked.sentAt > REMOTE_COMMAND_TIMEOUT_MS) {
+          settleTrackedCommand(commandId, "timeout", "Streamer did not respond in time");
+        }
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [settleTrackedCommand]);
 
   const guestLink =
     typeof window !== "undefined" && sessionCode
@@ -620,6 +940,11 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     pause,
   ]);
 
+  const sessionTrackCount = getPlaylistSessionTracks({
+    currentSource,
+    currentPlaylist,
+  }).length;
+
   // Publish state when MASTER and connected – include position/duration for CONTROL sync
   useEffect(() => {
     if (!isActive || status !== "connected" || deviceMode !== "MASTER" || !sendState) return;
@@ -633,10 +958,29 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       shuffle,
       autoMixState,
       pd ? { position: pd.position, duration: pd.duration } : undefined,
-      volume
+      volume,
+      currentPlaylist,
+      playNextQueue
     );
     sendState(state);
-  }, [isActive, status, deviceMode, sendState, playStatus, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState]);
+  }, [
+    isActive,
+    status,
+    deviceMode,
+    sendState,
+    playStatus,
+    currentSource?.id,
+    currentTrackIndex,
+    queue,
+    queueIndex,
+    volume,
+    shuffle,
+    autoMixState,
+    currentPlaylist?.id,
+    sessionTrackCount,
+    currentSource?.playlist?.tracks?.length,
+    playNextQueue,
+  ]);
 
   // When playing, send state more frequently so CONTROL progress stays in sync
   useEffect(() => {
@@ -652,22 +996,87 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         shuffle,
         autoMixState,
         pd ? { position: pd.position, duration: pd.duration } : undefined,
-        volume
+        volume,
+        currentPlaylist,
+        playNextQueue
       );
       sendState(state);
     }, 1000);
     return () => clearInterval(id);
-  }, [isActive, status, deviceMode, playStatus, sendState, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState]);
+  }, [
+    isActive,
+    status,
+    deviceMode,
+    playStatus,
+    sendState,
+    currentSource?.id,
+    currentTrackIndex,
+    queue,
+    queueIndex,
+    volume,
+    shuffle,
+    autoMixState,
+    currentPlaylist?.id,
+    sessionTrackCount,
+    currentSource?.playlist?.tracks?.length,
+    playNextQueue,
+  ]);
+
+  const useLocalDeviceTransport = effectiveDeviceMode === "MASTER" || isMobileLocalPlayback;
 
   const sendCommandToMaster = useCallback(
     (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number }) => {
-      if (!masterDeviceId) return;
-      sendCommand(masterDeviceId, command, payload);
+      if (useLocalDeviceTransport) return null;
+      if (!masterDeviceId) {
+        setRemoteCommandMessage("No MASTER device connected");
+        return null;
+      }
+      const now = Date.now();
+      if (isTransportCommand(command)) {
+        const last = lastTransportSentRef.current;
+        if (last && last.command === command && now - last.at < TRANSPORT_DEBOUNCE_MS) {
+          return null;
+        }
+        lastTransportSentRef.current = { command, at: now };
+      }
+      let dedupeKey: string | undefined;
+      if (command === "PLAY_SOURCE" && payload?.source) {
+        dedupeKey = playSourceDedupeKey(
+          payload.source.id,
+          payload.source.playlistId,
+          typeof payload.trackIndex === "number" ? payload.trackIndex : 0,
+        );
+        if (playSourcePendingKeyRef.current === dedupeKey) {
+          return null;
+        }
+        playSourcePendingKeyRef.current = dedupeKey;
+        setPlaySourceRemotePending(true);
+        setRemoteCommandMessage("Loading on streamer…");
+      }
+      const commandId = nextCommandId();
+      const sentId = sendCommand(masterDeviceId, command, payload, commandId);
+      if (!sentId) {
+        if (dedupeKey && playSourcePendingKeyRef.current === dedupeKey) {
+          playSourcePendingKeyRef.current = null;
+          setPlaySourceRemotePending(false);
+        }
+        setRemoteCommandMessage("Branch socket not connected");
+        return null;
+      }
+      const tracked: TrackedRemoteCommand = {
+        commandId: sentId,
+        command,
+        sentAt: now,
+        outcome: "pending",
+        masterDeviceId,
+        dedupeKey,
+      };
+      trackedCommandsRef.current.set(sentId, tracked);
+      setPendingRemoteCommands((prev) => new Set(prev).add(command));
+      return sentId;
     },
-    [masterDeviceId, sendCommand]
+    [useLocalDeviceTransport, masterDeviceId, sendCommand],
   );
-
-  const useLocalDeviceTransport = effectiveDeviceMode === "MASTER" || isMobileLocalPlayback;
 
   const playSourceOrSend = useCallback(
     (source: UnifiedSource, trackIndex = 0) => {
@@ -681,6 +1090,47 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       }
     },
     [useLocalDeviceTransport, playSource, sendCommandToMaster]
+  );
+
+  const queueNextOrSend = useCallback(
+    (source: UnifiedSource) => {
+      const cloned = createPlayNextFromUnifiedSource(source);
+      if (!cloned) return;
+      if (useLocalDeviceTransport) {
+        addPlayNextSources([cloned]);
+      } else {
+        sendCommandToMaster("QUEUE_NEXT", { source: unifiedSourceToPayload(cloned) });
+      }
+    },
+    [useLocalDeviceTransport, addPlayNextSources, sendCommandToMaster]
+  );
+
+  const queueNextFromPathsOrSend = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      if (useLocalDeviceTransport) {
+        addPlayNextFromPaths(paths);
+      } else {
+        for (const p of paths) {
+          sendCommandToMaster("QUEUE_NEXT", { url: p });
+        }
+      }
+    },
+    [useLocalDeviceTransport, addPlayNextFromPaths, sendCommandToMaster]
+  );
+
+  const queueNextFromUrlsOrSend = useCallback(
+    (urls: string[]) => {
+      if (urls.length === 0) return;
+      if (useLocalDeviceTransport) {
+        addPlayNextFromUrls(urls);
+      } else {
+        for (const u of urls) {
+          sendCommandToMaster("QUEUE_NEXT", { url: u });
+        }
+      }
+    },
+    [useLocalDeviceTransport, addPlayNextFromUrls, sendCommandToMaster]
   );
 
   const playOrSend = useCallback(() => {
@@ -757,6 +1207,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       sendSetControl,
       sendCommandToMaster,
       playSourceOrSend,
+      queueNextOrSend,
+      queueNextFromPathsOrSend,
+      queueNextFromUrlsOrSend,
       playOrSend,
       pauseOrSend,
       stopOrSend,
@@ -771,6 +1224,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       isObserverOnlyBrowser,
       isMobileLocalPlayback,
       isStreamerDevice,
+      remoteCommandMessage,
+      isPlaySourceRemotePending: playSourceRemotePending,
+      isRemoteCommandPending: (command: RemoteCommand) => pendingRemoteCommands.has(command),
     }),
     [
       isActive,
@@ -787,6 +1243,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       sendSetControl,
       sendCommandToMaster,
       playSourceOrSend,
+      queueNextOrSend,
+      queueNextFromPathsOrSend,
+      queueNextFromUrlsOrSend,
       playOrSend,
       pauseOrSend,
       stopOrSend,
@@ -801,6 +1260,12 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       isObserverOnlyBrowser,
       isMobileLocalPlayback,
       isStreamerDevice,
+      remoteCommandMessage,
+      playSourceRemotePending,
+      pendingRemoteCommands,
+      queueNextOrSend,
+      queueNextFromPathsOrSend,
+      queueNextFromUrlsOrSend,
     ]
   );
 

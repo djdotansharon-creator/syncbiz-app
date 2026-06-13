@@ -7,17 +7,30 @@
  * Extend with a v2 prefix if the formula changes — not stable across renames without rescan.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import type {
   DesktopRuntimeConfig,
   ListMusicLibraryDirResult,
+  LocalAiPlaylistCandidate,
   LocalAudioTagFields,
   LocalCollectionSearchHit,
 } from "../shared/mvp-types";
+import {
+  expandLocalSearchTokens,
+  scoreLocalTrackForAiSearch,
+  toLocalAiSearchMatchDebug,
+  rankLocalAiSearchResults,
+  parseLocalSearchIntents,
+} from "../shared/local-ai-playlist-search";
 
-export const LOCAL_COLLECTION_SCHEMA_VERSION = 1;
+/**
+ * Schema v2 (Phase 1 hybrid AI playlist): adds `comment`, `bpm`, `rating` to each row.
+ * Existing v1 snapshots are reset by ensureLocalCollectionSnapshot so the new fields populate cleanly.
+ */
+export const LOCAL_COLLECTION_SCHEMA_VERSION = 2;
 
 const SNAPSHOT_SUBDIR = "local-collection";
 const SNAPSHOT_FILENAME = "collection-snapshot.json";
@@ -38,6 +51,27 @@ export type LocalCollectionTrackRecord = {
   year: string | null;
   album: string | null;
   durationSec: number | null;
+  /** ID3 comment frame (joined when multi-value). Schema v2+. */
+  comment: string | null;
+  /** Tagged BPM only (no audio analysis). Schema v2+. */
+  bpm: number | null;
+  /** 0–5 star rating averaged across sources. Schema v2+. */
+  rating: number | null;
+  /** Tag&Rename / metadata bank track # when imported. */
+  trackNumber?: string | null;
+  /**
+   * Absolute root path this row was indexed against. Pilot multi-root model
+   * (PlaylistPro + Additional Music Folders) — when absent the row was
+   * imported under the snapshot's primary `musicFolderRoot`.
+   */
+  rootPath?: string | null;
+  /** Future: link to SyncBiz CatalogItem when matched online. */
+  catalogItemId?: string | null;
+  /** Future: preferred streaming URL when known. */
+  youtubeUrl?: string | null;
+  externalUrl?: string | null;
+  /** Future: ranked URL candidates for operator matching. */
+  urlCandidates?: Array<{ url: string; source?: string; score?: number }> | null;
   /** When this row was first seen or refreshed from a directory listing / scan. */
   lastScannedAt: string;
   /** When file stats were last confirmed (listing, scan, or tag read). */
@@ -53,6 +87,12 @@ export type LocalCollectionSnapshotFile = {
   musicFolderRoot: string | null;
   tracks: Record<string, LocalCollectionTrackRecord>;
   updatedAt: string;
+  /**
+   * Pilot: ISO timestamp of the most recent "Scan now" per indexed root path.
+   * Keys are lower-cased absolute paths so the UI can show "last scan" per
+   * source even when no tracks were indexed. Optional for backwards compat.
+   */
+  rootScanTimestamps?: Record<string, string>;
 };
 
 export type LocalCollectionSnapshotStats = {
@@ -104,7 +144,53 @@ function freshSnapshot(deviceId: string, musicRoot: string | null): LocalCollect
     musicFolderRoot: musicRoot,
     tracks: {},
     updatedAt: now,
+    rootScanTimestamps: {},
   };
+}
+
+type SnapshotCacheEntry = {
+  userData: string;
+  deviceId: string;
+  mtimeMs: number;
+  snap: LocalCollectionSnapshotFile;
+};
+
+let snapshotMemoryCache: SnapshotCacheEntry | null = null;
+
+export function invalidateLocalCollectionSnapshotCache(): void {
+  snapshotMemoryCache = null;
+}
+
+function snapshotFileMtimeMs(userData: string, deviceId: string): number {
+  const p = snapshotPath(userData, deviceId);
+  try {
+    return statSync(p).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/** In-memory snapshot for hot IPC search paths; invalidated on save and explicit scan. */
+export function loadLocalCollectionSnapshotCached(
+  userData: string,
+  deviceId: string,
+): LocalCollectionSnapshotFile | null {
+  const mtimeMs = snapshotFileMtimeMs(userData, deviceId);
+  if (
+    snapshotMemoryCache &&
+    snapshotMemoryCache.userData === userData &&
+    snapshotMemoryCache.deviceId === deviceId &&
+    snapshotMemoryCache.mtimeMs === mtimeMs
+  ) {
+    return snapshotMemoryCache.snap;
+  }
+  const snap = loadLocalCollectionSnapshot(userData, deviceId);
+  if (snap && mtimeMs > 0) {
+    snapshotMemoryCache = { userData, deviceId, mtimeMs, snap };
+  } else {
+    snapshotMemoryCache = null;
+  }
+  return snap;
 }
 
 export function loadLocalCollectionSnapshot(userData: string, deviceId: string): LocalCollectionSnapshotFile | null {
@@ -118,6 +204,18 @@ export function loadLocalCollectionSnapshot(userData: string, deviceId: string):
       data.tracks && typeof data.tracks === "object" && !Array.isArray(data.tracks)
         ? (data.tracks as Record<string, LocalCollectionTrackRecord>)
         : {};
+    const rootScanTimestamps: Record<string, string> = {};
+    if (
+      data.rootScanTimestamps &&
+      typeof data.rootScanTimestamps === "object" &&
+      !Array.isArray(data.rootScanTimestamps)
+    ) {
+      for (const [k, v] of Object.entries(data.rootScanTimestamps as Record<string, unknown>)) {
+        if (typeof k === "string" && k.length > 0 && typeof v === "string" && v.length > 0) {
+          rootScanTimestamps[k.toLowerCase()] = v;
+        }
+      }
+    }
     return {
       schemaVersion: typeof data.schemaVersion === "number" ? data.schemaVersion : LOCAL_COLLECTION_SCHEMA_VERSION,
       workspaceId: typeof data.workspaceId === "string" ? data.workspaceId : null,
@@ -128,6 +226,7 @@ export function loadLocalCollectionSnapshot(userData: string, deviceId: string):
           : null,
       tracks,
       updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
+      rootScanTimestamps,
     };
   } catch {
     return null;
@@ -142,6 +241,7 @@ export function saveLocalCollectionSnapshot(userData: string, snapshot: LocalCol
     const now = new Date().toISOString();
     const toWrite: LocalCollectionSnapshotFile = { ...snapshot, updatedAt: now };
     writeFileSync(snapshotPath(userData, snapshot.deviceId), JSON.stringify(toWrite), "utf-8");
+    invalidateLocalCollectionSnapshotCache();
   } catch (e) {
     console.warn(LOG, "snapshot write failed (ignored)", e);
   }
@@ -258,7 +358,11 @@ export function upsertLocalTrackIntoSnapshot(
   const genre = mergeTagField(tag.genre, prev?.genre, preserve);
   const year = mergeTagField(tag.year, prev?.year, preserve);
   const album = mergeTagField(tag.album, prev?.album, preserve);
+  const comment = mergeTagField(tag.comment, prev?.comment, preserve);
   const durationSec = mergeDuration(tag.durationSec, prev?.durationSec, preserve);
+  const bpm = mergeDuration(tag.bpm, prev?.bpm, preserve);
+  const rating = mergeDuration(tag.rating, prev?.rating, preserve);
+  const trackNumber = mergeTagField(tag.trackNumber, prev?.trackNumber, preserve);
 
   const lastScannedAt = args.touchScannedAt ? now : prev?.lastScannedAt ?? now;
 
@@ -273,12 +377,166 @@ export function upsertLocalTrackIntoSnapshot(
     genre,
     year,
     album,
+    comment,
+    bpm,
+    rating,
+    trackNumber,
     durationSec,
+    rootPath: rootNorm,
     lastScannedAt,
     lastVerifiedAt: now,
   };
 
   snapshot.updatedAt = now;
+}
+
+/**
+ * Pilot multi-root: upsert a track row from an "Additional Music Folder" root.
+ * Uses a distinct `extra:` localId namespace so the same relative-path/size/mtime
+ * triple under PlaylistPro and an extra folder produce separate rows. We keep
+ * the relative path computed against the extra root for friendly display.
+ */
+function localIdForExtraRoot(
+  rootNorm: string,
+  rel: string,
+  size: number,
+  mtimeMs: number,
+): string {
+  const rootHash = createHash("sha1").update(rootNorm.toLowerCase()).digest("hex").slice(0, 12);
+  return `extra:v1:${rootHash}:${encodeURIComponent(rel)}:${size}:${mtimeMs}`;
+}
+
+function relativeFromExtraRoot(absolutePath: string, rootNorm: string): string | null {
+  const abs = path.resolve(absolutePath);
+  const rel = path.relative(rootNorm, abs);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  return normalizeRelativePathForSnapshot(rel);
+}
+
+export function upsertExtraRootTrackIntoSnapshot(
+  snapshot: LocalCollectionSnapshotFile,
+  args: {
+    absolutePath: string;
+    extraRootNorm: string;
+    size: number;
+    mtimeMs: number;
+    tags?: Partial<LocalAudioTagFields> | null;
+    preserveTagsOnStatOnly?: boolean;
+    touchScannedAt?: boolean;
+  },
+): void {
+  const rootNorm = args.extraRootNorm;
+  if (!rootNorm) return;
+
+  const rel = relativeFromExtraRoot(args.absolutePath, rootNorm);
+  if (!rel) return;
+
+  const localId = localIdForExtraRoot(rootNorm, rel, args.size, args.mtimeMs);
+  const now = new Date().toISOString();
+  const prev = snapshot.tracks[localId];
+  const tag = args.tags ?? {};
+  const preserve = args.preserveTagsOnStatOnly === true && !!prev;
+
+  removeStaleKeysForAbsolutePath(snapshot, args.absolutePath, localId);
+
+  const artist = mergeTagField(tag.artist, prev?.artist, preserve);
+  const title = mergeTagField(tag.title, prev?.title, preserve);
+  const genre = mergeTagField(tag.genre, prev?.genre, preserve);
+  const year = mergeTagField(tag.year, prev?.year, preserve);
+  const album = mergeTagField(tag.album, prev?.album, preserve);
+  const comment = mergeTagField(tag.comment, prev?.comment, preserve);
+  const durationSec = mergeDuration(tag.durationSec, prev?.durationSec, preserve);
+  const bpm = mergeDuration(tag.bpm, prev?.bpm, preserve);
+  const rating = mergeDuration(tag.rating, prev?.rating, preserve);
+  const trackNumber = mergeTagField(tag.trackNumber, prev?.trackNumber, preserve);
+
+  const lastScannedAt = args.touchScannedAt ? now : prev?.lastScannedAt ?? now;
+
+  snapshot.tracks[localId] = {
+    localId,
+    absolutePath: path.resolve(args.absolutePath),
+    relativePathFromRoot: rel,
+    size: args.size,
+    mtimeMs: args.mtimeMs,
+    artist,
+    title,
+    genre,
+    year,
+    album,
+    comment,
+    bpm,
+    rating,
+    trackNumber,
+    durationSec,
+    rootPath: rootNorm,
+    lastScannedAt,
+    lastVerifiedAt: now,
+  };
+
+  snapshot.updatedAt = now;
+}
+
+/**
+ * After a recursive scan of an Additional Music Folder root, index its files
+ * into the snapshot using the multi-root upsert path. Returns nothing — the
+ * snapshot file is written once at the end.
+ *
+ * Pilot Blocker (Local Jazz strictness): when `tagsByAbsPath` is provided,
+ * each row gets its real ID3 / metadata tags written into the snapshot during
+ * the scan (instead of needing a separate My-Music-Library browse pass or an
+ * XLSX import to populate Genre / Artist / Title). When omitted, the legacy
+ * "paths-only" behavior is preserved.
+ */
+export async function recordExtraRootScanInSnapshot(
+  userData: string,
+  config: DesktopRuntimeConfig,
+  rootPath: string,
+  absolutePaths: string[],
+  tagsByAbsPath?: ReadonlyMap<string, LocalAudioTagFields | null>,
+): Promise<void> {
+  const rootNorm = path.resolve((rootPath ?? "").trim());
+  if (!rootNorm || absolutePaths.length === 0) return;
+  try {
+    const snap = ensureLocalCollectionSnapshot(userData, config);
+    for (const raw of absolutePaths) {
+      const p = (raw ?? "").trim();
+      if (!p) continue;
+      let st;
+      try {
+        st = await stat(p);
+      } catch {
+        continue;
+      }
+      if (!st.isFile()) continue;
+      const incomingTags = tagsByAbsPath?.get(path.resolve(p)) ?? null;
+      upsertExtraRootTrackIntoSnapshot(snap, {
+        absolutePath: p,
+        extraRootNorm: rootNorm,
+        size: st.size,
+        mtimeMs: Math.floor(st.mtimeMs),
+        tags: incomingTags ?? undefined,
+        preserveTagsOnStatOnly: !incomingTags,
+        touchScannedAt: true,
+      });
+    }
+    setSnapshotLastScanForRoot(snap, rootPath, new Date().toISOString());
+    saveLocalCollectionSnapshot(userData, snap);
+  } catch (e) {
+    console.warn(LOG, "extra-root scan snapshot failed", e);
+  }
+}
+
+/** Touch the per-root last-scan timestamp without rewriting any track rows. */
+export function setSnapshotLastScanForRoot(
+  snapshot: LocalCollectionSnapshotFile,
+  rootPath: string | null | undefined,
+  iso: string,
+): void {
+  const p = (rootPath ?? "").trim();
+  if (!p) return;
+  const map = snapshot.rootScanTimestamps ?? {};
+  map[path.resolve(p).toLowerCase()] = iso;
+  snapshot.rootScanTimestamps = map;
 }
 
 export function listSnapshotTracksForRoot(
@@ -431,6 +689,11 @@ async function flushPendingTagSnapshots(): Promise<void> {
           continue;
         }
         if (!st.isFile()) continue;
+        // Browse-driven ID3 reads typically return null for the XLSX-sourced fields
+        // (comment / bpm / rating). Passing `undefined` for null incoming values makes
+        // mergeTagField / mergeDuration fall through to "preserve previous" — so a prior
+        // Tag&Rename XLSX import for this file is not silently wiped when the user
+        // opens it from the My Music Library browse UI.
         upsertLocalTrackIntoSnapshot(snap, {
           absolutePath: absPath,
           musicRootNorm: rootNorm,
@@ -442,7 +705,10 @@ async function flushPendingTagSnapshots(): Promise<void> {
             album: tagFields.album,
             genre: tagFields.genre,
             year: tagFields.year,
+            comment: tagFields.comment ?? undefined,
             durationSec: tagFields.durationSec,
+            bpm: tagFields.bpm ?? undefined,
+            rating: tagFields.rating ?? undefined,
           },
           preserveTagsOnStatOnly: false,
         });
@@ -519,11 +785,18 @@ export async function recordListDirAudioFilesInSnapshot(
   }
 }
 
-/** After recursive scan: index files that still lie under the configured music folder root. */
+/**
+ * After recursive scan: index files that still lie under the configured music
+ * folder root. When `tagsByAbsPath` is provided, real ID3 / metadata tags are
+ * written into the snapshot during the scan (so Genre / Artist / Title power
+ * AI local search immediately, without needing a follow-up browse or XLSX
+ * import). When omitted, only path/size/mtime are recorded.
+ */
 export async function recordScanAudioFilesInSnapshot(
   userData: string,
   config: DesktopRuntimeConfig,
   absolutePaths: string[],
+  tagsByAbsPath?: ReadonlyMap<string, LocalAudioTagFields | null>,
 ): Promise<void> {
   if (absolutePaths.length === 0) return;
   try {
@@ -541,12 +814,14 @@ export async function recordScanAudioFilesInSnapshot(
         continue;
       }
       if (!st.isFile()) continue;
+      const incomingTags = tagsByAbsPath?.get(path.resolve(p)) ?? null;
       upsertLocalTrackIntoSnapshot(snap, {
         absolutePath: p,
         musicRootNorm: rootNorm,
         size: st.size,
         mtimeMs: Math.floor(st.mtimeMs),
-        preserveTagsOnStatOnly: true,
+        tags: incomingTags ?? undefined,
+        preserveTagsOnStatOnly: !incomingTags,
         touchScannedAt: true,
       });
     }
@@ -568,13 +843,25 @@ export async function flushLocalCollectionTagSnapshotWrites(): Promise<void> {
   await flushPendingTagSnapshots();
 }
 
-function tokenizeSearchQuery(q: string): string[] {
-  return q
-    .toLowerCase()
-    .trim()
-    .split(/\s+/)
-    .map((w) => w.replace(/^[^a-z0-9\u0590-\u05ff]+|[^a-z0-9\u0590-\u05ff]+$/gi, ""))
-    .filter((w) => w.length >= 2);
+function scoreSnapshotRow(row: LocalCollectionTrackRecord, query: string): number {
+  const intents = parseLocalSearchIntents(query);
+  return scoreLocalTrackForAiSearch(
+    {
+      artist: row.artist,
+      title: row.title,
+      album: row.album,
+      genre: row.genre,
+      year: row.year,
+      comment: row.comment,
+      bpm: row.bpm,
+      rating: row.rating,
+      trackNumber: row.trackNumber ?? null,
+      durationSec: row.durationSec,
+      relativePathFromRoot: row.relativePathFromRoot,
+      absolutePath: row.absolutePath,
+    },
+    intents,
+  ).score;
 }
 
 /**
@@ -586,34 +873,15 @@ export function searchLocalCollectionSnapshotInMemory(
   limit: number,
 ): LocalCollectionSearchHit[] {
   if (!snapshot || Object.keys(snapshot.tracks).length === 0) return [];
-  const tokens = tokenizeSearchQuery(query);
+  const { tokens, phrase } = expandLocalSearchTokens(query);
   if (tokens.length === 0) return [];
 
   const cap = Math.min(100, Math.max(1, limit));
   const scored: LocalCollectionSearchHit[] = [];
 
   for (const row of Object.values(snapshot.tracks)) {
-    const name = path.basename(row.absolutePath);
-    const fields = [row.artist, row.title, row.genre, row.year, row.album, row.relativePathFromRoot, name];
-    const hay = fields
-      .map((x) => (x ?? "").toLowerCase())
-      .join(" ");
-
-    let score = 0;
-    for (const t of tokens) {
-      if (!hay.includes(t)) continue;
-      score += 8;
-      if (row.artist?.toLowerCase().includes(t)) score += 4;
-      if (row.title?.toLowerCase().includes(t)) score += 4;
-      if (row.album?.toLowerCase().includes(t)) score += 2;
-      if (row.genre?.toLowerCase().includes(t)) score += 2;
-      if (row.year?.toLowerCase().includes(t)) score += 2;
-      if (name.toLowerCase().includes(t)) score += 3;
-      if (row.relativePathFromRoot.toLowerCase().includes(t)) score += 1;
-    }
-
+    const score = scoreSnapshotRow(row, query);
     if (score <= 0) continue;
-
     scored.push({
       localId: row.localId,
       absolutePath: row.absolutePath,
@@ -630,4 +898,63 @@ export function searchLocalCollectionSnapshotInMemory(
 
   scored.sort((a, b) => b.score - a.score || a.relativePathFromRoot.localeCompare(b.relativePathFromRoot));
   return scored.slice(0, cap);
+}
+
+/**
+ * Phase 1 hybrid AI playlist: return richer candidate rows (bpm/comment/rating included)
+ * scored against the prompt tokens. Caller (renderer) forwards these to /api/playlists/ai-build
+ * as `additionalCandidates`. Snapshot-only; never walks disk.
+ */
+export function searchLocalForAiPlaylistInMemory(
+  snapshot: LocalCollectionSnapshotFile | null,
+  query: string,
+  limit: number,
+): LocalAiPlaylistCandidate[] {
+  if (!snapshot || Object.keys(snapshot.tracks).length === 0) return [];
+  const intents = parseLocalSearchIntents(query);
+  if (intents.groups.length === 0) return [];
+
+  const cap = Math.min(80, Math.max(1, limit));
+  const scored: LocalAiPlaylistCandidate[] = [];
+
+  for (const row of Object.values(snapshot.tracks)) {
+    const rowFields = {
+      artist: row.artist,
+      title: row.title,
+      album: row.album,
+      genre: row.genre,
+      year: row.year,
+      comment: row.comment,
+      bpm: row.bpm,
+      rating: row.rating,
+      trackNumber: row.trackNumber ?? null,
+      durationSec: row.durationSec,
+      relativePathFromRoot: row.relativePathFromRoot,
+      absolutePath: row.absolutePath,
+    };
+    const scoredRow = scoreLocalTrackForAiSearch(rowFields, intents);
+    if (scoredRow.score <= 0) continue;
+    scored.push({
+      localId: row.localId,
+      absolutePath: row.absolutePath,
+      relativePathFromRoot: row.relativePathFromRoot,
+      artist: row.artist,
+      title: row.title,
+      album: row.album,
+      genre: row.genre,
+      year: row.year,
+      comment: row.comment,
+      durationSec: row.durationSec,
+      bpm: row.bpm,
+      rating: row.rating,
+      score: scoredRow.score,
+      matchDebug: toLocalAiSearchMatchDebug(scoredRow),
+    });
+  }
+
+  const { results, partialFallback, partialFallbackMessage } = rankLocalAiSearchResults(scored, intents);
+  if (partialFallback) {
+    console.warn("[SyncBiz:local-snapshot]", partialFallbackMessage, { query: intents.phrase });
+  }
+  return results.slice(0, cap);
 }

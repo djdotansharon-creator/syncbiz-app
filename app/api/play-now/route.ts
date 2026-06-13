@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runLocalPlaylist } from "@/lib/play-local";
 import { db } from "@/lib/store";
 
+/**
+ * POST /api/play-now — DISABLED shell-out branch for pilot.
+ *
+ * The previous implementation called `runLocalPlaylist()` for `local_playlist` sources,
+ * which shelled out via `cmd /c start "" "<path>"` (Winamp on machines where Winamp is
+ * the default audio handler). That is no longer allowed. Non-local "play now" still
+ * logs an informational entry the way it always did; local sources are short-circuited
+ * with a 410 because the in-app player owns local playback now.
+ */
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as { sourceId: string; deviceId?: string };
   const { sourceId, deviceId } = body;
 
   if (!sourceId) {
-    return NextResponse.json(
-      { error: "sourceId is required" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "sourceId is required" }, { status: 400 });
   }
 
   const sources = await db.getSources();
@@ -19,47 +24,21 @@ export async function POST(req: NextRequest) {
   const device = deviceId ? devices.find((d) => d.id === deviceId) : null;
 
   if (!source) {
-    return NextResponse.json(
-      { error: "Source not found" },
-      { status: 404 },
-    );
+    return NextResponse.json({ error: "Source not found" }, { status: 404 });
   }
 
   const path = (source.target ?? source.uriOrPath ?? "").trim();
   const deviceName = device ? device.name : "no device specified";
 
   if (source.type === "local_playlist" && path) {
-    console.log("[play-now] Local playlist endpoint hit", {
-      sourceId,
-      sourceName: source.name,
-      targetPath: path,
-    });
-
-    const result = await runLocalPlaylist(path);
-
-    if (result.success) {
-      console.log("[play-now] Command executed successfully:", path);
-      const log = db.addLog({
-        timestamp: new Date().toISOString(),
-        level: "info",
-        message: `Local playback: opened "${path}" with default app.`,
-        deviceId: device?.id,
-        sourceId: source.id,
-      });
-      return NextResponse.json({ ok: true, log });
-    }
-
-    console.error("[play-now] Command failed:", result.error);
-    db.addLog({
-      timestamp: new Date().toISOString(),
-      level: "error",
-      message: `Local playback failed: ${result.error} – "${source.name}" (${path})`,
-      deviceId: device?.id,
-      sourceId: source.id,
-    });
     return NextResponse.json(
-      { error: result.error },
-      { status: 500 },
+      {
+        ok: false,
+        disabled: true,
+        error:
+          "Local playlist shell-out is disabled. Open the playlist in SyncBiz Desktop — playback runs through the in-app MPV engine.",
+      },
+      { status: 410 },
     );
   }
 

@@ -278,7 +278,12 @@ export async function PUT(
     const updated = await updatePlaylist(id, updates);
     const uid = await getUserIdFromSession();
     if (uid && existing) {
-      void notifyLibraryUpdated(uid, { branchId: resolveMediaBranchId(existing), entityType: "playlist", action: "updated" });
+      void notifyLibraryUpdated(uid, {
+        branchId: resolveMediaBranchId(existing),
+        entityType: "playlist",
+        action: "updated",
+        entityId: id,
+      });
     }
     return NextResponse.json(updated);
   } catch (e) {
@@ -311,7 +316,12 @@ export async function DELETE(
     }
     const uid = await getUserIdFromSession();
     if (uid && existing) {
-      void notifyLibraryUpdated(uid, { branchId: resolveMediaBranchId(existing), entityType: "playlist", action: "deleted" });
+      void notifyLibraryUpdated(uid, {
+        branchId: resolveMediaBranchId(existing),
+        entityType: "playlist",
+        action: "deleted",
+        entityId: id,
+      });
     }
     return NextResponse.json({ ok: true });
   } catch (e) {

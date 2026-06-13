@@ -29,6 +29,12 @@ import {
   getPlaylistContainerPathFromDataTransfer,
   isPlaylistContainerPath,
 } from "@/lib/local-audio-path";
+import { isOperatorToolsEnabled } from "@/lib/operator-tools";
+import {
+  formatMusicLibraryBreadcrumbRoot,
+  formatMusicLibraryLocationTitle,
+  PLAYLISTPRO_LIBRARY_DISPLAY_NAME,
+} from "@/lib/playlistpro-paths";
 
 export type MyMusicPlaylistPickerOption = { key: string; label: string };
 
@@ -63,6 +69,14 @@ function canGetLocalAudioTags(): boolean {
 
 function canImportM3u(): boolean {
   return typeof window !== "undefined" && typeof window.syncbizDesktop?.importLocalM3uPlaylist === "function";
+}
+
+function canImportTagRenameXlsx(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.syncbizDesktop?.pickTagRenameXlsxFiles === "function" &&
+    typeof window.syncbizDesktop?.importTagRenameXlsxFiles === "function"
+  );
 }
 
 /** Mirrors desktop `LocalAudioTagFields` (preload IPC); duplicated here so Next doesn’t depend on desktop package. */
@@ -247,6 +261,7 @@ type TrackTableRowProps = {
   isPlayBusy: boolean;
   isAddDisabled: boolean;
   index: number;
+  showOperatorDebug: boolean;
 };
 
 function TrackTableRow({
@@ -259,6 +274,7 @@ function TrackTableRow({
   isPlayBusy,
   isAddDisabled,
   index,
+  showOperatorDebug,
 }: TrackTableRowProps): ReactElement {
   const rowRef = useRef<HTMLTableRowElement>(null);
   const [loading, setLoading] = useState(false);
@@ -345,7 +361,7 @@ function TrackTableRow({
       </td>
       <td className="px-3 py-2 text-right">
         <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-          {process.env.NODE_ENV !== "production" ? (
+          {showOperatorDebug ? (
             <button
               type="button"
               onClick={() => void inspectRawTagsAndLog(file.path)}
@@ -386,6 +402,7 @@ type TrackTableProps = {
   files: TrackTableFile[];
   scanBusyPath: string | null;
   addFlowBusy: boolean;
+  showOperatorDebug: boolean;
   onPlay: (path: string) => void;
   onAddToPlaylist: (file: TrackTableFile) => void;
   onDragStartFile: (e: ReactDragEvent<HTMLTableRowElement>, path: string) => void;
@@ -395,6 +412,7 @@ function TrackTable({
   files,
   scanBusyPath,
   addFlowBusy,
+  showOperatorDebug,
   onPlay,
   onAddToPlaylist,
   onDragStartFile,
@@ -501,6 +519,7 @@ function TrackTable({
               onDragStartFile={onDragStartFile}
               isPlayBusy={scanBusyPath === f.path}
               isAddDisabled={addFlowBusy}
+              showOperatorDebug={showOperatorDebug}
             />
           ))}
         </tbody>
@@ -592,7 +611,28 @@ export function MyMusicLibraryWorkspacePanel({
   const [youtubeResolveOpen, setYoutubeResolveOpen] = useState(false);
   const [m3uYoutubeResolveContext, setM3uYoutubeResolveContext] = useState<M3uYoutubeResolveContextState | null>(null);
 
+  const [tagRenameImportBusy, setTagRenameImportBusy] = useState(false);
+  const [tagRenameImportSummary, setTagRenameImportSummary] = useState<string | null>(null);
+  const [operatorTools, setOperatorTools] = useState(false);
+  const [libraryToolsOpen, setLibraryToolsOpen] = useState(false);
+  const libraryToolsRef = useRef<HTMLDivElement | null>(null);
+
   const hasUserPlaylists = userPlaylists.length > 0;
+
+  useEffect(() => {
+    if (!libraryToolsOpen) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (libraryToolsRef.current && !libraryToolsRef.current.contains(e.target as Node)) {
+        setLibraryToolsOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [libraryToolsOpen]);
+
+  useEffect(() => {
+    setOperatorTools(isOperatorToolsEnabled());
+  }, []);
 
   const refreshRoot = useCallback(async () => {
     if (!isElectronWithBridge() || !window.syncbizDesktop?.getMusicFolder) {
@@ -636,6 +676,14 @@ export function MyMusicLibraryWorkspacePanel({
   }, [rootPath, relSubpath, loadList]);
 
   const segments = useMemo(() => (relSubpath ? relSubpath.split("/").filter(Boolean) : []), [relSubpath]);
+  const breadcrumbRoot = useMemo(
+    () => formatMusicLibraryBreadcrumbRoot(rootPath, { isOperator: operatorTools }),
+    [rootPath, operatorTools],
+  );
+  const locationTitle = useMemo(
+    () => formatMusicLibraryLocationTitle(rootPath, relSubpath, { isOperator: operatorTools }),
+    [rootPath, relSubpath, operatorTools],
+  );
 
   const browseFolderAudioPaths = useMemo(() => {
     if (list?.status !== "ok") return [];
@@ -822,6 +870,55 @@ export function MyMusicLibraryWorkspacePanel({
     }
   }, [addModalTarget, pickedPlaylistKey, onAppendLocalUnifiedToPlaylist]);
 
+  const runTagRenameXlsxImport = useCallback(async () => {
+    const pick = window.syncbizDesktop?.pickTagRenameXlsxFiles;
+    const imp = window.syncbizDesktop?.importTagRenameXlsxFiles;
+    if (typeof pick !== "function" || typeof imp !== "function") {
+      setTagRenameImportSummary("Update SyncBiz Desktop to import Tag&Rename XLSX metadata.");
+      return;
+    }
+    if (!rootPath?.trim()) {
+      setTagRenameImportSummary("Choose a music folder first.");
+      return;
+    }
+    setTagRenameImportBusy(true);
+    setTagRenameImportSummary(null);
+    try {
+      const picked = await pick();
+      if (picked.status === "canceled") return;
+      if (picked.status === "error") {
+        setTagRenameImportSummary(picked.message);
+        return;
+      }
+      const res = await imp(picked.filePaths);
+      if (res.status === "error") {
+        setTagRenameImportSummary(res.message);
+        return;
+      }
+      const parts = [
+        `Updated ${res.updated} track(s) from ${res.filesProcessed} XLSX file(s) (${res.rowsRead} rows read).`,
+      ];
+      if (res.outsideMusicFolder > 0) {
+        parts.push(`${res.outsideMusicFolder} row(s) outside your music folder.`);
+      }
+      if (res.missingOnDisk > 0) {
+        parts.push(`${res.missingOnDisk} file(s) missing on disk.`);
+      }
+      if (res.unmatched > 0) {
+        parts.push(`${res.unmatched} row(s) could not be matched.`);
+      }
+      if (res.sampleUnmatchedPaths.length > 0) {
+        parts.push(`Example: ${res.sampleUnmatchedPaths[0]}`);
+      }
+      setTagRenameImportSummary(parts.join(" "));
+      await loadList();
+    } catch (e) {
+      setTagRenameImportSummary(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTagRenameImportBusy(false);
+    }
+  }, [rootPath, loadList]);
+
   const runM3uImport = useCallback(
     async (absolutePath: string) => {
       const trimmed = absolutePath.trim();
@@ -973,6 +1070,12 @@ export function MyMusicLibraryWorkspacePanel({
 
   const webOnly = !isElectronWithBridge();
   const listApiMissing = isElectronWithBridge() && !canListMusicLibrary();
+  const showLibraryToolsMenu =
+    operatorTools &&
+    Boolean(rootPath?.trim()) &&
+    !listApiMissing &&
+    (canImportM3u() || canImportTagRenameXlsx());
+  const libraryToolsBusy = m3uImportBusy || tagRenameImportBusy || listLoading || addFlowBusy;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 bg-slate-950 p-4 sm:p-5">
@@ -1021,28 +1124,25 @@ export function MyMusicLibraryWorkspacePanel({
             <IconFolderGlyph className="h-8 w-8 text-sky-400/85 drop-shadow-[0_0_6px_rgba(125,211,252,0.35)]" />
           </div>
           <p className="max-w-sm text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-            No music folder selected
+            {PLAYLISTPRO_LIBRARY_DISPLAY_NAME} unavailable
           </p>
           <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">
-            Choose where your local audio files live. You can change it anytime in Settings.
+            This device could not connect to the PlaylistPro music bank. Ask an operator to verify Desktop setup, or
+            enable advanced tools in Settings.
           </p>
-          {canPickMusicFolder() ? (
+          {operatorTools && canPickMusicFolder() ? (
             <button
               type="button"
               disabled={folderPickBusy}
               onClick={() => void chooseMusicFolderFromPanel()}
-              className="mt-7 inline-flex w-full max-w-xs items-center justify-center rounded-lg border border-sky-600/70 bg-sky-700 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-600 disabled:opacity-50"
+              className="mt-7 inline-flex w-full max-w-xs items-center justify-center rounded-lg border border-amber-600/60 bg-amber-900/40 px-6 py-2.5 text-sm font-semibold text-amber-50 transition hover:bg-amber-800/50 disabled:opacity-50"
             >
-              {folderPickBusy ? "Opening…" : "Choose Music Folder"}
+              {folderPickBusy ? "Opening…" : "Override music folder (operator)"}
             </button>
-          ) : (
-            <p className="mt-4 max-w-md text-xs text-amber-200/90">
-              Update SyncBiz Desktop to choose a folder from here, or use Settings below.
-            </p>
-          )}
+          ) : null}
           <Link
             href="/settings"
-            className={`inline-flex text-sm font-medium text-slate-400 underline decoration-slate-600 underline-offset-2 transition hover:text-slate-200 ${canPickMusicFolder() ? "mt-4" : "mt-6"}`}
+            className="mt-6 inline-flex text-sm font-medium text-slate-400 underline decoration-slate-600 underline-offset-2 transition hover:text-slate-200"
           >
             Open Settings
           </Link>
@@ -1100,20 +1200,9 @@ export function MyMusicLibraryWorkspacePanel({
               <IconChevronLeft className="h-4 w-4 text-slate-400" />
               Up
             </button>
-            {canImportM3u() ? (
-              <button
-                type="button"
-                disabled={m3uImportBusy || addFlowBusy}
-                onClick={() => m3uFileInputRef.current?.click()}
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-semibold text-slate-100 transition hover:border-slate-600 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto"
-                title="Import .m3u / .m3u8 / .pls. Only tracks inside your music folder are added."
-              >
-                {m3uImportBusy ? "Importing…" : "Import playlist"}
-              </button>
-            ) : null}
             <div
               className="min-w-0 flex-1 rounded-md border border-slate-800/90 bg-slate-900/55 px-2.5 py-1.5"
-              title={`${rootPath}${relSubpath ? `${rootPath.includes("\\") ? "\\" : "/"}${relSubpath.replace(/\//g, rootPath.includes("\\") ? "\\" : "/")}` : ""}`}
+              title={locationTitle}
             >
               <p className="text-[9px] font-medium uppercase tracking-[0.18em] text-slate-600">Location</p>
               <div className="mt-0.5 font-mono text-xs font-medium leading-snug text-slate-100 sm:text-[0.8125rem] sm:leading-snug">
@@ -1123,7 +1212,7 @@ export function MyMusicLibraryWorkspacePanel({
                     onClick={() => navigateToSegment(-1)}
                     className="break-all text-left text-sky-300/95 transition hover:text-sky-200"
                   >
-                    {rootPath}
+                    {breadcrumbRoot}
                   </button>
                 ) : (
                   <span className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
@@ -1154,7 +1243,94 @@ export function MyMusicLibraryWorkspacePanel({
                 )}
               </div>
             </div>
+            {showLibraryToolsMenu ? (
+              <div ref={libraryToolsRef} className="relative shrink-0 self-start sm:self-stretch">
+                <button
+                  type="button"
+                  disabled={libraryToolsBusy}
+                  onClick={() => setLibraryToolsOpen((v) => !v)}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-700/90 bg-slate-900/80 px-2 text-[11px] font-medium text-slate-400 transition hover:border-slate-600 hover:bg-slate-800/90 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-haspopup="menu"
+                  aria-expanded={libraryToolsOpen}
+                  title="Import and maintenance tools"
+                >
+                  Library tools
+                  <svg
+                    className={`h-3 w-3 text-slate-500 transition ${libraryToolsOpen ? "rotate-180" : ""}`}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    aria-hidden
+                  >
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+                {libraryToolsOpen ? (
+                  <div
+                    className="absolute right-0 top-full z-50 mt-1 min-w-[14.5rem] rounded-lg border border-slate-700/80 bg-slate-900/98 py-1 shadow-xl ring-1 ring-slate-700/60"
+                    role="menu"
+                    aria-label="Library tools"
+                  >
+                    {canImportM3u() ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={m3uImportBusy || tagRenameImportBusy || addFlowBusy}
+                        onClick={() => {
+                          setLibraryToolsOpen(false);
+                          m3uFileInputRef.current?.click();
+                        }}
+                        className="flex w-full px-3 py-2 text-left text-xs text-slate-200 transition hover:bg-slate-800/80 disabled:opacity-40"
+                        title="Import .m3u / .m3u8 / .pls. Only tracks inside your music folder are added."
+                      >
+                        {m3uImportBusy ? "Importing playlist…" : "Import playlist"}
+                      </button>
+                    ) : null}
+                    {canImportTagRenameXlsx() ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={tagRenameImportBusy || m3uImportBusy || addFlowBusy}
+                        onClick={() => {
+                          setLibraryToolsOpen(false);
+                          void runTagRenameXlsxImport();
+                        }}
+                        className="flex w-full px-3 py-2 text-left text-xs text-slate-200 transition hover:bg-slate-800/80 disabled:opacity-40"
+                        title="Pick Tag&Rename XLSX files. Rows match by File Name (full path). Metadata stays on this device only."
+                      >
+                        {tagRenameImportBusy ? "Importing metadata…" : "Import Tag&Rename XLSX"}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={listLoading || m3uImportBusy || tagRenameImportBusy}
+                      onClick={() => {
+                        setLibraryToolsOpen(false);
+                        void loadList();
+                      }}
+                      className="flex w-full px-3 py-2 text-left text-xs text-slate-200 transition hover:bg-slate-800/80 disabled:opacity-40"
+                      title="Reload this folder and refresh cached tags from the local snapshot."
+                    >
+                      {listLoading ? "Refreshing…" : "Refresh folder listing"}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </nav>
+
+          {operatorTools && tagRenameImportSummary ? (
+            <div
+              className="rounded-lg border border-emerald-500/30 bg-emerald-500/[0.07] px-3 py-2.5 text-sm text-emerald-50/95"
+              role="status"
+            >
+              <p className="leading-relaxed">
+                <span className="font-semibold">Tag&Rename metadata:</span> {tagRenameImportSummary}
+              </p>
+            </div>
+          ) : null}
 
           {m3uImportSummary ? (
             <div
@@ -1316,6 +1492,7 @@ export function MyMusicLibraryWorkspacePanel({
                         files={list.files}
                         scanBusyPath={scanBusy}
                         addFlowBusy={addFlowBusy}
+                        showOperatorDebug={operatorTools}
                         onPlay={(p) => void playTrackInCurrentBrowseFolder(p)}
                         onAddToPlaylist={(f) =>
                           openAddModal({ kind: "file", path: f.path, defaultName: f.name.replace(/\.[^/.]+$/, "") })

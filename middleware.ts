@@ -29,10 +29,12 @@ const PROTECTED_PREFIXES = [
 
 const ALLOWED_PATHS = ["/", "/login", "/signup"];
 const ALLOWED_PREFIX = "/api/auth/";
+const STREAMER_PUBLIC_PREFIX = "/api/streamer/";
 
 function isAllowed(pathname: string): boolean {
   if (ALLOWED_PATHS.includes(pathname)) return true;
   if (pathname.startsWith(ALLOWED_PREFIX)) return true;
+  if (pathname.startsWith(STREAMER_PUBLIC_PREFIX)) return true;
   return false;
 }
 
@@ -100,6 +102,10 @@ export function middleware(req: NextRequest) {
   }
 
   if (!isProtected(pathname)) {
+    return NextResponse.next();
+  }
+
+  if (pathname === "/streamer" || pathname.startsWith("/streamer/")) {
     return NextResponse.next();
   }
 

@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PlaylistTrack } from "@/lib/playlist-types";
+import type { PlaylistTrack, PlaylistType } from "@/lib/playlist-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { getPlaylistSessionTracks, usePlayback } from "@/lib/playback-provider";
+import { useDevicePlayer } from "@/lib/device-player-context";
+import type { SessionTrackMirror } from "@/lib/remote-control/types";
 import { isPlayNextSourceId } from "@/lib/play-next";
 import { resolveMyMusicLibraryDropFromDataTransfer } from "@/lib/music-library-drag";
 import {
@@ -306,8 +308,26 @@ function formatClockTotal(seconds: number | undefined | null): string {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
+function mirrorTracksToPlaylistTracks(mirror: SessionTrackMirror[]): TrackExtra[] {
+  return mirror.map((t, i) => ({
+    id: t.id || `mirror-${i}`,
+    name: t.title,
+    title: t.title,
+    type: "youtube" as PlaylistType,
+    url: "",
+    cover: t.cover ?? undefined,
+    durationSeconds: t.durationSeconds,
+  }));
+}
+
 /** Operator Live Queue: session list + in-memory Play Next (local + URLs; does not change saved playlists). */
 export function LiveQueuePanel() {
+  const deviceCtx = useDevicePlayer();
+  const isControlMirror = Boolean(
+    deviceCtx?.isBranchConnected &&
+      deviceCtx.deviceMode === "CONTROL" &&
+      !deviceCtx?.isMobileLocalPlayback,
+  );
   const {
     currentSource,
     currentPlaylist,
@@ -365,6 +385,7 @@ export function LiveQueuePanel() {
   const ingestDataTransfer = useCallback(
     async (dt: DataTransfer | null, sourcePath: string): Promise<boolean> => {
       if (!dt) return false;
+      if (isControlMirror && !deviceCtx) return false;
       if (processedDtRef.current.has(dt)) {
         console.debug("[SyncBiz:play-next-skip-dup]", { sourcePath });
         return true;
@@ -373,7 +394,11 @@ export function LiveQueuePanel() {
 
       const localLibrary = await resolveMyMusicLibraryDropFromDataTransfer(dt);
       if (localLibrary.length > 0) {
-        addPlayNextSources(localLibrary);
+        if (isControlMirror) {
+          for (const src of localLibrary) deviceCtx!.queueNextOrSend(src);
+        } else {
+          addPlayNextSources(localLibrary);
+        }
         return true;
       }
 
@@ -385,7 +410,11 @@ export function LiveQueuePanel() {
           firstTitles: fromSyncbiz.sources.slice(0, 4).map((s) => s.title),
           unsupported: fromSyncbiz.unsupported,
         });
-        addPlayNextSources(fromSyncbiz.sources);
+        if (isControlMirror) {
+          for (const src of fromSyncbiz.sources) deviceCtx!.queueNextOrSend(src);
+        } else {
+          addPlayNextSources(fromSyncbiz.sources);
+        }
         return true;
       }
 
@@ -411,8 +440,14 @@ export function LiveQueuePanel() {
         urls,
       });
       const dedupedPaths = dedupe(paths);
-      if (dedupedPaths.length > 0) addPlayNextFromPaths(dedupedPaths);
-      if (urls.length > 0) addPlayNextFromUrls(urls);
+      if (dedupedPaths.length > 0) {
+        if (isControlMirror) deviceCtx!.queueNextFromPathsOrSend(dedupedPaths);
+        else addPlayNextFromPaths(dedupedPaths);
+      }
+      if (urls.length > 0) {
+        if (isControlMirror) deviceCtx!.queueNextFromUrlsOrSend(urls);
+        else addPlayNextFromUrls(urls);
+      }
       if (dedupedPaths.length === 0 && urls.length === 0) {
         if (sawImageOnly || hadImageFiles) {
           showHint("That's an image. Drop the page link (e.g. youtube.com/watch...), not a .jpg.");
@@ -427,7 +462,7 @@ export function LiveQueuePanel() {
       }
       return true;
     },
-    [addPlayNextFromPaths, addPlayNextFromUrls, addPlayNextSources, showHint],
+    [addPlayNextFromPaths, addPlayNextFromUrls, addPlayNextSources, showHint, isControlMirror, deviceCtx],
   );
 
   const ingestDrop = useCallback(
@@ -486,11 +521,15 @@ export function LiveQueuePanel() {
     };
   }, [ingestDataTransfer, showHint]);
 
+  const nextQueueForUi = isControlMirror
+    ? (deviceCtx?.masterState?.playNextQueue ?? [])
+    : playNextQueue;
+
   // Flash the NEXT section when the queue grows so the enqueue is obvious even if the list is long.
   useEffect(() => {
     const prev = prevPlayNextLenRef.current;
-    prevPlayNextLenRef.current = playNextQueue.length;
-    if (playNextQueue.length <= prev) return;
+    prevPlayNextLenRef.current = nextQueueForUi.length;
+    if (nextQueueForUi.length <= prev) return;
     const node = nextBlockRef.current;
     if (!node) return;
     if (flashTimer.current) clearTimeout(flashTimer.current);
@@ -501,7 +540,7 @@ export function LiveQueuePanel() {
       node.classList.remove("play-next-block-flash");
       flashTimer.current = null;
     }, 900);
-  }, [playNextQueue.length]);
+  }, [nextQueueForUi.length]);
 
   const sessionForList = useMemo(() => {
     if (isPlayNextSourceId(currentSource?.id) && playNextBaseline) {
@@ -518,17 +557,52 @@ export function LiveQueuePanel() {
     };
   }, [currentSource, currentPlaylist, currentTrackIndex, playNextBaseline]);
 
-  const sessionTracks = useMemo(
+  const localSessionTracks = useMemo(
     () => getPlaylistSessionTracks({ currentSource: sessionForList.currentSource, currentPlaylist: sessionForList.currentPlaylist }),
     [sessionForList.currentSource, sessionForList.currentPlaylist],
   );
 
+  const controlMirrorTracks = useMemo(() => {
+    if (!isControlMirror) return null;
+    const rows = deviceCtx?.masterState?.sessionTracks;
+    if (!rows?.length) return null;
+    return mirrorTracksToPlaylistTracks(rows);
+  }, [isControlMirror, deviceCtx?.masterState?.sessionTracks]);
+
+  useEffect(() => {
+    if (!isControlMirror || process.env.NODE_ENV !== "development") return;
+    const len = deviceCtx?.masterState?.sessionTracks?.length ?? 0;
+    console.info("[SyncBiz:live-queue] CONTROL mirror session", {
+      sessionTracksLen: len,
+      sessionTitle: deviceCtx?.masterState?.sessionTitle ?? null,
+      currentTrackIndex: deviceCtx?.masterState?.currentTrackIndex ?? null,
+    });
+  }, [
+    isControlMirror,
+    deviceCtx?.masterState?.sessionTracks,
+    deviceCtx?.masterState?.sessionTitle,
+    deviceCtx?.masterState?.currentTrackIndex,
+  ]);
+
+  const sessionTracks = controlMirrorTracks ?? localSessionTracks;
+
   const onPlaylist = useMemo(() => {
+    if (isControlMirror) return null;
     const a = sessionForList.currentSource ? effectivePlaybackPlaylistAttachment(sessionForList.currentSource) : null;
     return a ?? sessionForList.currentPlaylist;
-  }, [sessionForList.currentSource, sessionForList.currentPlaylist]);
+  }, [isControlMirror, sessionForList.currentSource, sessionForList.currentPlaylist]);
 
-  const plName = onPlaylist?.name?.trim() || sessionForList.currentSource?.title?.trim() || "Current session";
+  const plName = isControlMirror
+    ? (deviceCtx?.masterState?.sessionTitle?.trim() ||
+        deviceCtx?.masterState?.currentSource?.title?.trim() ||
+        "Remote session")
+    : onPlaylist?.name?.trim() || sessionForList.currentSource?.title?.trim() || "Current session";
+
+  const sessionHighlightIndex = isControlMirror
+    ? (deviceCtx?.masterState?.currentTrackIndex ?? 0)
+    : sessionForList.highlightIndex;
+
+  const controlShuffle = deviceCtx?.masterState?.shuffle;
   const playlistGenre = (onPlaylist?.genre ?? "").trim();
 
   /**
@@ -693,15 +767,16 @@ export function LiveQueuePanel() {
     return known.reduce((a, b) => a + b, 0);
   }, [playNextQueue]);
 
-  const markNextInOrder = !shuffle && sessionTracks.length > 0;
+  const sessionShuffleActive = isControlMirror ? !!controlShuffle : shuffle;
+  const markNextInOrder = !sessionShuffleActive && sessionTracks.length > 0;
   const nextLinear = useMemo(() => {
     if (!markNextInOrder) return null;
     if (sessionTracks.length === 1) return 0;
-    if (sessionForList.highlightIndex < sessionTracks.length - 1) {
-      return sessionForList.highlightIndex + 1;
+    if (sessionHighlightIndex < sessionTracks.length - 1) {
+      return sessionHighlightIndex + 1;
     }
     return 0;
-  }, [markNextInOrder, sessionForList.highlightIndex, sessionTracks.length]);
+  }, [markNextInOrder, sessionHighlightIndex, sessionTracks.length]);
 
   const handlePanelDragOver = useCallback((e: React.DragEvent) => {
     if (e.dataTransfer?.types?.length) {
@@ -727,12 +802,14 @@ export function LiveQueuePanel() {
       e.preventDefault();
       const text = e.clipboardData?.getData("text/plain") ?? "";
       const urls = extractUrlsFromClipboardText(text);
-      if (urls.length > 0) addPlayNextFromUrls(urls);
-      else if (text.trim().startsWith("http") && isImageLikeHttpUrl(text.trim())) {
+      if (urls.length > 0) {
+        if (isControlMirror && deviceCtx) deviceCtx.queueNextFromUrlsOrSend(urls);
+        else addPlayNextFromUrls(urls);
+      } else if (text.trim().startsWith("http") && isImageLikeHttpUrl(text.trim())) {
         showHint("Paste the video or page URL, not an image link.");
       }
     },
-    [addPlayNextFromUrls, showHint],
+    [addPlayNextFromUrls, showHint, isControlMirror, deviceCtx],
   );
 
   /**
@@ -748,16 +825,49 @@ export function LiveQueuePanel() {
    */
   const jumpToSessionTrack = useCallback(
     (originalIndex: number) => {
+      if (originalIndex < 0 || originalIndex >= sessionTracks.length) return;
+      if (isControlMirror && deviceCtx) {
+        const ms = deviceCtx.masterState;
+        if (!ms?.currentSource) return;
+        const shell: UnifiedSource = {
+          id: ms.currentSource.id,
+          title: ms.sessionTitle ?? ms.currentSource.title,
+          genre: "Mixed",
+          cover: ms.currentSource.cover,
+          type: "youtube",
+          url: "",
+          origin: "playlist",
+          ...(ms.sessionPlaylistId
+            ? {
+                playlist: {
+                  id: ms.sessionPlaylistId,
+                  name: ms.sessionTitle ?? ms.currentSource.title,
+                  genre: "Mixed",
+                  type: "youtube" as PlaylistType,
+                  url: "",
+                  thumbnail: ms.currentSource.cover ?? "",
+                  createdAt: new Date(0).toISOString(),
+                  tracks: [],
+                },
+              }
+            : {}),
+        };
+        try {
+          deviceCtx.playSourceOrSend(shell, originalIndex);
+        } catch (err) {
+          console.warn("[SyncBiz:live-queue-jump-control] failed", err);
+        }
+        return;
+      }
       const src = sessionForList.currentSource;
       if (!src) return;
-      if (originalIndex < 0 || originalIndex >= sessionTracks.length) return;
       try {
-        playSource(src, originalIndex);
+        playSource(src, originalIndex, { via: "queue" });
       } catch (err) {
         console.warn("[SyncBiz:live-queue-jump] failed", err);
       }
     },
-    [playSource, sessionForList.currentSource, sessionTracks.length],
+    [deviceCtx, isControlMirror, playSource, sessionForList.currentSource, sessionTracks.length],
   );
 
   const removeSessionRow = useCallback((originalIndex: number) => {
@@ -806,6 +916,9 @@ export function LiveQueuePanel() {
           <p className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-100/95" title={plName}>
             {plName}
           </p>
+          {isControlMirror && deviceCtx?.remoteCommandMessage ? (
+            <span className="shrink-0 text-[9px] text-amber-200/90">{deviceCtx.remoteCommandMessage}</span>
+          ) : null}
           {totalPlaylistSeconds != null && sessionTracks.length > 0 ? (
             <span className="shrink-0 flex items-baseline gap-1 text-[10px]" title="Total duration of the active session">
               <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500">TOTAL</span>
@@ -827,7 +940,13 @@ export function LiveQueuePanel() {
 
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain py-0.5 pr-0.5">
         {sessionTracks.length === 0 ? (
-          <p className="text-xs text-slate-500">No active playlist - pick one from the library to start a session.</p>
+          <p className="text-xs text-slate-500">
+            {isControlMirror
+              ? deviceCtx?.masterState?.currentSource
+                ? "Session list syncing from MASTER…"
+                : "No active session on MASTER — start playback from the library."
+              : "No active playlist - pick one from the library to start a session."}
+          </p>
         ) : displayedSessionTracks.length === 0 ? (
           <p className="text-xs text-slate-500">All session rows hidden. Pick a different playlist to reset.</p>
         ) : (
@@ -855,7 +974,7 @@ export function LiveQueuePanel() {
                 (tr.artist && String(tr.artist)) ||
                 (tr.genre && String(tr.genre)) ||
                 (sessionTracks.length === 1 && playlistGenre ? playlistGenre : null);
-              const isCurrent = i === sessionForList.highlightIndex;
+              const isCurrent = i === sessionHighlightIndex;
               const isNextInList = markNextInOrder && nextLinear !== null && i === nextLinear;
               const rowDurationSeconds = getTrackDuration(t);
               // Display number is the position within the *visible* list (1..N), not the
@@ -869,7 +988,7 @@ export function LiveQueuePanel() {
                   key={`${t.id}-${i}`}
                   role="row"
                   tabIndex={0}
-                  title="Double-click to play"
+                  title={isControlMirror ? "Double-click to play on MASTER" : "Double-click to play"}
                   onDoubleClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -932,7 +1051,7 @@ export function LiveQueuePanel() {
                    * row hover or button focus to keep the row dense. stopPropagation prevents
                    * the parent row's double-click from firing when the operator clicks fast.
                    */}
-                  {isCurrent ? (
+                  {isCurrent || isControlMirror ? (
                     <span aria-hidden />
                   ) : (
                     <button
@@ -963,6 +1082,7 @@ export function LiveQueuePanel() {
         )}
       </div>
 
+      <>
       {/*
        * NEXT block lists ONLY upcoming staged items. The currently-playing Play Next item
        * (when present) is intentionally NOT echoed here — the player UI already shows it
@@ -976,9 +1096,9 @@ export function LiveQueuePanel() {
       >
         <div className="flex items-baseline justify-between gap-1.5">
           <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-amber-200/85">NEXT</span>
-          <span className="text-[9px] font-mono tabular-nums text-amber-200/60">{playNextQueue.length}</span>
+          <span className="text-[9px] font-mono tabular-nums text-amber-200/60">{nextQueueForUi.length}</span>
         </div>
-        {playNextQueue.length > 0 ? (
+        {nextQueueForUi.length > 0 ? (
           /*
            * NEXT rows mirror the session-row title treatment: single line, `text-xs
            * font-medium`, and the same `queue-row-title-marquee` doubled-span structure so
@@ -987,7 +1107,7 @@ export function LiveQueuePanel() {
            * relative to the session list AND consumed two full vertical lines per row.
            */
           <ol className="mt-0.5 max-h-32 list-decimal space-y-px overflow-y-auto pl-4 leading-tight text-slate-200/90 marker:text-[10px] marker:font-bold marker:text-amber-200/70">
-            {playNextQueue.map((it) => (
+            {nextQueueForUi.map((it) => (
               <li key={it.id} className="group/pn flex items-center gap-1 pl-0.5">
                 <div className="min-w-0 flex-1 overflow-hidden">
                   <div className="queue-row-title-marquee flex w-max gap-12 whitespace-nowrap" title={it.title}>
@@ -995,11 +1115,7 @@ export function LiveQueuePanel() {
                     <span dir="auto" aria-hidden className="text-xs font-medium">{it.title}</span>
                   </div>
                 </div>
-                {/*
-                 * Per-item trash for the staged NEXT list. Removes ONLY from the in-memory
-                 * playNextQueue via the provider — never touches saved sources, library, or
-                 * persisted playlists. Hidden by default; reveals on row hover or button focus.
-                 */}
+                {!isControlMirror ? (
                 <button
                   type="button"
                   aria-label={`Remove "${it.title}" from Play Next`}
@@ -1014,6 +1130,7 @@ export function LiveQueuePanel() {
                     />
                   </svg>
                 </button>
+                ) : null}
               </li>
             ))}
           </ol>
@@ -1023,7 +1140,11 @@ export function LiveQueuePanel() {
       <div
         tabIndex={0}
         role="button"
-        aria-label="Play next - drop a library track, audio file, or paste URL"
+        aria-label={
+          isControlMirror
+            ? "Remote play next — drop a library track, audio file, or paste URL to send to streamer"
+            : "Play next - drop a library track, audio file, or paste URL"
+        }
         onDragEnter={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -1051,12 +1172,21 @@ export function LiveQueuePanel() {
           <p className="mb-0.5 text-[10px] font-medium text-amber-200" role="status">{dropHint}</p>
         ) : null}
         <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-100/95 leading-tight">
-          {overDrop ? "Drop here" : "DROP NEXT PLAY"}
+          {overDrop
+            ? "Drop here"
+            : isControlMirror
+              ? "REMOTE DROP NEXT TO STREAMER"
+              : "DROP NEXT PLAY"}
         </p>
         <p className="mt-px text-[9px] leading-tight text-amber-200/65">
-          {overDrop || padHover ? "Tile / file / URL" : "Drop track, file or URL"}
+          {overDrop || padHover
+            ? "Tile / file / URL"
+            : isControlMirror
+              ? "Queues on branch MASTER"
+              : "Drop track, file or URL"}
         </p>
       </div>
+      </>
     </div>
   );
 }

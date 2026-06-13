@@ -14,6 +14,7 @@ export type RemoteCommand =
   | "PREV"
   | "LOAD_PLAYLIST"
   | "PLAY_SOURCE"
+  | "QUEUE_NEXT"
   | "SEEK"
   | "SET_VOLUME"
   | "SET_SHUFFLE"
@@ -28,6 +29,13 @@ export type DeviceType =
   | "mobile_player"
   | "owner_global_controller";
 
+export type SessionTrackMirror = {
+  id: string;
+  title: string;
+  cover: string | null;
+  durationSeconds?: number;
+};
+
 export type StationPlaybackState = {
   status: "idle" | "playing" | "paused" | "stopped";
   currentTrack: { title: string; cover: string | null } | null;
@@ -39,6 +47,11 @@ export type StationPlaybackState = {
     playlistOriginBadge?: "dj_creator" | "ready" | "scheduled" | "my" | "branch";
   } | null;
   currentTrackIndex: number;
+  sessionTracks?: SessionTrackMirror[];
+  sessionPlaylistId?: string | null;
+  sessionTitle?: string | null;
+  nextSessionTrack?: { title: string; cover: string | null } | null;
+  playNextQueue?: Array<{ id: string; title: string; cover: string | null }>;
   queue: Array<{ id: string; title: string; cover: string | null }>;
   queueIndex: number;
   shuffle?: boolean;
@@ -61,6 +74,8 @@ export type PlaySourcePayload = {
   type: string;
   url: string;
   origin: "playlist" | "source" | "radio";
+  playlistId?: string;
+  sessionTracks?: SessionTrackMirror[];
 };
 
 export type DeviceMode = "MASTER" | "CONTROL";
@@ -111,6 +126,7 @@ export type ClientMessage =
   | { type: "BRANCH_LIST_REQUEST" }
   | {
       type: "COMMAND";
+      commandId?: string;
       targetDeviceId?: string;
       targetBranchId?: string;
       command: RemoteCommand;
@@ -122,6 +138,13 @@ export type ClientMessage =
         value?: boolean;
         trackIndex?: number;
       };
+    }
+  | {
+      type: "COMMAND_RESULT";
+      commandId: string;
+      ok: boolean;
+      error?: string;
+      executedAt?: number;
     }
   | { type: "STATE_UPDATE"; state: StationPlaybackState }
   | { type: "SET_MASTER" }
@@ -142,6 +165,7 @@ export type ServerMessage =
   | { type: "STATE_UPDATE"; deviceId: string; state: StationPlaybackState }
   | {
       type: "COMMAND";
+      commandId?: string;
       command: RemoteCommand;
       payload?: {
         url?: string;
@@ -151,6 +175,20 @@ export type ServerMessage =
         value?: boolean;
         trackIndex?: number;
       };
+    }
+  | {
+      type: "COMMAND_ACK";
+      commandId: string;
+      masterDeviceId?: string | null;
+      receivedAt: number;
+    }
+  | {
+      type: "COMMAND_RESULT";
+      commandId: string;
+      ok: boolean;
+      error?: string;
+      executedAt?: number;
+      failedAt?: number;
     }
   | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string; secondaryDesktop?: boolean }
   | { type: "GUEST_RECOMMEND_RECEIVED"; recommendation: GuestRecommendationPayload }

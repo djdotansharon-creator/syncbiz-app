@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { usePlaybackOptional } from "@/lib/playback-provider";
+import { primeIOSFromGesture } from "@/lib/ios-audio-unlock";
 import { persistStreamerDeviceFlag } from "@/lib/streamer-device-mode";
+import { hasStreamerDeviceToken, clearStreamerDeviceCredentials } from "@/lib/streamer-device-client";
 
 function statusLabel(status: string | undefined): string {
   if (status === "connected") return "Online";
@@ -24,12 +27,16 @@ function playbackStatusLabel(status: string | undefined): string {
  * Registers as branch_streamer_station, auto-reclaims MASTER, executes remote WS commands locally.
  */
 export function StreamerPlayerPage() {
+  const router = useRouter();
   const deviceCtx = useDevicePlayer();
   const playback = usePlaybackOptional();
 
   useEffect(() => {
     persistStreamerDeviceFlag();
-  }, []);
+    if (!hasStreamerDeviceToken()) {
+      router.replace("/streamer/setup");
+    }
+  }, [router]);
 
   const wsStatus = deviceCtx?.status ?? "disconnected";
   const deviceMode = deviceCtx?.deviceMode ?? "CONTROL";
@@ -39,6 +46,11 @@ export function StreamerPlayerPage() {
   const queueLength = playback?.queue?.length ?? 0;
   const queueIndex = playback?.queueIndex ?? 0;
   const playStatus = playback?.status;
+
+  const unlockBranchAudio = useCallback(() => {
+    primeIOSFromGesture();
+    playback?.play();
+  }, [playback]);
 
   const title = currentTrack?.title ?? currentSource?.title ?? "No track loaded";
   const playlistName = currentSource?.playlist?.name ?? currentSource?.title ?? null;
@@ -92,6 +104,18 @@ export function StreamerPlayerPage() {
           <p className="mt-1 text-sm text-slate-400">Playlist: {playlistName}</p>
         ) : null}
         <p className="mt-3 text-sm text-slate-400">{playbackStatusLabel(playStatus)}</p>
+        {deviceMode === "MASTER" && playStatus !== "playing" && currentSource ? (
+          <button
+            type="button"
+            className="mt-4 rounded-lg border border-sky-500/50 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-100 hover:bg-sky-500/25"
+            onClick={unlockBranchAudio}
+          >
+            Tap to start branch audio
+          </button>
+        ) : null}
+        <p className="mt-3 text-[11px] text-slate-500">
+          Audio plays in the dock below — use your TV remote to focus it if sound is silent.
+        </p>
       </section>
 
       <section className="rounded-xl border border-slate-800/80 bg-slate-900/45 px-4 py-3" aria-label="Queue">
@@ -106,7 +130,20 @@ export function StreamerPlayerPage() {
       </section>
 
       <footer className="mt-auto space-y-1 text-[11px] text-slate-600">
-        <p>Bookmark this page: <span className="font-mono text-slate-500">/streamer?device=streamer&amp;mode=player</span></p>
+        <p>Bookmark: <span className="font-mono text-slate-500">/streamer?device=streamer&amp;mode=player</span></p>
+        <p>
+          <button
+            type="button"
+            className="text-sky-500/80 hover:text-sky-400"
+            onClick={() => {
+              clearStreamerDeviceCredentials();
+              void fetch("/api/streamer/auth/session", { method: "DELETE" });
+              router.push("/streamer/setup");
+            }}
+          >
+            Re-pair device
+          </button>
+        </p>
         <p>Device id: {deviceCtx?.deviceId ?? "…"}</p>
       </footer>
     </div>

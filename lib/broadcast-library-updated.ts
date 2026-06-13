@@ -8,12 +8,18 @@ function getWsServerHttpUrl(): string {
   return wsUrl.replace(/^ws(s?):/, "http$1:");
 }
 
-export type LibraryEntityType = "playlist" | "source" | "radio";
-export type LibraryAction = "created" | "updated" | "deleted";
+import type { LibraryAction, LibraryEntityType } from "@/lib/library-updated-event";
+
+export type { LibraryAction, LibraryEntityType } from "@/lib/library-updated-event";
 
 export async function notifyLibraryUpdated(
   userId: string,
-  options?: { branchId?: string; entityType?: LibraryEntityType; action?: LibraryAction }
+  options?: {
+    branchId?: string;
+    entityType?: LibraryEntityType;
+    action?: LibraryAction;
+    entityId?: string;
+  },
 ): Promise<void> {
   if (!userId?.trim()) return;
   const secret = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
@@ -36,6 +42,7 @@ export async function notifyLibraryUpdated(
         branchId: options?.branchId?.trim() || "default",
         entityType: options?.entityType,
         action: options?.action,
+        entityId: options?.entityId?.trim() || undefined,
       }),
     });
     if (!res.ok && process.env.NODE_ENV === "development") {

@@ -17,6 +17,10 @@ import { LIBRARY_SIDE_ACTION_ICON_BTN_CLASS } from "@/lib/library-side-action-st
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { canEmbedInCard, derivePlaylistUnifiedCoverArt } from "@/lib/playlist-utils";
 import { usePlaylistPlayer } from "@/lib/playlist-player-context";
+import {
+  legacyPlayLocalDisabled,
+  legacyStopLocalDisabled,
+} from "@/lib/legacy-shellout-playback";
 import type { Playlist } from "@/lib/playlist-types";
 
 type Props = {
@@ -62,17 +66,10 @@ export function PlaylistCard({ playlist, index, onShare }: Props) {
 
   useEffect(() => {
     if (!active || !localOrStream || status !== "playing") return;
-    const ctrl = new AbortController();
-    fetch("/api/commands/play-local", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target: playlist.url }),
-      signal: ctrl.signal,
-    }).catch(() => {});
+    legacyPlayLocalDisabled({ target: playlist.url }).catch(() => {});
     return () => {
-      ctrl.abort();
       if (active && localOrStream && status === "playing") {
-        fetch("/api/commands/stop-local", { method: "POST" }).catch(() => {});
+        legacyStopLocalDisabled().catch(() => {});
       }
     };
   }, [active, localOrStream, status, playlist.url]);
@@ -86,7 +83,7 @@ export function PlaylistCard({ playlist, index, onShare }: Props) {
   }
 
   async function handleStopLocal() {
-    await fetch("/api/commands/stop-local", { method: "POST" });
+    await legacyStopLocalDisabled();
     stop();
   }
 

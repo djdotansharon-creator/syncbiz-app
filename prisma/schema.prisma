@@ -449,6 +449,47 @@ model Device {
   @@index([token])
 }
 
+/// Dedicated GOtv / Android TV branch player — paired out-of-band, no browser password login.
+model BranchStreamerDevice {
+  id             String    @id @default(uuid())
+  deviceId       String    @unique
+  tokenHash      String    @unique
+  workspaceId    String
+  branchId       String    @default("default")
+  devicePurpose  String    @default("branch_streamer_station")
+  /// WS branch namespace user id (pairing admin at claim time).
+  branchUserId   String
+  pairedByUserId String?
+  label          String?
+  lastSeenAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([workspaceId, branchId])
+  @@index([branchUserId])
+  @@index([revokedAt])
+}
+
+/// Ephemeral pairing code shown on /streamer/setup until an admin claims it.
+model StreamerPairingCode {
+  id               String    @id @default(uuid())
+  code             String    @unique
+  deviceId         String
+  workspaceId      String?
+  branchId         String?
+  branchUserId     String?
+  expiresAt        DateTime
+  consumedAt       DateTime?
+  tokenDeliveredAt DateTime?
+  /// One-time plaintext token delivery buffer (cleared after poll). Short-lived pairing window only.
+  pendingToken     String?
+  createdAt        DateTime  @default(now())
+
+  @@index([deviceId])
+  @@index([expiresAt])
+}
+
 // ─────────────────────────────────────────────
 // MEDIA — WORKSPACE-SCOPED
 // ─────────────────────────────────────────────

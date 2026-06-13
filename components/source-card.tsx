@@ -11,6 +11,7 @@ import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { SourceIconBadge } from "@/components/source-icon-badge";
 import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
+import { legacyPlayLocalDisabled } from "@/lib/legacy-shellout-playback";
 import { supportsEmbedded, getSourceArtworkUrl, getSourceIconType } from "@/lib/player-utils";
 import type { Source } from "@/lib/types";
 
@@ -97,20 +98,13 @@ export function SourceCard({ source }: SourceCardProps) {
         setLastMessage("Failed: No target path");
         return;
       }
-      const res = await fetch("/api/commands/play-local", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          target,
-          browserPreference: source.browserPreference ?? "default",
-        }),
+      await legacyPlayLocalDisabled({
+        target,
+        browserPreference: source.browserPreference ?? "default",
       });
-      if (res.ok) {
-        setLastMessage("Local playback command sent");
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setLastMessage(data?.error ? `Failed: ${data.error}` : "Playback failed.");
-      }
+      setLastMessage(
+        "Local playback runs in the SyncBiz in-app player (Desktop MPV). Open the source in the player tab to start playback.",
+      );
     } finally {
       setPlaying(false);
     }

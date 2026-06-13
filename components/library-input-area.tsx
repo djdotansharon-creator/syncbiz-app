@@ -23,7 +23,14 @@ import {
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { inferGenre } from "@/lib/infer-genre";
-import { searchAll, searchExternal, type YouTubeSearchResult, type RadioSearchResult } from "@/lib/search-service";
+import {
+  searchAll,
+  searchExternal,
+  type CatalogSearchResult,
+  type YouTubeSearchResult,
+  type RadioSearchResult,
+} from "@/lib/search-service";
+import { filterLibraryResultsForMainSearch } from "@/lib/music-search-relevance";
 import { createEphemeralLocalSearchSource } from "@/lib/play-next";
 import { radioToUnified } from "@/lib/radio-utils";
 import {
@@ -254,15 +261,15 @@ type Props = {
   playSourceOverride?: (source: UnifiedSource) => void;
   /** After M3U YouTube merges, refresh the playlist tile in Sources (same as My Music). */
   onPlaylistUpdated?: (source: UnifiedSource) => void;
-  /** Build catalog-first AI playlist from the library search query (prompt mode). */
-  onAiPlaylistFromSearchPrompt?: (prompt: string) => void | Promise<void>;
+  /** Open DJ Creator AI with the current search prompt (playlist build happens there). */
+  onOpenDjCreatorWithSearchPrompt?: (prompt: string) => void;
 };
 
 export function LibraryInputArea({
   onAdd,
   playSourceOverride,
   onPlaylistUpdated,
-  onAiPlaylistFromSearchPrompt,
+  onOpenDjCreatorWithSearchPrompt,
 }: Props) {
   const router = useRouter();
   const { t } = useTranslations();
@@ -336,24 +343,29 @@ export function LibraryInputArea({
   } | null>(null);
 
   const [query, setQuery] = useState("");
+  const [catalogResults, setCatalogResults] = useState<CatalogSearchResult[]>([]);
   const [musicBankLocalResults, setMusicBankLocalResults] = useState<UnifiedSource[]>([]);
   const [localResults, setLocalResults] = useState<UnifiedSource[]>([]);
   const [youtubeResults, setYoutubeResults] = useState<YouTubeSearchResult[]>([]);
   const [radioResults, setRadioResults] = useState<RadioSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [listening, setListening] = useState(false);
-  const [aiPlaylistBusy, setAiPlaylistBusy] = useState(false);
+  const [djCreatorCtaBusy, setDjCreatorCtaBusy] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const searchQueryRef = useRef("");
 
   const hasQuery = query.trim().length >= 2;
+  const hasCatalog = catalogResults.length > 0;
   const hasMusicBankLocal = musicBankLocalResults.length > 0;
   const hasLocal = localResults.length > 0;
   const hasYoutube = youtubeResults.length > 0;
   const hasRadio = radioResults.length > 0;
-  const hasResults = hasMusicBankLocal || hasLocal || hasYoutube || hasRadio;
+  const hasResults = hasCatalog || hasMusicBankLocal || hasLocal || hasYoutube || hasRadio;
+  const showYoutubeDiscover =
+    catalogResults.length < 3 &&
+    musicBankLocalResults.length + localResults.length < 4;
 
   const ingestStripBusy = urlIngesting || searching || externalYtSaveBusy;
   const ingestShellPhaseClass = ingestStripBusy
@@ -365,6 +377,7 @@ export function LibraryInputArea({
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q || q.length < 2) {
+      setCatalogResults([]);
       setMusicBankLocalResults([]);
       setLocalResults([]);
       setYoutubeResults([]);
@@ -375,19 +388,23 @@ export function LibraryInputArea({
     setSearching(true);
     setYoutubeResults([]);
     setRadioResults([]);
+    setCatalogResults([]);
     try {
       const [allRes, mblRes] = await Promise.all([
         searchAll(sources, q),
         searchMusicBankLocalSnapshot(q, 25),
       ]);
       if (searchQueryRef.current === q) {
-        setLocalResults(allRes.internal);
+        const catalog = allRes.external.catalog;
+        setCatalogResults(catalog);
+        setLocalResults(filterLibraryResultsForMainSearch(allRes.internal, q, catalog.length));
         setYoutubeResults(allRes.external.youtube);
         setRadioResults(allRes.external.radio);
         setMusicBankLocalResults(mblRes);
       }
     } catch {
       if (searchQueryRef.current === q) {
+        setCatalogResults([]);
         setMusicBankLocalResults([]);
         setLocalResults([]);
         setYoutubeResults([]);
@@ -400,6 +417,7 @@ export function LibraryInputArea({
 
   useEffect(() => {
     if (!hasQuery) {
+      setCatalogResults([]);
       setMusicBankLocalResults([]);
       setLocalResults([]);
       setYoutubeResults([]);
@@ -1481,6 +1499,74 @@ export function LibraryInputArea({
     [query, effectivePlaySource, router, onAdd, tx]
   );
 
+  const handleAddCatalog = useCallback(
+    async (r: CatalogSearchResult) => {
+      const genre = inferGenre(r.title, query);
+      const playable = await resolveYouTubePlayableUrlForSearch(r.url);
+      const created = await createPlaylistFromUrl(playable, {
+        title: r.title,
+        genre,
+        cover: r.thumbnail,
+        type: "youtube",
+      });
+      if (created) {
+        onAdd({
+          id: `pl-${created.id}`,
+          title: created.name,
+          genre: created.genre || genre,
+          cover: created.thumbnail || null,
+          type: "youtube",
+          url: created.url,
+          origin: "playlist",
+          playlist: created,
+        });
+        setQuery("");
+        setCatalogResults([]);
+        setYoutubeResults([]);
+        setRadioResults([]);
+        setMusicBankLocalResults([]);
+        setLocalResults([]);
+        setShowResults(false);
+      }
+    },
+    [query, onAdd],
+  );
+
+  const handlePlayCatalog = useCallback(
+    async (r: CatalogSearchResult) => {
+      const genre = inferGenre(r.title, query);
+      const playable = await resolveYouTubePlayableUrlForSearch(r.url);
+      const created = await createPlaylistFromUrl(playable, {
+        title: r.title,
+        genre,
+        cover: r.thumbnail,
+        type: "youtube",
+      });
+      if (created) {
+        const u: UnifiedSource = {
+          id: `pl-${created.id}`,
+          title: created.name,
+          genre: created.genre || genre,
+          cover: created.thumbnail || null,
+          type: "youtube",
+          url: created.url,
+          origin: "playlist",
+          playlist: created,
+        };
+        onAdd(u);
+        effectivePlaySource(u);
+        setQuery("");
+        setCatalogResults([]);
+        setYoutubeResults([]);
+        setRadioResults([]);
+        setMusicBankLocalResults([]);
+        setLocalResults([]);
+        setShowResults(false);
+      }
+    },
+    [query, onAdd, effectivePlaySource],
+  );
+
   return (
     <div ref={panelRef} className="relative">
       {/* Tesla-style drop zone – clean, minimal, inviting */}
@@ -1687,31 +1773,35 @@ export function LibraryInputArea({
               </svg>
             </button>
           )}
-          {onAiPlaylistFromSearchPrompt ? (
+          {onOpenDjCreatorWithSearchPrompt ? (
             <button
               type="button"
-              disabled={aiPlaylistBusy || urlIngesting || !hasQuery || !query.trim()}
+              disabled={djCreatorCtaBusy || urlIngesting || !hasQuery || !query.trim()}
               onClick={(e) => {
                 e.preventDefault();
                 const q = query.trim();
-                if (!onAiPlaylistFromSearchPrompt || q.length < 2) return;
-                void (async () => {
-                  try {
-                    setAiPlaylistBusy(true);
-                    await onAiPlaylistFromSearchPrompt(q);
-                  } finally {
-                    setAiPlaylistBusy(false);
-                  }
-                })();
+                if (!onOpenDjCreatorWithSearchPrompt || q.length < 2) return;
+                setDjCreatorCtaBusy(true);
+                try {
+                  onOpenDjCreatorWithSearchPrompt(q);
+                } finally {
+                  setDjCreatorCtaBusy(false);
+                }
               }}
-              title="Build AI playlist from SyncBiz catalog using this search prompt"
+              title={locale === "he" ? "בניית פלייליסט ב-DJ Creator AI" : "Build a playlist in DJ Creator AI"}
               className={`shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-semibold leading-none transition-colors ${
-                aiPlaylistBusy
+                djCreatorCtaBusy
                   ? "border border-slate-600 text-slate-500"
-                  : "border border-cyan-500/35 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/18"
+                  : "border border-amber-500/40 bg-amber-500/12 text-amber-50 hover:bg-amber-500/20"
               } disabled:pointer-events-none disabled:opacity-40`}
             >
-              {aiPlaylistBusy ? "Building…" : "Build AI Playlist"}
+              {djCreatorCtaBusy
+                ? locale === "he"
+                  ? "פותח…"
+                  : "Opening…"
+                : locale === "he"
+                  ? "בנייה ב-DJ Creator AI"
+                  : "Build with DJ Creator AI"}
             </button>
           ) : null}
           </div>
@@ -1988,10 +2078,58 @@ export function LibraryInputArea({
             </div>
           ) : (
             <>
+              {hasCatalog && (
+                <div className="border-b border-slate-800/60 p-2">
+                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-violet-400">
+                    {locale === "he" ? "מקטלוג SyncBiz Smart" : "From SyncBiz Smart Catalog"}
+                  </p>
+                  <div className="space-y-0.5">
+                    {catalogResults.map((r) => (
+                      <div
+                        key={r.id}
+                        className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80"
+                      >
+                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                          {r.thumbnail ? (
+                            <img src={r.thumbnail} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <TrackMediaPlaceholder chip="CAT" className="h-full w-full" showCornerBadge={false} />
+                          )}
+                          <span className="pointer-events-none absolute bottom-0.5 left-0.5">
+                            <CompactSourceBadge chip="CAT" />
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-slate-100">{r.title}</p>
+                          {r.genres && r.genres.length > 0 ? (
+                            <p className="text-[10px] text-violet-400/80">{r.genres[0]}</p>
+                          ) : null}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void handleAddCatalog(r)}
+                            className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 px-2.5 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+                          >
+                            {t.addToLibrary}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handlePlayCatalog(r)}
+                            className="inline-flex h-8 items-center justify-center rounded-lg bg-violet-600 px-2.5 text-xs font-semibold text-white transition hover:bg-violet-500"
+                          >
+                            {t.playNow}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {hasMusicBankLocal && (
                 <div className="border-b border-slate-800/60 p-2">
                   <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/90">
-                    My Music Library
+                    {locale === "he" ? "ממאגר המוזיקה המקומי" : "From Local Music Library"}
                   </p>
                   <div className="space-y-0.5">
                     {musicBankLocalResults.map((source) => (
@@ -2136,9 +2274,11 @@ export function LibraryInputArea({
                   </div>
                 </div>
               )}
-              {hasYoutube && (
+              {hasYoutube && showYoutubeDiscover && (
                 <div className="p-2">
-                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t.youtubeResults}</p>
+                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    {locale === "he" ? "גילוי / YouTube" : "Discover / YouTube"}
+                  </p>
                   <div className="space-y-0.5">
                     {youtubeResults.map((r, i) => (
                       <div key={i} className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80">

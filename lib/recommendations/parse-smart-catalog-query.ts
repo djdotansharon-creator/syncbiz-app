@@ -1,11 +1,17 @@
 /**
  * Stage 6 V1 — deterministic Hebrew/English keyword parsing for smart catalog search.
  * No AI, no embeddings. Produces structured hints for {@link WorkspaceFitContext} + dayparts.
+ *
+ * PHRASE_MAP handles venue/daypart/style specifics; DJ Intent Dictionary adds taxonomy slugs.
  */
 
 import type { BusinessType, WorkspaceEnergyLevel } from "@prisma/client";
 import type { DaypartSegment } from "@/lib/recommendations/business-daypart-vibe.types";
 import type { DaypartSlug } from "@/lib/recommendations/fit-rules.types";
+import { applyDjIntentDictionaryToCatalogDraft } from "@/lib/recommendations/apply-dj-intent-to-catalog-parse";
+import { normalizeSmartQueryText, smartQueryPhraseMatches } from "@/lib/recommendations/smart-query-text";
+
+export { normalizeSmartQueryText, smartQueryPhraseMatches, smartQueryHasStandaloneToken } from "@/lib/recommendations/smart-query-text";
 
 export type ParsedSmartCatalogQuery = {
   rawQuery: string;
@@ -42,16 +48,6 @@ type ParseDraft = {
   conceptTags: Set<string>;
   matchedPhrases: Set<string>;
 };
-
-function lowerAscii(s: string): string {
-  return s.replace(/[A-Z]/g, (c) => c.toLowerCase());
-}
-
-/** Lowercase ASCII; keep Hebrew and other scripts as-is; collapse whitespace. */
-export function normalizeSmartQueryText(raw: string): string {
-  const t = raw.trim().replace(/\s+/g, " ");
-  return lowerAscii(t);
-}
 
 function setBusiness(d: ParseDraft, b: BusinessType, phrase: string): void {
   if (!d.businessType) d.businessType = b;
@@ -240,7 +236,7 @@ const PHRASE_MAP: PhraseMapEntry[] = [
     },
   },
   {
-    phrases: ["ים", "חוף", "beach"],
+    phrases: ["מוזיקה ליד הים", "ליד הים", "מוזיקת ים", "חוף", "beach lounge", "beach", "sea", "ים"],
     apply: (d) => addConcept(d, ["beach", "sea", "coast"], "ים"),
   },
   {
@@ -278,8 +274,7 @@ function applyPhraseMap(normalized: string, d: ParseDraft): void {
 
   for (const entry of entries) {
     for (const phrase of entry.phrases) {
-      const p = normalizeSmartQueryText(phrase);
-      if (p.length >= 2 && normalized.includes(p)) {
+      if (smartQueryPhraseMatches(normalized, phrase)) {
         entry.apply(d);
         break;
       }
@@ -337,6 +332,15 @@ export function parseSmartCatalogQuery(rawQuery: string): ParsedSmartCatalogQuer
 
   if (normalized.length >= 1) {
     applyPhraseMap(normalized, d);
+    applyDjIntentDictionaryToCatalogDraft(normalized, d, {
+      setBusiness: (b, phrase) => setBusiness(d, b, phrase),
+      setCoarseDaypart: (p, phrase) => setCoarseDaypart(d, p, phrase),
+      setVibeSegment: (s, phrase) => setVibeSegment(d, s, phrase),
+      addMoods: (moods, phrase) => addMoods(d, moods, phrase),
+      addSlugs: (slugs, phrase) => addSlugs(d, slugs, phrase),
+      setEnergy: (e, phrase) => setEnergy(d, e, phrase),
+      addAudience: (a, phrase) => addAudience(d, a, phrase),
+    });
   }
 
   return finalizeDraft(trimmed, normalized, d);

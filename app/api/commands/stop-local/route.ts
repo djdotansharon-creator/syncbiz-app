@@ -1,32 +1,19 @@
 import { NextResponse } from "next/server";
-import { runStopLocal } from "@/lib/play-local";
-import { db } from "@/lib/store";
 
 /**
- * POST /api/commands/stop-local
- * MVP: Stop Winamp on Windows (taskkill /IM winamp.exe /F).
+ * POST /api/commands/stop-local — DISABLED for pilot.
+ *
+ * Previously ran `taskkill /IM winamp.exe /F`. Killing Winamp is no longer meaningful
+ * because SyncBiz never launches Winamp in the first place (see
+ * app/api/commands/play-local/route.ts). The in-app player owns stop().
  */
 export async function POST() {
-  console.log("[stop-local] Endpoint hit");
-
-  const result = await runStopLocal();
-
-  if (result.success) {
-    db.addLog({
-      timestamp: new Date().toISOString(),
-      level: "info",
-      message: "Local playback: stop command sent (taskkill winamp.exe).",
-    });
-    return NextResponse.json({ ok: true, message: "Stop command sent" });
-  }
-
-  db.addLog({
-    timestamp: new Date().toISOString(),
-    level: "error",
-    message: `Local stop failed: ${result.error}`,
-  });
   return NextResponse.json(
-    { error: result.error },
-    { status: 500 },
+    {
+      ok: false,
+      disabled: true,
+      error: "Local OS stop is disabled. Use the in-app player stop().",
+    },
+    { status: 410 },
   );
 }

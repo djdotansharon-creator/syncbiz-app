@@ -21,6 +21,7 @@
     "src/**/*.tsx",
     "src/renderer/globals.d.ts",
     "../lib/types.ts",
+    "../lib/dj-intent-dictionary.ts",
     "../lib/player-utils.ts",
     "../lib/player-surface/**/*.ts",
     "../lib/player-surface/**/*.tsx",

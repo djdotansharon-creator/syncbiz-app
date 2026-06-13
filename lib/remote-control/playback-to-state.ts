@@ -2,12 +2,36 @@
  * Convert PlaybackProvider state to serializable StationPlaybackState.
  */
 
-import type { StationPlaybackState } from "./types";
+import type { StationPlaybackState, SessionTrackMirror } from "./types";
 import type { PlaybackStatus } from "@/lib/playback-provider";
+import { getPlaylistSessionTracks } from "@/lib/playback-provider";
+import type { Playlist } from "@/lib/playlist-types";
 import type { UnifiedSource } from "@/lib/source-types";
-import { derivePlaylistTrackCoverArt, derivePlaylistUnifiedCoverArt } from "@/lib/playlist-utils";
+import { derivePlaylistTrackCoverArt, derivePlaylistUnifiedCoverArt, effectivePlaybackPlaylistAttachment } from "@/lib/playlist-utils";
 import { resolvePlaylistOriginBadgeKey } from "@/lib/deck-source-badge";
 import { getPlaylistTracks } from "@/lib/playlist-types";
+
+function buildSessionTrackMirrors(
+  currentSource: UnifiedSource | null,
+  currentPlaylist: Playlist | null
+): SessionTrackMirror[] {
+  const rows = getPlaylistSessionTracks({ currentSource, currentPlaylist });
+  return rows.map((t, i) => {
+    const title = (t.name ?? (t as { title?: string }).title ?? "Track").trim() || "Track";
+    const cover = derivePlaylistTrackCoverArt({
+      cover: t.cover,
+      url: t.url ?? "",
+      type: t.type,
+    });
+    const durationSeconds = (t as { durationSeconds?: number }).durationSeconds;
+    return {
+      id: t.id || `${currentSource?.id ?? "session"}-track-${i}`,
+      title,
+      cover,
+      ...(typeof durationSeconds === "number" && durationSeconds >= 0 ? { durationSeconds } : {}),
+    };
+  });
+}
 
 export function playbackToStationState(
   status: PlaybackStatus,
@@ -18,7 +42,9 @@ export function playbackToStationState(
   shuffle?: boolean,
   autoMix?: boolean,
   positionDuration?: { position: number; duration: number },
-  volume?: number
+  volume?: number,
+  currentPlaylist?: Playlist | null,
+  playNextQueue?: UnifiedSource[]
 ): StationPlaybackState {
   const tracks = currentSource?.playlist ? getPlaylistTracks(currentSource.playlist) : [];
   const track = tracks[currentTrackIndex] ?? tracks[0];
@@ -45,6 +71,38 @@ export function playbackToStationState(
   const playlistBadge =
     currentSource?.origin === "playlist" ? resolvePlaylistOriginBadgeKey(currentSource.playlist ?? null) : null;
 
+  const sessionPlaylistAttachment = currentSource
+    ? effectivePlaybackPlaylistAttachment(currentSource)
+    : null;
+  const sessionPlaylist = sessionPlaylistAttachment ?? currentPlaylist ?? null;
+  const sessionTracks = buildSessionTrackMirrors(currentSource, currentPlaylist ?? null);
+  const sessionTitle =
+    sessionPlaylist?.name?.trim() ||
+    currentSource?.title?.trim() ||
+    null;
+
+  let nextSessionTrack: { title: string; cover: string | null } | null = null;
+  if (sessionTracks.length > 0) {
+    const nextIdx =
+      sessionTracks.length === 1
+        ? 0
+        : currentTrackIndex < sessionTracks.length - 1
+          ? currentTrackIndex + 1
+          : 0;
+    const nextRow = sessionTracks[nextIdx];
+    if (nextRow && nextIdx !== currentTrackIndex) {
+      nextSessionTrack = { title: nextRow.title, cover: nextRow.cover };
+    }
+  }
+
+  if (process.env.NODE_ENV === "development") {
+    console.info("[SyncBiz:playback-to-state] session mirror", {
+      sessionTracksLen: sessionTracks.length,
+      sessionPlaylistId: sessionPlaylist?.id ?? null,
+      currentTrackIndex,
+    });
+  }
+
   const base: StationPlaybackState = {
     status,
     currentTrack: trackTitle
@@ -69,6 +127,19 @@ export function playbackToStationState(
         }
       : null,
     currentTrackIndex,
+    ...(sessionTracks.length > 0 ? { sessionTracks } : {}),
+    ...(sessionPlaylist?.id ? { sessionPlaylistId: sessionPlaylist.id } : {}),
+    ...(sessionTitle ? { sessionTitle } : {}),
+    ...(nextSessionTrack ? { nextSessionTrack } : {}),
+    ...(playNextQueue && playNextQueue.length > 0
+      ? {
+          playNextQueue: playNextQueue.map((s) => ({
+            id: s.id,
+            title: s.title,
+            cover: s.cover ?? null,
+          })),
+        }
+      : {}),
     queue: queue.map((s) => ({ id: s.id, title: s.title, cover: s.cover ?? null })),
     queueIndex,
     shuffle: typeof shuffle === "boolean" ? shuffle : undefined,

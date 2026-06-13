@@ -13,6 +13,10 @@ import { DenseDataRowSurface } from "@/components/player-surface/dense-data-row-
 import { DENSE_PLAYLIST_MANAGER_ROW_GRID_CLASS } from "@/lib/player-surface/dense-data-row-constants";
 import { PlaylistIconBadge } from "@/components/playlist-icon-badge";
 import { PlaylistPlayerProvider, usePlaylistPlayer } from "@/lib/playlist-player-context";
+import {
+  legacyPlayLocalDisabled,
+  legacyStopLocalDisabled,
+} from "@/lib/legacy-shellout-playback";
 import type { Playlist } from "@/lib/playlist-types";
 import { derivePlaylistUnifiedCoverArt } from "@/lib/playlist-utils";
 
@@ -211,20 +215,13 @@ function PlaylistRow({
 
   useEffect(() => {
     if (!active || !localOrStream || status !== "playing") return;
-    const ctrl = new AbortController();
-    fetch("/api/commands/play-local", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target: playlist.url }),
-      signal: ctrl.signal,
-    }).catch(() => {});
-    return () => ctrl.abort();
+    legacyPlayLocalDisabled({ target: playlist.url }).catch(() => {});
   }, [active, localOrStream, status, playlist.url]);
 
   const thumbnail = derivePlaylistUnifiedCoverArt(playlist);
 
   async function handleStopLocal() {
-    await fetch("/api/commands/stop-local", { method: "POST" });
+    await legacyStopLocalDisabled();
     stop();
   }
 

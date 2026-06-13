@@ -7,6 +7,7 @@ import { unifiedPlaylistSourceId } from "@/lib/playlist-utils";
 import { radioToUnified } from "@/lib/radio-utils";
 import type { RadioStream, UnifiedSource } from "@/lib/source-types";
 import { sourceToUnified } from "@/lib/playback-provider";
+import { legacyPlayLocalDisabled } from "@/lib/legacy-shellout-playback";
 import { supportsEmbedded } from "@/lib/player-utils";
 import type { Schedule, Source } from "@/lib/types";
 
@@ -138,19 +139,15 @@ export async function runSchedulePlayback(
   if (target.startsWith("http://") || target.startsWith("https://")) {
     return true;
   }
-  const res = await fetch("/api/commands/play-local", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      target,
-      browserPreference: src.browserPreference ?? "default",
-    }),
+  // Legacy OS shell-out is disabled for pilot (would have launched Winamp/OS default).
+  // Local playback now happens only through PlaybackProvider → AudioPlayer (MPV on Desktop)
+  // already triggered above via `playSource()`. The call below is a no-op kept for shape.
+  await legacyPlayLocalDisabled({
+    target,
+    browserPreference: src.browserPreference ?? "default",
   });
-  if (res.ok) {
-    setLastMessage("Local playback command sent");
-    return true;
-  }
-  const data = await res.json().catch(() => ({}));
-  setLastMessage(data?.error ? `Failed: ${data.error}` : "Playback failed.");
-  return false;
+  setLastMessage(
+    "Scheduled local item handed to the SyncBiz in-app player (Desktop MPV).",
+  );
+  return true;
 }

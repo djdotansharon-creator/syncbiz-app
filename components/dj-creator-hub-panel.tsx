@@ -1,65 +1,72 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, type ReactElement, type DragEvent } from "react";
 import type { UnifiedSource } from "@/lib/source-types";
-import { getPlaylistTracks } from "@/lib/playlist-types";
 import { useLocale } from "@/lib/locale-context";
-import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
+import { DjCreatorAiPlaylistList } from "@/components/dj-creator-ai-playlist-list";
+import {
+  AI_PLAYLIST_GENRE,
+  isDjCreatorAiWorkspacePlaylist,
+  playlistGenreLabel,
+} from "@/lib/dj-creator-playlist-scope";
 
 type HubCopy = {
   title: string;
   subtitle: string;
   closeAria: string;
   createNew: string;
-  empty: string;
-  openPlaylist: string;
-  playPlaylist: string;
-  trackCount: (n: number) => string;
+  aiCount: (n: number) => string;
+  savedCount: (n: number) => string;
 };
 
 const HUB_EN: HubCopy = {
-  title: "DJ Creator playlists",
-  subtitle: "Sets you saved from the DJ Creator assistant appear here.",
+  title: "Your playlists",
+  subtitle: "AI-built and DJ Creator playlists you saved appear here.",
   closeAria: "Close DJ Creator playlists",
-  createNew: "Create new with DJ Creator",
-  empty: "No DJ Creator playlists yet — start the assistant and save a draft.",
-  openPlaylist: "Open playlist",
-  playPlaylist: "Play",
-  trackCount: (n) => `${n} track${n === 1 ? "" : "s"}`,
+  createNew: "Build another playlist",
+  aiCount: (n) => `AI Playlists: ${n}`,
+  savedCount: (n) => `DJ Creator: ${n}`,
 };
 
 const HUB_HE: HubCopy = {
-  title: "פלייליסטים מ־DJ Creator",
-  subtitle: "סטים ששמרתם מהעוזר מופיעים כאן.",
+  title: "הפלייליסטים שלי",
+  subtitle: "כאן מופיעים פלייליסטים שנבנו על־ידי DJ Creator AI.",
   closeAria: "סגירת פלייליסטי DJ Creator",
-  createNew: "יצירה חדשה עם DJ Creator",
-  empty: "עדיין אין פלייליסטים — פתחו את העוזר ושמרו טיוטה.",
-  openPlaylist: "פתיחת הפלייליסט",
-  playPlaylist: "נגן",
-  trackCount: (n) => `${n} רצועות`,
+  createNew: "בנה פלייליסט נוסף",
+  aiCount: (n) => `פלייליסטים שנבנו על־ידי AI: ${n}`,
+  savedCount: (n) => `שמורים ידנית: ${n}`,
 };
 
 export function DjCreatorHubPanel({
   playlists,
   onClose,
   onCreateNew,
-  onPlayPlaylist,
   onPlaylistDragStart,
+  onOpenPlaylist,
+  onSourcesChange,
 }: {
   playlists: UnifiedSource[];
   onClose: () => void;
   onCreateNew: () => void;
-  onPlayPlaylist: (source: UnifiedSource) => void;
   onPlaylistDragStart: (e: DragEvent<HTMLElement>, source: UnifiedSource) => void;
+  /** Open the playlist's track list in the library (selects the playlist container). */
+  onOpenPlaylist?: (source: UnifiedSource) => void;
+  onSourcesChange: (updater: (prev: UnifiedSource[]) => UnifiedSource[]) => void;
 }): ReactElement {
   const { locale } = useLocale();
   const he = locale === "he";
   const t = he ? HUB_HE : HUB_EN;
   const dir: "rtl" | "ltr" = he ? "rtl" : "ltr";
 
-  const rows = useMemo(() => {
-    return [...playlists].filter((s) => s.playlist?.id);
+  const { aiCount, savedCount } = useMemo(() => {
+    let ai = 0;
+    let saved = 0;
+    for (const src of playlists) {
+      if (!isDjCreatorAiWorkspacePlaylist(src)) continue;
+      if (playlistGenreLabel(src) === AI_PLAYLIST_GENRE) ai++;
+      else saved++;
+    }
+    return { aiCount: ai, savedCount: saved };
   }, [playlists]);
 
   return (
@@ -71,6 +78,16 @@ export function DjCreatorHubPanel({
         <div className="min-w-0">
           <h2 className="text-base font-semibold tracking-tight text-white">{t.title}</h2>
           <p className="mt-1 text-xs text-slate-500">{t.subtitle}</p>
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-medium text-slate-400">
+            <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2 py-[2px] text-amber-300 ring-1 ring-amber-500/30">
+              {t.aiCount(aiCount)}
+            </span>
+            {savedCount > 0 ? (
+              <span className="inline-flex items-center rounded-full bg-sky-500/10 px-2 py-[2px] text-sky-300 ring-1 ring-sky-500/30">
+                {t.savedCount(savedCount)}
+              </span>
+            ) : null}
+          </p>
         </div>
         <button
           type="button"
@@ -91,62 +108,13 @@ export function DjCreatorHubPanel({
           {t.createNew}
         </button>
 
-        {rows.length === 0 ? (
-          <p className="mt-6 text-center text-sm text-slate-500">{t.empty}</p>
-        ) : (
-          <ul className="mt-5 space-y-2">
-            {rows.map((s) => {
-              const pid = s.playlist!.id!;
-              const cover = s.cover?.trim() || null;
-              const n = getPlaylistTracks(s.playlist!).length;
-              return (
-                <li
-                  key={pid}
-                  draggable
-                  onDragStart={(e) => onPlaylistDragStart(e, s)}
-                  onDoubleClick={(e) => {
-                    if ((e.target as HTMLElement).closest("a,button")) return;
-                    onPlayPlaylist(s);
-                  }}
-                  className="flex cursor-grab items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 active:cursor-grabbing"
-                >
-                  <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-slate-900">
-                    {cover ? (
-                      <HydrationSafeImage src={cover} alt="" className="h-full w-full object-cover" draggable={false} />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-600">
-                        —
-                      </div>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-slate-100">{s.title}</p>
-                    <p className="text-[11px] text-slate-500">{t.trackCount(n)}</p>
-                  </div>
-                  <button
-                    type="button"
-                    draggable={false}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onPlayPlaylist(s);
-                    }}
-                    className="shrink-0 rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-100 hover:border-emerald-400/55 hover:bg-emerald-500/20"
-                  >
-                    {t.playPlaylist}
-                  </button>
-                  <Link
-                    href={`/playlists/${encodeURIComponent(pid)}/edit`}
-                    draggable={false}
-                    onClick={(e) => e.stopPropagation()}
-                    className="shrink-0 rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-100 hover:border-cyan-400/55 hover:bg-cyan-500/20"
-                  >
-                    {t.openPlaylist}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <DjCreatorAiPlaylistList
+          sources={playlists}
+          onSourcesChange={onSourcesChange}
+          onDragStart={onPlaylistDragStart}
+          onOpenPlaylist={onOpenPlaylist}
+          showSectionTitle={false}
+        />
       </div>
     </div>
   );

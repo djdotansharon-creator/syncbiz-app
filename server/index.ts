@@ -91,6 +91,18 @@ const controllers: ControllerEntry[] = [];
 type OwnerEntry = { ws: import("ws").WebSocket; userId: string };
 const owners: OwnerEntry[] = [];
 
+/** Routes COMMAND_RESULT from MASTER back to the socket that sent COMMAND. */
+type CommandRoute = { senderWs: import("ws").WebSocket; sentAt: number };
+const commandRoutes = new Map<string, CommandRoute>();
+const COMMAND_ROUTE_TTL_MS = 30_000;
+
+function pruneStaleCommandRoutes(): void {
+  const now = Date.now();
+  for (const [id, route] of commandRoutes) {
+    if (now - route.sentAt > COMMAND_ROUTE_TTL_MS) commandRoutes.delete(id);
+  }
+}
+
 /** Per-socket heartbeat: last pong timestamp. Used to detect stale connections. */
 const socketLastPongAt = new Map<import("ws").WebSocket, number>();
 
@@ -1065,7 +1077,33 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    if (msg.type === "COMMAND_RESULT" && role === "device" && deviceId) {
+      const conn = devices.get(deviceId);
+      if (!conn || conn.mode !== "MASTER") return;
+      const commandId = (msg as { commandId?: string }).commandId?.trim();
+      if (!commandId) return;
+      const route = commandRoutes.get(commandId);
+      if (route && route.senderWs.readyState === 1) {
+        route.senderWs.send(
+          JSON.stringify({
+            type: "COMMAND_RESULT",
+            commandId,
+            ok: (msg as { ok?: boolean }).ok === true,
+            error: (msg as { error?: string }).error,
+            executedAt: (msg as { executedAt?: number }).executedAt ?? Date.now(),
+          } as ServerMessage),
+        );
+      }
+      commandRoutes.delete(commandId);
+      return;
+    }
+
     if (msg.type === "COMMAND") {
+      pruneStaleCommandRoutes();
+      const commandId =
+        (msg as { commandId?: string }).commandId?.trim() || `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      commandRoutes.set(commandId, { senderWs: ws, sentAt: Date.now() });
+
       let masterId: string | null = null;
       if (role === "owner_global") {
         const owner = owners.find((o) => o.ws === ws);
@@ -1083,11 +1121,29 @@ wss.on("connection", (ws) => {
       }
       const target = masterId ? devices.get(masterId) : null;
       if (!target || target.role !== "device" || target.mode !== "MASTER") {
-        ws.send(JSON.stringify({ type: "ERROR", message: "No MASTER device" } as ServerMessage));
+        commandRoutes.delete(commandId);
+        ws.send(
+          JSON.stringify({
+            type: "COMMAND_RESULT",
+            commandId,
+            ok: false,
+            error: "No MASTER device",
+            failedAt: Date.now(),
+          } as ServerMessage),
+        );
         return;
       }
+      ws.send(
+        JSON.stringify({
+          type: "COMMAND_ACK",
+          commandId,
+          masterDeviceId: masterId,
+          receivedAt: Date.now(),
+        } as ServerMessage),
+      );
       const cmd: ServerMessage = {
         type: "COMMAND",
+        commandId,
         command: msg.command,
         payload: msg.payload,
       };
@@ -1097,6 +1153,17 @@ wss.on("connection", (ws) => {
         (role === "device" && deviceId && target.id === masterId && target.mode === "MASTER");
       if (canSend && target.ws.readyState === 1) {
         target.ws.send(JSON.stringify(cmd));
+      } else {
+        commandRoutes.delete(commandId);
+        ws.send(
+          JSON.stringify({
+            type: "COMMAND_RESULT",
+            commandId,
+            ok: false,
+            error: "MASTER unreachable",
+            failedAt: Date.now(),
+          } as ServerMessage),
+        );
       }
     }
   });

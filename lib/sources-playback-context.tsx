@@ -14,6 +14,8 @@ import type { UnifiedSource } from "./source-types";
 import { canEmbedInCard } from "./playlist-utils";
 import { supportsEmbedded } from "./player-utils";
 import { getPlaylistTracks } from "./playlist-types";
+import { usePlaybackOptional } from "./playback-provider";
+import { useDevicePlayer } from "./device-player-context";
 
 export type SourcesPlaybackStatus = "idle" | "playing" | "paused" | "stopped";
 
@@ -40,6 +42,16 @@ type SourcesPlaybackContextValue = SourcesPlaybackState & {
 
 const SourcesPlaybackContext = createContext<SourcesPlaybackContextValue | null>(null);
 
+/**
+ * Rail-level "what is highlighted as playing" state. Audio output is OWNED by the
+ * global `PlaybackProvider` (lib/playback-provider.tsx) so the Desktop internal MPV
+ * engine (or browser HTMLAudio / YT embed) drives playback. This provider used to
+ * POST `/api/commands/play-local`, which shelled out `cmd /c start "" "<path>"` —
+ * that opens the OS default app (Winamp) for a single file and breaks 50-track
+ * playlist playback. We never call that route from here anymore; instead we
+ * delegate to `PlaybackProvider.playSource` (full queue) or, when this tab is
+ * CONTROL, route the source to the branch MASTER via WS `PLAY_SOURCE`.
+ */
 export function SourcesPlaybackProvider({
   children,
   sources: initialSources,
@@ -52,6 +64,9 @@ export function SourcesPlaybackProvider({
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [status, setStatus] = useState<SourcesPlaybackStatus>("idle");
   const [volume, setVolumeState] = useState(80);
+
+  const playback = usePlaybackOptional();
+  const device = useDevicePlayer();
 
   // Only sync when IDs actually change (avoids render loop from unstable initialSources ref)
   const prevIdsRef = useRef<string>("");
@@ -85,83 +100,44 @@ export function SourcesPlaybackProvider({
   const currentPlayUrl = currentSource ? getPlayUrl(currentSource, currentTrackIndex) : null;
   const isEmbedded = currentSource ? isEmbeddedSource(currentSource) : false;
 
-  const stopPrevious = useCallback(() => {
-    fetch("/api/commands/stop-local", { method: "POST" }).catch(() => {});
-  }, []);
+  const routeToPlayback = useCallback(
+    (item: UnifiedSource, trackIndex: number) => {
+      if (device?.isBranchConnected && device.deviceMode === "CONTROL") {
+        device.playSourceOrSend(item, trackIndex);
+        return;
+      }
+      playback?.playSource(item, trackIndex);
+    },
+    [playback, device],
+  );
 
   const playSource = useCallback(
     (item: UnifiedSource, trackIndex = 0) => {
       setCurrentSource(item);
       setCurrentTrackIndex(trackIndex);
       setStatus("playing");
-
-      if (item.playlist) {
-        const tracks = getPlaylistTracks(item.playlist);
-        const track = tracks[trackIndex];
-        const url = track?.url ?? item.url;
-        if (track && canEmbedInCard(track.type)) {
-          stopPrevious();
-          return;
-        }
-        stopPrevious();
-        fetch("/api/commands/play-local", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target: url }),
-        }).catch(() => {});
-      } else if (item.source) {
-        const target = item.source.target ?? item.source.uriOrPath ?? item.url;
-        if (supportsEmbedded(item.source)) {
-          stopPrevious();
-          return;
-        }
-        stopPrevious();
-        fetch("/api/commands/play-local", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            target,
-            browserPreference: item.source.browserPreference ?? "default",
-          }),
-        }).catch(() => {});
-      } else {
-        if (item.type === "youtube" || item.type === "soundcloud") {
-          stopPrevious();
-        } else {
-          stopPrevious();
-          fetch("/api/commands/play-local", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ target: item.url }),
-          }).catch(() => {});
-        }
-      }
+      routeToPlayback(item, trackIndex);
     },
-    [stopPrevious],
+    [routeToPlayback],
   );
 
-  const pause = useCallback(() => setStatus("paused"), []);
+  const pause = useCallback(() => {
+    setStatus("paused");
+    if (device?.isBranchConnected && device.deviceMode === "CONTROL") {
+      device.pauseOrSend();
+      return;
+    }
+    playback?.pause();
+  }, [playback, device]);
+
   const stop = useCallback(() => {
     setStatus("stopped");
-    fetch("/api/commands/stop-local", { method: "POST" }).catch(() => {});
-  }, []);
-
-  const playLocalForCurrent = useCallback(() => {
-    if (!currentSource) return;
-    const url = getPlayUrl(currentSource, currentTrackIndex);
-    if (!url) return;
-    fetch("/api/commands/play-local", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ target: url }),
-    }).catch(() => {});
-  }, [currentSource, currentTrackIndex, getPlayUrl]);
-
-  useEffect(() => {
-    if (!currentSource || status !== "playing") return;
-    if (isEmbeddedSource(currentSource)) return;
-    playLocalForCurrent();
-  }, [currentSource, currentTrackIndex, status, isEmbeddedSource, playLocalForCurrent]);
+    if (device?.isBranchConnected && device.deviceMode === "CONTROL") {
+      device.stopOrSend();
+      return;
+    }
+    playback?.stop();
+  }, [playback, device]);
 
   const prev = useCallback(() => {
     if (!currentSource) return;

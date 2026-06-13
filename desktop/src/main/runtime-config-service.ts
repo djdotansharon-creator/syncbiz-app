@@ -20,7 +20,29 @@ export function defaultRuntimeConfig(): DesktopRuntimeConfig {
     lastAuthEmail: undefined,
     desktopTokenExpiresAtIso: undefined,
     musicFolderPath: undefined,
+    localMetadataBankPath: undefined,
+    additionalMusicFolders: [],
   };
+}
+
+/**
+ * Dedupe + trim user-added folders. PlaylistPro never lives here; the caller
+ * filters that out before passing in (the protection lives in `additional-music-folders.ts`).
+ */
+function normalizeAdditionalMusicFolders(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
 }
 
 export function loadRuntimeConfig(userData: string): DesktopRuntimeConfig {
@@ -57,6 +79,11 @@ export function loadRuntimeConfig(userData: string): DesktopRuntimeConfig {
         typeof data.musicFolderPath === "string" && data.musicFolderPath.trim()
           ? data.musicFolderPath.trim()
           : undefined,
+      localMetadataBankPath:
+        typeof data.localMetadataBankPath === "string" && data.localMetadataBankPath.trim()
+          ? data.localMetadataBankPath.trim()
+          : undefined,
+      additionalMusicFolders: normalizeAdditionalMusicFolders(data.additionalMusicFolders),
     };
     return merged;
   } catch {
@@ -101,6 +128,16 @@ export function patchRuntimeConfig(
         : typeof patch.musicFolderPath === "string" && patch.musicFolderPath.trim()
           ? patch.musicFolderPath.trim()
           : undefined,
+    localMetadataBankPath:
+      patch.localMetadataBankPath === undefined
+        ? current.localMetadataBankPath
+        : typeof patch.localMetadataBankPath === "string" && patch.localMetadataBankPath.trim()
+          ? patch.localMetadataBankPath.trim()
+          : undefined,
+    additionalMusicFolders:
+      patch.additionalMusicFolders === undefined
+        ? current.additionalMusicFolders ?? []
+        : normalizeAdditionalMusicFolders(patch.additionalMusicFolders),
   };
   if (!next.deviceId.trim()) {
     next = { ...next, deviceId: newDeviceId() };

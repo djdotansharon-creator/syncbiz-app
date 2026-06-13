@@ -29,7 +29,8 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "**/*.mts",
+    "desktop/src/shared/local-ai-playlist-search.ts"
   ],
   "exclude": ["node_modules", "server", "desktop"]
 }

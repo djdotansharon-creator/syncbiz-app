@@ -56,6 +56,16 @@ type Props = {
   onAddToLibrary?: () => void | Promise<void>;
   /** @deprecated Leaf bar does not show in-library chip. */
   inLibrary?: boolean;
+  /** Override tooltips/aria (e.g. DJ Creator hub — English-only deck labels). */
+  deckActionLabels?: {
+    play?: string;
+    stopPlayback?: string;
+    pausePlayback?: string;
+    edit?: string;
+    editPlaylist?: string;
+    share?: string;
+    delete?: string;
+  };
 };
 
 export function LibrarySourceItemActions({
@@ -73,8 +83,16 @@ export function LibrarySourceItemActions({
   onAddToPlaylistPress,
   onAddToLibrary,
   inLibrary = false,
+  deckActionLabels,
 }: Props) {
   const { t } = useTranslations();
+  const playLabel = deckActionLabels?.play ?? t.play;
+  const stopLabel = deckActionLabels?.stopPlayback ?? t.stopPlayback;
+  const pauseLabel = deckActionLabels?.pausePlayback ?? t.pausePlayback;
+  const shareLabel = deckActionLabels?.share ?? t.share;
+  const deleteLabel = deckActionLabels?.delete ?? t.delete;
+  const editPlaylistLabel = deckActionLabels?.editPlaylist ?? t.editPlaylist;
+  const editLabel = deckActionLabels?.edit ?? t.edit;
   const [adding, setAdding] = useState(false);
   const editHref = editHrefForLibrarySource(source);
   const leafEditHref = editHrefForLibraryLeaf(source);
@@ -97,8 +115,8 @@ export function LibrarySourceItemActions({
             libraryDeck={libraryDeckChrome}
             onClick={onStop}
             size={transportSm}
-            title={t.stopPlayback}
-            aria-label={t.stopPlayback}
+            title={stopLabel}
+            aria-label={stopLabel}
           >
             <svg className={compact ? "h-4 w-4" : "h-3.5 w-3.5"} viewBox="0 0 24 24" fill="currentColor">
               <path d="M6 6h12v12H6z" />
@@ -110,8 +128,8 @@ export function LibrarySourceItemActions({
             onClick={() => onPlay()}
             size={transportMd}
             active
-            title={t.play}
-            aria-label={t.play}
+            title={playLabel}
+            aria-label={playLabel}
           >
             <svg className={compact ? "h-5 w-5 ml-0.5" : "h-4 w-4 ml-0.5"} viewBox="0 0 24 24" fill="currentColor">
               <path d="M8 5v14l11-7L8 5z" />
@@ -123,8 +141,8 @@ export function LibrarySourceItemActions({
             onClick={onPause}
             size={transportSm}
             active
-            title={t.pausePlayback}
-            aria-label={t.pausePlayback}
+            title={pauseLabel}
+            aria-label={pauseLabel}
           >
             <svg className={compact ? "h-4 w-4" : "h-3.5 w-3.5"} viewBox="0 0 24 24" fill="currentColor">
               <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
@@ -138,8 +156,8 @@ export function LibrarySourceItemActions({
           libraryDeck={libraryDeckChrome}
           onClick={() => onPlay()}
           size={playSize}
-          title={t.play}
-          aria-label={t.play}
+          title={playLabel}
+          aria-label={playLabel}
         >
           <svg className={compact ? "h-5 w-5 ml-0.5" : "h-4 w-4 ml-0.5"} viewBox="0 0 24 24" fill="currentColor">
             <path d="M8 5v14l11-7L8 5z" />
@@ -154,17 +172,17 @@ export function LibrarySourceItemActions({
               variant="player"
               title={
                 source.id.includes(":track:") || (source.origin === "playlist" && source.playlist)
-                  ? t.editPlaylist
+                  ? editPlaylistLabel
                   : source.origin === "radio"
                     ? t.radioEdit
-                    : t.edit
+                    : editLabel
               }
               aria-label={
                 source.id.includes(":track:") || (source.origin === "playlist" && source.playlist)
-                  ? t.editPlaylist
+                  ? editPlaylistLabel
                   : source.origin === "radio"
                     ? t.radioEdit
-                    : t.edit
+                    : editLabel
               }
             />
           ) : (
@@ -190,17 +208,17 @@ export function LibrarySourceItemActions({
               variant="player"
               title={
                 source.origin === "playlist"
-                  ? t.editPlaylist
+                  ? editPlaylistLabel
                   : source.origin === "radio"
                     ? t.radioEdit
-                    : t.edit
+                    : editLabel
               }
               aria-label={
                 source.origin === "playlist"
-                  ? t.editPlaylist
+                  ? editPlaylistLabel
                   : source.origin === "radio"
                     ? t.radioEdit
-                    : t.edit
+                    : editLabel
               }
             />
           ) : (
@@ -256,7 +274,7 @@ export function LibrarySourceItemActions({
           ) : null}
         </>
       )}
-      <ActionButtonShare variant="player" onClick={onShareOpen} title={t.share} aria-label={t.share} />
+      <ActionButtonShare variant="player" onClick={onShareOpen} title={shareLabel} aria-label={shareLabel} />
       {showLibraryDelete ? (
         <span
           className="contents"
@@ -280,8 +298,8 @@ export function LibrarySourceItemActions({
               }
               onDeletePress();
             }}
-            title={t.delete}
-            aria-label={t.delete}
+            title={deleteLabel}
+            aria-label={deleteLabel}
           >
             <svg className={compact ? "h-4 w-4" : "h-3.5 w-3.5"} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />

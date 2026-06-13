@@ -17,6 +17,10 @@ import type {
 import { classifyResolveFoundation } from "./url-resolve-classify";
 import { getPlaylistTracks } from "./playlist-types";
 import {
+  isRealPlaylistLibraryContainer,
+  isSingleTrackPlaylistShell,
+} from "./library-playlist-container";
+import {
   leafContractSubtypeFromContentNode,
   shouldClassifyLeafUrlAsMixSet,
 } from "./library-leaf-mix-heuristics";
@@ -289,12 +293,26 @@ function classifyLibraryLeafEntityContract(source: UnifiedSource): LibraryEntity
     return { entityKind: "item", itemSubtype: "mix_set" };
   }
 
-  const kind = source.contentNodeKind;
-  if (kind === "syncbiz_playlist") {
+  if (isSingleTrackPlaylistShell(source)) {
+    return { entityKind: "item", itemSubtype: "single_track" };
+  }
+  if (isRealPlaylistLibraryContainer(source)) {
+    if (
+      source.playlist?.libraryPlacement === "ready_external" ||
+      source.contentNodeKind === "external_playlist" ||
+      playlistIsExternalShellUrl(source.url ?? "")
+    ) {
+      return { entityKind: "collection", collectionSubtype: "external_playlist" };
+    }
     return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };
   }
+
+  const kind = source.contentNodeKind;
   if (kind === "external_playlist") {
     return { entityKind: "collection", collectionSubtype: "external_playlist" };
+  }
+  if (kind === "syncbiz_playlist") {
+    return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };
   }
 
   const u = (source.url ?? "").toLowerCase();
@@ -304,12 +322,6 @@ function classifyLibraryLeafEntityContract(source: UnifiedSource): LibraryEntity
     (u.includes("soundcloud.com") && u.includes("/sets/"));
   if (isExternalPlaylist) {
     return { entityKind: "collection", collectionSubtype: "external_playlist" };
-  }
-  if (source.origin === "playlist" && source.playlist?.libraryPlacement === "ready_external") {
-    return { entityKind: "collection", collectionSubtype: "external_playlist" };
-  }
-  if (source.origin === "playlist") {
-    return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };
   }
   return { entityKind: "item", itemSubtype: "single_track" };
 }
@@ -323,11 +335,13 @@ export function classifyLibraryEntityContract(source: UnifiedSource): LibraryEnt
     if (playlistIsExternalShellUrl(source.url ?? "")) {
       return { entityKind: "collection", collectionSubtype: "external_playlist" };
     }
-    const trackCount = getPlaylistTracks(source.playlist).length;
-    if (trackCount <= 1) {
-      return classifyLibraryLeafEntityContract(source);
+    if (isSingleTrackPlaylistShell(source)) {
+      return { entityKind: "item", itemSubtype: "single_track" };
     }
-    return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };
+    if (isRealPlaylistLibraryContainer(source)) {
+      return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };
+    }
+    return classifyLibraryLeafEntityContract(source);
   }
 
   const kind = source.contentNodeKind;

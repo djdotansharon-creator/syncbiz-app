@@ -23,17 +23,21 @@ export function PlaybackBar() {
   if (isControlMirror) {
     const ms = deviceCtx!.masterState;
     const hasSource = !!(ms?.currentSource || ms?.currentTrack);
-    const hasPrevNext = (ms?.queue?.length ?? 0) > 1;
+    const sessionTrackCount = ms?.sessionTracks?.length ?? 0;
+    const hasPrevNext = sessionTrackCount > 1 || (ms?.queue?.length ?? 0) > 1;
     const titleText = ms
       ? (ms.currentTrack?.title ?? ms.currentSource?.title ?? t.noSourceSelected)
       : t.noSourceSelected;
-    const statusSubtext = ms
-      ? ms.status === "playing"
-        ? t.playing
-        : ms.status === "paused"
-          ? t.paused
-          : t.stopped
-      : t.noSourceSelected;
+    const remoteHint = deviceCtx!.remoteCommandMessage;
+    const statusSubtext = remoteHint
+      ? remoteHint
+      : ms
+        ? ms.status === "playing"
+          ? t.playing
+          : ms.status === "paused"
+            ? t.paused
+            : t.stopped
+        : t.noSourceSelected;
     return (
       <PlaybackDockSurface
         {...buildBrowserPlaybackDockProps({
@@ -48,6 +52,13 @@ export function PlaybackBar() {
           stop: deviceCtx!.stopOrSend,
           prev: deviceCtx!.prevOrSend,
           next: deviceCtx!.nextOrSend,
+          pendingTransport: {
+            prev: deviceCtx!.isRemoteCommandPending("PREV"),
+            next: deviceCtx!.isRemoteCommandPending("NEXT"),
+            play: deviceCtx!.isRemoteCommandPending("PLAY"),
+            pause: deviceCtx!.isRemoteCommandPending("PAUSE"),
+            stop: deviceCtx!.isRemoteCommandPending("STOP"),
+          },
         })}
       />
     );

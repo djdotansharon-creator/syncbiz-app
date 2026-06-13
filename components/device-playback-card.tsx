@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { PlaybackControls } from "@/components/playback-controls";
 import { usePlayback } from "@/lib/playback-provider";
+import { legacyPlayLocalDisabled } from "@/lib/legacy-shellout-playback";
 import { supportsEmbedded } from "@/lib/player-utils";
 import type { Device, Source } from "@/lib/types";
 
@@ -26,15 +27,13 @@ export function DevicePlaybackCard({ device, source }: DevicePlaybackCardProps) 
     const target = (source.target ?? source.uriOrPath ?? "").trim();
     if (target) {
       setLastMessage(null);
-      const res = await fetch("/api/commands/play-local", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          target,
-          browserPreference: source.browserPreference ?? "default",
-        }),
+      await legacyPlayLocalDisabled({
+        target,
+        browserPreference: source.browserPreference ?? "default",
       });
-      setLastMessage(res.ok ? "Local playback command sent" : `Failed: ${(await res.json().catch(() => ({}))).error ?? "Unknown error"}`);
+      setLastMessage(
+        "Local playback runs in the SyncBiz in-app player (Desktop MPV).",
+      );
     }
     router.refresh();
   }

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DjCreatorAiSparkle, DjCreatorAiWarmSpark } from "@/components/dj-creator-ai-mark";
 import {
@@ -20,7 +21,16 @@ import { useLocale } from "@/lib/locale-context";
 import { getYouTubeThumbnail, inferPlaylistType } from "@/lib/playlist-utils";
 import type { Playlist, PlaylistType } from "@/lib/playlist-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
-import { savePlaylistToLocal } from "@/lib/unified-sources-client";
+import { useSourcesPlayback } from "@/lib/sources-playback-context";
+import { savePlaylistToLocal, unifiedSourceFromPlaylist } from "@/lib/unified-sources-client";
+import {
+  AI_PLAYLIST_COUNT_OPTIONS,
+  AiPlaylistNoStrongMatchesClientError,
+  DEFAULT_AI_PLAYLIST_COUNT,
+  requestAiPlaylistBuild,
+  type AiPlaylistCountOption,
+  type AiPlaylistLocalMatchDebugRow,
+} from "@/lib/ai-playlist-build-client";
 
 type SmartSearchRow = {
   catalogItemId: string;
@@ -85,6 +95,16 @@ type ApiOk = {
 };
 
 const RESULT_COUNT = 10;
+
+const PROMPT_CHIPS = [
+  "ישראלי רגוע להיטים 2026",
+  "מוזיקת רקע למסעדה בערב",
+  "Afro House לאימון ערב",
+  "קפה בוקר רגוע",
+  "חנות אופנה אנרגיה בינונית",
+  "לובי מלון יוקרתי ורגוע",
+  "מזרחית עדינה לשישי צהריים",
+] as const;
 
 const DJ_CREATOR_SAVE_PLAYLIST_ENABLED = true;
 
@@ -204,6 +224,22 @@ type Copy = {
   composerPlaceholder: string;
   getPicks: string;
   getPicksLoading: string;
+  modeFree: string;
+  modeGuided: string;
+  freePromptIntro: string;
+  promptPlaceholder: string;
+  promptHelper: string;
+  trySuggestions: string;
+  playlistLength: string;
+  playNow: string;
+  editPlaylist: string;
+  openInLibrary: string;
+  buildAnotherPlaylist: string;
+  buildSuccessFootnote: string;
+  buildPlaylist: (n: number) => string;
+  buildPlaylistLoading: string;
+  buildSuccessTitle: string;
+  buildSuccessBody: (title: string, count: number) => string;
   thinkingLine: string;
   back: string;
   needMore: string;
@@ -250,6 +286,15 @@ type Copy = {
   requestEditorError: string;
   /** Gym high-energy intensity step only */
   questionIntensity: string;
+  /** "Built from" summary block on the success screen. */
+  builtFromHeading: string;
+  builtFromPrompt: string;
+  sourceMixCatalog: (n: number) => string;
+  sourceMixLocal: (n: number) => string;
+  trackCountChip: (n: number) => string;
+  noLocalMatchesFriendly: string;
+  diagnosticsToggleHidden: string;
+  diagnosticsToggleShown: string;
 };
 
 const COPY_EN: Copy = {
@@ -269,7 +314,23 @@ const COPY_EN: Copy = {
   composerPlaceholder: "Type anything extra…",
   getPicks: "Get my 10 picks",
   getPicksLoading: "Finding picks…",
-  thinkingLine: "DJ Creator AI is building your music direction…",
+  modeFree: "Free prompt",
+  modeGuided: "Guided setup",
+  freePromptIntro: "Describe the playlist you want.",
+  promptPlaceholder: "e.g. Israeli calm hits 2026",
+  promptHelper: "Describe the playlist you want, or choose a suggestion.",
+  trySuggestions: "Try:",
+  playlistLength: "Playlist length",
+  playNow: "Play now",
+  editPlaylist: "Edit details",
+  openInLibrary: "Open playlist",
+  buildAnotherPlaylist: "Build another playlist",
+  buildSuccessFootnote: "All generated playlists appear in the DJ Creator playlists section.",
+  buildPlaylist: (n) => `Build ${n}-track playlist`,
+  buildPlaylistLoading: "Building playlist…",
+  buildSuccessTitle: "Playlist ready",
+  buildSuccessBody: (title, count) => `Created “${title}” with ${count} tracks.`,
+  thinkingLine: "DJ Creator AI is building your playlist…",
   back: "Back",
   needMore: "Answer the steps above first (or add more in the box).",
   close: "Close",
@@ -325,6 +386,15 @@ const COPY_EN: Copy = {
   requestEditorThanks: "Request recorded — the team will pick it up from the SyncBiz queue.",
   requestEditorError: "Couldn't record the request — try again shortly.",
   questionIntensity: "How intense should it feel?",
+  builtFromHeading: "Built from",
+  builtFromPrompt: "Prompt",
+  sourceMixCatalog: (n) => `${n} from SyncBiz catalog / YouTube`,
+  sourceMixLocal: (n) => `${n} from your music`,
+  trackCountChip: (n) => `${n} tracks`,
+  noLocalMatchesFriendly:
+    "No matching tracks were found in your local library. Click \"Scan now\" in Settings → Local Music, or make sure your music folders are connected.",
+  diagnosticsToggleHidden: "Show technical details",
+  diagnosticsToggleShown: "Hide technical details",
 };
 
 const COPY_HE: Copy = {
@@ -343,7 +413,23 @@ const COPY_HE: Copy = {
   composerPlaceholder: "אפשר לכתוב כאן…",
   getPicks: "תביא לי 10 המלצות",
   getPicksLoading: "מחפש המלצות…",
-  thinkingLine: "DJ Creator AI מכין את כיוון המוזיקה…",
+  modeFree: "פרומפט חופשי",
+  modeGuided: "אשף מודרך",
+  freePromptIntro: "תארו את הפלייליסט שאתם רוצים.",
+  promptPlaceholder: "לדוגמה: ישראלי רגוע להיטים 2026",
+  promptHelper: "תארו את הפלייליסט, או בחרו הצעה.",
+  trySuggestions: "נסו:",
+  playlistLength: "אורך הפלייליסט",
+  playNow: "נגן עכשיו",
+  editPlaylist: "ערוך פרטים",
+  openInLibrary: "פתח פלייליסט",
+  buildAnotherPlaylist: "בנה פלייליסט נוסף",
+  buildSuccessFootnote: "כל הפלייליסטים שייצרת יופיעו בלשונית הפלייליסטים של DJ Creator.",
+  buildPlaylist: (n) => `בניית פלייליסט ב-${n} שירים`,
+  buildPlaylistLoading: "בונה פלייליסט…",
+  buildSuccessTitle: "הפלייליסט מוכן",
+  buildSuccessBody: (title, count) => `נוצר פלייליסט חדש: "${title}" עם ${count} שירים.`,
+  thinkingLine: "DJ Creator AI בונה את הפלייליסט…",
   back: "חזרה",
   needMore: "קודם ענו על השלבים למעלה (או הוסיפו בטקסט למטה).",
   close: "סגירה",
@@ -396,6 +482,15 @@ const COPY_HE: Copy = {
   requestEditorThanks: "הבקשה נרשמה — הצוות יקבל מהתור הפנימי.",
   requestEditorError: "לא הצלחנו לרשום את הבקשה — נסו שוב מאוחר יותר.",
   questionIntensity: "כמה אינטנסיבי זה צריך להרגיש?",
+  builtFromHeading: "נבנה לפי",
+  builtFromPrompt: "פרומפט",
+  sourceMixCatalog: (n) => `${n} מהקטלוג / YouTube`,
+  sourceMixLocal: (n) => `${n} מהמוזיקה המקומית`,
+  trackCountChip: (n) => `${n} שירים`,
+  noLocalMatchesFriendly:
+    "לא נמצאו שירים מתאימים במאגר המקומי. לחץ על 'סרוק עכשיו' בהגדרות → מוזיקה מקומית, או ודא שתיקיות המוזיקה מחוברות.",
+  diagnosticsToggleHidden: "הצג פרטים טכניים",
+  diagnosticsToggleShown: "הסתר פרטים טכניים",
 };
 
 type WizardStep = 0 | 1 | 2 | 3 | 4 | 5;
@@ -542,15 +637,46 @@ const PLAYER_GUIDE_VIDEOS: GuideItem[] = [
 export type DjCreatorAiShellProps = {
   drawerOpen: boolean;
   onDrawerOpenChange: (open: boolean) => void;
+  /** Main Search → DJ Creator: pre-fill free prompt (consumed on open). */
+  seedPrompt?: string | null;
+  onSeedPromptConsumed?: () => void;
 };
 
-export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAiShellProps) {
+export function DjCreatorAiShell({
+  drawerOpen,
+  onDrawerOpenChange,
+  seedPrompt,
+  onSeedPromptConsumed,
+}: DjCreatorAiShellProps) {
+  const router = useRouter();
+  const { sources, setSources, playSource } = useSourcesPlayback();
   const { locale } = useLocale();
   const he = locale === "he";
   const t = he ? COPY_HE : COPY_EN;
   const dir: "rtl" | "ltr" = he ? "rtl" : "ltr";
 
   const [tab, setTab] = useState<"chat" | "guide">("chat");
+  const [assistantMode, setAssistantMode] = useState<"free" | "guided">("free");
+  const [playlistCount, setPlaylistCount] = useState<AiPlaylistCountOption>(DEFAULT_AI_PLAYLIST_COUNT);
+  const [buildingPlaylist, setBuildingPlaylist] = useState(false);
+  const [buildResult, setBuildResult] = useState<{
+    playlistId: string;
+    title: string;
+    count: number;
+    shortfallExplanation: string | null;
+    /** Structured hint for the localized short-accurate message; null when not applicable. */
+    shortfallHint: { kind: "short_accurate"; matchedCount: number; intentLabel: string } | null;
+    /** Prompt the user actually submitted (for the "Built from" chip). */
+    promptUsed: string;
+    /** Wizard chips (only present when assistantMode === "guided"). */
+    wizardChips: string[];
+    /** From the API response — used to build the source-mix chips and friendly local-zero hint. */
+    catalogTracksInPlaylist: number;
+    localTracksInPlaylist: number;
+    localBridgeAvailable: boolean;
+    localCandidatesCount: number;
+  } | null>(null);
+  const [showBuildDiagnostics, setShowBuildDiagnostics] = useState(false);
   const [step, setStep] = useState<WizardStep>(0);
   const [business, setBusiness] = useState<WizardPick>(emptyPick);
   const [daypart, setDaypart] = useState<WizardPick>(emptyPick);
@@ -574,8 +700,11 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
   const [editorNote, setEditorNote] = useState("");
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorStatus, setEditorStatus] = useState<"idle" | "ok" | "err">("idle");
+  const [buildLocalHint, setBuildLocalHint] = useState<string | null>(null);
+  const [buildLocalDebug, setBuildLocalDebug] = useState<AiPlaylistLocalMatchDebugRow[] | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const drawerWasOpenRef = useRef(false);
 
   const gymHighEnergy = useMemo(
     () => isGymHighEnergyWizardVibes(business.id, vibe.id),
@@ -711,6 +840,12 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
     setEditorNote("");
     setEditorStatus("idle");
     setEditorBusy(false);
+    setAssistantMode("free");
+    setPlaylistCount(DEFAULT_AI_PLAYLIST_COUNT);
+    setBuildingPlaylist(false);
+    setBuildResult(null);
+    setBuildLocalHint(null);
+    setBuildLocalDebug(null);
   }, []);
 
   const closeDrawer = useCallback(() => {
@@ -718,10 +853,23 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
     setSaveOpen(false);
   }, [onDrawerOpenChange]);
 
-  /* Reset before paint when opening — avoids rendering stale results/tree for one frame (reduces DOM/reconcile churn that can trigger removeChild errors). */
+  /** Reset only on closed → open transition (not when seedPrompt is consumed/cleared). */
   useLayoutEffect(() => {
-    if (drawerOpen) resetWizard();
+    if (drawerOpen && !drawerWasOpenRef.current) {
+      resetWizard();
+    }
+    drawerWasOpenRef.current = drawerOpen;
   }, [drawerOpen, resetWizard]);
+
+  /** Apply Main Search seed after open — separate from reset so consume does not wipe textarea. */
+  useLayoutEffect(() => {
+    if (!drawerOpen) return;
+    const seed = (seedPrompt ?? "").trim();
+    if (seed.length < 2) return;
+    setAssistantMode("free");
+    setFreeText(seed);
+    onSeedPromptConsumed?.();
+  }, [drawerOpen, seedPrompt, onSeedPromptConsumed]);
 
   useEffect(() => {
     if (!drawerOpen || tab !== "chat") return;
@@ -1078,6 +1226,187 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
 
   const progress = step >= reviewStep ? 1 : (step + 1) / (lastBubbleStep + 1);
 
+  const buildPromptText = useMemo(() => {
+    if (assistantMode === "free") return freeText.trim();
+    return builtQuery.trim();
+  }, [assistantMode, freeText, builtQuery]);
+
+  const canBuildPlaylist = buildPromptText.length >= 2;
+
+  const buildDisabled =
+    buildingPlaylist ||
+    !canBuildPlaylist ||
+    (assistantMode === "guided" && step < reviewStep);
+
+  const runPlaylistBuild = useCallback(async () => {
+    const prompt = buildPromptText;
+    if (prompt.length < 2) {
+      setError(
+        locale === "he" ? "הוסיפו תיאור לפחות שני תווים." : "Add at least two characters to describe the playlist.",
+      );
+      return;
+    }
+    if (assistantMode === "guided" && step < reviewStep) {
+      setError(t.needMore);
+      return;
+    }
+    setBuildingPlaylist(true);
+    setError(null);
+    setBuildResult(null);
+    setBuildLocalHint(null);
+    setBuildLocalDebug(null);
+    setBuildLocalDebug(null);
+    setData(null);
+    try {
+      if (process.env.NODE_ENV === "development") {
+        console.info("[dj-creator] requestAiPlaylistBuild", { prompt, count: playlistCount });
+      }
+      const result = await requestAiPlaylistBuild({ prompt, count: playlistCount });
+      if (process.env.NODE_ENV === "development") {
+        console.info("[dj-creator] build merge stats", {
+          catalogCandidates: result.catalogCandidatesPooled,
+          localCandidates: result.localCandidatesCount,
+          catalogTracks: result.catalogTracksInPlaylist,
+          localTracks: result.localTracksInPlaylist,
+          localBridge: result.localBridgeAvailable,
+        });
+      }
+      if (result.localBridgeAvailable && result.localCandidatesCount === 0) {
+        setBuildLocalHint(
+          locale === "he"
+            ? "לא נמצאו התאמות במוזיקה המקומית — בונים מהקטלוג / YouTube."
+            : "No matches in your local music — building from the catalog / YouTube.",
+        );
+      } else if (result.localBridgeAvailable) {
+        const partial =
+          result.localPartialFallback
+            ? locale === "he"
+              ? " · אין התאמה מלאה מקומית — מוצגות התאמות חלקיות"
+              : " · No full local match; showing partial matches"
+            : "";
+        setBuildLocalHint(
+          locale === "he"
+            ? `מקטלוג: ${result.catalogTracksInPlaylist} · מקומי: ${result.localTracksInPlaylist} (${result.localCandidatesCount} מועמדים)${partial}`
+            : `Catalog: ${result.catalogTracksInPlaylist} · Local: ${result.localTracksInPlaylist} (${result.localCandidatesCount} candidates)${partial}`,
+        );
+        if (process.env.NODE_ENV === "development" && result.localMatchDebugTop?.length) {
+          setBuildLocalDebug(result.localMatchDebugTop);
+        }
+      }
+      const wizardChips =
+        assistantMode === "guided"
+          ? [business.label, daypart.label, vibe.label, style.label, gymHighEnergy ? gymIntensity.label : ""]
+              .map((s) => (s ?? "").trim())
+              .filter((s) => s.length > 0 && !/choose|יבחר/i.test(s))
+          : [];
+      setBuildResult({
+        playlistId: result.playlistId,
+        title: result.title,
+        count: result.count,
+        shortfallExplanation: result.shortfallExplanation,
+        shortfallHint: result.shortfallHint,
+        promptUsed: prompt,
+        wizardChips,
+        catalogTracksInPlaylist: result.catalogTracksInPlaylist,
+        localTracksInPlaylist: result.localTracksInPlaylist,
+        localBridgeAvailable: result.localBridgeAvailable,
+        localCandidatesCount: result.localCandidatesCount,
+      });
+      setShowBuildDiagnostics(false);
+      setLastSavedPlaylistId(result.playlistId);
+      try {
+        const verifyRes = await fetch(`/api/playlists/${encodeURIComponent(result.playlistId)}`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!verifyRes.ok) {
+          throw new Error(
+            locale === "he"
+              ? "הפלייליסט נוצר אך לא אומת בשרת."
+              : "Playlist was created but could not be verified on the server.",
+          );
+        }
+        const confirmed = (await verifyRes.json()) as Playlist;
+        savePlaylistToLocal(confirmed);
+        const unified = unifiedSourceFromPlaylist(confirmed);
+        setSources((prev) => {
+          if (prev.some((s) => s.id === unified.id)) {
+            return prev.map((s) => (s.id === unified.id ? unified : s));
+          }
+          return [unified, ...prev];
+        });
+      } catch (verifyErr) {
+        throw verifyErr instanceof Error
+          ? verifyErr
+          : new Error(locale === "he" ? "אימות הפלייליסט נכשל." : "Playlist verification failed.");
+      }
+      window.dispatchEvent(new Event("library-updated"));
+    } catch (e) {
+      // Pilot Blocker — "no strong matches" graceful message. The server only
+      // throws this when strict relevance + sibling exclusion left us with
+      // zero playable rows; we render a clear next-step hint in the user's
+      // locale instead of the raw "no playable URL" error.
+      if (e instanceof AiPlaylistNoStrongMatchesClientError) {
+        const label = e.intentLabel || buildPromptText;
+        const msg =
+          locale === "he"
+            ? `לא נמצאו התאמות חזקות ל־${label}. נסו ניסוח רחב יותר, או הוסיפו/סרקו עוד מוזיקה מקומית.`
+            : `No strong matches found for ${label}. Try a broader prompt, or add/rescan more local music.`;
+        setError(msg);
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[dj-creator] no strong matches:", { intentLabel: label });
+        }
+      } else {
+        const msg = e instanceof Error ? e.message : locale === "he" ? "לא הצלחנו לבנות." : "Could not build playlist.";
+        setError(msg);
+        if (process.env.NODE_ENV === "development") {
+          console.error("[dj-creator] playlist build failed:", e);
+        }
+      }
+    } finally {
+      setBuildingPlaylist(false);
+    }
+  }, [
+    buildPromptText,
+    assistantMode,
+    step,
+    reviewStep,
+    playlistCount,
+    locale,
+    t.needMore,
+    setSources,
+    business.label,
+    daypart.label,
+    vibe.label,
+    style.label,
+    gymHighEnergy,
+    gymIntensity.label,
+  ]);
+
+  const playBuiltPlaylist = useCallback(() => {
+    if (!buildResult?.playlistId) return;
+    const source = sources.find((s) => s.playlist?.id === buildResult.playlistId);
+    if (source) {
+      playSource(source);
+      return;
+    }
+    void (async () => {
+      try {
+        const res = await fetch(`/api/playlists/${encodeURIComponent(buildResult.playlistId)}`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error("Could not load playlist");
+        const confirmed = (await res.json()) as Playlist;
+        const unified = unifiedSourceFromPlaylist(confirmed);
+        setSources((prev) => [unified, ...prev.filter((s) => s.id !== unified.id)]);
+        playSource(unified);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : locale === "he" ? "לא הצלחנו להפעיל." : "Could not play.");
+      }
+    })();
+  }, [buildResult?.playlistId, sources, playSource, setSources, locale]);
+
   return (
     <>
       <section className="relative overflow-hidden rounded-2xl border border-amber-600/30 bg-[#141210] p-3 shadow-[0_8px_28px_rgba(0,0,0,0.42),inset_0_0_0_1px_rgba(217,119,6,0.12)]">
@@ -1196,13 +1525,226 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
                     </div>
                   ))}
                 </div>
+              ) : buildResult ? (
+                <div className="flex flex-col gap-3">
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/30 px-3 py-3" role="status">
+                    <p className="text-[13px] font-semibold text-emerald-100">{t.buildSuccessTitle}</p>
+                    <p className="mt-1 text-[11px] leading-snug text-emerald-100/90">
+                      {t.buildSuccessBody(buildResult.title, buildResult.count)}
+                    </p>
+
+                    <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                        {t.builtFromHeading}
+                      </p>
+                      {buildResult.promptUsed.trim().length > 0 ? (
+                        <p
+                          className="mt-1 break-words text-[11px] leading-snug text-slate-200"
+                          title={buildResult.promptUsed}
+                        >
+                          <span className="text-slate-500">{t.builtFromPrompt}: </span>
+                          {buildResult.promptUsed.slice(0, 140)}
+                          {buildResult.promptUsed.length > 140 ? "…" : ""}
+                        </p>
+                      ) : null}
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        <span className="inline-flex items-center rounded-md border border-cyan-400/30 bg-cyan-500/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-cyan-100">
+                          {t.trackCountChip(buildResult.count)}
+                        </span>
+                        {buildResult.catalogTracksInPlaylist > 0 ? (
+                          <span className="inline-flex items-center rounded-md border border-sky-400/25 bg-sky-500/[0.07] px-1.5 py-0.5 text-[10px] font-medium text-sky-100">
+                            {t.sourceMixCatalog(buildResult.catalogTracksInPlaylist)}
+                          </span>
+                        ) : null}
+                        {buildResult.localTracksInPlaylist > 0 ? (
+                          <span className="inline-flex items-center rounded-md border border-emerald-400/25 bg-emerald-500/[0.07] px-1.5 py-0.5 text-[10px] font-medium text-emerald-100">
+                            {t.sourceMixLocal(buildResult.localTracksInPlaylist)}
+                          </span>
+                        ) : null}
+                        {buildResult.wizardChips.map((chip, i) => (
+                          <span
+                            key={`built-from-wizard-${i}-${chip}`}
+                            className="inline-flex items-center rounded-md border border-amber-400/25 bg-amber-500/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-amber-100"
+                          >
+                            {chip}
+                          </span>
+                        ))}
+                      </div>
+                      {buildResult.localBridgeAvailable && buildResult.localCandidatesCount === 0 ? (
+                        <p className="mt-2 text-[10px] leading-snug text-amber-100/85">
+                          {t.noLocalMatchesFriendly}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    {(() => {
+                      const raw = (buildResult.shortfallExplanation ?? "").trim();
+                      // Pilot Blocker (Part 1) — short-accurate playlist message.
+                      // When the server returned a structured shortfallHint we render a
+                      // localized HE/EN sentence instead of the raw English shortfall.
+                      const hint = buildResult.shortfallHint;
+                      const localizedShortAccurate = (() => {
+                        if (!hint || hint.kind !== "short_accurate") return "";
+                        const n = String(hint.matchedCount);
+                        const intent = hint.intentLabel || buildResult.promptUsed || "";
+                        return he
+                          ? `נמצאו רק ${n} התאמות חזקות ל־${intent}, לכן יצרנו פלייליסט קצר ומדויק ולא הוספנו שירים לא קשורים.`
+                          : `Only ${n} strong ${intent} matches found — created a short, accurate playlist instead of padding with unrelated tracks.`;
+                      })();
+                      // Fallback: strip the noisy English local-zero phrase out of the raw line.
+                      const friendly = localizedShortAccurate
+                        ? ""
+                        : raw
+                            .replace(
+                              /PlaylistPro Local Catalog returned 0 candidates for this prompt\.?/gi,
+                              "",
+                            )
+                            .replace(/\s{2,}/g, " ")
+                            .trim();
+                      const isDev = process.env.NODE_ENV === "development";
+                      if (!localizedShortAccurate && !friendly && !isDev) return null;
+                      return (
+                        <div className="mt-2 space-y-1">
+                          {localizedShortAccurate ? (
+                            <p className="text-[10px] leading-snug text-amber-200/90">{localizedShortAccurate}</p>
+                          ) : friendly ? (
+                            <p className="text-[10px] leading-snug text-amber-200/90">{friendly}</p>
+                          ) : null}
+                          {isDev ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setShowBuildDiagnostics((v) => !v)}
+                                className="text-[10px] font-medium text-slate-500 underline-offset-2 hover:text-slate-300 hover:underline"
+                              >
+                                {showBuildDiagnostics ? t.diagnosticsToggleShown : t.diagnosticsToggleHidden}
+                              </button>
+                              {showBuildDiagnostics ? (
+                                <p className="rounded-md border border-slate-700/60 bg-slate-950/70 px-2 py-1 font-mono text-[10px] leading-snug text-slate-400">
+                                  {raw}
+                                </p>
+                              ) : null}
+                            </>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => playBuiltPlaylist()}
+                        className={`inline-flex min-h-[2.25rem] items-center justify-center rounded-xl px-3 text-[12px] font-semibold ${accentBtn}`}
+                      >
+                        {t.playNow}
+                      </button>
+                      <Link
+                        href="/sources"
+                        onClick={() => closeDrawer()}
+                        className="inline-flex min-h-[2.25rem] items-center justify-center rounded-xl border border-white/15 bg-white/[0.06] px-3 text-[12px] font-semibold text-slate-200 hover:bg-white/10"
+                      >
+                        {t.openInLibrary}
+                      </Link>
+                      <Link
+                        href={`/playlists/${encodeURIComponent(buildResult.playlistId)}/edit`}
+                        className="inline-flex min-h-[2.25rem] items-center justify-center rounded-xl border border-white/15 bg-white/[0.06] px-3 text-[12px] font-semibold text-slate-200 hover:bg-white/10"
+                      >
+                        {t.editPlaylist}
+                      </Link>
+                    </div>
+                    <p className="mt-2 text-[10px] text-slate-500">{t.buildSuccessFootnote}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBuildResult(null);
+                      setAssistantMode("free");
+                      setStep(0);
+                      setError(null);
+                    }}
+                    className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2.5 text-[12px] font-medium text-slate-300 hover:bg-white/[0.08]"
+                  >
+                    {t.buildAnotherPlaylist}
+                  </button>
+                </div>
               ) : !data ? (
                 <div className="flex flex-col gap-3">
                   <div className="max-w-[95%] self-start rounded-2xl rounded-bl-md border border-white/10 bg-white/[0.06] px-3.5 py-2.5 text-[13px] leading-snug text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                       {t.welcome}
                     </div>
 
-                  {(gymHighEnergy ? ([0, 1, 2, 3, 4] as const) : ([0, 1, 2, 3] as const)).map((i) => {
+                  <div className="flex gap-1 rounded-xl border border-white/10 bg-white/[0.04] p-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAssistantMode("free");
+                        setError(null);
+                      }}
+                      className={`flex-1 rounded-lg py-2 text-[11px] font-semibold ${
+                        assistantMode === "free"
+                          ? "bg-cyan-500/20 text-cyan-100"
+                          : "text-slate-500 hover:bg-white/[0.06]"
+                      }`}
+                    >
+                      {t.modeFree}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAssistantMode("guided");
+                        setError(null);
+                      }}
+                      className={`flex-1 rounded-lg py-2 text-[11px] font-semibold ${
+                        assistantMode === "guided"
+                          ? "bg-cyan-500/20 text-cyan-100"
+                          : "text-slate-500 hover:bg-white/[0.06]"
+                      }`}
+                    >
+                      {t.modeGuided}
+                    </button>
+                  </div>
+
+                  {assistantMode === "free" ? (
+                    <div className="flex flex-col gap-2">
+                      <p className="text-[11px] leading-snug text-slate-500">{t.freePromptIntro}</p>
+                      <textarea
+                        value={freeText}
+                        onChange={(e) => {
+                          setFreeText(e.target.value);
+                          setError(null);
+                        }}
+                        rows={4}
+                        placeholder={t.promptPlaceholder}
+                        className="min-h-[5.5rem] w-full resize-y rounded-xl border border-cyan-400/25 bg-white/[0.06] px-3 py-2.5 text-[14px] leading-snug text-slate-100 placeholder:text-slate-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] focus:border-cyan-400/45 focus:outline-none focus:ring-1 focus:ring-cyan-400/30"
+                        dir="auto"
+                        aria-label={t.promptPlaceholder}
+                      />
+                      {!canBuildPlaylist ? (
+                        <p className="text-[10px] text-slate-500">{t.promptHelper}</p>
+                      ) : null}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-600">
+                          {t.trySuggestions}
+                        </span>
+                        {PROMPT_CHIPS.map((chip) => (
+                          <button
+                            key={chip}
+                            type="button"
+                            onClick={() => {
+                              setFreeText(chip);
+                              setError(null);
+                            }}
+                            className="max-w-full truncate rounded-md border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[9px] font-medium text-slate-400 hover:border-cyan-400/35 hover:bg-cyan-500/10 hover:text-slate-200"
+                          >
+                            {chip}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {assistantMode === "guided"
+                    ? (gymHighEnergy ? ([0, 1, 2, 3, 4] as const) : ([0, 1, 2, 3] as const)).map((i) => {
                     const p = picks[i];
                     if (!p?.label || i >= Math.min(step, reviewStep)) return null;
                     const qBubble =
@@ -1221,9 +1763,10 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
                         </div>
                       </div>
                     );
-                  })}
+                  })
+                    : null}
 
-                  {step <= lastBubbleStep ? (
+                  {assistantMode === "guided" && step <= lastBubbleStep ? (
                     <>
                       <div className="max-w-[95%] self-start rounded-2xl rounded-bl-md border border-white/10 bg-white/[0.06] px-3.5 py-2.5 text-[13px] leading-snug text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                         {step === 3
@@ -1246,16 +1789,14 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
                         ))}
                       </div>
                     </>
-                  ) : (
+                  ) : assistantMode === "guided" ? (
                     <div className="max-w-[95%] self-start rounded-2xl rounded-bl-md border border-white/10 bg-white/[0.06] px-3.5 py-2.5 text-[13px] leading-snug text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
                         {t.addNoteQ}
                         <span className="mt-2 block text-[11px] text-slate-500">{t.addNoteHint}</span>
                       </div>
-                  )}
+                  ) : null}
 
-                  {error ? <p className="text-[12px] text-rose-400">{error}</p> : null}
-
-                  {step > 0 && !data ? (
+                  {assistantMode === "guided" && step > 0 && !data ? (
                     <button
                       type="button"
                       onClick={goBack}
@@ -1425,12 +1966,13 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
                   </button>
                 </>
               )}
+
             </div>
 
-            {tab === "chat" && (!data || !catalogSufficient) ? (
+            {tab === "chat" && !buildResult && (!data || !catalogSufficient) ? (
               <div className="shrink-0 border-t border-white/8 bg-[#0c0e14] px-3 py-2.5">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                  {loading && step >= reviewStep ? (
+                  {buildingPlaylist ? (
                     <div className="mb-2 flex items-start gap-2 rounded-xl border border-white/8 bg-white/[0.04] px-3 py-2.5">
                       <DjCreatorAiSparkle className="mt-0.5 h-4 w-4 shrink-0 animate-pulse" />
                       <div className="flex min-w-0 flex-1 items-stretch gap-2">
@@ -1439,24 +1981,83 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
                       </div>
                     </div>
                   ) : null}
-                  <textarea
-                    value={freeText}
-                    onChange={(e) => setFreeText(e.target.value)}
-                    rows={2}
-                    placeholder={t.composerPlaceholder}
-                    className="max-h-24 min-h-[2.5rem] w-full resize-y bg-transparent px-2 py-1 text-[13px] text-slate-100 placeholder:text-slate-600 focus:outline-none"
-                    dir="auto"
-                  />
+                  <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    {t.playlistLength}
+                  </p>
+                  <div className="mb-2 flex flex-wrap gap-1">
+                    {AI_PLAYLIST_COUNT_OPTIONS.map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setPlaylistCount(n)}
+                        className={`min-w-[2.75rem] rounded-lg border px-2 py-1.5 text-[11px] font-semibold ${
+                          playlistCount === n
+                            ? "border-cyan-400/45 bg-cyan-500/15 text-cyan-100"
+                            : "border-white/10 bg-white/[0.04] text-slate-400 hover:border-white/20"
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                  {assistantMode === "guided" ? (
+                    <textarea
+                      value={freeText}
+                      onChange={(e) => setFreeText(e.target.value)}
+                      rows={2}
+                      placeholder={t.composerPlaceholder}
+                      className="max-h-28 min-h-[2.5rem] w-full resize-y bg-transparent px-2 py-1 text-[13px] text-slate-100 placeholder:text-slate-600 focus:outline-none"
+                      dir="auto"
+                    />
+                  ) : null}
+                  {error ? (
+                    <p className="mt-2 rounded-lg border border-rose-500/30 bg-rose-950/40 px-2.5 py-2 text-[12px] text-rose-200" role="alert">
+                      {error}
+                    </p>
+                  ) : null}
+                  {buildLocalHint ? (
+                    <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-950/30 px-2.5 py-2 text-[11px] text-amber-100/90">
+                      {buildLocalHint}
+                    </p>
+                  ) : null}
+                  {process.env.NODE_ENV === "development" && buildLocalDebug && buildLocalDebug.length > 0 ? (
+                    <div className="mt-2 rounded-lg border border-cyan-500/20 bg-slate-950/80 px-2.5 py-2 text-[10px] text-slate-300">
+                      <p className="mb-1 font-semibold text-cyan-200/90">Local match debug (top results)</p>
+                      <ul className="max-h-40 space-y-1.5 overflow-y-auto">
+                        {buildLocalDebug.map((row, i) => (
+                          <li key={`${row.title}-${i}`} className="border-t border-slate-800/80 pt-1 first:border-0 first:pt-0">
+                            <p className="font-medium text-slate-100">
+                              {row.fullMatch ? "✓" : "○"} {row.title}{" "}
+                              <span className="text-slate-500">
+                                ({row.groupsMatched}/{row.groupsTotal} · {row.score})
+                              </span>
+                            </p>
+                            <p className="text-slate-500">{row.reason}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                   <div className="mt-2 flex gap-2">
                     <button
                       type="button"
-                      disabled={loading || step < reviewStep}
-                      onClick={() => void runSearch()}
-                      className={`flex-1 min-h-[2.5rem] px-3 text-[13px] disabled:opacity-40 ${accentBtn}`}
+                      disabled={buildDisabled}
+                      onClick={() => void runPlaylistBuild()}
+                      className={`flex-1 min-h-[2.5rem] px-3 text-[13px] ${
+                        buildDisabled && !buildingPlaylist
+                          ? "cursor-not-allowed opacity-40"
+                          : ""
+                      } ${accentBtn}`}
+                      aria-disabled={buildDisabled}
                     >
-                      {loading ? t.getPicksLoading : t.getPicks}
+                      {buildingPlaylist ? t.buildPlaylistLoading : t.buildPlaylist(playlistCount)}
                     </button>
                   </div>
+                  {assistantMode === "guided" && step < reviewStep ? (
+                    <p className="mt-1.5 px-1 text-[10px] text-slate-500">{t.needMore}</p>
+                  ) : assistantMode === "free" && !canBuildPlaylist ? (
+                    <p className="mt-1.5 px-1 text-[10px] text-slate-500">{t.promptHelper}</p>
+                  ) : null}
                 </div>
               </div>
             ) : null}

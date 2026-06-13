@@ -6,12 +6,15 @@ import { useParams } from "next/navigation";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
 import { MobileTypeBadge } from "@/components/mobile/mobile-type-badge";
+import { TrackMetaChips } from "@/components/track-meta-chips";
 import { useMobileSources } from "@/lib/mobile-sources-context";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { getPlaylistTracks } from "@/lib/playlist-types";
-import type { PlaylistTrack } from "@/lib/playlist-types";
+import type { Playlist, PlaylistTrack } from "@/lib/playlist-types";
 import type { UnifiedSource, SourceProviderType } from "@/lib/source-types";
+import { getCachedAiPlaylistTracksMeta } from "@/lib/ai-playlist-track-meta-cache";
+import type { SessionTrackMetaCache } from "@/lib/playlist-track-display-meta";
 
 /**
  * Mobile Library — playlist detail.
@@ -46,6 +49,10 @@ export default function MobilePlaylistDetailPage() {
   );
 
   const playlist = source?.playlist ?? null;
+  const trackMetaCache = useMemo<SessionTrackMetaCache>(
+    () => (playlist ? getCachedAiPlaylistTracksMeta(playlist.id) : {}),
+    [playlist],
+  );
   const tracks: PlaylistTrack[] = useMemo(
     () => (playlist ? getPlaylistTracks(playlist) : []),
     [playlist],
@@ -170,6 +177,8 @@ export default function MobilePlaylistDetailPage() {
                     key={track.id}
                     index={idx + 1}
                     track={track}
+                    parentPlaylist={playlist}
+                    trackMetaCache={trackMetaCache}
                     fallbackCover={playlist?.thumbnail || source.cover || null}
                     onPlay={() => handlePlayTrack(track)}
                     active={
@@ -190,12 +199,16 @@ export default function MobilePlaylistDetailPage() {
 function TrackRow({
   index,
   track,
+  parentPlaylist,
+  trackMetaCache,
   fallbackCover,
   onPlay,
   active,
 }: {
   index: number;
   track: PlaylistTrack;
+  parentPlaylist: Playlist | null;
+  trackMetaCache: SessionTrackMetaCache;
   fallbackCover: string | null;
   onPlay: () => void;
   active: boolean;
@@ -240,8 +253,16 @@ function TrackRow({
         >
           {track.name}
         </p>
-        <div className="mt-0.5 flex items-center gap-1.5">
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
           <MobileTypeBadge source={badgeSource} />
+          <TrackMetaChips
+            track={track}
+            parentPlaylist={parentPlaylist}
+            trackMetaCache={trackMetaCache}
+            density="compact"
+            showSource={false}
+            showUnclassifiedFallback={false}
+          />
         </div>
       </div>
       {/* Stadium cyan-neon pill — same language as the main player. */}

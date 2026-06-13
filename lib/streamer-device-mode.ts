@@ -36,9 +36,14 @@ export function streamerQueryParamsActive(search: string | URLSearchParams): boo
   return params.get("device") === "streamer" && params.get("mode") === "player";
 }
 
+export function isStreamerSetupRoute(pathname: string | null | undefined): boolean {
+  if (!pathname) return false;
+  return pathname === "/streamer/setup" || pathname.startsWith("/streamer/setup/");
+}
+
 /**
- * Active on the dedicated `/streamer` route only (never the mobile controller shell).
+ * Active on the dedicated `/streamer` player route only (not pairing setup).
  */
 export function isStreamerDeviceMode(pathname: string | null | undefined): boolean {
-  return isStreamerRoute(pathname);
+  return isStreamerRoute(pathname) && !isStreamerSetupRoute(pathname);
 }

@@ -40,6 +40,11 @@ import { ListContainerMetadataStrip } from "@/components/library-list-container-
 import { getLibraryListContainerMetaStripModel } from "@/lib/library-list-container-display";
 import { CompactSourceBadge, TrackMediaPlaceholder } from "@/components/track-source-visual";
 import { inferTrackSourceChip } from "@/lib/track-source-chip";
+import { TrackMetaChips } from "@/components/track-meta-chips";
+import { getMemoizedAiPlaylistTracksMeta } from "@/lib/ai-playlist-track-meta-cache";
+import { getMemoizedPlaylistTracks } from "@/lib/playlist-leaf-display-cache";
+import type { PlaylistTrack } from "@/lib/playlist-types";
+import { playlistLeafTrackIndexForQueueItem } from "@/lib/syncbiz-playlist-queue";
 import "@/components/player-surface/library-browse-card-surface.css";
 
 function EyeIcon({ className }: { className?: string }) {
@@ -456,6 +461,32 @@ export function SourceCard({
   const hasPersistedGenre = Boolean(typeof source.genre === "string" && source.genre.trim());
   const showMetaRow = libraryCardShouldShowMetaRow(source, durationSec, Boolean(cardCover));
 
+  /**
+   * Pilot fix: per-track genre/mood chips on the grid card.
+   *
+   * Grid leaves are synthesized by `expandPlaylistEntityToItems` with ids of
+   * the form `<playlistShellId>:track:r<index>`. The parent playlist is
+   * attached on `source.playlist`, so we can resolve the underlying
+   * `PlaylistTrack` and feed its genre/mood/subGenres to `TrackMetaChips`.
+   *
+   * Falls back to the parent playlist's vibe automatically when the leaf has
+   * no per-track taxonomy (the resolver handles the chain).
+   */
+  const leafTrack: PlaylistTrack | null = useMemo(() => {
+    if (!showLeafLibraryChips) return null;
+    if (!source.playlist) return null;
+    if (!source.id || !source.id.includes(":track:")) return null;
+    const tracks = getMemoizedPlaylistTracks(source.playlist);
+    if (tracks.length === 0) return null;
+    const idx = playlistLeafTrackIndexForQueueItem(source);
+    return tracks[idx] ?? null;
+  }, [showLeafLibraryChips, source.id, source.playlist]);
+  const leafPlaylistId = source.playlist?.id;
+  const leafTrackMetaCache = useMemo(
+    () => (leafPlaylistId ? getMemoizedAiPlaylistTracksMeta(leafPlaylistId) : {}),
+    [leafPlaylistId],
+  );
+
   function handleCardClickForOpen() {
     if (!onPlaylistEntityOpen) return;
     if (openClickTimerRef.current) clearTimeout(openClickTimerRef.current);
@@ -663,10 +694,26 @@ export function SourceCard({
 
           const chipRow = showLeafLibraryChips ? leafMetaStrip : listContainerStrip;
 
-          if (!genreWithChips && !legacyMeta && !chipRow) return undefined;
+          // Per-track genre/mood chips (Pilot). The provenance pill already
+          // sits on the cover (`CompactSourceBadge`), so we don't repeat the
+          // source label here — only the AI-derived genre/mood/subGenres.
+          // Hidden when nothing is known (no "Unclassified" noise on cards).
+          const trackChipsNode = leafTrack ? (
+            <TrackMetaChips
+              track={leafTrack}
+              parentPlaylist={source.playlist}
+              trackMetaCache={leafTrackMetaCache}
+              density="compact"
+              showSource={false}
+              showUnclassifiedFallback={false}
+            />
+          ) : null;
+
+          if (!genreWithChips && !legacyMeta && !chipRow && !trackChipsNode) return undefined;
           return (
             <div className="flex flex-col gap-1.5">
               {genreWithChips}
+              {trackChipsNode}
               {legacyMeta}
               {chipRow}
             </div>

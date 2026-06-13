@@ -11,7 +11,7 @@
   "private": true,
   "main": "dist/main/index.js",
   "scripts": {
-    "build": "tsc && node scripts/copy-assets.cjs && node scripts/bundle-desktop.cjs",
+    "build": "node scripts/sync-dj-intent-dictionary.cjs && tsc && node scripts/copy-assets.cjs && node scripts/bundle-desktop.cjs",
     "start": "npm run build && electron .",
     "start:web-bundle": "npm run build && node scripts/run-electron-with-staged-web.cjs",
     "verify:player-chrome": "electron scripts/verify-player-chrome.cjs",
@@ -24,6 +24,7 @@
     "dist:publish": "npm run build && electron-builder --publish always"
   },
   "dependencies": {
+    "xlsx": "^0.18.5",
     "music-metadata": "^11.12.3",
     "react": "18.3.1",
     "react-dom": "18.3.1",

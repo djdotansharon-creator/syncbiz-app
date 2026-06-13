@@ -155,7 +155,14 @@ export async function POST(req: NextRequest) {
       ...(playlistOwnershipScope ? { playlistOwnershipScope } : {}),
     });
     const uid = await getUserIdFromSession();
-    if (uid) void notifyLibraryUpdated(uid, { branchId, entityType: "playlist", action: "created" });
+    if (uid) {
+      void notifyLibraryUpdated(uid, {
+        branchId,
+        entityType: "playlist",
+        action: "created",
+        entityId: playlist.id,
+      });
+    }
     return NextResponse.json(playlist, { status: 201 });
   } catch (e) {
     if (e instanceof EntitlementLimitError) {

@@ -868,11 +868,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (isStreamerPath) {
     return (
       <>
-        <div className="min-h-screen bg-slate-950 text-slate-50">{children}</div>
+        <div className="min-h-screen bg-slate-950 text-slate-50 pb-36">{children}</div>
         <div
-          className="fixed bottom-0 right-0 z-0 opacity-0 pointer-events-none"
-          aria-hidden
-          style={{ width: 320, height: 180 }}
+          className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-800/90 bg-slate-950/98 shadow-[0_-8px_32px_rgba(0,0,0,0.45)]"
+          aria-label="Branch audio output"
         >
           <AudioPlayer />
         </div>

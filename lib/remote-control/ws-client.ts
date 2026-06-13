@@ -28,6 +28,7 @@ export function useRemoteControlWs(
   role: "device" | "controller",
   deviceId: string | null,
   onCommand?: (cmd: {
+    commandId?: string;
     command: string;
     payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number };
   }) => void,
@@ -44,6 +45,16 @@ export function useRemoteControlWs(
     isDesktopApp?: boolean;
     /** Dedicated GOtv / Android TV branch player (`/streamer`). Overrides tablet/mobile UA so this device can own MASTER. */
     isStreamerDevice?: boolean;
+    /** Branch id from streamer pairing (defaults to `default`). */
+    branchId?: string;
+    onCommandAck?: (ack: { commandId: string; masterDeviceId?: string | null; receivedAt: number }) => void;
+    onCommandResult?: (result: {
+      commandId: string;
+      ok: boolean;
+      error?: string;
+      executedAt?: number;
+      failedAt?: number;
+    }) => void;
   }
 ) {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
@@ -60,6 +71,8 @@ export function useRemoteControlWs(
   const onSecondaryDesktopRef = useRef(options?.onSecondaryDesktop);
   const onGuestRecommendationRef = useRef(options?.onGuestRecommendation);
   const onAuthErrorRef = useRef(options?.onAuthError);
+  const onCommandAckRef = useRef(options?.onCommandAck);
+  const onCommandResultRef = useRef(options?.onCommandResult);
   const deviceModeRef = useRef<DeviceMode>("CONTROL");
   statusRef.current = status;
   onCommandRef.current = onCommand;
@@ -68,6 +81,8 @@ export function useRemoteControlWs(
   onSecondaryDesktopRef.current = options?.onSecondaryDesktop;
   onGuestRecommendationRef.current = options?.onGuestRecommendation;
   onAuthErrorRef.current = options?.onAuthError;
+  onCommandAckRef.current = options?.onCommandAck;
+  onCommandResultRef.current = options?.onCommandResult;
   deviceModeRef.current = deviceMode;
 
   const tryReconnect = () => {
@@ -119,6 +134,7 @@ export function useRemoteControlWs(
         : options?.isStreamerDevice
           ? registrationIntentBranchStreamerDevice()
           : registrationIntentBranchDevice(isPhone);
+      const branchId = options?.branchId?.trim() || "default";
       const msg: ClientMessage =
         role === "device"
           ? {
@@ -127,14 +143,14 @@ export function useRemoteControlWs(
               authToken,
               deviceId: deviceId ?? undefined,
               isMobile,
-              branchId: "default",
+              branchId,
               registrationIntent,
             }
           : {
               type: "REGISTER",
               role: "controller",
               authToken,
-              branchId: "default",
+              branchId,
               registrationIntent: registrationIntentBranchController(isPhone),
             };
       ws.send(JSON.stringify(msg));
@@ -158,8 +174,26 @@ export function useRemoteControlWs(
           }
         } else if (data.type === "COMMAND" && onCommandRef.current) {
           if (deviceModeRef.current === "MASTER") {
-            onCommandRef.current({ command: data.command, payload: data.payload });
+            onCommandRef.current({
+              commandId: "commandId" in data ? data.commandId : undefined,
+              command: data.command,
+              payload: data.payload,
+            });
           }
+        } else if (data.type === "COMMAND_ACK") {
+          onCommandAckRef.current?.({
+            commandId: data.commandId,
+            masterDeviceId: data.masterDeviceId,
+            receivedAt: data.receivedAt,
+          });
+        } else if (data.type === "COMMAND_RESULT") {
+          onCommandResultRef.current?.({
+            commandId: data.commandId,
+            ok: data.ok,
+            error: data.error,
+            executedAt: data.executedAt,
+            failedAt: data.failedAt,
+          });
         } else if (data.type === "STATE_UPDATE" && onStateUpdateRef.current) {
           onStateUpdateRef.current(data.state);
         } else if (data.type === "REGISTERED" && "sessionCode" in data) {
@@ -270,11 +304,35 @@ export function useRemoteControlWs(
   const sendCommand = (
     targetDeviceId: string,
     command: RemoteCommand,
-    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number }
-  ) => {
+    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number },
+    commandId?: string
+  ): string | null => {
     const ws = wsRef.current;
-    if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify({ type: "COMMAND", targetDeviceId, command, payload } as ClientMessage));
+    if (!ws || ws.readyState !== 1) return null;
+    const id = commandId?.trim() || `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    ws.send(
+      JSON.stringify({ type: "COMMAND", commandId: id, targetDeviceId, command, payload } as ClientMessage),
+    );
+    if (process.env.NODE_ENV === "development") {
+      console.info("[SyncBiz:remote-cmd] sent", { commandId: id, command, targetDeviceId });
+    }
+    return id;
+  };
+
+  const sendCommandResult = (commandId: string, ok: boolean, error?: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== 1 || !commandId.trim()) return;
+    ws.send(
+      JSON.stringify({
+        type: "COMMAND_RESULT",
+        commandId: commandId.trim(),
+        ok,
+        error: error?.trim() || undefined,
+        executedAt: Date.now(),
+      } as ClientMessage),
+    );
+    if (process.env.NODE_ENV === "development") {
+      console.info("[SyncBiz:remote-cmd] result", { commandId, ok, error });
     }
   };
 
@@ -302,6 +360,7 @@ export function useRemoteControlWs(
     masterDeviceId,
     hasExistingMaster,
     sendCommand,
+    sendCommandResult,
     sessionCode,
     sendApproveGuestRecommend,
     sendRejectGuestRecommend,

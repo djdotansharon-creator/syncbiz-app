@@ -241,6 +241,8 @@ export async function runSmartCatalogSearch(args: {
   avoidStyleSlugs?: string[];
   /** DJ Creator Stage 6 matrix — energy gates + forbid untagged backfill. */
   djContext?: DjSmartSearchDjContext | null;
+  /** When true, never return untagged rows if any tag-overlap rows exist. */
+  requireTagOverlap?: boolean;
 }): Promise<SmartCatalogSearchResponse> {
   const parsed = parseSmartCatalogQuery(args.query);
   const coarseDaypart: DaypartSlug =
@@ -403,8 +405,7 @@ export async function runSmartCatalogSearch(args: {
     const displayScore = Math.round((baseFit + cB + pB) * 10000) / 10000;
 
     const rowSlugSet = slugSetById.get(row.catalogItemId);
-    const taxonomySlugsSorted =
-      djAvoidStyleFilterApplied && rowSlugSet ? [...rowSlugSet].sort() : undefined;
+    const taxonomySlugsSorted = rowSlugSet ? [...rowSlugSet].sort() : [];
 
     return {
       ...row,
@@ -419,7 +420,7 @@ export async function runSmartCatalogSearch(args: {
       baseFitScore: baseFit,
       displayScore,
       recommendedBecause: buildRecommendedBecause(row, parsed, baseFit, cB, pB),
-      ...(taxonomySlugsSorted ? { taxonomySlugs: taxonomySlugsSorted } : {}),
+      taxonomySlugs: taxonomySlugsSorted,
     };
   });
 
@@ -429,7 +430,8 @@ export async function runSmartCatalogSearch(args: {
   });
 
   const withOverlap = enriched.filter((r) => r.matchedTags.length > 0);
-  const preferOverlap = djCtx?.strictTagOverlapOnly
+  const strictOverlap = Boolean(args.requireTagOverlap || djCtx?.strictTagOverlapOnly);
+  const preferOverlap = strictOverlap
     ? withOverlap
     : withOverlap.length > 0
       ? withOverlap

@@ -10,8 +10,9 @@
  * here; the host decides what happens after save / cancel.
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useLocale } from "@/lib/locale-context";
 import { playlistMetadataRegistry } from "@/lib/playlist-metadata-registry";
 import {
   effectivePlaylistUseCases,
@@ -21,6 +22,8 @@ import {
 } from "@/lib/playlist-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { getPlaylistsLocal } from "@/lib/playlists-local-store";
+import { TrackMetaChips } from "@/components/track-meta-chips";
+import { getCachedAiPlaylistTracksMeta } from "@/lib/ai-playlist-track-meta-cache";
 import {
   PLAYLIST_PUBLICATION_SCOPE_UI,
   PLAYLIST_PUBLICATION_SCOPES,
@@ -86,6 +89,8 @@ type Props = {
 };
 
 export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = "/playlists", hideTopBackLink = false }: Props) {
+  const { locale } = useLocale();
+  const he = locale === "he";
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -106,6 +111,18 @@ export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = 
   const [energyLevel, setEnergyLevel] = useState<string>("");
   const [publicationScope, setPublicationScope] = useState<PlaylistPublicationScope>("PRIVATE");
   const [platformSuperAdmin, setPlatformSuperAdmin] = useState(false);
+
+  /**
+   * Per-track display chips come from three places in priority order:
+   *   1. fields baked into each track by the AI builder
+   *   2. this session cache (populated by `requestAiPlaylistBuild`)
+   *   3. the parent playlist's taxonomy
+   * The resolver in `lib/playlist-track-display-meta.ts` does the merge.
+   */
+  const trackMetaCache = useMemo(
+    () => (playlist ? getCachedAiPlaylistTracksMeta(playlist.id) : {}),
+    [playlist],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -270,6 +287,17 @@ export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = 
     setOrder(newOrder);
   }
 
+  /**
+   * Drop a track from the editor draft. Removes the id from `order` and the
+   * matching entry from `tracks`. Server PUT later persists both arrays so the
+   * deletion sticks. Mixed local + YouTube playlists are supported: we don't
+   * surface the leaf URL/path here, only `track.name` + `track.type`.
+   */
+  function removeTrack(trackId: string) {
+    setOrder((prev) => prev.filter((id) => id !== trackId));
+    setTracks((prev) => prev.filter((t) => t.id !== trackId));
+  }
+
   if (loading) {
     return (
       <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-6 sm:p-8 text-center text-slate-500 min-h-[120px] flex items-center justify-center">
@@ -308,7 +336,17 @@ export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = 
               ← {backHref === "/mobile" ? "Player" : "Playlists"}
             </Link>
           ) : null}
-          <h1 className="mt-2 text-lg sm:text-xl font-semibold text-slate-50">Edit playlist</h1>
+          <h1 className="mt-2 text-lg sm:text-xl font-semibold text-slate-50">
+            {he ? "פרטי פלייליסט" : "Playlist details"}
+          </h1>
+          <p className="mt-1 inline-flex items-start gap-1.5 rounded-md bg-amber-500/[0.06] px-2 py-1 text-[11px] leading-snug text-amber-200/85 ring-1 ring-amber-500/20">
+            <span aria-hidden>•</span>
+            <span>
+              {he
+                ? "השינויים כאן חלים על הפלייליסט הזה בלבד — הם לא משנים את ספריית הקטלוג הגלובלית של SyncBiz."
+                : "Edits here apply to this playlist only — they do not change the global SyncBiz catalog."}
+            </span>
+          </p>
         </div>
         {titleAddon ? <div className="shrink-0">{titleAddon}</div> : null}
       </div>
@@ -328,9 +366,15 @@ export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = 
           <p className="truncate text-[15px] font-semibold tracking-tight text-slate-100 sm:text-base" title={name}>
             {name.trim() || "Untitled playlist"}
           </p>
-          <p className="truncate font-mono text-[11px] leading-snug text-slate-500" title={url}>
-            {url.trim() || "No URL yet"}
-          </p>
+          {tracks.length > 1 ? (
+            <p className="truncate text-[11px] leading-snug text-slate-500">
+              {tracks.length} tracks
+            </p>
+          ) : (
+            <p className="truncate font-mono text-[11px] leading-snug text-slate-500" title={url}>
+              {url.trim() || "No URL yet"}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2 pt-0.5">
             <span className="inline-flex w-fit items-center rounded-md border border-emerald-500/25 bg-emerald-950/35 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-300/95 shadow-[0_0_12px_rgba(16,185,129,0.12)]">
               {playlistTypeLabel(type)}
@@ -350,15 +394,25 @@ export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = 
             className="mt-1 w-full min-h-[44px] rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 sm:py-2 text-base sm:text-sm text-slate-50 touch-manipulation"
           />
         </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-400">URL</label>
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            required
-            className="mt-1 w-full min-h-[44px] rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 sm:py-2 text-base sm:text-sm text-slate-50 touch-manipulation"
-          />
-        </div>
+        {tracks.length > 1 ? (
+          <div>
+            <label className="block text-xs font-medium text-slate-400">Tracks</label>
+            <p className="mt-1 text-[11px] leading-snug text-slate-500">
+              Multi-track playlist — manage the track order and remove tracks below. The
+              underlying track sources are not shown here to keep this view clean.
+            </p>
+          </div>
+        ) : (
+          <div>
+            <label className="block text-xs font-medium text-slate-400">URL</label>
+            <input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              required
+              className="mt-1 w-full min-h-[44px] rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 sm:py-2 text-base sm:text-sm text-slate-50 touch-manipulation"
+            />
+          </div>
+        )}
         <div>
           <label className="block text-xs font-medium text-slate-400">Genre</label>
           <input
@@ -572,8 +626,35 @@ export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = 
                         </svg>
                       </button>
                     </div>
-                    <span className="flex-1 min-w-0 truncate text-sm text-slate-200">{track.name}</span>
-                    <span className="shrink-0 text-xs text-slate-500">{track.type}</span>
+                    <div className="flex-1 min-w-0">
+                      <span className="block truncate text-sm text-slate-200">{track.name}</span>
+                      <TrackMetaChips
+                        track={track}
+                        parentPlaylist={playlist}
+                        trackMetaCache={trackMetaCache}
+                        density="compact"
+                        showSource
+                        className="mt-1"
+                      />
+                    </div>
+                    <span className="shrink-0 rounded-md border border-slate-700/70 bg-slate-900/60 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                      {playlistTypeLabel(track.type)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeTrack(tid)}
+                      aria-label={`Remove ${track.name}`}
+                      title="Remove track"
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-rose-700/40 bg-rose-950/30 text-rose-300 hover:border-rose-500/60 hover:bg-rose-900/40 hover:text-rose-100 touch-manipulation"
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        <path d="M10 11v6" />
+                        <path d="M14 11v6" />
+                      </svg>
+                    </button>
                   </div>
                 );
               })}

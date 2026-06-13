@@ -103,7 +103,7 @@ export function PlaylistAiShellMenu({
               refineDlgRef.current?.showModal();
             }}
           >
-            Improve with AI
+            Improve playlist with AI
           </button>
           <button
             type="button"
@@ -111,7 +111,7 @@ export function PlaylistAiShellMenu({
             className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
             onClick={() => void run("expand")}
           >
-            {busy === "expand" ? "…" : "Expand to 50 tracks"}
+            {busy === "expand" ? "…" : "Expand playlist…"}
           </button>
         </div>
       </details>
