@@ -1,8 +1,13 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import {
+  clearRememberedLogin,
+  loadRememberedLogin,
+  saveRememberedLogin,
+} from "@/lib/login-remember-preferences";
 
 function LoginForm() {
   const router = useRouter();
@@ -10,9 +15,18 @@ function LoginForm() {
   const from = searchParams.get("from") ?? "/sources";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const saved = loadRememberedLogin();
+    if (!saved) return;
+    setEmail(saved.email);
+    setPassword(saved.password);
+    setRememberMe(true);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -22,12 +36,17 @@ function LoginForm() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, rememberMe }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data?.error ?? "Login failed");
         return;
+      }
+      if (rememberMe) {
+        saveRememberedLogin(email, password);
+      } else {
+        clearRememberedLogin();
       }
       router.push(from);
       router.refresh();
@@ -65,6 +84,8 @@ function LoginForm() {
               <input
                 id="email"
                 type="email"
+                name="email"
+                autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@company.com"
@@ -83,6 +104,8 @@ function LoginForm() {
                 <input
                   id="password"
                   type={showPassword ? "text" : "password"}
+                  name="password"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
@@ -117,6 +140,8 @@ function LoginForm() {
               <label className="flex items-center gap-2 text-slate-400">
                 <input
                   type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
                   className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-900 text-sky-500 focus:ring-sky-500/30"
                 />
                 Remember me

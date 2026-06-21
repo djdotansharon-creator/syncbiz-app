@@ -5,12 +5,17 @@ import { emitEvent, EVENT_TYPES } from "@/lib/analytics-boundary";
 import { ACTIVE_WORKSPACE_COOKIE_NAME } from "@/lib/active-workspace-constants";
 
 const COOKIE_NAME = "syncbiz-session";
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+const REMEMBER_ME_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
+const SESSION_MAX_AGE = 60 * 60 * 24; // 1 day when "Remember me" is off
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { email, password } = body as { email?: string; password?: string };
+    const { email, password, rememberMe } = body as {
+      email?: string;
+      password?: string;
+      rememberMe?: boolean;
+    };
 
     if (!email || !password) {
       return NextResponse.json(
@@ -37,7 +42,7 @@ export async function POST(req: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: COOKIE_MAX_AGE,
+      maxAge: rememberMe === true ? REMEMBER_ME_MAX_AGE : SESSION_MAX_AGE,
       path: "/",
     });
     // Prevent a stale active-workspace UUID from applying to this account/session.

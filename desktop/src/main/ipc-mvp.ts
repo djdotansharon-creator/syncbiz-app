@@ -29,6 +29,7 @@ import type {
   RefreshLocalMetadataBankResult,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
+import { applyAutoStart, readAutoStartState } from "./login-item-settings";
 import {
   addAdditionalMusicFolder,
   listMusicLibrarySources,
@@ -310,7 +311,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   ipcMain.handle(MVP_IPC.SET_AUTOSTART, (_e, enabled: unknown): AutoStartState => {
     const want = enabled === true;
     try {
-      app.setLoginItemSettings({ openAtLogin: want });
+      applyAutoStart(want);
     } catch (err) {
       console.error("[SyncBiz desktop] setLoginItemSettings failed:", err);
     }
@@ -645,23 +646,6 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   );
 }
 
-function readAutoStartState(): AutoStartState {
-  // Linux: openAtLogin is supported on AppImage and a few configurations, but not
-  // universally. Electron returns `false` for `executableWillLaunchAtLogin` on
-  // unsupported setups; we surface a `supported` flag so the UI can disable the
-  // toggle rather than silently no-op.
-  const supported = process.platform === "win32" || process.platform === "darwin";
-  try {
-    const settings = app.getLoginItemSettings();
-    return {
-      enabled: Boolean(settings.openAtLogin),
-      supported,
-    };
-  } catch (err) {
-    console.error("[SyncBiz desktop] getLoginItemSettings failed:", err);
-    return { enabled: false, supported };
-  }
-}
 
 function fallbackSnapshot(): MvpStatusSnapshot {
   const c = cachedConfig ?? loadRuntimeConfig(getUserData());

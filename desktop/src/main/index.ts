@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { app, BrowserWindow } from "electron";
 
 import { registerMvpIpc } from "./ipc-mvp";
+import { repairAutoStartLoginItemIfEnabled } from "./login-item-settings";
 import { startEmbeddedNextServer, type EmbeddedNextHandle } from "./embedded-next-server";
 import { flushLocalCollectionTagSnapshotWrites } from "./local-collection-snapshot";
 import { PlaybackOrchestrator } from "./playback-orchestrator";
@@ -12,6 +13,11 @@ let mainWindow: BrowserWindow | null = null;
 let embeddedNext: EmbeddedNextHandle | null = null;
 let orchestrator: PlaybackOrchestrator | undefined;
 let desktopQuitAfterTagSnapshotFlush = false;
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
 
 function getMainWindow(): BrowserWindow | null {
   return mainWindow;
@@ -153,64 +159,75 @@ async function openMainWindow(): Promise<void> {
   mainWindow = win;
 }
 
-app.whenReady().then(async () => {
-  // Runtime binaries FIRST. `ensureRuntimeBinaries` either returns instantly
-  // (cached) or opens its own first-run splash and downloads mpv + yt-dlp
-  // into userData/bin/. We block launch on this because the orchestrator
-  // can't do anything useful without mpv — an unresolvable failure surfaces
-  // via its own retry/quit dialog.
-  let binaries: { mpvBin: string; ytDlpBin: string | null };
-  try {
-    binaries = await ensureRuntimeBinaries();
-  } catch (err) {
-    console.error("[SyncBiz desktop] runtime-binaries setup failed:", err);
-    shutdownEmbeddedNext();
-    app.quit();
-    return;
-  }
-
-  orchestrator = new PlaybackOrchestrator();
-  orchestrator.start(binaries);
-  registerMvpIpc(getMainWindow, orchestrator);
-
-  void openMainWindow().catch((err) => {
-    console.error("[SyncBiz desktop] failed to open main window:", err);
-    shutdownEmbeddedNext();
-    app.quit();
+if (gotSingleInstanceLock) {
+  app.on("second-instance", () => {
+    const win = mainWindow;
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    if (!win.isVisible()) win.show();
+    win.focus();
   });
 
-  // Fire-and-forget: once the app is running, start watching for yt-dlp
-  // updates in the background. Never blocks, never crashes.
-  scheduleBackgroundUpdateCheck();
+  app.whenReady().then(async () => {
+    // Runtime binaries FIRST. `ensureRuntimeBinaries` either returns instantly
+    // (cached) or opens its own first-run splash and downloads mpv + yt-dlp
+    // into userData/bin/. We block launch on this because the orchestrator
+    // can't do anything useful without mpv — an unresolvable failure surfaces
+    // via its own retry/quit dialog.
+    let binaries: { mpvBin: string; ytDlpBin: string | null };
+    try {
+      binaries = await ensureRuntimeBinaries();
+    } catch (err) {
+      console.error("[SyncBiz desktop] runtime-binaries setup failed:", err);
+      shutdownEmbeddedNext();
+      app.quit();
+      return;
+    }
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      void openMainWindow().catch((err) => {
-        console.error("[SyncBiz desktop] failed to reopen window:", err);
-      });
+    orchestrator = new PlaybackOrchestrator();
+    orchestrator.start(binaries);
+    registerMvpIpc(getMainWindow, orchestrator);
+    repairAutoStartLoginItemIfEnabled();
+
+    void openMainWindow().catch((err) => {
+      console.error("[SyncBiz desktop] failed to open main window:", err);
+      shutdownEmbeddedNext();
+      app.quit();
+    });
+
+    // Fire-and-forget: once the app is running, start watching for yt-dlp
+    // updates in the background. Never blocks, never crashes.
+    scheduleBackgroundUpdateCheck();
+
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        void openMainWindow().catch((err) => {
+          console.error("[SyncBiz desktop] failed to reopen window:", err);
+        });
+      }
+    });
+  });
+
+  app.on("before-quit", (e) => {
+    if (!desktopQuitAfterTagSnapshotFlush) {
+      e.preventDefault();
+      desktopQuitAfterTagSnapshotFlush = true;
+      void flushLocalCollectionTagSnapshotWrites()
+        .catch(() => undefined)
+        .finally(() => {
+          orchestrator?.kill();
+          shutdownEmbeddedNext();
+          app.quit();
+        });
+      return;
+    }
+    orchestrator?.kill();
+    shutdownEmbeddedNext();
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
     }
   });
-});
-
-app.on("before-quit", (e) => {
-  if (!desktopQuitAfterTagSnapshotFlush) {
-    e.preventDefault();
-    desktopQuitAfterTagSnapshotFlush = true;
-    void flushLocalCollectionTagSnapshotWrites()
-      .catch(() => undefined)
-      .finally(() => {
-        orchestrator?.kill();
-        shutdownEmbeddedNext();
-        app.quit();
-      });
-    return;
-  }
-  orchestrator?.kill();
-  shutdownEmbeddedNext();
-});
-
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
+}
