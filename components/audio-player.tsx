@@ -2266,6 +2266,7 @@ export function AudioPlayer() {
     crossfadeAbortRef.current = false;
     crossfadeInMixWindowRef.current = false;
     crossfadeDurNonFiniteLoggedRef.current = false;
+    mpvDesktopMixStartedRef.current = false;
     crossfadeCleanupRef.current?.();
     crossfadeCleanupRef.current = null;
     ytCrossfadeStartedRef.current = false;
@@ -2836,6 +2837,34 @@ export function AudioPlayer() {
     return onMixDurationChanged(sync);
   }, []);
 
+  // Desktop MPV: advance at mix point (duration − mixSec) so crossfade overlaps like browser A/B decks.
+  useEffect(() => {
+    if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
+    if (!desktopMpvSnap || status !== "playing" || !getAutoMix()) return;
+    if (!currentPlayUrl || isHlsUrl(currentPlayUrl)) return;
+
+    const pos = desktopMpvSnap.position;
+    const dur = desktopMpvSnap.duration;
+    if (!Number.isFinite(pos) || !Number.isFinite(dur) || dur <= 0) return;
+
+    const nextUrl = getNextStreamUrl();
+    if (!nextUrl || isHlsUrl(nextUrl)) return;
+
+    const mixSec = getMixDuration();
+    const mixAt = mixPointThresholdSec(dur, mixSec);
+    if (pos < mixAt || mpvDesktopMixStartedRef.current) return;
+
+    mpvDesktopMixStartedRef.current = true;
+    p0XfadeDebug("desktop_mpv_natural_mix_advance", {
+      pos,
+      dur,
+      mixSec,
+      mixAt,
+      nextUrl: nextUrl.slice(0, 80),
+    });
+    nextRef.current({ skipPlay: true, auditTransportCase: "ended_auto" });
+  }, [desktopMpvSnap, status, currentPlayUrl, getNextStreamUrl]);
+
   const mpvLastUrlRef = useRef<string | null>(null);
   // Tracks Ch-A MPV status from onStatus broadcasts (no re-render — refs only).
   const mpvChAStatusRef = useRef<string>("idle");
@@ -2852,6 +2881,7 @@ export function AudioPlayer() {
    */
   const mpvPendingUrlRef = useRef<string | null>(null);
   const mpvCoalesceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mpvDesktopMixStartedRef = useRef(false);
   const MPV_LOADFILE_COALESCE_MS = 250;
 
   // Subscribe to desktop status once. When Ch-A unexpectedly goes idle while
@@ -3539,7 +3569,7 @@ export function AudioPlayer() {
     <header
       className={
         isSourcesLibraryDeck
-          ? "audio-player-library-deck sticky top-0 z-50 px-3 py-3 backdrop-blur-md overflow-hidden sm:px-4"
+          ? "audio-player-library-deck sticky top-0 z-50 bg-slate-950/95 px-3 py-3 backdrop-blur-md overflow-hidden sm:px-4"
           : "sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/98 px-3 py-3 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.08)] backdrop-blur-md overflow-hidden sm:px-4"
       }
       role="region"
@@ -3750,16 +3780,17 @@ export function AudioPlayer() {
                         </div>
                         <div className="flex flex-col items-center gap-[15px]">
                           <span
-                            className={`inline-flex w-full items-center justify-center gap-0.5 rounded-full px-1 py-px text-[7px] font-semibold uppercase tracking-wider ${
+                            className={`inline-flex items-center justify-center rounded-full p-1.5 ${
                               displayStatus === "playing"
-                                ? "bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/40"
+                                ? "bg-emerald-500/15 ring-1 ring-emerald-500/40"
                                 : displayStatus === "paused"
-                                  ? "bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/40"
-                                  : "bg-slate-800/80 text-slate-500 ring-1 ring-slate-600/30"
+                                  ? "bg-amber-500/15 ring-1 ring-amber-500/40"
+                                  : "bg-slate-800/80 ring-1 ring-slate-600/30"
                             }`}
+                            title={displayStatusLabel}
+                            aria-label={displayStatusLabel}
                           >
-                            <span className={`h-1 w-1 shrink-0 rounded-full ${displayStatus === "playing" ? "bg-emerald-400 playing-led-pulse" : displayStatus === "paused" ? "bg-amber-400" : "bg-slate-500"}`} />
-                            {displayStatusLabel}
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${displayStatus === "playing" ? "bg-emerald-400 playing-led-pulse" : displayStatus === "paused" ? "bg-amber-400" : "bg-slate-500"}`} aria-hidden />
                           </span>
                           <span
                             className={`inline-flex w-full items-center justify-center gap-0.5 rounded-full px-1 py-px text-[7px] font-semibold uppercase tracking-wider ring-1 ${
@@ -3784,17 +3815,10 @@ export function AudioPlayer() {
                           isSourcesLibraryDeck ? "library-player-track-inner rounded-xl" : "rounded border border-slate-700/50 bg-slate-800/30"
                         }`}
                       >
-                        {/* Row 1: PLAY NOW : current track */}
+                        {/* Row 1: current track title */}
                         <div ref={titleContainerRef} className="relative flex min-w-0 flex-1 items-center overflow-hidden gap-1.5">
                           <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
                             {displayTitle as string}
-                          </span>
-                          <span
-                            className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider sm:text-xs ${
-                              isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"
-                            }`}
-                          >
-                            {t.playNowColon}
                           </span>
                           {titleOverflows ? (
                             <div className="min-w-0 flex-1 overflow-hidden">
@@ -3822,15 +3846,14 @@ export function AudioPlayer() {
                             </p>
                           )}
                         </div>
-                        {/* Row 2: NEXT TRACK : next track */}
-                        <div className="flex min-w-0 items-center gap-1.5">
-                          <span
-                            className={`shrink-0 text-[10px] font-semibold uppercase tracking-wider sm:text-xs ${
-                              isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"
-                            }`}
+                        {/* Row 2: next track */}
+                        <div className="flex min-w-0 items-center gap-1.5" title={t.nextTrackColon}>
+                          <svg
+                            className={`h-3 w-3 shrink-0 ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"}`}
+                            viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden
                           >
-                            {t.nextTrackColon}
-                          </span>
+                            <path d="M8 3v10M4 9l4 4 4-4" />
+                          </svg>
                           <span
                             className={`min-w-0 flex-1 truncate text-xs font-medium ${
                               isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-400"
@@ -3882,7 +3905,7 @@ export function AudioPlayer() {
                               displayAutoMix ? "bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" : "bg-slate-500/50"
                             }`} aria-hidden />
                             <span className={`text-[9px] font-semibold uppercase tracking-wider ${displayAutoMix ? "text-cyan-400" : "text-slate-500"}`}>
-                              {(t?.autoMix ?? "AUTOMIX").toUpperCase()}
+                              MIX
                             </span>
                           </div>
                           <div className={`inline-flex min-w-[28px] items-center justify-center rounded border px-1 py-0.5 tabular-nums ${
@@ -3899,7 +3922,7 @@ export function AudioPlayer() {
                             displayShuffle ? "bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" : "bg-slate-500/50"
                           }`} aria-hidden />
                           <span className={`text-[9px] font-semibold uppercase tracking-wider ${displayShuffle ? "text-cyan-400" : "text-slate-500"}`}>
-                            {(t?.random ?? "RANDOM").toUpperCase()}
+                            RND
                           </span>
                         </div>
                       </div>

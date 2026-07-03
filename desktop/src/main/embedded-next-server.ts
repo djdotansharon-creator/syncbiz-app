@@ -27,13 +27,18 @@ function parseEnvFile(filePath: string): Record<string, string> {
 }
 
 /**
- * Load .env then .env.local from the project root, returning vars not already in process.env.
- * standaloneRoot is desktop/staged-web; project root is two levels up.
- * Falls back to process.cwd() if the derived root has no env files.
+ * Load .env then .env.local, returning vars not already in process.env.
+ *
+ * Search order (first directory that contains any env file wins):
+ *   1. standaloneRoot itself      — packaged: resources/syncbiz-web (.env is
+ *                                   part of the Next.js standalone output)
+ *   2. standaloneRoot/../..       — dev: desktop/staged-web → project root
+ *   3. process.cwd()              — last-resort fallback
  */
 function loadDotEnvVars(standaloneRoot: string): Record<string, string> {
   const candidates = [
-    path.resolve(standaloneRoot, "../.."), // desktop/staged-web → desktop → project root
+    standaloneRoot,                        // packaged: resources/syncbiz-web
+    path.resolve(standaloneRoot, "../.."), // dev: desktop/staged-web → project root
     process.cwd(),
   ];
   let merged: Record<string, string> = {};
