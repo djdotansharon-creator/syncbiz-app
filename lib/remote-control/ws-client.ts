@@ -192,12 +192,12 @@ export function useRemoteControlWs(
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (closeEvent?: CloseEvent) => {
       setStatus("disconnected");
       setMasterDeviceId(null);
       setHasExistingMaster(false);
       setSessionCode(null);
-      console.warn("[SyncBiz DIAG] WS disconnected", { role, code: event.code, reason: event.reason, wasClean: event.wasClean, reconnectTrigger });
+      console.warn("[SyncBiz DIAG] WS disconnected", { role, code: closeEvent?.code, reason: closeEvent?.reason, wasClean: closeEvent?.wasClean, reconnectTrigger });
     };
     ws.onerror = (err) => { console.warn("[SyncBiz DIAG] WS error", { role, err }); setStatus("error"); };
 
