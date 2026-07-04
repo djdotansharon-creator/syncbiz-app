@@ -1102,7 +1102,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div
               className={
                 isMediaThemeRoute
-                  ? "library-deck-unified overflow-hidden rounded-2xl border border-slate-700/55 bg-slate-950/70 shadow-[0_12px_30px_rgba(0,0,0,0.42)] backdrop-blur-md"
+                  ? "library-deck-unified overflow-hidden rounded-2xl border border-slate-700/55 bg-slate-950/70 shadow-[0_12px_30px_rgba(0,0,0,0.42)]"
                   : undefined
               }
             >

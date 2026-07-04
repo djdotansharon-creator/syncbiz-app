@@ -3569,8 +3569,8 @@ export function AudioPlayer() {
     <header
       className={
         isSourcesLibraryDeck
-          ? "audio-player-library-deck sticky top-0 z-50 bg-slate-950/95 px-3 py-3 backdrop-blur-md overflow-hidden sm:px-4"
-          : "sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/98 px-3 py-3 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.08)] backdrop-blur-md overflow-hidden sm:px-4"
+          ? "audio-player-library-deck relative bg-slate-950/95 px-3 py-3 overflow-hidden sm:px-4"
+          : "sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/98 px-3 py-3 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.08)] overflow-hidden sm:px-4"
       }
       role="region"
       aria-label={t.playerControllerAria}
