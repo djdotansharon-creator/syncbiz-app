@@ -312,6 +312,28 @@ export function AudioPlayer() {
       deviceCtx.deviceMode === "CONTROL" &&
       !deviceCtx.isMobileLocalPlayback,
   );
+
+  // ─── Diagnostic: log isControlMirror / isBranchConnected changes ────────
+  useEffect(() => {
+    console.warn("[SyncBiz DIAG] AudioPlayer isControlMirror →", isControlMirror, {
+      isBranchConnected: deviceCtx?.isBranchConnected,
+      deviceMode: deviceCtx?.deviceMode,
+      wsStatus: deviceCtx?.status,
+      ts: new Date().toISOString(),
+    });
+  }, [isControlMirror]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    console.warn("[SyncBiz DIAG] AudioPlayer isBranchConnected →", deviceCtx?.isBranchConnected, {
+      deviceMode: deviceCtx?.deviceMode,
+      wsStatus: deviceCtx?.status,
+      isActive: deviceCtx?.isActive,
+      ts: new Date().toISOString(),
+    });
+  }, [deviceCtx?.isBranchConnected]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    return () => { console.warn("[SyncBiz DIAG] AudioPlayer UNMOUNTED", { ts: new Date().toISOString() }); };
+  }, []);
+  // ────────────────────────────────────────────────────────────────────────
   const {
     currentTrack,
     currentSource,
@@ -3191,6 +3213,17 @@ export function AudioPlayer() {
         return null;
       })();
   const displayHasContent = isControlMirror ? !!(ms?.currentSource || ms?.currentTrack) : !!currentSource;
+  // ─── Diagnostic: log displayHasContent + masterState changes ────────────
+  useEffect(() => {
+    console.warn("[SyncBiz DIAG] AudioPlayer displayHasContent →", displayHasContent, {
+      isControlMirror,
+      currentSource: currentSource?.id ?? null,
+      masterHasSource: ms ? !!(ms.currentSource || ms.currentTrack) : null,
+      masterStatus: ms?.status ?? null,
+      ts: new Date().toISOString(),
+    });
+  }, [displayHasContent]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ────────────────────────────────────────────────────────────────────────
   // Live Play Next staged items (and the post-play baseline-resume) need to keep the Next/Prev
   // transport active even when the operator dropped a one-off track that has no queue or
   // playlist of its own. Without this the Next button goes dead the moment a Play Next item

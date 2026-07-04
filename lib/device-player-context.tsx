@@ -434,6 +434,18 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
 
   const isBranchConnected = isActive && authLoaded && !!effectiveUserId && status === "connected";
 
+  // ─── Diagnostic: log whenever role/connectivity changes ─────────────────
+  const _diagCtxRef = useRef({ status: "init", deviceMode: "init", isBranchConnected: false, isActive: false, pathname: "init" });
+  useEffect(() => {
+    const prev = _diagCtxRef.current;
+    const curr = { status, deviceMode, effectiveDeviceMode, isBranchConnected, isActive, pathname };
+    if (prev.status !== status || prev.deviceMode !== deviceMode || prev.isBranchConnected !== isBranchConnected || prev.isActive !== isActive || prev.pathname !== pathname) {
+      console.warn("[SyncBiz DIAG] DeviceCtx change", { prev: { status: prev.status, deviceMode: prev.deviceMode, isBranchConnected: prev.isBranchConnected, isActive: prev.isActive }, curr: { status, deviceMode, effectiveDeviceMode, isBranchConnected, isActive, pathname }, ts: new Date().toISOString() });
+      _diagCtxRef.current = { status, deviceMode, isBranchConnected, isActive, pathname };
+    }
+  });
+  // ────────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (status === "connected") {
       lastConnectedModeRef.current = deviceMode;

@@ -381,6 +381,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { playSource, setQueue } = usePlayback();
   const [playerDropActive, setPlayerDropActive] = useState(false);
   const [activeCenterModule, setActiveCenterModule] = useState<CenterModule>(null);
+  // ─── Diagnostic: log AppShell renders that change pathname ───────────────
+  const _shellPathRef = React.useRef("");
+  if (_shellPathRef.current !== pathname) {
+    console.warn("[SyncBiz DIAG] AppShell pathname change", { prev: _shellPathRef.current, next: pathname, ts: new Date().toISOString() });
+    _shellPathRef.current = pathname ?? "";
+  }
+  // ────────────────────────────────────────────────────────────────────────
   const [inDesktopApp, setInDesktopApp] = useState(false);
   const [mainMenuOpen, setMainMenuOpen] = useState(false);
   const mainMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);

@@ -101,10 +101,8 @@ export function useRemoteControlWs(
 
     const ws = new globalThis.WebSocket(url);
     wsRef.current = ws;
-    setStatus("connecting");
-    if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
-      console.info(reconnectTrigger > 0 ? "[SyncBiz WS client] reconnect using latest token" : "[SyncBiz WS client] connecting", { role });
-    }
+      setStatus("connecting");
+      console.warn("[SyncBiz DIAG] WS connecting", { role, reconnectTrigger });
 
     ws.onopen = () => {
       const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
@@ -145,8 +143,10 @@ export function useRemoteControlWs(
         const data = JSON.parse(e.data as string) as ServerMessage;
         if (data.type === "REGISTERED" || data.type === "SET_DEVICE_MODE") {
           setStatus("connected");
+          if (data.type === "REGISTERED") console.warn("[SyncBiz DIAG] WS connected (REGISTERED)", { role });
         }
         if (data.type === "SET_DEVICE_MODE") {
+          console.warn("[SyncBiz DIAG] SET_DEVICE_MODE", { role, mode: data.mode });
           deviceModeRef.current = data.mode;
           setDeviceMode(data.mode);
           if ("masterDeviceId" in data && data.masterDeviceId) setMasterDeviceId(data.masterDeviceId);
@@ -197,11 +197,9 @@ export function useRemoteControlWs(
       setMasterDeviceId(null);
       setHasExistingMaster(false);
       setSessionCode(null);
-      if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
-        console.info("[SyncBiz WS client] disconnected", { role });
-      }
+      console.warn("[SyncBiz DIAG] WS disconnected", { role, code: event.code, reason: event.reason, wasClean: event.wasClean, reconnectTrigger });
     };
-    ws.onerror = () => setStatus("error");
+    ws.onerror = (err) => { console.warn("[SyncBiz DIAG] WS error", { role, err }); setStatus("error"); };
 
     return () => {
       ws.close();
