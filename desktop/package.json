@@ -18,7 +18,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "dist": "npm run build && electron-builder",
     "build-icons": "node scripts/build-icons.cjs",
-    "dist:win": "npm run build-icons && node scripts/build-electron-web.cjs && npm run build && electron-builder --win",
+    "dist:win": "npm run build-icons && npm run build && electron-builder --win",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux",
     "dist:publish": "npm run build && electron-builder --publish always"
@@ -58,43 +58,7 @@
       "package.json",
       "!dist/**/*.map"
     ],
-    "extraResources": [
-      {
-        "from": "staged-web",
-        "to": "syncbiz-web",
-        "filter": [
-          "**/*",
-          "!**/*.map",
-          "!**/node_modules/.cache/**",
-          "!**/node_modules/yt-dlp-wrap/bin/**",
-          "!**/*.ts",
-          "!**/*.tsx",
-          "!**/*.md",
-          "!**/README*",
-          "!**/LICENSE*",
-          "!**/CHANGELOG*",
-          "!**/.bin/**",
-          "!**/test/**",
-          "!**/tests/**",
-          "!**/__tests__/**",
-          "!**/*.test.js",
-          "!**/test-results/**",
-          "!**/playwright-report/**",
-          "!**/e2e/**",
-          "!**/playwright.config.*",
-          "!**/backups/**",
-          "!**/docs/**",
-          "!**/agent.py",
-          "!**/eslint.config.*",
-          "!**/postcss.config.*",
-          "!**/nixpacks.toml",
-          "!**/tsconfig*.json",
-          "!**/tsconfig.tsbuildinfo",
-          "!**/node_modules/.prisma/**/*.tmp*",
-          "!**/node_modules/typescript/**"
-        ]
-      }
-    ],
+    "extraResources": [],
     "asar": true,
     "compression": "maximum",
     "win": {
