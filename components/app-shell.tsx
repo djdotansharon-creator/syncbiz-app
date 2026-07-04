@@ -381,6 +381,26 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { playSource, setQueue } = usePlayback();
   const [playerDropActive, setPlayerDropActive] = useState(false);
   const [activeCenterModule, setActiveCenterModule] = useState<CenterModule>(null);
+  // ─── Adaptive player size: full / compact / mini ──────────────────────────
+  // Measured on the player cell container (ResizeObserver).
+  // full ≥700px · compact 500–699px · mini <500px
+  type PlayerSize = "full" | "compact" | "mini";
+  const [playerSize, setPlayerSize] = useState<PlayerSize>("full");
+  const playerCellRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    const cell = playerCellRef.current;
+    if (!cell || typeof ResizeObserver === "undefined") return;
+    const classify = (w: number): PlayerSize => w >= 700 ? "full" : w >= 500 ? "compact" : "mini";
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setPlayerSize(classify(w));
+    });
+    ro.observe(cell);
+    // Seed immediately so first paint gets the right class
+    setPlayerSize(classify(cell.getBoundingClientRect().width));
+    return () => ro.disconnect();
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
   // ─── Diagnostic: log AppShell renders that change pathname ───────────────
   const _shellPathRef = React.useRef("");
   if (_shellPathRef.current !== pathname) {
@@ -1188,6 +1208,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </aside>
               ) : null}
               <div
+                ref={isMediaThemeRoute ? playerCellRef : undefined}
+                data-player-size={isMediaThemeRoute ? playerSize : undefined}
                 {...(isMediaThemeRoute
                   ? {
                       onDragOver: (e: React.DragEvent) => {
