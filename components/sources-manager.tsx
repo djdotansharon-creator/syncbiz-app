@@ -2478,13 +2478,13 @@ function SourcesManagerInner({
               onAiPlaylistFromSearchPrompt={handleAiPlaylistFromSearchPrompt}
             />
           </div>
-          <div className="library-command-rail mt-3.5 flex min-w-0 flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-slate-800/35 bg-slate-950/25 px-3 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md sm:gap-3 lg:overflow-x-auto">
-            <div className="library-command-rail-browse flex min-w-0 flex-wrap items-center gap-2 sm:gap-2.5 lg:flex-nowrap lg:min-w-0">
+          <div className="library-command-rail mt-3.5 flex min-w-0 flex-nowrap items-center justify-between gap-1.5 overflow-x-auto rounded-2xl border border-slate-800/35 bg-slate-950/25 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md">
+            <div className="library-command-rail-browse flex min-w-0 flex-nowrap items-center gap-1.5">
               <div className="library-segment-bar flex h-10 rounded-xl p-0.5" role="tablist">
                 <button
                   type="button"
                   onClick={() => setViewMode("grid")}
-                  className={`flex h-full items-center gap-2 rounded-lg px-3.5 text-sm font-medium transition-[color,background,box-shadow] duration-200 ease-out ${
+                  className={`flex h-full items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium transition-[color,background,box-shadow] duration-200 ease-out ${
                     viewMode === "grid" ? "library-segment-btn-active" : "library-segment-btn-idle"
                   }`}
                 >
@@ -2499,7 +2499,7 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => setViewMode("list")}
-                  className={`flex h-full items-center gap-2 rounded-lg px-3.5 text-sm font-medium transition-[color,background,box-shadow] duration-200 ease-out ${
+                  className={`flex h-full items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium transition-[color,background,box-shadow] duration-200 ease-out ${
                     viewMode === "list" ? "library-segment-btn-active" : "library-segment-btn-idle"
                   }`}
                 >
@@ -2518,7 +2518,7 @@ function SourcesManagerInner({
                 <select
                   value={genreFilter}
                   onChange={(e) => setGenreFilter(e.target.value)}
-                  className="library-select h-10 min-w-[8rem] rounded-xl px-3 text-sm"
+                  className="library-select h-10 min-w-[6rem] max-w-[8rem] rounded-xl px-2 text-sm"
                 >
                   <option value="">{t.allGenres}</option>
                   {genres.map((g) => (
@@ -2530,7 +2530,7 @@ function SourcesManagerInner({
               )}
               <Link
                 href="/sources"
-                className="library-nav-link-current inline-flex h-10 items-center gap-2 rounded-xl px-3 text-xs font-semibold uppercase tracking-wider"
+                className="library-nav-link-current inline-flex h-10 items-center gap-1.5 rounded-xl px-2 text-xs font-semibold uppercase tracking-wider"
                 aria-current="page"
               >
                 <span className="library-nav-dot h-1.5 w-1.5 rounded-full" />
@@ -2538,7 +2538,7 @@ function SourcesManagerInner({
               </Link>
               <Link
                 href="/favorites"
-                className="library-nav-link flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-medium"
+                className="library-nav-link flex h-10 items-center gap-1.5 rounded-xl px-2 text-sm font-medium"
               >
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
@@ -2546,7 +2546,7 @@ function SourcesManagerInner({
                 {t.favorites}
               </Link>
             </div>
-            <div className="library-command-rail-trailing flex w-full min-w-0 shrink-0 flex-wrap items-center justify-end gap-y-2 self-center border-t border-slate-700/45 pt-2 sm:ms-auto sm:w-auto sm:flex-nowrap sm:border-t-0 sm:pt-0">
+            <div className="library-command-rail-trailing ms-auto flex min-w-0 shrink-0 flex-nowrap items-center justify-end gap-1.5 self-center">
               <div className="hidden shrink-0 items-center self-center sm:flex sm:px-1.5" aria-hidden>
                 <span className="h-5 w-px shrink-0 rounded-full bg-slate-700/45" />
               </div>
@@ -2564,7 +2564,7 @@ function SourcesManagerInner({
                     <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
                     <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                   </svg>
-                  <span>My link</span>
+                  <span>Link</span>
                 </button>
               </div>
               <div className="flex shrink-0 items-center self-center px-2 sm:hidden" aria-hidden>
@@ -2590,7 +2590,7 @@ function SourcesManagerInner({
                   aria-label="DJ Creator playlists and assistant — open workspace"
                   title="DJ Creator — saved playlists and new sets from your catalog"
                 >
-                  DJ Creator AI
+                  DJ AI
                 </button>
               </div>
             </div>

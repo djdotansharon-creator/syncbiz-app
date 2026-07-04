@@ -1135,7 +1135,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               isMediaThemeRoute ? " sources-app-header-row2" : ""
             }`}
           >
-            <nav className="flex flex-wrap items-center gap-1.5" aria-label="Main">
+            <nav className="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto" aria-label="Main">
               {/* Pill order is the canonical navKeys order so the pins stay in
                   a stable, predictable sequence regardless of the order the
                   user toggled them on. Library + Radio are always first (and
