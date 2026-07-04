@@ -387,6 +387,56 @@ export function AppShell({ children }: { children: ReactNode }) {
     console.warn("[SyncBiz DIAG] AppShell pathname change", { prev: _shellPathRef.current, next: pathname, ts: new Date().toISOString() });
     _shellPathRef.current = pathname ?? "";
   }
+  // ─── Diagnostic: layout/responsive ResizeObserver ────────────────────────
+  const _deckGridRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    const BREAKPOINTS = [640, 768, 1024, 1280, 1536];
+    const bp = (w: number) => BREAKPOINTS.slice().reverse().find((b) => w >= b) ?? 0;
+    const logLayout = (label: string) => {
+      const w = window.innerWidth;
+      const docW = document.documentElement.clientWidth;
+      const scrollbarW = w - docW;
+      const grid = _deckGridRef.current;
+      const gridH = grid?.getBoundingClientRect().height ?? -1;
+      const gridW = grid?.getBoundingClientRect().width ?? -1;
+      console.warn(`[SyncBiz DIAG] Layout(${label})`, {
+        windowInnerWidth: w,
+        docClientWidth: docW,
+        scrollbarWidth: scrollbarW,
+        breakpoint: bp(w),
+        deckGridHeight: gridH,
+        deckGridWidth: gridW,
+        deckGridZero: gridH === 0 || gridH < 10,
+        zoom: Math.round((window.devicePixelRatio / (window as unknown as { screen?: { deviceXDPI?: number; logicalXDPI?: number } }).screen?.deviceXDPI! * (window as unknown as { screen?: { deviceXDPI?: number; logicalXDPI?: number } }).screen?.logicalXDPI!) * 100) / 100,
+        ts: new Date().toISOString(),
+      });
+    };
+    // Log initial layout
+    logLayout("init");
+    // Log on window resize
+    const onResize = () => logLayout("resize");
+    window.addEventListener("resize", onResize);
+    // ResizeObserver on deck grid
+    let ro: ResizeObserver | null = null;
+    if (_deckGridRef.current && typeof ResizeObserver !== "undefined") {
+      let prevH = -1;
+      ro = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const h = entry.contentRect.height;
+          const w = entry.contentRect.width;
+          if (Math.abs(h - prevH) > 1) {
+            console.warn("[SyncBiz DIAG] DeckGrid ResizeObserver", { height: h, width: w, prevHeight: prevH, collapsed: h < 10, windowInnerWidth: window.innerWidth, breakpoint: bp(window.innerWidth), ts: new Date().toISOString() });
+            prevH = h;
+          }
+        }
+      });
+      ro.observe(_deckGridRef.current);
+    }
+    return () => {
+      window.removeEventListener("resize", onResize);
+      ro?.disconnect();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // ────────────────────────────────────────────────────────────────────────
   const [inDesktopApp, setInDesktopApp] = useState(false);
   const [mainMenuOpen, setMainMenuOpen] = useState(false);
@@ -1114,6 +1164,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               }
             >
             <div
+              ref={_deckGridRef}
               className={
                 isMediaThemeRoute
                   ? // Live Queue widened from 260/280 -> 300/320 to give the new Time column +
@@ -1124,7 +1175,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                     // lg: (1024 px) = minimum iPad landscape width → 3-column deck activates for
                     // every iPad in landscape (iPad mini 1024 px, Air/standard 1080-1180 px,
                     // Pro 12.9" 1366 px). Portrait tablets (<1024 px) keep the single-column deck.
-                    "grid min-w-0 lg:grid-cols-[280px_minmax(0,1fr)_240px] lg:h-[220px] xl:grid-cols-[300px_minmax(0,1fr)_260px] 2xl:grid-cols-[320px_minmax(0,1fr)_280px] 2xl:h-[240px]"
+                    // h-[160px] is the fallback below lg so h-full children never collapse to 0.
+                    "grid min-w-0 h-[160px] lg:grid-cols-[280px_minmax(0,1fr)_240px] lg:h-[220px] xl:grid-cols-[300px_minmax(0,1fr)_260px] 2xl:grid-cols-[320px_minmax(0,1fr)_280px] 2xl:h-[240px]"
                   : "grid grid-cols-1"
               }
             >
@@ -1149,7 +1201,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   : {})}
                 className={
                   isMediaThemeRoute
-                    ? `library-deck-player-cell relative h-full min-h-0 min-w-0 overflow-hidden transition-colors ${
+                    ? `library-deck-player-cell relative min-h-[160px] lg:h-full lg:min-h-0 min-w-0 overflow-hidden transition-colors ${
                         playerDropActive ? "ring-2 ring-inset ring-cyan-400/70" : ""
                       }`
                     : "relative min-w-0 w-full"
