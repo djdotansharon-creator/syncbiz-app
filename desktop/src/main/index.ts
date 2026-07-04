@@ -1,6 +1,6 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, screen } from "electron";
 
 import { initFileLogger, fileLog, getLogFilePath } from "./file-logger";
 import { registerMvpIpc } from "./ipc-mvp";
@@ -208,17 +208,30 @@ function buildOfflineErrorHtml(targetUrl: string, logPath: string): string {
 function createBrowserWindow(): BrowserWindow {
   const iconPath = resolveBrandIconPath();
   const preloadPath = path.join(__dirname, "../preload/index.js");
+
+  // Size the initial window to ~85% of the primary display's work area,
+  // capped at 1440×900 so it fits comfortably on all screen sizes.
+  // We size on logical (CSS) pixels — Electron handles DPI scaling internally.
+  const { width: screenW, height: screenH } =
+    screen.getPrimaryDisplay().workAreaSize;
+  const initWidth  = Math.min(1440, Math.round(screenW * 0.85));
+  const initHeight = Math.min(900,  Math.round(screenH * 0.85));
+
   fileLog("INFO", "createBrowserWindow", {
     iconPath: iconPath ?? "(none)",
     preloadPath,
     preloadExists: existsSync(preloadPath),
+    screenWorkArea: { width: screenW, height: screenH },
+    windowSize: { width: initWidth, height: initHeight },
   });
+
   return new BrowserWindow({
-    width: 960,
-    height: 720,
-    minWidth: 640,
-    minHeight: 520,
+    width:     initWidth,
+    height:    initHeight,
+    minWidth:  760,
+    minHeight: 540,
     title: "SyncBiz Player",
+    autoHideMenuBar: true,
     ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       preload: preloadPath,
@@ -227,6 +240,42 @@ function createBrowserWindow(): BrowserWindow {
       sandbox: false,
     },
   });
+}
+
+// ─── Desktop zoom helpers ─────────────────────────────────────────────────────
+
+/**
+ * The CSS pixel width the web app was designed for.
+ * At this width the layout is "full" quality (zoom = 1.0).
+ * When the window is narrower, zoom scales down so the full layout still fits.
+ *
+ * Override at runtime: SYNCBIZ_DESKTOP_DESIGN_WIDTH=<px>
+ */
+function designWidth(): number {
+  const env = parseInt(process.env.SYNCBIZ_DESKTOP_DESIGN_WIDTH ?? "", 10);
+  return Number.isFinite(env) && env > 200 ? env : 1440;
+}
+
+/**
+ * Compute the zoom factor for the current BrowserWindow content size.
+ * - windowWidth >= designWidth → zoom = 1.0  (full quality)
+ * - windowWidth < designWidth  → zoom proportionally < 1.0  (scaled down)
+ * Minimum zoom 0.55 to keep the UI readable in small windows.
+ */
+function computeZoom(windowWidth: number): number {
+  const zoom = windowWidth / designWidth();
+  return Math.max(0.55, Math.min(1.0, zoom));
+}
+
+/**
+ * Read the current BrowserWindow *content* width and apply the matching zoom
+ * factor so the full-width layout always fits without wrapping.
+ */
+function applyDesktopZoom(win: BrowserWindow): void {
+  const [contentW] = win.getContentSize();
+  const zoom = computeZoom(contentW);
+  win.webContents.setZoomFactor(zoom);
+  fileLog("INFO", "applyDesktopZoom", { contentW, designWidth: designWidth(), zoom });
 }
 
 function attachWindowDiagnostics(win: BrowserWindow): void {
@@ -312,6 +361,25 @@ async function openMainWindow(): Promise<void> {
   // Mute all Chromium audio output — in desktop mode every sound goes through MPV.
   win.webContents.setAudioMuted(true);
   fileLog("INFO", "openMainWindow: Chromium audio muted");
+
+  // ── Desktop zoom ────────────────────────────────────────────────────────────
+  // Apply once after the first page load and then on every resize so the
+  // full-width layout always fits the window without Tailwind compact-mode
+  // breakpoints triggering unintentionally.
+  win.webContents.on("did-finish-load", () => {
+    applyDesktopZoom(win);
+  });
+  win.on("resize", () => {
+    applyDesktopZoom(win);
+  });
+  // Fullscreen transitions change content size — update zoom immediately.
+  win.on("enter-full-screen", () => {
+    // Brief delay so Electron reports the updated content size.
+    setTimeout(() => applyDesktopZoom(win), 50);
+  });
+  win.on("leave-full-screen", () => {
+    setTimeout(() => applyDesktopZoom(win), 50);
+  });
 
   applyMainWindowContent(win, resolved);
   mainWindow = win;
