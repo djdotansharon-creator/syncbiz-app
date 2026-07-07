@@ -33,7 +33,9 @@ declare global {
       Player: new (
         el: HTMLElement,
         opts: {
-          videoId: string;
+          // Optional: YouTube playlist-only URLs (list= with no v=) init the player
+          // with playerVars.list and no videoId.
+          videoId?: string;
           width?: number;
           height?: number;
           playerVars?: Record<string, unknown>;

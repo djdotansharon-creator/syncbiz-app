@@ -575,9 +575,21 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // keep the last connected CONTROL role), so demoted side cannot re-enter standalone output.
   // Exception: /mobile in "Player" mode — the phone is supposed to play locally (see isMobileLocalPlayback).
   // Plain browser: only real player surfaces may own local branch output; `/settings` stays non-executing.
+  //
+  // MASTER exception (added): A MASTER-role browser device can start local playback from any
+  // workspace route (e.g. /radio, /schedules), not only the dedicated player surfaces. Without
+  // this, solo users navigating to /radio or /schedules would find all playSource/play/next calls
+  // silently blocked even though they are the sole MASTER device. CONTROL devices are still
+  // blocked on all routes regardless of this change.
+  //
+  // The MASTER exception explicitly does NOT cover branch-controls-only routes (`/settings`,
+  // `/library`): those open a device socket but must stay non-executing (see docstrings above and
+  // on `isBrowserBranchControlsOnlyRoute`). `/sources` remains allowed via the eligible-route list.
   deviceModeAllowsLocalPlayback.current =
     (isMobileLocalPlayback || !isActive || effectiveDeviceMode === "MASTER") &&
-    (!isBrowserShell || isEligibleBrowserPlayerRoute(pathname));
+    (!isBrowserShell ||
+      isEligibleBrowserPlayerRoute(pathname) ||
+      (effectiveDeviceMode === "MASTER" && !isBrowserBranchControlsOnlyRoute(pathname)));
 
   // Track CONTROL -> MASTER transition so adoption can complete even if mirrored state arrives a
   // moment later than the mode flip.

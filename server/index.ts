@@ -339,14 +339,13 @@ function tryPromoteConnectedControlOnMasterLoss(userId: string, branchId: string
   selected.mode = "MASTER";
   masterByBranch.set(key, selected.id);
   // primaryMasterByBranch policy:
-  //   - If an existing primary is set, leave it (lets the designated desktop primary reclaim
-  //     within grace; the takeover holder is temporary).
-  //   - If no primary is set AND we're promoting a desktop_station, write primary so that
-  //     desktop now owns the reservation going forward (e.g. web fallback MASTER died and
-  //     a desktop CONTROL took over — desktop should be the new primary).
-  //   - If no primary AND we're promoting a web_station, do NOT write primary (web is
-  //     fallback only; primary is desktop-only).
-  if (!primaryMasterByBranch.has(key) && isDedicatedPlayerStation(selected)) {
+  //   - If an existing primary is reserved (device in grace period), leave it so the
+  //     original device can reclaim MASTER when it reconnects within the grace window.
+  //   - If no primary is reserved, set it to the newly promoted device (regardless of
+  //     type) so the promoted MASTER gets grace-period protection on its next disconnect.
+  //     Previously this only applied to dedicated (desktop/streamer) stations; now web
+  //     stations promoted via auto-elect also gain the protection.
+  if (!primaryMasterByBranch.has(key)) {
     primaryMasterByBranch.set(key, selected.id);
   }
   masterDisconnectedAt.delete(key);
@@ -383,6 +382,29 @@ function getMasterForUser(userId: string): string | null {
 
 function getReservedMasterForUser(userId: string): string | null {
   return getReservedMasterForBranch(userId, DEFAULT_BRANCH_ID);
+}
+
+/**
+ * Playing-master hard lock.
+ *
+ * Returns the MASTER device ID if ALL of the following are true:
+ *   1. There is a current MASTER recorded in masterByBranch for this branch.
+ *   2. That MASTER's WebSocket is open (readyState === 1 — device is live).
+ *   3. Its last-reported playback state is "playing".
+ *   4. The device requesting the check is NOT the current MASTER itself
+ *      (so a reconnecting MASTER never blocks its own reclaim).
+ *
+ * When this returns a non-null value, NO other device may claim MASTER.
+ * Pass `requesterDeviceId` so the MASTER device's own reconnect is exempt.
+ */
+function getMasterPlayingLockId(userId: string, branchId: string, requesterDeviceId: string): string | null {
+  const key = branchKey(userId, branchId);
+  const masterId = masterByBranch.get(key);
+  if (!masterId || masterId === requesterDeviceId) return null;
+  const masterConn = devices.get(masterId);
+  if (!masterConn || masterConn.ws.readyState !== 1) return null;
+  const state = deviceState.get(masterId);
+  return state?.status === "playing" ? masterId : null;
 }
 
 function broadcastLibraryUpdated(
@@ -692,6 +714,15 @@ wss.on("connection", (ws) => {
         const primaryConn = primaryId ? devices.get(primaryId) : undefined;
         const activeStreamerMaster = getActiveStreamerMaster(userId, branchId);
 
+        // ── Playing-master hard lock ─────────────────────────────────────────────
+        // Evaluated before ALL other MASTER/CONTROL decisions so it gates every path.
+        // Streamers are exempt: they hold the highest MASTER priority and may displace
+        // any lower-priority playing MASTER (web/desktop station).
+        // Mobile is also exempt: it can never become MASTER anyway.
+        const playingLockId = (isMobile || isStreamerReg)
+          ? null
+          : getMasterPlayingLockId(userId, branchId, deviceId);
+
         if (isMobile) {
           // Mobile must never own primary. Clean up any stale ownership.
           if (masterByBranch.get(key) === deviceId) {
@@ -701,6 +732,25 @@ wss.on("connection", (ws) => {
             persistMasterLease();
           }
           masterDecisionReason = "mobile: never claim primary MASTER lease";
+        } else if (playingLockId) {
+          // Hard lock: the live MASTER is actively playing audio.
+          // Force CONTROL regardless of this device's type or priority.
+          // The business player keeps its MASTER lease uninterrupted.
+          mode = "CONTROL";
+          if (isDesktopReg || isStreamerReg) secondaryDesktop = true;
+          masterDecisionReason = `MASTER_LOCKED_PLAYING: master ${playingLockId} is actively playing — forced CONTROL`;
+          // Emit a dedicated denial event so it is easy to spot in production logs.
+          logLeaseEvent("register_denied_playing_lock", {
+            userId,
+            branchId,
+            deviceId,
+            requesterPurpose: purpose ?? "unknown",
+            lockedByMasterId: playingLockId,
+            lockedByPurpose: devices.get(playingLockId)?.registrationIntent?.devicePurpose ?? "unknown",
+            masterPlayState: deviceState.get(playingLockId)?.status ?? "unknown",
+            reason: "MASTER_LOCKED_PLAYING",
+            triggeredBy: "REGISTER",
+          });
         } else if (deviceId === primaryId) {
           if (isDesktopReg && activeStreamerMaster) {
             secondaryDesktop = true;
@@ -778,11 +828,13 @@ wss.on("connection", (ws) => {
               mode = "MASTER";
               masterDisconnectedAt.delete(key);
               masterByBranch.set(key, deviceId);
-              if (primaryId && !primaryConn) {
-                primaryMasterByBranch.delete(key);
-              }
+              // Set primary so web station MASTER gets grace-period protection on disconnect.
+              // Without this, any brief WS interruption (e.g. during a track transition)
+              // would open the lease to the first reconnecting device — the root cause of
+              // the "music stops when second computer logs in" production bug.
+              primaryMasterByBranch.set(key, deviceId);
               persistMasterLease();
-              masterDecisionReason = "web fallback: no streamer/desktop MASTER -> MASTER";
+              masterDecisionReason = "web fallback: no streamer/desktop MASTER -> MASTER (primary reserved)";
             }
           }
         }
@@ -972,6 +1024,37 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      // ── Playing-master hard lock ─────────────────────────────────────────────
+      // Streamers are exempt (highest MASTER priority). For all other device types,
+      // reject SET_MASTER if the live MASTER is actively playing audio.
+      if (!requesterIsStreamer) {
+        const liveMasterIdLock = masterByBranch.get(key);
+        if (liveMasterIdLock && liveMasterIdLock !== deviceId) {
+          const liveMasterConnLock = devices.get(liveMasterIdLock);
+          if (liveMasterConnLock?.ws.readyState === 1) {
+            const liveMasterStateLock = deviceState.get(liveMasterIdLock);
+            if (liveMasterStateLock?.status === "playing") {
+              logLeaseEvent("set_master_denied_playing_lock", {
+                userId,
+                branchId,
+                deviceId: deviceId!,
+                requesterPurpose: conn?.registrationIntent?.devicePurpose ?? "unknown",
+                lockedByMasterId: liveMasterIdLock,
+                lockedByPurpose: liveMasterConnLock.registrationIntent?.devicePurpose ?? "unknown",
+                masterPlayState: liveMasterStateLock.status,
+                oldMasterPlaying: true,
+                reason: "MASTER_LOCKED_PLAYING",
+                triggeredBy: "SET_MASTER",
+              });
+              if (ws.readyState === 1) {
+                ws.send(JSON.stringify({ type: "ERROR", message: "MASTER_LOCKED_PLAYING" } as ServerMessage));
+              }
+              return;
+            }
+          }
+        }
+      }
+
       // Streamer priority: desktop/web cannot take MASTER while streamer holds priority.
       if (requesterIsDesktop && streamerBlocksFallbackMaster(userId, branchId, deviceId)) {
         logLeaseEvent("set_master_blocked", {
@@ -1014,19 +1097,28 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      const oldMasterIdForLog = masterByBranch.get(key);
+      const oldMasterConnForLog = oldMasterIdForLog && oldMasterIdForLog !== deviceId
+        ? devices.get(oldMasterIdForLog) : undefined;
+      const oldMasterWasPlaying = oldMasterIdForLog
+        ? (deviceState.get(oldMasterIdForLog)?.status === "playing") : false;
+
       demoteOtherMasters(userId, branchId, deviceId, deviceId);
       masterByBranch.set(key, deviceId);
-      if (requesterIsStreamer || requesterIsDesktop) {
-        primaryMasterByBranch.set(key, deviceId);
-      }
+      // Always set primary so every explicitly-claimed MASTER gets grace-period protection
+      // on its next disconnect — prevents any brief WS interruption from opening the lease.
+      primaryMasterByBranch.set(key, deviceId);
       masterDisconnectedAt.delete(key);
       persistMasterLease();
       if (conn) conn.mode = "MASTER";
       logLeaseEvent("set_master", {
         userId,
         branchId,
-        deviceId,
+        deviceId: deviceId!,
         purpose: conn?.registrationIntent?.devicePurpose ?? "unknown",
+        oldMasterId: oldMasterIdForLog ?? null,
+        oldMasterPurpose: oldMasterConnForLog?.registrationIntent?.devicePurpose ?? null,
+        oldMasterWasPlaying,
         primaryBefore: primaryId ?? null,
         primaryAfter: primaryMasterByBranch.get(key) ?? null,
         triggeredBy: "SET_MASTER",
@@ -1147,20 +1239,57 @@ wss.on("connection", (ws) => {
               masterDeathReason = "dedicated MASTER ambiguous close -> grace window";
             }
           } else {
-            // Web/fallback MASTER: no grace window — fallback ownership is not reserved.
-            // Drop the lease immediately; a true-loss close attempts auto-promote so a
-            // desktop CONTROL (if any) takes over without delay.
-            masterByBranch.delete(key);
-            masterDisconnectedAt.delete(key);
-            if (primaryMasterByBranch.get(key) === deviceId) {
-              // Defensive: legacy state may have a web id in primary. Clear it.
-              primaryMasterByBranch.delete(key);
-            }
+            // Web/fallback MASTER: use the same grace-period model as dedicated stations.
+            //
+            // Ambiguous close (network blip, code 1005/1006 etc.): keep the lease reserved
+            // within the grace window so the device can reconnect and reclaim without any
+            // other device stealing MASTER.  This prevents the "track end / second login
+            // steals MASTER" production bug where a brief WS drop wiped the lease.
+            //
+            // True-loss close (tab closed = 1001, heartbeat timeout = 4006): release the
+            // primary reservation and drop the lease immediately so another CONTROL can
+            // take over without waiting the full grace period.
+            masterDisconnectedAt.set(key, Date.now());
             if (isTrueMasterLossCloseCode(code)) {
+              // Voluntary / confirmed departure: release lease so branch isn't silently stalled.
+              masterByBranch.delete(key);
+              if (primaryMasterByBranch.get(key) === deviceId) {
+                primaryMasterByBranch.delete(key);
+              }
               shouldTryAutoPromote = true;
-              masterDeathReason = "web fallback MASTER true-loss -> immediate promote attempt";
+              masterDeathReason = "web MASTER true-loss -> primary released, auto-promote if CONTROL available";
             } else {
-              masterDeathReason = "web fallback MASTER ambiguous close -> immediate cleanup, no promote";
+              // Network blip: keep lease and primary so device can reclaim within grace.
+              masterDeathReason = "web MASTER ambiguous close -> grace window (lease + primary preserved)";
+              // There is no periodic sweeper: clearExpiredGracePeriods only runs inside REGISTER and
+              // tryPromote only on true-loss close. So if an already-connected CONTROL exists and no
+              // new REGISTER arrives, the expired grace would never be swept and the branch would stay
+              // leased to the gone web MASTER indefinitely. Schedule a one-shot, guarded sweep.
+              const sweepKey = key;
+              const sweepUserId = userId;
+              const sweepBranchId = branchId;
+              const graceSweep = setTimeout(() => {
+                const disconnectedAt = masterDisconnectedAt.get(sweepKey);
+                // Reconnected (REGISTER clears the timestamp) or a newer disconnect reset the clock.
+                if (!disconnectedAt || Date.now() - disconnectedAt <= MASTER_GRACE_MS) return;
+                // Reserved master came back and is live -> leave it be.
+                const reservedId = masterByBranch.get(sweepKey);
+                const reservedConn = reservedId ? devices.get(reservedId) : undefined;
+                if (reservedConn && reservedConn.ws.readyState === 1) return;
+                clearExpiredGracePeriods(sweepUserId, sweepBranchId);
+                const promoted = tryPromoteConnectedControlOnMasterLoss(sweepUserId, sweepBranchId);
+                if (promoted) {
+                  logLeaseEvent("grace_sweep_promote", {
+                    userId: sweepUserId,
+                    branchId: sweepBranchId,
+                    deviceId: promoted,
+                    triggeredBy: "web_master_grace_sweep",
+                  });
+                  broadcastDeviceList();
+                }
+              }, MASTER_GRACE_MS + 1000);
+              // Never keep the process alive just for this sweep.
+              if (typeof graceSweep.unref === "function") graceSweep.unref();
             }
           }
           persistMasterLease();
