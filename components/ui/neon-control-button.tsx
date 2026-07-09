@@ -1,26 +1,34 @@
 "use client";
 
-const neonGreenBase =
-  "inline-flex items-center justify-center rounded-2xl border-2 border-[#1ed760]/60 bg-slate-900/95 text-[#1ed760] shadow-[0_0_0_1px_rgba(30,215,96,0.2),0_0_20px_rgba(30,215,96,0.15)] transition-[border-color,box-shadow,color,transform,opacity] duration-150 hover:border-[#1ed760] hover:shadow-[0_0_0_2px_rgba(30,215,96,0.4),0_0_28px_rgba(30,215,96,0.25)] hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-[#1ed760]/50 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-40 disabled:pointer-events-none disabled:hover:scale-100 active:scale-[0.97]";
-const neonGreenActive = "border-[#1ed760] text-[#1ed760] shadow-[0_0_0_2px_rgba(30,215,96,0.5),0_0_24px_rgba(30,215,96,0.35),0_0_40px_rgba(30,215,96,0.15)]";
+/*
+ * Clean control button — SyncBiz modern design language.
+ * Quiet surfaces, hairline borders, no glow. The variant color appears only
+ * in the icon tint (and as a soft tint fill when active), so controls stay
+ * calm at rest and read clearly when engaged.
+ * Public API is unchanged (variants/sizes/active/libraryDeck props).
+ */
 
-const neonRedBase =
-  "inline-flex items-center justify-center rounded-lg border-2 border-[#ff4c4c]/60 bg-slate-900/95 text-[#ff4c4c] shadow-[0_0_0_1px_rgba(255,76,76,0.2),0_0_20px_rgba(255,76,76,0.15)] transition-[border-color,box-shadow,color,transform,opacity] duration-150 hover:border-[#ff4c4c] hover:shadow-[0_0_0_2px_rgba(255,76,76,0.4),0_0_28px_rgba(255,76,76,0.25)] hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-[#ff4c4c]/50 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-40 disabled:pointer-events-none disabled:hover:scale-100 active:scale-[0.97]";
+const baseShape =
+  "inline-flex items-center justify-center rounded-xl border transition-[border-color,background-color,color,transform,opacity] duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.96]";
 
-const neonCyanBase =
-  "inline-flex items-center justify-center rounded-lg border-2 border-cyan-400/60 bg-slate-900/95 text-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.2),0_0_20px_rgba(34,211,238,0.15)] transition-[border-color,box-shadow,color,transform,opacity] duration-150 hover:border-cyan-400 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.4),0_0_28px_rgba(34,211,238,0.25)] hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-40 disabled:pointer-events-none disabled:hover:scale-100 active:scale-[0.97]";
-const neonCyanActive = "border-cyan-400 text-cyan-400 shadow-[0_0_0_2px_rgba(34,211,238,0.5),0_0_24px_rgba(34,211,238,0.35),0_0_40px_rgba(34,211,238,0.15)]";
+const quietSurface =
+  "border-white/[0.08] bg-white/[0.05] hover:border-white/[0.16] hover:bg-white/[0.08]";
 
-const neonWhiteBase =
-  "inline-flex items-center justify-center rounded-lg border-2 border-white/60 bg-slate-900/95 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.2),0_0_20px_rgba(255,255,255,0.15)] transition-[border-color,box-shadow,color,transform,opacity] duration-150 hover:border-white hover:shadow-[0_0_0_2px_rgba(255,255,255,0.4),0_0_28px_rgba(255,255,255,0.25)] hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-white/50 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-40 disabled:pointer-events-none disabled:hover:scale-100 active:scale-[0.97]";
-const neonWhiteActive = "border-white text-white shadow-[0_0_0_2px_rgba(255,255,255,0.5),0_0_24px_rgba(255,255,255,0.35),0_0_40px_rgba(255,255,255,0.15)]";
+const greenBase = `${baseShape} ${quietSurface} text-[#30d158]`;
+const greenActive = "border-[#30d158]/40 bg-[#30d158]/15 text-[#30d158]";
+
+const redBase = `${baseShape} ${quietSurface} text-[#ff453a]`;
+
+const cyanBase = `${baseShape} ${quietSurface} text-[#0a84ff]`;
+const cyanActive = "border-[#0a84ff]/40 bg-[#0a84ff]/15 text-[#0a84ff]";
+
+const whiteBase = `${baseShape} ${quietSurface} text-slate-100`;
+const whiteActive = "border-white/30 bg-white/15 text-white";
 
 /** Inactive: restrained dark frame, subtle border, restrained icon */
-const subtleBase =
-  "inline-flex items-center justify-center rounded-[10px] border border-slate-600/20 bg-[rgba(10,15,25,0.8)] text-slate-500 transition-[border-color,background-color,color,opacity] duration-150 hover:border-slate-500/30 hover:text-slate-400 hover:bg-slate-800/40 focus:outline-none focus:ring-1 focus:ring-slate-500/30 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.98]";
-/** Active: blue illuminated border + icon, matches top nav (Sources/Radio) */
-const subtleActive =
-  "border-sky-500/60 bg-sky-500/20 text-sky-200 shadow-[0_0_12px_rgba(56,189,248,0.25)]";
+const subtleBase = `${baseShape} border-white/[0.06] bg-white/[0.03] text-slate-500 hover:text-slate-300`;
+/** Active: quiet accent tint, matches top nav (Sources/Radio) */
+const subtleActive = "border-[#0a84ff]/35 bg-[#0a84ff]/15 text-[#7db8ff]";
 
 type Size = "2xs" | "xs" | "sm" | "md" | "lg" | "xl";
 type Variant = "green" | "red" | "cyan" | "white" | "subtle";
@@ -73,19 +81,19 @@ export function NeonControlButton({
   libraryDeckHero?: boolean;
 }) {
   const base =
-    variant === "red" ? neonRedBase :
-    variant === "cyan" ? neonCyanBase :
-    variant === "white" ? neonWhiteBase :
-    variant === "subtle" ? subtleBase : neonGreenBase;
+    variant === "red" ? redBase :
+    variant === "cyan" ? cyanBase :
+    variant === "white" ? whiteBase :
+    variant === "subtle" ? subtleBase : greenBase;
   const activeCls =
     libraryDeck && active
       ? "library-deck-neon-btn-active"
       : variant === "green" && active
-        ? neonGreenActive
+        ? greenActive
         : variant === "cyan" && active
-          ? neonCyanActive
+          ? cyanActive
           : variant === "white" && active
-            ? neonWhiteActive
+            ? whiteActive
             : variant === "subtle" && active
               ? subtleActive
               : "";

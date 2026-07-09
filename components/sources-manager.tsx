@@ -2584,7 +2584,7 @@ function SourcesManagerInner({
                   className={[
                     guestLinkLedButtonClass,
                     "h-10 shrink-0 justify-center gap-2 px-3 text-sm font-medium",
-                    djHubRailActive ? "ring-2 ring-amber-300/45 border-amber-400/65 bg-amber-600/22 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" : "",
+                    djHubRailActive ? "border-[#0a84ff]/40 bg-[#0a84ff]/15 text-[#7db8ff]" : "",
                   ]
                     .filter(Boolean)
                     .join(" ")}

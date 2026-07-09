@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { useDevicePlayer } from "@/lib/device-player-context";
 
-/** Shared amber LED pill style for guest / “My link” controls in the library rail. */
+/** Shared quiet pill style for guest / “My link” controls in the library rail. */
 export const guestLinkLedButtonClass =
-  "inline-flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-600/10 px-2.5 py-1.5 text-xs font-medium text-amber-200 transition hover:border-amber-500/60 hover:bg-amber-600/20 focus:outline-none focus:ring-2 focus:ring-amber-500/30";
+  "inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.05] px-2.5 py-1.5 text-xs font-medium text-[#a1a1a6] transition-colors duration-150 hover:border-white/[0.16] hover:bg-white/[0.08] hover:text-[#f5f5f7] focus:outline-none focus:ring-2 focus:ring-white/20 active:scale-[0.97]";
 
 type GuestLinkButtonProps = { className?: string };
 

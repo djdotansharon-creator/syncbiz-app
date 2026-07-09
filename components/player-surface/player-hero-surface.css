@@ -55,10 +55,11 @@
 .sb-phs-art-frame {
   aspect-ratio: 1;
   width: 12rem;
-  border-radius: 0.75rem;
+  border-radius: 1.25rem;
   overflow: hidden;
-  background: #0f172a;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.25), 0 4px 6px -4px rgba(0, 0, 0, 0.2);
+  background: #101014;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.6);
 }
 
 .sb-phs-art-img {
@@ -144,10 +145,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 1.25rem;
-  font-weight: 600;
-  line-height: 1.75rem;
-  color: #f1f5f9;
+  font-size: 1.375rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.85rem;
+  color: #f5f5f7;
 }
 
 .sb-phs-provider {
@@ -234,19 +236,21 @@
   width: 2.75rem;
   align-items: center;
   justify-content: center;
-  border-radius: 1rem;
-  border: 1px solid #334155;
-  background: rgba(15, 23, 42, 0.8);
-  color: #cbd5e1;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  color: #a1a1a6;
   font-size: 0.875rem;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
   padding: 0;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .sb-phs-tbtn:hover:not(:disabled) {
-  background: #1e293b;
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #f5f5f7;
 }
 
 .sb-phs-tbtn:disabled {
@@ -258,15 +262,16 @@
   height: 3.5rem;
   width: 3.5rem;
   border-color: transparent;
-  background: #1db954;
-  color: #fff;
+  background: #f5f5f7;
+  color: #111114;
   font-size: 1.25rem;
   line-height: 1.75rem;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 18px -6px rgba(0, 0, 0, 0.6);
 }
 
 .sb-phs-tbtn-play:hover:not(:disabled) {
-  background: #1ed760;
+  background: #ffffff;
+  color: #000000;
 }
 
 .sb-phs-vol {
@@ -289,7 +294,7 @@
   height: 0.5rem;
   flex: 1;
   border-radius: 9999px;
-  accent-color: #1db954;
+  accent-color: #f5f5f7;
 }
 
 .sb-phs-vol-num {

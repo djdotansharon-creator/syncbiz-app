@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useId, useRef } from "react";
 
 /**
- * Vertical VOLUME module — CDJ-style channel strip.
- * Pointer capture / onChange / mute logic unchanged.
+ * Vertical VOLUME module — clean modern channel strip.
+ * A slim rounded track with a round knob, numeric readout on top and a quiet
+ * mute toggle below. Pointer capture / onChange / mute logic unchanged.
  */
-
-const SEGMENTS = 20; /* tick overlay density in CSS — visual only */
 
 export type PlayerVerticalVolumeProps = {
   /** 0–100 — already accounts for desktop / control-mirror branches in AudioPlayer. */
@@ -15,7 +14,7 @@ export type PlayerVerticalVolumeProps = {
   onChange: (value: number) => void;
   /** Mute / unmute toggle. AudioPlayer owns the `volumeBeforeMuteRef` semantics. */
   onMuteToggle?: () => void;
-  /** When true, the LED VU-meter simulation and pulse animation are active. */
+  /** Kept for API compatibility; the clean design has no meter simulation. */
   isPlaying?: boolean;
   /** Localized aria label for the slider input itself. */
   ariaLabel?: string;
@@ -27,30 +26,11 @@ export function PlayerVerticalVolume({
   value,
   onChange,
   onMuteToggle,
-  isPlaying = false,
   ariaLabel = "Volume",
   muteLabel = "Toggle mute",
 }: PlayerVerticalVolumeProps) {
   const v = Math.max(0, Math.min(100, Math.round(value)));
   const isMuted = v === 0;
-
-  const [meterLevels, setMeterLevels] = useState({ l: v, r: v });
-  useEffect(() => {
-    if (!isPlaying || v === 0) {
-      setMeterLevels({ l: v, r: v });
-      return;
-    }
-    const tick = () => {
-      const variationL = (Math.random() - 0.42) * 22;
-      const variationR = (Math.random() - 0.38) * 24;
-      const l = Math.round(Math.max(Math.max(0, v - 28), Math.min(100, v + variationL)));
-      const r = Math.round(Math.max(Math.max(0, v - 30), Math.min(100, v + variationR)));
-      setMeterLevels({ l, r });
-    };
-    tick();
-    const id = setInterval(tick, 120);
-    return () => clearInterval(id);
-  }, [v, isPlaying]);
 
   const insetRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -103,64 +83,45 @@ export function PlayerVerticalVolume({
 
   return (
     <div
-      className="vol-deck-shell relative flex h-full min-h-0 w-[76px] flex-col items-stretch overflow-hidden rounded-lg border border-slate-700/35 bg-slate-900/90 px-2 py-1.5 sm:w-[80px]"
+      className="vol-deck-shell relative flex h-full min-h-0 w-[64px] flex-col items-stretch overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03] px-2 py-2 sm:w-[68px]"
       role="group"
       aria-label={ariaLabel}
     >
-      <div className="shrink-0 flex flex-col items-center pb-1 pt-0.5">
-        <span className="text-[8px] font-semibold uppercase tracking-[0.2em] text-slate-600">Vol</span>
-        <span className="vol-deck-readout mt-0.5 font-mono text-[20px] font-semibold tabular-nums leading-none text-slate-100 sm:text-[22px]">
-          {String(v).padStart(2, "0")}
+      <div className="shrink-0 flex flex-col items-center pb-1.5 pt-0.5">
+        <span className="text-[9px] font-medium uppercase tracking-[0.14em] text-[#6e6e73]">Vol</span>
+        <span className="vol-deck-readout mt-0.5 text-[17px] font-semibold tabular-nums leading-none text-[#f5f5f7]">
+          {v}
         </span>
       </div>
 
-      <div className="flex min-h-0 flex-1 items-stretch justify-center gap-2 px-0.5 py-0.5">
+      <div className="flex min-h-0 flex-1 items-stretch justify-center px-0.5 py-1">
         <div
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={stopDragging}
           onPointerCancel={stopDragging}
-          className="vol-deck-track relative flex h-full min-h-0 w-[22px] flex-1 cursor-pointer select-none touch-none"
+          className="vol-deck-track relative flex h-full min-h-0 w-[28px] cursor-pointer select-none touch-none justify-center"
           role="presentation"
         >
-          <div ref={insetRef} className="absolute inset-0">
+          <div ref={insetRef} className="absolute inset-y-1 left-1/2 w-0 -translate-x-1/2">
+            {/* Track */}
             <div
-              className="absolute inset-y-0 left-1/2 w-[5px] -translate-x-1/2 rounded-sm bg-[#050505] shadow-[inset_0_1px_3px_rgba(0,0,0,0.8)]"
+              className="absolute inset-y-0 left-1/2 w-[4px] -translate-x-1/2 rounded-full bg-white/[0.12]"
               aria-hidden
             />
+            {/* Fill */}
             <div
-              className="absolute bottom-0 left-1/2 w-[5px] -translate-x-1/2 rounded-sm bg-gradient-to-t from-neutral-500 via-neutral-300 to-neutral-100"
+              className="absolute bottom-0 left-1/2 w-[4px] -translate-x-1/2 rounded-full bg-[#f5f5f7]"
               style={{ height: `${v}%` }}
               aria-hidden
             />
+            {/* Knob */}
             <div
-              className="vol-deck-handle absolute left-1/2 z-10 h-[10px] w-[22px] -translate-x-1/2 -translate-y-1/2 rounded-[3px]"
+              className="vol-deck-handle absolute left-1/2 z-10 h-[14px] w-[14px] -translate-x-1/2 -translate-y-1/2 rounded-full"
               style={{ top: `${100 - v}%` }}
               aria-hidden
             />
           </div>
-        </div>
-
-        <div
-          className={`vol-deck-meter-bank flex h-full min-h-0 shrink-0 items-stretch gap-[3px] py-0 transition-opacity duration-200 ${isPlaying ? "opacity-100" : "opacity-45 pointer-events-none"}`}
-          aria-hidden
-        >
-          {(["L", "R"] as const).map((channel) => {
-            const level = channel === "L" ? meterLevels.l : meterLevels.r;
-            const pct = Math.max(0, Math.min(100, level));
-            return (
-              <div
-                key={channel}
-                className="vol-deck-meter-column relative h-full w-[5px] min-h-0 overflow-hidden rounded-[2px]"
-              >
-                <div
-                  className="vol-deck-meter-level absolute bottom-0 left-0 right-0"
-                  style={{ height: `${pct}%` }}
-                />
-                <div className="vol-deck-meter-ticks pointer-events-none absolute inset-0" aria-hidden />
-              </div>
-            );
-          })}
         </div>
       </div>
 
@@ -171,10 +132,10 @@ export function PlayerVerticalVolume({
           aria-label={muteLabel}
           aria-pressed={isMuted}
           title={muteLabel}
-          className={`vol-deck-mute-btn flex h-8 w-8 items-center justify-center rounded-[5px] border transition-colors focus:outline-none focus:ring-1 focus:ring-white/20 ${
+          className={`vol-deck-mute-btn flex h-8 w-8 items-center justify-center rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 ${
             isMuted
-              ? "border-rose-500/40 bg-rose-950/30 text-rose-200/90"
-              : "border-white/[0.08] bg-[#0d0d0d] text-slate-500 hover:border-white/14 hover:text-slate-300"
+              ? "border-[#ff453a]/35 bg-[#ff453a]/12 text-[#ff453a]"
+              : "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:text-[#f5f5f7]"
           }`}
         >
           <MuteIcon muted={isMuted} />

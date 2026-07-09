@@ -245,7 +245,7 @@ function DeckModeIndicator({
         {kind === "mix" ? <MixModeIcon active={active} /> : <RandomModeIcon active={active} />}
         <span
           className={`deck-mode-indicator__led h-1 w-1 shrink-0 rounded-full transition-colors ${
-            active ? "bg-cyan-400/80" : "bg-slate-600/80 group-hover:bg-slate-500"
+            active ? "bg-[#0a84ff]" : "bg-slate-600/80 group-hover:bg-slate-500"
           }`}
           aria-hidden
         />
@@ -263,7 +263,7 @@ function MixModeIcon({ active }: { active: boolean }) {
       viewBox="0 0 16 16"
       width="14"
       height="14"
-      className={`shrink-0 ${active ? "text-cyan-300" : "text-slate-500 group-hover:text-slate-300"}`}
+      className={`shrink-0 ${active ? "text-[#409cff]" : "text-slate-500 group-hover:text-slate-300"}`}
       aria-hidden
     >
       <path
@@ -285,7 +285,7 @@ function RandomModeIcon({ active }: { active: boolean }) {
       strokeWidth="1.35"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={`shrink-0 ${active ? "text-cyan-300" : "text-slate-500 group-hover:text-slate-300"}`}
+      className={`shrink-0 ${active ? "text-[#409cff]" : "text-slate-500 group-hover:text-slate-300"}`}
       aria-hidden
     >
       <path d="M2.5 5.5h2.8M2.5 10.5h2.8M10.7 3.5l2.8 2.8-2.8 2.8M10.7 12.5l2.8-2.8-2.8-2.8" />
