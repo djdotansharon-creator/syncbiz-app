@@ -78,6 +78,10 @@ type Props = {
   onAddToPlaylistPress?: () => void;
   /** Optional ⋯ AI tools slot on LIST shell tiles (outside leaf rows). */
   playlistAiMenuSlot?: ReactNode;
+  /** When set, shows a clock action that opens the day/hour schedule window for this playlist. */
+  onSchedulePress?: () => void;
+  /** Compact "when it plays" line shown when the playlist has an active schedule. */
+  scheduleLine?: string | null;
   /** @deprecated Ignored — all grid cards use the unified library browse shell. */
   libraryTilePresentation?: "rich" | "branch";
 };
@@ -152,6 +156,8 @@ export function SourceCard({
   leafUnifiedBar = false,
   onAddToPlaylistPress,
   playlistAiMenuSlot,
+  onSchedulePress,
+  scheduleLine,
   libraryTilePresentation: _libraryTilePresentation = "rich",
 }: Props) {
   const { t } = useTranslations();
@@ -302,6 +308,23 @@ export function SourceCard({
 
   const titleAsideNode = (
     <>
+      {onSchedulePress && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSchedulePress();
+          }}
+          className="rounded-md p-0.5 text-[color:var(--lib-text-secondary)] transition-colors duration-200 hover:bg-[color:var(--lib-surface-card-hover)] hover:text-[#7db8ff]"
+          title="Schedule playlist"
+          aria-label="Schedule playlist"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+        </button>
+      )}
       {onToggleFavorite && (
         <button
           type="button"
@@ -440,6 +463,15 @@ export function SourceCard({
           <span className="library-card-genre-label">Genre</span>
           <span className="library-card-genre-value">{cardGenre}</span>
         </p>
+        {scheduleLine ? (
+          <p className="m-0 flex items-center gap-1 truncate text-[10px] font-medium text-[#6cb2ff]">
+            <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            <span className="truncate">{scheduleLine}</span>
+          </p>
+        ) : null}
         <div className="library-card-actions-wrap">{sourceActions}</div>
         {metaFooter ? <div className="library-card-stats-wrap">{metaFooter}</div> : null}
       </LibraryBrowseCardSurface>
