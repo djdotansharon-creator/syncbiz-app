@@ -2060,59 +2060,55 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 
 /* ── Library card system (Stage 1A) — grid density, hierarchy, premium badges ── */
 
+/* Card badges — frameless: soft dark backdrop only, tinted text carries the meaning */
 .library-card-kind-badge {
   display: inline-flex;
   align-items: center;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(8, 12, 22, 0.72);
-  padding: 0.1rem 0.35rem;
+  border-radius: 0.3rem;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 0.12rem 0.38rem;
   font-size: 8px;
   font-weight: 600;
   letter-spacing: 0.09em;
   line-height: 1.25;
   text-transform: uppercase;
-  color: #e2e8f0;
+  color: #e5e5ea;
   backdrop-filter: blur(6px);
 }
 
 .library-card-kind-badge--list {
-  border-color: rgba(10, 132, 255, 0.28);
   color: #a8ccff;
 }
 
 .library-card-kind-badge--single {
-  border-color: rgba(52, 211, 153, 0.28);
   color: #a7f3d0;
 }
 
 .library-card-kind-badge--set {
-  border-color: rgba(167, 139, 250, 0.28);
   color: #ddd6fe;
 }
 
 .library-card-kind-badge--local {
-  border-color: rgba(56, 189, 248, 0.28);
   color: #bae6fd;
 }
 
 .library-card-kind-badge--radio {
-  border-color: rgba(251, 113, 133, 0.28);
   color: #fecdd3;
 }
 
 .library-card-source-badge {
   display: inline-flex;
   align-items: center;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(8, 12, 22, 0.78);
-  padding: 0.1rem 0.35rem;
+  border-radius: 0.3rem;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 0.12rem 0.38rem;
   font-size: 8px;
   font-weight: 600;
   letter-spacing: 0.04em;
   line-height: 1.25;
-  color: #cbd5e1;
+  color: #d4d4d8;
   backdrop-filter: blur(6px);
   white-space: nowrap;
 }
@@ -2120,10 +2116,10 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 .library-card-desktop-only-badge {
   display: inline-flex;
   align-items: center;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  background: rgba(2, 40, 72, 0.82);
-  padding: 0.1rem 0.3rem;
+  border-radius: 0.3rem;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 0.12rem 0.32rem;
   font-size: 7px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -2135,8 +2131,8 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 
 .library-card-duration-set {
   font-weight: 600;
-  border-color: rgba(167, 139, 250, 0.35) !important;
-  background: rgba(30, 15, 55, 0.82) !important;
+  border: none !important;
+  background: rgba(0, 0, 0, 0.55) !important;
   color: rgb(233, 213, 255) !important;
 }
 

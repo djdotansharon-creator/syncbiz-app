@@ -92,9 +92,9 @@ function libraryUrlIngestPhaseClass(phase: string | null): string {
 
 const controlHeight = "h-10";
 const inputBase =
-  "w-full rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 py-2 text-sm text-slate-100 placeholder:text-slate-400 transition-all focus:border-[#1ed760]/70 focus:ring-2 focus:ring-[#1ed760]/30 focus:outline-none disabled:opacity-60 backdrop-blur-sm";
+  "w-full bg-transparent py-2 text-sm text-[#f5f5f7] placeholder:text-[#6e6e73] transition-colors focus:outline-none disabled:opacity-60";
 const addBtn =
-  "shrink-0 rounded-lg border border-[#1ed760]/35 bg-[#1ed760]/10 px-3 text-xs font-semibold text-[#1ed760] transition-all hover:bg-[#1ed760]/20 hover:border-[#1ed760]/55 hover:text-[#34d965] disabled:opacity-30 disabled:pointer-events-none";
+  "shrink-0 rounded-lg border border-white/[0.1] bg-white/[0.06] px-3 text-xs font-semibold text-[#f5f5f7] transition-colors hover:border-white/[0.18] hover:bg-white/[0.1] disabled:opacity-30 disabled:pointer-events-none";
 
 /** Desktop: trace folder drag; remove or gate if noisy. */
 function logDesktopLibraryIngestDrop(e: React.DragEvent, payload: string | null) {
@@ -1566,8 +1566,8 @@ export function LibraryInputArea({
           ingestStripBusy ? `sb-library-ingest-shell--busy ${ingestShellPhaseClass}` : ""
         } ${
           dragOver && hasLinkInDrag
-            ? "border-[#1ed760]/80 bg-[#1ed760]/10 shadow-[0_0_24px_rgba(30,215,96,0.2)]"
-            : "border-slate-800/80 bg-slate-950/98 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.08)] hover:border-slate-700/80"
+            ? "border-[#0a84ff]/50 bg-[#0a84ff]/10"
+            : "border-white/[0.08] bg-white/[0.035] hover:border-white/[0.14] focus-within:border-white/[0.18]"
         }`}
       >
         {ingestStripBusy ? <div className="sb-library-ingest-wave" aria-hidden /> : null}
@@ -1593,7 +1593,7 @@ export function LibraryInputArea({
         >
           {/* URL input */}
           <div className={`relative min-w-0 flex-1 ${controlHeight}`}>
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6e6e73]">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
               </svg>
@@ -1642,13 +1642,12 @@ export function LibraryInputArea({
             </button>
           </div>
 
+          {/* Hairline divider between the two halves of the bar */}
+          <span className="h-6 w-px shrink-0 bg-white/[0.08]" aria-hidden />
+
           {/* Search Library / YouTube + Mic */}
-          <div
-            className={`relative flex min-w-0 flex-1 items-center gap-1 rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 backdrop-blur-sm transition-all focus-within:border-[#1ed760]/70 focus-within:ring-2 focus-within:ring-[#1ed760]/30 ${
-              showResults && hasResults ? "rounded-b-none border-b-0" : ""
-            }`}
-          >
-          <span className="pl-3 text-slate-500">
+          <div className="relative flex min-w-0 flex-1 items-center gap-1">
+          <span className="pl-3 text-[#6e6e73]">
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
@@ -1689,7 +1688,7 @@ export function LibraryInputArea({
               }
             }}
             placeholder={t.universalSearchPlaceholder ?? "Search library or find on YouTube…"}
-            className={`${controlHeight} flex-1 bg-transparent py-2 pr-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none`}
+            className={`${controlHeight} flex-1 bg-transparent py-2 pr-2 text-sm text-[#f5f5f7] placeholder:text-[#6e6e73] focus:outline-none`}
             aria-label={t.search}
             autoComplete="off"
             disabled={urlIngesting}
@@ -1707,7 +1706,7 @@ export function LibraryInputArea({
                 setShowResults(false);
                 inputRef.current?.focus();
               }}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-700/60 hover:text-slate-200"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#6e6e73] transition-colors hover:bg-white/[0.08] hover:text-white"
               aria-label={t.clearSearchAria}
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1720,10 +1719,10 @@ export function LibraryInputArea({
               type="button"
               onClick={handleVoiceSearch}
               disabled={listening}
-              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-all ${
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${
                 listening
-                  ? "border-[#1ed760]/60 text-[#1ed760] shadow-[0_0_12px_rgba(30,215,96,0.35)]"
-                  : "border-slate-600/80 text-slate-400 hover:border-[#1ed760]/50 hover:text-[#1ed760] hover:shadow-[0_0_12px_rgba(30,215,96,0.2)]"
+                  ? "bg-[#0a84ff]/15 text-[#409cff]"
+                  : "text-[#6e6e73] hover:bg-white/[0.08] hover:text-white"
               }`}
               title={t.voiceSearch}
               aria-label={t.voiceSearch}
@@ -1756,8 +1755,8 @@ export function LibraryInputArea({
               title="Build AI playlist from SyncBiz catalog using this search prompt"
               className={`shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-semibold leading-none transition-colors ${
                 aiPlaylistBusy
-                  ? "border border-slate-600 text-slate-500"
-                  : "border border-cyan-500/35 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/18"
+                  ? "border border-white/[0.08] text-[#6e6e73]"
+                  : "border border-white/[0.1] bg-white/[0.05] text-[#a1a1a6] hover:bg-white/[0.09] hover:text-white"
               } disabled:pointer-events-none disabled:opacity-40`}
             >
               {aiPlaylistBusy ? "Building…" : "Build AI Playlist"}

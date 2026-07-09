@@ -2113,12 +2113,12 @@ function SourcesManagerInner({
       <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:grid-cols-[240px_minmax(0,1fr)] xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)]">
         {/* Secondary shelf — old playlists rail content, tucked under a quiet disclosure (nothing removed). */}
         <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch">
-          <details className="group/shelf">
+          <details open className="group/shelf">
             <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6e6e73] transition-colors duration-150 hover:text-white [&::-webkit-details-marker]:hidden">
               <svg className="h-3 w-3 shrink-0 transition-transform duration-150 group-open/shelf:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="9 18 15 12 9 6" />
               </svg>
-              Playlist Tiles
+              Scheduled & Ready Playlists
             </summary>
           <div className="space-y-4 pt-2">
             <section>
