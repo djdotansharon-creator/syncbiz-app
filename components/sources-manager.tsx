@@ -2096,7 +2096,7 @@ function SourcesManagerInner({
   );
 
   return (
-    <div className="library-theme library-page-shell flex w-full min-w-0 flex-col space-y-0" data-library-theme={libraryTheme}>
+    <div className="library-theme library-page-shell flex w-full min-w-0 flex-col space-y-0 lg:h-full lg:min-h-0" data-library-theme={libraryTheme}>
       {/*
        * Bottom row column widths mirror the top deck row (see app-shell
        * `library-player-route-bridge` grid) so the left Ready-Playlists
@@ -2110,10 +2110,10 @@ function SourcesManagerInner({
        * deck was still single-column at lg. Commit 21f97b7 activated the
        * 3-column deck at lg, so workspace rails now widen to match.
        */}
-      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:grid-cols-[240px_minmax(0,1fr)] xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:h-full lg:min-h-0 lg:grid-cols-[240px_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)_auto] lg:overflow-hidden xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)]">
         {/* Secondary shelf — old playlists rail content, tucked under a quiet disclosure (nothing removed). */}
-        <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch">
-          <details open className="group/shelf">
+        <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch lg:max-h-[42vh] lg:overflow-y-auto">
+          <details className="group/shelf">
             <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6e6e73] transition-colors duration-150 hover:text-white [&::-webkit-details-marker]:hidden">
               <svg className="h-3 w-3 shrink-0 transition-transform duration-150 group-open/shelf:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="9 18 15 12 9 6" />
@@ -2425,7 +2425,7 @@ function SourcesManagerInner({
           </details>
         </aside>
 
-        <div className="library-list-shell row-start-1 min-w-0 self-start overflow-hidden rounded-2xl p-2.5 lg:col-start-2 lg:row-start-1 lg:px-3 xl:px-3">
+        <div className="library-list-shell row-start-1 min-w-0 self-start overflow-hidden rounded-2xl p-2.5 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-stretch lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:px-3 xl:px-3">
           {routeEmbedded ? (
             <div className="flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto p-3 sm:p-4">
               <div className="flex shrink-0 justify-end">
@@ -2613,7 +2613,7 @@ function SourcesManagerInner({
             </div>
           </div>
 
-          <div className="mt-2 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1">
+          <div className="mt-2 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1 lg:max-h-none lg:flex-1 lg:min-h-0">
           {displaySources.length === 0 ? (
             <div className="library-empty-state relative overflow-hidden rounded-2xl py-20 text-center">
               <div className="library-empty-icon-plate mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl">
@@ -2888,6 +2888,23 @@ function SourcesManagerInner({
               {collectionOpenContext ? (
                 <header className="library-list-shell rounded-2xl px-4 py-3">
                   <div className="flex items-start gap-3">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelection(
+                          selection.type === "collection_container" && selection.subtype === "daypart_collection"
+                            ? { type: "collection_group", id: "dayparts_hours" }
+                            : { type: "library_view", id: "playlists" }
+                        )
+                      }
+                      aria-label="Back to playlists"
+                      title="Back to playlists"
+                      className="mt-4 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#a1a1a6] transition-colors hover:bg-white/[0.08] hover:text-white"
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="15 18 9 12 15 6" />
+                      </svg>
+                    </button>
                     <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl ring-1 ring-[color:var(--lib-border-thumb)] bg-[color:var(--lib-surface-card-art)]">
                       {collectionOpenContext.cover ? (
                         <HydrationSafeImage src={collectionOpenContext.cover} alt="" className="h-full w-full object-cover" />
@@ -3260,13 +3277,13 @@ function SourcesManagerInner({
           )}
           </div>
           </>) : (
-          <div className="max-h-[calc(100vh-16rem)] min-h-0 overflow-y-auto pr-1">
+          <div className="max-h-[calc(100vh-16rem)] min-h-0 overflow-y-auto pr-1 lg:max-h-none lg:flex-1">
             {workspaceRouteCenter}
           </div>
           )}
         </div>
 
-        <aside className="row-start-1 w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-1 lg:justify-self-stretch">
+        <aside className="row-start-1 w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-1 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-y-auto">
           <div className="space-y-4">
             <DjCreatorAiShell drawerOpen={djCreatorOpen} onDrawerOpenChange={onDjCreatorOpenChange} />
             <section>
@@ -3296,6 +3313,20 @@ function SourcesManagerInner({
                   className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Playlists</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelection({ type: "collection_group", id: "dayparts_hours" })}
+                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
+                >
+                  <span>Scheduled</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelection({ type: "collection_group", id: "curated_masters" })}
+                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
+                >
+                  <span>Ready Playlists</span>
                 </button>
                 <button
                   type="button"

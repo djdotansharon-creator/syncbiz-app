@@ -90,7 +90,7 @@ function libraryUrlIngestPhaseClass(phase: string | null): string {
   return "sb-library-ingest-shell--neutral";
 }
 
-const controlHeight = "h-10";
+const controlHeight = "h-8";
 const inputBase =
   "w-full bg-transparent py-2 text-sm text-[#f5f5f7] placeholder:text-[#6e6e73] transition-colors focus:outline-none disabled:opacity-60";
 const addBtn =
@@ -1576,7 +1576,7 @@ export function LibraryInputArea({
           <form
           noValidate
           onSubmit={handleUrlSubmit}
-          className="flex flex-nowrap items-center gap-2.5 px-3 py-2"
+          className="flex flex-nowrap items-center gap-2 px-2.5 py-1"
           onDragOverCapture={(e) => {
             if (isDraggingIngestPayload(e)) {
               e.preventDefault();

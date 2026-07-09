@@ -1320,7 +1320,7 @@ export function AppShell({ children }: { children: ReactNode }) {
        */}
 
       <div
-        className={`flex min-h-screen flex-1 flex-col${isMediaThemeRoute ? " app-sources-theme-scope" : ""}`}
+        className={`flex min-h-screen flex-1 flex-col${isMediaThemeRoute ? " app-sources-theme-scope lg:h-screen lg:overflow-hidden" : ""}`}
         {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
       >
         <header
@@ -1671,12 +1671,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
 
         <main
-          className={`flex-1 px-4 pb-4 sm:px-6${isLibraryPlayerMainFullWidth ? " pt-4" : " py-5"}${isMediaThemeRoute ? " library-main-below-deck" : ""}`}
+          className={`flex-1 px-4 pb-4 sm:px-6${isLibraryPlayerMainFullWidth ? " pt-4" : " py-5"}${isMediaThemeRoute ? " library-main-below-deck lg:min-h-0 lg:overflow-hidden" : ""}`}
           {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
         >
           <div
             className={
-              isLibraryPlayerMainFullWidth ? "mx-auto w-full max-w-none" : "mx-auto max-w-5xl"
+              isLibraryPlayerMainFullWidth
+                ? `mx-auto w-full max-w-none${isMediaThemeRoute ? " lg:h-full lg:min-h-0" : ""}`
+                : "mx-auto max-w-5xl"
             }
           >
             {children}
