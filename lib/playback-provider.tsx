@@ -52,6 +52,7 @@ import {
 } from "./play-next";
 import { fetchUnifiedSourcesWithFallback } from "./unified-sources-client";
 import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
+import { urlTimingMark } from "./url-startup-timing";
 
 export type PlaybackStatus = "idle" | "playing" | "paused" | "stopped";
 
@@ -106,6 +107,13 @@ function unifiedToPlaybackTrack(source: UnifiedSource, trackIndex = 0): Playback
         type: source.type as PlaylistType,
       }) ?? source.cover ?? null,
   };
+}
+
+/** True when a playback URL should use the in-app YouTube/SoundCloud iframe (not type alone). */
+function isEmbeddablePlaybackUrl(url: string | null | undefined): boolean {
+  const u = (url ?? "").trim().toLowerCase();
+  if (!u) return false;
+  return u.includes("youtube") || u.includes("youtu.be") || u.includes("soundcloud");
 }
 
 export function sourceToUnified(s: Source): UnifiedSource {
@@ -496,6 +504,12 @@ type PlaybackContextValue = PlaybackState & {
    * transient metadata flashing before recovery completes.
    */
   isRestoring: boolean;
+  /**
+   * True while a URL dropped/pasted on the player deck is being parsed, resolved, and persisted
+   * before `playSource`. Does not change `status`; AudioPlayer uses this for honest LOADING UI.
+   */
+  urlPrepareActive: boolean;
+  setUrlPrepareActive: (active: boolean) => void;
 };
 
 const PlaybackContext = createContext<PlaybackContextValue | null>(null);
@@ -678,6 +692,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [lastPlayCommandVia, setLastPlayCommandVia] = useState<PlayCommandVia>("unknown");
   const playCommandEpochRef = useRef(0);
   const [playCommandEpoch, setPlayCommandEpoch] = useState(0);
+  const [urlPrepareActive, setUrlPrepareActive] = useState(false);
 
   useEffect(() => {
     initDeviceId();
@@ -742,10 +757,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (source.playlist) {
       const tracks = getPlaylistTracks(source.playlist);
       const t = tracks[trackIdx] ?? tracks[0];
-      return t ? canEmbedInCard(t.type) : canEmbedInCard(source.type as "youtube" | "soundcloud");
+      if (t) {
+        if (canEmbedInCard(t.type)) return true;
+        if (isEmbeddablePlaybackUrl(t.url)) return true;
+      }
+      if (canEmbedInCard(source.type as "youtube" | "soundcloud")) return true;
+      return isEmbeddablePlaybackUrl(source.url);
     }
     if (source.source) return supportsEmbedded(source.source);
-    return source.type === "youtube" || source.type === "soundcloud";
+    if (source.type === "youtube" || source.type === "soundcloud") return true;
+    return isEmbeddablePlaybackUrl(source.url);
   }, []);
 
   /** TEMP: one-screen runtime audit for transport — pair `*_entry_state_before` with `*_state_after_transition`. */
@@ -901,7 +922,18 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const playSource = useCallback(
     (source: UnifiedSource, trackIndex = 0, opts?: PlaySourceOptions) => {
-      if (!deviceModeAllowsLocalPlayback.current) return;
+      setUrlPrepareActive(false);
+      if (!deviceModeAllowsLocalPlayback.current) {
+        console.warn("[SyncBiz Audit] playSource BLOCKED by deviceModeAllowsLocalPlayback", {
+          sourceId: source.id,
+          sourceTitle: source.title,
+          sourceUrl: source.url,
+          sourceOrigin: source.origin,
+          sourceType: source.type,
+          note: "Check: effectiveDeviceMode, pathname, isBrowserShell in DeviceCtx console logs",
+        });
+        return;
+      }
       const via = opts?.via ?? "unknown";
       playCommandViaRef.current = via;
       setLastPlayCommandVia(via);
@@ -921,6 +953,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         trackIndex,
         via: "playSource",
       });
+      urlTimingMark("playSource_entered", { sourceId: source.id, trackIndex, via });
 
       const sourceEffectiveTrackCount = source.playlist ? getPlaylistTracks(source.playlist).length : 0;
       const isEphemeralLocalFolderSession = !!(
@@ -939,6 +972,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
       console.log("[SyncBiz Audit] playSource shell hydration check", {
         sourceId: source.id,
+        sourceTitle: source.title,
+        sourceUrl: source.url,
         origin: source.origin,
         playlistId: source.playlist?.id ?? null,
         sourcePlaylistTracksLen: source.playlist?.tracks?.length ?? 0,
@@ -951,7 +986,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         resolved: UnifiedSource,
         hydrationPath: "sync" | "merged" | "shell_fallback" = "sync",
       ) => {
-        const playlist = effectivePlaybackPlaylistAttachment(resolved);
+        // Reconcile with the richer in-memory session snap (same logic as getPlaylistSessionTracks)
+        // so queue-row jumps resolve the requested leaf index/URL, not a thin source.playlist shell.
+        const snap = playbackStateForAuditRef.current;
+        const playlist = getActivePlaylist({
+          currentSource: resolved,
+          currentPlaylist: snap.currentSource?.id === resolved.id ? snap.currentPlaylist : null,
+        });
         const tracks = playlist ? getPlaylistTracks(playlist) : [];
         console.log("[SyncBiz Audit] playSource runPlay session playlist snapshot", {
           hydrationPath,
@@ -996,14 +1037,21 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         }
 
         if (playlist && tracks.length === 0) {
-          mvpLog("empty_playlist", { id: resolved.id, title: resolved.title });
-          setState((s) => ({ ...s, lastMessage: "Playlist is empty" }));
-          return;
+          if (!urlPlayable(url)) {
+            // Genuinely unplayable: playlist has no individual tracks and no valid source URL.
+            mvpLog("empty_playlist", { id: resolved.id, title: resolved.title, url: url || "(empty)" });
+            setState((s) => ({ ...s, lastMessage: "Playlist is empty", status: "stopped" as const }));
+            return;
+          }
+          // Playlist has no individual track items but source.url is valid — this is a single-URL
+          // playlist saved from search (url field holds the video URL, items table is empty).
+          // Fall through and let the URL-based path handle playback.
+          mvpLog("single_url_playlist_fallback", { id: resolved.id, title: resolved.title, url });
         }
 
         if (!urlPlayable(url)) {
           mvpLog("invalid_url", { url: url || "(empty)", id: resolved.id, title: resolved.title });
-          setState((s) => ({ ...s, lastMessage: "Invalid playback URL" }));
+          setState((s) => ({ ...s, lastMessage: "Invalid playback URL", status: "stopped" as const }));
           return;
         }
 
@@ -1014,7 +1062,6 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           isRadioOrStream ||
           (playlist && track ? canEmbedInCard(track.type) : resolved.type === "youtube" || resolved.type === "soundcloud");
 
-        const snap = playbackStateForAuditRef.current;
         const sameActiveSession =
           snap.currentSource?.id === resolved.id &&
           snap.currentTrackIndex === idx &&
@@ -1034,13 +1081,25 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           return;
         }
 
+        urlTimingMark("provider_currentSource_set", {
+          sourceId: resolved.id,
+          resolvedPlayUrl: url.slice(0, 120),
+          trackIndex: idx,
+          embedded,
+        });
         setState((s) => {
           console.log("[SyncBiz Audit] playlist load start", {
             sourceId: resolved.id,
             origin: resolved.origin,
-            playlistId: playlist?.id,
+            playlistId: playlist?.id ?? null,
             trackIndex,
             resolvedTrackIndex: idx,
+            resolvedPlayUrl: url,
+            embedded,
+            isEphemeralCatalogPreview: resolved.id.startsWith("catalog-preview-"),
+            catalogItemId: (resolved as Record<string, unknown>).catalogItemId ?? null,
+            hasPlaylistAttachment: !!playlist,
+            trackCount: tracks.length,
             queueLenBefore: s.queue.length,
             currentSourceId: s.currentSource?.id ?? null,
             isHydration: hasRestoredRef.current,
@@ -1114,6 +1173,25 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         const pid = source.playlist!.id;
         const fetchUrl = `/api/playlists/${encodeURIComponent(pid)}`;
         const hydrationMode: "shell" | "richer_probe" = needsShellHydration ? "shell" : "richer_probe";
+
+        // For richer-probe (source already has tracks): start playback immediately so the user
+        // hears audio without waiting for the background probe. The probe may later swap in a
+        // richer playlist (more tracks), but audio never stalls on the network round-trip.
+        //
+        // For thin-shell (no track items, but source.url is a valid direct URL): also start
+        // immediately using source.url as the playable URL. The hydration probe runs in the
+        // background; when it completes it will call runPlay(merged) which resolves the same
+        // URL (getPlayUrl falls back to source.url when tracks is empty), so currentPlayUrl
+        // does not change and the audio engine is not restarted.
+        const rawShellUrl = (source.url ?? "").trim();
+        const shellUrlPlayable = rawShellUrl && !rawShellUrl.startsWith("local://") && isValidPlaybackUrl(rawShellUrl);
+
+        if (!needsShellHydration && sourceEffectiveTrackCount > 0) {
+          runPlay(source, "sync");
+        } else if (needsShellHydration && shellUrlPlayable) {
+          runPlay(source, "sync");
+        }
+
         void (async () => {
           if (!deviceModeAllowsLocalPlayback.current) return;
           try {
@@ -1142,10 +1220,15 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
                   reason: "fetch_not_ok",
                   hydrationMode,
                 });
-                setState((s) => ({
-                  ...s,
-                  lastMessage: "Failed to load playlist for playback.",
-                }));
+                // If source has a valid URL we already started playback via early runPlay; just log.
+                // Otherwise revert status so the UI does not show a fake PLAYING state.
+                if (!shellUrlPlayable) {
+                  setState((s) => ({
+                    ...s,
+                    lastMessage: "Failed to load playlist for playback.",
+                    status: "stopped" as const,
+                  }));
+                }
                 return;
               }
               runPlay(source, "shell_fallback");
@@ -1169,10 +1252,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
                   reason: "json_parse_failed",
                   hydrationMode,
                 });
-                setState((s) => ({
-                  ...s,
-                  lastMessage: "Failed to load playlist for playback.",
-                }));
+                if (!shellUrlPlayable) {
+                  setState((s) => ({
+                    ...s,
+                    lastMessage: "Failed to load playlist for playback.",
+                    status: "stopped" as const,
+                  }));
+                }
                 return;
               }
               runPlay(source, "shell_fallback");
@@ -1194,10 +1280,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
                   reason: "missing_playlist_id_in_body",
                   hydrationMode,
                 });
-                setState((s) => ({
-                  ...s,
-                  lastMessage: "Failed to load playlist for playback.",
-                }));
+                if (!shellUrlPlayable) {
+                  setState((s) => ({
+                    ...s,
+                    lastMessage: "Failed to load playlist for playback.",
+                    status: "stopped" as const,
+                  }));
+                }
                 return;
               }
               runPlay(source, "shell_fallback");
@@ -1225,10 +1314,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
                 error: String(e),
                 hydrationMode,
               });
-              setState((s) => ({
-                ...s,
-                lastMessage: "Failed to load playlist for playback.",
-              }));
+              if (!shellUrlPlayable) {
+                setState((s) => ({
+                  ...s,
+                  lastMessage: "Failed to load playlist for playback.",
+                  status: "stopped" as const,
+                }));
+              }
               return;
             }
             runPlay(source, "shell_fallback");
@@ -1388,7 +1480,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   );
 
   const play = useCallback(() => {
-    if (!deviceModeAllowsLocalPlayback.current) return;
+    if (!deviceModeAllowsLocalPlayback.current) {
+      console.warn("[SyncBiz Audit] play() BLOCKED by deviceModeAllowsLocalPlayback");
+      return;
+    }
     setState((s) => (s.currentSource ? { ...s, status: "playing" as const } : s));
   }, []);
 
@@ -2311,6 +2406,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       isRestoring,
       lastPlayCommandVia,
       playCommandEpoch,
+      urlPrepareActive,
+      setUrlPrepareActive,
     }),
     [
       state,
@@ -2348,6 +2445,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       isRestoring,
       lastPlayCommandVia,
       playCommandEpoch,
+      urlPrepareActive,
     ],
   );
 

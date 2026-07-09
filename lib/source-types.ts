@@ -297,6 +297,13 @@ function classifyLibraryLeafEntityContract(source: UnifiedSource): LibraryEntity
     return { entityKind: "collection", collectionSubtype: "external_playlist" };
   }
 
+  // A leaf with an explicit single-track node kind is always a media item — never a collection,
+  // regardless of `origin`. This prevents single YouTube videos added via search (origin:"playlist",
+  // contentNodeKind:"single_track") from being misclassified as syncbiz_playlist.
+  if (kind === "single_track" || kind === "track") {
+    return { entityKind: "item", itemSubtype: "single_track" };
+  }
+
   const u = (source.url ?? "").toLowerCase();
   const isExternalPlaylist =
     (u.includes("youtube.com") && u.includes("list=")) ||
@@ -307,9 +314,6 @@ function classifyLibraryLeafEntityContract(source: UnifiedSource): LibraryEntity
   }
   if (source.origin === "playlist" && source.playlist?.libraryPlacement === "ready_external") {
     return { entityKind: "collection", collectionSubtype: "external_playlist" };
-  }
-  if (source.origin === "playlist") {
-    return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };
   }
   return { entityKind: "item", itemSubtype: "single_track" };
 }

@@ -178,6 +178,17 @@ export function useRemoteControlWs(
           if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("library-updated"));
         } else if (data.type === "ERROR") {
           const msg = (data as { message?: string }).message ?? "";
+          // Non-fatal SET_MASTER rejections: stay connected in CONTROL mode.
+          // Closing the socket here would cause an immediate reconnect that
+          // would re-register and potentially steal MASTER from the playing device.
+          if (msg === "MASTER_LOCKED_PLAYING") {
+            console.warn("[SyncBiz WS] SET_MASTER denied — live MASTER is playing (MASTER_LOCKED_PLAYING). Staying in CONTROL.");
+            return;
+          }
+          if (/Dedicated player is currently MASTER|Streamer has branch audio priority/i.test(msg)) {
+            console.warn("[SyncBiz WS] SET_MASTER denied — priority device holds MASTER:", msg);
+            return;
+          }
           if (/invalid|expired|token/i.test(msg)) {
             onAuthErrorRef.current?.();
             if (process.env.NODE_ENV === "development") {

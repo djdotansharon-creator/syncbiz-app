@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PlaylistTrack } from "@/lib/playlist-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { getPlaylistSessionTracks, usePlayback } from "@/lib/playback-provider";
+import { useDevicePlayer } from "@/lib/device-player-context";
+import type { SessionTrackMirror } from "@/lib/remote-control/types";
 import { isPlayNextSourceId } from "@/lib/play-next";
 import { resolveMyMusicLibraryDropFromDataTransfer } from "@/lib/music-library-drag";
 import {
@@ -13,10 +15,23 @@ import {
   normalizeLocalFilePathInput,
 } from "@/lib/local-audio-path";
 import { isValidLocalFilePlaybackPath, isValidPlaybackUrl } from "@/lib/url-validation";
-import { effectivePlaybackPlaylistAttachment } from "@/lib/playlist-utils";
+import { effectivePlaybackPlaylistAttachment, derivePlaylistTrackCoverArt } from "@/lib/playlist-utils";
 import type { UnifiedSource } from "@/lib/source-types";
+import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 
 type TrackExtra = PlaylistTrack & { durationSeconds?: number; genre?: string; artist?: string };
+
+function mirrorTracksToPlaylistTracks(mirrors: SessionTrackMirror[]): PlaylistTrack[] {
+  return mirrors.map((m) => ({
+    id: m.id,
+    name: m.title,
+    title: m.title,
+    cover: m.cover ?? undefined,
+    url: m.url ?? "",
+    type: "stream-url" as const,
+    durationSeconds: m.durationSeconds,
+  }));
+}
 
 /** Thumbnail/CDN URLs — not playable as "Play Next" targets. */
 function isImageLikeHttpUrl(url: string): boolean {
@@ -308,6 +323,13 @@ function formatClockTotal(seconds: number | undefined | null): string {
 
 /** Operator Live Queue: session list + in-memory Play Next (local + URLs; does not change saved playlists). */
 export function LiveQueuePanel() {
+  const deviceCtx = useDevicePlayer();
+  const isControlMirror = Boolean(
+    deviceCtx?.isBranchConnected &&
+      deviceCtx.deviceMode === "CONTROL" &&
+      !deviceCtx.isMobileLocalPlayback,
+  );
+  const masterState = deviceCtx?.masterState;
   const {
     currentSource,
     currentPlaylist,
@@ -486,24 +508,14 @@ export function LiveQueuePanel() {
     };
   }, [ingestDataTransfer, showHint]);
 
-  // Flash the NEXT section when the queue grows so the enqueue is obvious even if the list is long.
-  useEffect(() => {
-    const prev = prevPlayNextLenRef.current;
-    prevPlayNextLenRef.current = playNextQueue.length;
-    if (playNextQueue.length <= prev) return;
-    const node = nextBlockRef.current;
-    if (!node) return;
-    if (flashTimer.current) clearTimeout(flashTimer.current);
-    node.classList.remove("play-next-block-flash");
-    void node.offsetWidth;
-    node.classList.add("play-next-block-flash");
-    flashTimer.current = setTimeout(() => {
-      node.classList.remove("play-next-block-flash");
-      flashTimer.current = null;
-    }, 900);
-  }, [playNextQueue.length]);
-
   const sessionForList = useMemo(() => {
+    if (isControlMirror && masterState) {
+      return {
+        currentSource: null,
+        currentPlaylist: null,
+        highlightIndex: typeof masterState.currentTrackIndex === "number" ? masterState.currentTrackIndex : 0,
+      };
+    }
     if (isPlayNextSourceId(currentSource?.id) && playNextBaseline) {
       return {
         currentSource: playNextBaseline.currentSource,
@@ -516,19 +528,63 @@ export function LiveQueuePanel() {
       currentPlaylist,
       highlightIndex: currentTrackIndex,
     };
-  }, [currentSource, currentPlaylist, currentTrackIndex, playNextBaseline]);
-
-  const sessionTracks = useMemo(
-    () => getPlaylistSessionTracks({ currentSource: sessionForList.currentSource, currentPlaylist: sessionForList.currentPlaylist }),
-    [sessionForList.currentSource, sessionForList.currentPlaylist],
-  );
+  }, [isControlMirror, masterState, currentSource, currentPlaylist, currentTrackIndex, playNextBaseline]);
 
   const onPlaylist = useMemo(() => {
+    if (isControlMirror) return null;
     const a = sessionForList.currentSource ? effectivePlaybackPlaylistAttachment(sessionForList.currentSource) : null;
     return a ?? sessionForList.currentPlaylist;
-  }, [sessionForList.currentSource, sessionForList.currentPlaylist]);
+  }, [sessionForList.currentSource, sessionForList.currentPlaylist, isControlMirror]);
 
-  const plName = onPlaylist?.name?.trim() || sessionForList.currentSource?.title?.trim() || "Current session";
+  const sessionTracks = useMemo(() => {
+    if (isControlMirror && masterState?.sessionTracks?.length) {
+      return mirrorTracksToPlaylistTracks(masterState.sessionTracks);
+    }
+    const fromProvider = getPlaylistSessionTracks({
+      currentSource: sessionForList.currentSource,
+      currentPlaylist: sessionForList.currentPlaylist,
+    });
+    if (fromProvider.length > 0) return fromProvider;
+    // Render-only fallback: keep session rows visible when the playlist attachment
+    // (same source as the header name) still has tracks but provider reconciliation
+    // returned empty for a tick.
+    return onPlaylist ? getPlaylistTracks(onPlaylist) : [];
+  }, [isControlMirror, masterState?.sessionTracks, sessionForList.currentSource, sessionForList.currentPlaylist, onPlaylist]);
+
+  const visiblePlayNextQueue = useMemo(() => {
+    if (isControlMirror && masterState?.playNextQueue?.length) {
+      return masterState.playNextQueue.map((it) => ({
+        id: it.id,
+        title: it.title,
+        cover: it.cover,
+      }));
+    }
+    return playNextQueue;
+  }, [isControlMirror, masterState?.playNextQueue, playNextQueue]);
+
+  // Flash the NEXT section when the queue grows so the enqueue is obvious even if the list is long.
+  useEffect(() => {
+    const prev = prevPlayNextLenRef.current;
+    prevPlayNextLenRef.current = visiblePlayNextQueue.length;
+    if (visiblePlayNextQueue.length <= prev) return;
+    const node = nextBlockRef.current;
+    if (!node) return;
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    node.classList.remove("play-next-block-flash");
+    void node.offsetWidth;
+    node.classList.add("play-next-block-flash");
+    flashTimer.current = setTimeout(() => {
+      node.classList.remove("play-next-block-flash");
+      flashTimer.current = null;
+    }, 900);
+  }, [visiblePlayNextQueue.length]);
+
+  const plName =
+    isControlMirror
+      ? (masterState?.sessionTitle?.trim() ||
+          masterState?.currentSource?.title?.trim() ||
+          "Current session")
+      : onPlaylist?.name?.trim() || sessionForList.currentSource?.title?.trim() || "Current session";
   const playlistGenre = (onPlaylist?.genre ?? "").trim();
 
   /**
@@ -567,7 +623,9 @@ export function LiveQueuePanel() {
    * acceptable for this iteration — operators using "hide" already know the row is gone from
    * their visible plan; auto-skipping would be a behaviour change they explicitly deferred.
    */
-  const sessionScopeId = sessionForList.currentSource?.id ?? null;
+  const sessionScopeId = isControlMirror
+    ? (masterState?.currentSource?.id ?? masterState?.sessionPlaylistId ?? null)
+    : (sessionForList.currentSource?.id ?? null);
   const [removedSessionTrackIndexes, setRemovedSessionTrackIndexes] = useState<Set<number>>(
     () => new Set(),
   );
@@ -686,12 +744,12 @@ export function LiveQueuePanel() {
   // "+M:SS" addendum makes it clear the total grows when the operator queues extras while
   // keeping the saved-session total visually distinct.
   const playNextSeconds = useMemo(() => {
-    const known = playNextQueue
+    const known = visiblePlayNextQueue
       .map((it) => (it as UnifiedSource & { durationSeconds?: number }).durationSeconds)
       .filter((d): d is number => typeof d === "number" && d >= 0);
     if (known.length === 0) return null;
     return known.reduce((a, b) => a + b, 0);
-  }, [playNextQueue]);
+  }, [visiblePlayNextQueue]);
 
   const markNextInOrder = !shuffle && sessionTracks.length > 0;
   const nextLinear = useMemo(() => {
@@ -735,29 +793,45 @@ export function LiveQueuePanel() {
     [addPlayNextFromUrls, showHint],
   );
 
+  const playSessionTrack = deviceCtx?.playSourceOrSend ?? playSource;
+
   /**
-   * Double-click jump: re-invokes playSource on the displayed session source at the requested
+   * Queue row jump: re-invokes playSource on the displayed session source at the requested
    * underlying track index. Reuses the existing playback path (no separate "jump" code path),
-   * so MPV / embedded / queue handling stay identical to a normal Play. The saved playlist
-   * tracks aren't touched — playSource just sets currentTrackIndex.
+   * so MPV / embedded / queue handling stay identical to a normal Play.
    *
-   * When sessionForList is the play-next baseline (Play Next is currently active), jumping
-   * effectively returns to the saved session at the chosen index. Stale playNextBaseline
-   * state is harmless after that: next() only restores baseline when currentSource is a
-   * playnext id, which it no longer will be.
+   * Attaches the reconciled onPlaylist when present so runPlay sees the same leaf rows as the
+   * queue list (not a thin source.playlist shell that would clamp every jump to index 0).
    */
   const jumpToSessionTrack = useCallback(
     (originalIndex: number) => {
-      const src = sessionForList.currentSource;
-      if (!src) return;
       if (originalIndex < 0 || originalIndex >= sessionTracks.length) return;
+
+      let src = sessionForList.currentSource;
+      if (!src && isControlMirror && masterState?.currentSource?.id && currentSource?.id === masterState.currentSource.id) {
+        src = currentSource;
+      }
+      if (!src) return;
+
+      const pl = onPlaylist;
+      const jumpSource =
+        pl && (!src.playlist || src.playlist.id === pl.id) ? { ...src, playlist: pl } : src;
+
       try {
-        playSource(src, originalIndex);
+        playSessionTrack(jumpSource, originalIndex);
       } catch (err) {
         console.warn("[SyncBiz:live-queue-jump] failed", err);
       }
     },
-    [playSource, sessionForList.currentSource, sessionTracks.length],
+    [
+      playSessionTrack,
+      sessionForList.currentSource,
+      sessionTracks.length,
+      isControlMirror,
+      masterState?.currentSource?.id,
+      currentSource,
+      onPlaylist,
+    ],
   );
 
   const removeSessionRow = useCallback((originalIndex: number) => {
@@ -793,28 +867,23 @@ export function LiveQueuePanel() {
        * Was a 3-row stack of "Live queue" / name+total / shuffle; that consumed too much
        * vertical real estate on the deck for what's effectively just metadata.
        */}
-      <header className="shrink-0 border-b border-slate-800/50 pb-1">
-        {/*
-         * Single-line header: [QUEUE] [Playlist name] [TOTAL hh:mm:ss (+m:ss NEXT)].
-         * Was two rows; collapsing onto one line freed ~16px which the session list now uses
-         * to show one extra track row. Playlist name is the flex-1 truncating element so
-         * arbitrarily long names degrade gracefully while TOTAL always stays visible at the
-         * end. The shuffle/RANDOM ON chip was already removed (the player surface owns that).
-         */}
-        <div className="flex items-baseline gap-1.5">
-          <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500">QUEUE</span>
-          <p className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-100/95" title={plName}>
+      <header className="shrink-0 border-b border-white/[0.06] pb-1.5">
+        <div className="flex items-baseline gap-2">
+          <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-600">QUEUE</span>
+          <p
+            className={`min-w-0 flex-1 truncate ${sessionTracks.length === 0 ? "text-[10px] font-medium text-slate-600/60" : "text-[11px] font-medium text-slate-200"}`}
+            title={plName}
+          >
             {plName}
           </p>
           {totalPlaylistSeconds != null && sessionTracks.length > 0 ? (
             <span className="shrink-0 flex items-baseline gap-1 text-[10px]" title="Total duration of the active session">
-              <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500">TOTAL</span>
-              <span className="font-mono font-semibold tabular-nums text-sky-200/95">
+              <span className="font-mono font-medium tabular-nums text-slate-400">
                 {formatClockTotal(totalPlaylistSeconds)}
               </span>
               {playNextSeconds != null && playNextSeconds > 0 ? (
                 <span
-                  className="font-mono tabular-nums text-emerald-300/90"
+                  className="font-mono tabular-nums text-emerald-300/85"
                   title="Additional time queued via Play Next (with known durations)"
                 >
                   +{formatClockTotal(playNextSeconds)}
@@ -825,115 +894,88 @@ export function LiveQueuePanel() {
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain py-0.5 pr-0.5">
+      <div className="min-h-0 flex-1 basis-0 overflow-y-auto overflow-x-hidden overscroll-contain py-1 pr-0.5">
         {sessionTracks.length === 0 ? (
-          <p className="text-xs text-slate-500">No active playlist - pick one from the library to start a session.</p>
+          <p className="text-[10px] leading-tight text-slate-500/70">Pick a playlist to start</p>
         ) : displayedSessionTracks.length === 0 ? (
-          <p className="text-xs text-slate-500">All session rows hidden. Pick a different playlist to reset.</p>
+          <p className="text-[10px] leading-tight text-slate-500/70">All session rows hidden</p>
         ) : (
-          <div role="table" className="w-full min-w-0 text-xs">
-            {/*
-             * Grid columns: [LED] [#] [Title] [Time] [Trash slot]. Trash slot is a fixed 1rem
-             * column reserved on every row so the layout doesn't jitter when the button shows
-             * up on hover. The button itself is invisible-by-default and lights up on hover or
-             * keyboard focus.
-             */}
-            <div
-              className="grid grid-cols-[0.6rem_1.5rem_minmax(0,1fr)_2.75rem_1rem] gap-1 border-b border-slate-800/50 pb-0.5 text-[10px] font-medium text-slate-500"
-              aria-hidden
-            >
-              <span />
-              <span className="text-right font-bold">#</span>
-              <span>Title</span>
-              <span className="text-right">Time</span>
-              <span />
-            </div>
+          <ul className="flex w-full min-w-0 flex-col gap-1.5">
             {displayedSessionTracks.map(({ track: t, originalIndex: i }, displayIndex) => {
               const tr = t as TrackExtra;
               const title = t.name ?? t.title ?? t.url ?? "Track";
-              const sub =
+              const artistLine =
                 (tr.artist && String(tr.artist)) ||
                 (tr.genre && String(tr.genre)) ||
                 (sessionTracks.length === 1 && playlistGenre ? playlistGenre : null);
+              const thumb = derivePlaylistTrackCoverArt({ cover: t.cover, url: t.url, type: t.type });
               const isCurrent = i === sessionForList.highlightIndex;
               const isNextInList = markNextInOrder && nextLinear !== null && i === nextLinear;
               const rowDurationSeconds = getTrackDuration(t);
-              // Display number is the position within the *visible* list (1..N), not the
-              // underlying playlist index. After session-only removals the operator expects
-              // sequential 1, 2, 3... — without this, hidden rows leave gaps (e.g. 18 -> 22).
-              // Underlying `i` is still used everywhere it matters for behavior (jump,
-              // remove, isCurrent, isNextInList) so playback stays bound to the saved order.
               const displayNumber = displayIndex + 1;
               return (
-                <div
+                <li
                   key={`${t.id}-${i}`}
-                  role="row"
                   tabIndex={0}
-                  title="Double-click to play"
-                  onDoubleClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    jumpToSessionTrack(i);
-                  }}
+                  role="button"
+                  title="Click to play"
+                  onClick={() => jumpToSessionTrack(i)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") {
+                    if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
                       jumpToSessionTrack(i);
                     }
                   }}
-                  // Block native text-selection on the second mousedown of a dblclick so the
-                  // operator doesn't get a flash of selected title text mid-action.
-                  onMouseDown={(e) => {
-                    if (e.detail > 1) e.preventDefault();
-                  }}
-                  className={`queue-row group grid cursor-pointer select-none grid-cols-[0.6rem_1.5rem_minmax(0,1fr)_2.75rem_1rem] items-baseline gap-1 border-b border-slate-800/25 py-0.5 leading-tight focus:outline-none focus:ring-1 focus:ring-sky-400/50 ${
+                  className={`queue-row group relative grid cursor-pointer select-none grid-cols-[2.25rem_minmax(0,1fr)_3.5rem_1.75rem] items-center gap-x-2 rounded-[5px] border px-2 py-2 leading-snug transition-colors focus:outline-none focus:ring-1 focus:ring-white/15 ${
                     isCurrent
-                      ? "queue-row-current bg-sky-500/10 text-slate-50"
+                      ? "queue-row-current border-white/[0.08] bg-white/[0.04] text-slate-100"
                       : isNextInList
-                        ? "bg-emerald-500/5 text-slate-200 hover:bg-emerald-500/10"
-                        : "text-slate-300/95 hover:bg-slate-800/40"
+                        ? "border-white/[0.05] bg-white/[0.02] text-slate-300 hover:bg-white/[0.04]"
+                        : "border-white/[0.04] bg-transparent text-slate-400 hover:border-white/[0.06] hover:bg-white/[0.02]"
                   }`}
                 >
-                  <span className="flex h-full items-center justify-center" aria-hidden={!isCurrent}>
+                  {isCurrent ? (
+                    <span className="pointer-events-none absolute bottom-1 left-0 top-1 w-[2px] rounded-full bg-amber-500/70" aria-hidden />
+                  ) : null}
+                  <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-md bg-slate-800/80 ring-1 ring-white/[0.06]">
+                    {thumb ? (
+                      <HydrationSafeImage src={thumb} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-[9px] font-bold text-slate-500">
+                        {displayNumber}
+                      </div>
+                    )}
                     {isCurrent ? (
-                      <span
-                        aria-label="Now playing"
-                        title="Now playing"
-                        className="live-queue-led-now inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-sky-300 shadow-[0_0_6px_rgba(56,189,248,0.95)]"
-                      />
+                      <span className="sr-only">Now playing</span>
                     ) : null}
-                  </span>
-                  <span
-                    className={`flex h-full items-center justify-end font-mono text-[12px] font-bold tabular-nums ${
-                      isCurrent ? "text-sky-200" : isNextInList ? "text-emerald-300/90" : "text-slate-300"
-                    }`}
-                    aria-hidden
-                  >
-                    {displayNumber}
-                  </span>
+                  </div>
                   <div className="min-w-0 overflow-hidden">
                     <div className="queue-row-title relative flex min-w-0 items-center overflow-hidden">
-                      {isNextInList && !isCurrent ? <span className="me-0.5 shrink-0 text-[9px] font-bold uppercase text-emerald-400/90">Next </span> : null}
+                      {isNextInList && !isCurrent ? (
+                        <span className="me-1.5 shrink-0 text-[9px] font-medium uppercase tracking-wide text-slate-500">Next</span>
+                      ) : null}
                       <div className="min-w-0 flex-1 overflow-hidden">
                         <div className="queue-row-title-marquee flex w-max gap-12 whitespace-nowrap" title={title}>
-                          <span dir="auto" className="text-xs font-medium">{title}</span>
-                          <span dir="auto" aria-hidden className="text-xs font-medium">{title}</span>
+                          <span dir="auto" className="text-[13px] font-semibold leading-tight text-slate-100">{title}</span>
+                          <span dir="auto" aria-hidden className="text-[13px] font-semibold leading-tight text-slate-100">{title}</span>
                         </div>
                       </div>
                     </div>
-                    {sub ? <span dir="auto" className="line-clamp-1 text-[10px] text-slate-500/90">{sub}</span> : null}
+                    {artistLine ? (
+                      <span dir="auto" className="mt-1 line-clamp-1 text-[11px] leading-snug text-slate-400/90">{artistLine}</span>
+                    ) : null}
                   </div>
-                  <span className="shrink-0 text-right font-mono text-[10px] font-medium tabular-nums text-slate-200/95">
+                  <span className="shrink-0 text-right font-mono text-sm font-medium tabular-nums text-slate-500">
                     {formatClockRow(rowDurationSeconds)}
                   </span>
-                  {/*
-                   * Trash slot. Disabled on the currently-playing row (per product rule:
-                   * skip-on-delete is deferred). On future rows, hidden by default; visible on
-                   * row hover or button focus to keep the row dense. stopPropagation prevents
-                   * the parent row's double-click from firing when the operator clicks fast.
-                   */}
                   {isCurrent ? (
-                    <span aria-hidden />
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center" aria-label="Now playing">
+                      <span className="queue-now-playing-bars queue-now-playing-bars--action-slot" aria-hidden>
+                        <span />
+                        <span />
+                        <span />
+                      </span>
+                    </span>
                   ) : (
                     <button
                       type="button"
@@ -946,9 +988,9 @@ export function LiveQueuePanel() {
                       }}
                       onMouseDown={(e) => e.stopPropagation()}
                       onDoubleClick={(e) => e.stopPropagation()}
-                      className="flex h-full items-center justify-center rounded text-[12px] leading-none text-slate-500/70 transition-colors hover:text-rose-300 focus:outline-none focus:ring-1 focus:ring-rose-400/60"
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] text-slate-500/60 opacity-50 transition-all hover:bg-white/[0.04] hover:text-slate-400 hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-1 focus:ring-white/15 group-hover:opacity-75"
                     >
-                      <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+                      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
                         <path
                           d="M5 3V2h6v1h3v1.4H2V3h3zm-1.5 2.4h9l-.7 8.4a1 1 0 0 1-1 .9H5.2a1 1 0 0 1-1-.9l-.7-8.4zM6.6 7v6h1V7h-1zm2.8 0v6h1V7h-1z"
                           fill="currentColor"
@@ -956,38 +998,24 @@ export function LiveQueuePanel() {
                       </svg>
                     </button>
                   )}
-                </div>
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
       </div>
 
       {/*
-       * NEXT block lists ONLY upcoming staged items. The currently-playing Play Next item
-       * (when present) is intentionally NOT echoed here — the player UI already shows it
-       * prominently, and operators read its presence here as "still queued / will replay".
-       * Block collapses to a single 1-line header when there's nothing staged so the deck
-       * height doesn't visibly change between empty and 1-item-queued states.
+       * Staged Play Next items (when any) + slim drop target.
+       * No separate "DROP NEXT" header — the pad label is the only title.
        */}
       <div
         ref={nextBlockRef}
-        className="play-next-block shrink-0 border-t border-slate-800/45 pt-1 transition-colors"
+        className={`play-next-block shrink-0 border-t border-white/[0.05] pt-1 transition-colors ${visiblePlayNextQueue.length === 0 ? "opacity-80" : ""}`}
       >
-        <div className="flex items-baseline justify-between gap-1.5">
-          <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-amber-200/85">NEXT</span>
-          <span className="text-[9px] font-mono tabular-nums text-amber-200/60">{playNextQueue.length}</span>
-        </div>
-        {playNextQueue.length > 0 ? (
-          /*
-           * NEXT rows mirror the session-row title treatment: single line, `text-xs
-           * font-medium`, and the same `queue-row-title-marquee` doubled-span structure so
-           * long titles scroll horizontally instead of wrapping to a second line. Was a
-           * `text-[10px]` block with `line-clamp-2 break-words` which both shrank the text
-           * relative to the session list AND consumed two full vertical lines per row.
-           */
-          <ol className="mt-0.5 max-h-32 list-decimal space-y-px overflow-y-auto pl-4 leading-tight text-slate-200/90 marker:text-[10px] marker:font-bold marker:text-amber-200/70">
-            {playNextQueue.map((it) => (
+        {visiblePlayNextQueue.length > 0 ? (
+          <ol className="mb-1 max-h-20 list-decimal space-y-px overflow-y-auto pl-4 leading-tight text-slate-200/90 marker:text-[10px] marker:font-bold marker:text-amber-200/70">
+            {visiblePlayNextQueue.map((it) => (
               <li key={it.id} className="group/pn flex items-center gap-1 pl-0.5">
                 <div className="min-w-0 flex-1 overflow-hidden">
                   <div className="queue-row-title-marquee flex w-max gap-12 whitespace-nowrap" title={it.title}>
@@ -995,11 +1023,6 @@ export function LiveQueuePanel() {
                     <span dir="auto" aria-hidden className="text-xs font-medium">{it.title}</span>
                   </div>
                 </div>
-                {/*
-                 * Per-item trash for the staged NEXT list. Removes ONLY from the in-memory
-                 * playNextQueue via the provider — never touches saved sources, library, or
-                 * persisted playlists. Hidden by default; reveals on row hover or button focus.
-                 */}
                 <button
                   type="button"
                   aria-label={`Remove "${it.title}" from Play Next`}
@@ -1018,44 +1041,42 @@ export function LiveQueuePanel() {
             ))}
           </ol>
         ) : null}
-      </div>
 
-      <div
-        tabIndex={0}
-        role="button"
-        aria-label="Play next - drop a library track, audio file, or paste URL"
-        onDragEnter={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          e.dataTransfer.dropEffect = "copy";
-          setOverDrop(true);
-        }}
-        onDragLeave={() => setOverDrop(false)}
-        onDrop={handlePadDrop}
-        onPaste={onPaste}
-        onMouseEnter={() => setPadHover(true)}
-        onMouseLeave={() => setPadHover(false)}
-        onFocus={() => setPadHover(true)}
-        onBlur={() => setPadHover(false)}
-        className={`play-next-pad mt-1 shrink-0 cursor-copy select-none rounded-md border px-2 py-1 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-all focus:outline-none focus:ring-2 focus:ring-amber-400/50 ${
-          overDrop
-            ? "border-amber-400/70 bg-amber-500/20 ring-1 ring-amber-400/40"
-            : "border-amber-400/30 bg-amber-500/10 hover:border-amber-400/55 hover:bg-amber-500/15"
-        }`}
-      >
-        {dropHint ? (
-          <p className="mb-0.5 text-[10px] font-medium text-amber-200" role="status">{dropHint}</p>
-        ) : null}
-        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-100/95 leading-tight">
-          {overDrop ? "Drop here" : "DROP NEXT PLAY"}
-        </p>
-        <p className="mt-px text-[9px] leading-tight text-amber-200/65">
-          {overDrop || padHover ? "Tile / file / URL" : "Drop track, file or URL"}
-        </p>
+        <div
+          tabIndex={0}
+          role="button"
+          aria-label="Play next - drop a library track, audio file, or paste URL"
+          onDragEnter={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = "copy";
+            setOverDrop(true);
+          }}
+          onDragLeave={() => setOverDrop(false)}
+          onDrop={handlePadDrop}
+          onPaste={onPaste}
+          onMouseEnter={() => setPadHover(true)}
+          onMouseLeave={() => setPadHover(false)}
+          onFocus={() => setPadHover(true)}
+          onBlur={() => setPadHover(false)}
+          className={`play-next-pad flex min-h-[34px] cursor-copy select-none items-center justify-center rounded-[5px] border px-2.5 py-1.5 text-center transition-all focus:outline-none focus:ring-1 focus:ring-amber-500/25 ${
+            overDrop
+              ? "border-amber-500/45 bg-amber-950/25"
+              : "border-amber-600/20 bg-amber-950/12 hover:border-amber-500/30 hover:bg-amber-950/18"
+          }`}
+        >
+          {dropHint ? (
+            <p className="text-[11px] font-medium text-amber-200/90" role="status">{dropHint}</p>
+          ) : (
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-amber-200/80 leading-none">
+              {overDrop ? "Drop here" : "Drop Next"}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

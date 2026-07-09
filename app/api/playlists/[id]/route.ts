@@ -35,13 +35,17 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const user = await getCurrentUserFromCookies();
-    const playlist = await getPlaylist(id);
+    const [user, playlist] = await Promise.all([
+      getCurrentUserFromCookies(),
+      getPlaylist(id),
+    ]);
     const g = await gatePlaylistAccess(user ?? null, playlist);
     if (!g.allow) {
       return NextResponse.json({ error: g.message }, { status: g.httpStatus });
     }
-    return NextResponse.json(playlist!);
+    return NextResponse.json(playlist!, {
+      headers: { "Cache-Control": "private, max-age=20, stale-while-revalidate=30" },
+    });
   } catch (e) {
     console.error("[api/playlists] GET error:", e);
     return NextResponse.json({ error: "Failed to load playlist" }, { status: 500 });

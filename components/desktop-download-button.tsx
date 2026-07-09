@@ -350,7 +350,7 @@ const HEADER_BTN =
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 " +
   "active:scale-[0.99] sm:max-w-none sm:px-3 sm:text-xs";
 
-export function DesktopDownloadButton() {
+export function DesktopDownloadButton({ compact }: { compact?: boolean } = {}) {
   const { t, locale } = useTranslations();
   const tr = t as unknown as Record<string, string | undefined>;
   const [payload, setPayload] = useState<Payload | null>(null);
@@ -390,6 +390,24 @@ export function DesktopDownloadButton() {
   }, [inElectron, locale, t]);
 
   if (inElectron || !loaded || !payload) return null;
+
+  if (compact) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setModalOpen(true)}
+          title={t.downloadDesktopAppTitle}
+          aria-haspopup="dialog"
+          aria-expanded={modalOpen}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-sky-500/30 bg-slate-900/80 text-sky-300 transition hover:border-sky-400/50 hover:bg-sky-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+        >
+          <DownloadGlyph className="h-3.5 w-3.5" />
+        </button>
+        {modalOpen && <DesktopDownloadModal onClose={() => setModalOpen(false)} payload={payload} />}
+      </>
+    );
+  }
 
   return (
     <>

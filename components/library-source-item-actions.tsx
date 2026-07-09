@@ -56,6 +56,9 @@ type Props = {
   onAddToLibrary?: () => void | Promise<void>;
   /** @deprecated Leaf bar does not show in-library chip. */
   inLibrary?: boolean;
+  /** Visual-only: disable Play (e.g. local desktop-only items in browser). */
+  playDisabled?: boolean;
+  playDisabledTitle?: string;
 };
 
 export function LibrarySourceItemActions({
@@ -73,6 +76,8 @@ export function LibrarySourceItemActions({
   onAddToPlaylistPress,
   onAddToLibrary,
   inLibrary = false,
+  playDisabled = false,
+  playDisabledTitle = "Desktop only",
 }: Props) {
   const { t } = useTranslations();
   const [adding, setAdding] = useState(false);
@@ -82,12 +87,15 @@ export function LibrarySourceItemActions({
   const playSize = compact ? "sm" : "md";
   const transportSm = compact ? "sm" : "sm";
   const transportMd = compact ? "md" : "md";
+  const secondaryActionSize = compact ? "sm" : "sm";
 
   return (
     <div
-      className="library-source-deck-actions mt-0.5 flex w-full min-w-0 flex-nowrap items-center justify-center gap-1"
+      className="library-source-deck-actions mt-0 flex w-full min-w-0 flex-nowrap items-center justify-center gap-0.5"
       role="group"
       aria-label={t.sourceControlsAria}
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
       {isActive && (
@@ -110,8 +118,9 @@ export function LibrarySourceItemActions({
             onClick={() => onPlay()}
             size={transportMd}
             active
-            title={t.play}
-            aria-label={t.play}
+            disabled={playDisabled}
+            title={playDisabled ? playDisabledTitle : t.play}
+            aria-label={playDisabled ? playDisabledTitle : t.play}
           >
             <svg className={compact ? "h-5 w-5 ml-0.5" : "h-4 w-4 ml-0.5"} viewBox="0 0 24 24" fill="currentColor">
               <path d="M8 5v14l11-7L8 5z" />
@@ -138,8 +147,9 @@ export function LibrarySourceItemActions({
           libraryDeck={libraryDeckChrome}
           onClick={() => onPlay()}
           size={playSize}
-          title={t.play}
-          aria-label={t.play}
+          disabled={playDisabled}
+          title={playDisabled ? playDisabledTitle : t.play}
+          aria-label={playDisabled ? playDisabledTitle : t.play}
         >
           <svg className={compact ? "h-5 w-5 ml-0.5" : "h-4 w-4 ml-0.5"} viewBox="0 0 24 24" fill="currentColor">
             <path d="M8 5v14l11-7L8 5z" />
@@ -273,7 +283,7 @@ export function LibrarySourceItemActions({
         >
           <NeonControlButton
             variant="red"
-            size="sm"
+            size={secondaryActionSize}
             onClick={() => {
               if (process.env.NODE_ENV !== "production") {
                 console.log("[SYNC_AUDIT] Delete click -> handler running", { listCompact: compact });

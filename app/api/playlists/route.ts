@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensurePlaylistTracksLinkedToCatalog, findOrCreateCatalogItem, normalizeCatalogUrlKey } from "@/lib/catalog-store";
 import { listPlaylistsForTenant, createPlaylist, isPlaylistPersistError } from "@/lib/playlist-store";
-import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
+import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession, getAssignedBranchIdsForUser } from "@/lib/auth-helpers";
 import { getAccessType } from "@/lib/user-store";
 import {
   canRequestApiScope,
@@ -37,14 +37,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     const all = await listPlaylistsForTenant(user.tenantId);
-    const filtered = [];
-    for (const p of all) {
-      if (!playlistMatchesApiScope(p, scope)) continue;
-      const branchId = resolveMediaBranchId(p);
-      if (await hasBranchAccess(user.id, branchId)) {
-        filtered.push(p);
-      }
-    }
+    // Fetch the user's allowed branches once, then filter synchronously.
+    // The old serial-await-per-item pattern caused 3-4 DB queries × N playlists = 60-80
+    // sequential DB calls on a 2-connection pool, leading to ~63s response times.
+    const allowedBranchIds = await getAssignedBranchIdsForUser(user.id);
+    const isOwner = allowedBranchIds.includes("*");
+    const filtered = all.filter((p) => {
+      if (!playlistMatchesApiScope(p, scope)) return false;
+      if (isOwner) return true;
+      const branchId = (resolveMediaBranchId(p) ?? "default").trim() || "default";
+      return allowedBranchIds.includes(branchId);
+    });
     return NextResponse.json(filtered);
   } catch (e) {
     console.error("[api/playlists] GET error:", e);

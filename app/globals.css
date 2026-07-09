@@ -276,13 +276,10 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   border: 0;
 }
 
-/* Shell focus ring — lights up when the hidden a11y input has keyboard
- * focus, so sighted keyboard users see where they are. Glow softened to
- * match the slim mixer-strip direction (no big drop shadow / no cyan fog).
- * Polish pass: ~30% softer to read closer to Rekordbox / Traktor than neon. */
+/* Shell focus ring — restrained hairline, no cyan bloom. */
 .vol-deck-shell:focus-within {
-  border-color: rgba(34, 211, 238, 0.35);
-  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.28);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 /* Status dot in the header — dim when muted, lit when v > 0. */
@@ -290,107 +287,419 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   display: block;
   width: 5px;
   height: 5px;
-  border-radius: 50%;
+  border-radius: 1px;
   background: rgba(100, 116, 139, 0.45);
-  transition: background 180ms ease, box-shadow 180ms ease;
+  transition: background 180ms ease;
 }
 .vol-deck-status-dot[data-active="true"] {
-  background: #22d3ee;
-  box-shadow: 0 0 4px rgba(34, 211, 238, 0.5);
+  background: #d4d4d4;
 }
 
-/* Compact value badge — slim mixer-strip variant. Glow softened so the
- * number reads as a quiet readout rather than a hero LCD. */
+/* LCD readout — crisp, no glow. */
 .vol-deck-readout {
-  color: #cffafe;
-  text-shadow: 0 0 2px rgba(34, 211, 238, 0.22);
-  letter-spacing: 0.03em;
+  color: #e5e5e5;
+  letter-spacing: 0.05em;
 }
 
-/* Pointer hit zone for the slider. `cursor: ns-resize` hints "drag me
- * vertically"; `touch-none` (set on the JSX) prevents touch scrolling
- * conflicts during drag. */
+/* Unified Now Playing hero — calm premium deck face. */
+.player-hero-shell {
+  isolation: isolate;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.player-hero-metadata {
+  min-height: 7rem;
+}
+
+@media (min-width: 1024px) {
+  .player-hero-metadata {
+    min-height: 6.25rem;
+  }
+}
+
+.player-hero-slot {
+  min-height: 1.2rem;
+}
+
+.player-hero-transport-slot {
+  min-height: 3rem;
+}
+
+.player-lcd-time {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* Transport dock — open, low-pressure control strip. */
+.player-transport-dock {
+  min-width: 0;
+}
+
+.player-transport-dock__row {
+  min-height: 3rem;
+}
+
+.player-transport-cluster {
+  /* No cluster frame — controls float as clean icons */
+}
+
+/* Transport playback buttons — calm icons; play is the sole soft anchor */
+.deck-transport-btn {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  color: #94a3b8;
+}
+
+.deck-transport-btn:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.045);
+  color: #cbd5e1;
+}
+
+.deck-transport-btn:active:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.deck-transport-btn--play {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #e2e8f0;
+  text-shadow: none;
+  box-shadow: 0 2px 8px -4px rgba(0, 0, 0, 0.45);
+}
+
+.deck-transport-btn--play:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #f8fafc;
+  box-shadow: 0 2px 10px -4px rgba(0, 0, 0, 0.5);
+}
+
+.deck-transport-btn--play-active {
+  background: rgba(34, 211, 238, 0.14);
+  border-color: rgba(34, 211, 238, 0.22);
+  color: #f0fdfa;
+  text-shadow: none;
+  box-shadow: 0 2px 10px -4px rgba(0, 0, 0, 0.4);
+}
+
+.deck-transport-btn--accent-emerald.deck-transport-btn--play {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.09);
+  color: #e2e8f0;
+  text-shadow: none;
+  box-shadow: 0 2px 8px -4px rgba(0, 0, 0, 0.45);
+}
+
+.deck-transport-btn--accent-emerald.deck-transport-btn--play:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #f8fafc;
+}
+
+.deck-transport-btn--accent-emerald.deck-transport-btn--play-active {
+  background: rgba(30, 215, 96, 0.12);
+  border-color: rgba(30, 215, 96, 0.22);
+  color: #ecfdf5;
+  box-shadow: 0 2px 10px -4px rgba(0, 0, 0, 0.4);
+}
+
+.deck-transport-btn--nav {
+  border: none;
+  color: #94a3b8;
+}
+
+.deck-transport-btn--nav:hover:not(:disabled) {
+  color: #e2e8f0;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.deck-transport-btn--accent-emerald.deck-transport-btn--nav {
+  border: none;
+  color: #94a3b8;
+}
+
+.deck-transport-btn--accent-emerald.deck-transport-btn--nav:hover:not(:disabled) {
+  color: #d1fae5;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.deck-transport-btn--stop {
+  border: none;
+  color: rgba(148, 163, 184, 0.75);
+  background-color: transparent;
+  box-shadow: none;
+}
+
+.deck-transport-btn--stop:hover:not(:disabled) {
+  color: rgba(248, 113, 113, 0.85);
+  background-color: rgba(248, 113, 113, 0.06);
+}
+
+/* Mix / Random — quiet mode indicators */
+.deck-mode-indicator__label {
+  display: inline-block;
+}
+
+.deck-mode-indicator--active {
+  justify-content: flex-start;
+  padding-left: 0.375rem;
+  padding-right: 0.25rem;
+  border: none;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.deck-mode-indicator--active .deck-mode-indicator__label,
+.deck-mode-indicator--show-label .deck-mode-indicator__label {
+  margin-left: 0.25rem;
+  max-width: 2.75rem;
+  opacity: 1;
+  color: rgba(203, 213, 225, 0.9);
+}
+
+.deck-mode-indicator--idle:hover,
+.deck-mode-indicator--idle:focus-visible {
+  justify-content: flex-start;
+  padding-left: 0.375rem;
+  padding-right: 0.25rem;
+}
+
+/* Queue active row — subtle now-playing bars (marquee unchanged) */
+.queue-now-playing-bars {
+  display: flex;
+  height: 0.75rem;
+  width: 0.75rem;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+}
+
+.queue-now-playing-bars span {
+  display: block;
+  width: 2px;
+  border-radius: 1px;
+  background: rgba(251, 191, 36, 0.65);
+  transform-origin: bottom;
+  animation: queue-now-playing-bar 0.85s ease-in-out infinite;
+}
+
+.queue-now-playing-bars span:nth-child(1) {
+  height: 4px;
+  animation-delay: 0s;
+}
+
+.queue-now-playing-bars span:nth-child(2) {
+  height: 9px;
+  animation-delay: 0.18s;
+}
+
+.queue-now-playing-bars span:nth-child(3) {
+  height: 5px;
+  animation-delay: 0.36s;
+}
+
+@keyframes queue-now-playing-bar {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+/* Right action slot on active queue row (replaces trash while playing) */
+.queue-now-playing-bars--action-slot {
+  height: 0.875rem;
+  width: 0.875rem;
+}
+
+.queue-now-playing-bars--action-slot span:nth-child(1) {
+  height: 5px;
+}
+
+.queue-now-playing-bars--action-slot span:nth-child(2) {
+  height: 10px;
+}
+
+.queue-now-playing-bars--action-slot span:nth-child(3) {
+  height: 6px;
+}
+
+/* Pointer hit zone for the slider. */
 .vol-deck-track {
   cursor: ns-resize;
 }
 
-/* Plastic mixer handle: dark body, subtle bevel, thin cyan stripe down the
- * center via ::before. Cyan halo dialed back to a soft outline for the
- * slim-mixer direction. */
+/* CDJ fader cap — slim rectangular, neutral metal. */
 .vol-deck-handle {
-  background: linear-gradient(180deg, #1e293b 0%, #0b1220 50%, #1e293b 100%);
-  border: 1px solid rgba(34, 211, 238, 0.22);
-  box-shadow: 0 0 2px rgba(34, 211, 238, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.55),
-    0 1px 2px rgba(0, 0, 0, 0.32);
-  /* No transition on `top` — we want 1:1 cursor tracking; transitions
-   * would lag the handle behind the cursor and re-introduce the
-   * "feels mushy" complaint. */
+  background: linear-gradient(180deg, #3a3a3a 0%, #1a1a1a 45%, #2a2a2a 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 1px 1px rgba(0, 0, 0, 0.4);
 }
 .vol-deck-handle::before {
   content: "";
   position: absolute;
-  left: 3px;
-  right: 3px;
+  left: 4px;
+  right: 4px;
   top: 50%;
-  height: 2px;
+  height: 1px;
   transform: translateY(-50%);
-  background: linear-gradient(90deg, #22d3ee 0%, #a5f3fc 50%, #22d3ee 100%);
-  border-radius: 1px;
-  box-shadow: 0 0 1px rgba(34, 211, 238, 0.28);
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 0;
 }
-/* Subtle "active" glow while the user is dragging or hovering. */
 .vol-deck-track:hover .vol-deck-handle,
 .vol-deck-track:active .vol-deck-handle {
-  border-color: rgba(34, 211, 238, 0.38);
-  box-shadow: 0 0 4px rgba(34, 211, 238, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.55),
-    0 1px 2px rgba(0, 0, 0, 0.32);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
-/* LED meter segments — bottom-up fill, classic green → amber → red.
- * `flex: 1 1 0` distributes evenly across the column height regardless of
- * the deck row size.
- *
- * Tuned for the 2-column L / R meter at 16 thin segments per column:
- *   - `min-height: 2px` lets each segment read as a fine bar instead of a
- *     chunky rectangle (the 12×min-3px version was called out as clunky).
- *   - `border-radius: 1px` replaces the previous 1.5px so segments look more
- *     like LED rectangles than rounded pills at this thinner scale.
+/* ─── Volume LED meter — live level bar + continuous gradient ───────────────
+ * Height-driven fill (`.vol-deck-meter-level`) moves with meterLevels L/R ticks.
+ * Gradient is one smooth green→amber→red arc; tick overlay adds hardware texture.
  */
+.vol-deck-meter-column {
+  background: #060608;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.65);
+}
+
+.vol-deck-meter-level {
+  background: linear-gradient(
+    to top,
+    hsl(128, 68%, 38%) 0%,
+    hsl(95, 70%, 42%) 22%,
+    hsl(52, 72%, 46%) 48%,
+    hsl(32, 75%, 50%) 72%,
+    hsl(4, 78%, 52%) 100%
+  );
+  will-change: height;
+  transition: height 70ms ease-out;
+  border-radius: 1px 1px 0 0;
+}
+
+.vol-deck-meter-ticks {
+  background: repeating-linear-gradient(
+    to top,
+    transparent 0,
+    transparent calc(5% - 1px),
+    rgba(0, 0, 0, 0.28) calc(5% - 1px),
+    rgba(0, 0, 0, 0.28) 5%
+  );
+  opacity: 0.55;
+}
+
+.vol-deck-meter-gradient {
+  background: linear-gradient(
+    to top,
+    hsl(128, 68%, 38%) 0%,
+    hsl(95, 70%, 42%) 22%,
+    hsl(52, 72%, 46%) 48%,
+    hsl(32, 75%, 50%) 72%,
+    hsl(4, 78%, 52%) 100%
+  );
+  opacity: 0.92;
+}
+
+.vol-deck-led-seg {
+  width: 100%;
+  flex: 1 1 0;
+  min-height: 2px;
+  background: rgba(8, 8, 10, 0.92);
+  transition: background-color 80ms ease;
+}
+
+.vol-deck-led-seg.is-lit {
+  box-shadow: inset 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+/* Legacy segment classes — kept for any stale refs; pulse removed for CDJ skin */
 .vol-deck-led {
   width: 100%;
   flex: 1 1 0;
   min-height: 2px;
-  border-radius: 1px;
-  /* Idle reads more matte / less glossy — closer to Rekordbox channel-strip
-   * meters than a backlit toy LED. */
-  background: rgba(15, 23, 42, 0.85);
-  box-shadow: inset 0 0 1px rgba(0, 0, 0, 0.45);
-  transition: background 90ms ease, box-shadow 90ms ease;
+  border-radius: 0;
+  background: rgba(8, 8, 10, 0.92);
+  transition: background-color 80ms ease;
 }
-/* Lit-segment glows softened across all three zones — slim mixer strip
- * direction, no toy-bright halos. Polish pass: ~30% softer than the prior
- * tuning so lit segments read as illumination, not as neon. */
-.vol-deck-led.is-on {
-  background: linear-gradient(90deg, #059669 0%, #34d399 100%);
-  box-shadow: 0 0 1px rgba(16, 185, 129, 0.32),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+
+/* ─── DJ Vinyl Disc ──────────────────────────────────────────────────────────
+ * Picture-disc approach: artwork fills the full disc.
+ * Layers (bottom → top):
+ *   1. .dj-vinyl-fallback  — fallback gradient when no cover art
+ *   2. HydrationSafeImage  — full-disc cover art (object-cover)
+ *   3. .dj-vinyl-vignette  — dark radial fade at the edges, art shows center
+ *   4. .dj-vinyl-grooves   — thin repeating-radial ring texture (~8% opacity)
+ *   5. .dj-vinyl-spindle   — stationary center hole, sits above the platter
+ *
+ * All layers 1-4 are inside .dj-vinyl-platter, which spins via .dj-vinyl-spinning.
+ */
+@keyframes dj-vinyl-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
-.vol-deck-led.is-on.is-warm {
-  background: linear-gradient(90deg, #d97706 0%, #fbbf24 100%);
-  box-shadow: 0 0 1px rgba(245, 158, 11, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+
+.dj-vinyl-platter {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
 }
-.vol-deck-led.is-on.is-hot {
-  background: linear-gradient(90deg, #dc2626 0%, #f87171 100%);
-  box-shadow: 0 0 2px rgba(239, 68, 68, 0.38),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+
+.dj-vinyl-spinning {
+  animation: dj-vinyl-spin 2.8s linear infinite;
+  will-change: transform;
+}
+
+/* Fallback disc — richer navy gradient, visible as an intentional surface */
+.dj-vinyl-fallback {
+  background: radial-gradient(
+    circle at 44% 40%,
+    #253060 0%,
+    #17204a 28%,
+    #0b1230 58%,
+    #050810 100%
+  );
+}
+
+/* Radial vignette — center 40% fully clear so fallback/art color reads.
+ * Darkens from 55 % radius outward to give a pressed-vinyl rim feel. */
+.dj-vinyl-vignette {
+  background: radial-gradient(
+    circle at 50% 50%,
+    transparent 40%,
+    rgba(0, 0, 0, 0.18) 58%,
+    rgba(0, 0, 0, 0.55) 76%,
+    rgba(0, 0, 0, 0.84) 100%
+  );
+}
+
+/* Groove rings — slightly more visible on dark fallback, subtle on art */
+.dj-vinyl-grooves {
+  background: repeating-radial-gradient(
+    circle at 50%,
+    transparent 0px,
+    transparent 6px,
+    rgba(255, 255, 255, 0.032) 6px,
+    rgba(255, 255, 255, 0.032) 7px
+  );
+}
+
+/* Spindle hole — frosted center dot, sits above the platter (z-10) */
+.dj-vinyl-spindle {
+  background: radial-gradient(
+    circle,
+    rgba(220, 230, 255, 0.28) 0%,
+    rgba(150, 165, 200, 0.14) 60%,
+    transparent 100%
+  );
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), inset 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 /* Active playing state – neon glow (reduced blur to prevent layout jitter) */
@@ -451,36 +760,24 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
 }
 
 .library-theme.library-player-route-bridge .library-deck-art-host--idle {
-  border: 2px solid var(--lib-border-thumb);
+  border: 1px solid var(--lib-border-thumb);
   box-shadow: var(--lib-shadow-thumb-inset);
 }
 
 .library-theme.library-player-route-bridge .library-deck-art-host--playing {
-  border: 2px solid color-mix(in srgb, var(--lib-accent-border) 55%, var(--lib-border-muted));
+  border: 1px solid color-mix(in srgb, var(--lib-border-muted) 70%, var(--lib-accent-border));
+  box-shadow: var(--lib-shadow-thumb-inset);
+}
+
+/* Matte mechanical platter bezel — no neon spin arc */
+.dj-platter-bezel {
   box-shadow:
-    var(--lib-shadow-thumb-inset),
-    0 0 24px -8px var(--lib-deck-control-aura, color-mix(in srgb, var(--lib-accent) 25%, transparent));
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 2px 8px rgba(0, 0, 0, 0.55);
 }
 
 .library-theme.library-player-route-bridge .library-deck-art-ring {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: 9999px;
-  pointer-events: none;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg 292deg,
-    color-mix(in srgb, var(--lib-accent) 35%, transparent) 292deg 302deg,
-    var(--lib-accent) 302deg 328deg,
-    color-mix(in srgb, var(--lib-on-air) 70%, var(--lib-accent)) 328deg 342deg,
-    color-mix(in srgb, var(--lib-accent) 38%, transparent) 342deg 352deg,
-    transparent 352deg 360deg
-  );
-  animation: library-deck-art-ring-spin 2.85s linear infinite;
-  will-change: transform;
-  mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+  display: none;
 }
 
 .library-theme.library-player-route-bridge .library-deck-art-inner {
@@ -511,11 +808,11 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
     0 0 22px -14px color-mix(in srgb, var(--lib-accent) 24%, transparent) !important;
   color: var(--lib-accent-text) !important;
   transition:
-    border-color 0.2s ease,
-    box-shadow 0.22s ease,
-    color 0.2s ease,
-    transform 0.14s ease,
-    filter 0.2s ease !important;
+    border-color 0.12s ease,
+    box-shadow 0.12s ease,
+    color 0.12s ease,
+    transform 0.1s ease,
+    filter 0.12s ease !important;
 }
 
 .library-theme.library-player-route-bridge .audio-player-library-deck button.library-deck-neon-btn:hover:not(:disabled),
@@ -602,11 +899,12 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
 .library-theme.library-player-route-bridge .audio-player-library-deck button.library-deck-neon-btn:not(.h-7):hover:not(:disabled) {
   border-color: #22d3ee !important;
   filter: none;
-  transform: scale(1.04);
+  transform: scale(1.025);
   color: #a5f3fc !important;
   box-shadow:
-    0 0 0 2px rgba(34, 211, 238, 0.55),
-    0 0 38px -2px rgba(34, 211, 238, 0.55) !important;
+    0 0 0 2px rgba(34, 211, 238, 0.45),
+    0 0 24px -2px rgba(34, 211, 238, 0.45) !important;
+  overflow: visible;
 }
 
 .library-theme.library-player-route-bridge .audio-player-library-deck button.library-deck-neon-btn:not(.h-7):active:not(:disabled) {
@@ -740,6 +1038,30 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
 }
 .queue-row-title-marquee:hover {
   animation-play-state: paused;
+}
+
+/* ── Queue panel — reduce table feel, more visual list ───────────────────── */
+/* Fade out the column-header row so it reads as a list, not a spreadsheet  */
+.library-deck-slot-aside [role="table"] > div:first-child {
+  opacity: 0;
+  height: 0;
+  overflow: hidden;
+  padding: 0 !important;
+  border: none !important;
+  margin: 0 !important;
+}
+/* More breathing room per row */
+.library-deck-slot-aside [role="row"] {
+  padding-top: 0.3125rem !important;
+  padding-bottom: 0.3125rem !important;
+}
+/* Soften row dividers — very subtle separation */
+.library-deck-slot-aside [role="row"] {
+  border-bottom-color: rgba(15, 23, 42, 0.5) !important;
+}
+/* De-emphasize track index number column */
+.library-deck-slot-aside [role="row"] > *:nth-child(2) {
+  opacity: 0.3;
 }
 
 /* Drop zone – inviting blink when dragging link */
@@ -1304,6 +1626,10 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   border-bottom: none;
   background: var(--lib-surface-rail);
   box-shadow: var(--lib-shadow-rail-inset), var(--lib-shadow-deck-drop);
+  height: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Deep Blue deck: flat slate rail — same density as Paste/Drop card, no gradient drama */
@@ -1329,9 +1655,7 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
 }
 
 .library-theme[data-library-theme="deep-blue"].library-player-route-bridge .library-player-play-emerald {
-  box-shadow:
-    0 0 0 1px rgba(34, 211, 238, 0.46),
-    0 0 24px -8px rgba(34, 211, 238, 0.26) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18) !important;
 }
 
 .library-theme[data-library-theme="graphite-black"].library-player-route-bridge .library-deck-art-inner {
@@ -1422,10 +1746,7 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 }
 
 .library-theme[data-library-theme="pearl-light"].library-player-route-bridge .library-player-play-emerald {
-  box-shadow:
-    0 0 0 1px rgba(16, 185, 129, 0.42),
-    0 0 28px -6px rgba(16, 185, 129, 0.26),
-    0 0 40px -14px rgba(59, 130, 246, 0.12) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2) !important;
 }
 
 .library-theme.library-player-route-bridge .library-player-track-shell {
@@ -1440,10 +1761,8 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 }
 
 .library-theme.library-player-route-bridge .library-player-play-emerald {
-  border-color: color-mix(in srgb, var(--lib-accent) 46%, var(--lib-accent-border)) !important;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--lib-accent) 38%, transparent),
-    0 0 22px -6px color-mix(in srgb, var(--lib-accent) 26%, transparent) !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12) !important;
 }
 
 .library-theme.library-player-route-bridge .library-player-timeline-buffer {
@@ -1485,14 +1804,14 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 }
 
 .library-source-card:hover {
-  border-color: var(--lib-border-strong);
+  border-color: color-mix(in srgb, var(--lib-border-strong) 65%, transparent);
   background: var(--lib-surface-card-hover);
   box-shadow: var(--lib-shadow-card-hover);
 }
 
 .library-source-card:focus-within {
-  border-color: color-mix(in srgb, var(--lib-accent) 30%, transparent);
-  box-shadow: var(--lib-shadow-card), 0 0 0 2px var(--lib-accent-focus-ring);
+  border-color: color-mix(in srgb, var(--lib-accent) 18%, transparent);
+  box-shadow: var(--lib-shadow-card), 0 0 0 1px var(--lib-accent-focus-ring);
 }
 
 .library-card-art-bg {
@@ -1525,6 +1844,230 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   color: var(--lib-text-faint);
 }
 
+/* ── Library card comfort polish (Stage 1A) — calm action bar, artwork-first ── */
+.library-source-card {
+  min-height: 0 !important;
+  height: auto !important;
+}
+
+.library-source-card .sb-lbc-as-div,
+.library-source-card .sb-lbc-shell {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+}
+
+.library-source-card .library-source-deck-actions {
+  gap: 0.25rem;
+  margin-top: 0;
+  padding-top: 0.125rem;
+  padding-bottom: 0;
+}
+
+/* Stage 1A density — compact body, shorter art, no dead stretch */
+.library-source-card .sb-lbc-body {
+  padding: 0.5rem 0.625rem 0.5rem !important;
+  gap: 0.25rem !important;
+  flex: 0 0 auto !important;
+}
+
+.library-source-card .sb-lbc-footer-slot {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+.library-source-card .sb-lbc-meta-wrap {
+  margin-top: 0 !important;
+}
+
+.library-source-card .sb-lbc-meta {
+  margin-top: 0 !important;
+}
+
+.library-source-card .sb-lbc-title-row {
+  gap: 0.25rem !important;
+}
+
+.library-source-card .sb-lbc-title {
+  font-size: 0.8125rem !important;
+  line-height: 1.25 !important;
+}
+
+.library-source-card .sb-lbc-art {
+  aspect-ratio: 4 / 3 !important;
+}
+
+.library-source-card.library-source-card-leaf .sb-lbc-body {
+  padding: 0.5625rem 0.625rem 0.625rem !important;
+  gap: 0.375rem !important;
+}
+
+.library-source-card .library-leaf-meta-strip {
+  padding-top: 0.375rem !important;
+  gap: 0.375rem 0.625rem !important;
+}
+
+.library-source-card .library-source-deck-actions a.inline-flex.h-7,
+.library-source-card .library-source-deck-actions button.inline-flex.h-7 {
+  height: 2rem !important;
+  width: 2rem !important;
+  min-height: 2rem !important;
+  min-width: 2rem !important;
+}
+
+.library-source-card .library-source-deck-actions span.inline-flex.h-7 {
+  height: 2rem !important;
+  width: 2rem !important;
+}
+
+.library-source-card .library-source-deck-actions button,
+.library-source-card .library-source-deck-actions a {
+  border-width: 0 !important;
+  border-radius: 0.5rem !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  transform: none !important;
+  filter: none !important;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    opacity 0.15s ease !important;
+}
+
+.library-source-card .library-source-deck-actions button:hover:not(:disabled),
+.library-source-card .library-source-deck-actions a:hover {
+  transform: none !important;
+  scale: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #cbd5e1 !important;
+}
+
+.library-source-card .library-source-deck-actions button:focus-visible,
+.library-source-card .library-source-deck-actions a:focus-visible {
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Play — primary anchor (md/xl transport size) */
+.library-source-card .library-source-deck-actions button.h-11,
+.library-source-card .library-source-deck-actions button.h-12,
+.library-source-card .library-source-deck-actions button.h-14,
+.library-source-card .library-source-deck-actions button.h-16 {
+  border-radius: 9999px !important;
+  border: 1px solid rgba(255, 255, 255, 0.11) !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  color: #e2e8f0 !important;
+  min-height: 2.5rem !important;
+  min-width: 2.5rem !important;
+}
+
+.library-source-card .library-source-deck-actions button.h-11:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-12:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-14:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-16:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  background: rgba(255, 255, 255, 0.09) !important;
+  color: #f8fafc !important;
+}
+
+.library-source-card .library-source-deck-actions button.library-deck-neon-btn-active,
+.library-source-card .library-source-deck-actions button.h-11.library-deck-neon-btn-active,
+.library-source-card .library-source-deck-actions button.h-12.library-deck-neon-btn-active {
+  border-color: color-mix(in srgb, var(--lib-accent) 28%, transparent) !important;
+  background: color-mix(in srgb, var(--lib-accent) 12%, transparent) !important;
+  color: var(--lib-accent-text) !important;
+  box-shadow: none !important;
+}
+
+/* Secondary icon actions — edit, share, add, stop, pause */
+.library-source-card .library-source-deck-actions button.h-7,
+.library-source-card .library-source-deck-actions button.h-8,
+.library-source-card .library-source-deck-actions button.h-9,
+.library-source-card .library-source-deck-actions button.h-10,
+.library-source-card .library-source-deck-actions button.h-11,
+.library-source-card .library-source-deck-actions a.h-7,
+.library-source-card .library-source-deck-actions a.h-8,
+.library-source-card .library-source-deck-actions a.h-9,
+.library-source-card .library-source-deck-actions span.h-7 {
+  color: #64748b !important;
+  min-height: 2rem !important;
+  min-width: 2rem !important;
+}
+
+.library-source-card .library-source-deck-actions button.h-7:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-8:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-9:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-10:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-11:hover:not(:disabled),
+.library-source-card .library-source-deck-actions a.h-7:hover,
+.library-source-card .library-source-deck-actions a.h-8:hover,
+.library-source-card .library-source-deck-actions a.h-9:hover {
+  color: #94a3b8 !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Delete — quiet by default; red only on interaction */
+.library-source-card .library-source-deck-actions button.h-9.w-9:last-of-type,
+.library-source-card .library-source-deck-actions button.h-8.w-8:last-of-type,
+.library-source-card .library-source-deck-actions button.h-10.w-10:last-of-type,
+.library-source-card .library-source-deck-actions button.h-11.w-11:last-of-type {
+  color: #475569 !important;
+  opacity: 0.72;
+}
+
+.library-source-card .library-source-deck-actions button.h-9.w-9:last-of-type:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-8.w-8:last-of-type:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-10.w-10:last-of-type:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-11.w-11:last-of-type:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-9.w-9:last-of-type:focus-visible,
+.library-source-card .library-source-deck-actions button.h-8.w-8:last-of-type:focus-visible,
+.library-source-card .library-source-deck-actions button.h-10.w-10:last-of-type:focus-visible,
+.library-source-card .library-source-deck-actions button.h-11.w-11:last-of-type:focus-visible {
+  color: #f87171 !important;
+  opacity: 1;
+  background: rgba(248, 113, 113, 0.08) !important;
+  box-shadow: none !important;
+}
+
+/* Override premium-rail neon chrome inside library cards only */
+.library-theme .library-source-card button.library-deck-neon-btn,
+.library-source-card button.library-deck-neon-btn {
+  border-width: 0 !important;
+  border-radius: 0.5rem !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  color: #94a3b8 !important;
+}
+
+.library-theme .library-source-card button.library-deck-neon-btn:hover:not(:disabled),
+.library-source-card button.library-deck-neon-btn:hover:not(:disabled) {
+  transform: none !important;
+  filter: none !important;
+  box-shadow: none !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #cbd5e1 !important;
+}
+
+.library-theme .library-source-card button.library-deck-neon-btn--hero,
+.library-source-card button.library-deck-neon-btn--hero {
+  border-radius: 9999px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  box-shadow: none !important;
+}
+
+.library-theme .library-source-card button.library-deck-neon-btn-active,
+.library-source-card button.library-deck-neon-btn-active {
+  border: 1px solid color-mix(in srgb, var(--lib-accent) 24%, transparent) !important;
+  background: color-mix(in srgb, var(--lib-accent) 10%, transparent) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  color: var(--lib-accent-text) !important;
+}
+
 .library-pill-overlay {
   border: 1px solid var(--lib-border-overlay);
   background: var(--lib-surface-card-footer);
@@ -1546,6 +2089,239 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   background: var(--lib-live-bg);
 }
 
+/* ── Library source card grid — compact auto-fill columns, no island gaps ── */
+.library-source-card-grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 240px));
+  gap: 1rem; /* 16px */
+  justify-content: start;
+  align-content: start;
+  align-items: start;
+}
+
+.library-source-card-grid-cell {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.library-source-card-grid-cell > .library-source-card,
+.library-source-card-grid .library-source-card {
+  width: 100%;
+  max-width: none;
+}
+
+/* ── Library card system (Stage 1A) — grid density, hierarchy, premium badges ── */
+
+.library-card-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 12, 22, 0.72);
+  padding: 0.1rem 0.35rem;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  line-height: 1.25;
+  text-transform: uppercase;
+  color: #e2e8f0;
+  backdrop-filter: blur(6px);
+}
+
+.library-card-kind-badge--list {
+  border-color: rgba(34, 211, 238, 0.28);
+  color: #a5f3fc;
+}
+
+.library-card-kind-badge--single {
+  border-color: rgba(52, 211, 153, 0.28);
+  color: #a7f3d0;
+}
+
+.library-card-kind-badge--set {
+  border-color: rgba(167, 139, 250, 0.28);
+  color: #ddd6fe;
+}
+
+.library-card-kind-badge--local {
+  border-color: rgba(56, 189, 248, 0.28);
+  color: #bae6fd;
+}
+
+.library-card-kind-badge--radio {
+  border-color: rgba(251, 113, 133, 0.28);
+  color: #fecdd3;
+}
+
+.library-card-source-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(8, 12, 22, 0.78);
+  padding: 0.1rem 0.35rem;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+  color: #cbd5e1;
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+}
+
+.library-card-desktop-only-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: rgba(2, 40, 72, 0.82);
+  padding: 0.1rem 0.3rem;
+  font-size: 7px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(186, 230, 253);
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+}
+
+.library-card-duration-set {
+  font-weight: 600;
+  border-color: rgba(167, 139, 250, 0.35) !important;
+  background: rgba(30, 15, 55, 0.82) !important;
+  color: rgb(233, 213, 255) !important;
+}
+
+/* Card body: title → genre → actions → bottom metadata */
+.library-source-card .sb-lbc-body {
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 0.4375rem 0.5625rem 0.5625rem !important;
+  gap: 0.3125rem !important;
+}
+
+.library-source-card .sb-lbc-title {
+  font-size: 0.8125rem !important;
+  line-height: 1.3 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.library-source-card .sb-lbc-art,
+.library-source-card .library-card-art-bg {
+  aspect-ratio: 4 / 3 !important;
+}
+
+.library-source-card .sb-lbc-footer-slot {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.3125rem !important;
+  margin: 0 !important;
+}
+
+.library-source-card .sb-lbc-meta-wrap {
+  display: none !important;
+}
+
+.library-card-genre-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.library-card-genre-label {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #64748b;
+}
+
+.library-card-genre-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.library-card-actions-wrap {
+  padding-top: 0.0625rem;
+}
+
+.library-card-stats-wrap {
+  margin-top: 0.125rem;
+  padding-top: 0.125rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.library-card-meta-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.1875rem 0.4375rem;
+  padding-top: 0.3125rem;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #b6c2d1;
+}
+
+.library-card-meta-sep {
+  opacity: 0.5;
+  padding: 0 0.1rem;
+  user-select: none;
+  color: #64748b;
+}
+
+.library-card-meta-item {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.library-card-meta-item--duration,
+.library-card-meta-item--tracks {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.library-card-meta-item--sync {
+  color: #6ee7b7;
+  font-weight: 600;
+}
+
+.library-card-meta-item--desktop {
+  color: #7dd3fc;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.library-source-card .library-source-deck-actions {
+  gap: 0.1875rem;
+  padding-top: 0;
+}
+
+.library-source-card .library-source-deck-actions button.h-11,
+.library-source-card .library-source-deck-actions button.h-12 {
+  min-height: 2.125rem !important;
+  min-width: 2.125rem !important;
+  height: 2.125rem !important;
+  width: 2.125rem !important;
+}
+
+.library-source-card .library-source-deck-actions button.h-7,
+.library-source-card .library-source-deck-actions button.h-8,
+.library-source-card .library-source-deck-actions a.h-7 {
+  min-height: 1.875rem !important;
+  min-width: 1.875rem !important;
+  height: 1.875rem !important;
+  width: 1.875rem !important;
+}
+
 /* ─── /sources: full right-column theme canvas (header + main + deck share one mode) ─── */
 .app-sources-theme-scope[data-library-theme="graphite-black"] {
   background: linear-gradient(180deg, #010101 0%, #070707 42%, #020202 100%);
@@ -1558,8 +2334,7 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   box-shadow: 0 4px 34px rgba(0, 0, 0, 0.82);
 }
 
-.app-sources-theme-scope[data-library-theme="graphite-black"] .sources-app-header-row1,
-.app-sources-theme-scope[data-library-theme="graphite-black"] .sources-app-header-row2 {
+.app-sources-theme-scope[data-library-theme="graphite-black"] .sources-app-header-row1 {
   border-color: rgba(255, 255, 255, 0.055);
 }
 
@@ -1663,8 +2438,7 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   color: #64748b !important;
 }
 
-.app-sources-theme-scope[data-library-theme="deep-blue"] .sources-app-header-row1,
-.app-sources-theme-scope[data-library-theme="deep-blue"] .sources-app-header-row2 {
+.app-sources-theme-scope[data-library-theme="deep-blue"] .sources-app-header-row1 {
   border-color: rgba(30, 41, 59, 0.9);
 }
 
@@ -1832,44 +2606,25 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   background: #020617; /* slate-950 — guarantees opaque fill in OS fullscreen */
 }
 
-/* Row 1 — main header bar: tighten vertical rhythm and shrink the logo so
-   the meta chip (time/user/company) and the right cluster (indicators +
-   gear + fullscreen) fit on a single tablet-landscape row. We keep all
-   children visible (logo, title, MASTER/CONTROL indicators stay) — only
-   the secondary subtitle row is hidden because the row title alone is
-   enough information for a controller view. */
+/* Unified header row — tighten height in Control Room mode. */
 .control-room .sources-app-header-row1,
 .control-room header > div.sources-app-header-row1 {
-  padding-top: 0.375rem !important;   /* py-3 → ~py-1.5 */
-  padding-bottom: 0.375rem !important;
-  gap: 0.5rem !important;
+  height: 44px !important;
 }
 .control-room .sources-app-header-row1 a[aria-label="SyncBiz"] > span:first-child {
   height: 1.75rem;
   width: 1.75rem;
   font-size: 0.8125rem;
 }
-.control-room .sources-app-header-row1 a[aria-label="SyncBiz"] > div {
-  display: none; /* hide "SyncBiz / Audio scheduling" double label */
+/* Hide the SyncBiz text label in Control Room — icon alone is enough */
+.control-room .sources-app-header-row1 a[aria-label="SyncBiz"] > span:last-child {
+  display: none;
 }
-.control-room .sources-app-header-row1 h1 {
-  font-size: 0.875rem;
-  line-height: 1.1;
-}
-.control-room .sources-app-header-row1 h1 + p {
-  display: none; /* subtitle is redundant in compact mode */
-}
-
-/* Row 2 — nav pills: trim padding so pills sit tight under the header. */
-.control-room .sources-app-header-row2 {
-  padding-top: 0.25rem !important;
-  padding-bottom: 0.25rem !important;
-}
-.control-room .sources-app-header-row2 nav a.source-nav-pill,
-.control-room .sources-app-header-row2 nav a {
-  padding-top: 0.25rem;
-  padding-bottom: 0.25rem;
+/* Trim nav tab font in Control Room */
+.control-room .sources-app-header-row1 nav a {
   font-size: 0.8125rem;
+  padding-left: 0.625rem;
+  padding-right: 0.625rem;
 }
 
 /* Row 3 — deck (Live Queue · Player · Command Pads): shave outer padding
@@ -1885,12 +2640,12 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 }
 @media (min-width: 1024px) {
   .control-room .library-deck-unified > .grid {
-    height: 240px;
+    height: 264px;
   }
 }
 @media (min-width: 1536px) {
   .control-room .library-deck-unified > .grid {
-    height: 264px;
+    height: 284px;
   }
 }
 
@@ -1975,9 +2730,11 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
 }
-/* Tighten the controls column gap */
+/* Tighten the controls column gap on compact */
 [data-player-size="compact"] .library-deck-controls-col {
   gap: 0.5rem !important;
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
 }
 /* Hide volume strip in compact to reclaim horizontal space */
 [data-player-size="compact"] .library-deck-volume-aside {
@@ -2003,6 +2760,7 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 }
 [data-player-size="mini"] .library-deck-controls-col {
   gap: 0.25rem !important;
+  padding: 0 !important;
 }
 [data-player-size="mini"] .library-deck-volume-aside {
   display: none !important;

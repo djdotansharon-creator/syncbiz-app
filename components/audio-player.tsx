@@ -22,6 +22,7 @@ import {
   resolvePlaybackHeroCoverArt,
 } from "@/lib/playlist-utils";
 import { getSoundCloudEmbedUrl, isSoundCloudUrl } from "@/lib/player-utils";
+import { urlTimingActive, urlTimingMark, urlTimingSummary } from "@/lib/url-startup-timing";
 import {
   isYtPlayerReady,
   safeGetPlayerState,
@@ -45,8 +46,8 @@ import {
   type YTPlayerAPI,
 } from "@/lib/yt-player-utils";
 import { PlayerDeckTransportSurface } from "@/components/player-surface/player-deck-transport-surface";
-import { PlayerUnitSurface } from "@/components/player-surface/player-unit-surface";
 import { PlayerVerticalVolume } from "@/components/player-surface/player-vertical-volume";
+import { DjVinylArtwork } from "@/components/player-surface/dj-vinyl-artwork";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
 import { masterPlaybackDiag } from "@/lib/master-playback-diag";
@@ -124,6 +125,17 @@ function getEmbedType(url: string): "youtube" | "soundcloud" | null {
   if (u.includes("youtube") || u.includes("youtu.be")) return "youtube";
   if (u.includes("soundcloud")) return "soundcloud";
   return null;
+}
+
+/** Human-readable YouTube IFrame API player state for audit logs. */
+function ytStateLabel(state: number): string {
+  if (state === -1) return "unstarted";
+  if (state === 0) return "ended";
+  if (state === 1) return "playing";
+  if (state === 2) return "paused";
+  if (state === 3) return "buffering";
+  if (state === 5) return "cued";
+  return `unknown_${state}`;
 }
 
 type CrossfadeCallbacks = {
@@ -367,6 +379,7 @@ export function AudioPlayer() {
     playNextBaseline,
     lastPlayCommandVia,
     playCommandEpoch,
+    urlPrepareActive,
   } = usePlayback();
 
   // YouTube A/B decks. Both iframes stay mounted and their refs NEVER swap:
@@ -423,23 +436,48 @@ export function AudioPlayer() {
 
   // ── Desktop mode: MPV Orchestrator is the single source of truth for display ──
   // The React playback state drives commands (intent). MPV state drives what the UI shows (truth).
-  type DesktopMpvSnap = { status: "idle" | "playing" | "paused" | "stopped"; volume: number; position: number; duration: number; catalogCount: number };
+  type DesktopMpvSnap = { status: "idle" | "playing" | "paused" | "stopped"; volume: number; position: number; duration: number; catalogCount: number; engineReady: boolean; lastError: string | null };
   const [desktopMpvSnap, setDesktopMpvSnap] = useState<DesktopMpvSnap | null>(null);
+  // Ref always holds the latest snap so timeout callbacks (stall detection) can read it
+  // without stale-closure issues and without being in the effect dependency array.
+  const desktopMpvSnapRef = useRef<DesktopMpvSnap | null>(null);
+  /** Wall-clock when desktop snap position last changed — for interpolation + stale-playing guard. */
+  const desktopSnapPositionAtRef = useRef(0);
+  const desktopSnapLastPosRef = useRef<number | null>(null);
+  useEffect(() => { desktopMpvSnapRef.current = desktopMpvSnap; }, [desktopMpvSnap]);
   useEffect(() => {
     if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const unsub = (window as any).syncbizDesktop.onStatus((s: any) => {
-      setDesktopMpvSnap({
+    const desktop = (window as any).syncbizDesktop;
+    let cancelled = false;
+    const applySnap = (s: any) => {
+      if (cancelled) return;
+      const nextPos = typeof s.mpvPosition === "number" ? s.mpvPosition : 0;
+      if (desktopSnapLastPosRef.current === null || nextPos !== desktopSnapLastPosRef.current) {
+        desktopSnapLastPosRef.current = nextPos;
+        desktopSnapPositionAtRef.current = Date.now();
+      }
+      const snap: DesktopMpvSnap = {
         status: (s.mockPlaybackStatus as DesktopMpvSnap["status"]) ?? "idle",
         volume: typeof s.mockVolume === "number" ? s.mockVolume : 80,
-        position: typeof s.mpvPosition === "number" ? s.mpvPosition : 0,
+        position: nextPos,
         duration: typeof s.mpvDuration === "number" ? s.mpvDuration : 0,
         catalogCount: typeof s.branchCatalogCount === "number" ? s.branchCatalogCount : 0,
-      });
-    });
-    return () => { if (typeof unsub === "function") unsub(); };
+        engineReady: Boolean(s.mpvEngineReady),
+        lastError: typeof s.mpvLastError === "string" ? s.mpvLastError : null,
+      };
+      desktopMpvSnapRef.current = snap;
+      setDesktopMpvSnap(snap);
+    };
+    const unsub = desktop.onStatus((s: any) => applySnap(s));
+    return () => { cancelled = true; if (typeof unsub === "function") unsub(); };
   }, []);
   // ── End desktop source-of-truth sync ─────────────────────────────────────
+  // True once the first live MPV status push arrives — do not seed from getStatus()
+  // (stale playing+position:0 snapshots caused fake PLAYING with frozen 0:00).
+  const isDesktopMode = desktopMpvSnap !== null;
+  /** Browser MASTER only — prewarm hidden YT containers + IFrame API; never on desktop MPV or CONTROL mirror. */
+  const canPrewarmYoutubeEmbed = !isDesktopMode && !isControlMirror;
   const [bufferedPercent, setBufferedPercent] = useState(0);
   const [isHoveringTimeline, setIsHoveringTimeline] = useState(false);
   const [hoverPercent, setHoverPercent] = useState(0);
@@ -447,6 +485,10 @@ export function AudioPlayer() {
   const [autoMix, setAutoMixState] = useState(false);
   const [mixDurationDisplay, setMixDurationDisplay] = useState(6);
   const [embedReady, setEmbedReady] = useState(false);
+  /** Browser YouTube: true only after IFrame API reports PLAYING/BUFFERING or time advances. */
+  const [ytEngineConfirmed, setYtEngineConfirmed] = useState(false);
+  const ytEngineConfirmedRef = useRef(false);
+  const ytStallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSeekingRef = useRef(false);
   const isDraggingRef = useRef(false);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -527,6 +569,88 @@ export function AudioPlayer() {
   isHtmlAudioRef.current = isHtmlAudio;
   isControlMirrorRef.current = Boolean(isControlMirror);
   embedReadyRef.current = embedReady;
+  ytEngineConfirmedRef.current = ytEngineConfirmed;
+
+  const markYtEngineConfirmed = useCallback((reason: string, player?: unknown) => {
+    if (ytEngineConfirmedRef.current) return;
+    ytEngineConfirmedRef.current = true;
+    setYtEngineConfirmed(true);
+    if (ytStallTimerRef.current) {
+      clearTimeout(ytStallTimerRef.current);
+      ytStallTimerRef.current = null;
+    }
+    p0XfadeDebug("yt_engine_confirmed", {
+      reason,
+      state: player != null ? safeGetPlayerState(player) : null,
+      currentTime: player != null ? safeGetCurrentTime(player) : null,
+    });
+    console.log("[SyncBiz Audit] url_prepare yt_engine_confirmed", {
+      reason,
+      stateLabel:
+        player != null ? ytStateLabel(safeGetPlayerState(player) ?? -1) : null,
+    });
+    urlTimingMark("now_playing_displayed", { reason });
+    if (urlTimingActive()) {
+      urlTimingSummary({ outcome: "engine_confirmed", reason });
+    }
+  }, []);
+
+  const clearYtEngineConfirmed = useCallback((reason: string) => {
+    ytEngineConfirmedRef.current = false;
+    setYtEngineConfirmed(false);
+    if (ytStallTimerRef.current) {
+      clearTimeout(ytStallTimerRef.current);
+      ytStallTimerRef.current = null;
+    }
+    p0XfadeDebug("yt_engine_confirmed_cleared", { reason });
+  }, []);
+
+  const handleYtPlayerStateChange = useCallback(
+    (player: unknown, state: number, via: string) => {
+      const YT = typeof window !== "undefined" ? window.YT : undefined;
+      console.log("[SyncBiz Audit] YT state_change", {
+        via,
+        state,
+        stateLabel: ytStateLabel(state),
+        currentUrl: currentPlayUrlRef.current?.slice(0, 120) ?? null,
+        videoId: currentVidRef.current,
+        playlistId: ytPlaylistId,
+        statusRef: statusRef.current,
+        currentTime: isYtPlayerReady(player) ? safeGetCurrentTime(player) : null,
+        duration: isYtPlayerReady(player) ? safeGetDuration(player) : null,
+      });
+      if (YT && (state === YT.PlayerState.PLAYING || state === YT.PlayerState.BUFFERING)) {
+        urlTimingMark("yt_buffering_or_playing", {
+          via,
+          stateLabel: ytStateLabel(state),
+        });
+        markYtEngineConfirmed(`state_${via}`, player);
+      }
+      if (isYtPlayerReady(player)) {
+        const pos = safeGetCurrentTime(player);
+        if (Number.isFinite(pos) && pos > 0) {
+          urlTimingMark("first_nonzero_current_time", { via, currentTime: pos });
+        }
+      }
+    },
+    [markYtEngineConfirmed, ytPlaylistId],
+  );
+
+  const handleYtPlayerError = useCallback(
+    (code: number, via: string) => {
+      console.warn("[SyncBiz Audit] YT onError", {
+        via,
+        code,
+        currentUrl: currentPlayUrlRef.current?.slice(0, 120) ?? null,
+        videoId: currentVidRef.current,
+        playlistId: ytPlaylistId,
+      });
+      clearYtEngineConfirmed("player_error");
+      setLastMessage(getTranslations(locale).playbackFailed);
+      stop();
+    },
+    [clearYtEngineConfirmed, setLastMessage, stop, locale, ytPlaylistId],
+  );
 
   const markYtCanonicalActive = useCallback((videoId: string, reason: string) => {
     ytCanonicalActiveVidRef.current = videoId;
@@ -769,22 +893,39 @@ export function AudioPlayer() {
   const loadYouTube = useCallback(() => {
     p0XfadeDebug("loadYouTube_called", {
       vid: vid ?? null,
+      playlistId: ytPlaylistId,
+      isEmbedded,
+      isYouTube,
       canonical: ytCanonicalActiveVidRef.current,
       suppress: ytSuppressColdLoadVidRef.current,
       manual: ytManualTransitionRef.current,
       currentVidRef: currentVidRef.current,
       via: lastPlayCommandViaRef.current,
     });
+    if (isYouTube && !isEmbedded) {
+      console.warn("[SyncBiz Audit] YT embed mismatch — isYouTube true but isEmbedded false", {
+        currentUrl: currentPlayUrl?.slice(0, 120) ?? null,
+        videoId: vid,
+        playlistId: ytPlaylistId,
+      });
+    }
     // Cold load always targets the ACTIVE deck — refs never swap, only the pointer.
     const coldDeck = getYtActiveDeck();
     const coldContainerRef = getYtContainerRefForDeck(coldDeck);
     const coldPlayerRef = getYtPlayerRefForDeck(coldDeck);
-    if (!vid || !coldContainerRef.current) return;
+    // Allow playlist-only URLs (ytPlaylistId set but vid=null) to proceed.
+    // The IFrame API initialises from playerVars.list when videoId is absent.
+    if ((!vid && !ytPlaylistId) || !coldContainerRef.current) return;
+    urlTimingMark("iframe_container_available", {
+      hasContainer: !!coldContainerRef.current,
+      ytApiReady: !!window.YT?.Player,
+    });
+    clearYtEngineConfirmed("load_youtube_start");
     if (ytManualTransitionRef.current || ytSequentialActiveRef.current) {
       p0XfadeDebug("loadYouTube_skipped_manual_active", { vid });
       return;
     }
-    if (ytCanonicalActiveVidRef.current === vid || ytSuppressColdLoadVidRef.current === vid) {
+    if (vid && (ytCanonicalActiveVidRef.current === vid || ytSuppressColdLoadVidRef.current === vid)) {
       p0XfadeDebug("suppress_duplicate_reload", {
         vid,
         via: lastPlayCommandViaRef.current,
@@ -792,7 +933,7 @@ export function AudioPlayer() {
       });
       return;
     }
-    if (lastYtVidRef.current === vid && currentVidRef.current === vid) {
+    if (vid && lastYtVidRef.current === vid && currentVidRef.current === vid) {
       p0XfadeDebug("yt_load_suppressed_promoted", { vid, via: lastPlayCommandViaRef.current });
       return;
     }
@@ -808,12 +949,13 @@ export function AudioPlayer() {
     const canManualHandoff =
       !ytForceColdLoadRef.current &&
       midPlayback &&
+      vid &&
       oldVid &&
       oldVid !== vid &&
       !isYouTubeMix &&
       !isYouTubeMultiTrack &&
       !ytManualTransitionRef.current;
-    if (canManualHandoff && isYtPlayerReady(oldPlayer)) {
+    if (canManualHandoff && vid && isYtPlayerReady(oldPlayer)) {
       ytXfadeLog("manual_transition_delegated", { from: oldVid, to: vid });
       p0XfadeDebug("transition_start", {
         via: lastPlayCommandViaRef.current,
@@ -873,7 +1015,7 @@ export function AudioPlayer() {
       playerVars.listType = "playlist";
     }
     const loadYT = () => {
-      if (ytCanonicalActiveVidRef.current === vid) {
+      if (vid && ytCanonicalActiveVidRef.current === vid) {
         p0XfadeDebug("cold_loadYT_aborted_canonical", { vid });
         return;
       }
@@ -903,14 +1045,18 @@ export function AudioPlayer() {
         playlistId: ytPlaylistId,
         currentSourceId: currentSource?.id ?? null,
       });
-      new window.YT.Player(coldContainerRef.current, {
+      urlTimingMark("yt_player_create_start", {
         videoId: vid,
+        destroyingPrior: isYtPlayerReady(oldPlayer),
+      });
+      new window.YT.Player(coldContainerRef.current, {
+        ...(vid != null ? { videoId: vid } : {}),
         width: 320,
         height: 180,
         playerVars,
         events: {
           onReady(evt) {
-            if (ytCanonicalActiveVidRef.current === vid) {
+            if (vid && ytCanonicalActiveVidRef.current === vid) {
               p0XfadeDebug("cold_onReady_aborted_post_handoff", { vid });
               return;
             }
@@ -969,6 +1115,15 @@ export function AudioPlayer() {
               playerState: initialState,
               statusRef: statusRef.current,
             });
+            console.log("[SyncBiz Audit] url_prepare yt_player_ready", {
+              videoId: vid,
+              playlistId: ytPlaylistId,
+            });
+            urlTimingMark("yt_on_ready", {
+              videoId: vid,
+              initialState: initialState,
+              initialStateLabel: ytStateLabel(initialState ?? -1),
+            });
             coldPlayerRef.current = target;
             safeSetVolume(target, volumeRef.current);
             setEmbedReady(true);
@@ -981,6 +1136,10 @@ export function AudioPlayer() {
                 action: "safePlayVideo",
               });
               guardedYtPlay(target, "cold_onReady_status_playing");
+              urlTimingMark("play_video_called", {
+                reason: "cold_onReady_status_playing",
+                playerStateAfter: safeGetPlayerState(target),
+              });
               const stateAfterPlay = safeGetPlayerState(target);
               console.log("[SyncBiz Audit] YT first_state_after_ready", {
                 embed: "current",
@@ -1049,20 +1208,68 @@ export function AudioPlayer() {
                 statusRef: statusRef.current,
               });
             }, 300);
+            const sampleEngine = (msAfter: number) => {
+              if (currentVidRef.current !== auditReadyVid && auditReadyVid != null) return;
+              const p = coldPlayerRef.current;
+              if (!isYtPlayerReady(p)) return;
+              const pos = safeGetCurrentTime(p);
+              const dur = safeGetDuration(p);
+              const st = safeGetPlayerState(p);
+              console.log("[SyncBiz Audit] YT engine_sample", {
+                msAfterReady: msAfter,
+                videoId: auditReadyVid,
+                playlistId: ytPlaylistId,
+                playerState: st,
+                stateLabel: ytStateLabel(st),
+                currentTime: pos,
+                duration: dur,
+                ytEngineConfirmed: ytEngineConfirmedRef.current,
+              });
+              const YT = window.YT;
+              if (
+                YT &&
+                (st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING) &&
+                Number.isFinite(pos) &&
+                pos > 0
+              ) {
+                markYtEngineConfirmed(`ready_sample_${msAfter}ms`, p);
+              }
+            };
+            window.setTimeout(() => sampleEngine(1000), 1000);
+            window.setTimeout(() => sampleEngine(3000), 3000);
+          },
+          onStateChange(evt) {
+            handleYtPlayerStateChange(evt.target, evt.data, "cold_onStateChange");
+          },
+          onError(evt) {
+            handleYtPlayerError(typeof evt?.data === "number" ? evt.data : -1, "cold_onError");
           },
         },
       });
     };
     if (window.YT?.Player) {
+      urlTimingMark("yt_api_ready", { preloaded: true, via: "loadYouTube" });
       loadYT();
+      return;
+    }
+    const chainYtApiReady = (run: () => void) => {
+      const priorReady = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => {
+        urlTimingMark("yt_api_ready", { preloaded: false, via: "loadYouTube" });
+        if (typeof priorReady === "function") priorReady();
+        run();
+      };
+    };
+    if (document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+      chainYtApiReady(loadYT);
       return;
     }
     const tag = document.createElement("script");
     tag.src = "https://www.youtube.com/iframe_api";
     const first = document.getElementsByTagName("script")[0];
     first?.parentNode?.insertBefore(tag, first);
-    window.onYouTubeIframeAPIReady = () => loadYT();
-  }, [vid, ytPlaylistId, clearYtCanonicalActive, getActiveDeck, guardedYtPlay, getYtActiveDeck, getYtContainerRefForDeck, getYtPlayerRefForDeck]);
+    chainYtApiReady(loadYT);
+  }, [vid, ytPlaylistId, isEmbedded, isYouTube, currentPlayUrl, clearYtCanonicalActive, clearYtEngineConfirmed, getActiveDeck, guardedYtPlay, getYtActiveDeck, getYtContainerRefForDeck, getYtPlayerRefForDeck, handleYtPlayerError, handleYtPlayerStateChange, markYtEngineConfirmed]);
 
   useEffect(() => {
     loadYouTubeRef.current = loadYouTube;
@@ -1612,6 +1819,27 @@ export function AudioPlayer() {
   }, [scEmbedUrl, mountSoundCloudWidget]);
 
   useEffect(() => {
+    if (!canPrewarmYoutubeEmbed || typeof window === "undefined") return;
+    if (window.YT?.Player) {
+      console.log("[SyncBiz Audit] YT API preload already ready");
+      urlTimingMark("yt_api_ready", { preloaded: true, onMount: true });
+      return;
+    }
+    if (document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) return;
+    console.log("[SyncBiz Audit] YT API preload start");
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    const first = document.getElementsByTagName("script")[0];
+    first?.parentNode?.insertBefore(tag, first);
+    const priorReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      console.log("[SyncBiz Audit] YT API preload ready");
+      urlTimingMark("yt_api_ready", { preloaded: true, onMount: false });
+      if (typeof priorReady === "function") priorReady();
+    };
+  }, [canPrewarmYoutubeEmbed]);
+
+  useEffect(() => {
     if (!isYouTube) return;
     loadYouTube();
   }, [isYouTube, loadYouTube]);
@@ -1639,12 +1867,89 @@ export function AudioPlayer() {
     if (isYouTube && vidFromUrl) {
       p0XfadeDebug("currentPlayUrl_changed_embed_reset", { vid: vidFromUrl });
     }
+    urlTimingMark("audio_player_source", {
+      currentPlayUrl: currentPlayUrl?.slice(0, 120) ?? null,
+      currentSourceId: currentSource?.id ?? null,
+      isYouTube,
+      videoId: vidFromUrl,
+    });
     setEmbedReady(false);
+    clearYtEngineConfirmed("current_play_url_changed");
     setPosition(0);
     setDuration(0);
     setBufferedPercent(0);
     resetLocalPlaybackTime();
-  }, [currentPlayUrl, isYouTube]);
+  }, [currentPlayUrl, isYouTube, clearYtEngineConfirmed]);
+
+  /** YouTube stall watchdog — intent playing but engine never confirms within 4 s. */
+  useEffect(() => {
+    if (isDesktopMode || isControlMirror || !isYouTube) {
+      if (ytStallTimerRef.current) {
+        clearTimeout(ytStallTimerRef.current);
+        ytStallTimerRef.current = null;
+      }
+      return;
+    }
+    if (status !== "playing") {
+      if (ytStallTimerRef.current) {
+        clearTimeout(ytStallTimerRef.current);
+        ytStallTimerRef.current = null;
+      }
+      return;
+    }
+    if (ytStallTimerRef.current) clearTimeout(ytStallTimerRef.current);
+    ytStallTimerRef.current = setTimeout(() => {
+      ytStallTimerRef.current = null;
+      if (statusRef.current !== "playing" || !isYouTubeRef.current) return;
+      if (ytEngineConfirmedRef.current) return;
+      const p = getYtActivePlayer();
+      const YT = typeof window !== "undefined" ? window.YT : undefined;
+      const st = isYtPlayerReady(p) ? safeGetPlayerState(p) : -1;
+      const engineActive =
+        YT != null && (st === YT.PlayerState.PLAYING || st === YT.PlayerState.BUFFERING);
+      if (engineActive) {
+        markYtEngineConfirmed("stall_watchdog_late", p);
+        return;
+      }
+      console.warn("[SyncBiz Audit] YT stall — no playback confirmation after 4 s", {
+        url: currentPlayUrlRef.current?.slice(0, 120) ?? null,
+        videoId: currentVidRef.current,
+        playerState: st,
+        stateLabel: ytStateLabel(st),
+        embedReady: embedReadyRef.current,
+        hasPlayer: isYtPlayerReady(p),
+      });
+      urlTimingMark("stall_error", { playerState: st, stateLabel: ytStateLabel(st) });
+      if (urlTimingActive()) urlTimingSummary({ outcome: "stall_error" });
+      setLastMessage(getTranslations(locale).playbackFailed);
+      stop();
+    }, 4000);
+    return () => {
+      if (ytStallTimerRef.current) {
+        clearTimeout(ytStallTimerRef.current);
+        ytStallTimerRef.current = null;
+      }
+    };
+  }, [
+    status,
+    isYouTube,
+    currentPlayUrl,
+    isControlMirror,
+    isDesktopMode,
+    stop,
+    setLastMessage,
+    locale,
+    getYtActivePlayer,
+    markYtEngineConfirmed,
+    clearYtEngineConfirmed,
+  ]);
+
+  useEffect(() => {
+    if (!isYouTube || isControlMirror || isDesktopMode) return;
+    if (status === "stopped" || status === "idle" || status === "paused") {
+      clearYtEngineConfirmed(`status_${status}`);
+    }
+  }, [status, isYouTube, isControlMirror, isDesktopMode, clearYtEngineConfirmed]);
 
   const handlePlaybackError = useCallback(
     (err: unknown, context?: string) => {
@@ -2167,6 +2472,22 @@ export function AudioPlayer() {
   // IMPORTANT: Do NOT include status in deps – play/pause is handled separately.
   useEffect(() => {
     syncAudioRefToActiveDeck();
+
+    // Local file paths (Windows/Unix absolute paths, file:// URIs) cannot be loaded by a web
+    // browser renderer due to security restrictions. Detect this early, log a clear error, and
+    // stop playback so the UI does not show a fake PLAYING state. On Electron Desktop the
+    // MPV bridge handles local files; the HTML audio engine is intentionally bypassed.
+    const isDesktopApp = typeof window !== "undefined" && "syncbizDesktop" in window;
+    if (isHtmlAudio && currentPlayUrl && !isDesktopApp && isValidLocalFilePlaybackPath(currentPlayUrl)) {
+      console.warn("[SyncBiz Audit] local_file_browser_blocked", {
+        url: currentPlayUrl.slice(0, 120),
+        note: "Browser cannot load local filesystem paths. Use the SyncBiz Desktop app to play local files.",
+      });
+      setLastMessage("Local files require the SyncBiz desktop app");
+      stop();
+      return;
+    }
+
     if (!isHtmlAudio || !currentPlayUrl) {
       lastStreamUrlRef.current = null;
       standbyPreloadedUrlRef.current = null;
@@ -2219,7 +2540,7 @@ export function AudioPlayer() {
     lastStreamUrlRef.current = currentPlayUrl;
     standbyPreloadedUrlRef.current = null;
     loadStreamOnDeck(getActiveDeck(), currentPlayUrl, statusRef.current === "playing");
-  }, [isHtmlAudio, currentPlayUrl, beginStreamUrlTransition, loadStreamOnDeck, getDeckAudio, getActiveDeck, syncAudioRefToActiveDeck]);
+  }, [isHtmlAudio, currentPlayUrl, beginStreamUrlTransition, loadStreamOnDeck, getDeckAudio, getActiveDeck, syncAudioRefToActiveDeck, stop, setLastMessage]);
 
   useEffect(() => {
     if (
@@ -2240,6 +2561,29 @@ export function AudioPlayer() {
 
   useEffect(() => {
     const isDesktop = typeof window !== "undefined" && "syncbizDesktop" in window;
+    const engineName = isYouTube ? "youtube_iframe"
+      : (isSoundCloud ? "soundcloud_widget"
+      : (isDesktop ? "mpv_desktop" : (currentPlayUrl ? "html_audio" : "none")));
+    const isLocalPath = currentPlayUrl ? isValidLocalFilePlaybackPath(currentPlayUrl) : false;
+    console.log("[SyncBiz Audit] AudioPlayer engine_selection", {
+      engine: engineName,
+      url: currentPlayUrl?.slice(0, 120) ?? null,
+      videoId: isYouTube && currentPlayUrl ? getYouTubeVideoId(currentPlayUrl) : null,
+      playlistId: isYouTube && currentPlayUrl ? getYouTubePlaylistId(currentPlayUrl) : null,
+      isEmbedded,
+      isYouTube,
+      isSoundCloud,
+      isLocalPath,
+      isDesktop,
+      isControlMirror,
+      status,
+      ytEngineConfirmed,
+      sourceId: currentSource?.id ?? null,
+      sourceTitle: currentSource?.title ?? null,
+      sourceType: currentTrack?.type ?? null,
+      embedMismatch: isYouTube && !isEmbedded ? "isYouTube_without_isEmbedded" : null,
+      note: isLocalPath && !isDesktop ? "LOCAL_PATH_IN_BROWSER: will be blocked by stream routing guard" : null,
+    });
     p0XfadeDebug("currentPlayUrl_changed", {
       url: currentPlayUrl?.slice(0, 120) ?? null,
       isHtmlAudio,
@@ -2257,7 +2601,7 @@ export function AudioPlayer() {
       inHandoffGrace: Date.now() < ytHandoffGraceUntilRef.current,
       via: lastPlayCommandViaRef.current,
     });
-  }, [currentPlayUrl, isHtmlAudio, isYouTube, isSoundCloud, isControlMirror, deviceCtx?.deviceMode, status, currentTrack?.type, deckTransitionLock]);
+  }, [currentPlayUrl, isHtmlAudio, isYouTube, isSoundCloud, isControlMirror, deviceCtx?.deviceMode, status, currentTrack?.type, deckTransitionLock, isDesktopMode, currentSource?.id, currentSource?.title, isEmbedded, ytEngineConfirmed]);
 
   useEffect(() => {
     const urlVid = isYouTube && currentPlayUrl ? getYouTubeVideoId(currentPlayUrl) : null;
@@ -2539,6 +2883,15 @@ export function AudioPlayer() {
             deviceCtx.reportPosition(pos, dur);
           }
           reportRecoveryProgress(pos);
+          const YT = window.YT;
+          if (
+            statusRef.current === "playing" &&
+            !ytEngineConfirmedRef.current &&
+            YT != null &&
+            (playerState === YT.PlayerState.PLAYING || playerState === YT.PlayerState.BUFFERING)
+          ) {
+            markYtEngineConfirmed("poll_state", p);
+          }
           if (
             statusRef.current === "playing" &&
             !isYouTubeMix &&
@@ -2743,7 +3096,7 @@ export function AudioPlayer() {
     poll();
     const id = setInterval(poll, 500);
     return () => clearInterval(id);
-  }, [currentSource, isYouTube, isSoundCloud, isHtmlAudio, isYouTubeMix, isYouTubeMultiTrack, getNextStreamUrl, getNextEmbeddedSource, deviceCtx?.isBranchConnected, deviceCtx?.deviceMode, updatePositionIfChanged, updateDurationIfChanged, updateBufferedIfChanged, reportRecoveryProgress, getDeckAudio, getStandbyDeck, swapActiveDeck, deckTransitionLock, guardedYtPlay]);
+  }, [currentSource, isYouTube, isSoundCloud, isHtmlAudio, isYouTubeMix, isYouTubeMultiTrack, getNextStreamUrl, getNextEmbeddedSource, deviceCtx?.isBranchConnected, deviceCtx?.deviceMode, updatePositionIfChanged, updateDurationIfChanged, updateBufferedIfChanged, reportRecoveryProgress, getDeckAudio, getStandbyDeck, swapActiveDeck, deckTransitionLock, guardedYtPlay, markYtEngineConfirmed]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -2904,6 +3257,9 @@ export function AudioPlayer() {
   const mpvPendingUrlRef = useRef<string | null>(null);
   const mpvCoalesceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mpvDesktopMixStartedRef = useRef(false);
+  // Fires 4 s after mpvPlayUrl() is dispatched. If MPV hasn't confirmed "playing" by
+  // then, the fake-PLAYING UI is reset and the error is surfaced to the user.
+  const mpvStallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const MPV_LOADFILE_COALESCE_MS = 250;
 
   // Subscribe to desktop status once. When Ch-A unexpectedly goes idle while
@@ -3032,21 +3388,54 @@ export function AudioPlayer() {
           } else {
             void desktop.mpvPlayUrl(latest);
           }
+
+          // Stall detection: if Ch-A hasn't reported "playing" within 4 s, the file
+          // or engine has a problem. Reset the fake-playing state and surface the error.
+          if (mpvStallTimerRef.current) clearTimeout(mpvStallTimerRef.current);
+          mpvStallTimerRef.current = setTimeout(() => {
+            mpvStallTimerRef.current = null;
+            if (
+              statusRef.current === "playing" &&
+              currentPlayUrlRef.current === latest &&
+              mpvChAStatusRef.current !== "playing"
+            ) {
+              const snap = desktopMpvSnapRef.current;
+              const engineOk = snap?.engineReady !== false;
+              const errDetail = snap?.lastError ?? null;
+              const userMsg = !engineOk
+                ? (errDetail ?? "MPV player is not ready — check the desktop installation")
+                : (errDetail ?? "Desktop playback did not start — file may be missing or in an unsupported format");
+              console.warn("[SyncBiz Audit] Desktop MPV stall — no playing confirmation after 4 s", {
+                url: latest.slice(0, 100),
+                mpvChAStatus: mpvChAStatusRef.current,
+                engineReady: snap?.engineReady ?? null,
+                lastError: errDetail,
+              });
+              setLastMessage(userMsg);
+              stop();
+            }
+          }, 4000);
         }, MPV_LOADFILE_COALESCE_MS);
       } else {
         // Same URL, resumed after pause — don't restart.
         cancelPendingLoadfile();
+        if (mpvStallTimerRef.current) { clearTimeout(mpvStallTimerRef.current); mpvStallTimerRef.current = null; }
         void desktop.localMockTransport({ command: "PLAY" });
       }
     } else if (status === "paused") {
       cancelPendingLoadfile();
+      if (mpvStallTimerRef.current) { clearTimeout(mpvStallTimerRef.current); mpvStallTimerRef.current = null; }
       void desktop.localMockTransport({ command: "PAUSE" });
     } else if (status === "stopped") {
       cancelPendingLoadfile();
+      if (mpvStallTimerRef.current) { clearTimeout(mpvStallTimerRef.current); mpvStallTimerRef.current = null; }
       mpvLastUrlRef.current = null;
       void desktop.localMockTransport({ command: "STOP" });
     }
-  }, [status, currentPlayUrl]);
+    return () => {
+      if (mpvStallTimerRef.current) { clearTimeout(mpvStallTimerRef.current); mpvStallTimerRef.current = null; }
+    };
+  }, [status, currentPlayUrl, stop, setLastMessage]);
 
   // Sync volume slider → MPV master volume
   useEffect(() => {
@@ -3058,12 +3447,44 @@ export function AudioPlayer() {
 
   /** Unified display values: desktop MPV > CONTROL mirror > local React state. */
   const ms = deviceCtx?.masterState;
-  // In desktop mode the Orchestrator/MPV state is the single source of truth for all playback display.
-  // React state still drives commands (intent → engine), but the UI must reflect what MPV is actually doing.
-  const isDesktopMode = desktopMpvSnap !== null;
+  // isDesktopMode is declared earlier (near the desktopMpvSnap state) to avoid TDZ errors
+  // in effects that reference it in their dependency arrays before this line in the file.
+
+  // Desktop: tick between onStatus pushes so the timeline advances smoothly.
+  const [, setDesktopProgressTick] = useState(0);
+  useEffect(() => {
+    if (!isDesktopMode || desktopMpvSnap?.status !== "playing") return;
+    const id = setInterval(() => setDesktopProgressTick((n) => n + 1), 250);
+    return () => clearInterval(id);
+  }, [isDesktopMode, desktopMpvSnap?.status]);
+
+  const desktopStalePlayingZero =
+    isDesktopMode &&
+    desktopMpvSnap.status === "playing" &&
+    desktopMpvSnap.duration > 0 &&
+    desktopMpvSnap.position <= 0 &&
+    desktopSnapPositionAtRef.current > 0 &&
+    Date.now() - desktopSnapPositionAtRef.current > 1000;
+
+  /** Browser YouTube: provider intent is playing but IFrame API has not confirmed yet. */
+  const isYtAwaitingEngine =
+    !isDesktopMode &&
+    !isControlMirror &&
+    isYouTube &&
+    status === "playing" &&
+    !ytEngineConfirmed;
+
+  /** Player-deck URL drop: parse/resolve/create in flight before playSource. */
+  const isUrlPreparing =
+    !isDesktopMode && !isControlMirror && urlPrepareActive;
+
   const displayStatus = isDesktopMode
-    ? desktopMpvSnap.status
-    : isControlMirror ? (ms?.status ?? "idle") : status;
+    ? (desktopStalePlayingZero ? "paused" : desktopMpvSnap.status)
+    : isControlMirror
+      ? (ms?.status ?? "idle")
+      : isYtAwaitingEngine
+        ? "idle"
+        : status;
   const displayTrack = isControlMirror ? ms?.currentTrack : currentTrack;
   const displaySource = isControlMirror ? ms?.currentSource : currentSource;
 
@@ -3079,7 +3500,17 @@ export function AudioPlayer() {
 
   // Interpolate CONTROL position between STATE_UPDATE snapshots using positionAt timestamp.
   const displayPosition = isDesktopMode
-    ? desktopMpvSnap.position
+    ? (() => {
+        const pos = desktopMpvSnap.position;
+        const dur = desktopMpvSnap.duration;
+        if (desktopMpvSnap.status !== "playing" || !Number.isFinite(pos)) return pos;
+        if (!Number.isFinite(dur) || dur <= 0) return pos;
+        const at = desktopSnapPositionAtRef.current;
+        if (!at) return pos;
+        const ageMs = Date.now() - at;
+        if (ageMs > 1200) return pos;
+        return Math.min(pos + ageMs / 1000, dur);
+      })()
     : isControlMirror
       ? (() => {
           const pos = ms?.position;
@@ -3253,13 +3684,17 @@ export function AudioPlayer() {
       : 0;
 
   const displayStatusLabel =
-    displayStatus === "playing"
-      ? t.playing
-      : displayStatus === "paused"
-        ? t.paused
-        : displayStatus === "stopped"
-          ? t.stopped
-          : t.idle;
+    isUrlPreparing
+      ? "Preparing URL"
+      : isYtAwaitingEngine
+        ? "Loading"
+        : displayStatus === "playing"
+          ? t.playing
+          : displayStatus === "paused"
+            ? t.paused
+            : displayStatus === "stopped"
+              ? t.stopped
+              : t.idle;
 
   const trackTypeForTooltip = (displayTrack as PlaybackTrack | undefined)?.type;
   const originForTooltip = (displaySource as typeof currentSource | null | undefined)?.origin;
@@ -3450,7 +3885,34 @@ export function AudioPlayer() {
       };
   const onPlayPause = isControlMirror
     ? (displayStatus === "playing" ? deviceCtx!.pauseOrSend : deviceCtx!.playOrSend)
-    : (status === "playing" ? pause : () => { if (status === "paused" && currentSource) play(); else if (currentSource) playSource(currentSource); });
+    : (status === "playing"
+        ? () => {
+            console.log("[SyncBiz Audit] PAUSE click", {
+              context: "local_ui",
+              status,
+              currentSourceId: currentSource?.id ?? null,
+            });
+            pause();
+          }
+        : () => {
+            console.log("[SyncBiz Audit] PLAY click", {
+              context: "local_ui",
+              status,
+              currentSourceId: currentSource?.id ?? null,
+              sourceOrigin: currentSource?.origin ?? null,
+              // Direct URL on the source (covers ephemeral catalog-preview and DB source)
+              sourceDirectUrl: currentSource?.url ?? null,
+              // Track-level URL (only for playlist sources with loaded tracks)
+              sourceTrackUrl: currentSource?.playlist?.tracks?.[0]?.url ?? null,
+              hasPlaylistAttachment: !!currentSource?.playlist,
+              catalogItemId: currentSource?.catalogItemId ?? null,
+              isEphemeralCatalogPreview: currentSource?.id?.startsWith("catalog-preview-") ?? false,
+              isBPath: !!(currentSource?.playlist?.id) || currentSource?.origin === "source",
+            });
+            if (status === "paused" && currentSource) play();
+            else if (currentSource) playSource(currentSource);
+            else console.warn("[SyncBiz Audit] PLAY blocked: no currentSource");
+          });
   const onVolumeChange = isControlMirror ? deviceCtx!.setVolumeOrSend : setVolume;
 
   const canSeek =
@@ -3584,8 +4046,10 @@ export function AudioPlayer() {
     };
   }, [displayCanSeek, displayDuration, onSeekChange, getPercentFromClientX, handleSeekEnd]);
 
-  const progressPercent = duration > 0 ? Math.min(100, (position / duration) * 100) : 0;
-  const hoverTime = duration > 0 ? (hoverPercent / 100) * duration : 0;
+  const hoverTime =
+    Number.isFinite(displayDuration) && displayDuration > 0
+      ? (hoverPercent / 100) * displayDuration
+      : 0;
 
   useEffect(() => {
     const measure = titleMeasureRef.current;
@@ -3602,66 +4066,213 @@ export function AudioPlayer() {
     <header
       className={
         isSourcesLibraryDeck
-          ? "audio-player-library-deck relative bg-slate-950/95 px-3 py-3 overflow-hidden sm:px-4"
+          ? "audio-player-library-deck relative flex h-full min-h-0 flex-col px-1.5 py-0.5 sm:px-2"
           : "sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/98 px-3 py-3 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.08)] overflow-hidden sm:px-4"
       }
       role="region"
       aria-label={t.playerControllerAria}
     >
-      <PlayerUnitSurface
-        artwork={
-          isSourcesLibraryDeck ? (
-            <div
-              className={`library-deck-art-host flex shrink-0 items-center justify-center ${
-                displayStatus === "playing" ? "library-deck-art-host--playing" : "library-deck-art-host--idle"
-              }`}
-            >
-              {displayStatus === "playing" ? <div className="library-deck-art-ring" aria-hidden /> : null}
-              <div className="library-deck-art-inner h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 rounded-full overflow-hidden bg-slate-800/90 shadow-[inset_0_0_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]">
-                <div className="h-full w-full overflow-hidden rounded-full">
-                  {displayThumbnailCover ? (
-                    <HydrationSafeImage src={displayThumbnailCover} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div
-              className={`relative flex shrink-0 items-center justify-center rounded-full border-2 p-[6px] bg-slate-800/80 ${
-                displayStatus === "playing" ? "playing-active-ring" : "border-slate-600/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_0_1px_rgba(0,0,0,0.2),0_2px_12px_rgba(0,0,0,0.3)]"
-              }`}
-            >
-              <div className="relative h-28 w-28 sm:h-32 sm:w-32 flex-shrink-0 rounded-full overflow-hidden bg-slate-800/90 shadow-[inset_0_0_8px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.04)]">
-                <div className="h-full w-full overflow-hidden rounded-full">
-                  {displayThumbnailCover ? (
-                    <HydrationSafeImage src={displayThumbnailCover} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900" aria-hidden />
-                  )}
-                </div>
-              </div>
-            </div>
-          )
-        }
-        rightAside={
-          <PlayerVerticalVolume
-            value={displayVolume}
-            onChange={onVolumeChange}
-            onMuteToggle={() => {
-              if (displayVolume > 0) {
-                volumeBeforeMuteRef.current = displayVolume;
-                onVolumeChange(0);
-              } else {
-                onVolumeChange(volumeBeforeMuteRef.current);
-              }
-            }}
-            ariaLabel={t.volumeAria}
-            muteLabel={displayVolume === 0 ? t.unmute : t.mute}
-          />
-        }
+      <div
+        className={`player-hero-shell relative min-w-0 w-full flex-1 rounded-2xl border px-2.5 py-2.5 sm:px-3.5 sm:py-3 ${
+          displayStatus === "playing"
+            ? "border-white/[0.06] bg-gradient-to-b from-slate-800/38 to-slate-950/72"
+            : "border-white/[0.04] bg-gradient-to-b from-slate-900/32 to-slate-950/68"
+        }`}
       >
+        {displayStatus === "playing" ? (
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"
+            aria-hidden
+          />
+        ) : null}
+      <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        {/* Unified hero: vinyl · metadata + progress + transport · volume */}
+        <div className="grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)_auto] items-stretch gap-3 sm:gap-4 lg:gap-5">
+          <div className="flex shrink-0 items-center justify-center self-center">
+            <DjVinylArtwork
+              coverSrc={displayThumbnailCover}
+              isPlaying={displayStatus === "playing"}
+              size="hero"
+            />
+          </div>
+
+          <div className="library-deck-controls-col flex min-h-0 min-w-0 w-full max-w-none flex-col justify-between gap-1.5 py-1 sm:gap-2">
+            {(() => {
+              const rawTitle = String(displayTitle ?? "");
+              const titleSplit = rawTitle.match(/^(.+?)\s[–—-]\s(.+)$/);
+              const heroArtist = titleSplit?.[1]?.trim() || null;
+              const heroTitle = titleSplit?.[2]?.trim() || rawTitle;
+
+              return (
+                <div className="player-hero-metadata flex min-w-0 w-full flex-col gap-1.5 sm:gap-2">
+
+                  {/* Eyebrow — fixed height slot */}
+                  <div className="flex h-4 min-w-0 items-center gap-2">
+                    <span
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${displayStatus === "playing" ? "bg-cyan-400/70" : "bg-transparent"}`}
+                      aria-hidden
+                    />
+                    <p
+                      className={`shrink-0 text-[9px] font-medium uppercase tracking-[0.22em] ${
+                        displayStatus === "playing"
+                          ? isSourcesLibraryDeck ? "text-[color:var(--lib-accent)]" : "text-cyan-400/75"
+                          : displayStatus === "paused"
+                            ? "text-slate-500"
+                            : "text-slate-600"
+                      }`}
+                      aria-label={displayStatusLabel}
+                    >
+                      {isUrlPreparing
+                        ? "Preparing URL"
+                        : isYtAwaitingEngine
+                          ? "LOADING"
+                          : displayStatus === "playing"
+                            ? "NOW PLAYING"
+                            : displayStatus === "paused"
+                              ? "PAUSED"
+                              : "READY"}
+                    </p>
+                  </div>
+
+                  {/* Title — fixed min-height slot */}
+                  <div ref={titleContainerRef} className="relative min-h-[2.75rem] min-w-0 w-full overflow-hidden lg:min-h-[2rem]">
+                    <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
+                      {heroTitle}
+                    </span>
+                    <p
+                      className={`min-w-0 w-full line-clamp-2 lg:line-clamp-1 text-xl font-bold leading-[1.2] tracking-tight sm:text-2xl ${
+                        isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-white"
+                      } ${!displayHasContent ? "text-slate-500" : ""}`}
+                      title={heroTitle}
+                    >
+                      {heroTitle}
+                    </p>
+                  </div>
+
+                  <div className="player-hero-slot flex min-h-[1.25rem] min-w-0 flex-col justify-center">
+                  {heroArtist ? (
+                    <p
+                      className={`min-w-0 truncate text-sm font-medium leading-snug sm:text-base ${
+                        isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-300"
+                      }`}
+                      title={heroArtist}
+                    >
+                      {heroArtist}
+                    </p>
+                  ) : (
+                    <span className="text-sm text-transparent select-none" aria-hidden>&nbsp;</span>
+                  )}
+                  </div>
+
+                  <div className="player-hero-slot flex min-h-[1rem] min-w-0 flex-col justify-center">
+                  {displaySource?.title ? (
+                    <p
+                      className={`min-w-0 truncate text-xs leading-snug sm:text-sm ${
+                        isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"
+                      }`}
+                      title={displaySource.title}
+                    >
+                      {displaySource.title}
+                    </p>
+                  ) : (
+                    <span className="text-xs text-transparent select-none" aria-hidden>&nbsp;</span>
+                  )}
+                  </div>
+
+                  <div className="player-hero-slot flex min-h-[1.25rem] min-w-0 items-baseline gap-2" title={displayNextLabel ? t.nextTrackColon : undefined}>
+                    <span className={`shrink-0 text-[9px] font-medium uppercase tracking-[0.2em] ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-600"}`} aria-hidden>
+                      NEXT
+                    </span>
+                    <span
+                      className={`min-w-0 flex-1 truncate text-xs leading-snug sm:text-sm ${
+                        displayNextLabel
+                          ? isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-400"
+                          : "text-slate-600/50"
+                      }`}
+                      title={displayNextLabel ?? undefined}
+                    >
+                      {displayNextLabel ?? "—"}
+                    </span>
+                  </div>
+
+                </div>
+              );
+            })()}
+
+            {/* Progress — LCD time labels + precise hardware strip */}
+            <div className="flex w-full min-w-0 shrink-0 items-center gap-3 sm:gap-4">
+              <span
+                className={`player-lcd-time w-14 shrink-0 text-right text-base font-semibold tabular-nums tracking-tight sm:w-16 sm:text-lg ${
+                  isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-200"
+                }`}
+                aria-live="polite"
+              >
+                {formatTime(displayPosition)}
+              </span>
+            <div
+              ref={timelineRef}
+              role="slider"
+              aria-label={t.trackProgressAria}
+              aria-valuemin={0}
+              aria-valuemax={Number.isFinite(displayDuration) ? displayDuration : 0}
+              aria-valuenow={Number.isFinite(displayPosition) ? displayPosition : 0}
+              aria-disabled={!displayCanSeek}
+              tabIndex={displayCanSeek ? 0 : undefined}
+              className={`relative flex flex-1 min-w-0 select-none py-2.5 ${displayCanSeek ? "cursor-pointer" : "cursor-default opacity-80"}`}
+            onMouseMove={handleTimelineMouseMove}
+            onMouseEnter={handleTimelineMouseEnter}
+            onMouseLeave={handleTimelineMouseLeave}
+            onMouseDown={handleSeekStart}
+            onTouchStart={handleTouchStart}
+          >
+            <div
+              className={`absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-sm ${
+                isSourcesLibraryDeck ? "bg-[color:var(--lib-border-muted)]/80" : "bg-[#1a1a1a]"
+              }`}
+            />
+            {displayBufferedPercent > 0 && (
+              <div
+                className={`absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-sm transition-all duration-150 ${
+                  isSourcesLibraryDeck ? "library-player-timeline-buffer" : "bg-neutral-700/50"
+                }`}
+                style={{ width: `${Math.min(displayBufferedPercent, 100)}%` }}
+              />
+            )}
+            <div
+              className={`absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-sm transition-all duration-100 ${
+                isSourcesLibraryDeck ? "library-player-timeline-played" : "bg-gradient-to-r from-cyan-600/50 to-cyan-400/75"
+              }`}
+              style={{ width: `${displayProgressPercent}%` }}
+            />
+            <div
+              className={`absolute top-1/2 h-3 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-sm transition-all duration-100 ${
+                isSourcesLibraryDeck
+                  ? "library-player-timeline-thumb bg-[color:var(--lib-accent)]"
+                  : "bg-cyan-100/90"
+              }`}
+              style={{ left: `${Math.max(0, Math.min(100, displayProgressPercent))}%` }}
+            />
+            {isHoveringTimeline && displayDuration > 0 && (
+              <div
+                className="pointer-events-none absolute bottom-full z-10 mb-1 rounded-sm border border-white/10 bg-[#141414] px-2 py-0.5 text-xs font-mono tabular-nums text-slate-300"
+                style={{ left: `${hoverPercent}%`, transform: "translate(-50%, -100%)" }}
+              >
+                {formatTime(hoverTime)}
+              </div>
+            )}
+          </div>
+              <span
+                className={`player-lcd-time w-14 shrink-0 text-left text-base font-semibold tabular-nums tracking-tight sm:w-16 sm:text-lg ${
+                  isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"
+                }`}
+                aria-live="polite"
+              >
+                {formatTime(displayDuration)}
+              </span>
+            </div>
+
+            {/* Transport — integrated dock at bottom of metadata column */}
+            <div className="player-hero-transport-slot mt-auto shrink-0 pt-1">
             <PlayerDeckTransportSurface
               variant={isSourcesLibraryDeck ? "library-deck" : "default"}
               onPrev={() => {
@@ -3713,43 +4324,15 @@ export function AudioPlayer() {
               }}
               onShareClick={() => setShareOpen(true)}
               shareDisabled={!displayHasContent || Boolean(isControlMirror)}
-              /**
-               * Edit deep-link for the currently-playing track — routes to
-               * the correct editor based on the source origin:
-               *   playlist → /playlists/[id]/edit
-               *   radio    → /radio/[id]/edit
-               *   source   → /sources/[id]/edit
-               * Used as the fallback when we can't open the editor inline
-               * (non-library route, or radio which has its own full-page
-               * editor). Hidden in control-mirror mode or when nothing
-               * is playing.
-               */
               editHref={
                 displayHasContent
                   ? isControlMirror
-                    // CONTROL mirror: master broadcasts a precomputed editHref
-                    // so the Edit button opens the correct editor on the
-                    // browser tab even though the browser isn't the playing
-                    // device. Catalog editing is data, not playback, so it
-                    // should not be gated by device role.
                     ? (ms?.currentSource?.editHref ?? null)
                     : currentSource
                       ? editHrefForLibrarySource(currentSource)
                       : null
                   : null
               }
-              /**
-               * Inline edit: on library routes (which host the center
-               * workspace panel), playlist/source items open their
-               * editor inline in the center column — matching the
-               * Jingles workspace UX. Radio stays URL-based; there's no
-               * in-panel radio editor yet.
-               *
-               * Only available on the MASTER device — inline editing
-               * requires the full UnifiedSource, which the CONTROL
-               * mirror does not carry. CONTROL falls back to `editHref`
-               * above and opens the editor as a full page.
-               */
               onEditClick={
                 !isControlMirror && displayHasContent && currentSource && isLibraryRoute
                   ? currentSource.origin === "playlist" && currentSource.playlist
@@ -3782,279 +4365,46 @@ export function AudioPlayer() {
                 edit: t.edit,
               }}
             />
-
-            {/* ROW 2: Track display panel – source icon + status + title + next (unified deck display) */}
-            {(() => {
-              return (
-                <div className="flex w-full">
-                  <div
-                    className={`relative flex min-w-0 w-full flex-col py-2.5 pl-4 pr-2.5 ${
-                      isSourcesLibraryDeck
-                        ? "library-player-track-shell rounded-2xl"
-                        : "rounded-lg border border-slate-700/60 bg-slate-900/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_1px_3px_rgba(0,0,0,0.2)] ring-1 ring-slate-700/40"
-                    }`}
-                  >
-                    {/* Main row: left = icon + status (original compact structure), center = inner display frame */}
-                    <div className="flex min-w-0 flex-1 items-stretch gap-4">
-                      <div
-                        className={`flex w-9 shrink-0 flex-col items-center justify-center gap-[15px] border-r pr-4 sm:w-10 ${
-                          isSourcesLibraryDeck ? "border-[color:var(--lib-border-muted)]" : "border-slate-700/50"
-                        }`}
-                      >
-                        <div
-                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl sm:h-10 sm:w-10 ${
-                            isSourcesLibraryDeck
-                              ? "bg-[color:var(--lib-surface-segment)] ring-1 ring-[color:var(--lib-border-subtle)]"
-                              : "rounded-lg bg-slate-800/80 ring-1 ring-slate-700/60"
-                          }`}
-                          title={sourceIconTitle}
-                        >
-                          <SourceIcon type={(isControlMirror ? "local" : currentTrack?.type) ?? "local"} origin={isControlMirror ? undefined : currentSource?.origin} size="lg" />
-                        </div>
-                        <div className="flex flex-col items-center gap-[15px]">
-                          <span
-                            className={`inline-flex items-center justify-center rounded-full p-1.5 ${
-                              displayStatus === "playing"
-                                ? "bg-emerald-500/15 ring-1 ring-emerald-500/40"
-                                : displayStatus === "paused"
-                                  ? "bg-amber-500/15 ring-1 ring-amber-500/40"
-                                  : "bg-slate-800/80 ring-1 ring-slate-600/30"
-                            }`}
-                            title={displayStatusLabel}
-                            aria-label={displayStatusLabel}
-                          >
-                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${displayStatus === "playing" ? "bg-emerald-400 playing-led-pulse" : displayStatus === "paused" ? "bg-amber-400" : "bg-slate-500"}`} aria-hidden />
-                          </span>
-                          <span
-                            className={`inline-flex w-full items-center justify-center gap-0.5 rounded-full px-1 py-px text-[7px] font-semibold uppercase tracking-wider ring-1 ${
-                              isSourcesLibraryDeck
-                                ? "bg-[color:var(--lib-surface-segment)] text-[color:var(--lib-text-muted)] ring-[color:var(--lib-border-subtle)]"
-                                : "bg-slate-700/50 text-slate-400 ring-slate-600/40"
-                            }`}
-                            title={deckSourceBadgeLabel}
-                          >
-                            <span
-                              className={`h-1 w-1 shrink-0 rounded-full ${
-                                isSourcesLibraryDeck ? "bg-[color:var(--lib-accent)]" : "bg-slate-400"
-                              }`}
-                              aria-hidden
-                            />
-                            {deckSourceBadgeLabel}
-                          </span>
-                        </div>
-                      </div>
-                      <div
-                        className={`relative flex min-w-0 flex-1 flex-col gap-1 px-2.5 py-1.5 ${
-                          isSourcesLibraryDeck ? "library-player-track-inner rounded-xl" : "rounded border border-slate-700/50 bg-slate-800/30"
-                        }`}
-                      >
-                        {/* Row 1: current track title */}
-                        <div ref={titleContainerRef} className="relative flex min-w-0 flex-1 items-center overflow-hidden gap-1.5">
-                          <span ref={titleMeasureRef} className="invisible absolute whitespace-nowrap pointer-events-none" aria-hidden>
-                            {displayTitle as string}
-                          </span>
-                          {titleOverflows ? (
-                            <div className="min-w-0 flex-1 overflow-hidden">
-                              <div className="track-title-marquee flex w-max gap-12 whitespace-nowrap">
-                                <span
-                                  className={`text-xs font-medium sm:text-sm ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"}`}
-                                >
-                                  {displayTitle}
-                                </span>
-                                <span
-                                  className={`text-xs font-medium sm:text-sm ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"}`}
-                                >
-                                  {displayTitle}
-                                </span>
-                              </div>
-                            </div>
-                          ) : (
-                            <p
-                              className={`min-w-0 flex-1 truncate text-xs font-medium sm:text-sm ${
-                                isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-slate-100"
-                              }`}
-                              title={displayTitle}
-                            >
-                              {displayTitle}
-                            </p>
-                          )}
-                        </div>
-                        {/* Row 2: next track */}
-                        <div className="flex min-w-0 items-center gap-1.5" title={t.nextTrackColon}>
-                          <svg
-                            className={`h-3 w-3 shrink-0 ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"}`}
-                            viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden
-                          >
-                            <path d="M8 3v10M4 9l4 4 4-4" />
-                          </svg>
-                          <span
-                            className={`min-w-0 flex-1 truncate text-xs font-medium ${
-                              isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-400"
-                            }`}
-                            title={displayNextLabel ?? undefined}
-                          >
-                            {displayNextLabel ?? "—"}
-                          </span>
-                        </div>
-                        {/* Row 3: Source / Genre / Mood chips for the current track.
-                            Resolves against the underlying `PlaylistTrack` so we get
-                            per-track ID3 / catalog tags (not just playlist vibe). */}
-                        {playerHeroTrack ? (
-                          <TrackMetaChips
-                            track={playerHeroTrack}
-                            parentPlaylist={playerHeroPlaylist}
-                            trackMetaCache={playerHeroTrackMetaCache}
-                            density="hero"
-                            showSource
-                            showUnclassifiedFallback={false}
-                            className="min-w-0"
-                          />
-                        ) : null}
-                      </div>
-                      <div
-                        className={`flex shrink-0 flex-col items-stretch gap-2 border-l pl-2 ${
-                          isSourcesLibraryDeck ? "border-[color:var(--lib-border-muted)]" : "border-slate-700/50"
-                        }`}
-                      >
-                        {/* AutoMix status: two-part module [ ● AUTOMIX ] [ 9S ] */}
-                        <div
-                          className="flex items-center gap-1"
-                          role="status"
-                          aria-label={
-                            displayAutoMix
-                              ? t.autoMixAriaOn.replace("{seconds}", String(mixDurationDisplay))
-                              : t.autoMixAriaOff
-                          }
-                          title={
-                            displayAutoMix
-                              ? t.autoMixTitleOn.replace("{seconds}", String(mixDurationDisplay))
-                              : t.autoMixTitleOff
-                          }
-                        >
-                          <div className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 ${
-                            displayAutoMix ? "border-cyan-500/30 bg-slate-800/50" : "border-slate-600/30 bg-slate-800/20"
-                          }`}>
-                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                              displayAutoMix ? "bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" : "bg-slate-500/50"
-                            }`} aria-hidden />
-                            <span className={`text-[9px] font-semibold uppercase tracking-wider ${displayAutoMix ? "text-cyan-400" : "text-slate-500"}`}>
-                              MIX
-                            </span>
-                          </div>
-                          <div className={`inline-flex min-w-[28px] items-center justify-center rounded border px-1 py-0.5 tabular-nums ${
-                            displayAutoMix ? "border-cyan-500/30 bg-slate-800/50 text-cyan-400 text-[10px] font-bold" : "border-slate-600/30 bg-slate-800/20 text-slate-500 text-[10px] font-bold"
-                          }`}>
-                            {mixDurationDisplay}S
-                          </div>
-                        </div>
-                        {/* Random status: same modular language [ ● RANDOM ] */}
-                        <div className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 w-fit ${
-                          displayShuffle ? "border-cyan-500/30 bg-slate-800/50" : "border-slate-600/30 bg-slate-800/20"
-                        }`} role="status" aria-label={displayShuffle ? t.randomAriaOn : t.randomAriaOff} title={t.randomTitle}>
-                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                            displayShuffle ? "bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" : "bg-slate-500/50"
-                          }`} aria-hidden />
-                          <span className={`text-[9px] font-semibold uppercase tracking-wider ${displayShuffle ? "text-cyan-400" : "text-slate-500"}`}>
-                            RND
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* ROW 3: Timeline – [current time] [progress bar] [total duration] */}
-            <div className="flex w-full items-center gap-3">
-              <span
-                className={`w-10 shrink-0 text-right text-xs font-semibold tabular-nums sm:w-12 ${
-                  isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-400"
-                }`}
-                aria-live="polite"
-              >
-                {formatTime(displayPosition)}
-              </span>
-            <div
-              ref={timelineRef}
-              role="slider"
-              aria-label={t.trackProgressAria}
-              aria-valuemin={0}
-              aria-valuemax={Number.isFinite(displayDuration) ? displayDuration : 0}
-              aria-valuenow={Number.isFinite(displayPosition) ? displayPosition : 0}
-              aria-disabled={!displayCanSeek}
-              tabIndex={displayCanSeek ? 0 : undefined}
-              className={`relative flex flex-1 min-w-0 select-none py-1.5 ${displayCanSeek ? "cursor-pointer" : "cursor-default opacity-80"}`}
-            onMouseMove={handleTimelineMouseMove}
-            onMouseEnter={handleTimelineMouseEnter}
-            onMouseLeave={handleTimelineMouseLeave}
-            onMouseDown={handleSeekStart}
-            onTouchStart={handleTouchStart}
-          >
-            {/* Track background */}
-            <div
-              className={`absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-full ${
-                isSourcesLibraryDeck ? "bg-[color:var(--lib-border-muted)]" : "bg-slate-700/80"
-              }`}
-            />
-            {/* Buffered layer */}
-            {displayBufferedPercent > 0 && (
-              <div
-                className={`absolute left-0 top-1/2 h-2 -translate-y-1/2 rounded-full transition-all duration-150 ${
-                  isSourcesLibraryDeck ? "library-player-timeline-buffer" : "bg-slate-500/60"
-                }`}
-                style={{ width: `${Math.min(displayBufferedPercent, 100)}%` }}
-              />
-            )}
-            {/* Played layer */}
-            <div
-              className={`absolute left-0 top-1/2 h-2 -translate-y-1/2 rounded-full transition-all duration-100 ${
-                isSourcesLibraryDeck
-                  ? "library-player-timeline-played"
-                  : "bg-[#1ed760] shadow-[0_0_6px_rgba(30,215,96,0.4)]"
-              }`}
-              style={{ width: `${displayProgressPercent}%` }}
-            />
-            {/* Draggable thumb – clamped so it stays visible */}
-            <div
-              className={`absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full transition-all duration-100 hover:scale-110 ${
-                isSourcesLibraryDeck
-                  ? "library-player-timeline-thumb ring-1 ring-[color:var(--lib-accent-border)]"
-                  : "bg-[#1ed760] shadow-[0_0_0_2px_rgba(30,215,96,0.3),0_0_8px_var(--neon-green-glow)]"
-              }`}
-              style={{ left: `${Math.max(0, Math.min(100, displayProgressPercent))}%` }}
-            />
-            {/* Hover time preview tooltip – centered above hover position */}
-            {isHoveringTimeline && displayDuration > 0 && (
-              <div
-                className="pointer-events-none absolute bottom-full z-10 mb-1 rounded-full bg-slate-800 px-2 py-1 text-xs font-semibold tabular-nums text-slate-200 shadow-lg ring-1 ring-slate-600/80"
-                style={{ left: `${hoverPercent}%`, transform: "translate(-50%, -100%)" }}
-              >
-                {formatTime(hoverTime)}
-              </div>
-            )}
-          </div>
-              <span
-                className={`w-10 shrink-0 text-left text-xs font-semibold tabular-nums sm:w-12 ${
-                  isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-400"
-                }`}
-                aria-live="polite"
-              >
-                {formatTime(displayDuration)}
-              </span>
             </div>
-      </PlayerUnitSurface>
-
-      {/* Off-screen embeds for YouTube/SoundCloud – always mount both to avoid React removeChild conflict */}
-      {/* key by embedType so YT→YT switches don't remount (needed for crossfade handoff) */}
-      {isEmbedded && (
-        <div key={embedType ?? "none"} className="pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0" aria-hidden>
-          {/* Wrapper div prevents YT API DOM manipulation from conflicting with React unmount */}
-          {/* Persistent A/B decks — both iframes stay mounted; only the active pointer moves. */}
-          <div style={{ display: isYouTube ? "block" : "none" }} className="h-full w-full">
-            <div ref={ytContainerRef} className="h-full w-full" />
-            <div ref={ytContainerNextRef} className="h-full w-full" />
           </div>
+
+          <div className="library-deck-volume-aside hidden h-full min-h-0 shrink-0 self-stretch sm:flex">
+            <PlayerVerticalVolume
+              value={displayVolume}
+              onChange={onVolumeChange}
+              isPlaying={displayStatus === "playing"}
+              onMuteToggle={() => {
+                if (displayVolume > 0) {
+                  volumeBeforeMuteRef.current = displayVolume;
+                  onVolumeChange(0);
+                } else {
+                  onVolumeChange(volumeBeforeMuteRef.current);
+                }
+              }}
+              ariaLabel={t.volumeAria}
+              muteLabel={displayVolume === 0 ? t.unmute : t.mute}
+            />
+          </div>
+        </div>
+      </div>
+      </div>
+
+      {/* Prewarm: hidden YT A/B decks stay mounted in browser MASTER so first URL skips container creation */}
+      {canPrewarmYoutubeEmbed ? (
+        <div className="pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0" aria-hidden>
+          <div ref={ytContainerRef} className="h-full w-full" />
+          <div ref={ytContainerNextRef} className="h-full w-full" />
+        </div>
+      ) : null}
+      {/* Off-screen SoundCloud embed — mount when active to avoid React removeChild conflict */}
+      {isEmbedded || isYouTube || isSoundCloud ? (
+        <div key={embedType ?? "none"} className="pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0" aria-hidden>
+          {!canPrewarmYoutubeEmbed ? (
+            <div style={{ display: isYouTube ? "block" : "none" }} className="h-full w-full">
+              <div ref={ytContainerRef} className="h-full w-full" />
+              <div ref={ytContainerNextRef} className="h-full w-full" />
+            </div>
+          ) : null}
           <div style={{ display: isSoundCloud ? "block" : "none" }} className="h-full w-full">
             <iframe
               ref={scIframeRef}
@@ -4065,7 +4415,7 @@ export function AudioPlayer() {
             />
           </div>
         </div>
-      )}
+      ) : null}
       {/* A/B decks for stream URLs — true overlap crossfade between direct audio elements */}
       <audio ref={audioDeckARef} className="hidden" playsInline />
       <audio ref={audioDeckBRef} className="hidden" playsInline />

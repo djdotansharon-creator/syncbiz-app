@@ -101,6 +101,39 @@ export async function resolveBinary(
     }
   }
 
+  // Step 2.5 — bundled resource (packaged builds, Windows only).
+  // The installer ships mpv.exe as an extraResource so it is always present at
+  // process.resourcesPath/mpv.exe immediately after install — no download needed.
+  // This step only fires when the user cache is absent or invalid (e.g. fresh
+  // install), so a previously-cached newer binary from GitHub still wins.
+  if (app.isPackaged) {
+    const bundled = getBundledResourcePath(name);
+    if (bundled) {
+      console.log("[runtime-binaries] using bundled installer resource:", bundled);
+      // Write a cache entry so subsequent launches take the fast path (Step 2)
+      // and skip this existence check. If the app is reinstalled later the
+      // old path will fail existsSync and the cache will be treated as a miss,
+      // falling through back here to pick up the new installer copy.
+      await updateEntry(name, {
+        name,
+        path: bundled,
+        version: "bundled",
+        sha256: "bundled",
+        installedAt: new Date().toISOString(),
+        lastCheckedAt: new Date().toISOString(),
+        sourceKind: "bundled",
+      }).catch(() => {}); // ignore write failure — binary is still usable
+      return {
+        name,
+        path: bundled,
+        version: "bundled",
+        fromCache: false,
+        fromSystemPath: false,
+        fromDevFallback: false,
+      };
+    }
+  }
+
   // Step 3 — live resolve.
   if (source.kind === "system") {
     const sysPath = await findOnPath(source.command);
@@ -169,6 +202,28 @@ function resolveDevFallback(name: BinaryName): string | null {
   ];
   for (const p of candidates) {
     if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+// ─── Bundled installer resource ─────────────────────────────────────────────
+
+/**
+ * Check whether `mpv.exe` (or another binary) is present in the app's
+ * `extraResources` directory — the path that electron-builder populates from
+ * `win.extraResources` in `package.json`.
+ *
+ * Returns the absolute path when found, `null` otherwise.
+ * Only meaningful in packaged builds; callers should guard with `app.isPackaged`.
+ */
+export function getBundledResourcePath(name: BinaryName): string | null {
+  if (process.platform !== "win32") return null; // only Windows ships a bundled mpv
+  const exeName = name === "mpv" ? "mpv.exe" : "yt-dlp.exe";
+  try {
+    const bundledPath = path.join(process.resourcesPath, exeName);
+    if (existsSync(bundledPath)) return bundledPath;
+  } catch {
+    // process.resourcesPath can be undefined in unusual environments
   }
   return null;
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/store";
-import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
+import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession, getAssignedBranchIdsForUser } from "@/lib/auth-helpers";
 import { normalizeScheduleTimeLocal } from "@/lib/schedule-target-helpers";
 import { validateScheduleTarget } from "@/lib/schedule-target-validator";
 import type { Schedule, ScheduleRecurrence, ScheduleTargetType } from "@/lib/types";
@@ -20,13 +20,13 @@ export async function GET() {
   }
   await db.ensureSchedulesLoaded();
   const all = await db.getSchedules(resolveAccountScope(user.tenantId));
-  const filtered = [];
-  for (const s of all) {
+  const allowedBranchIds = await getAssignedBranchIdsForUser(user.id);
+  const isOwner = allowedBranchIds.includes("*");
+  const filtered = all.filter((s) => {
+    if (isOwner) return true;
     const branchId = (s.branchId ?? "default").trim() || "default";
-    if (await hasBranchAccess(user.id, branchId)) {
-      filtered.push(s);
-    }
-  }
+    return allowedBranchIds.includes(branchId);
+  });
   return NextResponse.json(filtered);
 }
 

@@ -182,7 +182,7 @@ export function ListContainerMetadataStrip({ source }: { source: UnifiedSource }
         <ListStackIcon className={iconClass} />
         <span className={valClass}>
           {m.trackCount === 1 ? "1" : String(m.trackCount)}
-          <span className="ml-0.5 text-[11px] font-medium text-slate-400">{m.trackCount === 1 ? "item" : "items"}</span>
+          <span className="ml-0.5 text-[11px] font-medium text-slate-400">{m.trackCount === 1 ? "track" : "tracks"}</span>
         </span>
       </span>
 

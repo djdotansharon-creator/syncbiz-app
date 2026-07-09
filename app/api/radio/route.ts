@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listRadioStationsForTenant, createRadioStation } from "@/lib/radio-store";
-import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
+import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession, getAssignedBranchIdsForUser } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 
@@ -16,13 +16,13 @@ export async function GET() {
   }
   try {
     const all = await listRadioStationsForTenant(user.tenantId);
-    const filtered = [];
-    for (const s of all) {
-      const branchId = resolveMediaBranchId(s);
-      if (await hasBranchAccess(user.id, branchId)) {
-        filtered.push(s);
-      }
-    }
+    const allowedBranchIds = await getAssignedBranchIdsForUser(user.id);
+    const isOwner = allowedBranchIds.includes("*");
+    const filtered = all.filter((s) => {
+      if (isOwner) return true;
+      const branchId = (resolveMediaBranchId(s) ?? "default").trim() || "default";
+      return allowedBranchIds.includes(branchId);
+    });
     return NextResponse.json(filtered);
   } catch (e) {
     console.error("[api/radio] GET", e);

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 type AiMode = "similar" | "refine" | "expand";
 
@@ -27,20 +28,33 @@ async function postAiBuild(body: Record<string, unknown>): Promise<{ title: stri
 }
 
 /**
- * Inline ⋯ AI actions on SyncBiz playlist shell tiles (similar / refine / expand).
+ * Inline ⋯ AI actions on SyncBiz playlist shell tiles (similar / refine / expand / send-to-playlist).
  */
 export function PlaylistAiShellMenu({
   playlistId,
   playlistName,
   branchId = "default",
+  onSendToPlaylist,
 }: {
   playlistId: string;
   playlistName?: string;
   branchId?: string;
+  /** Opens the playlist-picker to send this playlist's tracks into another playlist. */
+  onSendToPlaylist?: () => void;
 }) {
   const [busy, setBusy] = useState<AiMode | null>(null);
-  const refineDlgRef = useRef<HTMLDialogElement>(null);
+  const [refineOpen, setRefineOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [refineDraft, setRefineDraft] = useState("");
+
+  useEffect(() => { setMounted(true); }, []);
+
+  useEffect(() => {
+    if (!refineOpen) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setRefineOpen(false); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [refineOpen]);
   const [toast, setToast] = useState<string | null>(null);
 
   const fireLibraryUpdated = () => {
@@ -100,7 +114,7 @@ export function PlaylistAiShellMenu({
             className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
             onClick={() => {
               setRefineDraft("");
-              refineDlgRef.current?.showModal();
+              setRefineOpen(true);
             }}
           >
             Improve with AI
@@ -113,45 +127,70 @@ export function PlaylistAiShellMenu({
           >
             {busy === "expand" ? "…" : "Expand to 50 tracks"}
           </button>
+          {onSendToPlaylist && (
+            <>
+              <div className="my-1 border-t border-slate-700/60" />
+              <button
+                type="button"
+                disabled={busy != null}
+                className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
+                onClick={() => onSendToPlaylist()}
+              >
+                Send to playlist
+              </button>
+            </>
+          )}
         </div>
       </details>
 
-      <dialog
-        ref={refineDlgRef}
-        className="max-w-md rounded-xl border border-slate-600 bg-slate-950 p-4 text-slate-100 shadow-2xl backdrop:bg-black/55"
-      >
-        <p className="text-sm font-semibold text-white">Improve with AI</p>
-        <p className="mt-1 text-[11px] text-slate-400">Adds a refined copy — the original playlist is unchanged.</p>
-        <textarea
-          value={refineDraft}
-          onChange={(e) => setRefineDraft(e.target.value)}
-          rows={3}
-          placeholder={'e.g. "תחדד אותו יותר רגוע ועדכני"'}
-          className="mt-3 w-full rounded-lg border border-slate-700 bg-slate-900/90 px-2 py-1.5 text-sm text-white placeholder:text-slate-500"
-        />
-        <div className="mt-3 flex justify-end gap-2">
-          <button
-            type="button"
-            className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
-            onClick={() => refineDlgRef.current?.close()}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={busy != null || !refineDraft.trim()}
-            className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-500 disabled:opacity-40"
-            onClick={() => {
-              const rp = refineDraft.trim();
-              if (!rp) return;
-              refineDlgRef.current?.close();
-              void run("refine", rp);
-            }}
-          >
-            Build
-          </button>
-        </div>
-      </dialog>
+      {/* Centered modal — no backdrop darkening */}
+      {mounted && refineOpen
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[9990] flex items-center justify-center"
+              style={{ pointerEvents: "none" }}
+            >
+              <div
+                className="pointer-events-auto mx-4 w-full max-w-md rounded-xl border border-slate-600 bg-slate-950 p-4 text-slate-100 shadow-[0_0_0_1px_rgba(100,116,139,0.25),0_32px_64px_rgba(0,0,0,0.7)]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p className="text-sm font-semibold text-white">Improve with AI</p>
+                <p className="mt-1 text-[11px] text-slate-400">Adds a refined copy — the original playlist is unchanged.</p>
+                <textarea
+                  value={refineDraft}
+                  onChange={(e) => setRefineDraft(e.target.value)}
+                  rows={3}
+                  autoFocus
+                  placeholder={'e.g. "תחדד אותו יותר רגוע ועדכני"'}
+                  className="mt-3 w-full rounded-lg border border-slate-700 bg-slate-900/90 px-2 py-1.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/60"
+                />
+                <div className="mt-3 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+                    onClick={() => setRefineOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy != null || !refineDraft.trim()}
+                    className="rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-500 disabled:opacity-40"
+                    onClick={() => {
+                      const rp = refineDraft.trim();
+                      if (!rp) return;
+                      setRefineOpen(false);
+                      void run("refine", rp);
+                    }}
+                  >
+                    Build
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {toast ? (
         <p className="absolute left-1/2 top-full z-20 mt-1 w-max max-w-[14rem] -translate-x-1/2 rounded bg-slate-900/98 px-2 py-1 text-[9px] text-cyan-100 shadow-md">

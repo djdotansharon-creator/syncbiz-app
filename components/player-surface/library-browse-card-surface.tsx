@@ -109,12 +109,12 @@ export function LibraryBrowseCardSurface(props: LibraryBrowseCardSurfaceProps) {
           <h3 className="sb-lbc-title">{title}</h3>
           {titleAside ? <div className="sb-lbc-title-aside">{titleAside}</div> : null}
         </div>
+        {children ? <div className="sb-lbc-footer-slot">{children}</div> : null}
         {metaSlot ? (
           <div className="sb-lbc-meta-wrap">{metaSlot}</div>
         ) : metaLine.trim() ? (
           <p className="sb-lbc-meta">{metaLine}</p>
         ) : null}
-        {children ? <div className="sb-lbc-footer-slot">{children}</div> : null}
       </div>
     </>
   );

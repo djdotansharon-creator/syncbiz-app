@@ -34,14 +34,14 @@ export function PlayerUnitSurface(props: {
     <div
       className={
         rightAside
-          ? "grid h-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 sm:gap-5 sm:gap-6"
-          : "mx-auto flex h-full min-w-0 max-w-6xl items-center justify-center gap-3 sm:gap-5 sm:gap-6"
+          ? "grid h-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-1 sm:gap-3"
+          : "mx-auto flex h-full min-w-0 max-w-6xl items-center justify-center gap-2 px-1 sm:gap-3"
       }
     >
-      <div className="relative flex shrink-0 items-center justify-center">{artwork}</div>
-      <div className="library-deck-controls-col mx-auto flex min-w-0 w-full max-w-2xl flex-col gap-2.5">{children}</div>
+      <div className="relative flex shrink-0 items-center justify-center py-0.5">{artwork}</div>
+      <div className="library-deck-controls-col flex min-w-0 w-full flex-col justify-center gap-1.5 py-0.5">{children}</div>
       {rightAside ? (
-        <div className="library-deck-volume-aside hidden h-full shrink-0 items-stretch sm:flex">
+        <div className="library-deck-volume-aside hidden h-full shrink-0 items-stretch sm:flex py-1">
           {rightAside}
         </div>
       ) : null}

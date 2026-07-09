@@ -1,6 +1,5 @@
 "use client";
 
-import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { ActionButtonShare, ActionButtonEdit } from "@/components/ui/action-buttons";
 import {
   PlaybackTransportIconNext,
@@ -12,16 +11,7 @@ import {
 import type { PlayerDeckTransportSurfaceProps } from "@/lib/player-surface/player-deck-transport-types";
 
 /**
- * First row of the in-shell player: transport, automix/shuffle, share.
- *
- * The deck volume rail used to live here as a horizontal slider; it has moved
- * to `PlayerVerticalVolume`, which the parent `PlayerUnitSurface` renders as
- * a tall DJ-style module on the right edge of the player band, just before
- * the Command Pads aside. The volume / mute props are still part of
- * `PlayerDeckTransportSurfaceProps` (and still passed by `AudioPlayer`) but
- * are intentionally not destructured here — the new module owns the UI.
- *
- * Shared surface for browser + desktop branch parity; timeline/seek lives in `AudioPlayer`.
+ * Transport dock — CDJ-inspired layout with inviting SyncBiz playback controls.
  */
 export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProps) {
   const {
@@ -45,137 +35,266 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
   } = props;
 
   const libDeck = variant === "library-deck";
-  const transportVariant = libDeck ? "cyan" : "green";
 
   return (
-    <div className="flex w-full flex-wrap items-center gap-2 gap-y-2 sm:gap-3">
-      <NeonControlButton
-        size="md"
-        variant={transportVariant}
-        libraryDeck={libDeck}
-        onClick={onPrev}
-        disabled={prevNextDisabled}
-        aria-label={labels.previousTrack}
-        title={labels.previousTrack}
-      >
-        <PlaybackTransportIconPrev className="h-5 w-5 sm:h-6 sm:w-6" />
-      </NeonControlButton>
-      <NeonControlButton
-        size="md"
-        variant={transportVariant}
-        libraryDeck={libDeck}
-        onClick={onStop}
-        disabled={contentDisabled}
-        aria-label={labels.stopPlayback}
-        title={labels.stopPlayback}
-      >
-        <PlaybackTransportIconStop className="h-5 w-5 sm:h-6 sm:w-6" />
-      </NeonControlButton>
-      <NeonControlButton
-        size="xl"
-        variant={transportVariant}
-        libraryDeck={libDeck}
-        libraryDeckHero={libDeck}
-        onClick={onPlayPause}
-        disabled={contentDisabled}
-        active={isPlaying}
-        aria-label={isPlaying ? labels.pausePlayback : labels.play}
-        title={isPlaying ? labels.pausePlayback : labels.play}
-        className={`!h-11 !min-w-[90px] !w-auto !px-4 sm:!h-12 sm:!min-w-[110px] sm:!px-6${
-          libDeck && isPlaying ? " library-player-play-emerald" : ""
-        }`}
-      >
-        <span className="relative flex h-8 w-8 items-center justify-center sm:h-9 sm:w-9" aria-hidden>
-          <PlaybackTransportIconPause
-            className={`absolute h-5 w-5 sm:h-6 sm:w-6 ${isPlaying ? "opacity-100" : "pointer-events-none opacity-0"}`}
-          />
-          <PlaybackTransportIconPlay
-            className={`absolute ml-0.5 sm:ml-1 h-5 w-5 sm:h-6 sm:w-6 ${isPlaying ? "pointer-events-none opacity-0" : "opacity-100"}`}
-          />
-        </span>
-      </NeonControlButton>
-      <NeonControlButton
-        size="md"
-        variant={transportVariant}
-        libraryDeck={libDeck}
-        onClick={onNext}
-        disabled={prevNextDisabled}
-        aria-label={labels.next}
-        title={labels.next}
-      >
-        <PlaybackTransportIconNext className="h-5 w-5 sm:h-6 sm:w-6" />
-      </NeonControlButton>
-      <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
-      <NeonControlButton
-        size="2xs"
-        variant="cyan"
-        libraryDeck={libDeck}
-        onClick={onAutoMixToggle}
-        active={displayAutoMix}
-        disabled={contentDisabled}
-        aria-label={labels.autoMix}
-        title={labels.autoMix}
-      >
-        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" />
-        </svg>
-      </NeonControlButton>
-      <NeonControlButton
-        size="2xs"
-        variant="cyan"
-        libraryDeck={libDeck}
-        onClick={onShuffleToggle}
-        active={displayShuffle}
-        disabled={contentDisabled}
-        aria-label={labels.random}
-        title={labels.random}
-      >
-        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M4 4l5 5-5 5M20 4l-5 5 5 5M20 20l-5-5 5-5M4 20l5-5-5-5" />
-        </svg>
-      </NeonControlButton>
-      <div className="h-5 w-px shrink-0 bg-slate-700/80" aria-hidden />
-      {/*
-        Volume rail used to render here as a horizontal fader; it has been
-        replaced by the vertical DJ-style `PlayerVerticalVolume` module
-        rendered by `PlayerUnitSurface` on the right edge of the player band.
-        Volume / mute props are still part of the type and still passed by
-        AudioPlayer (so the existing data flow is unchanged), but they are
-        consumed by the new module instead of this row.
-      */}
-      {/*
-        Track-level action pair (Edit + Share) sit together in a shrink-0
-        flex group — prevents the two square icon buttons from wrapping
-        individually onto separate rows (a narrower volume rail already
-        leaves room for them on the main transport row).
-      */}
-      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-        {onEditClick ? (
-          <ActionButtonEdit onClick={onEditClick} variant="player" aria-label={labels.edit} title={labels.edit} />
-        ) : editHref ? (
-          <ActionButtonEdit href={editHref} variant="player" aria-label={labels.edit} title={labels.edit} />
-        ) : null}
-        {libDeck ? (
-          <ActionButtonShare variant="player" onClick={onShareClick} disabled={shareDisabled} aria-label={labels.share} title={labels.share} />
-        ) : (
-          <NeonControlButton
-            size="2xs"
-            variant="white"
-            onClick={onShareClick}
-            disabled={shareDisabled}
-            aria-label={labels.share}
-            title={labels.share}
+    <div className="player-transport-dock w-full min-w-0">
+      <div className="player-transport-dock__row flex w-full min-w-0 flex-wrap items-center justify-center gap-x-2.5 gap-y-1 border-t border-white/[0.04] pt-2.5 sm:gap-x-3">
+        <DeckModeIndicator
+          kind="mix"
+          label="Mix"
+          active={displayAutoMix}
+          disabled={contentDisabled}
+          onClick={onAutoMixToggle}
+          ariaLabel={labels.autoMix}
+          title={labels.autoMix}
+        />
+
+        <div className="player-transport-cluster flex shrink-0 items-center gap-0.5 sm:gap-1">
+          <DeckTransportButton
+            onClick={onStop}
+            disabled={contentDisabled}
+            ariaLabel={labels.stopPlayback}
+            title={labels.stopPlayback}
+            size="stop"
+            libraryDeck={libDeck}
           >
-            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="18" cy="5" r="3" />
-              <circle cx="6" cy="12" r="3" />
-              <circle cx="18" cy="19" r="3" />
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-            </svg>
-          </NeonControlButton>
-        )}
+            <PlaybackTransportIconStop className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          </DeckTransportButton>
+
+          <DeckTransportButton
+            onClick={onPrev}
+            disabled={prevNextDisabled}
+            ariaLabel={labels.previousTrack}
+            title={labels.previousTrack}
+            size="nav"
+            libraryDeck={libDeck}
+          >
+            <PlaybackTransportIconPrev className="h-5 w-5 sm:h-6 sm:w-6" />
+          </DeckTransportButton>
+
+          <DeckTransportButton
+            onClick={onPlayPause}
+            disabled={contentDisabled}
+            active={isPlaying}
+            primary
+            ariaLabel={isPlaying ? labels.pausePlayback : labels.play}
+            title={isPlaying ? labels.pausePlayback : labels.play}
+            libraryDeck={libDeck}
+            className={libDeck && isPlaying ? "library-player-play-emerald" : undefined}
+          >
+            <span className="relative flex h-7 w-7 items-center justify-center sm:h-8 sm:w-8" aria-hidden>
+              <PlaybackTransportIconPause
+                className={`absolute h-5 w-5 sm:h-6 sm:w-6 ${isPlaying ? "opacity-100" : "pointer-events-none opacity-0"}`}
+              />
+              <PlaybackTransportIconPlay
+                className={`absolute ml-0.5 h-5 w-5 sm:h-6 sm:w-6 ${isPlaying ? "pointer-events-none opacity-0" : "opacity-100"}`}
+              />
+            </span>
+          </DeckTransportButton>
+
+          <DeckTransportButton
+            onClick={onNext}
+            disabled={prevNextDisabled}
+            ariaLabel={labels.next}
+            title={labels.next}
+            size="nav"
+            libraryDeck={libDeck}
+          >
+            <PlaybackTransportIconNext className="h-5 w-5 sm:h-6 sm:w-6" />
+          </DeckTransportButton>
+        </div>
+
+        <DeckModeIndicator
+          kind="random"
+          label="Random"
+          active={displayShuffle}
+          disabled={contentDisabled}
+          onClick={onShuffleToggle}
+          ariaLabel={labels.random}
+          title={labels.random}
+        />
+
+        <div className="player-transport-secondary flex shrink-0 items-center gap-0.5 opacity-25 transition-opacity duration-200 hover:opacity-50 focus-within:opacity-50">
+          {onEditClick ? (
+            <ActionButtonEdit onClick={onEditClick} variant="player" aria-label={labels.edit} title={labels.edit} />
+          ) : editHref ? (
+            <ActionButtonEdit href={editHref} variant="player" aria-label={labels.edit} title={labels.edit} />
+          ) : null}
+          {libDeck ? (
+            <ActionButtonShare variant="player" onClick={onShareClick} disabled={shareDisabled} aria-label={labels.share} title={labels.share} />
+          ) : (
+            <button
+              type="button"
+              onClick={onShareClick}
+              disabled={shareDisabled}
+              aria-label={labels.share}
+              title={labels.share}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition-colors hover:text-slate-300 disabled:opacity-30"
+            >
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
 }
+
+/** Inviting SyncBiz playback control — soft neon accent, restrained premium feel. */
+function DeckTransportButton({
+  onClick,
+  disabled,
+  active,
+  primary,
+  size = "nav",
+  libraryDeck,
+  ariaLabel,
+  title,
+  className,
+  children,
+}: {
+  onClick?: () => void;
+  disabled?: boolean;
+  active?: boolean;
+  primary?: boolean;
+  size?: "stop" | "nav";
+  libraryDeck?: boolean;
+  ariaLabel: string;
+  title: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const accent = libraryDeck ? "cyan" : "emerald";
+
+  const dim =
+    size === "stop"
+      ? "h-8 w-8 rounded-lg"
+      : primary
+        ? "h-11 w-11 rounded-full sm:h-12 sm:w-12"
+        : "h-10 w-10 rounded-xl sm:h-11 sm:w-11";
+
+  const tone = primary
+    ? active
+      ? accent === "cyan"
+        ? "deck-transport-btn--play-active"
+        : "deck-transport-btn--play-active deck-transport-btn--accent-emerald"
+      : accent === "cyan"
+        ? "deck-transport-btn--play"
+        : "deck-transport-btn--play deck-transport-btn--accent-emerald"
+    : size === "stop"
+      ? "deck-transport-btn--stop"
+      : accent === "cyan"
+        ? "deck-transport-btn--nav"
+        : "deck-transport-btn--nav deck-transport-btn--accent-emerald";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      title={title}
+      className={`deck-transport-btn inline-flex shrink-0 items-center justify-center transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/12 disabled:opacity-35 disabled:pointer-events-none ${dim} ${tone}${className ? ` ${className}` : ""}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Compact mode indicator — icon + LED; label reveals on hover/focus; active always visible. */
+function DeckModeIndicator({
+  kind,
+  label,
+  active,
+  disabled,
+  onClick,
+  ariaLabel,
+  title,
+}: {
+  kind: "mix" | "random";
+  label: string;
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  ariaLabel: string;
+  title: string;
+}) {
+  const showLabel = active ? "deck-mode-indicator--show-label" : "";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      aria-pressed={active}
+      title={title}
+      className={`deck-mode-indicator group inline-flex h-8 w-10 shrink-0 items-center justify-center gap-0 overflow-hidden rounded-lg transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/10 disabled:opacity-35 ${
+        active
+          ? `deck-mode-indicator--active ${showLabel}`
+          : "deck-mode-indicator--idle border-transparent bg-transparent hover:bg-white/[0.03] focus-visible:bg-white/[0.03]"
+      }`}
+    >
+      <span className="flex shrink-0 items-center gap-1">
+        {kind === "mix" ? <MixModeIcon active={active} /> : <RandomModeIcon active={active} />}
+        <span
+          className={`deck-mode-indicator__led h-1 w-1 shrink-0 rounded-full transition-colors ${
+            active ? "bg-cyan-400/80" : "bg-slate-600/80 group-hover:bg-slate-500"
+          }`}
+          aria-hidden
+        />
+      </span>
+      <span className="deck-mode-indicator__label ml-0 max-w-0 overflow-hidden whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-300 opacity-0 transition-all duration-200 group-hover:ml-1.5 group-hover:max-w-[3rem] group-hover:opacity-100 group-focus-visible:ml-1.5 group-focus-visible:max-w-[3rem] group-focus-visible:opacity-100">
+        {label}
+      </span>
+    </button>
+  );
+}
+
+function MixModeIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      className={`shrink-0 ${active ? "text-cyan-300" : "text-slate-500 group-hover:text-slate-300"}`}
+      aria-hidden
+    >
+      <path
+        fill="currentColor"
+        d="M2 11.5h3.2l2.1-3.2 2.1 3.2H12L8.8 6.5 12 2H8.8L6.7 5.2 4.6 2H2l3.2 4.5L2 11.5z"
+      />
+    </svg>
+  );
+}
+
+function RandomModeIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`shrink-0 ${active ? "text-cyan-300" : "text-slate-500 group-hover:text-slate-300"}`}
+      aria-hidden
+    >
+      <path d="M2.5 5.5h2.8M2.5 10.5h2.8M10.7 3.5l2.8 2.8-2.8 2.8M10.7 12.5l2.8-2.8-2.8-2.8" />
+      <path d="M5.3 5.5h1.2l1.5 5M9 10.5h1.2" />
+    </svg>
+  );
+}
+
+/** @deprecated Use DeckModeIndicator */
+export const PlayerModeToggle = DeckModeIndicator;
+/** @deprecated Use DeckModeIndicator */
+export const PlayerModeChip = DeckModeIndicator;

@@ -261,10 +261,13 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     setShuffle,
     status: playStatus,
     currentSource,
+    currentPlaylist,
     currentTrackIndex,
     queue,
     queueIndex,
     volume,
+    playNextQueue,
+    playNextBaseline,
     isRestoring,
   } = usePlayback();
   const [masterConfirmOpen, setMasterConfirmOpen] = useState(false);
@@ -644,6 +647,15 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     pause,
   ]);
 
+  const sessionMirrorInput = useMemo(
+    () => ({
+      currentPlaylist,
+      playNextQueue,
+      playNextBaseline,
+    }),
+    [currentPlaylist, playNextQueue, playNextBaseline],
+  );
+
   // Publish state when MASTER and connected – include position/duration for CONTROL sync
   useEffect(() => {
     if (!isActive || status !== "connected" || deviceMode !== "MASTER" || !sendState) return;
@@ -657,10 +669,11 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       shuffle,
       autoMixState,
       pd ? { position: pd.position, duration: pd.duration } : undefined,
-      volume
+      volume,
+      sessionMirrorInput,
     );
     sendState(state);
-  }, [isActive, status, deviceMode, sendState, playStatus, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState]);
+  }, [isActive, status, deviceMode, sendState, playStatus, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState, sessionMirrorInput]);
 
   // When playing, send state more frequently so CONTROL progress stays in sync
   useEffect(() => {
@@ -676,12 +689,13 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         shuffle,
         autoMixState,
         pd ? { position: pd.position, duration: pd.duration } : undefined,
-        volume
+        volume,
+        sessionMirrorInput,
       );
       sendState(state);
     }, 1000);
     return () => clearInterval(id);
-  }, [isActive, status, deviceMode, playStatus, sendState, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState]);
+  }, [isActive, status, deviceMode, playStatus, sendState, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState, sessionMirrorInput]);
 
   const sendCommandToMaster = useCallback(
     (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number }) => {

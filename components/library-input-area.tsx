@@ -23,7 +23,7 @@ import {
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { inferGenre } from "@/lib/infer-genre";
-import { searchAll, searchExternal, type YouTubeSearchResult, type RadioSearchResult } from "@/lib/search-service";
+import { searchAll, searchExternal, type YouTubeSearchResult, type RadioSearchResult, type CatalogSearchResult } from "@/lib/search-service";
 import { createEphemeralLocalSearchSource } from "@/lib/play-next";
 import { radioToUnified } from "@/lib/radio-utils";
 import {
@@ -94,7 +94,7 @@ const controlHeight = "h-10";
 const inputBase =
   "w-full rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 py-2 text-sm text-slate-100 placeholder:text-slate-400 transition-all focus:border-[#1ed760]/70 focus:ring-2 focus:ring-[#1ed760]/30 focus:outline-none disabled:opacity-60 backdrop-blur-sm";
 const addBtn =
-  "shrink-0 rounded-full bg-gradient-to-b from-[#1ed760] to-[#1db954] px-5 text-sm font-semibold text-white shadow-[0_0_0_2px_rgba(29,185,84,0.35),0_2px_8px_rgba(29,185,84,0.2)] transition-all hover:from-[#2ee770] hover:to-[#1ed760] hover:shadow-[0_0_0_2px_rgba(30,215,96,0.5),0_4px_16px_rgba(30,215,96,0.3)] disabled:opacity-40 disabled:pointer-events-none";
+  "shrink-0 rounded-lg border border-[#1ed760]/35 bg-[#1ed760]/10 px-3 text-xs font-semibold text-[#1ed760] transition-all hover:bg-[#1ed760]/20 hover:border-[#1ed760]/55 hover:text-[#34d965] disabled:opacity-30 disabled:pointer-events-none";
 
 /** Desktop: trace folder drag; remove or gate if noisy. */
 function logDesktopLibraryIngestDrop(e: React.DragEvent, payload: string | null) {
@@ -340,6 +340,7 @@ export function LibraryInputArea({
   const [localResults, setLocalResults] = useState<UnifiedSource[]>([]);
   const [youtubeResults, setYoutubeResults] = useState<YouTubeSearchResult[]>([]);
   const [radioResults, setRadioResults] = useState<RadioSearchResult[]>([]);
+  const [catalogResults, setCatalogResults] = useState<CatalogSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [listening, setListening] = useState(false);
   const [aiPlaylistBusy, setAiPlaylistBusy] = useState(false);
@@ -353,7 +354,8 @@ export function LibraryInputArea({
   const hasLocal = localResults.length > 0;
   const hasYoutube = youtubeResults.length > 0;
   const hasRadio = radioResults.length > 0;
-  const hasResults = hasMusicBankLocal || hasLocal || hasYoutube || hasRadio;
+  const hasCatalog = catalogResults.length > 0;
+  const hasResults = hasMusicBankLocal || hasLocal || hasYoutube || hasRadio || hasCatalog;
 
   const ingestStripBusy = urlIngesting || searching || externalYtSaveBusy;
   const ingestShellPhaseClass = ingestStripBusy
@@ -369,12 +371,14 @@ export function LibraryInputArea({
       setLocalResults([]);
       setYoutubeResults([]);
       setRadioResults([]);
+      setCatalogResults([]);
       return;
     }
     searchQueryRef.current = q;
     setSearching(true);
     setYoutubeResults([]);
     setRadioResults([]);
+    setCatalogResults([]);
     try {
       const [allRes, mblRes] = await Promise.all([
         searchAll(sources, q),
@@ -384,6 +388,7 @@ export function LibraryInputArea({
         setLocalResults(allRes.internal);
         setYoutubeResults(allRes.external.youtube);
         setRadioResults(allRes.external.radio);
+        setCatalogResults(allRes.external.catalog);
         setMusicBankLocalResults(mblRes);
       }
     } catch {
@@ -392,6 +397,7 @@ export function LibraryInputArea({
         setLocalResults([]);
         setYoutubeResults([]);
         setRadioResults([]);
+        setCatalogResults([]);
       }
     } finally {
       setSearching(false);
@@ -404,6 +410,7 @@ export function LibraryInputArea({
       setLocalResults([]);
       setYoutubeResults([]);
       setRadioResults([]);
+      setCatalogResults([]);
       setShowResults(false);
       searchQueryRef.current = "";
       return;
@@ -1481,6 +1488,47 @@ export function LibraryInputArea({
     [query, effectivePlaySource, router, onAdd, tx]
   );
 
+  const handlePlayCatalog = useCallback(
+    async (r: CatalogSearchResult) => {
+      const genre = r.genres?.[0] || inferGenre(r.title, query);
+      let playableUrl = await resolveYouTubePlayableUrlForSearch(r.url);
+      if (!getYouTubeVideoId(playableUrl) && getYouTubeVideoId(r.url)) {
+        playableUrl = r.url;
+      }
+      // Ephemeral catalog preview: build UnifiedSource directly from catalog data.
+      // No POST /api/playlists, no branch permission check, no DB write.
+      // The playback engine resolves the URL directly (no playlist attachment → uses resolved.url).
+      const u: UnifiedSource = {
+        id: `catalog-preview-${r.id}`,
+        title: r.title,
+        genre,
+        cover: r.thumbnail ?? null,
+        type: "youtube",
+        url: playableUrl,
+        origin: "playlist",
+        catalogItemId: r.id,
+        ...unifiedFoundationHints("playlist", "youtube", playableUrl),
+      };
+      console.log("[SyncBiz Verify] catalog-preview play", {
+        path: "A_catalog_preview",
+        sourceId: u.id,
+        catalogItemId: r.id,
+        resolvedUrl: playableUrl,
+        hasPlaylist: false,
+        hasPrivatePlaylistCreate: false,
+        branchCheckRequired: false,
+      });
+      effectivePlaySource(u);
+      setQuery("");
+      setCatalogResults([]);
+      setYoutubeResults([]);
+      setRadioResults([]);
+      setLocalResults([]);
+      setShowResults(false);
+    },
+    [query, effectivePlaySource]
+  );
+
   return (
     <div ref={panelRef} className="relative">
       {/* Tesla-style drop zone – clean, minimal, inviting */}
@@ -1655,6 +1703,7 @@ export function LibraryInputArea({
                 setLocalResults([]);
                 setYoutubeResults([]);
                 setRadioResults([]);
+                setCatalogResults([]);
                 setShowResults(false);
                 inputRef.current?.focus();
               }}
@@ -2085,6 +2134,44 @@ export function LibraryInputArea({
                       </div>
                       );
                     })}
+                  </div>
+                </div>
+              )}
+              {hasCatalog && (
+                <div className="border-b border-slate-800/60 p-2">
+                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-cyan-400/80">
+                    {t.catalogResults ?? "FROM CATALOG"}
+                  </p>
+                  <div className="space-y-0.5">
+                    {catalogResults.map((r) => (
+                      <div key={r.id} className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80">
+                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                          {r.thumbnail ? (
+                            <img src={r.thumbnail} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <TrackMediaPlaceholder chip="YT" className="h-full w-full" showCornerBadge={false} />
+                          )}
+                          <span className="pointer-events-none absolute bottom-0.5 left-0.5">
+                            <CompactSourceBadge chip="YT" />
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-slate-100">{r.title}</p>
+                          <p className="text-[10px] text-slate-500">
+                            {r.genres?.length > 0 ? r.genres.slice(0, 2).join(" · ") : tx.providerYouTube}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void handlePlayCatalog(r)}
+                            className="inline-flex h-8 items-center justify-center rounded-lg bg-[#1db954] px-2.5 text-xs font-semibold text-white transition hover:bg-[#1ed760]"
+                          >
+                            {t.playNow}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

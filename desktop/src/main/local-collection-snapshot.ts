@@ -631,3 +631,28 @@ export function searchLocalCollectionSnapshotInMemory(
   scored.sort((a, b) => b.score - a.score || a.relativePathFromRoot.localeCompare(b.relativePathFromRoot));
   return scored.slice(0, cap);
 }
+
+/**
+ * Alias of loadLocalCollectionSnapshot.
+ * The "Cached" variant was planned but never implemented; the base function is used directly.
+ */
+export const loadLocalCollectionSnapshotCached = loadLocalCollectionSnapshot;
+
+/**
+ * AI-playlist variant of the local snapshot search — same logic as
+ * searchLocalCollectionSnapshotInMemory but returns LocalAiPlaylistCandidate[] which
+ * includes extra optional fields (comment, bpm, rating) not yet tracked in the snapshot.
+ * Those fields are returned as null until the snapshot schema is extended.
+ */
+export function searchLocalForAiPlaylistInMemory(
+  snapshot: LocalCollectionSnapshotFile | null,
+  query: string,
+  limit: number,
+): import("../shared/mvp-types").LocalAiPlaylistCandidate[] {
+  return searchLocalCollectionSnapshotInMemory(snapshot, query, limit).map((hit) => ({
+    ...hit,
+    comment: null,
+    bpm: null,
+    rating: null,
+  }));
+}

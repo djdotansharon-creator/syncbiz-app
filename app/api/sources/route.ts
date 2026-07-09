@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/store";
-import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
+import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession, getAssignedBranchIdsForUser } from "@/lib/auth-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import type { Source } from "@/lib/types";
 
@@ -17,13 +17,13 @@ export async function GET() {
     return NextResponse.json({ error: "Tenant context missing" }, { status: 400 });
   }
   const all = await db.getSources(resolveAccountScope(user.tenantId));
-  const filtered: Source[] = [];
-  for (const s of all) {
-    const branchId = s.branchId ?? "default";
-    if (await hasBranchAccess(user.id, branchId)) {
-      filtered.push(s);
-    }
-  }
+  const allowedBranchIds = await getAssignedBranchIdsForUser(user.id);
+  const isOwner = allowedBranchIds.includes("*");
+  const filtered: Source[] = all.filter((s) => {
+    if (isOwner) return true;
+    const branchId = (s.branchId ?? "default").trim() || "default";
+    return allowedBranchIds.includes(branchId);
+  });
   return NextResponse.json(filtered);
 }
 

@@ -197,11 +197,12 @@
 }
 
 .sb-lbc-meta-wrap {
-  margin-top: 0.25rem;
+  margin-top: 0;
 }
 
 .sb-lbc-footer-slot {
   margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
   min-width: 0;
 }
 
@@ -224,11 +225,12 @@
 }
 
 .library-source-card.library-source-card-leaf .sb-lbc-meta-wrap {
-  margin-top: 0.125rem;
+  margin-top: 0;
 }
 
 .library-source-card.library-source-card-leaf .sb-lbc-footer-slot {
   margin-top: 0.375rem;
+  margin-bottom: 0.25rem;
 }
 
 /* Match legacy library-card-footer padding on web SourceCard */

@@ -186,7 +186,7 @@ const TRANSLATIONS = {
     stopped: "Stopped",
     playing: "Playing",
     paused: "Paused",
-    noSourceSelected: "No source selected",
+    noSourceSelected: "—",
     commandSent: "Command sent",
     sending: "Sending…",
     offline: "offline",
@@ -599,7 +599,7 @@ const TRANSLATIONS = {
     stopped: "עצור",
     playing: "מתנגן",
     paused: "מושהה",
-    noSourceSelected: "לא נבחר מקור",
+    noSourceSelected: "—",
     commandSent: "הפקודה נשלחה",
     sending: "שולח…",
 

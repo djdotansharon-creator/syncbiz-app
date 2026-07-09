@@ -81,8 +81,8 @@ export type ManifestEntry = {
   installedAt: string;
   /** ISO timestamp when we last hit GitHub to check for a newer version. */
   lastCheckedAt: string;
-  /** Source descriptor key ("github-release" / "system") recorded for debug. */
-  sourceKind: BinarySource["kind"];
+  /** Source descriptor key recorded for debug. "bundled" = shipped inside the installer. */
+  sourceKind: BinarySource["kind"] | "bundled";
 };
 
 export type Manifest = {

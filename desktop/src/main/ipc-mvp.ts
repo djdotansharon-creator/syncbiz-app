@@ -248,8 +248,13 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   ipcMain.handle(MVP_IPC.MPV_PLAY_URL, (_e, url: string): void => {
     const u = typeof url === "string" ? url.trim() : "";
     if (!u) return;
-    console.log("[SyncBiz:desktop-mpv:ipc] MPV_PLAY_URL (renderer test / dev) → playMusic", { preview: u.slice(0, 160) });
+    console.log("[SyncBiz:desktop-mpv:ipc] MPV_PLAY_URL → playMusic", { preview: u.slice(0, 160) });
     orchestratorInstance?.playMusic(u);
+    // Immediately push state snapshot so the renderer's desktopMpvSnap reflects any
+    // synchronous failures (binary missing, null child) as well as engine-ready status.
+    // play() calls push() synchronously on failure, so manager.snapshot() already
+    // has the updated mpvEngineReady / mpvLastError by the time we reach this line.
+    broadcast(getWindow(), manager ? manager.snapshot() : fallbackSnapshot());
   });
 
   ipcMain.handle(MVP_IPC.SET_MIX_DURATION, (_e, seconds: number): void => {
@@ -272,6 +277,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
         fadeSec,
       });
       orchestratorInstance?.playMusicCrossfade(u, fadeSec);
+      broadcast(getWindow(), manager ? manager.snapshot() : fallbackSnapshot());
     },
   );
 

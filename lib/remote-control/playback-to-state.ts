@@ -2,12 +2,101 @@
  * Convert PlaybackProvider state to serializable StationPlaybackState.
  */
 
-import type { StationPlaybackState } from "./types";
+import type { StationPlaybackState, SessionTrackMirror } from "./types";
 import type { PlaybackStatus } from "@/lib/playback-provider";
+import { getPlaylistSessionTracks } from "@/lib/playback-provider";
 import type { UnifiedSource } from "@/lib/source-types";
-import { derivePlaylistTrackCoverArt, derivePlaylistUnifiedCoverArt } from "@/lib/playlist-utils";
+import { derivePlaylistTrackCoverArt, derivePlaylistUnifiedCoverArt, effectivePlaybackPlaylistAttachment } from "@/lib/playlist-utils";
 import { resolvePlaylistOriginBadgeKey } from "@/lib/deck-source-badge";
-import { getPlaylistTracks } from "@/lib/playlist-types";
+import { getPlaylistTracks, type Playlist, type PlaylistTrack } from "@/lib/playlist-types";
+import { isPlayNextSourceId } from "@/lib/play-next";
+
+/** Session + Play Next rows mirrored to CONTROL Live Queue. */
+export type PlaybackSessionMirrorInput = {
+  currentPlaylist: Playlist | null;
+  playNextQueue: UnifiedSource[];
+  playNextBaseline: {
+    currentSource: UnifiedSource;
+    currentPlaylist: Playlist | null;
+    currentTrackIndex: number;
+  } | null;
+};
+
+function mirrorSessionTracksFromRows(tracks: PlaylistTrack[]): SessionTrackMirror[] {
+  return tracks.map((t) => ({
+    id: t.id,
+    title: t.name ?? (t as { title?: string }).title ?? t.url ?? "Track",
+    cover: derivePlaylistTrackCoverArt({
+      cover: t.cover,
+      url: t.url ?? "",
+      type: t.type,
+    }),
+    durationSeconds: (t as { durationSeconds?: number }).durationSeconds,
+    url: t.url,
+  }));
+}
+
+function buildSessionMirrorFields(
+  currentSource: UnifiedSource | null,
+  currentTrackIndex: number,
+  sessionInput?: PlaybackSessionMirrorInput,
+): Pick<
+  StationPlaybackState,
+  "sessionTracks" | "sessionTitle" | "sessionPlaylistId" | "nextSessionTrack" | "playNextQueue"
+> {
+  if (!sessionInput) {
+    return {};
+  }
+
+  let sessionSource = currentSource;
+  let sessionPlaylist = sessionInput.currentPlaylist;
+  let highlightIndex = currentTrackIndex;
+
+  if (isPlayNextSourceId(currentSource?.id) && sessionInput.playNextBaseline) {
+    sessionSource = sessionInput.playNextBaseline.currentSource;
+    sessionPlaylist = sessionInput.playNextBaseline.currentPlaylist;
+    highlightIndex = sessionInput.playNextBaseline.currentTrackIndex;
+  }
+
+  const sessionCtx = { currentSource: sessionSource, currentPlaylist: sessionPlaylist };
+  let rows = getPlaylistSessionTracks(sessionCtx);
+  if (rows.length === 0) {
+    const attached = sessionSource ? effectivePlaybackPlaylistAttachment(sessionSource) : null;
+    const onPlaylist = attached ?? sessionPlaylist;
+    rows = onPlaylist ? getPlaylistTracks(onPlaylist) : [];
+  }
+
+  const attached = sessionSource ? effectivePlaybackPlaylistAttachment(sessionSource) : null;
+  const onPlaylist = attached ?? sessionPlaylist;
+  const sessionTitle = onPlaylist?.name?.trim() || sessionSource?.title?.trim() || null;
+  const sessionTracks = mirrorSessionTracksFromRows(rows);
+
+  let nextSessionTrack: { title: string; cover: string | null } | null = null;
+  if (sessionTracks.length > 0) {
+    const nextIdx =
+      sessionTracks.length === 1
+        ? 0
+        : highlightIndex < sessionTracks.length - 1
+          ? highlightIndex + 1
+          : 0;
+    const next = sessionTracks[nextIdx];
+    if (next) nextSessionTrack = { title: next.title, cover: next.cover };
+  }
+
+  const playNextQueue = sessionInput.playNextQueue.map((it) => ({
+    id: it.id,
+    title: it.title,
+    cover: it.cover ?? null,
+  }));
+
+  return {
+    sessionTracks: sessionTracks.length > 0 ? sessionTracks : undefined,
+    sessionTitle,
+    sessionPlaylistId: onPlaylist?.id ?? null,
+    nextSessionTrack: nextSessionTrack ?? undefined,
+    playNextQueue: playNextQueue.length > 0 ? playNextQueue : undefined,
+  };
+}
 
 export function playbackToStationState(
   status: PlaybackStatus,
@@ -18,7 +107,8 @@ export function playbackToStationState(
   shuffle?: boolean,
   autoMix?: boolean,
   positionDuration?: { position: number; duration: number },
-  volume?: number
+  volume?: number,
+  sessionInput?: PlaybackSessionMirrorInput,
 ): StationPlaybackState {
   const tracks = currentSource?.playlist ? getPlaylistTracks(currentSource.playlist) : [];
   const track = tracks[currentTrackIndex] ?? tracks[0];
@@ -73,6 +163,7 @@ export function playbackToStationState(
     queueIndex,
     shuffle: typeof shuffle === "boolean" ? shuffle : undefined,
     autoMix: typeof autoMix === "boolean" ? autoMix : undefined,
+    ...buildSessionMirrorFields(currentSource, currentTrackIndex, sessionInput),
   };
 
   if (positionDuration && Number.isFinite(positionDuration.position) && Number.isFinite(positionDuration.duration)) {

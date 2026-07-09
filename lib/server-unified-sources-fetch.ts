@@ -8,18 +8,26 @@ export async function fetchUnifiedSourcesForServerComponent(): Promise<UnifiedSo
     const base = getApiBase();
     const h = await headers();
     const cookie = h.get("cookie");
-    const res = await fetch(`${base}/api/sources/unified`, {
-      cache: "no-store",
-      headers: cookie ? { cookie } : {},
-    });
-    if (!res.ok) {
-      console.error("[unified server fetch] API error:", res.status, await res.text());
-      return [];
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 75_000); // 75s — generous for slow dev DB
+    try {
+      const res = await fetch(`${base}/api/sources/unified`, {
+        cache: "no-store",
+        headers: cookie ? { cookie } : {},
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        // Use warn (not error) so the Next.js dev overlay doesn't flash red on transient DB pressure.
+        console.warn("[unified server fetch] API unavailable:", res.status);
+        return [];
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } finally {
+      clearTimeout(timeoutId);
     }
-    const data = await res.json();
-    return Array.isArray(data) ? data : [];
   } catch (e) {
-    console.error("[unified server fetch] error:", e);
+    console.warn("[unified server fetch] skipped:", (e as Error)?.message ?? e);
     return [];
   }
 }

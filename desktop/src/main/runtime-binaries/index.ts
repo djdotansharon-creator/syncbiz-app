@@ -9,8 +9,9 @@
 
 import { dialog } from "electron";
 
+import { app } from "electron";
 import type { BinaryName } from "./types";
-import { resolveAll, resolveBinary, hasUpstreamUpdate } from "./resolver";
+import { resolveAll, resolveBinary, hasUpstreamUpdate, getBundledResourcePath } from "./resolver";
 import { openFirstRunWindow, type FirstRunWindowHandle } from "./first-run-window";
 import { getEntry } from "./manifest";
 
@@ -117,7 +118,11 @@ async function runUpdateCheck(): Promise<void> {
 async function needsFirstRun(names: BinaryName[]): Promise<boolean> {
   for (const name of names) {
     const entry = await getEntry(name);
-    if (!entry) return true;
+    if (entry) continue; // cache hit — no download needed
+    // A bundled binary in the installer covers this — skip the setup window.
+    // resolveBinary() will use it directly at step 2.5 without network access.
+    if (app.isPackaged && getBundledResourcePath(name)) continue;
+    return true; // no cache and no bundled copy — live download required
   }
   return false;
 }

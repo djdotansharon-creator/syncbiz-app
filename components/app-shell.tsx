@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
@@ -11,8 +12,9 @@ import { useLibraryTheme } from "@/lib/library-theme-context";
 import { AudioPlayer } from "@/components/audio-player";
 import { LiveQueuePanel } from "@/components/live-queue-panel";
 import { usePlayback } from "@/lib/playback-provider";
-import { inferPlaylistType } from "@/lib/playlist-utils";
+import { canonicalYouTubeWatchUrlForPlayback, getYouTubeThumbnail, getYouTubeVideoId, inferPlaylistType } from "@/lib/playlist-utils";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
+import { urlTimingMark, urlTimingStart, urlTimingSummary } from "@/lib/url-startup-timing";
 import { radioToUnified } from "@/lib/radio-utils";
 import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal } from "@/lib/unified-sources-client";
 import { resolveDaypartCollectionSources } from "@/lib/daypart-collection";
@@ -233,10 +235,6 @@ const mainMenuIconMap: Record<string, () => React.ReactElement> = {
   "access-control": IconAccess,
   architecture: IconArchitecture,
 };
-const pillBase = "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05),0_2px_8px_rgba(0,0,0,0.25)] transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-slate-400/40 focus:ring-offset-2 focus:ring-offset-slate-950";
-const pillInactive = "border-slate-700/80 bg-slate-900/70 text-slate-400 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-200 hover:shadow-[0_0_20px_rgba(100,116,139,0.08)]";
-const pillActive = "border-sky-500/40 bg-sky-500/15 text-sky-200 shadow-[0_0_24px_rgba(56,189,248,0.15)]";
-
 const navKeys = [
   "dashboard",
   "sources",
@@ -263,7 +261,7 @@ function getTimeBasedGreeting(hour: number, t: Record<string, string>): string {
   return t.greetingNight ?? "Good night";
 }
 
-function LogoutButton() {
+function LogoutButton({ compact: isCompact }: { compact?: boolean } = {}) {
   const router = useRouter();
   const { t } = useTranslations();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -280,15 +278,34 @@ function LogoutButton() {
   }
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setConfirmOpen(true)}
-        disabled={loading}
-        className="logout-led-button inline-flex items-center gap-1.5 rounded-full border border-sky-400/70 bg-sky-500/12 px-2.5 py-1 text-[11px] font-medium text-sky-100 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.18),0_0_14px_rgba(56,189,248,0.3)] transition hover:border-sky-300/90 hover:bg-sky-500/20 hover:shadow-[inset_0_0_0_1px_rgba(56,189,248,0.3),0_0_22px_rgba(56,189,248,0.48)] focus:outline-none focus:ring-2 focus:ring-sky-400/40 disabled:opacity-50"
-      >
-        <span aria-hidden className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-300 shadow-[0_0_6px_rgba(56,189,248,0.95)]" />
-        {loading ? "…" : "Logout"}
-      </button>
+      {isCompact ? (
+        /* Compact icon-only variant for the unified header right cluster */
+        <button
+          type="button"
+          onClick={() => setConfirmOpen(true)}
+          disabled={loading}
+          aria-label={t.logout ?? "Log out"}
+          title={t.logout ?? "Log out"}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-800 bg-slate-900/80 text-slate-400 transition hover:border-slate-700 hover:bg-slate-800 hover:text-rose-300 focus:outline-none focus:ring-2 focus:ring-sky-400/40 disabled:opacity-50"
+        >
+          {/* Exit/logout door icon */}
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirmOpen(true)}
+          disabled={loading}
+          className="logout-led-button inline-flex items-center gap-1.5 rounded-full border border-sky-400/70 bg-sky-500/12 px-2.5 py-1 text-[11px] font-medium text-sky-100 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.18),0_0_14px_rgba(56,189,248,0.3)] transition hover:border-sky-300/90 hover:bg-sky-500/20 hover:shadow-[inset_0_0_0_1px_rgba(56,189,248,0.3),0_0_22px_rgba(56,189,248,0.48)] focus:outline-none focus:ring-2 focus:ring-sky-400/40 disabled:opacity-50"
+        >
+          <span aria-hidden className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-300 shadow-[0_0_6px_rgba(56,189,248,0.95)]" />
+          {loading ? "…" : "Logout"}
+        </button>
+      )}
       <DeleteConfirmModal
         isOpen={confirmOpen}
         onClose={() => setConfirmOpen(false)}
@@ -297,6 +314,162 @@ function LogoutButton() {
         message={t.logoutConfirm}
         confirmLabel={t.confirmLogout}
         loading={loading}
+        loadingLabel={t.loggingOut}
+        compact
+      />
+    </>
+  );
+}
+
+/**
+ * HeaderProfileButton — compact avatar that opens a portal dropdown
+ * with user info, workspace switcher, and logout.
+ * Rendered inside the unified header right cluster.
+ */
+type WorkspaceEntry = { id: string; name: string };
+
+function HeaderProfileButton({
+  sessionName,
+  sessionAccountName,
+  timeStr,
+  workspaceList,
+  activeWorkspaceId,
+  locale,
+}: {
+  sessionName?: string | null;
+  sessionAccountName?: string | null;
+  timeStr: string;
+  workspaceList?: WorkspaceEntry[] | null;
+  activeWorkspaceId?: string | null;
+  locale: string;
+}) {
+  const router = useRouter();
+  const { t } = useTranslations();
+  const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [coords, setCoords] = useState<{ top: number; right: number } | null>(null);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => { setMounted(true); }, []);
+
+  useEffect(() => {
+    if (!open || !btnRef.current) { setCoords(null); return; }
+    const rect = btnRef.current.getBoundingClientRect();
+    setCoords({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (btnRef.current && !btnRef.current.closest("[data-profile-panel-root]")?.contains(e.target as Node)) {
+        if (!btnRef.current.contains(e.target as Node)) setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  async function handleLogout() {
+    setLogoutLoading(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      router.push("/login");
+      router.refresh();
+    } finally {
+      setLogoutLoading(false);
+    }
+  }
+
+  const initials = sessionName
+    ? sessionName.split(/\s+/).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
+    : "••";
+
+  const dropdown =
+    mounted && open && coords
+      ? createPortal(
+          <div
+            data-profile-panel-root
+            style={{ position: "fixed", top: coords.top, right: coords.right, zIndex: 70 }}
+            className="w-56 rounded-xl border border-slate-700/60 bg-slate-900/98 shadow-[0_8px_32px_rgba(0,0,0,0.55)] backdrop-blur-sm"
+          >
+            {/* User info */}
+            <div className="flex items-start gap-2.5 px-4 py-3">
+              <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-[11px] font-semibold text-sky-200 ring-1 ring-sky-500/30">
+                {initials}
+              </span>
+              <div className="min-w-0 flex-1">
+                {sessionName && (
+                  <p className="truncate text-[12px] font-semibold leading-tight text-slate-100">{sessionName}</p>
+                )}
+                {sessionAccountName && (
+                  <p className="truncate text-[11px] leading-snug text-slate-400">{sessionAccountName}</p>
+                )}
+                <p className="mt-1 tabular-nums text-[11px] text-slate-500" suppressHydrationWarning>
+                  {timeStr}
+                </p>
+              </div>
+            </div>
+
+            {/* Workspace switcher (only when multiple workspaces) */}
+            {activeWorkspaceId && workspaceList && workspaceList.length > 1 && (
+              <div className="border-t border-slate-700/50 px-4 py-2.5" dir={locale === "he" ? "rtl" : "ltr"}>
+                <WorkspaceSwitcher workspaces={workspaceList} activeId={activeWorkspaceId} />
+              </div>
+            )}
+
+            {/* Logout row */}
+            <div className="border-t border-slate-700/50 p-2">
+              <button
+                type="button"
+                onClick={() => { setOpen(false); setLogoutConfirmOpen(true); }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[12px] text-slate-400 transition hover:bg-slate-800/80 hover:text-rose-300 focus:outline-none"
+              >
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                {t.logout ?? "Log out"}
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={sessionName ?? "Profile"}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-400/40 ${
+          open
+            ? "bg-sky-500/25 text-sky-100 ring-1 ring-sky-400/50"
+            : "bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/30 hover:bg-sky-500/25 hover:ring-sky-400/50"
+        }`}
+      >
+        {initials}
+      </button>
+      {dropdown}
+      <DeleteConfirmModal
+        isOpen={logoutConfirmOpen}
+        onClose={() => setLogoutConfirmOpen(false)}
+        onConfirm={handleLogout}
+        title={t.logoutConfirmTitle}
+        message={t.logoutConfirm}
+        confirmLabel={t.confirmLogout}
+        loading={logoutLoading}
         loadingLabel={t.loggingOut}
         compact
       />
@@ -357,8 +530,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     minute: "2-digit",
     hour12: false,
   });
+  const activeWorkspaceName =
+    activeWorkspaceId && workspaceList
+      ? (workspaceList.find((w) => w.id === activeWorkspaceId)?.name ?? null)
+      : null;
 
-  const isSourcesLibraryRoute = pathname?.startsWith("/sources") ?? false;
   /** Full-width main under the deck — same shell as library (workspace routes + library). */
   const isLibraryPlayerMainFullWidth = (() => {
     const p = pathname ?? "";
@@ -378,7 +554,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // desktop routes.
   const isMediaThemeRoute = true;
   const { libraryTheme } = useLibraryTheme();
-  const { playSource, setQueue } = usePlayback();
+  const { playSource, setQueue, setUrlPrepareActive, setLastMessage } = usePlayback();
   const [playerDropActive, setPlayerDropActive] = useState(false);
   const [activeCenterModule, setActiveCenterModule] = useState<CenterModule>(null);
   // ─── Adaptive player size: full / compact / mini ──────────────────────────
@@ -595,6 +771,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const parseDroppedUrl = async (url: string): Promise<ParseUrlJson | null> => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2500);
+    const parseStarted = typeof performance !== "undefined" ? performance.now() : 0;
+    urlTimingMark("parse_start");
     try {
       const res = await fetch("/api/sources/parse-url", {
         method: "POST",
@@ -602,9 +780,31 @@ export function AppShell({ children }: { children: ReactNode }) {
         body: JSON.stringify({ url }),
         signal: controller.signal,
       });
-      if (!res.ok) return null;
-      return res.json();
-    } catch {
+      const parseMs =
+        typeof performance !== "undefined" ? Math.round(performance.now() - parseStarted) : null;
+      if (!res.ok) {
+        urlTimingMark("parse_done", { ok: false, aborted: false, parseUrlMs: parseMs });
+        return null;
+      }
+      const data = (await res.json()) as ParseUrlJson;
+      urlTimingMark("parse_done", {
+        ok: true,
+        aborted: false,
+        parseUrlMs: parseMs,
+        type: data.type ?? null,
+        note: "server may run yt-dlp for metadata even when client returns",
+      });
+      return data;
+    } catch (err) {
+      const parseMs =
+        typeof performance !== "undefined" ? Math.round(performance.now() - parseStarted) : null;
+      const aborted = err instanceof DOMException && err.name === "AbortError";
+      urlTimingMark("parse_done", {
+        ok: false,
+        aborted,
+        parseUrlMs: parseMs,
+        note: aborted ? "client_abort_2500ms_server_may_continue" : "fetch_error",
+      });
       return null;
     } finally {
       clearTimeout(timeoutId);
@@ -623,35 +823,194 @@ export function AppShell({ children }: { children: ReactNode }) {
   const playDroppedUrl = async (rawUrl: string) => {
     const trimmed = rawUrl.trim();
     if (!trimmed) return;
-    const parsed = await parseDroppedUrl(trimmed);
-    const inferredType = inferPlaylistType(trimmed);
-    const typeCandidate = parsed?.type ?? inferredType;
-    const apiType = ["youtube", "soundcloud", "spotify", "winamp", "local", "stream-url"].includes(typeCandidate)
-      ? typeCandidate
-      : inferredType;
-    const isRadio = parsed?.isRadio || apiType === "winamp" || /\.(m3u8?|pls|aac|mp3)(\?|$)/i.test(trimmed);
+    setUrlPrepareActive(true);
+    urlTimingStart({ url: trimmed.slice(0, 120) });
+    urlTimingMark("playDroppedUrl_entered");
+    console.log("[SyncBiz Audit] url_prepare drop_start", { url: trimmed.slice(0, 120) });
+    const clearUrlPrepare = (reason: string) => {
+      setUrlPrepareActive(false);
+      console.log("[SyncBiz Audit] url_prepare cleared", { reason });
+    };
+    try {
+      const ytVideoId = getYouTubeVideoId(trimmed);
+      if (ytVideoId) {
+        const playableUrl = canonicalYouTubeWatchUrlForPlayback(trimmed);
+        urlTimingMark("parse_skipped_fast_path", {
+          videoId: ytVideoId,
+          reason: "watch_v_present",
+          droppedUrl: trimmed.slice(0, 120),
+          playableUrl: playableUrl.slice(0, 120),
+        });
+        console.log("[SyncBiz Audit] url_prepare parse_skipped", {
+          fastPath: true,
+          videoId: ytVideoId,
+          note: "skip parse-url and yt-dlp before first playback",
+        });
+        urlTimingMark("resolve_start", { apiType: "youtube", hasVideoId: true, fastPath: true });
+        urlTimingMark("resolve_done", {
+          clientYtDlpSkipped: true,
+          ytDlpResolveApiCalled: false,
+          playableUrl: playableUrl.slice(0, 120),
+          fastPath: true,
+        });
+        urlTimingMark("create_playlist_start");
+        const createStarted = typeof performance !== "undefined" ? performance.now() : 0;
+        const created = await createPlaylistFromUrl(playableUrl, {
+          title: `YouTube ${ytVideoId}`,
+          genre: "Mixed",
+          cover: getYouTubeThumbnail(playableUrl),
+          type: "youtube",
+        });
+        if (!created) {
+          clearUrlPrepare("playlist_create_failed");
+          urlTimingSummary({ outcome: "create_failed", fastPath: true });
+          setLastMessage("Failed to add URL");
+          return;
+        }
+        const createMs =
+          typeof performance !== "undefined" ? Math.round(performance.now() - createStarted) : null;
+        urlTimingMark("create_playlist_done", { playlistId: created.id, createPlaylistMs: createMs, fastPath: true });
+        const unified: UnifiedSource = {
+          id: `pl-${created.id}`,
+          title: created.name,
+          genre: created.genre || "Mixed",
+          cover: created.thumbnail || null,
+          type: created.type as UnifiedSource["type"],
+          url: created.url,
+          origin: "playlist",
+          playlist: created,
+          ...unifiedFoundationHints("playlist", created.type as UnifiedSource["type"], created.url),
+        };
+        savePlaylistToLocal(created);
+        console.log("[SyncBiz Audit] playlist load resolved", {
+          sourceId: unified.id,
+          origin: unified.origin,
+          playlistId: created.id,
+          queueLen: 1,
+          fastPath: true,
+          videoId: ytVideoId,
+        });
+        setQueue([unified], { force: true });
+        urlTimingMark("playSource_call", { sourceId: unified.id, fastPath: true });
+        console.log("[SyncBiz Audit] url_prepare playSource_call", { sourceId: unified.id, fastPath: true });
+        playSource(unified);
+        return;
+      }
 
-    if (parsed?.type === "shazam") {
-      const searchQuery =
-        parsed?.artist && parsed?.song
-          ? `${parsed.artist} ${parsed.song}`
-          : parsed?.title ?? "";
-      const { youtube } = await searchExternal(searchQuery);
-      const first = youtube.find((r) => r.type === "youtube") ?? youtube[0];
-      if (!first) return;
-      const resolvedFirstUrl =
-        first.type === "youtube"
-          ? await resolveYouTubePlayableUrlForSearch(first.url)
-          : first.url;
-      const created = await createPlaylistFromUrl(resolvedFirstUrl, {
-        title: parsed?.title || first.title || "Untitled",
-        genre: parsed?.genre || "Mixed",
-        cover: first.cover || parsed?.cover || null,
-        type: "youtube",
-        viewCount: first.viewCount,
-        durationSeconds: first.durationSeconds,
+      const parsed = await parseDroppedUrl(trimmed);
+      console.log("[SyncBiz Audit] url_prepare parse_done", {
+        ok: parsed != null,
+        type: parsed?.type ?? null,
       });
-      if (!created) return;
+      const inferredType = inferPlaylistType(trimmed);
+      const typeCandidate = parsed?.type ?? inferredType;
+      const apiType = ["youtube", "soundcloud", "spotify", "winamp", "local", "stream-url"].includes(typeCandidate)
+        ? typeCandidate
+        : inferredType;
+      const isRadio = parsed?.isRadio || apiType === "winamp" || /\.(m3u8?|pls|aac|mp3)(\?|$)/i.test(trimmed);
+
+      if (parsed?.type === "shazam") {
+        const searchQuery =
+          parsed?.artist && parsed?.song
+            ? `${parsed.artist} ${parsed.song}`
+            : parsed?.title ?? "";
+        const { youtube } = await searchExternal(searchQuery);
+        const first = youtube.find((r) => r.type === "youtube") ?? youtube[0];
+        if (!first) {
+          clearUrlPrepare("shazam_no_match");
+          setLastMessage("No YouTube match for Shazam link");
+          return;
+        }
+        const resolvedFirstUrl =
+          first.type === "youtube"
+            ? await resolveYouTubePlayableUrlForSearch(first.url)
+            : first.url;
+        const created = await createPlaylistFromUrl(resolvedFirstUrl, {
+          title: parsed?.title || first.title || "Untitled",
+          genre: parsed?.genre || "Mixed",
+          cover: first.cover || parsed?.cover || null,
+          type: "youtube",
+          viewCount: first.viewCount,
+          durationSeconds: first.durationSeconds,
+        });
+        if (!created) {
+          clearUrlPrepare("shazam_create_failed");
+          setLastMessage("Failed to add URL");
+          return;
+        }
+        console.log("[SyncBiz Audit] url_prepare playlist_created", { playlistId: created.id });
+        const unified: UnifiedSource = {
+          id: `pl-${created.id}`,
+          title: created.name,
+          genre: created.genre || "Mixed",
+          cover: created.thumbnail || null,
+          type: created.type as UnifiedSource["type"],
+          url: created.url,
+          origin: "playlist",
+          playlist: created,
+          ...unifiedFoundationHints("playlist", created.type as UnifiedSource["type"], created.url),
+        };
+        savePlaylistToLocal(created);
+        setQueue([unified], { force: true });
+        console.log("[SyncBiz Audit] url_prepare playSource_call", { sourceId: unified.id });
+        playSource(unified);
+        return;
+      }
+
+      if (isRadio) {
+        const res = await fetch("/api/radio", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: parsed?.title || "Radio Station",
+            url: trimmed,
+            genre: parsed?.genre || "Live Radio",
+            cover: parsed?.cover || null,
+          }),
+        });
+        if (!res.ok) {
+          clearUrlPrepare("radio_create_failed");
+          setLastMessage("Failed to add radio station");
+          return;
+        }
+        const station = (await res.json()) as RadioStream;
+        const unified = radioToUnified(station);
+        saveRadioToLocal(station);
+        setQueue([unified], { force: true });
+        console.log("[SyncBiz Audit] url_prepare playSource_call", { sourceId: unified.id });
+        playSource(unified);
+        return;
+      }
+
+      urlTimingMark("resolve_start", {
+        apiType,
+        hasVideoId: !!getYouTubeVideoId(trimmed),
+      });
+      const playableUrl = apiType === "youtube" ? await resolveYouTubePlayableUrlForSearch(trimmed) : trimmed;
+      urlTimingMark("resolve_done", {
+        ytDlpResolveApiCalled: apiType === "youtube" && !getYouTubeVideoId(trimmed),
+        clientYtDlpSkipped: apiType === "youtube" && !!getYouTubeVideoId(trimmed),
+        playableUrl: playableUrl.slice(0, 120),
+      });
+      urlTimingMark("create_playlist_start");
+      const createStarted = typeof performance !== "undefined" ? performance.now() : 0;
+      const created = await createPlaylistFromUrl(playableUrl, {
+        title: parsed?.title || "Untitled",
+        genre: parsed?.genre || "Mixed",
+        cover: parsed?.cover || null,
+        type: apiType,
+        viewCount: parsed?.viewCount,
+        durationSeconds: parsed?.durationSeconds,
+      });
+      if (!created) {
+        clearUrlPrepare("playlist_create_failed");
+        urlTimingSummary({ outcome: "create_failed" });
+        setLastMessage("Failed to add URL");
+        return;
+      }
+      const createMs =
+        typeof performance !== "undefined" ? Math.round(performance.now() - createStarted) : null;
+      urlTimingMark("create_playlist_done", { playlistId: created.id, createPlaylistMs: createMs });
       const unified: UnifiedSource = {
         id: `pl-${created.id}`,
         title: created.name,
@@ -664,62 +1023,22 @@ export function AppShell({ children }: { children: ReactNode }) {
         ...unifiedFoundationHints("playlist", created.type as UnifiedSource["type"], created.url),
       };
       savePlaylistToLocal(created);
-      setQueue([unified], { force: true });
-      playSource(unified);
-      return;
-    }
-
-    if (isRadio) {
-      const res = await fetch("/api/radio", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: parsed?.title || "Radio Station",
-          url: trimmed,
-          genre: parsed?.genre || "Live Radio",
-          cover: parsed?.cover || null,
-        }),
+      console.log("[SyncBiz Audit] playlist load resolved", {
+        sourceId: unified.id,
+        origin: unified.origin,
+        playlistId: created.id,
+        queueLen: 1,
+        isShazam: parsed?.type === "shazam",
       });
-      if (!res.ok) return;
-      const station = (await res.json()) as RadioStream;
-      const unified = radioToUnified(station);
-      saveRadioToLocal(station);
       setQueue([unified], { force: true });
+      urlTimingMark("playSource_call", { sourceId: unified.id });
+      console.log("[SyncBiz Audit] url_prepare playSource_call", { sourceId: unified.id });
       playSource(unified);
-      return;
+    } catch {
+      clearUrlPrepare("error");
+      urlTimingSummary({ outcome: "error" });
+      setLastMessage("Failed to play URL");
     }
-
-    const playableUrl = apiType === "youtube" ? await resolveYouTubePlayableUrlForSearch(trimmed) : trimmed;
-    const created = await createPlaylistFromUrl(playableUrl, {
-      title: parsed?.title || "Untitled",
-      genre: parsed?.genre || "Mixed",
-      cover: parsed?.cover || null,
-      type: apiType,
-      viewCount: parsed?.viewCount,
-      durationSeconds: parsed?.durationSeconds,
-    });
-    if (!created) return;
-    const unified: UnifiedSource = {
-      id: `pl-${created.id}`,
-      title: created.name,
-      genre: created.genre || "Mixed",
-      cover: created.thumbnail || null,
-      type: created.type as UnifiedSource["type"],
-      url: created.url,
-      origin: "playlist",
-      playlist: created,
-      ...unifiedFoundationHints("playlist", created.type as UnifiedSource["type"], created.url),
-    };
-    savePlaylistToLocal(created);
-    console.log("[SyncBiz Audit] playlist load resolved", {
-      sourceId: unified.id,
-      origin: unified.origin,
-      playlistId: created.id,
-      queueLen: 1,
-      isShazam: parsed?.type === "shazam",
-    });
-    setQueue([unified], { force: true });
-    playSource(unified);
   };
 
   const handlePlayerDrop = async (e: React.DragEvent) => {
@@ -1010,74 +1329,128 @@ export function AppShell({ children }: { children: ReactNode }) {
           }`}
           role="banner"
         >
-          {/* Row 1: Left (logo + title) · Center (time/user/station chip) · Right (indicators + gear) */}
+          {/* ── Single unified header row — three-column flex for reliable centering ── */}
           <div
-            className={`flex min-w-0 flex-nowrap items-center gap-2 border-b border-slate-800/60 px-3 py-3 sm:gap-3 sm:px-6${
+            className={`flex h-[56px] min-w-0 items-stretch px-4 sm:px-6${
               isMediaThemeRoute ? " sources-app-header-row1" : ""
             }`}
           >
-            <div className="flex min-w-0 flex-1 basis-0 items-center gap-3">
-              <Link href="/library" className="flex shrink-0 items-center gap-2.5" aria-label="SyncBiz">
-                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-base font-semibold text-sky-400 ring-1 ring-sky-500/30">
+            {/* ── LEFT: Logo — flex-1 basis-0 anchors the three-column balance ── */}
+            <div className="flex flex-1 basis-0 items-center min-w-0">
+              <Link href="/library" className="flex shrink-0 items-center gap-2" aria-label="SyncBiz">
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-[13px] font-semibold text-sky-400 ring-1 ring-sky-500/30">
                   SB
                 </span>
-                <div className="hidden min-w-0 sm:block">
-                  <p className="text-sm font-semibold leading-tight tracking-tight text-slate-50">
-                    SyncBiz
-                  </p>
-                  <p className="text-[11px] leading-tight text-slate-500">Audio scheduling</p>
-                </div>
+                <span className="hidden text-[13px] font-semibold tracking-tight text-slate-50 sm:block">
+                  SyncBiz
+                </span>
               </Link>
-              <span className="hidden h-8 w-px shrink-0 bg-slate-800/80 sm:block" aria-hidden />
-              <div className="min-w-0 flex-1">
-                <h1 className="truncate text-base font-bold tracking-tight text-slate-50">
-                  {t.businessMediaScheduler ?? "Business Media Scheduler"}
-                </h1>
-                <p className="mt-0.5 truncate text-xs text-slate-500">
-                  {headerSubtitle}
-                </p>
-              </div>
             </div>
-            {/* Centered meta chip — gentle cyan frame + soft outer glow so it
-                reads as "alive" without stealing attention from the Master LED. */}
-            <div
-              className={`flex min-w-0 shrink items-center gap-1.5 rounded-xl border border-cyan-400/40 bg-slate-900/85 px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),inset_0_0_0_1px_rgba(56,189,248,0.12),0_0_22px_rgba(56,189,248,0.14),0_2px_6px_rgba(0,0,0,0.3)] sm:gap-2.5 sm:px-3${
-                isSourcesLibraryRoute ? " sources-header-meta-plate" : ""
-              }`}
-              dir={locale === "he" ? "rtl" : "ltr"}
-            >
-              <span className="shrink-0 text-base font-semibold tabular-nums text-slate-200" suppressHydrationWarning>
-                {timeStr}
-              </span>
-              <span className="h-4 w-px shrink-0 bg-slate-700/60" aria-hidden />
-              <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
-                <span className="shrink-0 text-slate-500">{greeting}</span>
-                <span className="h-3 w-px shrink-0 bg-slate-700/50" aria-hidden />
-                <span className="truncate font-medium text-slate-100">
-                  {sessionName ?? t.subscriberName ?? "Subscriber"}
+
+            {/* ── CENTER: Nav tabs — perfectly centered between left and right columns ──
+                All items always use font-medium + fixed px-3.5 so width never shifts.
+                The underline span is always in the DOM (opacity changes only).
+                Explicit sort guarantees display order: Library → Schedules → Radio → Settings */}
+            <nav className="flex shrink-0 items-end pb-0" aria-label="Main">
+              {(() => {
+                const NAV_ORDER = ["library", "schedules", "radio", "settings"] as const;
+                return navItems
+                  .filter((item) => (NAV_ORDER as readonly string[]).includes(item.labelKey))
+                  .sort((a, b) => (NAV_ORDER as readonly string[]).indexOf(a.labelKey) - (NAV_ORDER as readonly string[]).indexOf(b.labelKey));
+              })()
+                .map((item) => {
+                  const isActive =
+                    item.href === "/dashboard"
+                      ? pathname === "/dashboard"
+                      : pathname.startsWith(item.href);
+                  const label = labels[item.labelKey]?.[locale] ?? item.labelKey;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`relative px-3.5 pb-[6px] pt-[4px] text-[13px] font-medium transition-colors duration-150 focus:outline-none ${
+                        isActive ? "text-slate-50" : "text-slate-500 hover:text-slate-200"
+                      }`}
+                    >
+                      {label}
+                      {/* Always rendered — opacity controls visibility to keep layout stable */}
+                      <span
+                        className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-cyan-400 transition-opacity duration-200 ${
+                          isActive ? "opacity-100" : "opacity-0"
+                        }`}
+                        style={isActive ? { boxShadow: "0 0 8px rgba(34,211,238,0.8), 0 0 2px rgba(34,211,238,1)" } : undefined}
+                        aria-hidden
+                      />
+                    </Link>
+                  );
+                })}
+            </nav>
+
+            {/* ── RIGHT: meta chip + operational controls — flex-1 basis-0 justify-end ── */}
+            <div className="flex flex-1 basis-0 items-center justify-end gap-2 min-w-0">
+              {/* ── Greeting + clock chip — larger, readable, prominent ──
+                  sm: time only · md: time · greeting · name · lg: + workspace */}
+              <div
+                className="me-0.5 hidden items-center gap-2 rounded-full border border-slate-700/40 bg-slate-800/50 px-3.5 py-1.5 sm:flex"
+                dir={locale === "he" ? "rtl" : "ltr"}
+                suppressHydrationWarning
+              >
+                <span className="tabular-nums text-[13px] font-semibold text-slate-100" suppressHydrationWarning>
+                  {timeStr}
                 </span>
-                <span className="h-3 w-px shrink-0 bg-slate-700/50" aria-hidden />
-                <span className="truncate text-slate-300">
-                  {sessionAccountName ?? t.companyName ?? "Company"}
-                </span>
-                {activeWorkspaceId && workspaceList && workspaceList.length > 1 ? (
+                {sessionName ? (
                   <>
-                    <span className="h-3 w-px shrink-0 bg-slate-700/50" aria-hidden />
-                    <WorkspaceSwitcher workspaces={workspaceList} activeId={activeWorkspaceId} />
+                    <span className="text-slate-600" aria-hidden>·</span>
+                    <span className="hidden text-[12px] text-slate-300 md:inline">
+                      {greeting}
+                    </span>
+                    <span className="text-slate-600 hidden md:inline" aria-hidden>·</span>
+                    <span className="text-[12px] font-medium text-slate-200">
+                      {sessionName.split(/\s+/)[0]}
+                    </span>
+                  </>
+                ) : null}
+                {activeWorkspaceName && workspaceList && workspaceList.length > 1 ? (
+                  <>
+                    <span className="text-slate-600 hidden lg:inline" aria-hidden>·</span>
+                    <span className="hidden max-w-[72px] truncate text-[11px] text-slate-400 lg:inline">
+                      {activeWorkspaceName}
+                    </span>
                   </>
                 ) : null}
               </div>
-            </div>
-            <div className="flex min-w-0 flex-1 basis-0 items-center justify-end gap-1.5 sm:gap-2">
-              <div className="me-0.5 min-w-0 shrink-0 border-e border-slate-600/60 pe-2 sm:pe-3">
-                <DesktopDownloadButton />
-                <DesktopUpdatePill />
-              </div>
+
+              {/* Desktop download — compact icon */}
+              <DesktopDownloadButton compact />
+              <DesktopUpdatePill />
+
+              {/* MASTER / On Air / device mode indicators */}
               <HeaderDeviceIndicators />
-              <span className="hidden items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/80 px-2.5 py-1 text-xs text-slate-400 sm:flex">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                {t.agentsHealthy}
+
+              {/* Agents healthy — glowing green dot + text on md+ */}
+              <span
+                className="hidden items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2.5 py-[5px] text-[11px] font-medium text-emerald-300 sm:flex"
+                title={t.agentsHealthy}
+              >
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full bg-emerald-400"
+                  style={{ boxShadow: "0 0 6px rgba(52,211,153,0.75), 0 0 2px rgba(52,211,153,0.95)" }}
+                  aria-hidden
+                />
+                <span className="hidden md:inline">{t.agentsHealthy}</span>
               </span>
+
+              {/* Profile avatar → dropdown with full info + logout */}
+              <HeaderProfileButton
+                sessionName={sessionName}
+                sessionAccountName={sessionAccountName}
+                timeStr={timeStr}
+                workspaceList={workspaceList}
+                activeWorkspaceId={activeWorkspaceId}
+                locale={locale}
+              />
+
+              {/* Fullscreen / Control Room toggle */}
               <button
                 type="button"
                 onClick={() => void toggleControlRoom()}
@@ -1100,6 +1473,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 {isControlRoomMode ? <IconFullscreenExit /> : <IconFullscreenEnter />}
               </button>
+
+              {/* Gear / More — Dashboard, Owner, Logs, Access, Architecture */}
               <div className="relative">
                 <button
                   ref={mainMenuTriggerRef}
@@ -1129,44 +1504,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             </div>
           </div>
-          {/* Row 2: Nav pills + language */}
-          <div
-            className={`flex flex-nowrap items-center justify-between gap-2 border-b border-slate-800/50 px-3 py-1.5 sm:px-4${
-              isMediaThemeRoute ? " sources-app-header-row2" : ""
-            }`}
-          >
-            <nav className="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto" aria-label="Main">
-              {/* Pill order is the canonical navKeys order so the pins stay in
-                  a stable, predictable sequence regardless of the order the
-                  user toggled them on. Library + Radio are always first (and
-                  non-removable); every other pill appears only if pinned. */}
-              {navItems
-                .filter((item) => isCategoryPinned(item.labelKey))
-                .map((item) => {
-                  const isActive =
-                    item.href === "/dashboard"
-                      ? pathname === "/dashboard"
-                      : pathname.startsWith(item.href);
-                  const label = labels[item.labelKey]?.[locale] ?? item.labelKey;
-                  const Icon = mainMenuIconMap[item.labelKey];
-                  const pillClass = isMediaThemeRoute
-                    ? `inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05),0_2px_8px_rgba(0,0,0,0.25)] transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-slate-400/40 focus:ring-offset-0 source-nav-pill ${
-                        isActive ? "source-nav-pill-active" : "source-nav-pill-idle"
-                      }`
-                    : `${pillBase} ${isActive ? pillActive : pillInactive}`;
-                  const focusRing = isMediaThemeRoute ? "" : " focus:ring-offset-2 focus:ring-offset-slate-950";
-                  return (
-                    <Link key={item.href} href={item.href} className={`${pillClass}${focusRing}`}>
-                      {Icon && <Icon />}
-                      {label}
-                    </Link>
-                  );
-                })}
-            </nav>
-            <div className="sources-system-cluster ms-auto flex shrink-0 items-center gap-2">
-              <LogoutButton />
-            </div>
-          </div>
           {/* Row 3: Player — keep a single AudioPlayer instance across routes (media vs non-media); swapping branches remounts embeds */}
           <div
             className={isMediaThemeRoute ? "library-theme library-player-route-bridge shrink-0 overflow-x-hidden px-3 pb-2 sm:px-4" : undefined}
@@ -1179,7 +1516,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div
               className={
                 isMediaThemeRoute
-                  ? "library-deck-unified overflow-hidden rounded-2xl border border-slate-700/55 bg-slate-950/70 shadow-[0_12px_30px_rgba(0,0,0,0.42)]"
+                  ? "library-deck-unified overflow-hidden rounded-2xl border border-slate-700/40 bg-[#050914]/95 shadow-[0_16px_40px_rgba(0,0,0,0.55)]"
                   : undefined
               }
             >
@@ -1196,7 +1533,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     // every iPad in landscape (iPad mini 1024 px, Air/standard 1080-1180 px,
                     // Pro 12.9" 1366 px). Portrait tablets (<1024 px) keep the single-column deck.
                     // h-[160px] is the fallback below lg so h-full children never collapse to 0.
-                    "grid min-w-0 h-[160px] lg:grid-cols-[280px_minmax(0,1fr)_240px] lg:h-[220px] xl:grid-cols-[300px_minmax(0,1fr)_260px] 2xl:grid-cols-[320px_minmax(0,1fr)_280px] 2xl:h-[240px]"
+                    "grid min-w-0 h-[176px] lg:grid-cols-[270px_minmax(0,1fr)_210px] lg:h-[308px] xl:grid-cols-[290px_minmax(0,1fr)_220px] xl:h-[316px] 2xl:grid-cols-[310px_minmax(0,1fr)_230px] 2xl:h-[324px]"
                   : "grid grid-cols-1"
               }
             >
@@ -1223,7 +1560,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   : {})}
                 className={
                   isMediaThemeRoute
-                    ? `library-deck-player-cell relative min-h-[160px] lg:h-full lg:min-h-0 min-w-0 overflow-hidden transition-colors ${
+                    ? `library-deck-player-cell relative flex min-h-[160px] flex-col lg:h-full lg:min-h-0 min-w-0 overflow-hidden transition-colors ${
                         playerDropActive ? "ring-2 ring-inset ring-cyan-400/70" : ""
                       }`
                     : "relative min-w-0 w-full"
@@ -1238,51 +1575,44 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
               {isMediaThemeRoute ? (
                 <aside className="library-deck-pads-aside relative z-[60] isolate hidden h-full overflow-hidden lg:block lg:border-s lg:border-slate-800/60">
-                  <div className="flex h-full flex-col overflow-hidden p-3">
+                  <div className="flex h-full flex-col overflow-hidden p-2.5">
                     <header className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200/90">
-                          Command Pads
-                        </p>
-                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200/90">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-                          Standby
-                        </span>
-                      </div>
-                      <p className="mt-1 text-[11px] text-slate-300/80">Live operator trigger area</p>
+                      <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                        Pads
+                      </p>
                     </header>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-1.5">
                       {(
                         [
                           {
                             key: "jingles" as const,
                             title: "Jingles",
-                            tone: "border-sky-400/30 bg-sky-500/10 text-sky-100",
+                            tone: "border-sky-400/30 bg-sky-500/8 text-sky-200",
                             activeTone:
-                              "border-sky-400/70 bg-sky-500/25 text-sky-100 ring-1 ring-sky-400/40",
-                            dot: "bg-sky-300",
+                              "border-sky-400/70 bg-sky-500/18 text-sky-100 shadow-[0_0_10px_-2px_rgba(56,189,248,0.3)]",
+                            dot: "bg-sky-400",
                           },
                           {
                             key: null,
                             title: "Birthdays",
-                            tone: "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100",
+                            tone: "border-slate-700/20 bg-slate-800/20 text-slate-600",
                             activeTone: "",
-                            dot: "bg-fuchsia-300",
+                            dot: "bg-slate-600",
                           },
                           {
                             key: "my-music-library" as const,
-                            title: "My Music Library",
-                            tone: "border-amber-400/30 bg-amber-500/10 text-amber-100",
+                            title: "My Music",
+                            tone: "border-amber-400/30 bg-amber-500/8 text-amber-200",
                             activeTone:
-                              "border-amber-400/70 bg-amber-500/25 text-amber-100 ring-1 ring-amber-400/40",
-                            dot: "bg-amber-300",
+                              "border-amber-400/70 bg-amber-500/18 text-amber-100 shadow-[0_0_10px_-2px_rgba(251,191,36,0.3)]",
+                            dot: "bg-amber-400",
                           },
                           {
                             key: null,
-                            title: "Announcements",
-                            tone: "border-rose-400/30 bg-rose-500/10 text-rose-100",
+                            title: "Alerts",
+                            tone: "border-slate-700/20 bg-slate-800/20 text-slate-600",
                             activeTone: "",
-                            dot: "bg-rose-300",
+                            dot: "bg-slate-600",
                           },
                         ] as const
                       ).map((group) => {
@@ -1296,9 +1626,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                           <button
                             key={group.title}
                             type="button"
-                            className={`rounded-xl border px-2.5 py-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition ${
+                            className={`rounded-lg border px-2 py-2 text-left transition-[border-color,background-color,opacity,box-shadow] duration-150 ${
                               isActive && group.activeTone ? group.activeTone : group.tone
-                            } ${padDisabled ? "opacity-70" : ""}`}
+                            } ${padDisabled ? "opacity-45 cursor-default" : "hover:opacity-90 active:opacity-75"}`}
                             disabled={padDisabled}
                             aria-disabled={padDisabled}
                             aria-pressed={!padDisabled && (isJinglesPad || isMusicPad) ? isActive : undefined}
@@ -1316,18 +1646,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                           >
                             <p className="text-xs font-semibold tracking-tight">{group.title}</p>
                             {isMusicPad && !inDesktopApp ? (
-                              <div className="mt-1 space-y-1">
-                                <p className="text-[10px] leading-snug text-slate-400/95">
-                                  Available in SyncBiz Desktop
-                                </p>
-                                <a
-                                  href="/api/desktop/download"
-                                  className="inline-block text-[10px] font-medium text-sky-300/95 underline decoration-sky-500/45 underline-offset-2 hover:text-sky-200"
-                                  onClick={(ev) => ev.stopPropagation()}
-                                >
-                                  Download Desktop
-                                </a>
-                              </div>
+                              <p className="mt-1 flex items-center gap-1 text-[10px] opacity-60">
+                                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />
+                                Desktop only
+                              </p>
                             ) : isMusicPad && inDesktopApp ? (
                               <p className="mt-1 flex flex-wrap items-center gap-1 text-[10px] opacity-90">
                                 <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />

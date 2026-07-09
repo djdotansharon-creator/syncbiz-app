@@ -415,11 +415,9 @@ const PLAYLIST_TILES_STORAGE_KEY = "syncbiz-custom-playlist-tiles";
 const PLAYLIST_ASSIGNMENTS_STORAGE_KEY = SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY;
 const DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY = "syncbiz-daypart-playlist-assignments";
 
-const LIBRARY_CARD_GRID_CLASS =
-  "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 xl:justify-items-start";
+const LIBRARY_CARD_GRID_CLASS = "library-source-card-grid";
 
-const LIBRARY_SOURCE_CARD_CELL_CLASS =
-  "w-full max-w-[320px] [&>article]:h-full [&>article]:min-h-[340px] [&>article]:overflow-hidden";
+const LIBRARY_SOURCE_CARD_CELL_CLASS = "library-source-card-grid-cell";
 
 const LIBRARY_GRID_GENERIC_CELL_CLASS = "relative w-full min-w-[220px] max-w-none";
 
@@ -1223,8 +1221,11 @@ function SourcesManagerInner({
   /** Ready external drill-in: expanded rows must set session queue + correct leaf index (same contract as Play All). */
   const playSourceForLibraryCard = useCallback(
     (source: UnifiedSource) => {
-      if (selection.type === "collection_container" && selection.subtype === "external_playlist") {
-        const queue = resolveSourcesForSelection("external_playlist", selection.key);
+      if (
+        selection.type === "collection_container" &&
+        (selection.subtype === "external_playlist" || selection.subtype === "syncbiz_playlist")
+      ) {
+        const queue = resolveSourcesForSelection(selection.subtype, selection.key);
         if (queue.length > 0) {
           setQueue(queue, { force: true });
         }
@@ -3131,6 +3132,7 @@ function SourcesManagerInner({
                                 playlistId={source.playlist.id}
                                 playlistName={source.title}
                                 branchId={source.playlist.branchId ?? "default"}
+                                onSendToPlaylist={() => setAddToPlaylistLeaf(source)}
                               />
                             ) : undefined;
                           return (

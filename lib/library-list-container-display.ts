@@ -90,10 +90,7 @@ export function getLibraryListContainerMetaStripModel(source: UnifiedSource): Li
     curation != null && Number.isFinite(curation) && curation > 0 ? formatSyncBizCurationChip(curation) : "";
   const showSync = syncLabel !== "" && syncLabel !== "—";
 
-  const hasMetaFields = showDuration || showViews || showLikes || Boolean(dateRaw) || showSync;
-  if (!hasMetaFields && listMeta.trackCount === 0) return null;
-
-  const itemTitle = listMeta.trackCount === 1 ? "1 item" : `${listMeta.trackCount} items`;
+  const itemTitle = listMeta.trackCount === 1 ? "1 track" : `${listMeta.trackCount} tracks`;
 
   return {
     trackCount: listMeta.trackCount,

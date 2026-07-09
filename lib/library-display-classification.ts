@@ -1,12 +1,23 @@
 /**
- * Single display contract for library badges: LIST (real containers), SINGLE / SET (leaves), RADIO.
+ * Single display contract for library badges: LIST (containers), SINGLE / SET / LOCAL (leaves), RADIO.
  */
 
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { shouldClassifyLeafUrlAsMixSet } from "@/lib/library-leaf-mix-heuristics";
 import { classifyLibraryEntityContract, type UnifiedSource } from "@/lib/source-types";
+import { isValidLocalFilePlaybackPath } from "@/lib/url-validation";
 
-export type LibraryKindBadge = "LIST" | "SINGLE" | "SET" | "RADIO";
+export type LibraryKindBadge = "LIST" | "SINGLE" | "SET" | "LOCAL" | "RADIO";
+
+/** True when the item is computer / folder music (desktop playback path). */
+export function isLibraryLocalSource(source: UnifiedSource): boolean {
+  if (source.type === "local" || source.type === "winamp") return true;
+  if (source.source?.type === "local_playlist") return true;
+  const u = (source.url ?? "").trim();
+  if (u.startsWith("local://user-playlist/")) return false;
+  if (u.startsWith("local://")) return true;
+  return isValidLocalFilePlaybackPath(u);
+}
 
 function sumPlaylistTrackDurationSeconds(source: UnifiedSource): number | null {
   if (!source.playlist) return null;
@@ -46,9 +57,10 @@ export function resolveLibraryKindBadge(source: UnifiedSource): LibraryKindBadge
     return "LIST";
   }
   if (contract.entityKind === "item") {
+    if (contract.itemSubtype === "radio_stream") return "RADIO";
     if (contract.itemSubtype === "mix_set") return "SET";
     if (shouldClassifyLeafUrlAsMixSet(source)) return "SET";
-    if (contract.itemSubtype === "radio_stream") return "RADIO";
+    if (isLibraryLocalSource(source)) return "LOCAL";
     return "SINGLE";
   }
   if (shouldClassifyLeafUrlAsMixSet(source)) return "SET";
@@ -56,20 +68,35 @@ export function resolveLibraryKindBadge(source: UnifiedSource): LibraryKindBadge
 }
 
 export function libraryKindBadgeUpper(kind: LibraryKindBadge): string {
-  if (kind === "RADIO") return "Radio";
+  if (kind === "LIST") return "PLAYLIST";
+  if (kind === "RADIO") return "RADIO";
   return kind;
 }
 
-/** Tailwind classes for top-left library badges ( SourceCard + branch tiles ). */
 export function libraryKindBadgeArtClass(kind: LibraryKindBadge): string {
-  switch (kind) {
-    case "LIST":
-      return "!border-cyan-400/55 !bg-cyan-950/85 !text-cyan-100 shadow-[0_0_12px_rgba(34,211,238,0.12)] border";
-    case "SINGLE":
-      return "!border-emerald-400/55 !bg-emerald-950/85 !text-emerald-100 shadow-[0_0_12px_rgba(52,211,153,0.12)] border";
-    case "SET":
-      return "!border-violet-400/55 !bg-violet-950/85 !text-violet-100 shadow-[0_0_12px_rgba(167,139,250,0.12)] border";
-    case "RADIO":
-      return "!border-rose-400/55 !bg-rose-950/85 !text-rose-100 shadow-[0_0_12px_rgba(251,113,133,0.12)] border";
+  return `library-card-kind-badge--${kind.toLowerCase()}`;
+}
+
+/** Human-readable source label for top-right card badge. */
+export function librarySourceBadgeLabel(source: UnifiedSource, kindBadge: LibraryKindBadge): string {
+  if (kindBadge === "LIST") return "Playlist";
+  if (source.origin === "radio") return "Radio";
+  if (isLibraryLocalSource(source)) return "Local";
+  switch (source.type) {
+    case "youtube":
+      return "YouTube";
+    case "soundcloud":
+      return "SoundCloud";
+    case "spotify":
+      return "Spotify";
+    case "local":
+    case "winamp":
+      return "Local";
+    default:
+      break;
   }
+  if (source.origin === "playlist" && source.playlist?.libraryPlacement !== "ready_external") {
+    return "SyncBiz";
+  }
+  return "URL";
 }
