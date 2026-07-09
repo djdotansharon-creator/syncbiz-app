@@ -1014,7 +1014,7 @@ export function LiveQueuePanel() {
         className={`play-next-block shrink-0 border-t border-white/[0.05] pt-1 transition-colors ${visiblePlayNextQueue.length === 0 ? "opacity-80" : ""}`}
       >
         {visiblePlayNextQueue.length > 0 ? (
-          <ol className="mb-1 max-h-20 list-decimal space-y-px overflow-y-auto pl-4 leading-tight text-slate-200/90 marker:text-[10px] marker:font-bold marker:text-amber-200/70">
+          <ol className="mb-1 max-h-20 list-decimal space-y-px overflow-y-auto pl-4 leading-tight text-slate-200/90 marker:text-[10px] marker:font-semibold marker:text-[#6e6e73]">
             {visiblePlayNextQueue.map((it) => (
               <li key={it.id} className="group/pn flex items-center gap-1 pl-0.5">
                 <div className="min-w-0 flex-1 overflow-hidden">
@@ -1028,7 +1028,7 @@ export function LiveQueuePanel() {
                   aria-label={`Remove "${it.title}" from Play Next`}
                   title="Remove from Play Next"
                   onClick={() => removePlayNextRow(it.id)}
-                  className="shrink-0 rounded text-[12px] leading-none text-amber-200/55 transition-colors hover:text-rose-300 focus:outline-none focus:ring-1 focus:ring-rose-400/60"
+                  className="shrink-0 rounded text-[12px] leading-none text-[#6e6e73] transition-colors hover:text-rose-300 focus:outline-none focus:ring-1 focus:ring-rose-400/60"
                 >
                   <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
                     <path
@@ -1063,16 +1063,16 @@ export function LiveQueuePanel() {
           onMouseLeave={() => setPadHover(false)}
           onFocus={() => setPadHover(true)}
           onBlur={() => setPadHover(false)}
-          className={`play-next-pad flex min-h-[34px] cursor-copy select-none items-center justify-center rounded-[5px] border px-2.5 py-1.5 text-center transition-all focus:outline-none focus:ring-1 focus:ring-amber-500/25 ${
+          className={`play-next-pad flex min-h-[34px] cursor-copy select-none items-center justify-center rounded-lg border border-dashed px-2.5 py-1.5 text-center transition-all duration-150 focus:outline-none focus:ring-1 focus:ring-white/20 ${
             overDrop
-              ? "border-amber-500/45 bg-amber-950/25"
-              : "border-amber-600/20 bg-amber-950/12 hover:border-amber-500/30 hover:bg-amber-950/18"
+              ? "border-[#0a84ff]/50 bg-[#0a84ff]/10"
+              : "border-white/[0.12] bg-white/[0.02] hover:border-white/[0.2] hover:bg-white/[0.04]"
           }`}
         >
           {dropHint ? (
-            <p className="text-[11px] font-medium text-amber-200/90" role="status">{dropHint}</p>
+            <p className="text-[11px] font-medium text-[#6cb2ff]" role="status">{dropHint}</p>
           ) : (
-            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-amber-200/80 leading-none">
+            <p className={`text-[11px] font-medium uppercase tracking-[0.14em] leading-none transition-colors ${overDrop ? "text-[#6cb2ff]" : "text-[#6e6e73]"}`}>
               {overDrop ? "Drop here" : "Drop Next"}
             </p>
           )}

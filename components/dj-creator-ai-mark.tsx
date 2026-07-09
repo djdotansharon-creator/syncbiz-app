@@ -41,7 +41,7 @@ export function DjCreatorAiWarmSpark({ className }: Props) {
       height={512}
       draggable={false}
       className={[
-        "bg-transparent object-contain object-center select-none rounded-2xl ring-1 ring-amber-500/15 shadow-[0_6px_20px_rgba(0,0,0,0.55)]",
+        "bg-transparent object-contain object-center select-none rounded-2xl ring-1 ring-white/[0.08] shadow-[0_6px_20px_rgba(0,0,0,0.55)]",
         className,
       ]
         .filter(Boolean)

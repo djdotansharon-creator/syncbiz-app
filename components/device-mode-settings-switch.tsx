@@ -62,13 +62,13 @@ export function DeviceModeSettingsSwitch() {
             title={isMaster ? "This device is MASTER" : "Switch to MASTER"}
             className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-xs font-semibold uppercase tracking-wider transition-all ${
               isMaster
-                ? "border border-red-500/60 bg-red-600/25 text-red-200 shadow-[0_0_12px_rgba(239,68,68,0.2)]"
-                : "border border-transparent bg-transparent text-slate-500 hover:bg-slate-800/80 hover:text-slate-300"
+                ? "border border-red-500/35 bg-red-500/10 text-red-300"
+                : "border border-transparent bg-transparent text-slate-500 hover:bg-white/[0.05] hover:text-slate-300"
             }`}
           >
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                isMaster ? "bg-red-400 animate-pulse" : "bg-slate-500"
+                isMaster ? "bg-red-400" : "bg-slate-500"
               }`}
             />
             MASTER
@@ -81,13 +81,13 @@ export function DeviceModeSettingsSwitch() {
             title={!isMaster ? "This device is CONTROL" : "Switch to CONTROL"}
             className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-xs font-semibold uppercase tracking-wider transition-all ${
               !isMaster
-                ? "border border-amber-500/60 bg-amber-600/20 text-amber-200 shadow-[0_0_10px_rgba(245,158,11,0.15)]"
-                : "border border-transparent bg-transparent text-slate-500 hover:bg-slate-800/80 hover:text-slate-300"
+                ? "border border-[#0a84ff]/35 bg-[#0a84ff]/10 text-[#7db8ff]"
+                : "border border-transparent bg-transparent text-slate-500 hover:bg-white/[0.05] hover:text-slate-300"
             }`}
           >
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                !isMaster ? "bg-amber-400" : "bg-slate-500"
+                !isMaster ? "bg-[#409cff]" : "bg-slate-500"
               }`}
             />
             CONTROL
@@ -99,7 +99,7 @@ export function DeviceModeSettingsSwitch() {
             : "This device mirrors the MASTER. Use the switch above to become MASTER."}
         </p>
         {!isMaster && hasExistingMaster && (
-          <p className="text-[11px] text-amber-400/90">
+          <p className="text-[11px] text-[#6e6e73]">
             Controlling: Branch Master. This device mirrors the main player.
           </p>
         )}

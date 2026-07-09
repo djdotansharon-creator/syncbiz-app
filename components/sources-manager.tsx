@@ -405,11 +405,12 @@ function getCuratedCollectionKey(source: UnifiedSource): string {
   return `curated:${normalizeCollectionLabel(curatedLabel)}`;
 }
 
+/* Quiet tiles: uniform surface; daypart identity lives in a small color dot. */
 const FIXED_DAYPART_PADS: Array<{ label: "Morning" | "Afternoon" | "Evening" | "Night"; key: string; tone: string }> = [
-  { label: "Morning", key: "daypart:morning", tone: "from-amber-500/35 to-orange-500/20 border-amber-300/45" },
-  { label: "Afternoon", key: "daypart:afternoon", tone: "from-sky-500/35 to-cyan-500/20 border-sky-300/45" },
-  { label: "Evening", key: "daypart:evening", tone: "from-violet-500/35 to-fuchsia-500/20 border-violet-300/45" },
-  { label: "Night", key: "daypart:late_night", tone: "from-indigo-500/35 to-slate-700/35 border-indigo-300/45" },
+  { label: "Morning", key: "daypart:morning", tone: "bg-amber-400" },
+  { label: "Afternoon", key: "daypart:afternoon", tone: "bg-sky-400" },
+  { label: "Evening", key: "daypart:evening", tone: "bg-violet-400" },
+  { label: "Night", key: "daypart:late_night", tone: "bg-indigo-400" },
 ];
 const PLAYLIST_TILES_STORAGE_KEY = "syncbiz-custom-playlist-tiles";
 const PLAYLIST_ASSIGNMENTS_STORAGE_KEY = SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY;
@@ -2209,7 +2210,7 @@ function SourcesManagerInner({
                 </button>
               </div>
               {playlistTileDropMessage ? (
-                <p className="mb-2 px-1 text-[10px] leading-snug text-amber-400/95" role="status">
+                <p className="mb-2 px-1 text-[10px] leading-snug text-[#6cb2ff]" role="status">
                   {playlistTileDropMessage}
                 </p>
               ) : null}
@@ -2246,7 +2247,7 @@ function SourcesManagerInner({
                     }}
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
-                    className={`rounded-xl border bg-gradient-to-r px-3 py-2.5 ${pad.tone}`}
+                    className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
                     title={t.playlistTileDropBindPlaylistTitle}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -2260,7 +2261,10 @@ function SourcesManagerInner({
                           {tileCover ? <HydrationSafeImage src={tileCover} alt="" className="h-full w-full object-cover" /> : null}
                         </span>
                         <span className="min-w-0">
-                          <span className="library-text-title block truncate text-sm font-semibold">{pad.label}</span>
+                          <span className="library-text-title flex items-center gap-1.5 text-sm font-semibold">
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${pad.tone}`} aria-hidden />
+                            <span className="truncate">{pad.label}</span>
+                          </span>
                           <span className="library-card-meta block truncate text-[10px]">
                             {assignedPlaylist?.title ?? "Playlist"}
                           </span>
@@ -2341,7 +2345,7 @@ function SourcesManagerInner({
                     }}
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
-                    className="rounded-xl border border-emerald-300/45 bg-gradient-to-r from-emerald-500/35 to-teal-500/20 px-3 py-2.5"
+                    className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
                     title={t.playlistTileDropBindPlaylistTitle}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -2355,7 +2359,10 @@ function SourcesManagerInner({
                           {tileCover ? <HydrationSafeImage src={tileCover} alt="" className="h-full w-full object-cover" /> : null}
                         </span>
                         <span className="min-w-0">
-                          <span className="library-text-title block truncate text-sm font-semibold">{pad.label}</span>
+                          <span className="library-text-title flex items-center gap-1.5 text-sm font-semibold">
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" aria-hidden />
+                            <span className="truncate">{pad.label}</span>
+                          </span>
                           <span className="library-card-meta block truncate text-[10px]">
                             {assignedPlaylist?.title ?? "Playlist"}
                           </span>

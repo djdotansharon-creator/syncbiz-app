@@ -101,7 +101,7 @@ const accentBtn =
   "rounded-xl border border-cyan-400/25 bg-gradient-to-r from-sky-500/22 via-cyan-500/20 to-sky-400/22 font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_6px_20px_rgba(34,211,238,0.08)] hover:from-sky-500/32 hover:via-cyan-500/28 hover:to-sky-400/30";
 /** Launcher card only — warm frame; radius matches library rail (Guest / My link). */
 const launcherOpenBtn =
-  "rounded-lg border border-amber-400/40 bg-gradient-to-r from-amber-500/18 via-orange-500/14 to-amber-600/16 font-semibold text-[#fffbeb] text-[10px] shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_4px_18px_rgba(245,158,11,0.12)] hover:from-amber-500/26 hover:via-orange-500/20 hover:to-amber-600/22";
+  "rounded-lg border border-white/[0.1] bg-white/[0.06] font-semibold text-[#f5f5f7] text-[10px] transition-colors duration-150 hover:border-white/[0.18] hover:bg-white/[0.1] active:scale-[0.98]";
 /** Inner surface once gradient chrome is applied (see panel wrapper). */
 const sidePanelInner =
   "relative flex min-h-0 w-full flex-col overflow-hidden rounded-[15px] bg-[#0b121c] ring-1 ring-inset ring-cyan-400/12";
@@ -1080,20 +1080,9 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
 
   return (
     <>
-      <section className="relative overflow-hidden rounded-2xl border border-amber-600/30 bg-[#141210] p-3 shadow-[0_8px_28px_rgba(0,0,0,0.42),inset_0_0_0_1px_rgba(217,119,6,0.12)]">
-        <div
-          className="pointer-events-none absolute inset-0 opacity-[0.2]"
-          style={{
-            backgroundImage: `
-              linear-gradient(rgba(251,191,36,0.14) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(251,191,36,0.14) 1px, transparent 1px)
-            `,
-            backgroundSize: "14px 14px",
-          }}
-          aria-hidden
-        />
+      <section className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03] p-3 shadow-[0_8px_28px_rgba(0,0,0,0.35)]">
         <div className="relative flex flex-col items-center gap-3 sm:flex-row sm:items-center" dir={dir}>
-          <DjCreatorAiWarmSpark className="h-[5.25rem] w-[5.25rem] shrink-0 sm:h-[5.75rem] sm:w-[5.75rem]" />
+          <DjCreatorAiWarmSpark className="h-12 w-12 shrink-0 rounded-xl sm:h-14 sm:w-14" />
           <div className="min-w-0 w-full flex-1 text-center sm:text-start">
             <p className="library-text-title text-sm font-semibold tracking-tight text-[#faf8f5]">{t.launcherTitle}</p>
             <button
@@ -1116,7 +1105,7 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
             onClick={closeDrawer}
           />
           <div
-            className={`fixed right-3 bottom-3 z-[120] flex flex-col rounded-2xl border border-cyan-400/22 bg-gradient-to-b from-cyan-500/[0.06] via-sky-500/[0.04] to-transparent p-px shadow-[0_0_28px_rgba(34,211,238,0.14),0_18px_48px_rgba(0,0,0,0.5)] ${
+            className={`fixed right-3 bottom-3 z-[120] flex flex-col rounded-2xl border border-white/[0.1] bg-[#101014] p-px shadow-[0_18px_48px_rgba(0,0,0,0.5)] ${
               panelSize === "compact"
                 ? "w-[min(calc(100vw-1.5rem),320px)]"
                 : "w-[min(calc(100vw-1.5rem),428px)]"

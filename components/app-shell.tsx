@@ -300,9 +300,9 @@ function LogoutButton({ compact: isCompact }: { compact?: boolean } = {}) {
           type="button"
           onClick={() => setConfirmOpen(true)}
           disabled={loading}
-          className="logout-led-button inline-flex items-center gap-1.5 rounded-full border border-sky-400/70 bg-sky-500/12 px-2.5 py-1 text-[11px] font-medium text-sky-100 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.18),0_0_14px_rgba(56,189,248,0.3)] transition hover:border-sky-300/90 hover:bg-sky-500/20 hover:shadow-[inset_0_0_0_1px_rgba(56,189,248,0.3),0_0_22px_rgba(56,189,248,0.48)] focus:outline-none focus:ring-2 focus:ring-sky-400/40 disabled:opacity-50"
+          className="logout-led-button inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-[#a1a1a6] transition-colors duration-150 hover:border-white/[0.16] hover:bg-white/[0.08] hover:text-[#f5f5f7] focus:outline-none focus:ring-2 focus:ring-white/20 active:scale-[0.97] disabled:opacity-50"
         >
-          <span aria-hidden className="inline-flex h-1.5 w-1.5 rounded-full bg-sky-300 shadow-[0_0_6px_rgba(56,189,248,0.95)]" />
+          <span aria-hidden className="inline-flex h-1.5 w-1.5 rounded-full bg-[#6e6e73]" />
           {loading ? "…" : "Logout"}
         </button>
       )}
@@ -1375,10 +1375,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                       {label}
                       {/* Always rendered — opacity controls visibility to keep layout stable */}
                       <span
-                        className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-cyan-400 transition-opacity duration-200 ${
+                        className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-[#f5f5f7] transition-opacity duration-200 ${
                           isActive ? "opacity-100" : "opacity-0"
                         }`}
-                        style={isActive ? { boxShadow: "0 0 8px rgba(34,211,238,0.8), 0 0 2px rgba(34,211,238,1)" } : undefined}
                         aria-hidden
                       />
                     </Link>
@@ -1391,7 +1390,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               {/* ── Greeting + clock chip — larger, readable, prominent ──
                   sm: time only · md: time · greeting · name · lg: + workspace */}
               <div
-                className="me-0.5 hidden items-center gap-2 rounded-full border border-slate-700/40 bg-slate-800/50 px-3.5 py-1.5 sm:flex"
+                className="me-0.5 hidden items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3.5 py-1.5 sm:flex"
                 dir={locale === "he" ? "rtl" : "ltr"}
                 suppressHydrationWarning
               >
@@ -1427,16 +1426,12 @@ export function AppShell({ children }: { children: ReactNode }) {
               {/* MASTER / On Air / device mode indicators */}
               <HeaderDeviceIndicators />
 
-              {/* Agents healthy — glowing green dot + text on md+ */}
+              {/* Agents healthy — quiet chip, small green dot */}
               <span
-                className="hidden items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/8 px-2.5 py-[5px] text-[11px] font-medium text-emerald-300 sm:flex"
+                className="hidden items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-[5px] text-[11px] font-medium text-[#a1a1a6] sm:flex"
                 title={t.agentsHealthy}
               >
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full bg-emerald-400"
-                  style={{ boxShadow: "0 0 6px rgba(52,211,153,0.75), 0 0 2px rgba(52,211,153,0.95)" }}
-                  aria-hidden
-                />
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#30d158]" aria-hidden />
                 <span className="hidden md:inline">{t.agentsHealthy}</span>
               </span>
 
@@ -1465,10 +1460,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                     ? (t.exitControlRoom ?? "Exit Full Screen / Control Room")
                     : (t.enterControlRoom ?? "Full Screen / Control Room")
                 }
-                className={`control-room-toggle inline-flex h-8 w-8 items-center justify-center rounded-full border transition ${
+                className={`control-room-toggle inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors duration-150 active:scale-95 ${
                   isControlRoomMode
-                    ? "border-cyan-400/60 bg-cyan-500/15 text-cyan-100 shadow-[0_0_18px_rgba(34,211,238,0.28)]"
-                    : "border-slate-800 bg-slate-900/80 text-slate-300 hover:border-slate-700 hover:bg-slate-800 hover:text-slate-100"
+                    ? "border-[#0a84ff]/40 bg-[#0a84ff]/15 text-[#7db8ff]"
+                    : "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.08] hover:text-[#f5f5f7]"
                 }`}
               >
                 {isControlRoomMode ? <IconFullscreenExit /> : <IconFullscreenEnter />}
@@ -1486,7 +1481,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   onClick={() => setMainMenuOpen((v) => !v)}
                   className={`main-menu-gear inline-flex h-8 w-8 items-center justify-center rounded-full border text-slate-300 transition ${
                     mainMenuOpen
-                      ? "border-sky-500/50 bg-sky-500/15 text-sky-200 shadow-[0_0_18px_rgba(56,189,248,0.25)]"
+                      ? "border-[#0a84ff]/40 bg-[#0a84ff]/15 text-[#7db8ff]"
                       : "border-slate-800 bg-slate-900/80 hover:border-slate-700 hover:bg-slate-800 hover:text-slate-100"
                   }`}
                 >
@@ -1587,32 +1582,30 @@ export function AppShell({ children }: { children: ReactNode }) {
                           {
                             key: "jingles" as const,
                             title: "Jingles",
-                            tone: "border-sky-400/30 bg-sky-500/8 text-sky-200",
-                            activeTone:
-                              "border-sky-400/70 bg-sky-500/18 text-sky-100 shadow-[0_0_10px_-2px_rgba(56,189,248,0.3)]",
+                            tone: "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.07] hover:text-[#f5f5f7]",
+                            activeTone: "border-[#0a84ff]/40 bg-[#0a84ff]/12 text-[#7db8ff]",
                             dot: "bg-sky-400",
                           },
                           {
                             key: null,
                             title: "Birthdays",
-                            tone: "border-slate-700/20 bg-slate-800/20 text-slate-600",
+                            tone: "border-white/[0.05] bg-white/[0.02] text-[#48484d]",
                             activeTone: "",
-                            dot: "bg-slate-600",
+                            dot: "bg-[#48484d]",
                           },
                           {
                             key: "my-music-library" as const,
                             title: "My Music",
-                            tone: "border-amber-400/30 bg-amber-500/8 text-amber-200",
-                            activeTone:
-                              "border-amber-400/70 bg-amber-500/18 text-amber-100 shadow-[0_0_10px_-2px_rgba(251,191,36,0.3)]",
+                            tone: "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.07] hover:text-[#f5f5f7]",
+                            activeTone: "border-[#0a84ff]/40 bg-[#0a84ff]/12 text-[#7db8ff]",
                             dot: "bg-amber-400",
                           },
                           {
                             key: null,
                             title: "Alerts",
-                            tone: "border-slate-700/20 bg-slate-800/20 text-slate-600",
+                            tone: "border-white/[0.05] bg-white/[0.02] text-[#48484d]",
                             activeTone: "",
-                            dot: "bg-slate-600",
+                            dot: "bg-[#48484d]",
                           },
                         ] as const
                       ).map((group) => {

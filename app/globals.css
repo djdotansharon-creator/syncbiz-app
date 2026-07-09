@@ -26,6 +26,40 @@ body {
   overflow-x: hidden;
 }
 
+/* ─── Smooth interactions everywhere ───
+   Every control responds instantly: soft color transitions and a gentle
+   press-down. `scale` is its own property so it never fights translate/rotate
+   transforms set elsewhere. */
+button,
+[role="button"],
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+button {
+  transition-property: color, background-color, border-color, opacity, box-shadow, scale;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+button:active:not(:disabled) {
+  scale: 0.97;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition-duration: 1ms;
+  }
+  button:active:not(:disabled) {
+    scale: 1;
+  }
+}
+
 /* ─── Global dark scrollbars (SyncBiz) — page, modals, rails, any overflow container ─── */
 :root {
   --sb-scrollbar-thumb: rgba(100, 116, 139, 0.5);
@@ -644,14 +678,14 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   will-change: transform;
 }
 
-/* Fallback disc — richer navy gradient, visible as an intentional surface */
+/* Fallback disc — quiet graphite gradient, reads as a matte record */
 .dj-vinyl-fallback {
   background: radial-gradient(
     circle at 44% 40%,
-    #253060 0%,
-    #17204a 28%,
-    #0b1230 58%,
-    #050810 100%
+    #26262b 0%,
+    #1a1a1f 30%,
+    #101014 60%,
+    #060608 100%
   );
 }
 

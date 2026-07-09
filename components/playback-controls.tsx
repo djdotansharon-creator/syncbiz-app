@@ -106,13 +106,13 @@ export function PlaybackControls({
       role="group"
       aria-label="Playback controls"
     >
-      {/* Transport rail – raised deck surface */}
+      {/* Transport rail – quiet surface */}
       <div
-        className={`flex items-center gap-1.5 rounded-2xl border border-slate-700/80 bg-slate-900/90 px-2 py-2 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_4px_12px_rgba(0,0,0,0.4)] sm:gap-2 sm:px-3 sm:py-2.5 ${
+        className={`flex items-center gap-1.5 rounded-2xl border border-white/[0.08] bg-white/[0.03] px-2 py-2 sm:gap-2 sm:px-3 sm:py-2.5 ${
           compact ? "rounded-r-none border-r-0" : ""
         }`}
       >
-        {/* Play – primary transport, larger, emerald */}
+        {/* Play – primary transport: solid white circle, dark glyph */}
         <button
           type="button"
           onClick={handlePlay}
@@ -120,17 +120,13 @@ export function PlaybackControls({
           aria-label={loading === "play" ? "Sending…" : "Play"}
           className={`
             flex items-center justify-center rounded-full
-            border border-emerald-500/40
-            bg-gradient-to-b from-emerald-400/25 to-emerald-600/30
-            text-emerald-200
-            shadow-[0_1px_0_0_rgba(255,255,255,0.08)_inset,0_2px_4px_rgba(0,0,0,0.4),0_0_20px_rgba(16,185,129,0.12)]
-            transition-all duration-100
-            hover:border-emerald-400/60 hover:from-emerald-400/30 hover:to-emerald-500/40
-            hover:shadow-[0_1px_0_0_rgba(255,255,255,0.1)_inset,0_3px_6px_rgba(0,0,0,0.35),0_0_28px_rgba(16,185,129,0.2)]
+            bg-[#f5f5f7] text-[#111114]
+            shadow-[0_4px_16px_-6px_rgba(0,0,0,0.55)]
+            transition-colors duration-150
+            hover:bg-white hover:text-black
             active:scale-[0.96]
-            active:shadow-[0_2px_0_0_rgba(0,0,0,0.3)_inset,0_1px_2px_rgba(0,0,0,0.5)]
             disabled:opacity-50 disabled:pointer-events-none
-            focus:outline-none focus:ring-2 focus:ring-emerald-400/40 focus:ring-offset-2 focus:ring-offset-slate-900
+            focus:outline-none focus:ring-2 focus:ring-white/30
             ${playSize}
           `}
         >
@@ -145,18 +141,12 @@ export function PlaybackControls({
           aria-label={loading === "pause" ? "Sending…" : "Pause"}
           className={`
             flex items-center justify-center rounded-full
-            border border-slate-600/80
-            bg-gradient-to-b from-slate-500/20 to-slate-800/90
-            text-slate-300
-            shadow-[0_1px_0_0_rgba(255,255,255,0.05)_inset,0_2px_4px_rgba(0,0,0,0.35)]
-            transition-all duration-100
-            hover:border-slate-500/80 hover:from-slate-400/25 hover:to-slate-700/80
-            hover:text-slate-100
-            hover:shadow-[0_1px_0_0_rgba(255,255,255,0.06)_inset,0_3px_6px_rgba(0,0,0,0.3)]
+            border border-white/[0.08] bg-white/[0.05] text-[#a1a1a6]
+            transition-colors duration-150
+            hover:border-white/[0.16] hover:bg-white/[0.09] hover:text-[#f5f5f7]
             active:scale-[0.96]
-            active:shadow-[0_2px_0_0_rgba(0,0,0,0.25)_inset,0_1px_2px_rgba(0,0,0,0.4)]
             disabled:opacity-50 disabled:pointer-events-none
-            focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-900
+            focus:outline-none focus:ring-2 focus:ring-white/25
             ${secondarySize}
           `}
         >
@@ -171,18 +161,12 @@ export function PlaybackControls({
           aria-label={loading === "stop" ? "Sending…" : "Stop"}
           className={`
             flex items-center justify-center rounded-full
-            border border-slate-600/80
-            bg-gradient-to-b from-slate-500/20 to-slate-800/90
-            text-slate-300
-            shadow-[0_1px_0_0_rgba(255,255,255,0.05)_inset,0_2px_4px_rgba(0,0,0,0.35)]
-            transition-all duration-100
-            hover:border-slate-500/80 hover:from-slate-400/25 hover:to-slate-700/80
-            hover:text-slate-100
-            hover:shadow-[0_1px_0_0_rgba(255,255,255,0.06)_inset,0_3px_6px_rgba(0,0,0,0.3)]
+            border border-white/[0.08] bg-white/[0.05] text-[#a1a1a6]
+            transition-colors duration-150
+            hover:border-white/[0.16] hover:bg-white/[0.09] hover:text-[#f5f5f7]
             active:scale-[0.96]
-            active:shadow-[0_2px_0_0_rgba(0,0,0,0.25)_inset,0_1px_2px_rgba(0,0,0,0.4)]
             disabled:opacity-50 disabled:pointer-events-none
-            focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-900
+            focus:outline-none focus:ring-2 focus:ring-white/25
             ${secondarySize}
           `}
         >
@@ -190,10 +174,10 @@ export function PlaybackControls({
         </button>
       </div>
 
-      {/* Volume fader strip – deck-style with LED segment readout */}
+      {/* Volume fader strip – quiet surface */}
       <div
-        className={`flex items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/90 px-3 py-2 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.03),0_2px_8px_rgba(0,0,0,0.3)] ${
-          compact ? "rounded-l-none border-l-slate-700/80 pl-3" : "ml-1 border-l border-slate-700/80 pl-4"
+        className={`flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 ${
+          compact ? "rounded-l-none pl-3" : "ml-1 pl-4"
         }`}
       >
         <IconVolume className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
@@ -288,24 +272,20 @@ export function PlayNowButton({
       aria-label={loading ? loadingLabel : label}
       className={`
         inline-flex items-center justify-center gap-2 rounded-xl
-        border border-[#1db954]/40
-        bg-gradient-to-b from-[#1ed760]/20 to-[#1db954]/25
-        px-3.5 py-2 text-sm font-medium text-[#1ed760]
-        shadow-[0_1px_0_0_rgba(255,255,255,0.06)_inset,0_2px_6px_rgba(0,0,0,0.3),0_0_16px_rgba(30,215,96,0.12)]
-        transition-all duration-150
-        hover:border-[#1ed760]/60 hover:from-[#1ed760]/28 hover:to-[#1db954]/35 hover:text-white
-        hover:shadow-[0_1px_0_0_rgba(255,255,255,0.08)_inset,0_3px_8px_rgba(0,0,0,0.25),0_0_22px_rgba(30,215,96,0.2)]
+        border border-white/[0.1] bg-white/[0.06]
+        px-3.5 py-2 text-sm font-medium text-[#f5f5f7]
+        transition-colors duration-150
+        hover:border-white/[0.18] hover:bg-white/[0.1]
         active:scale-[0.98]
-        active:shadow-[0_2px_0_0_rgba(0,0,0,0.2)_inset,0_1px_3px_rgba(0,0,0,0.4)]
-        disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none
-        focus:outline-none focus:ring-2 focus:ring-[#1ed760]/40 focus:ring-offset-2 focus:ring-offset-slate-900
+        disabled:opacity-50 disabled:pointer-events-none
+        focus:outline-none focus:ring-2 focus:ring-white/25
       `}
     >
       <span
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#1db954]/30 bg-[#1db954]/20 shadow-[0_1px_0_0_rgba(255,255,255,0.08)_inset,0_1px_3px_rgba(0,0,0,0.3)]"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f5f5f7]"
         aria-hidden
       >
-        <svg className="h-4 w-4 text-[#1ed760]" viewBox="0 0 24 24" fill="currentColor">
+        <svg className="h-4 w-4 ml-0.5 text-[#111114]" viewBox="0 0 24 24" fill="currentColor">
           <path d="M8 5v14l11-7L8 5z" />
         </svg>
       </span>

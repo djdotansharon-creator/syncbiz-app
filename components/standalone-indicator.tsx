@@ -8,12 +8,12 @@ export function StandaloneIndicator() {
   if (!ctx?.isActive || ctx?.isBranchConnected) return null;
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border border-slate-600/40 bg-slate-800/50 px-2.5 py-[5px] text-[11px] font-semibold uppercase tracking-wider text-slate-400"
+      className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-[5px] text-[11px] font-medium uppercase tracking-wider text-[#6e6e73]"
       role="status"
       aria-label="Standalone mode"
       title="Local playback only. Sign in to sync across devices."
     >
-      <span className="h-2 w-2 shrink-0 rounded-full bg-slate-500 shadow-[0_0_5px_rgba(148,163,184,0.4)]" />
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#6e6e73]" />
       Standalone
     </span>
   );
