@@ -2720,3 +2720,107 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   font-size: 0.625rem !important;  /* 10 px */
   line-height: 1.2 !important;
 }
+
+/* ═══ Full-bleed library cards ═══════════════════════════════════════════════
+   The artwork covers the entire card; title, genre and actions float on a
+   dark fog gradient at the bottom of the image. Action buttons are bare
+   icons — the circular backdrop appears only on hover.
+   This block intentionally sits LAST so it wins over the earlier card rules. */
+
+.library-source-card .sb-lbc-shell {
+  position: relative;
+  overflow: hidden;
+}
+
+.library-source-card .sb-lbc-art,
+.library-source-card .library-card-art-bg {
+  aspect-ratio: 4 / 5 !important;
+}
+
+.library-source-card .sb-lbc-body,
+.library-source-card.library-source-card-leaf .sb-lbc-body {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.92) 0%,
+    rgba(0, 0, 0, 0.68) 55%,
+    rgba(0, 0, 0, 0.3) 82%,
+    transparent 100%
+  ) !important;
+  padding: 2.25rem 0.75rem 0.625rem !important;
+}
+
+.library-source-card .sb-lbc-title {
+  color: #ffffff !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.library-source-card .library-card-genre-label {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.library-source-card .library-card-genre-value {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.library-source-card .library-card-stats-wrap {
+  border-top-color: rgba(255, 255, 255, 0.14);
+}
+
+/* Action buttons over the image — bare white icons, circle only on hover */
+.library-source-card .library-source-deck-actions button,
+.library-source-card .library-source-deck-actions a,
+.library-source-card .library-source-deck-actions button.h-11,
+.library-source-card .library-source-deck-actions button.h-12,
+.library-source-card .library-source-deck-actions button.h-14,
+.library-source-card .library-source-deck-actions button.h-16 {
+  border: none !important;
+  border-radius: 9999px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.library-source-card .library-source-deck-actions button:hover:not(:disabled),
+.library-source-card .library-source-deck-actions a:hover,
+.library-source-card .library-source-deck-actions button.h-11:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-12:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-14:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-16:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18) !important;
+  color: #ffffff !important;
+  backdrop-filter: blur(4px);
+}
+
+.library-source-card .library-source-deck-actions button:focus-visible,
+.library-source-card .library-source-deck-actions a:focus-visible {
+  background: rgba(255, 255, 255, 0.18) !important;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Active toggle (e.g. now playing / automix on) keeps a quiet accent circle */
+.library-source-card .library-source-deck-actions button.library-deck-neon-btn-active {
+  background: rgba(10, 132, 255, 0.28) !important;
+  color: #ffffff !important;
+}
+
+/* Delete — dimmer at rest, red circle on hover */
+.library-source-card .library-source-deck-actions button.h-9.w-9:last-of-type,
+.library-source-card .library-source-deck-actions button.h-8.w-8:last-of-type,
+.library-source-card .library-source-deck-actions button.h-10.w-10:last-of-type,
+.library-source-card .library-source-deck-actions button.h-11.w-11:last-of-type {
+  color: rgba(255, 255, 255, 0.55) !important;
+  opacity: 1;
+}
+
+.library-source-card .library-source-deck-actions button.h-9.w-9:last-of-type:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-8.w-8:last-of-type:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-10.w-10:last-of-type:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-11.w-11:last-of-type:hover:not(:disabled) {
+  color: #fca5a5 !important;
+  background: rgba(248, 113, 113, 0.22) !important;
+}

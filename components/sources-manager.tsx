@@ -2110,9 +2110,17 @@ function SourcesManagerInner({
        * deck was still single-column at lg. Commit 21f97b7 activated the
        * 3-column deck at lg, so workspace rails now widen to match.
        */}
-      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:grid-cols-[220px_minmax(0,1fr)_220px] xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)_260px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px]">
-        <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl border-cyan-500/35 p-2.5 shadow-[0_10px_28px_rgba(0,0,0,0.34)] lg:col-start-1 lg:row-start-1 lg:justify-self-stretch">
-          <div className="space-y-4">
+      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:grid-cols-[240px_minmax(0,1fr)] xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)]">
+        {/* Secondary shelf — old playlists rail content, tucked under a quiet disclosure (nothing removed). */}
+        <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch">
+          <details className="group/shelf">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6e6e73] transition-colors duration-150 hover:text-white [&::-webkit-details-marker]:hidden">
+              <svg className="h-3 w-3 shrink-0 transition-transform duration-150 group-open/shelf:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              Playlist Tiles
+            </summary>
+          <div className="space-y-4 pt-2">
             <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="library-section-title text-[10px] font-semibold uppercase tracking-[0.16em]">
@@ -2414,6 +2422,7 @@ function SourcesManagerInner({
               </div>
             </section>
           </div>
+          </details>
         </aside>
 
         <div className="library-list-shell row-start-1 min-w-0 self-start overflow-hidden rounded-2xl p-2.5 lg:col-start-2 lg:row-start-1 lg:px-3 xl:px-3">
@@ -3257,7 +3266,7 @@ function SourcesManagerInner({
           )}
         </div>
 
-        <aside className="library-list-shell row-start-1 w-full min-w-0 self-start rounded-2xl p-2.5 lg:col-start-3 lg:row-start-1 lg:justify-self-stretch">
+        <aside className="row-start-1 w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-1 lg:justify-self-stretch">
           <div className="space-y-4">
             <DjCreatorAiShell drawerOpen={djCreatorOpen} onDrawerOpenChange={onDjCreatorOpenChange} />
             <section>
@@ -3268,7 +3277,7 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "all_library" })}
-                  className="library-nav-link-current flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm"
+                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm font-medium text-[#f5f5f7] transition-colors duration-150 hover:text-white"
                 >
                   <span>All Library</span>
                   <span className="text-xs tabular-nums">{displaySources.length}</span>
@@ -3276,7 +3285,7 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "recently_added" })}
-                  className="library-nav-link flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm"
+                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Recently Added</span>
                   <span className="text-xs tabular-nums">{Math.min(displaySources.length, 24)}</span>
@@ -3284,14 +3293,14 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "playlists" })}
-                  className="library-nav-link flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm"
+                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Playlists</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "sources" })}
-                  className="library-nav-link flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm"
+                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Sources</span>
                   <span className="text-xs tabular-nums">{containers.sources.length}</span>
@@ -3299,7 +3308,7 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "favorites" })}
-                  className="library-nav-link flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm"
+                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Favorites</span>
                   <span className="text-xs tabular-nums">{favoriteIds.length}</span>
@@ -3315,13 +3324,14 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => void handleCreatePlaylist()}
-                  className="library-nav-link-current flex w-full items-center justify-center rounded-xl px-3 py-2 text-sm"
+                  className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
+                  <span aria-hidden className="text-base leading-none">+</span>
                   Add Playlist
                 </button>
                 <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
                 {userPlaylistContainers.slice(0, 10).map((p) => (
-                  <div key={p.key} className="library-source-card flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs">
+                  <div key={p.key} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors duration-150 hover:bg-white/[0.04]">
                     <button
                       type="button"
                       draggable
