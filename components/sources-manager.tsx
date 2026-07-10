@@ -687,7 +687,9 @@ function SourcesManagerInner({
     | { key: string; variant: "clearAssignment" | "removeCustomTile" | "empty" }
   >(null);
   const [tileSlotActionLoading, setTileSlotActionLoading] = useState(false);
-  const [playlistTileScheduleModal, setPlaylistTileScheduleModal] = useState<ScheduleModalInitialContext | null>(null);
+  const [playlistTileScheduleModal, setPlaylistTileScheduleModal] = useState<
+    (ScheduleModalInitialContext & { scheduleId?: string }) | null
+  >(null);
   const [playlistSchedules, setPlaylistSchedules] = useState<Schedule[]>([]);
   const refreshPlaylistSchedules = useCallback(async () => {
     try {
@@ -1043,14 +1045,50 @@ function SourcesManagerInner({
     return lines;
   }, [playlistSchedules]);
 
-  /** Resolve the underlying Playlist id for a collection card (direct or daypart-bound). */
+  /** Fallback matcher: playlist title (case-insensitive) → playlist id, for collection cards without a direct binding. */
+  const playlistIdByTitle = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of sources) {
+      if (s.origin === "playlist" && s.playlist?.id) {
+        const key = s.title.trim().toLowerCase();
+        if (key && !m.has(key)) m.set(key, s.playlist.id);
+      }
+    }
+    return m;
+  }, [sources]);
+
+  /** Resolve the underlying Playlist id for a collection card (direct, daypart-bound, or by matching title). */
   const playlistIdForCollectionKey = useCallback(
-    (subtype: LibraryCollectionSubtype, key: string): string | null => {
+    (subtype: LibraryCollectionSubtype, key: string, label?: string): string | null => {
       const sourceKey = subtype === "daypart_collection" ? daypartPlaylistAssignments[key] : key;
-      if (!sourceKey) return null;
-      return playlistSourceByKey.get(sourceKey)?.playlist?.id ?? null;
+      const direct = sourceKey ? playlistSourceByKey.get(sourceKey)?.playlist?.id ?? null : null;
+      if (direct) return direct;
+      const titleKey = label?.trim().toLowerCase();
+      return titleKey ? playlistIdByTitle.get(titleKey) ?? null : null;
     },
-    [daypartPlaylistAssignments, playlistSourceByKey],
+    [daypartPlaylistAssignments, playlistSourceByKey, playlistIdByTitle],
+  );
+
+  /**
+   * Clock action: an already-scheduled playlist opens its EXISTING schedule for
+   * editing; only an unscheduled playlist gets a fresh scheduling form.
+   */
+  const openPlaylistScheduleWindow = useCallback(
+    (opts: { daypartKey?: string; daypartLabel?: string; playlistId?: string | null; playlistName?: string }) => {
+      const pid = opts.playlistId ?? undefined;
+      const existing = pid
+        ? playlistSchedules.find((s) => s.targetId === pid && s.enabled) ??
+          playlistSchedules.find((s) => s.targetId === pid)
+        : undefined;
+      setPlaylistTileScheduleModal({
+        daypartKey: opts.daypartKey,
+        daypartLabel: opts.daypartLabel,
+        playlistId: pid,
+        playlistName: opts.playlistName,
+        scheduleId: existing?.id,
+      });
+    },
+    [playlistSchedules],
   );
 
   const selectedSourceCards = useMemo(() => {
@@ -2337,7 +2375,7 @@ function SourcesManagerInner({
                           aria-label={t.playlistTileScheduleActionTitle}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setPlaylistTileScheduleModal({
+                            openPlaylistScheduleWindow({
                               daypartKey: pad.key,
                               daypartLabel: pad.label,
                               playlistId: assignedPlaylist?.playlist?.id,
@@ -2435,7 +2473,7 @@ function SourcesManagerInner({
                           aria-label={t.playlistTileScheduleActionTitle}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setPlaylistTileScheduleModal({
+                            openPlaylistScheduleWindow({
                               daypartKey: pad.key,
                               daypartLabel: pad.label,
                               playlistId: assignedPlaylist?.playlist?.id,
@@ -2750,13 +2788,13 @@ function SourcesManagerInner({
                         <div className="mb-2 aspect-[16/9] w-full shrink-0 overflow-hidden rounded-lg bg-[color:var(--lib-surface-card-art)]">
                           {c.cover ? <HydrationSafeImage src={c.cover} alt="" className="h-full w-full object-cover" /> : null}
                         </div>
-                        <div className="min-h-0 flex-1">
+                        <div className="min-h-0 flex-1 pe-9">
                           <p className="library-card-title text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
                             {c.label}
                           </p>
                           <p className="library-card-meta mt-1 text-xs truncate">{c.meta ?? "Ready collection"} • {c.itemCount} items</p>
                           {(() => {
-                            const pid = playlistIdForCollectionKey(c.subtype, c.key);
+                            const pid = playlistIdForCollectionKey(c.subtype, c.key, c.label);
                             const line = pid ? playlistScheduleLineById.get(pid) : null;
                             return line ? (
                               <p className="mt-1 flex items-center gap-1 truncate text-[10px] font-medium text-[#6cb2ff]">
@@ -2770,15 +2808,16 @@ function SourcesManagerInner({
                           })()}
                         </div>
                       </button>
+                      {/* Clock lives on the dark info strip (bottom-right) — always readable, never over bright artwork */}
                       <button
                         type="button"
-                        className={`absolute right-12 top-3 z-[1] ${LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}`}
+                        className={`absolute bottom-4 right-3 z-[1] ${LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setPlaylistTileScheduleModal({
+                          openPlaylistScheduleWindow({
                             daypartKey: c.subtype === "daypart_collection" ? c.key : undefined,
                             daypartLabel: c.label,
-                            playlistId: playlistIdForCollectionKey(c.subtype, c.key) ?? undefined,
+                            playlistId: playlistIdForCollectionKey(c.subtype, c.key, c.label),
                             playlistName: c.label,
                           });
                         }}
@@ -3306,7 +3345,7 @@ function SourcesManagerInner({
                               onSchedulePress={
                                 pe && source.playlist?.id
                                   ? () =>
-                                      setPlaylistTileScheduleModal({
+                                      openPlaylistScheduleWindow({
                                         playlistId: source.playlist?.id,
                                         playlistName: source.title,
                                       })
@@ -3680,8 +3719,13 @@ function SourcesManagerInner({
           setPlaylistTileScheduleModal(null);
           void refreshPlaylistSchedules();
         }}
+        initialScheduleId={playlistTileScheduleModal?.scheduleId ?? null}
         initialContext={playlistTileScheduleModal}
-        tileClockScheduleMode={playlistTileScheduleModal !== null && Boolean(playlistTileScheduleModal.playlistId)}
+        tileClockScheduleMode={
+          playlistTileScheduleModal !== null &&
+          Boolean(playlistTileScheduleModal.playlistId) &&
+          !playlistTileScheduleModal.scheduleId
+        }
       />
       <AddLeafToPlaylistModal
         isOpen={addToPlaylistLeaf !== null}
