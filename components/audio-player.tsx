@@ -4200,8 +4200,8 @@ export function AudioPlayer() {
               );
             })()}
 
-            {/* Progress — LCD time labels + precise hardware strip */}
-            <div className="flex w-full min-w-0 shrink-0 items-center gap-3 sm:gap-4">
+            {/* Progress — LCD time labels + waveform strip (compact, centered) */}
+            <div className="mx-auto flex w-full min-w-0 max-w-[540px] shrink-0 items-center gap-3 sm:gap-4 lg:max-w-[620px]">
               <span
                 className={`player-lcd-time w-14 shrink-0 text-right text-base font-semibold tabular-nums tracking-tight sm:w-16 sm:text-lg ${
                   isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-200"

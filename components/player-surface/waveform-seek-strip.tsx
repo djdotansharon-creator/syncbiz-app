@@ -55,7 +55,7 @@ export function WaveformSeekStrip({
   progressPercent,
   bufferedPercent = 0,
   peaks,
-  barCount = 220,
+  barCount = 200,
   className = "",
 }: {
   seed: string;
