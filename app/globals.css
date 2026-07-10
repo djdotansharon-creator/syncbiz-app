@@ -2060,21 +2060,22 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 
 /* ── Library card system (Stage 1A) — grid density, hierarchy, premium badges ── */
 
-/* Card badges — frameless: soft dark backdrop only, tinted text carries the meaning */
+/* Card kind label — pure text over the artwork: no box, no border, just a clean
+   caption with a shadow for readability. SINGLE/SET read larger; SET stands out. */
 .library-card-kind-badge {
   display: inline-flex;
   align-items: center;
-  border-radius: 0.3rem;
   border: none;
-  background: rgba(0, 0, 0, 0.55);
-  padding: 0.12rem 0.38rem;
-  font-size: 8px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
+  background: transparent;
+  padding: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
   line-height: 1.25;
   text-transform: uppercase;
-  color: #e5e5ea;
-  backdrop-filter: blur(6px);
+  color: #f5f5f7;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 1px rgba(0, 0, 0, 0.9);
+  backdrop-filter: none;
 }
 
 .library-card-kind-badge--list {
@@ -2082,14 +2083,19 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 }
 
 .library-card-kind-badge--single {
-  color: #a7f3d0;
+  font-size: 12px;
+  color: #ffffff;
 }
 
 .library-card-kind-badge--set {
-  color: #ddd6fe;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  color: #d8ccff;
 }
 
 .library-card-kind-badge--local {
+  font-size: 12px;
   color: #bae6fd;
 }
 
@@ -2819,4 +2825,34 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 .library-source-card .library-source-deck-actions button.h-11.w-11:last-of-type:hover:not(:disabled) {
   color: #fca5a5 !important;
   background: rgba(248, 113, 113, 0.22) !important;
+}
+
+/* ═══ List rows — same language as the cards ═════════════════════════════════
+   Bare icons; the circular backdrop appears only on hover. Delete turns red
+   on hover only. */
+.library-theme .library-row-controls button,
+.library-theme .library-row-controls a {
+  border: none !important;
+  border-radius: 9999px !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  color: rgba(255, 255, 255, 0.72) !important;
+}
+
+.library-theme .library-row-controls button:hover:not(:disabled),
+.library-theme .library-row-controls a:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
+
+.library-theme .library-row-controls button:focus-visible,
+.library-theme .library-row-controls a:focus-visible {
+  background: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25) !important;
+}
+
+.library-theme .library-row-controls button:last-of-type:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.2) !important;
+  color: #fca5a5 !important;
 }

@@ -2680,29 +2680,6 @@ function SourcesManagerInner({
               <div className="flex shrink-0 items-center self-center px-2 sm:hidden" aria-hidden>
                 <span className="h-5 w-px shrink-0 rounded-full bg-slate-700/45" />
               </div>
-              <div className="hidden shrink-0 items-center self-center sm:flex sm:px-1.5" aria-hidden>
-                <span className="h-5 w-px shrink-0 rounded-full bg-slate-700/45" />
-              </div>
-              <div className="library-command-rail-radio flex shrink-0 items-center self-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onDjCreatorOpenChange(false);
-                    setActiveCenterModule(activeCenterModule === "dj-creator-hub" ? null : "dj-creator-hub");
-                  }}
-                  className={[
-                    guestLinkLedButtonClass,
-                    "h-10 shrink-0 justify-center gap-2 px-3 text-sm font-medium",
-                    djHubRailActive ? "border-[#0a84ff]/40 bg-[#0a84ff]/15 text-[#7db8ff]" : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  aria-label="DJ Creator playlists and assistant — open workspace"
-                  title="DJ Creator — saved playlists and new sets from your catalog"
-                >
-                  DJ AI
-                </button>
-              </div>
             </div>
           </div>
 
@@ -3490,6 +3467,23 @@ function SourcesManagerInner({
                 >
                   <span>Ready Playlists</span>
                   <span className="text-xs tabular-nums">{containers.external.length}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDjCreatorOpenChange(false);
+                    setActiveCenterModule(activeCenterModule === "dj-creator-hub" ? null : "dj-creator-hub");
+                  }}
+                  aria-label="DJ Creator playlists and assistant — open workspace"
+                  title="DJ Creator — saved playlists and new sets from your catalog"
+                  className={`flex w-full items-center justify-between px-2 py-1.5 text-left text-sm transition-colors duration-150 hover:text-white ${
+                    djHubRailActive ? "font-medium text-[#7db8ff]" : "text-[#a1a1a6]"
+                  }`}
+                >
+                  <span>DJ AI</span>
+                  <span className="text-xs tabular-nums">
+                    {displaySources.filter((s) => isDjCreatorWorkspacePlaylistSource(s)).length}
+                  </span>
                 </button>
                 <button
                   type="button"
