@@ -87,32 +87,24 @@ function durationFromUnified(source: UnifiedSource): number | null {
   return typeof d === "number" && d > 0 ? d : null;
 }
 
+/** SET threshold — a leaf is a SET only when it runs longer than this. */
+export const MIX_SET_MIN_DURATION_SECONDS = 15 * 60;
+
 /**
- * Leaf SET rules:
- * - Under 10m: SET only for explicit YouTube mix/RD URLs.
- * - 10m–20m: SET only if explicit mix URL or strong long-form title cue.
- * - 20m+: usually SET (long-form).
- * - Unknown duration: explicit mix URL or strong cue only (not bare "mix" / foundation flags alone).
+ * Leaf SET rule (simple, duration-driven):
+ * - Known duration: SET iff it is over 15 minutes. Titles/keywords never override this.
+ * - Unknown duration: SET only for explicit YouTube mix/RD URLs (endless radio-style mixes);
+ *   everything else stays SINGLE.
  */
 export function shouldClassifyLeafUrlAsMixSet(source: UnifiedSource): boolean {
   if (source.contentNodeKind === "syncbiz_playlist") return false;
 
-  const url = source.url?.trim() ?? "";
-  const explicitMix = isExplicitLeafMixStyleUrl(url);
   const durationSeconds = durationFromUnified(source);
-
   if (durationSeconds != null) {
-    if (durationSeconds < 10 * 60) {
-      return explicitMix;
-    }
-    if (durationSeconds >= 20 * 60) {
-      return true;
-    }
-    return explicitMix || strongLongFormTitleCue(source.title);
+    return durationSeconds >= MIX_SET_MIN_DURATION_SECONDS;
   }
 
-  if (explicitMix) return true;
-  return strongLongFormTitleCue(source.title);
+  return isExplicitLeafMixStyleUrl(source.url?.trim() ?? "");
 }
 
 /** Map contentNodeKind — mix_set is resolved only via shouldClassifyLeafUrlAsMixSet, not here. */

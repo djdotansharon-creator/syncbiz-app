@@ -121,6 +121,7 @@ type LibraryViewId =
   | "recently_added"
   | "playlists"
   | "user_playlists"
+  | "scheduled_playlists"
   | "external_playlists"
   | "single_tracks"
   | "favorites"
@@ -424,12 +425,10 @@ const LIBRARY_SOURCE_CARD_CELL_CLASS = "library-source-card-grid-cell";
 
 const LIBRARY_GRID_GENERIC_CELL_CLASS = "relative w-full min-w-[220px] max-w-none";
 
+/** Display grouping mirror of the badge rule: SET = strictly longer than 15 minutes. */
 function isLikelyMixSet(source: UnifiedSource): boolean {
-  if (source.contentNodeKind === "mix_set") return true;
-  const title = (source.title ?? "").toLowerCase();
-  if (/\b(mix|set|session)\b/.test(title) || /\blive\s+set\b/.test(title)) return true;
-  const duration = source.playlist?.durationSeconds ?? 0;
-  return duration >= 20 * 60;
+  const duration = source.leafDurationSeconds ?? source.playlist?.durationSeconds ?? 0;
+  return duration >= 15 * 60;
 }
 
 function getSourceCreatedAtMs(source: UnifiedSource): number {
@@ -705,6 +704,10 @@ function SourcesManagerInner({
   useEffect(() => {
     void refreshPlaylistSchedules();
   }, [refreshPlaylistSchedules]);
+  const scheduledPlaylistIdSet = useMemo(
+    () => new Set(playlistSchedules.map((s) => s.targetId)),
+    [playlistSchedules],
+  );
   /** Leaf row: open add-to-playlist destination picker. */
   const [addToPlaylistLeaf, setAddToPlaylistLeaf] = useState<UnifiedSource | null>(null);
   const sourceBackSelectionRef = useRef<LibrarySelection>({ type: "library_view", id: "sources" });
@@ -860,6 +863,9 @@ function SourcesManagerInner({
       }
       if (selection.id === "user_playlists") {
         return displaySources.filter((s) => isUserSyncbizPlaylistSource(s));
+      }
+      if (selection.id === "scheduled_playlists") {
+        return displaySources.filter((s) => s.playlist?.id && scheduledPlaylistIdSet.has(s.playlist.id));
       }
       if (selection.id === "favorites") return displaySources.filter((s) => favoriteIds.includes(s.id));
       if (selection.id === "single_tracks") {
@@ -3000,6 +3006,23 @@ function SourcesManagerInner({
             </div>
           ) : (
             <div className="space-y-12 library-sections-canvas">
+              {selection.type === "library_view" && selection.id === "scheduled_playlists" ? (
+                <header className="library-list-shell rounded-2xl px-4 py-3">
+                  <div className="flex items-end justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="library-text-title text-base font-semibold tracking-tight">Scheduled Playlists</h2>
+                      <p className="library-text-subtitle mt-0.5 text-xs">Playlists with an active day &amp; hour schedule — the clock on each card edits it.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPlaylistTileScheduleModal({})}
+                      className="shrink-0 rounded-lg border border-white/[0.1] bg-white/[0.06] px-2.5 py-1.5 text-xs font-medium text-[#f5f5f7] transition-colors hover:border-white/[0.18] hover:bg-white/[0.1]"
+                    >
+                      + New Schedule
+                    </button>
+                  </div>
+                </header>
+              ) : null}
               {collectionOpenContext ? (
                 <header className="library-list-shell rounded-2xl px-4 py-3">
                   <div className="flex items-start gap-3">
@@ -3418,89 +3441,77 @@ function SourcesManagerInner({
                 Library
               </p>
               <div className="space-y-0.5">
-                <button
-                  type="button"
-                  onClick={() => setSelection({ type: "library_view", id: "all_library" })}
-                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm font-medium text-[#f5f5f7] transition-colors duration-150 hover:text-white"
-                >
-                  <span>All Library</span>
-                  <span className="text-xs tabular-nums">{displaySources.length}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelection({ type: "library_view", id: "recently_added" })}
-                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
-                >
-                  <span>Recently Added</span>
-                  <span className="text-xs tabular-nums">{Math.min(displaySources.length, 24)}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelection({ type: "library_view", id: "playlists" })}
-                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
-                >
-                  <span>Playlists</span>
-                  <span className="text-xs tabular-nums">
-                    {displaySources.filter((s) => s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s)).length}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelection({ type: "library_view", id: "user_playlists" })}
-                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
-                >
-                  <span>Your Playlists</span>
-                  <span className="text-xs tabular-nums">{userPlaylistContainers.length}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelection({ type: "collection_group", id: "dayparts_hours" })}
-                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
-                >
-                  <span>Scheduled</span>
-                  <span className="text-xs tabular-nums">{containers.dayparts.length}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelection({ type: "library_view", id: "external_playlists" })}
-                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
-                >
-                  <span>Ready Playlists</span>
-                  <span className="text-xs tabular-nums">{containers.external.length}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onDjCreatorOpenChange(false);
-                    setActiveCenterModule(activeCenterModule === "dj-creator-hub" ? null : "dj-creator-hub");
-                  }}
-                  aria-label="DJ Creator playlists and assistant — open workspace"
-                  title="DJ Creator — saved playlists and new sets from your catalog"
-                  className={`flex w-full items-center justify-between px-2 py-[3px] text-left text-sm transition-colors duration-150 hover:text-white ${
-                    djHubRailActive ? "font-medium text-[#7db8ff]" : "text-[#a1a1a6]"
-                  }`}
-                >
-                  <span>DJ AI</span>
-                  <span className="text-xs tabular-nums">
-                    {displaySources.filter((s) => isDjCreatorWorkspacePlaylistSource(s)).length}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelection({ type: "library_view", id: "sources" })}
-                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
-                >
-                  <span>Sources</span>
-                  <span className="text-xs tabular-nums">{containers.sources.length}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelection({ type: "library_view", id: "favorites" })}
-                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
-                >
-                  <span>Favorites</span>
-                  <span className="text-xs tabular-nums">{favoriteIds.length}</span>
-                </button>
+                {(() => {
+                  const navViewActive = (id: LibraryViewId) =>
+                    !djHubRailActive && selection.type === "library_view" && selection.id === id;
+                  const navCls = (active: boolean) =>
+                    `flex w-full items-center justify-between px-2 py-[3px] text-left text-sm transition-colors duration-150 ${
+                      active ? "font-medium text-white" : "text-[#a1a1a6] hover:text-white"
+                    }`;
+                  const rows: Array<{ id: LibraryViewId; label: string; count: number }> = [
+                    { id: "all_library", label: "All Library", count: displaySources.length },
+                    { id: "recently_added", label: "Recently Added", count: Math.min(displaySources.length, 24) },
+                    {
+                      id: "playlists",
+                      label: "Playlists",
+                      count: displaySources.filter((s) => s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s)).length,
+                    },
+                    { id: "user_playlists", label: "Your Playlists", count: userPlaylistContainers.length },
+                    {
+                      id: "scheduled_playlists",
+                      label: "Scheduled",
+                      count: displaySources.filter((s) => s.playlist?.id && scheduledPlaylistIdSet.has(s.playlist.id)).length,
+                    },
+                    { id: "external_playlists", label: "Ready Playlists", count: containers.external.length },
+                  ];
+                  const tailRows: Array<{ id: LibraryViewId; label: string; count: number }> = [
+                    { id: "sources", label: "Sources", count: containers.sources.length },
+                    { id: "favorites", label: "Favorites", count: favoriteIds.length },
+                  ];
+                  return (
+                    <>
+                      {rows.map((r) => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => setSelection({ type: "library_view", id: r.id })}
+                          className={navCls(navViewActive(r.id))}
+                        >
+                          <span>{r.label}</span>
+                          <span className="text-xs tabular-nums">{r.count}</span>
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onDjCreatorOpenChange(false);
+                          setActiveCenterModule(activeCenterModule === "dj-creator-hub" ? null : "dj-creator-hub");
+                        }}
+                        aria-label="DJ Creator playlists and assistant — open workspace"
+                        title="DJ Creator — saved playlists and new sets from your catalog"
+                        className={`flex w-full items-center justify-between px-2 py-[3px] text-left text-sm transition-colors duration-150 hover:text-white ${
+                          djHubRailActive ? "font-medium text-[#7db8ff]" : "text-[#a1a1a6]"
+                        }`}
+                      >
+                        <span>DJ AI</span>
+                        <span className="text-xs tabular-nums">
+                          {displaySources.filter((s) => isDjCreatorWorkspacePlaylistSource(s)).length}
+                        </span>
+                      </button>
+                      {tailRows.map((r) => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => setSelection({ type: "library_view", id: r.id })}
+                          className={navCls(navViewActive(r.id))}
+                        >
+                          <span>{r.label}</span>
+                          <span className="text-xs tabular-nums">{r.count}</span>
+                        </button>
+                      ))}
+                    </>
+                  );
+                })()}
               </div>
             </section>
 
