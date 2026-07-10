@@ -120,6 +120,7 @@ type LibraryViewId =
   | "all_library"
   | "recently_added"
   | "playlists"
+  | "user_playlists"
   | "external_playlists"
   | "single_tracks"
   | "favorites"
@@ -856,6 +857,9 @@ function SourcesManagerInner({
         return displaySources.filter(
           (s) => s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s)
         );
+      }
+      if (selection.id === "user_playlists") {
+        return displaySources.filter((s) => isUserSyncbizPlaylistSource(s));
       }
       if (selection.id === "favorites") return displaySources.filter((s) => favoriteIds.includes(s.id));
       if (selection.id === "single_tracks") {
@@ -3459,6 +3463,17 @@ function SourcesManagerInner({
                   className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Playlists</span>
+                  <span className="text-xs tabular-nums">
+                    {displaySources.filter((s) => s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s)).length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelection({ type: "library_view", id: "user_playlists" })}
+                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
+                >
+                  <span>Your Playlists</span>
+                  <span className="text-xs tabular-nums">{userPlaylistContainers.length}</span>
                 </button>
                 <button
                   type="button"
@@ -3466,13 +3481,15 @@ function SourcesManagerInner({
                   className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Scheduled</span>
+                  <span className="text-xs tabular-nums">{containers.dayparts.length}</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSelection({ type: "collection_group", id: "curated_masters" })}
+                  onClick={() => setSelection({ type: "library_view", id: "external_playlists" })}
                   className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Ready Playlists</span>
+                  <span className="text-xs tabular-nums">{containers.external.length}</span>
                 </button>
                 <button
                   type="button"
@@ -3494,9 +3511,6 @@ function SourcesManagerInner({
             </section>
 
             <section>
-              <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
-                Your Playlists
-              </p>
               <div className="space-y-1.5">
                 <button
                   type="button"
@@ -3506,8 +3520,9 @@ function SourcesManagerInner({
                   <span aria-hidden className="text-base leading-none">+</span>
                   Add Playlist
                 </button>
-                <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
-                {userPlaylistContainers.slice(0, 10).map((p) => (
+                {/* Rail rows retired — "Your Playlists" opens as a full center view from the LIBRARY nav. */}
+                <div className="hidden">
+                {userPlaylistContainers.slice(0, 0).map((p) => (
                   <div key={p.key} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors duration-150 hover:bg-white/[0.04]">
                     <button
                       type="button"
@@ -3585,9 +3600,6 @@ function SourcesManagerInner({
                   </div>
                 ))}
                 </div>
-                {userPlaylistContainers.length === 0 ? (
-                  <p className="px-3 py-2 text-xs text-[color:var(--lib-text-faint)]">Create your first playlist to start building your own container.</p>
-                ) : null}
               </div>
             </section>
           </div>
