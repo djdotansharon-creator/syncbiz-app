@@ -85,6 +85,15 @@ function ytXfadeLog(phase: string, data?: Record<string, unknown>) {
 const YT_PRELOAD_BUFFER_SEC = PRELOAD_LEAD_SEC;
 /** Hidden YT iframe preload may take longer than HTML audio standby — 20s before fallback. */
 const YT_PRELOAD_READY_TIMEOUT_MS = 20_000;
+/**
+ * Manual track switches via the A/B deck crossfade are DISABLED: after
+ * `yt_deck_complete` the promoted deck stays silent/frozen (position stops,
+ * old deck keeps playing) and the post-handoff grace guard blocks the
+ * corrective play (`safePlayVideo_skipped_post_handoff`). Until that WIP is
+ * fixed, manual skips take the cold-load path (instant switch — the stable
+ * long-standing behavior). Natural end-of-track AutoMix crossfade is unaffected.
+ */
+const YT_MANUAL_DECK_CROSSFADE_ENABLED = false;
 import { useDevicePlayer } from "@/lib/device-player-context";
 import {
   setLocalPlaybackPosition,
@@ -948,6 +957,7 @@ export function AudioPlayer() {
     const midPlayback =
       statusRef.current === "playing" || statusRef.current === "paused";
     const canManualHandoff =
+      YT_MANUAL_DECK_CROSSFADE_ENABLED &&
       !ytForceColdLoadRef.current &&
       midPlayback &&
       vid &&
