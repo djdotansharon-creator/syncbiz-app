@@ -38,11 +38,11 @@ function seededBars(seed: string, count: number): number[] {
 
 function Bars({ heights, barClass }: { heights: number[]; barClass: string }) {
   return (
-    <div className="flex h-full w-full items-center gap-[2px]">
+    <div className="flex h-full w-full items-center gap-px">
       {heights.map((v, i) => (
         <span
           key={i}
-          className={`min-w-0 flex-1 rounded-[1px] ${barClass}`}
+          className={`min-w-0 flex-1 ${barClass}`}
           style={{ height: `${Math.round(v * 100)}%` }}
         />
       ))}
@@ -55,7 +55,7 @@ export function WaveformSeekStrip({
   progressPercent,
   bufferedPercent = 0,
   peaks,
-  barCount = 96,
+  barCount = 220,
   className = "",
 }: {
   seed: string;
