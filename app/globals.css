@@ -571,16 +571,19 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   cursor: ns-resize;
 }
 
-/* Fader knob — clean round white knob, soft shadow, gentle grow on hover. */
+/* Fader knob — clean round white knob, soft shadow, gentle grow on hover.
+   NOTE: grow via the standalone `scale` property — Tailwind's -translate-x/y-1/2
+   uses the `translate` property, so overriding `transform` here double-translated
+   the knob and made it jump sideways on hover. */
 .vol-deck-handle {
   background: #f5f5f7;
   border: none;
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.45);
-  transition: transform 0.15s ease;
+  transition: scale 0.15s ease;
 }
 .vol-deck-track:hover .vol-deck-handle,
 .vol-deck-track:active .vol-deck-handle {
-  transform: translate(-50%, -50%) scale(1.15);
+  scale: 1.15;
 }
 
 /* ─── Volume LED meter — live level bar + continuous gradient ───────────────

@@ -38,29 +38,19 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
 
   return (
     <div className="player-transport-dock w-full min-w-0">
-      <div className="player-transport-dock__row flex w-full min-w-0 flex-wrap items-center justify-center gap-x-2.5 gap-y-1 border-t border-white/[0.04] pt-2.5 sm:gap-x-3">
-        <DeckModeIndicator
-          kind="mix"
-          label="Mix"
-          active={displayAutoMix}
+      <div className="player-transport-dock__row flex w-full min-w-0 flex-wrap items-center justify-center gap-x-5 gap-y-1.5 border-t border-white/[0.04] pt-3 sm:gap-x-7">
+        <DeckTransportButton
+          onClick={onStop}
           disabled={contentDisabled}
-          onClick={onAutoMixToggle}
-          ariaLabel={labels.autoMix}
-          title={labels.autoMix}
-        />
+          ariaLabel={labels.stopPlayback}
+          title={labels.stopPlayback}
+          size="stop"
+          libraryDeck={libDeck}
+        >
+          <PlaybackTransportIconStop className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+        </DeckTransportButton>
 
-        <div className="player-transport-cluster flex shrink-0 items-center gap-0.5 sm:gap-1">
-          <DeckTransportButton
-            onClick={onStop}
-            disabled={contentDisabled}
-            ariaLabel={labels.stopPlayback}
-            title={labels.stopPlayback}
-            size="stop"
-            libraryDeck={libDeck}
-          >
-            <PlaybackTransportIconStop className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-          </DeckTransportButton>
-
+        <div className="player-transport-cluster flex shrink-0 items-center gap-3 sm:gap-4">
           <DeckTransportButton
             onClick={onPrev}
             disabled={prevNextDisabled}
@@ -104,15 +94,23 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
           </DeckTransportButton>
         </div>
 
-        <DeckModeIndicator
-          kind="random"
-          label="Random"
-          active={displayShuffle}
-          disabled={contentDisabled}
-          onClick={onShuffleToggle}
-          ariaLabel={labels.random}
-          title={labels.random}
-        />
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <ShuffleToggleButton
+            active={displayShuffle}
+            disabled={contentDisabled}
+            onClick={onShuffleToggle}
+            ariaLabel={labels.random}
+            title={labels.random}
+          />
+
+          <AutoMixToggleButton
+            active={displayAutoMix}
+            disabled={contentDisabled}
+            onClick={onAutoMixToggle}
+            ariaLabel={labels.autoMix}
+            title={labels.autoMix}
+          />
+        </div>
 
         <div className="player-transport-secondary flex shrink-0 items-center gap-0.5 opacity-25 transition-opacity duration-200 hover:opacity-50 focus-within:opacity-50">
           {onEditClick ? (
@@ -207,7 +205,100 @@ function DeckTransportButton({
   );
 }
 
-/** Compact mode indicator — icon + LED; label reveals on hover/focus; active always visible. */
+/** Shuffle — clean standard icon, quiet circle; blue tint when on. */
+function ShuffleToggleButton({
+  active,
+  disabled,
+  onClick,
+  ariaLabel,
+  title,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  ariaLabel: string;
+  title: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      aria-pressed={active}
+      title={title}
+      className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 disabled:opacity-35 ${
+        active
+          ? "bg-[#0a84ff]/15 text-[#409cff]"
+          : "text-[#8e8e93] hover:bg-white/[0.06] hover:text-[#f5f5f7]"
+      }`}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        className="h-[18px] w-[18px]"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M16 3h5v5" />
+        <path d="M4 20L21 3" />
+        <path d="M21 16v5h-5" />
+        <path d="M15 15l6 6" />
+        <path d="M4 4l5 5" />
+      </svg>
+    </button>
+  );
+}
+
+/** AutoMix — labeled pill (mockup style); blue tint when engaged. */
+function AutoMixToggleButton({
+  active,
+  disabled,
+  onClick,
+  ariaLabel,
+  title,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  ariaLabel: string;
+  title: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      aria-pressed={active}
+      title={title}
+      className={`inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[11px] font-semibold uppercase tracking-[0.1em] transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 disabled:opacity-35 ${
+        active
+          ? "border-[#0a84ff]/40 bg-[#0a84ff]/15 text-[#409cff]"
+          : "border-white/[0.1] bg-transparent text-[#8e8e93] hover:border-white/[0.18] hover:text-[#f5f5f7]"
+      }`}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        className="h-3.5 w-3.5 shrink-0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M4 12h4l3-7 4 14 3-7h2" />
+      </svg>
+      Automix
+    </button>
+  );
+}
+
+/** @deprecated Compact mode indicator — replaced by ShuffleToggleButton / AutoMixToggleButton. */
 function DeckModeIndicator({
   kind,
   label,
