@@ -2778,12 +2778,12 @@ function SourcesManagerInner({
                             const pid = playlistIdForCollectionKey(c.subtype, c.key, c.label);
                             const line = pid ? playlistScheduleLineById.get(pid) : null;
                             return line ? (
-                              <p className="mt-1 flex items-center gap-1 truncate text-[10px] font-medium text-[#6cb2ff]">
-                                <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <p className="mt-1 flex items-start gap-1 text-[10px] font-medium leading-snug text-[#6cb2ff]">
+                                <svg className="mt-[1px] h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                   <circle cx="12" cy="12" r="10" />
                                   <polyline points="12 6 12 12 16 14" />
                                 </svg>
-                                <span className="truncate">{line}</span>
+                                <span className="min-w-0">{line}</span>
                               </p>
                             ) : null;
                           })()}
@@ -3417,11 +3417,11 @@ function SourcesManagerInner({
               <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
                 Library
               </p>
-              <div className="space-y-1.5">
+              <div className="space-y-0.5">
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "all_library" })}
-                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm font-medium text-[#f5f5f7] transition-colors duration-150 hover:text-white"
+                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm font-medium text-[#f5f5f7] transition-colors duration-150 hover:text-white"
                 >
                   <span>All Library</span>
                   <span className="text-xs tabular-nums">{displaySources.length}</span>
@@ -3429,7 +3429,7 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "recently_added" })}
-                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
+                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Recently Added</span>
                   <span className="text-xs tabular-nums">{Math.min(displaySources.length, 24)}</span>
@@ -3437,7 +3437,7 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "playlists" })}
-                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
+                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Playlists</span>
                   <span className="text-xs tabular-nums">
@@ -3447,7 +3447,7 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "user_playlists" })}
-                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
+                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Your Playlists</span>
                   <span className="text-xs tabular-nums">{userPlaylistContainers.length}</span>
@@ -3455,7 +3455,7 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "collection_group", id: "dayparts_hours" })}
-                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
+                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Scheduled</span>
                   <span className="text-xs tabular-nums">{containers.dayparts.length}</span>
@@ -3463,7 +3463,7 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "external_playlists" })}
-                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
+                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Ready Playlists</span>
                   <span className="text-xs tabular-nums">{containers.external.length}</span>
@@ -3476,7 +3476,7 @@ function SourcesManagerInner({
                   }}
                   aria-label="DJ Creator playlists and assistant — open workspace"
                   title="DJ Creator — saved playlists and new sets from your catalog"
-                  className={`flex w-full items-center justify-between px-2 py-1.5 text-left text-sm transition-colors duration-150 hover:text-white ${
+                  className={`flex w-full items-center justify-between px-2 py-[3px] text-left text-sm transition-colors duration-150 hover:text-white ${
                     djHubRailActive ? "font-medium text-[#7db8ff]" : "text-[#a1a1a6]"
                   }`}
                 >
@@ -3488,7 +3488,7 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "sources" })}
-                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
+                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Sources</span>
                   <span className="text-xs tabular-nums">{containers.sources.length}</span>
@@ -3496,7 +3496,7 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "favorites" })}
-                  className="flex w-full items-center justify-between px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
+                  className="flex w-full items-center justify-between px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span>Favorites</span>
                   <span className="text-xs tabular-nums">{favoriteIds.length}</span>
@@ -3509,7 +3509,7 @@ function SourcesManagerInner({
                 <button
                   type="button"
                   onClick={() => void handleCreatePlaylist()}
-                  className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
+                  className="flex w-full items-center gap-1.5 px-2 py-[3px] text-left text-sm text-[#a1a1a6] transition-colors duration-150 hover:text-white"
                 >
                   <span aria-hidden className="text-base leading-none">+</span>
                   Add Playlist

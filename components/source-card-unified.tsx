@@ -123,32 +123,32 @@ function PlatformLogoBadge({ platform }: { platform: NonNullable<ReturnType<type
     platform === "youtube" ? "YouTube" : platform === "soundcloud" ? "SoundCloud" : platform === "spotify" ? "Spotify" : platform === "radio" ? "Radio" : "Local";
   return (
     <span
-      className="flex h-6 w-6 items-center justify-center rounded-md bg-black/55 backdrop-blur-sm"
+      className="flex items-center justify-center drop-shadow-[0_1px_4px_rgba(0,0,0,0.9)]"
       title={title}
       aria-label={title}
     >
       {platform === "youtube" ? (
-        <svg className="h-3.5 w-3.5 text-[#ff0000]" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <svg className="h-5 w-7" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
           <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z" fill="#ff0000" />
           <path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ffffff" />
         </svg>
       ) : platform === "soundcloud" ? (
-        <svg className="h-3.5 w-3.5 text-[#ff5500]" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <svg className="h-5 w-5 text-[#ff5500]" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
           <path d="M12 4.5c-1.5 0-2.8.5-3.9 1.2-.5.3-.9.7-1.1 1.2-.2-.1-.4-.1-.6-.1-1.1 0-2 .9-2 2v.1c-1.5.3-2.5 1.5-2.5 3 0 1.7 1.3 3 3 3h6.5c2.2 0 4-1.8 4-4 0-2.2-1.8-4-4-4-.2 0-.4 0-.6.1-.2-1.2-1.2-2.1-2.4-2.1z" />
         </svg>
       ) : platform === "spotify" ? (
-        <svg className="h-3.5 w-3.5 text-[#1db954]" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <svg className="h-5 w-5 text-[#1db954]" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
           <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.5 17.3a.75.75 0 0 1-1.03.25c-2.83-1.73-6.39-2.12-10.58-1.16a.75.75 0 1 1-.33-1.46c4.58-1.05 8.51-.6 11.68 1.34.36.22.47.68.26 1.03zm1.47-3.27a.94.94 0 0 1-1.29.31c-3.24-1.99-8.17-2.57-12-1.4a.94.94 0 1 1-.55-1.79c4.38-1.35 9.82-.7 13.53 1.59.44.27.58.85.31 1.29zm.13-3.4C15.24 8.32 8.84 8.11 5.13 9.23a1.12 1.12 0 1 1-.65-2.15c4.26-1.29 11.34-1.04 15.81 1.61a1.12 1.12 0 0 1-1.19 1.94z" />
         </svg>
       ) : platform === "radio" ? (
-        <svg className="h-3.5 w-3.5 text-[#fb7185]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <svg className="h-5 w-5 text-[#fb7185]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <rect x="2" y="8" width="20" height="12" rx="2" />
           <path d="M6 8L18 3" />
           <circle cx="8" cy="14" r="2.5" />
           <path d="M16 12h2M16 16h2" />
         </svg>
       ) : (
-        <svg className="h-3.5 w-3.5 text-[#93c5fd]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <svg className="h-5 w-5 text-[#93c5fd]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <rect x="2" y="4" width="20" height="14" rx="2" />
           <path d="M8 22h8M12 18v4" />
         </svg>
@@ -509,12 +509,12 @@ export function SourceCard({
           <span className="library-card-genre-value">{cardGenre}</span>
         </p>
         {scheduleLine ? (
-          <p className="m-0 flex items-center gap-1 truncate text-[10px] font-medium text-[#6cb2ff]">
-            <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <p className="m-0 flex items-start gap-1 text-[10px] font-medium leading-snug text-[#6cb2ff]">
+            <svg className="mt-[1px] h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10" />
               <polyline points="12 6 12 12 16 14" />
             </svg>
-            <span className="truncate">{scheduleLine}</span>
+            <span className="min-w-0">{scheduleLine}</span>
           </p>
         ) : null}
         <div className="library-card-actions-wrap">{sourceActions}</div>
