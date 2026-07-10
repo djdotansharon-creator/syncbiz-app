@@ -48,7 +48,6 @@ import {
 import { PlayerDeckTransportSurface } from "@/components/player-surface/player-deck-transport-surface";
 import { PlayerVerticalVolume } from "@/components/player-surface/player-vertical-volume";
 import { DjVinylArtwork } from "@/components/player-surface/dj-vinyl-artwork";
-import { WaveformSeekStrip } from "@/components/player-surface/waveform-seek-strip";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
 import { masterPlaybackDiag } from "@/lib/master-playback-diag";
@@ -4210,8 +4209,8 @@ export function AudioPlayer() {
               );
             })()}
 
-            {/* Progress — LCD time labels + waveform strip (compact, centered) */}
-            <div className="mx-auto flex w-full min-w-0 max-w-[540px] shrink-0 items-center gap-3 sm:gap-4 lg:max-w-[620px]">
+            {/* Progress — LCD time labels + precise hardware strip */}
+            <div className="flex w-full min-w-0 shrink-0 items-center gap-3 sm:gap-4">
               <span
                 className={`player-lcd-time w-14 shrink-0 text-right text-base font-semibold tabular-nums tracking-tight sm:w-16 sm:text-lg ${
                   isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-200"
@@ -4236,14 +4235,31 @@ export function AudioPlayer() {
             onMouseDown={handleSeekStart}
             onTouchStart={handleTouchStart}
           >
-            <WaveformSeekStrip
-              seed={displaySource?.id ?? "syncbiz"}
-              progressPercent={displayProgressPercent}
-              bufferedPercent={displayBufferedPercent}
-              className="absolute inset-x-0 top-1/2 h-6 -translate-y-1/2 sm:h-7"
+            <div
+              className={`absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-sm ${
+                isSourcesLibraryDeck ? "bg-[color:var(--lib-border-muted)]/80" : "bg-[#1a1a1a]"
+              }`}
+            />
+            {displayBufferedPercent > 0 && (
+              <div
+                className={`absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-sm transition-all duration-150 ${
+                  isSourcesLibraryDeck ? "library-player-timeline-buffer" : "bg-neutral-700/50"
+                }`}
+                style={{ width: `${Math.min(displayBufferedPercent, 100)}%` }}
+              />
+            )}
+            <div
+              className={`absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-sm transition-all duration-100 ${
+                isSourcesLibraryDeck ? "library-player-timeline-played" : "bg-gradient-to-r from-cyan-600/50 to-cyan-400/75"
+              }`}
+              style={{ width: `${displayProgressPercent}%` }}
             />
             <div
-              className="absolute top-1/2 h-7 w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#f5f5f7] shadow-[0_0_4px_rgba(0,0,0,0.6)] transition-all duration-100 sm:h-8"
+              className={`absolute top-1/2 h-3 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-sm transition-all duration-100 ${
+                isSourcesLibraryDeck
+                  ? "library-player-timeline-thumb bg-[color:var(--lib-accent)]"
+                  : "bg-cyan-100/90"
+              }`}
               style={{ left: `${Math.max(0, Math.min(100, displayProgressPercent))}%` }}
             />
             {isHoveringTimeline && displayDuration > 0 && (
