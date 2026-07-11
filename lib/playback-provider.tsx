@@ -1023,7 +1023,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           (isValidPlaybackUrl(u) || isValidLocalFilePlaybackPath(u));
 
         if (!urlPlayable(url) && playlist && tracks.length > 0) {
-          for (let i = 0; i < tracks.length; i++) {
+          // Scan FORWARD from the requested index (wrapping) — not from 0 — so a
+          // mid-session advance that lands on a browser-unplayable local track
+          // skips ahead to the next playable song instead of jumping back to the
+          // start of the playlist. When idx is 0 the behavior is unchanged.
+          for (let step = 0; step < tracks.length; step++) {
+            const i = (idx + step) % tracks.length;
             const raw = tracks[i]?.url?.trim() ?? "";
             if (!raw || raw.startsWith("local://")) continue;
             const cand = canonicalYouTubeWatchUrlForPlayback(raw);

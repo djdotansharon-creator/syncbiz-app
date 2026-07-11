@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { ActionButtonShare, ActionButtonEdit } from "@/components/ui/action-buttons";
+import { MIX_DURATIONS, getMixDuration, setMixDuration, onMixDurationChanged, type MixDuration } from "@/lib/mix-preferences";
 import {
   PlaybackTransportIconNext,
   PlaybackTransportIconPause,
@@ -253,7 +255,12 @@ function ShuffleToggleButton({
   );
 }
 
-/** AutoMix — labeled pill (mockup style); blue tint when engaged. */
+/**
+ * AutoMix — professional split pill:
+ *   left side toggles AutoMix on/off; right side shows the crossfade length
+ *   and opens a clean picker (3/6/9/12s) — no trip to Settings needed.
+ * Duration is shared app-wide via lib/mix-preferences (Settings stays in sync).
+ */
 function AutoMixToggleButton({
   active,
   disabled,
@@ -267,34 +274,130 @@ function AutoMixToggleButton({
   ariaLabel: string;
   title: string;
 }) {
+  const mixSec = useSyncExternalStore(
+    (onStoreChange) => onMixDurationChanged(() => onStoreChange()),
+    () => getMixDuration(),
+    () => 6,
+  );
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+
+  const idleText = "text-[#8e8e93] hover:text-[#f5f5f7]";
+  const activeText = "text-[#409cff]";
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={ariaLabel}
-      aria-pressed={active}
-      title={title}
-      className={`inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[11px] font-semibold uppercase tracking-[0.1em] transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 disabled:opacity-35 ${
-        active
-          ? "border-[#0a84ff]/40 bg-[#0a84ff]/15 text-[#409cff]"
-          : "border-white/[0.1] bg-transparent text-[#8e8e93] hover:border-white/[0.18] hover:text-[#f5f5f7]"
-      }`}
-    >
-      <svg
-        viewBox="0 0 24 24"
-        className="h-3.5 w-3.5 shrink-0"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden
+    <div className="relative flex shrink-0 items-stretch">
+      <div
+        className={`flex h-10 items-stretch overflow-hidden rounded-full border transition-colors duration-150 ${
+          active ? "border-[#0a84ff]/40 bg-[#0a84ff]/15" : "border-white/[0.1] bg-transparent hover:border-white/[0.18]"
+        }`}
       >
-        <path d="M4 12h4l3-7 4 14 3-7h2" />
-      </svg>
-      Automix
-    </button>
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={disabled}
+          aria-label={ariaLabel}
+          aria-pressed={active}
+          title={title}
+          className={`flex items-center gap-1.5 pe-2.5 ps-3.5 text-[11px] font-semibold uppercase tracking-[0.1em] transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20 disabled:opacity-35 ${
+            active ? activeText : idleText
+          } hover:bg-white/[0.04]`}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="h-3.5 w-3.5 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M4 12h4l3-7 4 14 3-7h2" />
+          </svg>
+          Automix
+        </button>
+
+        <span aria-hidden className={`my-2 w-px shrink-0 ${active ? "bg-[#0a84ff]/30" : "bg-white/[0.1]"}`} />
+
+        <button
+          type="button"
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label="Mix length"
+          title="Mix length — how long the two songs blend"
+          className={`flex items-center gap-1 pe-3 ps-2.5 text-[11px] font-semibold tabular-nums transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/20 ${
+            active ? activeText : idleText
+          } hover:bg-white/[0.04]`}
+        >
+          {mixSec}s
+          <svg
+            viewBox="0 0 24 24"
+            className={`h-2.5 w-2.5 shrink-0 transition-transform duration-150 ${menuOpen ? "rotate-180" : ""}`}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      </div>
+
+      {menuOpen ? (
+        <>
+          <button
+            type="button"
+            aria-hidden
+            tabIndex={-1}
+            className="fixed inset-0 z-40 cursor-default"
+            onClick={() => setMenuOpen(false)}
+          />
+          <div
+            role="menu"
+            aria-label="Mix length"
+            className="absolute bottom-[calc(100%+8px)] right-0 z-50 w-36 rounded-xl border border-white/[0.1] bg-[#141418] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.55)]"
+          >
+            <p className="px-2.5 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#6e6e73]">
+              Mix length
+            </p>
+            {MIX_DURATIONS.map((sec) => (
+              <button
+                key={sec}
+                type="button"
+                role="menuitemradio"
+                aria-checked={mixSec === sec}
+                onClick={() => {
+                  setMixDuration(sec as MixDuration);
+                  setMenuOpen(false);
+                }}
+                className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-[13px] tabular-nums transition-colors duration-150 ${
+                  mixSec === sec ? "font-medium text-white" : "text-[#a1a1a6] hover:bg-white/[0.06] hover:text-white"
+                }`}
+              >
+                {sec} seconds
+                {mixSec === sec ? (
+                  <svg className="h-3.5 w-3.5 shrink-0 text-[#409cff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }
 
