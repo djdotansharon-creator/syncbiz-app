@@ -1386,9 +1386,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             </nav>
 
             {/* ── RIGHT: meta chip + operational controls — flex-1 basis-0 justify-end ── */}
-            <div className="flex flex-1 basis-0 items-center justify-end gap-2 min-w-0">
-              {/* ── Greeting + clock chip — larger, readable, prominent ──
-                  sm: time only · md: time · greeting · name · lg: + workspace */}
+            <div className="flex flex-1 basis-0 items-center justify-end gap-2.5 min-w-0">
+              {/* ── Clock chip — quiet: time · first name (greeting on xl+ only) ── */}
               <div
                 className="me-0.5 hidden items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3.5 py-1.5 sm:flex"
                 dir={locale === "he" ? "rtl" : "ltr"}
@@ -1399,29 +1398,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </span>
                 {sessionName ? (
                   <>
-                    <span className="text-slate-600" aria-hidden>·</span>
-                    <span className="hidden text-[12px] text-slate-300 md:inline">
+                    <span className="hidden text-slate-600 xl:inline" aria-hidden>·</span>
+                    <span className="hidden text-[12px] text-slate-300 xl:inline">
                       {greeting}
                     </span>
                     <span className="text-slate-600 hidden md:inline" aria-hidden>·</span>
-                    <span className="text-[12px] font-medium text-slate-200">
+                    <span className="hidden text-[12px] font-medium text-slate-200 md:inline">
                       {sessionName.split(/\s+/)[0]}
                     </span>
                   </>
                 ) : null}
-                {activeWorkspaceName && workspaceList && workspaceList.length > 1 ? (
-                  <>
-                    <span className="text-slate-600 hidden lg:inline" aria-hidden>·</span>
-                    <span className="hidden max-w-[72px] truncate text-[11px] text-slate-400 lg:inline">
-                      {activeWorkspaceName}
-                    </span>
-                  </>
-                ) : null}
               </div>
-
-              {/* Desktop download — compact icon */}
-              <DesktopDownloadButton compact />
-              <DesktopUpdatePill />
 
               {/* MASTER / On Air / device mode indicators */}
               <HeaderDeviceIndicators />
@@ -1497,6 +1484,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                   dir={locale === "he" ? "rtl" : "ltr"}
                 />
               </div>
+
+              {/* Desktop download + update — pinned at the far right edge of the header */}
+              <DesktopDownloadButton compact />
+              <DesktopUpdatePill />
             </div>
           </div>
           {/* Row 3: Player — keep a single AudioPlayer instance across routes (media vs non-media); swapping branches remounts embeds */}

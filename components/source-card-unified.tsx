@@ -157,18 +157,63 @@ function PlatformLogoBadge({ platform }: { platform: NonNullable<ReturnType<type
   );
 }
 
+/** Playlist that only plays on desktop (local files) — a clear mark that downloads the desktop app. */
+function DesktopGetAppBadge() {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (busy) return;
+        setBusy(true);
+        void (async () => {
+          try {
+            const res = await fetch("/api/desktop/download", { cache: "no-store" });
+            const data = res.ok ? ((await res.json()) as { url?: string }) : null;
+            const url = typeof data?.url === "string" && data.url.trim() ? data.url.trim() : null;
+            if (url) window.open(url, "_blank", "noopener");
+          } catch {
+            /* download endpoint unavailable — the header button remains the fallback */
+          } finally {
+            setBusy(false);
+          }
+        })();
+      }}
+      title="Plays files from this computer — available in the SyncBiz desktop app. Click to download."
+      aria-label="Download the SyncBiz desktop app"
+      className="flex items-center gap-1 rounded-md border border-[#0a84ff]/40 bg-[#0a84ff]/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-[#a8ccff] backdrop-blur-sm transition-colors hover:border-[#0a84ff] hover:bg-[#0a84ff]/30 hover:text-white disabled:opacity-60"
+    >
+      <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M12 3v10" />
+        <path d="M8 9l4 4 4-4" />
+        <path d="M4 17h16v4H4z" />
+      </svg>
+      {busy ? "…" : "Get Desktop"}
+    </button>
+  );
+}
+
 function ArtTopRightCorner({
   source,
   showDesktopOnly,
+  desktopDownloadCta = false,
 }: {
   source: UnifiedSource;
   showDesktopOnly: boolean;
+  desktopDownloadCta?: boolean;
 }) {
   const platform = resolveCardPlatform(source);
-  if (!platform && !showDesktopOnly) return null;
+  if (!platform && !showDesktopOnly && !desktopDownloadCta) return null;
   return (
     <div className="library-card-art-top-right absolute right-1.5 top-1.5 z-10 flex flex-col items-end gap-0.5">
-      {platform ? <PlatformLogoBadge platform={platform} /> : null}
+      {desktopDownloadCta ? (
+        <DesktopGetAppBadge />
+      ) : platform ? (
+        <PlatformLogoBadge platform={platform} />
+      ) : null}
       {showDesktopOnly ? (
         <span className="library-card-desktop-only-badge" title="Requires SyncBiz desktop app">
           Desktop only
@@ -267,6 +312,8 @@ export function SourceCard({
   const showDesktopOnly =
     isLibraryLocalSource(source) && kindBadge !== "LIST" && kindBadge !== "RADIO" && isBrowserShell;
   const playDisabled = showDesktopOnly;
+  /** Local playlists can't play in the browser — surface a "get the desktop app" mark instead. */
+  const desktopOnlyPlaylist = isBrowserShell && kindBadge === "LIST" && isLibraryLocalSource(source);
 
   const sourceForLeafDisplay = useMemo(() => {
     const p = displayMetaPatch;
@@ -456,7 +503,7 @@ export function SourceCard({
             >
               {badgeText}
             </span>
-            <ArtTopRightCorner source={source} showDesktopOnly={showDesktopOnly} />
+            <ArtTopRightCorner source={source} showDesktopOnly={showDesktopOnly} desktopDownloadCta={desktopOnlyPlaylist} />
             {cardCover ? (
               <>
                 <HydrationSafeImage src={cardCover} alt="" className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]" />
