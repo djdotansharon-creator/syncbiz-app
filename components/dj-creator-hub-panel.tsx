@@ -64,18 +64,18 @@ export function DjCreatorHubPanel({
 
   return (
     <div
-      className="flex min-h-[min(480px,calc(100vh-14rem))] flex-col overflow-hidden rounded-2xl border border-amber-500/25 bg-slate-950/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+      className="flex min-h-[min(480px,calc(100vh-14rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0c0c10]/95"
       dir={dir}
     >
-      <header className="flex shrink-0 items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
+      <header className="flex shrink-0 items-start justify-between gap-3 border-b border-white/[0.06] px-4 py-3">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold tracking-tight text-white">{t.title}</h2>
-          <p className="mt-1 text-xs text-slate-500">{t.subtitle}</p>
+          <h2 className="text-base font-semibold tracking-tight text-[#f5f5f7]">{t.title}</h2>
+          <p className="mt-1 text-xs text-[#6e6e73]">{t.subtitle}</p>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-sm text-slate-300 hover:bg-white/[0.08]"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#a1a1a6] transition-colors hover:bg-white/[0.08] hover:text-white"
           aria-label={t.closeAria}
         >
           ✕
@@ -86,15 +86,15 @@ export function DjCreatorHubPanel({
         <button
           type="button"
           onClick={onCreateNew}
-          className="flex w-full items-center justify-center rounded-xl border border-amber-500/40 bg-gradient-to-r from-amber-500/20 via-amber-400/15 to-amber-500/20 px-4 py-3 text-sm font-semibold text-amber-50 shadow-[0_8px_24px_rgba(0,0,0,0.35)] hover:border-amber-400/60 hover:from-amber-500/30 hover:to-amber-500/30"
+          className="flex w-full items-center justify-center rounded-xl border border-white/[0.1] bg-white/[0.06] px-4 py-3 text-sm font-semibold text-[#f5f5f7] transition-colors hover:border-white/[0.18] hover:bg-white/[0.1]"
         >
           {t.createNew}
         </button>
 
         {rows.length === 0 ? (
-          <p className="mt-6 text-center text-sm text-slate-500">{t.empty}</p>
+          <p className="mt-6 text-center text-sm text-[#6e6e73]">{t.empty}</p>
         ) : (
-          <ul className="mt-5 space-y-2">
+          <ul className="mt-5 space-y-1.5">
             {rows.map((s) => {
               const pid = s.playlist!.id!;
               const cover = s.cover?.trim() || null;
@@ -108,20 +108,20 @@ export function DjCreatorHubPanel({
                     if ((e.target as HTMLElement).closest("a,button")) return;
                     onPlayPlaylist(s);
                   }}
-                  className="flex cursor-grab items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 active:cursor-grabbing"
+                  className="flex cursor-grab items-center gap-3 rounded-xl bg-white/[0.03] px-3 py-2.5 transition-colors hover:bg-white/[0.06] active:cursor-grabbing"
                 >
-                  <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-slate-900">
+                  <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-[#101014] ring-1 ring-white/[0.06]">
                     {cover ? (
                       <HydrationSafeImage src={cover} alt="" className="h-full w-full object-cover" draggable={false} />
                     ) : (
-                      <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-600">
+                      <div className="flex h-full w-full items-center justify-center text-[10px] text-[#48484d]">
                         —
                       </div>
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-slate-100">{s.title}</p>
-                    <p className="text-[11px] text-slate-500">{t.trackCount(n)}</p>
+                    <p className="truncate text-sm font-medium text-[#f5f5f7]">{s.title}</p>
+                    <p className="text-[11px] text-[#6e6e73]">{t.trackCount(n)}</p>
                   </div>
                   <button
                     type="button"
@@ -130,7 +130,7 @@ export function DjCreatorHubPanel({
                       e.stopPropagation();
                       onPlayPlaylist(s);
                     }}
-                    className="shrink-0 rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-100 hover:border-emerald-400/55 hover:bg-emerald-500/20"
+                    className="shrink-0 rounded-full bg-[#f5f5f7] px-3 py-1.5 text-xs font-semibold text-[#111114] transition-colors hover:bg-white"
                   >
                     {t.playPlaylist}
                   </button>
@@ -138,7 +138,7 @@ export function DjCreatorHubPanel({
                     href={`/playlists/${encodeURIComponent(pid)}/edit`}
                     draggable={false}
                     onClick={(e) => e.stopPropagation()}
-                    className="shrink-0 rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-1.5 text-xs font-medium text-cyan-100 hover:border-cyan-400/55 hover:bg-cyan-500/20"
+                    className="shrink-0 rounded-full border border-white/[0.1] px-3 py-1.5 text-xs font-medium text-[#a1a1a6] transition-colors hover:border-white/[0.18] hover:bg-white/[0.06] hover:text-white"
                   >
                     {t.openPlaylist}
                   </Link>

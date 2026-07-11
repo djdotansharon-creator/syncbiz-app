@@ -2894,10 +2894,29 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   border-radius: 0.875rem;
 }
 
-/* Fog carries title + icons only — genre line and stats stay off the artwork */
-.library-source-card-grid .library-card-genre-line,
-.library-source-card-grid .library-card-stats-wrap {
+/* Fog carries title, icons and a quiet single-line stats strip (views · likes · date) */
+.library-source-card-grid .library-card-genre-line {
   display: none !important;
+}
+
+.library-source-card-grid .library-card-stats-wrap {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  border-top: none !important;
+}
+
+.library-source-card-grid .library-card-meta-footer {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  gap: 0.125rem 0.4rem;
+  padding-top: 0.125rem;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.library-source-card-grid .library-card-meta-item--duration,
+.library-source-card-grid .library-card-meta-item--tracks {
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .library-source-card-grid .library-source-card .sb-lbc-body,
