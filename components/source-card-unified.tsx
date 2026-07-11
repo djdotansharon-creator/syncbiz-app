@@ -8,7 +8,8 @@ import { LibrarySourceItemActions } from "@/components/library-source-item-actio
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
-import { isValidStreamUrl } from "@/lib/url-validation";
+import { isValidStreamUrl, isValidLocalFilePlaybackPath } from "@/lib/url-validation";
+import { getPlaylistTracks } from "@/lib/playlist-types";
 import { formatDuration } from "@/lib/format-utils";
 import {
   libraryCardDisplayGenre,
@@ -157,8 +158,8 @@ function PlatformLogoBadge({ platform }: { platform: NonNullable<ReturnType<type
   );
 }
 
-/** Playlist that only plays on desktop (local files) — a clear mark that downloads the desktop app. */
-function DesktopGetAppBadge() {
+/** Playlist that plays computer files (fully or partially) — a clear mark that downloads the desktop app. */
+function DesktopGetAppBadge({ label = "Get Desktop", title }: { label?: string; title?: string }) {
   const [busy, setBusy] = useState(false);
   return (
     <button
@@ -182,7 +183,7 @@ function DesktopGetAppBadge() {
           }
         })();
       }}
-      title="Plays files from this computer — available in the SyncBiz desktop app. Click to download."
+      title={title ?? "Plays files from this computer — available in the SyncBiz desktop app. Click to download."}
       aria-label="Download the SyncBiz desktop app"
       className="flex items-center gap-1 rounded-md border border-[#0a84ff]/40 bg-[#0a84ff]/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-[#a8ccff] backdrop-blur-sm transition-colors hover:border-[#0a84ff] hover:bg-[#0a84ff]/30 hover:text-white disabled:opacity-60"
     >
@@ -191,7 +192,7 @@ function DesktopGetAppBadge() {
         <path d="M8 9l4 4 4-4" />
         <path d="M4 17h16v4H4z" />
       </svg>
-      {busy ? "…" : "Get Desktop"}
+      {busy ? "…" : label}
     </button>
   );
 }
@@ -200,19 +201,28 @@ function ArtTopRightCorner({
   source,
   showDesktopOnly,
   desktopDownloadCta = false,
+  desktopOnlyTrackCount = 0,
 }: {
   source: UnifiedSource;
   showDesktopOnly: boolean;
   desktopDownloadCta?: boolean;
+  /** Mixed playlist: how many of its tracks are computer files (browser can't play them). */
+  desktopOnlyTrackCount?: number;
 }) {
   const platform = resolveCardPlatform(source);
-  if (!platform && !showDesktopOnly && !desktopDownloadCta) return null;
+  if (!platform && !showDesktopOnly && !desktopDownloadCta && desktopOnlyTrackCount === 0) return null;
   return (
     <div className="library-card-art-top-right absolute right-1.5 top-1.5 z-10 flex flex-col items-end gap-0.5">
       {desktopDownloadCta ? (
         <DesktopGetAppBadge />
       ) : platform ? (
         <PlatformLogoBadge platform={platform} />
+      ) : null}
+      {!desktopDownloadCta && desktopOnlyTrackCount > 0 ? (
+        <DesktopGetAppBadge
+          label={`${desktopOnlyTrackCount} on Desktop`}
+          title={`${desktopOnlyTrackCount} song${desktopOnlyTrackCount === 1 ? "" : "s"} in this playlist play only in the SyncBiz desktop app — the browser plays the rest. Click to download.`}
+        />
       ) : null}
       {showDesktopOnly ? (
         <span className="library-card-desktop-only-badge" title="Requires SyncBiz desktop app">
@@ -314,6 +324,16 @@ export function SourceCard({
   const playDisabled = showDesktopOnly;
   /** Local playlists can't play in the browser — surface a "get the desktop app" mark instead. */
   const desktopOnlyPlaylist = isBrowserShell && kindBadge === "LIST" && isLibraryLocalSource(source);
+  /** MIXED playlist (URLs + computer files): count the desktop-only tracks for a partial mark. */
+  const desktopOnlyTrackCount = useMemo(() => {
+    if (!isBrowserShell || kindBadge !== "LIST" || desktopOnlyPlaylist || !source.playlist) return 0;
+    let n = 0;
+    for (const t of getPlaylistTracks(source.playlist)) {
+      const u = (t.url ?? "").trim();
+      if (u.startsWith("local://") || isValidLocalFilePlaybackPath(u)) n++;
+    }
+    return n;
+  }, [isBrowserShell, kindBadge, desktopOnlyPlaylist, source.playlist]);
 
   const sourceForLeafDisplay = useMemo(() => {
     const p = displayMetaPatch;
@@ -503,7 +523,12 @@ export function SourceCard({
             >
               {badgeText}
             </span>
-            <ArtTopRightCorner source={source} showDesktopOnly={showDesktopOnly} desktopDownloadCta={desktopOnlyPlaylist} />
+            <ArtTopRightCorner
+              source={source}
+              showDesktopOnly={showDesktopOnly}
+              desktopDownloadCta={desktopOnlyPlaylist}
+              desktopOnlyTrackCount={desktopOnlyTrackCount}
+            />
             {cardCover ? (
               <>
                 <HydrationSafeImage src={cardCover} alt="" className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]" />
