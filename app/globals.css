@@ -2739,7 +2739,7 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 
 .library-source-card .sb-lbc-art,
 .library-source-card .library-card-art-bg {
-  aspect-ratio: 4 / 5 !important;
+  aspect-ratio: 16 / 9 !important;
 }
 
 .library-source-card .sb-lbc-body,
@@ -2858,4 +2858,50 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 .library-theme .library-row-controls button:last-of-type:hover:not(:disabled) {
   background: rgba(248, 113, 113, 0.2) !important;
   color: #fca5a5 !important;
+}
+
+/* ═══ Song grid — frameless rounded rectangles, 4 per row ════════════════════
+   The artwork IS the card: wide 16:9 rounded rectangle, no border, no panel.
+   Bottom fog carries the title + action icons only. */
+
+.library-source-card-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 1024px) {
+  .library-source-card-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.library-source-card-grid .library-source-card {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  border-radius: 0.875rem;
+}
+
+.library-source-card-grid .sb-lbc-as-button,
+.library-source-card-grid .sb-lbc-as-div {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+.library-source-card-grid .sb-lbc-shell {
+  border-radius: 0.875rem;
+}
+
+/* Fog carries title + icons only — genre line and stats stay off the artwork */
+.library-source-card-grid .library-card-genre-line,
+.library-source-card-grid .library-card-stats-wrap {
+  display: none !important;
+}
+
+.library-source-card-grid .library-source-card .sb-lbc-body,
+.library-source-card-grid .library-source-card.library-source-card-leaf .sb-lbc-body {
+  padding: 1.9rem 0.7rem 0.45rem !important;
+  gap: 0.25rem !important;
 }
