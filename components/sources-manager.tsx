@@ -408,6 +408,97 @@ function getCuratedCollectionKey(source: UnifiedSource): string {
   return `curated:${normalizeCollectionLabel(curatedLabel)}`;
 }
 
+/** LIBRARY nav glyphs — quiet 16px strokes matching the minimal rail (mockup style). */
+type LibraryNavGlyphKind =
+  | "all_library"
+  | "recently_added"
+  | "playlists"
+  | "user_playlists"
+  | "scheduled_playlists"
+  | "external_playlists"
+  | "dj_ai"
+  | "sources"
+  | "favorites";
+
+function LibraryNavGlyph({ kind }: { kind: LibraryNavGlyphKind }) {
+  const base = {
+    className: "h-4 w-4 shrink-0",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  switch (kind) {
+    case "all_library": /* main stream — waveform */
+      return (
+        <svg {...base}>
+          <path d="M3 10v4M7.5 7v10M12 4v16M16.5 7v10M21 10v4" />
+        </svg>
+      );
+    case "recently_added": /* clock */
+      return (
+        <svg {...base}>
+          <circle cx="12" cy="12" r="9" />
+          <polyline points="12 7 12 12 15.5 14" />
+        </svg>
+      );
+    case "playlists": /* music note */
+      return (
+        <svg {...base}>
+          <path d="M9 18V5l12-2v13" />
+          <circle cx="6" cy="18" r="3" />
+          <circle cx="18" cy="16" r="3" />
+        </svg>
+      );
+    case "user_playlists": /* my list */
+      return (
+        <svg {...base}>
+          <path d="M8 6h13M8 12h13M8 18h9" />
+          <circle cx="4" cy="6" r="0.9" fill="currentColor" stroke="none" />
+          <circle cx="4" cy="12" r="0.9" fill="currentColor" stroke="none" />
+          <circle cx="4" cy="18" r="0.9" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "scheduled_playlists": /* calendar */
+      return (
+        <svg {...base}>
+          <rect x="3" y="5" width="18" height="16" rx="2.5" />
+          <path d="M8 3v4M16 3v4M3 10h18" />
+        </svg>
+      );
+    case "external_playlists": /* inbox tray (arrived from outside) */
+      return (
+        <svg {...base}>
+          <path d="M22 13h-5.5l-2 3h-5l-2-3H2" />
+          <path d="M5 6h14l3 7v6a1.5 1.5 0 0 1-1.5 1.5h-17A1.5 1.5 0 0 1 2 19v-6l3-7z" />
+        </svg>
+      );
+    case "dj_ai": /* sparkles */
+      return (
+        <svg {...base}>
+          <path d="M12 4l1.7 4.3L18 10l-4.3 1.7L12 16l-1.7-4.3L6 10l4.3-1.7L12 4z" />
+          <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z" />
+        </svg>
+      );
+    case "sources": /* globe */
+      return (
+        <svg {...base}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18M12 3c2.6 2.5 4 5.6 4 9s-1.4 6.5-4 9c-2.6-2.5-4-5.6-4-9s1.4-6.5 4-9z" />
+        </svg>
+      );
+    case "favorites": /* heart */
+      return (
+        <svg {...base}>
+          <path d="M12 20.5S4 15.3 4 9.9C4 7.2 6.1 5 8.8 5c1.6 0 3 .9 3.2 2 .2-1.1 1.6-2 3.2-2C17.9 5 20 7.2 20 9.9c0 5.4-8 10.6-8 10.6z" />
+        </svg>
+      );
+  }
+}
+
 /* Quiet tiles: uniform surface; daypart identity lives in a small color dot. */
 const FIXED_DAYPART_PADS: Array<{ label: "Morning" | "Afternoon" | "Evening" | "Night"; key: string; tone: string }> = [
   { label: "Morning", key: "daypart:morning", tone: "bg-amber-400" },
@@ -3477,7 +3568,10 @@ function SourcesManagerInner({
                           onClick={() => setSelection({ type: "library_view", id: r.id })}
                           className={navCls(navViewActive(r.id))}
                         >
-                          <span>{r.label}</span>
+                          <span className="flex min-w-0 items-center gap-2.5">
+                            <LibraryNavGlyph kind={r.id as LibraryNavGlyphKind} />
+                            <span className="truncate">{r.label}</span>
+                          </span>
                           <span className="text-xs tabular-nums">{r.count}</span>
                         </button>
                       ))}
@@ -3493,7 +3587,10 @@ function SourcesManagerInner({
                           djHubRailActive ? "font-medium text-[#7db8ff]" : "text-[#a1a1a6]"
                         }`}
                       >
-                        <span>DJ AI</span>
+                        <span className="flex min-w-0 items-center gap-2.5">
+                          <LibraryNavGlyph kind="dj_ai" />
+                          <span className="truncate">DJ AI</span>
+                        </span>
                         <span className="text-xs tabular-nums">
                           {displaySources.filter((s) => isDjCreatorWorkspacePlaylistSource(s)).length}
                         </span>
@@ -3505,7 +3602,10 @@ function SourcesManagerInner({
                           onClick={() => setSelection({ type: "library_view", id: r.id })}
                           className={navCls(navViewActive(r.id))}
                         >
-                          <span>{r.label}</span>
+                          <span className="flex min-w-0 items-center gap-2.5">
+                            <LibraryNavGlyph kind={r.id as LibraryNavGlyphKind} />
+                            <span className="truncate">{r.label}</span>
+                          </span>
                           <span className="text-xs tabular-nums">{r.count}</span>
                         </button>
                       ))}
