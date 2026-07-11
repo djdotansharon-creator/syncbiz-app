@@ -30,7 +30,7 @@ import {
   isYouTubeMultiTrackUrl,
   unifiedPlaylistSourceId,
 } from "./playlist-utils";
-import { getShuffle, setShufflePreference } from "./mix-preferences";
+import { getShuffle, setShufflePreference, getRepeatMode } from "./mix-preferences";
 import { supportsEmbedded, getSourceArtworkUrl } from "./player-utils";
 import { log as mvpLog } from "./mvp-logger";
 import {
@@ -275,27 +275,38 @@ type SessionNextKind = "advance" | "restart" | "exhausted";
 
 /**
  * Next index within the active playlist session only. No global queue / no jump to another top-level source.
- * Session always loops at end; exhausted only when trackCount is 0.
- * UI repeat flag does not disable session loop (passed for API compatibility).
+ * Loop behavior follows `repeatMode`:
+ *   "playlist" — session loops at its end (long-standing default behavior);
+ *   "track"    — replay the same index (callers pass this only for NATURAL ends; manual next still advances);
+ *   "off"      — no wrap: at the last track the session is exhausted (natural end stops playback).
  */
 export function computeSessionNextTrackIndex(
   trackCount: number,
   currentIndex: number,
   shuffle: boolean,
-  _repeat: boolean,
+  repeatMode: "playlist" | "track" | "off",
   getShuffledIndex: (len: number, current: number) => number,
 ): { kind: SessionNextKind; nextIndex: number } {
   if (trackCount < 1) return { kind: "exhausted", nextIndex: 0 };
   const safeCount = trackCount;
   const capped = Math.min(Math.max(0, currentIndex), safeCount - 1);
 
+  if (repeatMode === "track") {
+    return { kind: "restart", nextIndex: capped };
+  }
+
   if (safeCount === 1) {
+    if (repeatMode === "off") return { kind: "exhausted", nextIndex: 0 };
     return { kind: "restart", nextIndex: 0 };
   }
 
   if (capped < safeCount - 1) {
     const nextIdx = shuffle ? getShuffledIndex(safeCount, capped) : capped + 1;
     return { kind: "advance", nextIndex: nextIdx };
+  }
+
+  if (repeatMode === "off") {
+    return { kind: "exhausted", nextIndex: capped };
   }
 
   const nextIdx = shuffle ? getShuffledIndex(safeCount, capped) : 0;
@@ -1699,6 +1710,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       playCommandViaRef.current = "natural";
       setLastPlayCommandVia("natural");
     }
+    /**
+     * Effective loop mode for this transport step:
+     * - natural end (ended_auto): honor the LOOP button fully (playlist / track / off);
+     * - manual next press: "track" must NOT trap the user — treat it as playlist-loop
+     *   so pressing next always advances; "off" still refuses to wrap past the end.
+     */
+    const rawRepeatMode = getRepeatMode();
+    const effectiveRepeatMode: "playlist" | "track" | "off" =
+      auditTransportCase === "ended_auto"
+        ? rawRepeatMode
+        : rawRepeatMode === "track"
+          ? "playlist"
+          : rawRepeatMode;
     transportLockRef.current = true;
     syncbizAuditTransportTransitionStart({
       phase: "next_callback_entry",
@@ -1820,12 +1844,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             sessionTracks.length,
             restored.currentTrackIndex,
             restored.shuffle,
-            restored.repeat,
+            effectiveRepeatMode,
             getShuffledIndex,
           );
           if (sessionStep.kind === "exhausted") {
             transportLockRef.current = false;
-            return restored;
+            return auditTransportCase === "ended_auto" ? { ...restored, status: "stopped" as const } : restored;
           }
           const nextIdx = sessionStep.nextIndex;
           const track = sessionTracks[nextIdx];
@@ -1853,12 +1877,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           trks.length,
           restored.currentTrackIndex,
           restored.shuffle,
-          restored.repeat,
+          effectiveRepeatMode,
           getShuffledIndex,
         );
         if (fbStep.kind === "exhausted") {
           transportLockRef.current = false;
-          return restored;
+          return auditTransportCase === "ended_auto" ? { ...restored, status: "stopped" as const } : restored;
         }
         const nextIdx = fbStep.nextIndex;
         const track = trks[nextIdx];
@@ -1915,14 +1939,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           trackCount,
           s.currentTrackIndex,
           s.shuffle,
-          s.repeat,
+          effectiveRepeatMode,
           getShuffledIndex,
         );
 
         if (sessionStep.kind === "exhausted") {
           transportLockRef.current = false;
           emitScheduledQueueEndedAutoProof(null);
-          return s;
+          return auditTransportCase === "ended_auto" ? { ...s, status: "stopped" as const } : s;
         }
 
         const nextIdx = sessionStep.nextIndex;
@@ -2017,13 +2041,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         tracks.length,
         s.currentTrackIndex,
         s.shuffle,
-        s.repeat,
+        effectiveRepeatMode,
         getShuffledIndex,
       );
       if (fbStep.kind === "exhausted") {
         transportLockRef.current = false;
         emitScheduledQueueEndedAutoProof(null);
-        return s;
+        return auditTransportCase === "ended_auto" ? { ...s, status: "stopped" as const } : s;
       }
       const nextIdx = fbStep.nextIndex;
       const branch: "advance" | "restart" = fbStep.kind === "advance" ? "advance" : "restart";
@@ -2062,6 +2086,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     return (() => {
       const s = stateRef.current;
       if (!s.currentSource) return null;
+      /* Track-loop: natural end replays the same song — no auto-advance target. */
+      const autoRepeatMode = getRepeatMode();
+      if (autoRepeatMode === "track") return null;
 
       if (isPlayNextSourceId(s.currentSource.id) && s.playNextQueue.length > 0) {
         const t = s.playNextQueue[0]!;
@@ -2083,7 +2110,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           sessionTracks.length,
           s.currentTrackIndex,
           s.shuffle,
-          s.repeat,
+          autoRepeatMode,
           getShuffledIndex,
         );
         if (step.kind === "exhausted") return null;
@@ -2109,7 +2136,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         tracks.length,
         s.currentTrackIndex,
         s.shuffle,
-        s.repeat,
+        autoRepeatMode,
         getShuffledIndex,
       );
       if (step.kind === "exhausted") return null;
@@ -2124,6 +2151,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const getNextEmbeddedSource = useCallback((): { type: "youtube"; url: string; videoId: string } | null => {
     const s = stateRef.current;
     if (!s.currentSource) return null;
+    /* Track-loop: natural end replays the same song — no auto-advance target. */
+    const autoRepeatMode = getRepeatMode();
+    if (autoRepeatMode === "track") return null;
 
     const sessionTracks = getPlaylistSessionTracks(s);
     if (
@@ -2134,7 +2164,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         sessionTracks.length,
         s.currentTrackIndex,
         s.shuffle,
-        s.repeat,
+        autoRepeatMode,
         getShuffledIndex,
       );
       if (step.kind === "exhausted") return null;
@@ -2164,7 +2194,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       tracks.length,
       s.currentTrackIndex,
       s.shuffle,
-      s.repeat,
+      autoRepeatMode,
       getShuffledIndex,
     );
     if (step.kind === "exhausted") return null;

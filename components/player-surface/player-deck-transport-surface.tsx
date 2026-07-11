@@ -2,7 +2,17 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { ActionButtonShare, ActionButtonEdit } from "@/components/ui/action-buttons";
-import { MIX_DURATIONS, getMixDuration, setMixDuration, onMixDurationChanged, type MixDuration } from "@/lib/mix-preferences";
+import {
+  MIX_DURATIONS,
+  getMixDuration,
+  setMixDuration,
+  onMixDurationChanged,
+  getRepeatMode,
+  setRepeatMode,
+  onRepeatModeChanged,
+  type MixDuration,
+  type RepeatMode,
+} from "@/lib/mix-preferences";
 import {
   PlaybackTransportIconNext,
   PlaybackTransportIconPause,
@@ -104,6 +114,9 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
             ariaLabel={labels.random}
             title={labels.random}
           />
+
+          {/* Loop is a mode preference — usable even before anything is loaded */}
+          <LoopToggleButton />
 
           <AutoMixToggleButton
             active={displayAutoMix}
@@ -235,22 +248,54 @@ function ShuffleToggleButton({
           : "text-[#8e8e93] hover:bg-white/[0.06] hover:text-[#f5f5f7]"
       }`}
     >
-      <svg
-        viewBox="0 0 24 24"
-        className="h-[18px] w-[18px]"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden
-      >
-        <path d="M16 3h5v5" />
-        <path d="M4 20L21 3" />
-        <path d="M21 16v5h-5" />
-        <path d="M15 15l6 6" />
-        <path d="M4 4l5 5" />
+      {/* Universal shuffle glyph (crossed arrows) — instantly recognizable */}
+      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="currentColor" aria-hidden>
+        <path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z" />
       </svg>
+    </button>
+  );
+}
+
+/**
+ * LOOP — one button, three states (cycled by click):
+ *   playlist → the whole playlist loops (default behavior);
+ *   track    → the playing song repeats;
+ *   off      → playback stops after the last track.
+ * Shared via lib/mix-preferences so the playback engine reads the same value.
+ */
+function LoopToggleButton({ disabled }: { disabled?: boolean }) {
+  const mode = useSyncExternalStore(
+    (onStoreChange) => onRepeatModeChanged(() => onStoreChange()),
+    () => getRepeatMode(),
+    () => "playlist" as RepeatMode,
+  );
+
+  const nextMode: RepeatMode = mode === "playlist" ? "track" : mode === "track" ? "off" : "playlist";
+  const label =
+    mode === "playlist" ? "Loop: playlist" : mode === "track" ? "Loop: this song" : "Loop: off";
+  const activeCls =
+    mode === "off"
+      ? "text-[#8e8e93] hover:bg-white/[0.06] hover:text-[#f5f5f7]"
+      : "bg-[#0a84ff]/15 text-[#409cff]";
+
+  return (
+    <button
+      type="button"
+      onClick={() => setRepeatMode(nextMode)}
+      disabled={disabled}
+      aria-label={label}
+      title={`${label} — click to change`}
+      className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 disabled:opacity-35 ${activeCls}`}
+    >
+      {/* Universal repeat glyph */}
+      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="currentColor" aria-hidden>
+        <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z" />
+      </svg>
+      {mode === "track" ? (
+        <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#0a84ff] text-[9px] font-bold leading-none text-white">
+          1
+        </span>
+      ) : null}
     </button>
   );
 }

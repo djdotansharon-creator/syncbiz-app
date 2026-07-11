@@ -636,13 +636,17 @@ export function LiveQueuePanel() {
     setRemovedSessionTrackIndexes((prev) => (prev.size === 0 ? prev : new Set()));
   }, [sessionScopeId]);
 
-  const displayedSessionTracks = useMemo(
-    () =>
-      sessionTracks
-        .map((track, originalIndex) => ({ track, originalIndex }))
-        .filter(({ originalIndex }) => !removedSessionTrackIndexes.has(originalIndex)),
-    [sessionTracks, removedSessionTrackIndexes],
-  );
+  const displayedSessionTracks = useMemo(() => {
+    const rows = sessionTracks
+      .map((track, originalIndex) => ({ track, originalIndex }))
+      .filter(({ originalIndex }) => !removedSessionTrackIndexes.has(originalIndex));
+    /* The playing song always leads the stack: rotate the DISPLAY so the current
+       row is first and the upcoming order follows it. Pure presentation — every
+       row keeps its originalIndex, so click-to-play/highlight logic is untouched. */
+    const cur = rows.findIndex(({ originalIndex }) => originalIndex === sessionForList.highlightIndex);
+    if (cur > 0) return [...rows.slice(cur), ...rows.slice(0, cur)];
+    return rows;
+  }, [sessionTracks, removedSessionTrackIndexes, sessionForList.highlightIndex]);
 
   /*
    * Lazy duration resolver. Runs whenever the visible session changes. For every playable URL
