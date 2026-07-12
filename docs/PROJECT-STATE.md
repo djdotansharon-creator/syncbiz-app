@@ -54,6 +54,9 @@ Business media player: Next.js 16 app (`app/`, `components/`, `lib/`) + standalo
 - LIBRARY nav: counts on all rows; Scheduled = real scheduled playlists view (`scheduled_playlists`) with header + "+ New Schedule"; clock on every playlist card (edits existing schedule); blue schedule line on cards.
 - Backups: branch `backup/pre-redesign-2026-07-09` = original design (fd66216). Every step committed on main.
 
+## Left rail layout contract (4830839)
+Top→bottom: DJ Creator AI card (clean sparkles tile, no gold) → LIBRARY nav (icons+counts; "Your Playlists" row has inline "+" create button — nested-button avoided via sibling layout, search `Add playlist`) → YOUR PLAYLISTS compact list (cover·name·count·trash, `userPlaylistContainers.slice(0, 12)`, scrollable) → collapsed "Scheduled & Ready Playlists" shelf.
+
 ## Search/ingest behavior contract (75d328b)
 - Catalog rows must be RELEVANT (query words in title/artist/tags) or they don't render — the user's rule: "if it's not in the catalog, show what I searched first". Discover (YouTube) renders above Radio.
 - Every ingest jumps selection to `recently_added` (handleAdd) — new items always visible first. SHAZAM pill next to Guest = placeholder for phone-app→desktop capture (future), currently opens Recently Added.
