@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { DjCreatorAiSparkle, DjCreatorAiWarmSpark } from "@/components/dj-creator-ai-mark";
+import { DjCreatorAiSparkle } from "@/components/dj-creator-ai-mark";
 import {
   buildDjCreatorMatchContextFromWizard,
   effectiveResultCount,
@@ -1082,7 +1082,15 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
     <>
       <section className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03] p-3 shadow-[0_8px_28px_rgba(0,0,0,0.35)]">
         <div className="relative flex flex-col items-center gap-3 sm:flex-row sm:items-center" dir={dir}>
-          <DjCreatorAiWarmSpark className="h-12 w-12 shrink-0 rounded-xl sm:h-14 sm:w-14" />
+          <span
+            aria-hidden
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.05] text-[#7db8ff] sm:h-12 sm:w-12"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 4l1.7 4.3L18 10l-4.3 1.7L12 16l-1.7-4.3L6 10l4.3-1.7L12 4z" />
+              <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z" />
+            </svg>
+          </span>
           <div className="min-w-0 w-full flex-1 text-center sm:text-start">
             <p className="library-text-title text-sm font-semibold tracking-tight text-[#faf8f5]">{t.launcherTitle}</p>
             <button
