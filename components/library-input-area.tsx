@@ -96,6 +96,59 @@ const inputBase =
 const addBtn =
   "shrink-0 rounded-lg border border-white/[0.1] bg-white/[0.06] px-3 text-xs font-semibold text-[#f5f5f7] transition-colors hover:border-white/[0.18] hover:bg-white/[0.1] disabled:opacity-30 disabled:pointer-events-none";
 
+/* ── Search results — Spotify-scale rows in the player language ── */
+const RESULT_ROW =
+  "flex items-center gap-3 rounded-xl px-2.5 py-2 transition-colors hover:bg-white/[0.05]";
+const RESULT_THUMB =
+  "relative h-11 w-[74px] shrink-0 overflow-hidden rounded-lg bg-[#101014]";
+const RESULT_TITLE = "truncate text-[15px] font-semibold leading-snug text-[#f5f5f7]";
+const RESULT_META = "mt-0.5 truncate text-xs text-[#a1a1a6]";
+const RESULT_SECTION_HEAD =
+  "mb-1.5 px-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6e6e73]";
+const RESULT_PLAY_BTN =
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f5f5f7] text-[#111114] shadow-[0_2px_10px_-3px_rgba(0,0,0,0.6)] transition-colors hover:bg-white active:scale-95";
+const RESULT_GHOST_BTN =
+  "inline-flex h-8 shrink-0 items-center justify-center rounded-full border border-white/[0.1] px-3 text-xs font-medium text-[#a1a1a6] transition-colors hover:border-white/[0.18] hover:bg-white/[0.06] hover:text-white";
+
+function ResultPlayIcon() {
+  return (
+    <svg className="ml-0.5 h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M8 5v14l11-7L8 5z" />
+    </svg>
+  );
+}
+
+/** Inline platform logo shown right after the title — a logo, never letters. */
+function ResultPlatformLogo({ kind }: { kind: "youtube" | "radio" | "local" | null }) {
+  if (!kind) return null;
+  if (kind === "youtube") {
+    return (
+      <svg className="h-3.5 w-[18px] shrink-0" viewBox="0 0 24 24" aria-label="YouTube">
+        <path
+          d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"
+          fill="#ff0000"
+        />
+        <path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ffffff" />
+      </svg>
+    );
+  }
+  if (kind === "radio") {
+    return (
+      <svg className="h-3.5 w-3.5 shrink-0 text-[#fb7185]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="Radio">
+        <rect x="2" y="8" width="20" height="12" rx="2" />
+        <path d="M6 8L18 3" />
+        <circle cx="8" cy="14" r="2.5" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="h-3.5 w-3.5 shrink-0 text-[#93c5fd]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="Local">
+      <rect x="2" y="4" width="20" height="14" rx="2" />
+      <path d="M8 22h8M12 18v4" />
+    </svg>
+  );
+}
+
 /** Desktop: trace folder drag; remove or gate if noisy. */
 function logDesktopLibraryIngestDrop(e: React.DragEvent, payload: string | null) {
   if (typeof window === "undefined" || !window.syncbizDesktop) return;
@@ -2025,7 +2078,7 @@ export function LibraryInputArea({
 
       {/* Search results dropdown */}
       {showResults && hasQuery && (
-        <div className="absolute left-0 right-0 top-full z-50 max-h-[60vh] overflow-y-auto rounded-b-xl border border-t-0 border-slate-800/80 bg-slate-900 ring-1 ring-slate-700/60 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+        <div className="absolute left-0 right-0 top-full z-50 max-h-[64vh] overflow-y-auto rounded-b-2xl border border-t-0 border-white/[0.08] bg-[#0d0d11] shadow-[0_16px_48px_rgba(0,0,0,0.6)]">
           {searching && !hasResults ? (
             <div className="flex items-center justify-center gap-2 py-6 text-sm text-slate-400">
               <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -2037,31 +2090,26 @@ export function LibraryInputArea({
           ) : (
             <>
               {hasMusicBankLocal && (
-                <div className="border-b border-slate-800/60 p-2">
-                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/90">
-                    My Music Library
-                  </p>
+                <div className="border-b border-white/[0.05] p-2.5">
+                  <p className={RESULT_SECTION_HEAD}>My Music Library</p>
                   <div className="space-y-0.5">
                     {musicBankLocalResults.map((source) => (
-                      <div
-                        key={source.id}
-                        className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80"
-                      >
-                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                      <div key={source.id} className={RESULT_ROW}>
+                        <div className={RESULT_THUMB}>
                           {source.cover ? (
                             <img src={source.cover} alt="" className="h-full w-full object-cover" />
                           ) : (
                             <TrackMediaPlaceholder chip="LOCAL" className="h-full w-full" showCornerBadge={false} />
                           )}
-                          <span className="pointer-events-none absolute bottom-0.5 left-0.5">
-                            <CompactSourceBadge chip="LOCAL" />
-                          </span>
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-slate-100">{source.title}</p>
-                          {source.genre && <p className="text-[10px] text-slate-500">{source.genre}</p>}
+                          <p className="flex items-center gap-2">
+                            <span className={RESULT_TITLE}>{source.title}</span>
+                            <ResultPlatformLogo kind="local" />
+                          </p>
+                          {source.genre && <p className={RESULT_META}>{source.genre}</p>}
                         </div>
-                        <div className="flex shrink-0 items-center gap-1">
+                        <div className="flex shrink-0 items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => {
@@ -2073,9 +2121,11 @@ export function LibraryInputArea({
                               setRadioResults([]);
                               setShowResults(false);
                             }}
-                            className="inline-flex h-8 items-center justify-center rounded-lg bg-[#1db954] px-2.5 text-xs font-medium text-white transition hover:bg-[#1ed760]"
+                            className={RESULT_PLAY_BTN}
+                            title={t.play}
+                            aria-label={t.play}
                           >
-                            {t.play}
+                            <ResultPlayIcon />
                           </button>
                         </div>
                       </div>
@@ -2084,39 +2134,46 @@ export function LibraryInputArea({
                 </div>
               )}
               {hasLocal && (
-                <div className="border-b border-slate-800/60 p-2">
-                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t.localResults}</p>
+                <div className="border-b border-white/[0.05] p-2.5">
+                  <p className={RESULT_SECTION_HEAD}>{t.localResults}</p>
                   <div className="space-y-0.5">
                     {localResults.map((source) => {
                       const libChip = inferTrackSourceChip(source);
+                      const logoKind =
+                        source.type === "youtube" ? ("youtube" as const)
+                        : source.origin === "radio" ? ("radio" as const)
+                        : libChip === "LOCAL" ? ("local" as const)
+                        : null;
                       return (
-                      <div key={source.id} className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80">
-                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                      <div key={source.id} className={RESULT_ROW}>
+                        <div className={RESULT_THUMB}>
                           {source.cover ? (
                             <img src={source.cover} alt="" className="h-full w-full object-cover" />
                           ) : (
                             <TrackMediaPlaceholder chip={libChip} className="h-full w-full" showCornerBadge={false} />
                           )}
-                          <span className="pointer-events-none absolute bottom-0.5 left-0.5">
-                            <CompactSourceBadge chip={libChip} />
-                          </span>
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-slate-100">{source.title}</p>
-                          {source.genre && <p className="text-[10px] text-slate-500">{source.genre}</p>}
+                          <p className="flex items-center gap-2">
+                            <span className={RESULT_TITLE}>{source.title}</span>
+                            <ResultPlatformLogo kind={logoKind} />
+                          </p>
+                          {source.genre && <p className={RESULT_META}>{source.genre}</p>}
                         </div>
-                        <div className="flex shrink-0 items-center gap-1">
+                        <div className="flex shrink-0 items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => effectivePlaySource(source)}
-                            className="inline-flex h-8 items-center justify-center rounded-lg bg-[#1db954] px-2.5 text-xs font-medium text-white transition hover:bg-[#1ed760]"
+                            className={RESULT_PLAY_BTN}
+                            title={t.play}
+                            aria-label={t.play}
                           >
-                            {t.play}
+                            <ResultPlayIcon />
                           </button>
                           <button
                             type="button"
                             onClick={() => router.push("/sources")}
-                            className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 px-2.5 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+                            className={RESULT_GHOST_BTN}
                           >
                             {t.open}
                           </button>
@@ -2137,36 +2194,36 @@ export function LibraryInputArea({
                 </div>
               )}
               {hasCatalog && (
-                <div className="border-b border-slate-800/60 p-2">
-                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-cyan-400/80">
-                    {t.catalogResults ?? "FROM CATALOG"}
-                  </p>
+                <div className="border-b border-white/[0.05] p-2.5">
+                  <p className={RESULT_SECTION_HEAD}>{t.catalogResults ?? "From catalog"}</p>
                   <div className="space-y-0.5">
                     {catalogResults.map((r) => (
-                      <div key={r.id} className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80">
-                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                      <div key={r.id} className={RESULT_ROW}>
+                        <div className={RESULT_THUMB}>
                           {r.thumbnail ? (
                             <img src={r.thumbnail} alt="" className="h-full w-full object-cover" />
                           ) : (
                             <TrackMediaPlaceholder chip="YT" className="h-full w-full" showCornerBadge={false} />
                           )}
-                          <span className="pointer-events-none absolute bottom-0.5 left-0.5">
-                            <CompactSourceBadge chip="YT" />
-                          </span>
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-slate-100">{r.title}</p>
-                          <p className="text-[10px] text-slate-500">
-                            {r.genres?.length > 0 ? r.genres.slice(0, 2).join(" · ") : tx.providerYouTube}
+                          <p className="flex items-center gap-2">
+                            <span className={RESULT_TITLE}>{r.title}</span>
+                            <ResultPlatformLogo kind="youtube" />
                           </p>
+                          {r.genres?.length > 0 ? (
+                            <p className={RESULT_META}>{r.genres.slice(0, 3).join(" · ")}</p>
+                          ) : null}
                         </div>
-                        <div className="flex shrink-0 items-center gap-1">
+                        <div className="flex shrink-0 items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => void handlePlayCatalog(r)}
-                            className="inline-flex h-8 items-center justify-center rounded-lg bg-[#1db954] px-2.5 text-xs font-semibold text-white transition hover:bg-[#1ed760]"
+                            className={RESULT_PLAY_BTN}
+                            title={t.playNow}
+                            aria-label={t.playNow}
                           >
-                            {t.playNow}
+                            <ResultPlayIcon />
                           </button>
                         </div>
                       </div>
@@ -2175,46 +2232,48 @@ export function LibraryInputArea({
                 </div>
               )}
               {hasRadio && (
-                <div className="p-2">
-                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t.radioResults ?? "Radio stations"}</p>
+                <div className="p-2.5">
+                  <p className={RESULT_SECTION_HEAD}>{t.radioResults ?? "Radio stations"}</p>
                   <div className="space-y-0.5">
                     {radioResults.map((r, i) => (
-                      <div key={i} className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80">
-                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                      <div key={i} className={RESULT_ROW}>
+                        <div className={RESULT_THUMB}>
                           {r.cover ? (
                             <img src={r.cover} alt="" className="h-full w-full object-cover" />
                           ) : (
                             <TrackMediaPlaceholder chip="RADIO" className="h-full w-full" showCornerBadge={false} />
                           )}
-                          <span className="pointer-events-none absolute bottom-0.5 left-0.5 z-[1]">
-                            <CompactSourceBadge chip="RADIO" />
-                          </span>
-                          <span className="absolute bottom-0.5 right-0.5 rounded bg-rose-500/92 px-1 py-[1px] text-[8px] font-semibold uppercase tracking-wide text-white">
+                          <span className="absolute bottom-1 right-1 rounded bg-rose-500/90 px-1 py-[1px] text-[8px] font-semibold uppercase tracking-wide text-white">
                             {t.live ?? "LIVE"}
                           </span>
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-slate-100">{r.title}</p>
-                          <p className="text-[10px] text-slate-500">
+                          <p className="flex items-center gap-2">
+                            <span className={RESULT_TITLE}>{r.title}</span>
+                            <ResultPlatformLogo kind="radio" />
+                          </p>
+                          <p className={RESULT_META}>
                             {r.genre && r.genre !== "Radio" && r.genre !== tx.defaultGenreRadioShort
                               ? r.genre
                               : tx.defaultGenreRadioShort}
                           </p>
                         </div>
-                        <div className="flex shrink-0 items-center gap-1">
+                        <div className="flex shrink-0 items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => void handleAddRadio(r)}
-                            className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 px-2.5 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+                            className={RESULT_GHOST_BTN}
                           >
                             {t.addToRadio ?? "Add to Radio"}
                           </button>
                           <button
                             type="button"
                             onClick={() => void handlePlayRadio(r)}
-                            className="inline-flex h-8 items-center justify-center rounded-lg bg-[#1db954] px-2.5 text-xs font-semibold text-white transition hover:bg-[#1ed760]"
+                            className={RESULT_PLAY_BTN}
+                            title={t.playNow}
+                            aria-label={t.playNow}
                           >
-                            {t.playNow}
+                            <ResultPlayIcon />
                           </button>
                         </div>
                       </div>
@@ -2223,57 +2282,50 @@ export function LibraryInputArea({
                 </div>
               )}
               {hasYoutube && (
-                <div className="p-2">
-                  <p className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t.youtubeResults}</p>
+                <div className="p-2.5">
+                  <p className={RESULT_SECTION_HEAD}>{t.youtubeResults}</p>
                   <div className="space-y-0.5">
                     {youtubeResults.map((r, i) => (
-                      <div key={i} className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80">
-                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                      <div key={i} className={RESULT_ROW}>
+                        <div className={RESULT_THUMB}>
                           {r.cover ? (
                             <img src={r.cover} alt="" className="h-full w-full object-cover" />
                           ) : (
                             <TrackMediaPlaceholder chip="YT" className="h-full w-full" showCornerBadge={false} />
                           )}
-                          <span className="pointer-events-none absolute bottom-0.5 left-0.5">
-                            <CompactSourceBadge chip="YT" />
-                          </span>
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-slate-100">{r.title}</p>
-                          <p className="text-[10px] text-slate-500">
-                            {tx.providerYouTube}
+                          <p className="flex items-center gap-2">
+                            <span className={RESULT_TITLE}>{r.title}</span>
+                            <ResultPlatformLogo kind="youtube" />
+                          </p>
+                          <p className={RESULT_META}>
                             {(() => {
                               const g = inferGenre(r.title, query);
-                              return g && g !== "Mixed" && g !== tx.defaultGenreMixed ? (
-                                <span className="ml-1.5 text-slate-400">• {g}</span>
-                              ) : null;
+                              const parts: string[] = [];
+                              if (g && g !== "Mixed" && g !== tx.defaultGenreMixed) parts.push(g);
+                              if (r.durationSeconds != null && r.durationSeconds > 0) parts.push(formatDuration(r.durationSeconds));
+                              if (r.viewCount != null) parts.push(`${formatViewCount(r.viewCount)} ${t.views ?? "views"}`);
+                              return parts.length > 0 ? parts.join(" · ") : tx.providerYouTube;
                             })()}
-                            {r.viewCount != null && (
-                              <span className="ml-1.5 text-slate-400">
-                                • {formatViewCount(r.viewCount)} {t.views ?? "views"}
-                              </span>
-                            )}
-                            {r.durationSeconds != null && r.durationSeconds > 0 && (
-                              <span className="ml-1.5 text-slate-400">
-                                • {formatDuration(r.durationSeconds)}
-                              </span>
-                            )}
                           </p>
                         </div>
-                        <div className="flex shrink-0 items-center gap-1">
+                        <div className="flex shrink-0 items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => void handleAddYoutube(r)}
-                            className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 px-2.5 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+                            className={RESULT_GHOST_BTN}
                           >
                             {t.addToLibrary}
                           </button>
                           <button
                             type="button"
                             onClick={() => void handlePlayYoutube(r)}
-                            className="inline-flex h-8 items-center justify-center rounded-lg bg-[#1db954] px-2.5 text-xs font-semibold text-white transition hover:bg-[#1ed760]"
+                            className={RESULT_PLAY_BTN}
+                            title={t.playNow}
+                            aria-label={t.playNow}
                           >
-                            {t.playNow}
+                            <ResultPlayIcon />
                           </button>
                         </div>
                       </div>
