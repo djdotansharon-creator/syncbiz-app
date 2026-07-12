@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "@/lib/locale-context";
 import { getTranslations } from "@/lib/translations";
@@ -484,15 +485,45 @@ export function LibraryInputArea({
     return () => clearTimeout(id);
   }, [query, runSearch, hasQuery, looksLikeIngestText]);
 
+  const resultsPortalRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideBar = panelRef.current?.contains(target);
+      const insideResults = resultsPortalRef.current?.contains(target);
+      if (!insideBar && !insideResults) {
         setShowResults(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  /* Results render in a document.body PORTAL (fixed, above EVERYTHING) — the
+     command rail lives inside overflow-hidden columns that clipped the old
+     absolute dropdown under the card grid. */
+  const [resultsMounted, setResultsMounted] = useState(false);
+  useEffect(() => {
+    setResultsMounted(true);
+  }, []);
+  const [resultsRect, setResultsRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  useEffect(() => {
+    if (!showResults || !hasQuery) return;
+    const update = () => {
+      const r = panelRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const width = Math.min(Math.max(r.width, 720), window.innerWidth - 16);
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+      setResultsRect({ top: r.bottom + 6, left, width });
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [showResults, hasQuery]);
 
   const ingestingRef = useRef(false);
 
@@ -2049,8 +2080,12 @@ export function LibraryInputArea({
       ) : null}
 
       {/* Search results dropdown */}
-      {showResults && hasQuery && (
-        <div className="absolute left-0 right-0 top-full z-50 max-h-[64vh] overflow-y-auto rounded-b-2xl border border-t-0 border-white/[0.08] bg-[#0d0d11] shadow-[0_16px_48px_rgba(0,0,0,0.6)]">
+      {resultsMounted && showResults && hasQuery && resultsRect ? createPortal(
+        <div
+          ref={resultsPortalRef}
+          style={{ top: resultsRect.top, left: resultsRect.left, width: resultsRect.width }}
+          className="fixed z-[9960] max-h-[64vh] overflow-y-auto rounded-2xl border border-white/[0.08] bg-[#0d0d11] shadow-[0_24px_64px_rgba(0,0,0,0.7)]"
+        >
           {searching && !hasResults ? (
             <div className="flex items-center justify-center gap-2 py-6 text-sm text-slate-400">
               <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -2359,8 +2394,9 @@ export function LibraryInputArea({
               )}
             </>
           )}
-        </div>
-      )}
+        </div>,
+        document.body,
+      ) : null}
     </div>
   );
 }
