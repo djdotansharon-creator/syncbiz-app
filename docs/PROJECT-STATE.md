@@ -55,9 +55,9 @@ Business media player: Next.js 16 app (`app/`, `components/`, `lib/`) + standalo
 - Backups: branch `backup/pre-redesign-2026-07-09` = original design (fd66216). Every step committed on main.
 
 ## Open items / known issues
-1. **⋯ menu clipped in grid cards** — playlist-ai-shell-menu dropdown must portal above everything. (IN PROGRESS)
-2. **DJ hub**: add GRID/LIST toggle; grid = same rectangular card language. (IN PROGRESS)
-3. **List view**: still partially old-styled; needs clock + ⋯/add-to-playlist parity with cards. (IN PROGRESS)
+1. ~~⋯ menu clipped~~ DONE (c91f224): playlist-ai-shell-menu is a controlled button + document.body portal (fixed pos from trigger rect). Verify on real account.
+2. ~~DJ hub grid/list~~ DONE (c91f224): `view` state persisted `syncbiz-djhub-view`; grid reuses `library-source-card-grid` + sb-lbc classes.
+3. ~~List parity~~ DONE (c91f224): internal `SourceRow` (in sources-manager, search `function SourceRow(`) takes `onSchedulePress`/`scheduleLine`/`playlistAiMenuSlot`; list callsite builds `rowAiMenuSlot`.
 4. Natural-end automix uses same deck engine — watch for handoff issues (memory note).
 5. Phase-2 sweep: ~30 files still contain old glow classes (radio page, schedules, mobile, modals).
 6. Real waveform peaks (server-side ffprobe → catalog) — designed, not built; strip component ready.
