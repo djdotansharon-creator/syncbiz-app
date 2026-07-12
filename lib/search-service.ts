@@ -36,6 +36,11 @@ export type CatalogSearchResult = {
   title: string;
   thumbnail: string | null;
   genres: string[];
+  /* Enriched fields (smart-search rows) — optional for plain title matches. */
+  artist?: string;
+  durationSec?: number;
+  viewCount?: number;
+  likeCount?: number;
 };
 
 export type ExternalSearchResults = {
@@ -92,9 +97,11 @@ export async function searchExternal(query: string, genreFilter?: string): Promi
   const catalogUrl = genreFilter
     ? `/api/catalog/search?q=${q}&genre=${encodeURIComponent(genreFilter)}`
     : `/api/catalog/search?q=${q}`;
-  const [sourcesOutcome, catalogOutcome] = await Promise.all([
+  const [sourcesOutcome, catalogOutcome, smartOutcome] = await Promise.all([
     fetchDiscoveryJson(`/api/sources/search?q=${q}`),
     fetchDiscoveryJson(catalogUrl),
+    /* Smart catalog search understands keywords/moods/genres ("jazz", "80s"...) — not just title matches. */
+    fetchDiscoveryJson(`/api/catalog/smart-search?q=${q}&limit=12`),
   ]);
 
   const externalData = sourcesOutcome.data;
@@ -103,7 +110,37 @@ export async function searchExternal(query: string, genreFilter?: string): Promi
   const youtube = asResultArray<YouTubeSearchResult>(externalData.results);
   const radio = asResultArray<RadioSearchResult>(externalData.radioResults);
   const catalogRaw = catalogData.items ?? (catalogData.data as Record<string, unknown> | undefined)?.items;
-  const catalog = asResultArray<CatalogSearchResult>(catalogRaw);
+  const plainCatalog = asResultArray<CatalogSearchResult>(catalogRaw);
+
+  type SmartRow = {
+    catalogItemId: string;
+    title: string;
+    artist?: string;
+    url: string;
+    thumbnail?: string | null;
+    durationSec?: number;
+    viewCount?: number;
+    likeCount?: number;
+    matchedTags?: string[];
+  };
+  const smartRows = asResultArray<SmartRow>(smartOutcome.data.rows);
+  const smartCatalog: CatalogSearchResult[] = smartRows
+    .filter((r) => r?.url && r?.title)
+    .map((r) => ({
+      id: r.catalogItemId,
+      url: r.url,
+      title: r.title,
+      thumbnail: r.thumbnail ?? null,
+      genres: (r.matchedTags ?? []).slice(0, 3),
+      artist: r.artist,
+      durationSec: r.durationSec,
+      viewCount: r.viewCount,
+      likeCount: r.likeCount,
+    }));
+
+  /* Smart matches lead; plain title matches fill in anything smart missed. */
+  const seen = new Set(smartCatalog.map((c) => c.url || c.id));
+  const catalog = [...smartCatalog, ...plainCatalog.filter((c) => !seen.has(c.url || c.id))];
 
   return { youtube, radio, catalog };
 }

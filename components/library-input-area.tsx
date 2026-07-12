@@ -417,6 +417,13 @@ export function LibraryInputArea({
       : "sb-library-ingest-shell--read"
     : "";
 
+  /** Unified field: link-looking input routes to ingest instead of search. */
+  const looksLikeIngestText = useCallback((v: string) => {
+    const s = v.trim();
+    if (!s) return false;
+    return s.startsWith("http://") || s.startsWith("https://") || !!normalizeLocalFilePathInput(s);
+  }, []);
+
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q || q.length < 2) {
@@ -468,10 +475,14 @@ export function LibraryInputArea({
       searchQueryRef.current = "";
       return;
     }
+    if (looksLikeIngestText(query)) {
+      setShowResults(false);
+      return;
+    }
     searchQueryRef.current = query.trim();
     const id = setTimeout(runSearch, 200);
     return () => clearTimeout(id);
-  }, [query, runSearch, hasQuery]);
+  }, [query, runSearch, hasQuery, looksLikeIngestText]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -1644,62 +1655,15 @@ export function LibraryInputArea({
           }}
           onDrop={handleIngestDrop}
         >
-          {/* URL input */}
-          <div className={`relative min-w-0 flex-1 ${controlHeight}`}>
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6e6e73]">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-              </svg>
-            </span>
-            <input
-              type="text"
-              autoComplete="off"
-              value={urlValue}
-              onChange={(e) => {
-                applyUrlInputValue(e.target.value);
-              }}
-              onDragOver={(e) => {
-                if (
-                  e.dataTransfer?.types?.includes("Files") ||
-                  e.dataTransfer?.types?.includes("text/uri-list") ||
-                  e.dataTransfer?.types?.includes("text/plain")
-                ) {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "copy";
-                }
-              }}
-              onDrop={handleIngestDrop}
-              placeholder={t.addUrlOrPathPlaceholder ?? t.addUrlPlaceholder ?? "Add URL or local path…"}
-              disabled={urlIngesting || externalYtSaveBusy}
-              className={`${inputBase} ${controlHeight} pl-9 pr-3`}
-            />
-          </div>
-
-          {/* Add button – centered */}
-          <div className="flex shrink-0 justify-center">
-            <button
-              type="submit"
-              disabled={
-                urlIngesting ||
-                externalYtSaveBusy ||
-                externalYtResolvePack != null ||
-                !urlValue.trim()
-              }
-              className={`${addBtn} ${controlHeight}`}
-            >
-              {externalYtSaveBusy
-                ? "Saving…"
-                : urlIngesting
-                  ? urlIngestPhase ?? (t.adding ?? "Adding…")
-                  : t.add ?? "Add"}
-            </button>
-          </div>
-
-          {/* Hairline divider between the two halves of the bar */}
-          <span className="h-6 w-px shrink-0 bg-white/[0.08]" aria-hidden />
-
-          {/* Search Library / YouTube + Mic */}
+          {/* ONE unified field: search text, keywords (jazz / 80s), or ANY link —
+              YouTube video/playlist, Spotify, radio stream, local path. Links go
+              straight to the ingest flow; everything else searches. */}
           <div className="relative flex min-w-0 flex-1 items-center gap-1">
+          {urlIngesting || externalYtSaveBusy ? (
+            <span className="shrink-0 ps-1 text-[11px] font-medium text-[#6cb2ff]">
+              {externalYtSaveBusy ? "Saving…" : urlIngestPhase ?? (t.adding ?? "Adding…")}
+            </span>
+          ) : null}
           <span className="pl-3 text-[#6e6e73]">
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1717,6 +1681,14 @@ export function LibraryInputArea({
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
+                if (looksLikeIngestText(query)) {
+                  const link = query.trim();
+                  setQuery("");
+                  setShowResults(false);
+                  applyUrlInputValue(link);
+                  void ingestUrl(link);
+                  return;
+                }
                 if (e.shiftKey) {
                   if (hasYoutube && youtubeResults.length > 0) {
                     void handleAddAllYoutube();
@@ -1740,7 +1712,7 @@ export function LibraryInputArea({
                 setShowResults(true);
               }
             }}
-            placeholder={t.universalSearchPlaceholder ?? "Search library or find on YouTube…"}
+            placeholder="Search music, genres (jazz, 80s…) or paste any link — YouTube · Spotify · radio"
             className={`${controlHeight} flex-1 bg-transparent py-2 pr-2 text-sm text-[#f5f5f7] placeholder:text-[#6e6e73] focus:outline-none`}
             aria-label={t.search}
             autoComplete="off"
@@ -2089,6 +2061,93 @@ export function LibraryInputArea({
             </div>
           ) : (
             <>
+              {/* ── CATALOG FIRST — Spotify-style: big Top result + Songs list ── */}
+              {hasCatalog && (
+                <div className="border-b border-white/[0.05] p-3">
+                  <div className="grid gap-4 lg:grid-cols-[minmax(280px,380px)_minmax(0,1fr)]">
+                    <div className="min-w-0">
+                      <p className={RESULT_SECTION_HEAD}>Top result</p>
+                      {(() => {
+                        const r = catalogResults[0];
+                        return (
+                          <div className="group relative overflow-hidden rounded-2xl bg-white/[0.04] p-4 transition-colors hover:bg-white/[0.07]">
+                            <div className="h-28 w-full max-w-[210px] overflow-hidden rounded-xl bg-[#101014]">
+                              {r.thumbnail ? (
+                                <img src={r.thumbnail} alt="" className="h-full w-full object-cover" />
+                              ) : (
+                                <TrackMediaPlaceholder chip="YT" className="h-full w-full" showCornerBadge={false} />
+                              )}
+                            </div>
+                            <p className="mt-3 flex items-center gap-2">
+                              <span className="truncate text-xl font-bold leading-tight text-white">{r.title}</span>
+                              <ResultPlatformLogo kind="youtube" />
+                            </p>
+                            <p className="mt-1 truncate text-xs text-[#a1a1a6]">
+                              {[
+                                r.artist,
+                                r.genres?.length ? r.genres.slice(0, 3).join(" · ") : null,
+                                r.durationSec ? formatDuration(r.durationSec) : null,
+                                r.viewCount != null ? `${formatViewCount(r.viewCount)} ${t.views ?? "views"}` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => void handlePlayCatalog(r)}
+                              className="absolute bottom-4 right-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-[#f5f5f7] text-[#111114] shadow-[0_6px_20px_-6px_rgba(0,0,0,0.7)] transition-all hover:bg-white active:scale-95"
+                              title={t.playNow}
+                              aria-label={t.playNow}
+                            >
+                              <svg className="ml-0.5 h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                <path d="M8 5v14l11-7L8 5z" />
+                              </svg>
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    {catalogResults.length > 1 ? (
+                      <div className="min-w-0">
+                        <p className={RESULT_SECTION_HEAD}>Songs</p>
+                        <div className="space-y-0.5">
+                          {catalogResults.slice(1, 6).map((r) => (
+                            <div key={r.id} className={RESULT_ROW}>
+                              <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-[#101014]">
+                                {r.thumbnail ? (
+                                  <img src={r.thumbnail} alt="" className="h-full w-full object-cover" />
+                                ) : (
+                                  <TrackMediaPlaceholder chip="YT" className="h-full w-full" showCornerBadge={false} />
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className={RESULT_TITLE}>{r.title}</p>
+                                <p className={RESULT_META}>
+                                  {[r.artist, r.genres?.length ? r.genres.slice(0, 2).join(" · ") : null]
+                                    .filter(Boolean)
+                                    .join(" · ") || " "}
+                                </p>
+                              </div>
+                              {r.durationSec ? (
+                                <span className="shrink-0 text-xs tabular-nums text-[#6e6e73]">{formatDuration(r.durationSec)}</span>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => void handlePlayCatalog(r)}
+                                className={RESULT_PLAY_BTN}
+                                title={t.playNow}
+                                aria-label={t.playNow}
+                              >
+                                <ResultPlayIcon />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              )}
               {hasMusicBankLocal && (
                 <div className="border-b border-white/[0.05] p-2.5">
                   <p className={RESULT_SECTION_HEAD}>My Music Library</p>
@@ -2190,44 +2249,6 @@ export function LibraryInputArea({
                       </div>
                       );
                     })}
-                  </div>
-                </div>
-              )}
-              {hasCatalog && (
-                <div className="border-b border-white/[0.05] p-2.5">
-                  <p className={RESULT_SECTION_HEAD}>{t.catalogResults ?? "From catalog"}</p>
-                  <div className="space-y-0.5">
-                    {catalogResults.map((r) => (
-                      <div key={r.id} className={RESULT_ROW}>
-                        <div className={RESULT_THUMB}>
-                          {r.thumbnail ? (
-                            <img src={r.thumbnail} alt="" className="h-full w-full object-cover" />
-                          ) : (
-                            <TrackMediaPlaceholder chip="YT" className="h-full w-full" showCornerBadge={false} />
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="flex items-center gap-2">
-                            <span className={RESULT_TITLE}>{r.title}</span>
-                            <ResultPlatformLogo kind="youtube" />
-                          </p>
-                          {r.genres?.length > 0 ? (
-                            <p className={RESULT_META}>{r.genres.slice(0, 3).join(" · ")}</p>
-                          ) : null}
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => void handlePlayCatalog(r)}
-                            className={RESULT_PLAY_BTN}
-                            title={t.playNow}
-                            aria-label={t.playNow}
-                          >
-                            <ResultPlayIcon />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
                   </div>
                 </div>
               )}

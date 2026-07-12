@@ -2677,15 +2677,7 @@ function SourcesManagerInner({
               onClose={() => setActiveCenterModule(null)}
             />
           ) : showLibraryCenter ? (<>
-          <div className="library-sources-input-shell">
-            <LibraryInputArea
-              onAdd={handleAdd}
-              playSourceOverride={playSourceOverride}
-              onPlaylistUpdated={handlePlaylistUpdatedFromMyMusic}
-              onAiPlaylistFromSearchPrompt={handleAiPlaylistFromSearchPrompt}
-            />
-          </div>
-          <div className="library-command-rail mt-3.5 flex min-w-0 flex-nowrap items-center justify-between gap-1.5 overflow-x-auto rounded-2xl border border-slate-800/35 bg-slate-950/25 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md">
+          <div className="library-command-rail flex min-w-0 flex-nowrap items-center justify-between gap-1.5 rounded-2xl border border-slate-800/35 bg-slate-950/25 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md">
             <div className="library-command-rail-browse flex min-w-0 flex-nowrap items-center gap-1.5">
               <div className="library-segment-bar flex h-10 rounded-xl p-0.5" role="tablist">
                 <button
@@ -2753,6 +2745,17 @@ function SourcesManagerInner({
                 {t.favorites}
               </Link>
             </div>
+
+            {/* Unified search — lives IN the rail, between Favorites and Guest */}
+            <div className="library-sources-input-shell relative z-40 mx-1.5 min-w-0 flex-1 self-center">
+              <LibraryInputArea
+                onAdd={handleAdd}
+                playSourceOverride={playSourceOverride}
+                onPlaylistUpdated={handlePlaylistUpdatedFromMyMusic}
+                onAiPlaylistFromSearchPrompt={handleAiPlaylistFromSearchPrompt}
+              />
+            </div>
+
             <div className="library-command-rail-trailing ms-auto flex min-w-0 shrink-0 flex-nowrap items-center justify-end gap-1.5 self-center">
               <div className="hidden shrink-0 items-center self-center sm:flex sm:px-1.5" aria-hidden>
                 <span className="h-5 w-px shrink-0 rounded-full bg-slate-700/45" />
