@@ -316,6 +316,11 @@ async function fetchAlbumPreview(
     { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000), cache: "no-store" },
   );
   if (metaRes.status === 404) throw new Error("Album not found.");
+  /* 401/403 → token/market gating: surface the same blocked flow as playlists
+     (connect Spotify / paste tracklist CTA) instead of a raw HTTP error. */
+  if (metaRes.status === 401 || metaRes.status === 403) {
+    throw new SpotifyPlaylistBlockedError("private_or_blocked");
+  }
   if (!metaRes.ok) throw new Error(`Spotify album metadata: HTTP ${metaRes.status}`);
   const meta = (await metaRes.json()) as {
     name?: unknown;
@@ -444,7 +449,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<SpotifyPlayli
        * flow continues unchanged. Tokens never leave the server; only track metadata is
        * returned.
        */
-      if (parsed.kind === "playlist") {
+      {
         const user = await getCurrentUserFromApiRequest(req);
         if (!user) {
           /** Not authenticated to this API — UI should prompt login then connect. */
@@ -453,9 +458,12 @@ export async function POST(req: NextRequest): Promise<NextResponse<SpotifyPlayli
         const tok = await getValidSpotifyAccessToken(user.id);
         if (tok.status === "ok") {
           try {
-            const retry = await fetchPlaylistPreview(parsed.id, tok.accessToken);
+            const retry =
+              parsed.kind === "playlist"
+                ? await fetchPlaylistPreview(parsed.id, tok.accessToken)
+                : await fetchAlbumPreview(parsed.id, tok.accessToken);
             if (retry.tracks.length > 0) {
-              return NextResponse.json({ status: "ok", kind: "playlist", ...retry });
+              return NextResponse.json({ status: "ok", kind: parsed.kind, ...retry });
             }
             /** User token worked but playlist is empty — nothing to Auto-Build. */
             return NextResponse.json(
@@ -476,7 +484,6 @@ export async function POST(req: NextRequest): Promise<NextResponse<SpotifyPlayli
         /** `not_configured`: encryption key missing — connecting can't be honored yet. */
         return blocked(e.reason, false);
       }
-      return blocked(e.reason, false);
     }
     const msg = e instanceof Error ? e.message : "Spotify request failed.";
     return NextResponse.json({ status: "error", message: msg }, { status: 502 });

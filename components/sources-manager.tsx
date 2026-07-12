@@ -1864,6 +1864,9 @@ function SourcesManagerInner({
       });
       if (s.origin === "playlist" && s.playlist) savePlaylistToLocal(s.playlist);
       if (s.origin === "radio" && s.radio) saveRadioToLocal(s.radio);
+      /* Every ingest (Shazam/Spotify/YouTube link…) jumps to Recently Added so the
+         new item is the FIRST thing on screen — never lost inside long lists. */
+      setSelection({ type: "library_view", id: "recently_added" });
     },
     [setSources]
   );
@@ -2761,6 +2764,20 @@ function SourcesManagerInner({
                 <span className="h-5 w-px shrink-0 rounded-full bg-slate-700/45" />
               </div>
               <div className="library-command-rail-guest-my flex shrink-0 items-center justify-center gap-2 self-center">
+                {/* Shazam captures — placeholder for the phone-app link (Shazam → desktop).
+                    For now it jumps to Recently Added, where dropped Shazam links land first. */}
+                <button
+                  type="button"
+                  onClick={() => setSelection({ type: "library_view", id: "recently_added" })}
+                  className={[guestLinkLedButtonClass, "h-10 shrink-0 justify-center px-3"].join(" ")}
+                  title="Shazam captures land in Recently Added. Phone-app link coming soon."
+                  aria-label="Shazam captures"
+                >
+                  <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                    <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm3.6 13.9a3.9 3.9 0 0 1-2.8 1.2l-2.2.05a1.1 1.1 0 0 1-.05-2.2l2.2-.05a1.7 1.7 0 1 0-1.2-2.9l-1.3 1.25a1.1 1.1 0 0 1-1.53-1.58l1.3-1.26a3.9 3.9 0 0 1 5.58 5.49zM9.2 9.3l-2.2.05a1.7 1.7 0 1 0 1.2 2.9l1.3-1.25a1.1 1.1 0 0 1 1.53 1.58l-1.3 1.26A3.9 3.9 0 1 1 6.95 7.15l2.2-.05a1.1 1.1 0 0 1 .05 2.2z" />
+                  </svg>
+                  <span>Shazam</span>
+                </button>
                 <GuestLinkButton className="h-10 shrink-0 justify-center px-3" />
                 <button
                   type="button"

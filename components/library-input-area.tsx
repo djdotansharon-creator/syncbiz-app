@@ -2287,56 +2287,6 @@ export function LibraryInputArea({
                   </div>
                 </div>
               )}
-              {hasRadio && (
-                <div className="p-2.5">
-                  <p className={RESULT_SECTION_HEAD}>{t.radioResults ?? "Radio stations"}</p>
-                  <div className="space-y-0.5">
-                    {radioResults.map((r, i) => (
-                      <div key={i} className={RESULT_ROW}>
-                        <div className={RESULT_THUMB}>
-                          {r.cover ? (
-                            <img src={r.cover} alt="" className="h-full w-full object-cover" />
-                          ) : (
-                            <TrackMediaPlaceholder chip="RADIO" className="h-full w-full" showCornerBadge={false} />
-                          )}
-                          <span className="absolute bottom-1 right-1 rounded bg-rose-500/90 px-1 py-[1px] text-[8px] font-semibold uppercase tracking-wide text-white">
-                            {t.live ?? "LIVE"}
-                          </span>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="flex items-center gap-2">
-                            <span className={RESULT_TITLE}>{r.title}</span>
-                            <ResultPlatformLogo kind="radio" />
-                          </p>
-                          <p className={RESULT_META}>
-                            {r.genre && r.genre !== "Radio" && r.genre !== tx.defaultGenreRadioShort
-                              ? r.genre
-                              : tx.defaultGenreRadioShort}
-                          </p>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => void handleAddRadio(r)}
-                            className={RESULT_GHOST_BTN}
-                          >
-                            {t.addToRadio ?? "Add to Radio"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handlePlayRadio(r)}
-                            className={RESULT_PLAY_BTN}
-                            title={t.playNow}
-                            aria-label={t.playNow}
-                          >
-                            <ResultPlayIcon />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
               {hasYoutube && (
                 <div className="p-2.5">
                   <p className={RESULT_SECTION_HEAD}>{t.youtubeResults}</p>
@@ -2377,6 +2327,56 @@ export function LibraryInputArea({
                           <button
                             type="button"
                             onClick={() => void handlePlayYoutube(r)}
+                            className={RESULT_PLAY_BTN}
+                            title={t.playNow}
+                            aria-label={t.playNow}
+                          >
+                            <ResultPlayIcon />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {hasRadio && (
+                <div className="p-2.5">
+                  <p className={RESULT_SECTION_HEAD}>{t.radioResults ?? "Radio stations"}</p>
+                  <div className="space-y-0.5">
+                    {radioResults.map((r, i) => (
+                      <div key={i} className={RESULT_ROW}>
+                        <div className={RESULT_THUMB}>
+                          {r.cover ? (
+                            <img src={r.cover} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <TrackMediaPlaceholder chip="RADIO" className="h-full w-full" showCornerBadge={false} />
+                          )}
+                          <span className="absolute bottom-1 right-1 rounded bg-rose-500/90 px-1 py-[1px] text-[8px] font-semibold uppercase tracking-wide text-white">
+                            {t.live ?? "LIVE"}
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="flex items-center gap-2">
+                            <span className={RESULT_TITLE}>{r.title}</span>
+                            <ResultPlatformLogo kind="radio" />
+                          </p>
+                          <p className={RESULT_META}>
+                            {r.genre && r.genre !== "Radio" && r.genre !== tx.defaultGenreRadioShort
+                              ? r.genre
+                              : tx.defaultGenreRadioShort}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => void handleAddRadio(r)}
+                            className={RESULT_GHOST_BTN}
+                          >
+                            {t.addToRadio ?? "Add to Radio"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handlePlayRadio(r)}
                             className={RESULT_PLAY_BTN}
                             title={t.playNow}
                             aria-label={t.playNow}

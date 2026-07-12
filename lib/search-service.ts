@@ -138,9 +138,25 @@ export async function searchExternal(query: string, genreFilter?: string): Promi
       likeCount: r.likeCount,
     }));
 
+  /* Relevance gate: smart-search is fuzzy (mood/taxonomy) and can return
+     loosely-related rows for artist/title queries. Keep a smart row only when
+     the query words actually appear in its title/artist/tags — otherwise the
+     catalog stays out of the way and the real search (YouTube etc.) leads. */
+  const words = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length >= 2);
+  const isRelevant = (c: CatalogSearchResult) => {
+    if (words.length === 0) return true;
+    const hay = `${c.title} ${c.artist ?? ""} ${c.genres.join(" ")}`.toLowerCase();
+    return words.some((w) => hay.includes(w));
+  };
+  const smartRelevant = smartCatalog.filter(isRelevant);
+
   /* Smart matches lead; plain title matches fill in anything smart missed. */
-  const seen = new Set(smartCatalog.map((c) => c.url || c.id));
-  const catalog = [...smartCatalog, ...plainCatalog.filter((c) => !seen.has(c.url || c.id))];
+  const seen = new Set(smartRelevant.map((c) => c.url || c.id));
+  const catalog = [...smartRelevant, ...plainCatalog.filter((c) => !seen.has(c.url || c.id))];
 
   return { youtube, radio, catalog };
 }
