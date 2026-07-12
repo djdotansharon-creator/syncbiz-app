@@ -54,8 +54,10 @@ Business media player: Next.js 16 app (`app/`, `components/`, `lib/`) + standalo
 - LIBRARY nav: counts on all rows; Scheduled = real scheduled playlists view (`scheduled_playlists`) with header + "+ New Schedule"; clock on every playlist card (edits existing schedule); blue schedule line on cards.
 - Backups: branch `backup/pre-redesign-2026-07-09` = original design (fd66216). Every step committed on main.
 
-## Left rail layout contract (4830839)
-Top→bottom: DJ Creator AI card (clean sparkles tile, no gold) → LIBRARY nav (icons+counts; "Your Playlists" row has inline "+" create button — nested-button avoided via sibling layout, search `Add playlist`) → YOUR PLAYLISTS compact list (cover·name·count·trash, `userPlaylistContainers.slice(0, 12)`, scrollable) → collapsed "Scheduled & Ready Playlists" shelf.
+## Workspace rails contract (9d0428b — SYMMETRIC 3 columns 240/260/280)
+LEFT rail: LIBRARY nav (icons+counts; "Your Playlists" row has inline "+" create — sibling-button layout, search `Add playlist`) → collapsed "Scheduled & Ready Playlists" shelf (row 2).
+RIGHT rail (col-start-3, row-span-2, own scroll): DJ Creator AI card (clean sparkles tile, no gold) → YOUR PLAYLISTS compact list (cover·name·count·trash, slice(0,30), max-h-[60vh]).
+CENTER (col-start-2, row-span-2): command rail (view toggles · genres · LIBRARY · Favorites · unified search · Shazam · Guest · Link) → scrolling cards pane.
 
 ## Search/ingest behavior contract (75d328b)
 - Catalog rows must be RELEVANT (query words in title/artist/tags) or they don't render — the user's rule: "if it's not in the catalog, show what I searched first". Discover (YouTube) renders above Radio.
