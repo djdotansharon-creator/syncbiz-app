@@ -2303,7 +2303,7 @@ function SourcesManagerInner({
        * deck was still single-column at lg. Commit 21f97b7 activated the
        * 3-column deck at lg, so workspace rails now widen to match.
        */}
-      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:h-full lg:min-h-0 lg:grid-cols-[240px_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)_auto] lg:overflow-hidden xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:h-full lg:min-h-0 lg:grid-cols-[240px_minmax(0,1fr)_240px] lg:grid-rows-[minmax(0,1fr)_auto] lg:overflow-hidden xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)_260px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px]">
         {/* Secondary shelf — old playlists rail content, tucked under a quiet disclosure (nothing removed). */}
         <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch lg:max-h-[42vh] lg:overflow-y-auto">
           <details className="group/shelf">
@@ -3571,7 +3571,6 @@ function SourcesManagerInner({
 
         <aside className="row-start-1 w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-1 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-y-auto">
           <div className="space-y-4">
-            <DjCreatorAiShell drawerOpen={djCreatorOpen} onDrawerOpenChange={onDjCreatorOpenChange} />
             <section>
               <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
                 Library
@@ -3688,14 +3687,21 @@ function SourcesManagerInner({
               </div>
             </section>
 
+          </div>
+        </aside>
+
+        {/* ── RIGHT rail — symmetric to the nav: DJ Creator AI + Your Playlists ── */}
+        <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-y-auto">
+          <div className="space-y-4">
+            <DjCreatorAiShell drawerOpen={djCreatorOpen} onDrawerOpenChange={onDjCreatorOpenChange} />
             <section>
               <p className="library-section-title px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
                 Your Playlists
               </p>
               <div className="space-y-0.5">
                 {/* Compact rail list (cover · name · count · trash) — full view via the nav row */}
-                <div className="max-h-56 space-y-0.5 overflow-y-auto pr-1">
-                {userPlaylistContainers.slice(0, 12).map((p) => (
+                <div className="max-h-[60vh] space-y-0.5 overflow-y-auto pr-1">
+                {userPlaylistContainers.slice(0, 30).map((p) => (
                   <div key={p.key} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors duration-150 hover:bg-white/[0.04]">
                     <button
                       type="button"
