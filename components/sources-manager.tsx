@@ -3465,6 +3465,18 @@ function SourcesManagerInner({
                           const pe = getPlaylistEntitySubtypeKey(source);
                           const leafBar = isLeafLibraryUnifiedCard(source, selection);
                           const libraryPresentation = libraryTilePresentationForUnifiedSource(source);
+                          const rowAiMenuSlot =
+                            pe?.subtype === "syncbiz_playlist" &&
+                            source.origin === "playlist" &&
+                            source.playlist?.id &&
+                            !leafBar ? (
+                              <PlaylistAiShellMenu
+                                playlistId={source.playlist.id}
+                                playlistName={source.title}
+                                branchId={source.playlist.branchId ?? "default"}
+                                onSendToPlaylist={() => setAddToPlaylistLeaf(source)}
+                              />
+                            ) : undefined;
                           return (
                           <SourceRow
                             key={source.id}
@@ -3504,6 +3516,19 @@ function SourcesManagerInner({
                                 : undefined
                             }
                             onPlaylistEntityPlay={pe ? () => playCollectionSelection(pe.subtype, pe.key) : undefined}
+                            onSchedulePress={
+                              pe && source.playlist?.id
+                                ? () =>
+                                    openPlaylistScheduleWindow({
+                                      playlistId: source.playlist?.id,
+                                      playlistName: source.title,
+                                    })
+                                : undefined
+                            }
+                            scheduleLine={
+                              source.playlist?.id ? playlistScheduleLineById.get(source.playlist.id) ?? null : null
+                            }
+                            playlistAiMenuSlot={rowAiMenuSlot}
                             leafUnifiedBar={leafBar}
                             onAddToPlaylistPress={leafBar ? () => setAddToPlaylistLeaf(source) : undefined}
                           />
@@ -3894,6 +3919,9 @@ function SourceRow({
   onPlaylistEntityPlay,
   leafUnifiedBar = false,
   onAddToPlaylistPress,
+  onSchedulePress,
+  scheduleLine,
+  playlistAiMenuSlot,
 }: {
   source: UnifiedSource;
   isFavorite?: boolean;
@@ -3912,6 +3940,12 @@ function SourceRow({
   onPlaylistEntityPlay?: () => void;
   leafUnifiedBar?: boolean;
   onAddToPlaylistPress?: () => void;
+  /** Clock action — opens the day/hour schedule window (edit when already scheduled). */
+  onSchedulePress?: () => void;
+  /** Compact "when it plays" line under the title when the playlist is scheduled. */
+  scheduleLine?: string | null;
+  /** ⋯ AI tools / send-to-playlist menu (parity with the grid cards). */
+  playlistAiMenuSlot?: React.ReactNode;
 }) {
   const { t } = useTranslations();
   const { playSource, stop, pause, currentSource } = usePlayback();
@@ -4060,8 +4094,19 @@ function SourceRow({
         ) : undefined
       }
       titleSlot={
-        <span className="library-text-title font-medium tracking-tight leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
-          {source.title}
+        <span className="min-w-0">
+          <span className="library-text-title block font-medium tracking-tight leading-snug [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
+            {source.title}
+          </span>
+          {scheduleLine ? (
+            <span className="mt-0.5 flex items-center gap-1 text-[10px] font-medium leading-snug text-[#6cb2ff]">
+              <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              <span className="min-w-0 truncate">{scheduleLine}</span>
+            </span>
+          ) : null}
         </span>
       }
       metaSlot={
@@ -4125,20 +4170,40 @@ function SourceRow({
         },
       }}
       controlsSlot={
-        <LibrarySourceItemActions
-          source={source}
-          onPlay={() => playFn(source)}
-          isActive={active}
-          onStop={stopFn}
-          onPause={pauseFn}
-          libraryDeckChrome
-          compact
-          actionLayout={leafUnifiedBar ? "leaf" : "default"}
-          onAddToPlaylistPress={leafUnifiedBar ? onAddToPlaylistPress : undefined}
-          onShareOpen={() => setShareOpen(true)}
-          onDeletePress={() => setDeleteOpen(true)}
-          showLibraryDelete={showDeleteControl}
-        />
+        <>
+          {onSchedulePress ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSchedulePress();
+              }}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[color:var(--lib-text-secondary)] transition-colors hover:bg-white/[0.1] hover:text-[#7db8ff]"
+              title="Schedule playlist"
+              aria-label="Schedule playlist"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            </button>
+          ) : null}
+          {playlistAiMenuSlot}
+          <LibrarySourceItemActions
+            source={source}
+            onPlay={() => playFn(source)}
+            isActive={active}
+            onStop={stopFn}
+            onPause={pauseFn}
+            libraryDeckChrome
+            compact
+            actionLayout={leafUnifiedBar ? "leaf" : "default"}
+            onAddToPlaylistPress={leafUnifiedBar ? onAddToPlaylistPress : undefined}
+            onShareOpen={() => setShareOpen(true)}
+            onDeletePress={() => setDeleteOpen(true)}
+            showLibraryDelete={showDeleteControl}
+          />
+        </>
       }
     />
     {shareOpen ? (

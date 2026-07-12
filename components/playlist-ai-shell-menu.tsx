@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type AiMode = "similar" | "refine" | "expand";
@@ -49,6 +49,18 @@ export function PlaylistAiShellMenu({
 
   useEffect(() => { setMounted(true); }, []);
 
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+
   useEffect(() => {
     if (!refineOpen) return;
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setRefineOpen(false); };
@@ -90,21 +102,51 @@ export function PlaylistAiShellMenu({
 
   return (
     <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
-      <details className="group relative">
-        <summary
-          className="list-none cursor-pointer rounded-md p-0.5 text-[color:var(--lib-text-secondary)] transition-colors hover:bg-[color:var(--lib-surface-card-hover)] hover:text-cyan-200 [&::-webkit-details-marker]:hidden"
-          aria-label={`AI playlist tools${playlistName ? ` for ${playlistName}` : ""}`}
+      {/* Controlled trigger + PORTALED dropdown — cards clip overflow, so the
+          menu must render on document.body to float above everything. */}
+      <button
+        type="button"
+        ref={menuBtnRef}
+        onClick={() => {
+          if (menuOpen) {
+            setMenuOpen(false);
+            return;
+          }
+          const r = menuBtnRef.current?.getBoundingClientRect();
+          if (r) {
+            setMenuPos({
+              top: Math.min(r.bottom + 4, window.innerHeight - 200),
+              left: Math.max(8, Math.min(r.right - 176, window.innerWidth - 184)),
+            });
+          }
+          setMenuOpen(true);
+        }}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        aria-label={`AI playlist tools${playlistName ? ` for ${playlistName}` : ""}`}
+        className="list-none cursor-pointer rounded-md p-0.5 text-[color:var(--lib-text-secondary)] transition-colors hover:bg-white/[0.12] hover:text-white"
+      >
+        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold">
+          ⋯
+        </span>
+      </button>
+      {mounted && menuOpen && menuPos
+        ? createPortal(
+        <div className="fixed inset-0 z-[9970]" onClick={() => setMenuOpen(false)}>
+        <div
+          role="menu"
+          style={{ top: menuPos.top, left: menuPos.left }}
+          onClick={(e) => e.stopPropagation()}
+          className="fixed z-[9975] min-w-[11rem] overflow-hidden rounded-xl border border-white/[0.1] bg-[#141418] py-1 text-[11px] shadow-[0_12px_32px_rgba(0,0,0,0.55)]"
         >
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-white/10 text-xs font-bold">
-            ⋯
-          </span>
-        </summary>
-        <div className="absolute right-0 z-30 mt-1 min-w-[11rem] overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950/98 py-1 text-[11px] shadow-xl backdrop-blur-sm">
           <button
             type="button"
             disabled={busy != null}
             className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
-            onClick={() => void run("similar")}
+            onClick={() => {
+              setMenuOpen(false);
+              void run("similar");
+            }}
           >
             {busy === "similar" ? "…" : "Create similar"}
           </button>
@@ -113,6 +155,7 @@ export function PlaylistAiShellMenu({
             disabled={busy != null}
             className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
             onClick={() => {
+              setMenuOpen(false);
               setRefineDraft("");
               setRefineOpen(true);
             }}
@@ -123,25 +166,33 @@ export function PlaylistAiShellMenu({
             type="button"
             disabled={busy != null}
             className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
-            onClick={() => void run("expand")}
+            onClick={() => {
+              setMenuOpen(false);
+              void run("expand");
+            }}
           >
             {busy === "expand" ? "…" : "Expand to 50 tracks"}
           </button>
           {onSendToPlaylist && (
             <>
-              <div className="my-1 border-t border-slate-700/60" />
+              <div className="my-1 border-t border-white/[0.08]" />
               <button
                 type="button"
                 disabled={busy != null}
-                className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
-                onClick={() => onSendToPlaylist()}
+                className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-white/[0.07] disabled:opacity-45"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onSendToPlaylist();
+                }}
               >
                 Send to playlist
               </button>
             </>
           )}
         </div>
-      </details>
+        </div>,
+        document.body)
+        : null}
 
       {/* Centered modal — no backdrop darkening */}
       {mounted && refineOpen
