@@ -1,7 +1,7 @@
 # SyncBiz — Project State (Claude working map)
 
 > Read this FIRST instead of scanning files. Update it after every meaningful change.
-> Last updated: 2026-07-12.
+> Last updated: 2026-07-13.
 
 ## What this app is
 Business media player: Next.js 16 app (`app/`, `components/`, `lib/`) + standalone WS server (`server/`, port 3001) + Electron desktop player (`desktop/`, MPV). DB = PostgreSQL/Prisma. Auth cookie `syncbiz-session`. Main workspace route: `/sources` (rendered by `SourcesManager` via `app/(app)/(workspace)/layout.tsx`; the page itself is empty).
@@ -33,7 +33,7 @@ Business media player: Next.js 16 app (`app/`, `components/`, `lib/`) + standalo
 - **`components/dj-creator-hub-panel.tsx`** — DJ AI playlists panel (clean language; list rows; white Play pill / ghost Open).
 - **`components/playlist-ai-shell-menu.tsx`** — the ⋯ menu (line ~102 dropdown is `absolute` INSIDE the card → gets clipped by card overflow-hidden. KNOWN BUG, fix = portal/fixed).
 - **`components/app-shell.tsx` (~1.7k — NEVER read whole)** — header: clock chip · MASTER/STANDALONE (`HeaderDeviceIndicators`; duplication fixed) · agents chip · avatar · fullscreen · gear · **desktop download at far right**. Media routes lock page scroll (`lg:h-screen lg:overflow-hidden` chain down to sources-manager grid; inner panes scroll).
-- **Search**: `components/library-input-area.tsx` — ONE unified input (ffda5dd) living inside the command rail in sources-manager (between Favorites and Guest; search `library-sources-input-shell`). `looksLikeIngestText` routes links (YouTube/Spotify/radio/local path) to ingest on Enter/paste; text goes to search. Results dropdown Spotify-style: catalog FIRST with "Top result" big card + Songs list (search `Top result`), then library/My Music/radio/YouTube; shared consts `RESULT_ROW/THUMB/TITLE/META/PLAY_BTN/GHOST_BTN` + `ResultPlatformLogo`; no letter chips. `lib/search-service.ts` merges `/api/catalog/smart-search` (keywords/genres/moods, rows w/ artist·duration·views) with plain title search.
+- **Search**: `components/library-input-area.tsx` — ONE unified input (ffda5dd) living inside the command rail in sources-manager (between Favorites and Guest; search `library-sources-input-shell`). `looksLikeIngestText` routes links (YouTube/Spotify/radio/local path) to ingest on Enter/paste; text goes to search. Results dropdown Spotify-style: catalog FIRST with "Top result" big card + Songs list (search `Top result`), then library/My Music/radio/YouTube; shared consts `RESULT_ROW/THUMB/TITLE/META/PLAY_BTN/GHOST_BTN` + `ResultPlatformLogo`; no letter chips. Dropdown = body portal anchored to the CENTER pane rect (`closest(".library-list-shell")` in `updateResultsRect`), maxHeight to viewport bottom (121353c). Play buttons = bare white triangle, white circle only on hover (`RESULT_PLAY_BTN`). Behavior: YT-result Play = save to library + play; "Add to library" = save only; catalog Play = ephemeral preview (`catalog-preview-` UnifiedSource, no DB write); library-row "Open" = legacy `router.push("/sources")` (weak — candidate: open item in center). `lib/search-service.ts` merges `/api/catalog/smart-search` (keywords/genres/moods, rows w/ artist·duration·views) with plain title search.
 - **Card CSS**: end of `app/globals.css` — blocks: "Full-bleed library cards" (fog overlay, bare icons circle-on-hover), "List rows — same language", "Song grid — frameless rounded rectangles" (16:9, 4-per-row lg+, stats strip `library-card-meta-footer` quiet single line, genre hidden in grid).
 
 ## How to verify (saves tokens — do this, not guessing)
@@ -41,6 +41,9 @@ Business media player: Next.js 16 app (`app/`, `components/`, `lib/`) + standalo
 - Playwright login: `test@syncbiz.com` / `test123` (fill `#email`,`#password`, wait `/api/auth/login` response). **Always launch chromium with `--autoplay-policy=no-user-gesture-required`** — without it YT playback "bugs" are FALSE POSITIVES (deck crossfade freeze incident).
 - Test account has 2 YT singles + small playlists + 18 DJ-AI e2e playlists. No local files.
 - `npx tsc --noEmit` (root covers app only). ESLint: pre-existing errors in sources-manager/app-shell — only check touched files; rule `react-hooks/set-state-in-effect` is enforced.
+
+## MASTER playing-lock (server — verified 2026-07-13, no change needed)
+`server/index.ts` `getMasterPlayingLockId`: if the branch's current MASTER (ANY type incl. web, ws open) reports `status === "playing"`, every REGISTER (line ~735) and SET_MASTER (~1046) from another device is forced to CONTROL (`MASTER_LOCKED_PLAYING`, logged `register_denied_playing_lock`). Exempt: streamers (higher priority) + mobile. So a playing business player CANNOT be demoted by opening the desktop app. Browser demotion point if it ever did flip: `onDeviceMode` in `lib/device-player-context.tsx` → `stopForControlHandoff()`. Server changes require WS server restart.
 
 ## State / recent history (newest first)
 - DJ hub restyled clean; platform logo shadowless; stats strip restored on grid fog. (aa39d3a)
