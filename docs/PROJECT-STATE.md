@@ -10,6 +10,7 @@ Business media player: Next.js 16 app (`app/`, `components/`, `lib/`) + standalo
 - Tokens in `app/globals.css` `:root`: `--sb-bg #0a0a0c`, surfaces `white/4–7%`, borders `white/8–14%`, text `#f5f5f7 / #a1a1a6 / #6e6e73`, accent **#0a84ff** (soft tint for active), on-air green #30d158, danger #ff453a.
 - NO neon/glow/text-shadow/pulse. Primary play = **solid white circle, dark glyph**. Buttons: quiet surface or bare icon with circle-on-hover. Active toggle = blue tint. Global smooth press (`button:active { scale: .97 }`) + 150ms color transitions (in globals near `body`).
 - Nav rails: plain grey text rows → white when active/hover, tiny stroke icons (`LibraryNavGlyph` in sources-manager).
+- **Motion system** (end of globals.css, "Motion — presentation-grade"): shared entrance classes — `sb-anim-overlay-down` (search takeover), `sb-anim-rise` (center pane view switches — keyed div in sources-manager `key={viewMode|selection...}`; also roots of DJ hub / Jingles / MyMusic / EditCurrent panels + embedded editor), `sb-anim-pop` (⋯ menus), `sb-anim-modal` (schedule + AI-refine modals). One easing `cubic-bezier(0.22,1,0.36,1)`; `prefers-reduced-motion` disables. Apply these to ANY new opening surface.
 
 ## Key files & anchors (search by SYMBOL, not line numbers)
 - **`components/sources-manager.tsx` (~3.9k lines — NEVER read whole)**
