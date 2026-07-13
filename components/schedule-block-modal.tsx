@@ -88,6 +88,10 @@ export function ScheduleBlockModal({
   const { t } = useTranslations();
   const titleId = useId();
   const [mounted, setMounted] = useState(false);
+  /* Exit presence: dialog stays mounted while `sb-anim-modal-out` plays after
+     `open` flips false (render-phase state adjustment). */
+  const [present, setPresent] = useState(false);
+  if (open && !present) setPresent(true);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -282,7 +286,7 @@ export function ScheduleBlockModal({
     }
   }
 
-  if (!mounted || !open) return null;
+  if (!mounted || !present) return null;
 
   const daysOptions = [
     { value: 0, label: t.sun },
@@ -296,13 +300,20 @@ export function ScheduleBlockModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+      className={`fixed inset-0 z-[200] flex items-center justify-center p-4 ${open ? "" : "pointer-events-none"}`}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
     >
       <button type="button" className="absolute inset-0 bg-transparent" aria-label={t.cancel} onClick={onClose} />
-      <div className="sb-anim-modal relative w-full max-w-lg">
+      <div
+        className={`${open ? "sb-anim-modal" : "sb-anim-modal-out"} relative w-full max-w-lg`}
+        onAnimationEnd={(e) => {
+          if (!open && e.target === e.currentTarget && e.animationName === "sb-modal-dismiss") {
+            setPresent(false);
+          }
+        }}
+      >
         <ConsoleSurface>
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>

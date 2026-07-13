@@ -507,6 +507,12 @@ export function LibraryInputArea({
   useEffect(() => {
     setResultsMounted(true);
   }, []);
+  /* Exit presence: keep the overlay mounted while `sb-anim-overlay-up` plays,
+     unmount on animationend. Render-phase state adjustment (React-sanctioned)
+     — the lint rule forbids setState in effects, not during render. */
+  const resultsOpen = showResults && hasQuery;
+  const [resultsPresent, setResultsPresent] = useState(false);
+  if (resultsOpen && !resultsPresent) setResultsPresent(true);
   const [resultsRect, setResultsRect] = useState<{ top: number; left: number; width: number } | null>(null);
   useEffect(() => {
     if (!showResults || !hasQuery) return;
@@ -2085,7 +2091,7 @@ export function LibraryInputArea({
       ) : null}
 
       {/* Search results dropdown */}
-      {resultsMounted && showResults && hasQuery && resultsRect ? createPortal(
+      {resultsMounted && resultsPresent && resultsRect ? createPortal(
         <div
           ref={resultsPortalRef}
           style={{
@@ -2094,7 +2100,12 @@ export function LibraryInputArea({
             width: resultsRect.width,
             maxHeight: `calc(100vh - ${resultsRect.top + 12}px)`,
           }}
-          className="sb-anim-overlay-down fixed z-[9960] overflow-y-auto rounded-2xl border border-white/[0.08] bg-[#0d0d11] shadow-[0_24px_64px_rgba(0,0,0,0.7)]"
+          className={`${resultsOpen ? "sb-anim-overlay-down" : "sb-anim-overlay-up"} fixed z-[9960] overflow-y-auto rounded-2xl border border-white/[0.08] bg-[#0d0d11] shadow-[0_24px_64px_rgba(0,0,0,0.7)]`}
+          onAnimationEnd={(e) => {
+            if (!resultsOpen && e.target === e.currentTarget && e.animationName === "sb-overlay-ascend") {
+              setResultsPresent(false);
+            }
+          }}
         >
           {searching && !hasResults ? (
             <div className="flex items-center justify-center gap-2 py-6 text-sm text-slate-400">

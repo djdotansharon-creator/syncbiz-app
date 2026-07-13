@@ -52,6 +52,12 @@ export function PlaylistAiShellMenu({
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  /* Exit presence: menu/modal stay mounted while the exit animation plays
+     (render-phase state adjustment — allowed; effects-only lint rule unaffected). */
+  const [menuPresent, setMenuPresent] = useState(false);
+  if (menuOpen && !menuPresent) setMenuPresent(true);
+  const [refinePresent, setRefinePresent] = useState(false);
+  if (refineOpen && !refinePresent) setRefinePresent(true);
   useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -130,14 +136,22 @@ export function PlaylistAiShellMenu({
           ⋯
         </span>
       </button>
-      {mounted && menuOpen && menuPos
+      {mounted && menuPresent && menuPos
         ? createPortal(
-        <div className="fixed inset-0 z-[9970]" onClick={() => setMenuOpen(false)}>
+        <div
+          className={`fixed inset-0 z-[9970] ${menuOpen ? "" : "pointer-events-none"}`}
+          onClick={() => setMenuOpen(false)}
+        >
         <div
           role="menu"
           style={{ top: menuPos.top, left: menuPos.left }}
           onClick={(e) => e.stopPropagation()}
-          className="sb-anim-pop fixed z-[9975] min-w-[11rem] overflow-hidden rounded-xl border border-white/[0.1] bg-[#141418] py-1 text-[11px] shadow-[0_12px_32px_rgba(0,0,0,0.55)]"
+          onAnimationEnd={(e) => {
+            if (!menuOpen && e.target === e.currentTarget && e.animationName === "sb-pop-out") {
+              setMenuPresent(false);
+            }
+          }}
+          className={`${menuOpen ? "sb-anim-pop" : "sb-anim-pop-out"} fixed z-[9975] min-w-[11rem] overflow-hidden rounded-xl border border-white/[0.1] bg-[#141418] py-1 text-[11px] shadow-[0_12px_32px_rgba(0,0,0,0.55)]`}
         >
           <button
             type="button"
@@ -195,15 +209,20 @@ export function PlaylistAiShellMenu({
         : null}
 
       {/* Centered modal — no backdrop darkening */}
-      {mounted && refineOpen
+      {mounted && refinePresent
         ? createPortal(
             <div
               className="fixed inset-0 z-[9990] flex items-center justify-center"
               style={{ pointerEvents: "none" }}
             >
               <div
-                className="sb-anim-modal pointer-events-auto mx-4 w-full max-w-md rounded-xl border border-slate-600 bg-slate-950 p-4 text-slate-100 shadow-[0_0_0_1px_rgba(100,116,139,0.25),0_32px_64px_rgba(0,0,0,0.7)]"
+                className={`${refineOpen ? "sb-anim-modal pointer-events-auto" : "sb-anim-modal-out"} mx-4 w-full max-w-md rounded-xl border border-slate-600 bg-slate-950 p-4 text-slate-100 shadow-[0_0_0_1px_rgba(100,116,139,0.25),0_32px_64px_rgba(0,0,0,0.7)]`}
                 onClick={(e) => e.stopPropagation()}
+                onAnimationEnd={(e) => {
+                  if (!refineOpen && e.target === e.currentTarget && e.animationName === "sb-modal-dismiss") {
+                    setRefinePresent(false);
+                  }
+                }}
               >
                 <p className="text-sm font-semibold text-white">Improve with AI</p>
                 <p className="mt-1 text-[11px] text-slate-400">Adds a refined copy — the original playlist is unchanged.</p>
