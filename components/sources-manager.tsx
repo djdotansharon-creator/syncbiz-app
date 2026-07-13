@@ -2620,7 +2620,7 @@ function SourcesManagerInner({
 
         <div className="library-list-shell row-start-1 min-w-0 self-start overflow-hidden rounded-2xl p-2.5 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-stretch lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:px-3 xl:px-3">
           {routeEmbedded ? (
-            <div className="flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto p-3 sm:p-4">
+            <div className="sb-anim-rise flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto p-3 sm:p-4">
               <div className="flex shrink-0 justify-end">
                 <button
                   type="button"
@@ -2800,7 +2800,10 @@ function SourcesManagerInner({
             </div>
           </div>
 
-          <div className="mt-2 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1 lg:max-h-none lg:flex-1 lg:min-h-0">
+          <div
+            key={`${viewMode}|${selection.type}|${"id" in selection ? selection.id : ""}|${"key" in selection ? selection.key : ""}`}
+            className="sb-anim-rise mt-2 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1 lg:max-h-none lg:flex-1 lg:min-h-0"
+          >
           {displaySources.length === 0 ? (
             <div className="library-empty-state relative overflow-hidden rounded-2xl py-20 text-center">
               <div className="library-empty-icon-plate mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl">

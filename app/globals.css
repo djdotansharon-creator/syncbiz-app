@@ -2924,3 +2924,46 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   padding: 1.9rem 0.7rem 0.45rem !important;
   gap: 0.25rem !important;
 }
+
+/* ── Motion — presentation-grade open transitions ──────────────────────────
+   Shared entrance animations for anything that OPENS: overlays descend,
+   panes rise, menus pop, modals settle. One easing everywhere (Apple-style
+   decelerate) so every surface feels like part of the same product. */
+@keyframes sb-overlay-descend {
+  from { opacity: 0; transform: translateY(-16px) scale(0.99); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes sb-pane-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes sb-pop-in {
+  from { opacity: 0; transform: translateY(-5px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes sb-modal-settle {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+.sb-anim-overlay-down {
+  animation: sb-overlay-descend 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.sb-anim-rise {
+  animation: sb-pane-rise 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.sb-anim-pop {
+  animation: sb-pop-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.sb-anim-modal {
+  animation: sb-modal-settle 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-anim-overlay-down,
+  .sb-anim-rise,
+  .sb-anim-pop,
+  .sb-anim-modal {
+    animation: none;
+  }
+}

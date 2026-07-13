@@ -78,7 +78,7 @@ export function DjCreatorHubPanel({
 
   return (
     <div
-      className="flex min-h-[min(480px,calc(100vh-14rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0c0c10]/95"
+      className="sb-anim-rise flex min-h-[min(480px,calc(100vh-14rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0c0c10]/95"
       dir={dir}
     >
       <header className="flex shrink-0 items-start justify-between gap-3 border-b border-white/[0.06] px-4 py-3">

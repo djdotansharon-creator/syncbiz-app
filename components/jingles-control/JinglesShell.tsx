@@ -1135,7 +1135,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
   const editingPad = editPadId ? pads.find((p) => p.id === editPadId) ?? null : null;
 
   return (
-    <div className="jc-workspace-panel">
+    <div className="jc-workspace-panel sb-anim-rise">
       {/* ── Header: title + tiny status LEDs + close ───────────────────── */}
       <header className="jc-ws-header">
         <div className="jc-ws-header-title">

@@ -2094,7 +2094,7 @@ export function LibraryInputArea({
             width: resultsRect.width,
             maxHeight: `calc(100vh - ${resultsRect.top + 12}px)`,
           }}
-          className="fixed z-[9960] overflow-y-auto rounded-2xl border border-white/[0.08] bg-[#0d0d11] shadow-[0_24px_64px_rgba(0,0,0,0.7)]"
+          className="sb-anim-overlay-down fixed z-[9960] overflow-y-auto rounded-2xl border border-white/[0.08] bg-[#0d0d11] shadow-[0_24px_64px_rgba(0,0,0,0.7)]"
         >
           {searching && !hasResults ? (
             <div className="flex items-center justify-center gap-2 py-6 text-sm text-slate-400">

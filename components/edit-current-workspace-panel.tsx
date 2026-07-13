@@ -41,7 +41,7 @@ export function EditCurrentWorkspacePanel({ target, onClose }: Props) {
   );
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto p-3 sm:p-4">
+    <div className="sb-anim-rise flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto p-3 sm:p-4">
       {target.kind === "playlist" ? (
         <EditPlaylistForm
           id={target.id}

@@ -137,7 +137,7 @@ export function PlaylistAiShellMenu({
           role="menu"
           style={{ top: menuPos.top, left: menuPos.left }}
           onClick={(e) => e.stopPropagation()}
-          className="fixed z-[9975] min-w-[11rem] overflow-hidden rounded-xl border border-white/[0.1] bg-[#141418] py-1 text-[11px] shadow-[0_12px_32px_rgba(0,0,0,0.55)]"
+          className="sb-anim-pop fixed z-[9975] min-w-[11rem] overflow-hidden rounded-xl border border-white/[0.1] bg-[#141418] py-1 text-[11px] shadow-[0_12px_32px_rgba(0,0,0,0.55)]"
         >
           <button
             type="button"
@@ -202,7 +202,7 @@ export function PlaylistAiShellMenu({
               style={{ pointerEvents: "none" }}
             >
               <div
-                className="pointer-events-auto mx-4 w-full max-w-md rounded-xl border border-slate-600 bg-slate-950 p-4 text-slate-100 shadow-[0_0_0_1px_rgba(100,116,139,0.25),0_32px_64px_rgba(0,0,0,0.7)]"
+                className="sb-anim-modal pointer-events-auto mx-4 w-full max-w-md rounded-xl border border-slate-600 bg-slate-950 p-4 text-slate-100 shadow-[0_0_0_1px_rgba(100,116,139,0.25),0_32px_64px_rgba(0,0,0,0.7)]"
                 onClick={(e) => e.stopPropagation()}
               >
                 <p className="text-sm font-semibold text-white">Improve with AI</p>

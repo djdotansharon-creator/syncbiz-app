@@ -975,7 +975,7 @@ export function MyMusicLibraryWorkspacePanel({
   const listApiMissing = isElectronWithBridge() && !canListMusicLibrary();
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 bg-slate-950 p-4 sm:p-5">
+    <div className="sb-anim-rise flex h-full min-h-0 flex-col gap-4 bg-slate-950 p-4 sm:p-5">
       <div className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-800/70 pb-3">
         <h2 className="text-xl font-semibold tracking-tight text-slate-100 sm:text-2xl">My Music Library</h2>
         <button

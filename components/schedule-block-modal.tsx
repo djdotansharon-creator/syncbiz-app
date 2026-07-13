@@ -302,7 +302,7 @@ export function ScheduleBlockModal({
       aria-labelledby={titleId}
     >
       <button type="button" className="absolute inset-0 bg-transparent" aria-label={t.cancel} onClick={onClose} />
-      <div className="relative w-full max-w-lg">
+      <div className="sb-anim-modal relative w-full max-w-lg">
         <ConsoleSurface>
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
