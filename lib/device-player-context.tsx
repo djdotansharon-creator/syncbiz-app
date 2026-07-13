@@ -99,13 +99,30 @@ function isEligibleBrowserPlayerRoute(pathname: string): boolean {
 }
 
 /**
+ * Browser: operator pages that must NEVER own local branch audio even as MASTER
+ * (`/settings`, `/library`) — the exclusion used by the MASTER exception below.
+ */
+function isBrowserNonExecutingRoute(pathname: string): boolean {
+  if (pathname === "/settings" || pathname.startsWith("/settings/")) return true;
+  if (pathname === "/library" || pathname.startsWith("/library/")) return true;
+  return false;
+}
+
+/**
  * Browser: operator pages that need a branch `device` socket (MASTER/CONTROL in Settings, MY LINK in
  * Sources rail, etc.) but must not own local branch audio — gated separately via `isEligibleBrowserPlayerRoute`.
+ *
+ * `/schedules` and `/radio` are included so the SAME tab keeps its device socket (and MASTER
+ * lease) while the operator moves between top-nav tabs. Before this, switching to Schedules/Radio
+ * closed the socket, dropped the lease into its 90s grace window, and made the header MASTER/
+ * STANDALONE chips vanish — the header must stay stable across tabs. Local audio for a MASTER
+ * browser on these routes stays allowed via the MASTER exception (see `isBrowserNonExecutingRoute`).
  */
 function isBrowserBranchControlsOnlyRoute(pathname: string): boolean {
-  if (pathname === "/settings" || pathname.startsWith("/settings/")) return true;
+  if (isBrowserNonExecutingRoute(pathname)) return true;
   if (pathname === "/sources" || pathname.startsWith("/sources/")) return true;
-  if (pathname === "/library" || pathname.startsWith("/library/")) return true;
+  if (pathname === "/schedules" || pathname.startsWith("/schedules/")) return true;
+  if (pathname === "/radio" || pathname.startsWith("/radio/")) return true;
   return false;
 }
 
@@ -585,14 +602,16 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // silently blocked even though they are the sole MASTER device. CONTROL devices are still
   // blocked on all routes regardless of this change.
   //
-  // The MASTER exception explicitly does NOT cover branch-controls-only routes (`/settings`,
-  // `/library`): those open a device socket but must stay non-executing (see docstrings above and
-  // on `isBrowserBranchControlsOnlyRoute`). `/sources` remains allowed via the eligible-route list.
+  // The MASTER exception explicitly does NOT cover non-executing routes (`/settings`,
+  // `/library`): those open a device socket but must stay non-executing (see docstrings above).
+  // `/sources` remains allowed via the eligible-route list; `/schedules` and `/radio` are
+  // controls-only for the SOCKET but a MASTER browser may keep playing on them (tab switches
+  // while music is running must never gate playback).
   deviceModeAllowsLocalPlayback.current =
     (isMobileLocalPlayback || !isActive || effectiveDeviceMode === "MASTER") &&
     (!isBrowserShell ||
       isEligibleBrowserPlayerRoute(pathname) ||
-      (effectiveDeviceMode === "MASTER" && !isBrowserBranchControlsOnlyRoute(pathname)));
+      (effectiveDeviceMode === "MASTER" && !isBrowserNonExecutingRoute(pathname)));
 
   // Track CONTROL -> MASTER transition so adoption can complete even if mirrored state arrives a
   // moment later than the mode flip.
