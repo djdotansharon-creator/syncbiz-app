@@ -2947,16 +2947,16 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 }
 
 .sb-anim-overlay-down {
-  animation: sb-overlay-descend 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sb-overlay-descend 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .sb-anim-rise {
-  animation: sb-pane-rise 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sb-pane-rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .sb-anim-pop {
-  animation: sb-pop-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sb-pop-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .sb-anim-modal {
-  animation: sb-modal-settle 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sb-modal-settle 440ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* Exit counterparts — quicker than entrances (leaving should feel effortless).
@@ -2976,15 +2976,15 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 }
 
 .sb-anim-overlay-up {
-  animation: sb-overlay-ascend 220ms cubic-bezier(0.4, 0, 1, 1) both;
+  animation: sb-overlay-ascend 280ms cubic-bezier(0.4, 0, 1, 1) both;
   pointer-events: none;
 }
 .sb-anim-pop-out {
-  animation: sb-pop-out 150ms cubic-bezier(0.4, 0, 1, 1) both;
+  animation: sb-pop-out 190ms cubic-bezier(0.4, 0, 1, 1) both;
   pointer-events: none;
 }
 .sb-anim-modal-out {
-  animation: sb-modal-dismiss 200ms cubic-bezier(0.4, 0, 1, 1) both;
+  animation: sb-modal-dismiss 240ms cubic-bezier(0.4, 0, 1, 1) both;
   pointer-events: none;
 }
 
