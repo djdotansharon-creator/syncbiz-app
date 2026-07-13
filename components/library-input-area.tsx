@@ -106,8 +106,9 @@ const RESULT_TITLE = "truncate text-[15px] font-semibold leading-snug text-[#f5f
 const RESULT_META = "mt-0.5 truncate text-xs text-[#a1a1a6]";
 const RESULT_SECTION_HEAD =
   "mb-1.5 px-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6e6e73]";
+/* Play = bare white triangle; the circle appears only on hover (fills white, glyph darkens) */
 const RESULT_PLAY_BTN =
-  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f5f5f7] text-[#111114] shadow-[0_2px_10px_-3px_rgba(0,0,0,0.6)] transition-colors hover:bg-white active:scale-95";
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#f5f5f7] transition-colors hover:bg-[#f5f5f7] hover:text-[#111114] hover:shadow-[0_2px_10px_-3px_rgba(0,0,0,0.6)] active:scale-95";
 const RESULT_GHOST_BTN =
   "inline-flex h-8 shrink-0 items-center justify-center rounded-full border border-white/[0.1] px-3 text-xs font-medium text-[#a1a1a6] transition-colors hover:border-white/[0.18] hover:bg-white/[0.06] hover:text-white";
 
@@ -510,11 +511,15 @@ export function LibraryInputArea({
   useEffect(() => {
     if (!showResults || !hasQuery) return;
     const update = () => {
-      const r = panelRef.current?.getBoundingClientRect();
-      if (!r) return;
-      const width = Math.min(Math.max(r.width, 720), window.innerWidth - 16);
-      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
-      setResultsRect({ top: r.bottom + 6, left, width });
+      const bar = panelRef.current?.getBoundingClientRect();
+      if (!bar) return;
+      /* Search takes over the whole CENTER pane (the player's control screen),
+         Spotify-style — anchor to the center column, not just the input. */
+      const center = panelRef.current?.closest(".library-list-shell")?.getBoundingClientRect();
+      const host = center ?? bar;
+      const width = Math.min(Math.max(host.width, 720), window.innerWidth - 16);
+      const left = Math.max(8, Math.min(host.left, window.innerWidth - width - 8));
+      setResultsRect({ top: bar.bottom + 8, left, width });
     };
     update();
     window.addEventListener("resize", update);
@@ -2083,8 +2088,13 @@ export function LibraryInputArea({
       {resultsMounted && showResults && hasQuery && resultsRect ? createPortal(
         <div
           ref={resultsPortalRef}
-          style={{ top: resultsRect.top, left: resultsRect.left, width: resultsRect.width }}
-          className="fixed z-[9960] max-h-[64vh] overflow-y-auto rounded-2xl border border-white/[0.08] bg-[#0d0d11] shadow-[0_24px_64px_rgba(0,0,0,0.7)]"
+          style={{
+            top: resultsRect.top,
+            left: resultsRect.left,
+            width: resultsRect.width,
+            maxHeight: `calc(100vh - ${resultsRect.top + 12}px)`,
+          }}
+          className="fixed z-[9960] overflow-y-auto rounded-2xl border border-white/[0.08] bg-[#0d0d11] shadow-[0_24px_64px_rgba(0,0,0,0.7)]"
         >
           {searching && !hasResults ? (
             <div className="flex items-center justify-center gap-2 py-6 text-sm text-slate-400">
@@ -2130,7 +2140,7 @@ export function LibraryInputArea({
                             <button
                               type="button"
                               onClick={() => void handlePlayCatalog(r)}
-                              className="absolute bottom-4 right-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-[#f5f5f7] text-[#111114] shadow-[0_6px_20px_-6px_rgba(0,0,0,0.7)] transition-all hover:bg-white active:scale-95"
+                              className="absolute bottom-4 right-4 inline-flex h-12 w-12 items-center justify-center rounded-full text-[#f5f5f7] transition-all hover:bg-[#f5f5f7] hover:text-[#111114] hover:shadow-[0_6px_20px_-6px_rgba(0,0,0,0.7)] active:scale-95"
                               title={t.playNow}
                               aria-label={t.playNow}
                             >
