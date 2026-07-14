@@ -374,18 +374,86 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   );
 
   const effectiveUserId = (userId ?? "").trim();
+
+  /* ── Playing-player protection (client mirror of the server's MASTER_LOCKED_PLAYING) ──
+     A tab that is actively PLAYING must never be silently wiped by a CONTROL flip.
+     The eject bug this fixes: the operator presses Play while the WS is still
+     registering (Railway auth can take 10+s); playback starts under the provisional
+     MASTER default; registration then answers with an initial CONTROL, which used to
+     stopForControlHandoff() — wiping player + queue — moments before MASTER arrived.
+     Instead, a playing tab re-claims MASTER once. The server grants it unless another
+     MASTER is genuinely playing (MASTER_LOCKED_PLAYING) or a priority device holds it —
+     those denials stop local audio via onMasterClaimDenied (one branch = one audio). */
+  const playStatusRef = useRef(playStatus);
+  useEffect(() => {
+    playStatusRef.current = playStatus;
+  }, [playStatus]);
+  const sendSetMasterRef = useRef<(() => void) | null>(null);
+  /* State (not just a ref) so `effectiveDeviceMode` re-renders as MASTER for the
+     whole reclaim window — the audio engine must never see the transient CONTROL
+     (a single CONTROL render unmounts the embedded players and playback dies
+     even though the session survives). */
+  const [masterReclaimInFlight, setMasterReclaimInFlight] = useState(false);
+  const masterReclaimInFlightRef = useRef(false);
+  const setMasterReclaim = useCallback((v: boolean) => {
+    masterReclaimInFlightRef.current = v;
+    setMasterReclaimInFlight(v);
+  }, []);
+
   const onDeviceMode = useCallback(
     (mode: DeviceMode) => {
       console.log("[SyncBiz Audit] Device mode change", {
         mode,
       });
+      if (mode === "MASTER") {
+        setMasterReclaim(false);
+        return;
+      }
       if (mode === "CONTROL" && !isMobileLocalPlayback) {
+        if (playStatusRef.current === "playing" && !masterReclaimInFlightRef.current) {
+          setMasterReclaim(true);
+          console.warn(
+            "[SyncBiz Audit] CONTROL while locally PLAYING — re-claiming MASTER instead of wiping (playing-player protection)",
+          );
+          sendSetMasterRef.current?.();
+          return;
+        }
+        setMasterReclaim(false);
         console.log("[SyncBiz Audit] CONTROL transition -> stopForControlHandoff (no stop-local)");
         stopForControlHandoff();
       }
     },
-    [stopForControlHandoff, isMobileLocalPlayback],
+    [stopForControlHandoff, isMobileLocalPlayback, setMasterReclaim],
   );
+
+  const onMasterClaimDenied = useCallback(
+    (reason: string) => {
+      const wasReclaiming = masterReclaimInFlightRef.current;
+      setMasterReclaim(false);
+      if (wasReclaiming && playStatusRef.current === "playing" && !isMobileLocalPlayback) {
+        console.warn(
+          `[SyncBiz Audit] MASTER re-claim denied (${reason}) — stopping local playback (another device owns branch audio)`,
+        );
+        stopForControlHandoff();
+      }
+    },
+    [stopForControlHandoff, isMobileLocalPlayback, setMasterReclaim],
+  );
+
+  /* Reclaim never resolved (message lost / server silent): fail safe after 10s —
+     drop the MASTER override; if still CONTROL and playing, stop to avoid double audio. */
+  useEffect(() => {
+    if (!masterReclaimInFlight) return;
+    const t = setTimeout(() => {
+      if (!masterReclaimInFlightRef.current) return;
+      setMasterReclaim(false);
+      if (playStatusRef.current === "playing") {
+        console.warn("[SyncBiz Audit] MASTER re-claim timed out — stopping local playback");
+        stopForControlHandoff();
+      }
+    }, 10_000);
+    return () => clearTimeout(t);
+  }, [masterReclaimInFlight, setMasterReclaim, stopForControlHandoff]);
   const onStateUpdate = useCallback((state: StationPlaybackState) => setMasterState(state), []);
   const onSecondaryDesktop = useCallback(() => setSecondaryDesktopModalOpen(true), []);
   const onGuestRecommendation = useCallback((rec: GuestRecommendationPayload) => setPendingGuestRecommendation(rec), []);
@@ -415,6 +483,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const {
     status,
     deviceMode,
+    modeAssigned,
     sendSetMaster,
     sendSetControl,
     sendState,
@@ -435,10 +504,16 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       onSecondaryDesktop,
       onGuestRecommendation,
       onAuthError,
+      onMasterClaimDenied,
       isDesktopApp: isElectronShell === true,
       isStreamerDevice,
     }
   );
+
+  // onDeviceMode is created before the WS hook returns sendSetMaster — bridge via ref.
+  useEffect(() => {
+    sendSetMasterRef.current = sendSetMaster;
+  }, [sendSetMaster]);
 
   const guestLink =
     typeof window !== "undefined" && sessionCode
@@ -447,9 +522,19 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
 
   // Use server truth when connected. During reconnect blips, keep last connected mode to avoid
   // CONTROL<->standalone oscillation during live handoff.
+  //
+  // Two guarded windows keep a PLAYING tab's engine alive (playing-player protection):
+  // 1. `!modeAssigned` — connected but the server hasn't sent SET_DEVICE_MODE yet; `deviceMode`
+  //    is still the useState default ("CONTROL"), not a decision. Acting on it unmounted the
+  //    embedded players mid-song when playback began before registration finished.
+  // 2. Reclaim in flight — server said CONTROL while we were playing; we answered SET_MASTER.
+  //    Hold MASTER until the server grants (SET_DEVICE_MODE MASTER), denies (onMasterClaimDenied
+  //    stops playback), or the 10s timeout fires. The engine never sees the transient CONTROL.
   const effectiveDeviceMode =
     status === "connected"
-      ? deviceMode
+      ? !modeAssigned || (deviceMode === "CONTROL" && masterReclaimInFlight)
+        ? (lastConnectedModeRef.current ?? "MASTER")
+        : deviceMode
       : (lastConnectedModeRef.current ?? "MASTER");
 
   const isBranchConnected = isActive && authLoaded && !!effectiveUserId && status === "connected";
@@ -467,10 +552,13 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // ────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (status === "connected") {
+    // Only record REAL server decisions: skip the pre-SET_DEVICE_MODE default and the
+    // reclaim window (recording their transient CONTROL would defeat the MASTER hold
+    // in `effectiveDeviceMode` above).
+    if (status === "connected" && modeAssigned && !(deviceMode === "CONTROL" && masterReclaimInFlight)) {
       lastConnectedModeRef.current = deviceMode;
     }
-  }, [status, deviceMode]);
+  }, [status, deviceMode, modeAssigned, masterReclaimInFlight]);
 
   // Dedicated streamer: reclaim MASTER after connect/reconnect when demoted (cabinet player must output audio).
   // Server assigns streamer priority on REGISTER/SET_MASTER; this covers reconnect blips only.

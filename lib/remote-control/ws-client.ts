@@ -40,6 +40,13 @@ export function useRemoteControlWs(
     onGuestRecommendation?: (recommendation: GuestRecommendationPayload) => void;
     /** Called when server returns auth error (e.g. 4005). Parent should refetch token. */
     onAuthError?: () => void;
+    /**
+     * Called when the server rejects this device's SET_MASTER with a non-fatal denial
+     * (MASTER_LOCKED_PLAYING / priority device holds MASTER). The playing-player
+     * protection in DevicePlayerProvider uses this to stop local audio instead of
+     * fighting a legitimately playing MASTER.
+     */
+    onMasterClaimDenied?: (reason: string) => void;
     /** True when running inside the Electron desktop shell. Sends branch_desktop_station intent so the server can prefer this device as MASTER over browser tabs. */
     isDesktopApp?: boolean;
     /** Dedicated GOtv / Android TV branch player (`/streamer`). Overrides tablet/mobile UA so this device can own MASTER. */
@@ -48,6 +55,13 @@ export function useRemoteControlWs(
 ) {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("CONTROL");
+  /**
+   * True once the server has sent this connection its real mode (SET_DEVICE_MODE).
+   * Between REGISTERED and the first SET_DEVICE_MODE, `deviceMode` is still the
+   * useState default ("CONTROL") — consumers must not act on it (the playing-player
+   * protection keeps the provisional mode until the server has actually decided).
+   */
+  const [modeAssigned, setModeAssigned] = useState(false);
   const [masterDeviceId, setMasterDeviceId] = useState<string | null>(null);
   const [hasExistingMaster, setHasExistingMaster] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -60,6 +74,7 @@ export function useRemoteControlWs(
   const onSecondaryDesktopRef = useRef(options?.onSecondaryDesktop);
   const onGuestRecommendationRef = useRef(options?.onGuestRecommendation);
   const onAuthErrorRef = useRef(options?.onAuthError);
+  const onMasterClaimDeniedRef = useRef(options?.onMasterClaimDenied);
   const deviceModeRef = useRef<DeviceMode>("CONTROL");
   statusRef.current = status;
   onCommandRef.current = onCommand;
@@ -69,6 +84,10 @@ export function useRemoteControlWs(
   onGuestRecommendationRef.current = options?.onGuestRecommendation;
   onAuthErrorRef.current = options?.onAuthError;
   deviceModeRef.current = deviceMode;
+  const optionsOnMasterClaimDenied = options?.onMasterClaimDenied;
+  useEffect(() => {
+    onMasterClaimDeniedRef.current = optionsOnMasterClaimDenied;
+  }, [optionsOnMasterClaimDenied]);
 
   const tryReconnect = () => {
     const ws = wsRef.current;
@@ -149,6 +168,7 @@ export function useRemoteControlWs(
           console.warn("[SyncBiz DIAG] SET_DEVICE_MODE", { role, mode: data.mode });
           deviceModeRef.current = data.mode;
           setDeviceMode(data.mode);
+          setModeAssigned(true);
           if ("masterDeviceId" in data && data.masterDeviceId) setMasterDeviceId(data.masterDeviceId);
           else if (data.mode === "MASTER") setMasterDeviceId(null);
           setHasExistingMaster(!!("secondaryDesktop" in data && data.secondaryDesktop));
@@ -183,10 +203,12 @@ export function useRemoteControlWs(
           // would re-register and potentially steal MASTER from the playing device.
           if (msg === "MASTER_LOCKED_PLAYING") {
             console.warn("[SyncBiz WS] SET_MASTER denied — live MASTER is playing (MASTER_LOCKED_PLAYING). Staying in CONTROL.");
+            onMasterClaimDeniedRef.current?.(msg);
             return;
           }
           if (/Dedicated player is currently MASTER|Streamer has branch audio priority/i.test(msg)) {
             console.warn("[SyncBiz WS] SET_MASTER denied — priority device holds MASTER:", msg);
+            onMasterClaimDeniedRef.current?.(msg);
             return;
           }
           if (/invalid|expired|token/i.test(msg)) {
@@ -205,6 +227,7 @@ export function useRemoteControlWs(
 
     ws.onclose = (closeEvent?: CloseEvent) => {
       setStatus("disconnected");
+      setModeAssigned(false);
       setMasterDeviceId(null);
       setHasExistingMaster(false);
       setSessionCode(null);
@@ -216,6 +239,7 @@ export function useRemoteControlWs(
       ws.close();
       wsRef.current = null;
       setStatus("disconnected");
+      setModeAssigned(false);
       setMasterDeviceId(null);
     };
   // DO NOT include `options?.authToken` (the full JWT string) in deps —
@@ -306,6 +330,7 @@ export function useRemoteControlWs(
     wsRef,
     sendState,
     deviceMode,
+    modeAssigned,
     sendSetMaster,
     sendSetControl,
     masterDeviceId,
