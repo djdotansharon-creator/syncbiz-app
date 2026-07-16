@@ -2232,6 +2232,17 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 .library-card-meta-item {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+}
+
+/* Icon+number stats (quieter than "32.7K views · 307 likes" words) */
+.library-card-meta-glyph {
+  width: 0.7rem;
+  height: 0.7rem;
+  flex-shrink: 0;
+  opacity: 0.75;
 }
 
 .library-card-meta-item--duration,
@@ -2998,5 +3009,20 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   .sb-anim-modal-out {
     /* near-zero, NOT none — unmount logic waits for animationend */
     animation-duration: 0.01ms !important;
+  }
+}
+
+/* ── Card actions appear on hover only (operator feedback: cards were crowded).
+   Keyboard focus reveals them too; touch devices (no hover) keep them visible. */
+@media (hover: hover) {
+  .library-source-card .library-card-actions-wrap {
+    opacity: 0;
+    transform: translateY(2px);
+    transition: opacity 180ms ease-out, transform 180ms ease-out;
+  }
+  .library-source-card:hover .library-card-actions-wrap,
+  .library-source-card:focus-within .library-card-actions-wrap {
+    opacity: 1;
+    transform: none;
   }
 }

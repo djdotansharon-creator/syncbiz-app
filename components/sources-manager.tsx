@@ -3608,34 +3608,7 @@ function SourcesManagerInner({
                   ];
                   return (
                     <>
-                      {rows.map((r) =>
-                        r.id === "user_playlists" ? (
-                          /* Your Playlists carries an inline "+" (create) — Spotify-style */
-                          <div key={r.id} className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => setSelection({ type: "library_view", id: r.id })}
-                              className={`${navCls(navViewActive(r.id))} min-w-0 flex-1`}
-                            >
-                              <span className="flex min-w-0 items-center gap-2.5">
-                                <LibraryNavGlyph kind={r.id as LibraryNavGlyphKind} />
-                                <span className="truncate">{r.label}</span>
-                              </span>
-                              <span className="text-xs tabular-nums">{r.count}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleCreatePlaylist()}
-                              title="Add playlist"
-                              aria-label="Add playlist"
-                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#6e6e73] transition-colors hover:bg-white/[0.08] hover:text-white"
-                            >
-                              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                                <path d="M12 5v14M5 12h14" />
-                              </svg>
-                            </button>
-                          </div>
-                        ) : (
+                      {rows.map((r) => (
                         <button
                           key={r.id}
                           type="button"
@@ -3648,8 +3621,7 @@ function SourcesManagerInner({
                           </span>
                           <span className="text-xs tabular-nums">{r.count}</span>
                         </button>
-                        ),
-                      )}
+                      ))}
                       <button
                         type="button"
                         onClick={() => {
@@ -3698,9 +3670,27 @@ function SourcesManagerInner({
           <div className="space-y-4">
             <DjCreatorAiShell drawerOpen={djCreatorOpen} onDrawerOpenChange={onDjCreatorOpenChange} />
             <section>
-              <p className="library-section-title px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
-                Your Playlists
-              </p>
+              <div className="flex items-center justify-between gap-2 px-2 pb-1 pt-1">
+                <p className="library-section-title m-0 text-[10px] font-semibold uppercase tracking-[0.16em]">
+                  Your Playlists
+                </p>
+                {/* Create lives HERE — next to the list it creates into (moved from the left nav "+") */}
+                <button
+                  type="button"
+                  onClick={() => void handleCreatePlaylist()}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full border border-white/[0.1] bg-white/[0.05] px-2.5 py-1 text-[10px] font-semibold text-[#a1a1a6] transition-colors duration-150 hover:border-white/[0.18] hover:bg-white/[0.09] hover:text-[#f5f5f7]"
+                >
+                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                  New playlist
+                </button>
+              </div>
+              {userPlaylistContainers.length === 0 ? (
+                <p className="m-0 px-2 py-2 text-[11px] leading-relaxed text-[#6e6e73]">
+                  Create a playlist, then add songs from anywhere in the library — drag them here or use a card&apos;s ＋ button.
+                </p>
+              ) : null}
               <div className="space-y-0.5">
                 {/* Compact rail list (cover · name · count · trash) — full view via the nav row */}
                 <div className="max-h-[60vh] space-y-0.5 overflow-y-auto pr-1">

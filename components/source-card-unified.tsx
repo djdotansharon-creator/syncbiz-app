@@ -570,7 +570,6 @@ export function SourceCard({
         }
         title={source.title}
         metaLine=""
-        titleAside={titleAsideNode}
       >
         <p className="library-card-genre-line m-0">
           <span className="library-card-genre-label">Genre</span>
@@ -585,7 +584,12 @@ export function SourceCard({
             <span className="min-w-0">{scheduleLine}</span>
           </p>
         ) : null}
-        <div className="library-card-actions-wrap">{sourceActions}</div>
+        <div className="library-card-actions-wrap flex items-center">
+          {sourceActions}
+          {/* Schedule · favorite · ⋯ live in the SAME hover bar, right-aligned —
+              the old title-side stack crowded the card (operator feedback). */}
+          <div className="library-card-aside-actions ms-auto flex shrink-0 items-center gap-0.5">{titleAsideNode}</div>
+        </div>
         {metaFooter ? <div className="library-card-stats-wrap">{metaFooter}</div> : null}
       </LibraryBrowseCardSurface>
       {shareOpen ? (
