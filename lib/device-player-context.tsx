@@ -399,6 +399,14 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     masterReclaimInFlightRef.current = v;
     setMasterReclaimInFlight(v);
   }, []);
+  /* Loop breaker: two devices that are BOTH locally playing can otherwise
+     ping-pong MASTER forever (each demotion answers with a re-claim, the server
+     alternates grants, SET_DEVICE_MODE storms and the deck UI blinks — the
+     "player flickers constantly" incident). A device may re-claim at most
+     MASTER_RECLAIM_MAX times per window; after that it accepts CONTROL. */
+  const MASTER_RECLAIM_MAX = 2;
+  const MASTER_RECLAIM_WINDOW_MS = 60_000;
+  const masterReclaimHistoryRef = useRef<number[]>([]);
 
   const onDeviceMode = useCallback(
     (mode: DeviceMode) => {
@@ -410,13 +418,32 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (mode === "CONTROL" && !isMobileLocalPlayback) {
-        if (playStatusRef.current === "playing" && !masterReclaimInFlightRef.current) {
-          setMasterReclaim(true);
-          console.warn(
-            "[SyncBiz Audit] CONTROL while locally PLAYING — re-claiming MASTER instead of wiping (playing-player protection)",
+        /* Electron: the desktop MAIN process owns branch audio (MPV) and has its
+           own device socket — the renderer must never fight over MASTER on its
+           behalf (a renderer re-claim can demote the station itself). Renderer
+           demotion falls through to the classic mirror handoff. */
+        const isElectronRenderer = typeof window !== "undefined" && "syncbizDesktop" in window;
+        if (
+          !isElectronRenderer &&
+          playStatusRef.current === "playing" &&
+          !masterReclaimInFlightRef.current
+        ) {
+          const now = Date.now();
+          masterReclaimHistoryRef.current = masterReclaimHistoryRef.current.filter(
+            (t) => now - t < MASTER_RECLAIM_WINDOW_MS,
           );
-          sendSetMasterRef.current?.();
-          return;
+          if (masterReclaimHistoryRef.current.length < MASTER_RECLAIM_MAX) {
+            masterReclaimHistoryRef.current.push(now);
+            setMasterReclaim(true);
+            console.warn(
+              "[SyncBiz Audit] CONTROL while locally PLAYING — re-claiming MASTER instead of wiping (playing-player protection)",
+            );
+            sendSetMasterRef.current?.();
+            return;
+          }
+          console.warn(
+            "[SyncBiz Audit] MASTER re-claim loop breaker — another device keeps winning; accepting CONTROL",
+          );
         }
         setMasterReclaim(false);
         console.log("[SyncBiz Audit] CONTROL transition -> stopForControlHandoff (no stop-local)");
