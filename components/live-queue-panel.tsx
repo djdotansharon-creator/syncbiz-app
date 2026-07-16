@@ -930,7 +930,7 @@ export function LiveQueuePanel() {
                       jumpToSessionTrack(i);
                     }
                   }}
-                  className={`queue-row group relative grid cursor-pointer select-none grid-cols-[2.25rem_minmax(0,1fr)_3.5rem_1.75rem] items-center gap-x-2 rounded-[5px] border px-2 py-2 leading-snug transition-colors focus:outline-none focus:ring-1 focus:ring-white/15 ${
+                  className={`queue-row group relative grid cursor-pointer select-none grid-cols-[3rem_minmax(0,1fr)_3.5rem_1.75rem] items-center gap-x-2.5 rounded-[7px] border px-2 py-1.5 leading-snug transition-colors focus:outline-none focus:ring-1 focus:ring-white/15 ${
                     isCurrent
                       ? "queue-row-current border-white/[0.08] bg-white/[0.04] text-slate-100"
                       : isNextInList
@@ -941,7 +941,7 @@ export function LiveQueuePanel() {
                   {isCurrent ? (
                     <span className="pointer-events-none absolute bottom-1 left-0 top-1 w-[2px] rounded-full bg-amber-500/70" aria-hidden />
                   ) : null}
-                  <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-md bg-slate-800/80 ring-1 ring-white/[0.06]">
+                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-slate-800/80 ring-1 ring-white/[0.06]">
                     {thumb ? (
                       <HydrationSafeImage src={thumb} alt="" className="h-full w-full object-cover" />
                     ) : (
@@ -960,13 +960,13 @@ export function LiveQueuePanel() {
                       ) : null}
                       <div className="min-w-0 flex-1 overflow-hidden">
                         <div className="queue-row-title-marquee flex w-max gap-12 whitespace-nowrap" title={title}>
-                          <span dir="auto" className="text-[13px] font-semibold leading-tight text-slate-100">{title}</span>
-                          <span dir="auto" aria-hidden className="text-[13px] font-semibold leading-tight text-slate-100">{title}</span>
+                          <span dir="auto" className="text-[14px] font-semibold leading-tight text-[#f5f5f7]">{title}</span>
+                          <span dir="auto" aria-hidden className="text-[14px] font-semibold leading-tight text-[#f5f5f7]">{title}</span>
                         </div>
                       </div>
                     </div>
                     {artistLine ? (
-                      <span dir="auto" className="mt-1 line-clamp-1 text-[11px] leading-snug text-slate-400/90">{artistLine}</span>
+                      <span dir="auto" className="mt-1 line-clamp-1 text-[12px] leading-snug text-[#a1a1a6]">{artistLine}</span>
                     ) : null}
                   </div>
                   <span className="shrink-0 text-right font-mono text-sm font-medium tabular-nums text-slate-500">

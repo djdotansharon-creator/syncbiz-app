@@ -3738,7 +3738,7 @@ function SourcesManagerInner({
                     >
                       <span
                         draggable={false}
-                        className="h-8 w-8 shrink-0 overflow-hidden rounded-md ring-1 ring-[color:var(--lib-border-thumb)] bg-[color:var(--lib-surface-card-art)]"
+                        className="h-12 w-12 shrink-0 overflow-hidden rounded-md ring-1 ring-[color:var(--lib-border-thumb)] bg-[color:var(--lib-surface-card-art)]"
                       >
                         {p.cover ? (
                           <HydrationSafeImage
@@ -3752,8 +3752,8 @@ function SourcesManagerInner({
                         )}
                       </span>
                       <span draggable={false} className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{p.label}</span>
-                        <span className="library-card-meta block text-[10px]">{p.itemCount} item</span>
+                        <span className="block truncate text-[13px] font-semibold text-[#f5f5f7]">{p.label}</span>
+                        <span className="block text-[11px] text-[#a1a1a6]">{p.itemCount} item</span>
                       </span>
                     </button>
                     <button

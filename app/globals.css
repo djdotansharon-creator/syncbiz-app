@@ -1899,17 +1899,29 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
 }
 
-/* Play — primary anchor (md/xl transport size) */
+/* Play — primary anchor: SOLID WHITE circle, dark glyph (deck language, big
+   and obvious — operator asked for controls anyone can hit with confidence). */
+.library-source-card .library-source-deck-actions button.h-9,
 .library-source-card .library-source-deck-actions button.h-11,
 .library-source-card .library-source-deck-actions button.h-12,
 .library-source-card .library-source-deck-actions button.h-14,
 .library-source-card .library-source-deck-actions button.h-16 {
   border-radius: 9999px !important;
-  border: 1px solid rgba(255, 255, 255, 0.11) !important;
-  background: rgba(255, 255, 255, 0.07) !important;
-  color: #e2e8f0 !important;
-  min-height: 2.5rem !important;
-  min-width: 2.5rem !important;
+  border: none !important;
+  background: #f5f5f7 !important;
+  color: #111114 !important;
+  min-height: 2.75rem !important;
+  min-width: 2.75rem !important;
+  box-shadow: 0 2px 12px -2px rgba(0, 0, 0, 0.65) !important;
+}
+.library-source-card .library-source-deck-actions button.h-9:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-11:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-12:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-14:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-16:hover:not(:disabled) {
+  background: #ffffff !important;
+  color: #111114 !important;
+  scale: 1.06 !important;
 }
 
 .library-source-card .library-source-deck-actions button.h-11:hover:not(:disabled),
@@ -3025,4 +3037,38 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
     opacity: 1;
     transform: none;
   }
+}
+
+/* ── Readability pass (operator: "big and clear, nothing faded") ─────────── */
+.library-source-card .sb-lbc-title {
+  font-size: 0.9rem !important;
+  font-weight: 600 !important;
+  color: #f5f5f7 !important;
+}
+.library-card-meta-footer {
+  color: #b9b9be;
+}
+.library-source-card-grid .library-card-meta-footer {
+  font-size: 11px !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+.library-card-meta-sep {
+  color: #8e8e93;
+}
+
+/* Play stays a SOLID WHITE circle even inside the bare-icons fog treatment —
+   it is THE primary action and must be unmistakable at a glance. */
+.library-source-card .library-source-deck-actions button.h-9,
+.library-source-card .library-source-deck-actions button.h-11 {
+  background: #f5f5f7 !important;
+  color: #111114 !important;
+  min-height: 2.75rem !important;
+  min-width: 2.75rem !important;
+  box-shadow: 0 2px 12px -2px rgba(0, 0, 0, 0.65) !important;
+}
+.library-source-card .library-source-deck-actions button.h-9:hover:not(:disabled),
+.library-source-card .library-source-deck-actions button.h-11:hover:not(:disabled) {
+  background: #ffffff !important;
+  color: #111114 !important;
+  scale: 1.06;
 }
