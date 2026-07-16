@@ -487,19 +487,20 @@ export function AudioPlayer() {
   const isDesktopMode = desktopMpvSnap !== null;
   /** Browser MASTER only — prewarm hidden YT containers + IFrame API; never on desktop MPV or CONTROL mirror. */
   const canPrewarmYoutubeEmbed = !isDesktopMode && !isControlMirror;
-  /* ── Video side panel (Spotify-style) — DISPLAY-ONLY. The audio engine IS the
-     YT iframe pair; opening the panel merely repositions their existing hidden
-     wrapper on screen. Zero playback-logic involvement; clicks never reach the
-     iframes (pointer-events-none) so YouTube's own UI can't pause the business. */
-  const [videoPanelOpen, setVideoPanelOpen] = useState(false);
+  /* ── Video dock (Spotify-style) — DISPLAY-ONLY, always on while YT plays.
+     The audio engine IS the YT iframe pair; the dock merely repositions their
+     existing hidden wrapper into the deck. Zero playback-logic involvement;
+     clicks never reach the iframes (pointer-events-none) so YouTube's own UI
+     can't pause the business. */
   const [videoActiveDeck, setVideoActiveDeck] = useState<DeckId>("A");
   useEffect(() => {
-    if (!videoPanelOpen) return;
+    /* Cheap always-on mirror of the audible deck (ref → state only on change);
+       drives the visual crossfade between deck videos during automix. */
     const id = setInterval(() => {
       setVideoActiveDeck((prev) => (prev === ytActiveDeckRef.current ? prev : ytActiveDeckRef.current));
-    }, 400);
+    }, 500);
     return () => clearInterval(id);
-  }, [videoPanelOpen]);
+  }, []);
   const [bufferedPercent, setBufferedPercent] = useState(0);
   const [isHoveringTimeline, setIsHoveringTimeline] = useState(false);
   const [hoverPercent, setHoverPercent] = useState(0);
@@ -4415,63 +4416,45 @@ export function AudioPlayer() {
       {/* Prewarm: hidden YT A/B decks stay mounted in browser MASTER so first URL skips container creation.
           When the video panel is open, THIS SAME wrapper docks bottom-right as a visible player —
           the iframes never remount, so audio is untouched. */}
-      {canPrewarmYoutubeEmbed ? (
-        <div
-          className={
-            videoPanelOpen && isYouTube
-              ? "sb-anim-pop pointer-events-none absolute bottom-3 right-3 z-[45] aspect-video w-[24rem] max-w-[38vw] overflow-hidden rounded-xl border border-white/[0.14] bg-black shadow-[0_24px_64px_rgba(0,0,0,0.7)]"
-              : "pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0"
-          }
-          aria-hidden={!(videoPanelOpen && isYouTube)}
-        >
+      {canPrewarmYoutubeEmbed ? (() => {
+        /* Video dock: fixed deck element — under the track text, before the
+           volume column. No button: it simply IS there while YouTube plays,
+           with the same bottom fade language as the library cards. */
+        const videoDocked = isYouTube && (displayStatus === "playing" || displayStatus === "paused");
+        return (
           <div
-            ref={ytContainerRef}
             className={
-              videoPanelOpen && isYouTube
-                ? `absolute inset-0 transition-opacity duration-500 [&_iframe]:h-full [&_iframe]:w-full ${videoActiveDeck === "A" ? "opacity-100" : "opacity-0"}`
-                : "h-full w-full"
+              videoDocked
+                ? "pointer-events-none absolute right-12 top-1/2 z-[40] aspect-video w-[19rem] -translate-y-1/2 overflow-hidden rounded-xl bg-black shadow-[0_16px_48px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08]"
+                : "pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0"
             }
-          />
-          <div
-            ref={ytContainerNextRef}
-            className={
-              videoPanelOpen && isYouTube
-                ? `absolute inset-0 transition-opacity duration-500 [&_iframe]:h-full [&_iframe]:w-full ${videoActiveDeck === "B" ? "opacity-100" : "opacity-0"}`
-                : "h-full w-full"
-            }
-          />
-          {videoPanelOpen && isYouTube ? (
-            <button
-              type="button"
-              onClick={() => setVideoPanelOpen(false)}
-              title="Hide video"
-              aria-label="Hide video"
-              className="pointer-events-auto absolute right-2 top-2 z-[2] flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white/85 backdrop-blur-sm transition-colors duration-150 hover:bg-black/80 hover:text-white"
-            >
-              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-      {/* Video panel toggle — docked bottom-right of the DECK, only while a YT engine is live */}
-      {canPrewarmYoutubeEmbed && isYouTube && displayHasContent && !videoPanelOpen ? (
-        <button
-          type="button"
-          onClick={() => setVideoPanelOpen(true)}
-          title="Show video"
-          aria-label="Show video"
-          className="absolute bottom-3 right-3 z-[44] flex h-9 items-center gap-1.5 rounded-full border border-white/[0.14] bg-[#141418]/95 px-3 text-[12px] font-semibold text-[#d1d1d6] shadow-[0_8px_24px_rgba(0,0,0,0.5)] backdrop-blur-md transition-colors duration-150 hover:bg-[#1f1f24] hover:text-white"
-        >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <rect x="2" y="5" width="14" height="14" rx="2" />
-            <path d="m22 8-6 4 6 4V8z" transform="translate(-1,-1)" />
-          </svg>
-          Video
-        </button>
-      ) : null}
+            aria-hidden
+          >
+            <div
+              ref={ytContainerRef}
+              className={
+                videoDocked
+                  ? `absolute inset-0 transition-opacity duration-500 [&_iframe]:h-full [&_iframe]:w-full ${videoActiveDeck === "A" ? "opacity-100" : "opacity-0"}`
+                  : "h-full w-full"
+              }
+            />
+            <div
+              ref={ytContainerNextRef}
+              className={
+                videoDocked
+                  ? `absolute inset-0 transition-opacity duration-500 [&_iframe]:h-full [&_iframe]:w-full ${videoActiveDeck === "B" ? "opacity-100" : "opacity-0"}`
+                  : "h-full w-full"
+              }
+            />
+            {videoDocked ? (
+              <div
+                className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-[#0a0a0c]/95 via-[#0a0a0c]/40 to-transparent"
+                aria-hidden
+              />
+            ) : null}
+          </div>
+        );
+      })() : null}
       {/* Off-screen SoundCloud embed — mount when active to avoid React removeChild conflict */}
       {isEmbedded || isYouTube || isSoundCloud ? (
         <div key={embedType ?? "none"} className="pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0" aria-hidden>
