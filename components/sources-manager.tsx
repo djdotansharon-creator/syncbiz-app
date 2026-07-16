@@ -2693,7 +2693,7 @@ function SourcesManagerInner({
               onClose={() => setActiveCenterModule(null)}
             />
           ) : showLibraryCenter ? (<>
-          <div className="library-command-rail flex min-w-0 flex-nowrap items-center justify-between gap-1.5 rounded-2xl border border-slate-800/35 bg-slate-950/25 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md">
+          <div className="library-command-rail flex min-w-0 flex-nowrap items-center justify-between gap-1.5 px-0.5 py-0.5">
             <div className="library-command-rail-browse flex min-w-0 flex-nowrap items-center gap-1.5">
               <div className="library-segment-bar flex h-10 rounded-xl p-0.5" role="tablist">
                 <button
@@ -2902,7 +2902,6 @@ function SourcesManagerInner({
                   }`}
                 >
                   {c.label}
-                  <span className={`ms-1.5 text-[11px] tabular-nums ${active ? "text-[#8e8e93]" : "text-[#6e6e73]"}`}>{c.count}</span>
                   <span
                     className={`absolute bottom-0 left-1 right-1 h-[2px] rounded-full bg-[#f5f5f7] transition-opacity duration-200 ${
                       active ? "opacity-100" : "opacity-0"
@@ -2912,6 +2911,28 @@ function SourcesManagerInner({
                 </button>
               );
             })}
+            {/* Selected view's count — ONE number, big and proud on the right */}
+            {(() => {
+              const chipsData: Array<{ id: LibraryViewId; count: number }> = [
+                { id: "all_library", count: displaySources.length },
+                { id: "recently_added", count: Math.min(displaySources.length, 24) },
+                {
+                  id: "playlists",
+                  count: displaySources.filter((s) => s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s)).length,
+                },
+                { id: "user_playlists", count: userPlaylistContainers.length },
+                { id: "external_playlists", count: containers.external.length },
+                { id: "sources", count: containers.sources.length },
+                { id: "favorites", count: favoriteIds.length },
+              ];
+              const activeId = !djHubRailActive && selection.type === "library_view" ? selection.id : null;
+              const n = chipsData.find((c) => c.id === activeId)?.count;
+              return typeof n === "number" ? (
+                <span className="ms-auto shrink-0 pe-1 text-xl font-bold tabular-nums leading-none text-[#f5f5f7]">
+                  {n}
+                </span>
+              ) : null;
+            })()}
           </div>
 
           <div

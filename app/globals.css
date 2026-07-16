@@ -1417,10 +1417,12 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   color: var(--lib-filter-text);
 }
 
+/* Command rail: NO outer frame — thin and elegant, only the controls
+   themselves carry chrome (operator direction, simplification pass). */
 .library-command-rail {
-  border: 1px solid var(--lib-border-subtle);
-  background: var(--lib-surface-rail);
-  box-shadow: var(--lib-shadow-rail-inset);
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 
 .library-segment-bar {
