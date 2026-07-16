@@ -30,6 +30,22 @@ const pageErrors = [];
 page.on("pageerror", (e) => pageErrors.push(String(e)));
 
 try {
+  // ── Warm-up: dev recompile + remote DB make the FIRST login painfully slow;
+  // hit the API directly (with one retry) so the UI login never flakes. ──
+  for (let i = 0; i < 2; i++) {
+    try {
+      const r = await fetch(`${BASE}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: EMAIL, password: PASS }),
+        signal: AbortSignal.timeout(120000),
+      });
+      if (r.ok) break;
+    } catch {
+      /* retry once */
+    }
+  }
+
   // ── Login ──
   await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded", timeout: 180000 });
   await page.waitForTimeout(3000);

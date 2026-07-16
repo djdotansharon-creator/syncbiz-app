@@ -2800,6 +2800,43 @@ function SourcesManagerInner({
             </div>
           </div>
 
+          {/* ── Library filter CHIPS (Spotify-style) — ONE library, filters in your
+              face. These replaced most left-nav rows in the simplification pass. */}
+          <div className="mt-2 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {(
+              [
+                { id: "all_library", label: "All", count: displaySources.length },
+                { id: "recently_added", label: "Recently Added", count: Math.min(displaySources.length, 24) },
+                {
+                  id: "playlists",
+                  label: "Playlists",
+                  count: displaySources.filter((s) => s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s)).length,
+                },
+                { id: "user_playlists", label: "Your Playlists", count: userPlaylistContainers.length },
+                { id: "external_playlists", label: "Ready", count: containers.external.length },
+                { id: "sources", label: "Sources", count: containers.sources.length },
+                { id: "favorites", label: "Favorites", count: favoriteIds.length },
+              ] as Array<{ id: LibraryViewId; label: string; count: number }>
+            ).map((c) => {
+              const active = !djHubRailActive && selection.type === "library_view" && selection.id === c.id;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setSelection({ type: "library_view", id: c.id })}
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors duration-150 ${
+                    active
+                      ? "bg-[#f5f5f7] text-[#111114]"
+                      : "bg-white/[0.06] text-[#d1d1d6] hover:bg-white/[0.1] hover:text-white"
+                  }`}
+                >
+                  {c.label}
+                  <span className={`text-[11px] tabular-nums ${active ? "text-[#3a3a3c]" : "text-[#8e8e93]"}`}>{c.count}</span>
+                </button>
+              );
+            })}
+          </div>
+
           <div
             key={`${viewMode}|${selection.type}|${"id" in selection ? selection.id : ""}|${"key" in selection ? selection.key : ""}`}
             className="sb-anim-rise mt-2 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1 lg:max-h-none lg:flex-1 lg:min-h-0"
@@ -3586,26 +3623,19 @@ function SourcesManagerInner({
                     `flex w-full items-center justify-between px-2 py-[3px] text-left text-sm transition-colors duration-150 ${
                       active ? "font-medium text-white" : "text-[#a1a1a6] hover:text-white"
                     }`;
+                  /* Simplification pass: the nav keeps only the two DESTINATIONS.
+                     Content-type filters (Recently Added / Playlists / Your
+                     Playlists / Ready / Sources / Favorites) live as chips above
+                     the cards — one library, filters in your face. */
                   const rows: Array<{ id: LibraryViewId; label: string; count: number }> = [
                     { id: "all_library", label: "All Library", count: displaySources.length },
-                    { id: "recently_added", label: "Recently Added", count: Math.min(displaySources.length, 24) },
-                    {
-                      id: "playlists",
-                      label: "Playlists",
-                      count: displaySources.filter((s) => s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s)).length,
-                    },
-                    { id: "user_playlists", label: "Your Playlists", count: userPlaylistContainers.length },
                     {
                       id: "scheduled_playlists",
                       label: "Scheduled",
                       count: displaySources.filter((s) => s.playlist?.id && scheduledPlaylistIdSet.has(s.playlist.id)).length,
                     },
-                    { id: "external_playlists", label: "Ready Playlists", count: containers.external.length },
                   ];
-                  const tailRows: Array<{ id: LibraryViewId; label: string; count: number }> = [
-                    { id: "sources", label: "Sources", count: containers.sources.length },
-                    { id: "favorites", label: "Favorites", count: favoriteIds.length },
-                  ];
+                  const tailRows: Array<{ id: LibraryViewId; label: string; count: number }> = [];
                   return (
                     <>
                       {rows.map((r) => (
