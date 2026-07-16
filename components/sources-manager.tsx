@@ -2750,23 +2750,8 @@ function SourcesManagerInner({
                   <span className="max-w-[7rem] truncate">{genreFilter || "Genres"}</span>
                 </button>
               )}
-              <Link
-                href="/sources"
-                className="library-nav-link-current inline-flex h-10 items-center gap-1.5 rounded-xl px-2 text-xs font-semibold uppercase tracking-wider"
-                aria-current="page"
-              >
-                <span className="library-nav-dot h-1.5 w-1.5 rounded-full" />
-                {t.library}
-              </Link>
-              <Link
-                href="/favorites"
-                className="library-nav-link flex h-10 items-center gap-1.5 rounded-xl px-2 text-sm font-medium"
-              >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                </svg>
-                {t.favorites}
-              </Link>
+              {/* LIBRARY / Favorites rail links removed — the filter tabs above the
+                  cards cover both (simplification pass, no duplicate controls). */}
             </div>
 
             {/* Unified search — lives IN the rail, between Favorites and Guest */}
@@ -2820,7 +2805,8 @@ function SourcesManagerInner({
             </div>
           </div>
 
-          {/* ── Genre Browse — colorful tiles (Spotify "Browse all" language) ── */}
+          {/* ── Genre Browse — colorful tiles (Spotify "Browse all" language):
+              each tile carries a tilted cover from a playlist of that genre. ── */}
           {genreBrowseOpen ? (
             <div className="sb-anim-rise mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
               <button
@@ -2829,7 +2815,7 @@ function SourcesManagerInner({
                   setGenreFilter("");
                   setGenreBrowseOpen(false);
                 }}
-                className={`flex h-16 items-start justify-start overflow-hidden rounded-xl p-3 text-left text-[15px] font-bold text-white transition-transform duration-150 hover:scale-[1.02] ${
+                className={`relative flex h-20 items-start justify-start overflow-hidden rounded-xl p-3 text-left text-[15px] font-bold text-white transition-transform duration-150 hover:scale-[1.02] ${
                   genreFilter === "" ? "ring-2 ring-white/70" : ""
                 }`}
                 style={{ background: "linear-gradient(135deg,#3a3a3c,#1c1c1e)" }}
@@ -2837,6 +2823,10 @@ function SourcesManagerInner({
                 All genres
               </button>
               {genres.map((g, i) => {
+                const coverSrc =
+                  sources.find(
+                    (s) => s.genre?.toLowerCase() === g.toLowerCase() && (s.cover ?? "").trim() !== "",
+                  )?.cover ?? null;
                 const palette = [
                   "linear-gradient(135deg,#e13300,#8e2800)",
                   "linear-gradient(135deg,#1e3264,#27856a)",
@@ -2862,12 +2852,19 @@ function SourcesManagerInner({
                       setGenreFilter(active ? "" : g);
                       setGenreBrowseOpen(false);
                     }}
-                    className={`flex h-16 items-start justify-start overflow-hidden rounded-xl p-3 text-left text-[15px] font-bold capitalize text-white transition-transform duration-150 hover:scale-[1.02] ${
+                    className={`relative flex h-20 items-start justify-start overflow-hidden rounded-xl p-3 text-left text-[15px] font-bold capitalize text-white transition-transform duration-150 hover:scale-[1.02] ${
                       active ? "ring-2 ring-white/70" : ""
                     }`}
                     style={{ background: bg, animationDelay: `${Math.min(i * 30, 300)}ms` }}
                   >
-                    <span className="line-clamp-2 break-words">{g}</span>
+                    <span className="relative z-[1] line-clamp-2 max-w-[70%] break-words drop-shadow-[0_1px_4px_rgba(0,0,0,0.5)]">{g}</span>
+                    {coverSrc ? (
+                      <HydrationSafeImage
+                        src={coverSrc}
+                        alt=""
+                        className="absolute -bottom-2 -right-3 h-16 w-16 rotate-[25deg] rounded-md object-cover shadow-[0_6px_18px_rgba(0,0,0,0.5)]"
+                      />
+                    ) : null}
                   </button>
                 );
               })}
@@ -2893,19 +2890,25 @@ function SourcesManagerInner({
               ] as Array<{ id: LibraryViewId; label: string; count: number }>
             ).map((c) => {
               const active = !djHubRailActive && selection.type === "library_view" && selection.id === c.id;
+              /* Words + LED underline (same language as the top app nav) —
+                 the operator rejected capsule chips. */
               return (
                 <button
                   key={c.id}
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: c.id })}
-                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors duration-150 ${
-                    active
-                      ? "bg-[#f5f5f7] text-[#111114]"
-                      : "bg-white/[0.06] text-[#d1d1d6] hover:bg-white/[0.1] hover:text-white"
+                  className={`relative shrink-0 px-1.5 pb-[7px] pt-1 text-[13px] font-semibold transition-colors duration-150 ${
+                    active ? "text-[#f5f5f7]" : "text-[#a1a1a6] hover:text-white"
                   }`}
                 >
                   {c.label}
-                  <span className={`text-[11px] tabular-nums ${active ? "text-[#3a3a3c]" : "text-[#8e8e93]"}`}>{c.count}</span>
+                  <span className={`ms-1.5 text-[11px] tabular-nums ${active ? "text-[#8e8e93]" : "text-[#6e6e73]"}`}>{c.count}</span>
+                  <span
+                    className={`absolute bottom-0 left-1 right-1 h-[2px] rounded-full bg-[#f5f5f7] transition-opacity duration-200 ${
+                      active ? "opacity-100" : "opacity-0"
+                    }`}
+                    aria-hidden
+                  />
                 </button>
               );
             })}
