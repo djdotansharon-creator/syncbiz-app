@@ -1033,6 +1033,12 @@ export function AudioPlayer() {
     const playerVars: Record<string, string | number> = {
       enablejsapi: 1,
       origin: typeof window !== "undefined" ? window.location.origin : "",
+      /* Display-only: the deck video is a BACKGROUND — no YT chrome/annotations.
+         Zero effect on playback (API control is via enablejsapi). */
+      controls: 0,
+      disablekb: 1,
+      iv_load_policy: 3,
+      rel: 0,
     };
     if (ytPlaylistId && (ytPlaylistId.startsWith("RD") || ytPlaylistId.startsWith("PL"))) {
       playerVars.list = ytPlaylistId;
@@ -1455,6 +1461,11 @@ export function AudioPlayer() {
       const playerVars: Record<string, string | number> = {
         enablejsapi: 1,
         origin: typeof window !== "undefined" ? window.location.origin : "",
+        /* Display-only: background video, no YT chrome (see cold-load playerVars). */
+        controls: 0,
+        disablekb: 1,
+        iv_load_policy: 3,
+        rel: 0,
       };
       syncbizAuditPlayerCreationTarget({
         slot: "standby",
@@ -4090,7 +4101,7 @@ export function AudioPlayer() {
     <header
       className={
         isSourcesLibraryDeck
-          ? "audio-player-library-deck relative flex h-full min-h-0 flex-col px-1.5 py-0.5 sm:px-2"
+          ? "audio-player-library-deck relative isolate flex h-full min-h-0 flex-col px-1.5 py-0.5 sm:px-2"
           : "sticky top-0 z-50 border-b border-slate-800/80 bg-slate-950/98 px-3 py-3 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_0_1px_rgba(30,215,96,0.08)] overflow-hidden sm:px-4"
       }
       role="region"
@@ -4421,34 +4432,29 @@ export function AudioPlayer() {
            volume column. No button: it simply IS there while YouTube plays,
            with the same bottom fade language as the library cards. */
         const videoDocked = isYouTube && (displayStatus === "playing" || displayStatus === "paused");
+        /* Cover-crop: iframe is forced to a full-width 16:9 box centered
+           vertically — YouTube's own title bar and controls are cropped away. */
+        const deckVideoCls = (deck: DeckId) =>
+          videoDocked
+            ? `absolute inset-0 overflow-hidden transition-opacity duration-500 [&_iframe]:absolute [&_iframe]:left-[-10%] [&_iframe]:top-1/2 [&_iframe]:w-[120%] [&_iframe]:h-auto [&_iframe]:aspect-video [&_iframe]:-translate-y-1/2 ${
+                videoActiveDeck === deck ? "opacity-100" : "opacity-0"
+              }`
+            : "h-full w-full";
         return (
           <div
             className={
               videoDocked
-                ? "pointer-events-none absolute right-12 top-1/2 z-[40] aspect-video w-[19rem] -translate-y-1/2 overflow-hidden rounded-xl bg-black shadow-[0_16px_48px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08]"
+                ? "pointer-events-none absolute -z-[1] inset-y-[5px] right-[11px] left-1/2 overflow-hidden rounded-r-xl"
                 : "pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0"
             }
             aria-hidden
           >
-            <div
-              ref={ytContainerRef}
-              className={
-                videoDocked
-                  ? `absolute inset-0 transition-opacity duration-500 [&_iframe]:h-full [&_iframe]:w-full ${videoActiveDeck === "A" ? "opacity-100" : "opacity-0"}`
-                  : "h-full w-full"
-              }
-            />
-            <div
-              ref={ytContainerNextRef}
-              className={
-                videoDocked
-                  ? `absolute inset-0 transition-opacity duration-500 [&_iframe]:h-full [&_iframe]:w-full ${videoActiveDeck === "B" ? "opacity-100" : "opacity-0"}`
-                  : "h-full w-full"
-              }
-            />
+            <div ref={ytContainerRef} className={deckVideoCls("A")} />
+            <div ref={ytContainerNextRef} className={deckVideoCls("B")} />
             {videoDocked ? (
+              /* Card-fog language, horizontal: deck-dark on the left melting into the video. */
               <div
-                className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-[#0a0a0c]/95 via-[#0a0a0c]/40 to-transparent"
+                className="absolute inset-y-0 left-0 w-3/5 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/60 to-transparent"
                 aria-hidden
               />
             ) : null}
