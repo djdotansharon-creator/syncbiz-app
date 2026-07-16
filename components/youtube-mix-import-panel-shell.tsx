@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { formatDuration } from "@/lib/format-utils";
 import {
   PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT,
@@ -186,13 +187,24 @@ export function YouTubeMixImportPanelShell({ sourceUrl, onDismiss, onSaved: onSa
     playlistName.trim().length > 0 &&
     selectedVisible.length > 0;
 
-  return (
+  /* CENTERED MODAL (portal): the inline panel got crushed inside the center
+     column on small/scaled screens (operator report from a client laptop) —
+     a viewport-sized overlay with internal scroll fits every resolution. */
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[9985] flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]"
+      onClick={() => {
+        if (!saving) onDismiss();
+      }}
+    >
     <section
-      className="mt-2 rounded-xl border border-sky-500/30 bg-slate-950/80 ring-1 ring-sky-500/15 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]"
+      className="sb-anim-modal flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-sky-500/30 bg-[#0b0d13] ring-1 ring-sky-500/15 shadow-[0_32px_96px_rgba(0,0,0,0.7)]"
       aria-labelledby="youtube-mix-import-heading"
       aria-busy={loadState === "loading" || saving}
+      onClick={(e) => e.stopPropagation()}
     >
-      <div className="border-b border-slate-800/90 px-4 py-3">
+      <div className="shrink-0 border-b border-slate-800/90 px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <h2
@@ -220,7 +232,7 @@ export function YouTubeMixImportPanelShell({ sourceUrl, onDismiss, onSaved: onSa
         </p>
       </div>
 
-      <div className="space-y-3 px-4 py-3">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
             Track count
@@ -357,5 +369,7 @@ export function YouTubeMixImportPanelShell({ sourceUrl, onDismiss, onSaved: onSa
         </div>
       </div>
     </section>
+    </div>,
+    document.body,
   );
 }

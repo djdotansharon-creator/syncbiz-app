@@ -1742,8 +1742,12 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   position: relative;
 }
 
-/* NOW PLAYING card — a light that RUNS around the frame (operator request:
-   the playing playlist must be identifiable at a glance from across a room). */
+/* NOW PLAYING card — TWO white lights running in parallel around the frame
+   (operator request: identifiable at a glance; white, calm pace). */
+.library-playing-active {
+  border-color: rgba(245, 245, 247, 0.28) !important;
+}
+
 .library-playing-active::after {
   content: "";
   position: absolute;
@@ -1754,17 +1758,22 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   background: conic-gradient(
     from var(--sb-run-angle, 0deg),
     transparent 0deg,
-    transparent 285deg,
-    rgba(48, 209, 88, 0.15) 315deg,
-    #30d158 350deg,
-    #b7f5c6 360deg
+    transparent 115deg,
+    rgba(245, 245, 247, 0.14) 150deg,
+    #f5f5f7 176deg,
+    rgba(255, 255, 255, 0.95) 180deg,
+    transparent 186deg,
+    transparent 295deg,
+    rgba(245, 245, 247, 0.14) 330deg,
+    #f5f5f7 356deg,
+    rgba(255, 255, 255, 0.95) 360deg
   );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   mask-composite: exclude;
   pointer-events: none;
-  animation: sb-run-border 3.2s linear infinite;
+  animation: sb-run-border 6.5s linear infinite;
 }
 
 @property --sb-run-angle {
@@ -1782,7 +1791,7 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 @media (prefers-reduced-motion: reduce) {
   .library-playing-active::after {
     animation: none;
-    background: conic-gradient(#30d158 0deg, #30d158 360deg);
+    background: conic-gradient(rgba(245, 245, 247, 0.7) 0deg, rgba(245, 245, 247, 0.7) 360deg);
     opacity: 0.6;
   }
 }
