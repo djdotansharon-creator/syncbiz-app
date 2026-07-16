@@ -1,7 +1,15 @@
 # SyncBiz — Project State (Claude working map)
 
 > Read this FIRST instead of scanning files. Update it after every meaningful change.
-> Last updated: 2026-07-13.
+> Last updated: 2026-07-16.
+
+## ⛔ PLAYER SAFETY CONTRACT (owner directive — read before ANY change)
+The player runs in businesses and must NEVER stop. Past incidents (all solved, do not reintroduce):
+1. **Eject** — playlist loaded then vanished from player+queue (play-before-WS-register + CONTROL wipe → playing-player protection, see below).
+2. **Flicker** — MASTER re-claim ping-pong between two playing devices (loop breaker, max 2/60s; Electron renderer never re-claims).
+3. **Mix dead on manual switch** — headless-autoplay FALSE POSITIVE led to disabling a working crossfade; NEVER change playback code from headless-only evidence (`--autoplay-policy=no-user-gesture-required` mandatory).
+4. **Desktop mix gap + fader drop** — single-MPV fade-to-silence; now dual-deck A/B in playback-orchestrator.
+RULES: (a) files in the playback chain (`playback-provider`, `audio-player`, `device-player-context`, `ws-client`, `server/index.ts`, `desktop/src/main/*`) get SURGICAL edits only, each verified live before commit; (b) UI work must not import/alter playback logic; (c) verify with the CANONICAL script — do NOT write ad-hoc Playwright scripts each time: `node scripts/verify-player.mjs` (against localhost:3000; `BASE_URL=` for prod). It covers: login → play → tab round-trip survival → MASTER chip stability → automix seek-to-end transition. One run ≈ 2 min.
 
 ## What this app is
 Business media player: Next.js 16 app (`app/`, `components/`, `lib/`) + standalone WS server (`server/`, port 3001) + Electron desktop player (`desktop/`, MPV). DB = PostgreSQL/Prisma. Auth cookie `syncbiz-session`. Main workspace route: `/sources` (rendered by `SourcesManager` via `app/(app)/(workspace)/layout.tsx`; the page itself is empty).
