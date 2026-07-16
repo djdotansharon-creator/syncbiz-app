@@ -515,6 +515,9 @@ export function AudioPlayer() {
       s.opacity = active ? "1" : "0";
       s.pointerEvents = "none";
       s.border = "0";
+      /* Slight lift — the translucent deck surface dims the video; this keeps
+         the right (un-faded) side vivid. Display-only. */
+      s.filter = "brightness(1.12)";
     };
     const id = setInterval(() => {
       setVideoActiveDeck((prev) => (prev === ytActiveDeckRef.current ? prev : ytActiveDeckRef.current));
@@ -4468,7 +4471,7 @@ export function AudioPlayer() {
           <div
             className={
               videoDocked
-                ? "pointer-events-none absolute -z-[1] inset-y-[4px] right-[4px] left-1/2 overflow-hidden rounded-r-[14px]"
+                ? "pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-1/2 overflow-hidden rounded-r-[14px]"
                 : "pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0"
             }
             aria-hidden
@@ -4478,7 +4481,7 @@ export function AudioPlayer() {
             {videoDocked ? (
               /* Card-fog language, horizontal: deck-dark on the left melting into the video. */
               <div
-                className="absolute inset-y-0 left-0 z-[1] w-3/5 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/60 to-transparent"
+                className="absolute inset-y-0 left-0 z-[1] w-2/3 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/75 to-transparent"
                 aria-hidden
               />
             ) : null}

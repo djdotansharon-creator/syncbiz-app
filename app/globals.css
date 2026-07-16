@@ -1739,6 +1739,52 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   animation: none;
   transform: none;
   contain: none;
+  position: relative;
+}
+
+/* NOW PLAYING card — a light that RUNS around the frame (operator request:
+   the playing playlist must be identifiable at a glance from across a room). */
+.library-playing-active::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--sb-run-angle, 0deg),
+    transparent 0deg,
+    transparent 285deg,
+    rgba(48, 209, 88, 0.15) 315deg,
+    #30d158 350deg,
+    #b7f5c6 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: sb-run-border 3.2s linear infinite;
+}
+
+@property --sb-run-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes sb-run-border {
+  to {
+    --sb-run-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-playing-active::after {
+    animation: none;
+    background: conic-gradient(#30d158 0deg, #30d158 360deg);
+    opacity: 0.6;
+  }
 }
 
 .library-playing-row {

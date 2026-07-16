@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { ActionButtonShare } from "@/components/ui/action-buttons";
 import { useTranslations } from "@/lib/locale-context";
 import type { UnifiedSource } from "@/lib/source-types";
@@ -181,10 +180,10 @@ type Props = {
 export function LibrarySourceItemActions({
   source,
   onPlay,
-  isActive,
-  onStop,
-  onPause,
-  libraryDeckChrome = false,
+  isActive: _isActive,
+  onStop: _onStop,
+  onPause: _onPause,
+  libraryDeckChrome: _libraryDeckChrome = false,
   onShareOpen,
   onDeletePress = () => {},
   compact = false,
@@ -202,8 +201,8 @@ export function LibrarySourceItemActions({
   const editHref = editHrefForLibrarySource(source);
   const leafEditHref = editHrefForLibraryLeaf(source);
   const leaf = actionLayout === "leaf";
-  const transportSm = compact ? "sm" : "sm";
-  const transportMd = compact ? "md" : "md";
+
+
 
   return (
     <div
@@ -214,63 +213,21 @@ export function LibrarySourceItemActions({
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
-      {isActive && (
-        <>
-          <NeonControlButton
-            variant="cyan"
-            libraryDeck={libraryDeckChrome}
-            onClick={onStop}
-            size={transportSm}
-            title={t.stopPlayback}
-            aria-label={t.stopPlayback}
-          >
-            <svg className={compact ? "h-4 w-4" : "h-3.5 w-3.5"} viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 6h12v12H6z" />
-            </svg>
-          </NeonControlButton>
-          <NeonControlButton
-            variant="cyan"
-            libraryDeck={libraryDeckChrome}
-            onClick={() => onPlay()}
-            size={transportMd}
-            active
-            disabled={playDisabled}
-            title={playDisabled ? playDisabledTitle : t.play}
-            aria-label={playDisabled ? playDisabledTitle : t.play}
-          >
-            <svg className={compact ? "h-5 w-5 ml-0.5" : "h-4 w-4 ml-0.5"} viewBox="0 0 24 24" fill="currentColor">
-              <path d="M8 5v14l11-7L8 5z" />
-            </svg>
-          </NeonControlButton>
-          <NeonControlButton
-            variant="cyan"
-            libraryDeck={libraryDeckChrome}
-            onClick={onPause}
-            size={transportSm}
-            active
-            title={t.pausePlayback}
-            aria-label={t.pausePlayback}
-          >
-            <svg className={compact ? "h-4 w-4" : "h-3.5 w-3.5"} viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-            </svg>
-          </NeonControlButton>
-        </>
-      )}
-      {!isActive && (
-        <button
-          type="button"
-          onClick={() => onPlay()}
-          disabled={playDisabled}
-          title={playDisabled ? playDisabledTitle : t.play}
-          aria-label={playDisabled ? playDisabledTitle : t.play}
-          className={`${CARD_PLAY_BTN} ${compact ? "h-9 w-9" : "h-11 w-11"}`}
-        >
-          <svg className={compact ? "h-4.5 w-4.5 ml-0.5" : "h-5 w-5 ml-0.5"} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-            <path d="M8 5v14l11-7L8 5z" />
-          </svg>
-        </button>
-      )}
+      {/* ONE white play — always. No stop/pause squares on the card while it
+          plays (operator: transport lives on the deck); re-clicking the playing
+          card is a provider-level noop (sameActiveSession). */}
+      <button
+        type="button"
+        onClick={() => onPlay()}
+        disabled={playDisabled}
+        title={playDisabled ? playDisabledTitle : t.play}
+        aria-label={playDisabled ? playDisabledTitle : t.play}
+        className={`${CARD_PLAY_BTN} ${compact ? "h-9 w-9" : "h-11 w-11"}`}
+      >
+        <svg className={compact ? "h-4.5 w-4.5 ml-0.5" : "h-5 w-5 ml-0.5"} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+          <path d="M8 5v14l11-7L8 5z" />
+        </svg>
+      </button>
       {leaf ? (
         <>
           <button
