@@ -174,6 +174,8 @@ type Props = {
   /** Visual-only: disable Play (e.g. local desktop-only items in browser). */
   playDisabled?: boolean;
   playDisabledTitle?: string;
+  /** False when the card already carries another ⋯ menu (e.g. AI slot) — ONE ⋯ per card. */
+  showMoreMenu?: boolean;
 };
 
 export function LibrarySourceItemActions({
@@ -193,6 +195,7 @@ export function LibrarySourceItemActions({
   inLibrary = false,
   playDisabled = false,
   playDisabledTitle = "Desktop only",
+  showMoreMenu = true,
 }: Props) {
   const { t } = useTranslations();
   const [adding, setAdding] = useState(false);
@@ -335,6 +338,7 @@ export function LibrarySourceItemActions({
         </>
       )}
       <ActionButtonShare variant="player" onClick={onShareOpen} title={t.share} aria-label={t.share} />
+      {showMoreMenu ? (
       <CardMoreMenu
         editHref={leaf ? leafEditHref : editHref}
         editLabel={
@@ -349,6 +353,7 @@ export function LibrarySourceItemActions({
         deleteLabel={t.delete}
         menuLabel={t.sourceControlsAria}
       />
+      ) : null}
     </div>
   );
 }

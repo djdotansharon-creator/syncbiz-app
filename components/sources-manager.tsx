@@ -2307,8 +2307,8 @@ function SourcesManagerInner({
         {/* Secondary shelf — old playlists rail content, tucked under a quiet disclosure (nothing removed). */}
         <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch lg:max-h-[42vh] lg:overflow-y-auto">
           <details className="group/shelf">
-            <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6e6e73] transition-colors duration-150 hover:text-white [&::-webkit-details-marker]:hidden">
-              <svg className="h-3 w-3 shrink-0 transition-transform duration-150 group-open/shelf:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c7c7cc] transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.07] hover:text-white [&::-webkit-details-marker]:hidden">
+              <svg className="h-3.5 w-3.5 shrink-0 transition-transform duration-150 group-open/shelf:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="9 18 15 12 9 6" />
               </svg>
               Scheduled & Ready Playlists

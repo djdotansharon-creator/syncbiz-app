@@ -35,12 +35,18 @@ export function PlaylistAiShellMenu({
   playlistName,
   branchId = "default",
   onSendToPlaylist,
+  editHref,
+  onDeletePress,
 }: {
   playlistId: string;
   playlistName?: string;
   branchId?: string;
   /** Opens the playlist-picker to send this playlist's tracks into another playlist. */
   onSendToPlaylist?: () => void;
+  /** Cards merge Edit into THIS menu so there is exactly ONE ⋯ per card. */
+  editHref?: string | null;
+  /** Cards merge Delete into THIS menu so there is exactly ONE ⋯ per card. */
+  onDeletePress?: () => void;
 }) {
   const [busy, setBusy] = useState<AiMode | null>(null);
   const [refineOpen, setRefineOpen] = useState(false);
@@ -201,6 +207,33 @@ export function PlaylistAiShellMenu({
               >
                 Send to playlist
               </button>
+            </>
+          )}
+          {(editHref || onDeletePress) && (
+            <>
+              <div className="my-1 border-t border-white/[0.08]" />
+              {editHref ? (
+                <a
+                  href={editHref}
+                  role="menuitem"
+                  className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-white/[0.07]"
+                >
+                  Edit playlist
+                </a>
+              ) : null}
+              {onDeletePress ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="block w-full px-3 py-1.5 text-left text-[#ff6961] hover:bg-[#ff453a]/10 hover:text-[#ff453a]"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onDeletePress();
+                  }}
+                >
+                  Delete
+                </button>
+              ) : null}
             </>
           )}
         </div>

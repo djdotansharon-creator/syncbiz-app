@@ -3,6 +3,7 @@
  */
 
 import { getYouTubePlaylistId, isYouTubeMixUrl } from "@/lib/playlist-utils";
+import { getPlaylistTracks } from "@/lib/playlist-types";
 import type { ContentNodeKind } from "@/lib/types";
 import type { UnifiedSource } from "@/lib/source-types";
 
@@ -83,7 +84,14 @@ function durationFromUnified(source: UnifiedSource): number | null {
   if (typeof source.leafDurationSeconds === "number" && source.leafDurationSeconds > 0) {
     return source.leafDurationSeconds;
   }
-  const d = source.playlist?.durationSeconds;
+  // playlist.durationSeconds is the TOTAL of the container. It only equals this
+  // leaf's duration for single-URL shells; for a track inside a multi-track
+  // playlist it is the whole playlist's length and classified every 4-minute
+  // song as a 15-minute SET (operator-reported). Unknown stays unknown.
+  const pl = source.playlist;
+  if (!pl) return null;
+  if (getPlaylistTracks(pl).length > 1) return null;
+  const d = pl.durationSeconds;
   return typeof d === "number" && d > 0 ? d : null;
 }
 

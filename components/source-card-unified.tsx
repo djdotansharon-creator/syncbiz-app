@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { LibraryItemContextDeleteModal } from "@/components/library-item-context-delete-modal";
-import { LibrarySourceItemActions } from "@/components/library-source-item-actions";
+import { LibrarySourceItemActions, editHrefForLibrarySource } from "@/components/library-source-item-actions";
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
@@ -449,7 +449,14 @@ export function SourceCard({
           </svg>
         </button>
       )}
-      {playlistAiMenuSlot}
+      {/* ONE ⋯ per card: when the AI menu slot exists, Edit/Delete merge into it
+          (cloneElement injection) and the generic CardMoreMenu is suppressed. */}
+      {playlistAiMenuSlot && isValidElement(playlistAiMenuSlot)
+        ? cloneElement(playlistAiMenuSlot as ReactElement<{ editHref?: string | null; onDeletePress?: () => void }>, {
+            editHref: editHrefForLibrarySource(source),
+            onDeletePress: () => setDeleteOpen(true),
+          })
+        : playlistAiMenuSlot}
     </>
   );
 
@@ -481,6 +488,7 @@ export function SourceCard({
       inLibrary={leafUnifiedBar ? false : expandedTrackInMainLibrary}
       playDisabled={playDisabled}
       playDisabledTitle="Desktop only"
+      showMoreMenu={!playlistAiMenuSlot}
     />
   );
 
@@ -571,9 +579,10 @@ export function SourceCard({
         title={source.title}
         metaLine=""
       >
+        {/* Descriptor line — genre, DJ-Creator prompt or album name; the old
+            "Genre" label lied whenever the stored text wasn't a genre. */}
         <p className="library-card-genre-line m-0">
-          <span className="library-card-genre-label">Genre</span>
-          <span className="library-card-genre-value">{cardGenre}</span>
+          <span className="library-card-genre-value" title={cardGenre}>{cardGenre}</span>
         </p>
         {scheduleLine ? (
           <p className="m-0 flex items-start gap-1 text-[10px] font-medium leading-snug text-[#6cb2ff]">
