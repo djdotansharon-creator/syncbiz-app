@@ -761,6 +761,14 @@ function SourcesManagerInner({
   const { libraryTheme } = useLibraryTheme();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [genreFilter, setGenreFilter] = useState("");
+  /* Saved-to-library confirmation toast (simplification pass — "where did it save?"). */
+  const [savedToast, setSavedToast] = useState<{ title: string } | null>(null);
+  const savedToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (savedToastTimerRef.current) clearTimeout(savedToastTimerRef.current);
+  }, []);
+  /* Genre Browse takeover (colorful tiles instead of the grey dropdown). */
+  const [genreBrowseOpen, setGenreBrowseOpen] = useState(false);
   const [selection, setSelection] = useState<LibrarySelection>({ type: "library_view", id: "all_library" });
   const [customPlaylists, setCustomPlaylists] = useState<PlaylistTile[]>([]);
   const [playlistItemAssignments, setPlaylistItemAssignments] = useState<Record<string, string[]>>({});
@@ -1867,6 +1875,11 @@ function SourcesManagerInner({
       /* Every ingest (Shazam/Spotify/YouTube link…) jumps to Recently Added so the
          new item is the FIRST thing on screen — never lost inside long lists. */
       setSelection({ type: "library_view", id: "recently_added" });
+      /* Loud saved-confirmation — the operator must never hunt for where an
+         ingested item landed. */
+      setSavedToast({ title: s.title });
+      if (savedToastTimerRef.current) clearTimeout(savedToastTimerRef.current);
+      savedToastTimerRef.current = setTimeout(() => setSavedToast(null), 4500);
     },
     [setSources]
   );
@@ -2717,18 +2730,25 @@ function SourcesManagerInner({
                 </button>
               </div>
               {genres.length > 0 && (
-                <select
-                  value={genreFilter}
-                  onChange={(e) => setGenreFilter(e.target.value)}
-                  className="library-select h-10 min-w-[6rem] max-w-[8rem] rounded-xl px-2 text-sm"
+                <button
+                  type="button"
+                  onClick={() => setGenreBrowseOpen((v) => !v)}
+                  aria-expanded={genreBrowseOpen}
+                  className={`inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3 text-sm font-medium transition-colors duration-150 ${
+                    genreFilter || genreBrowseOpen
+                      ? "bg-[#f5f5f7] text-[#111114]"
+                      : "bg-white/[0.06] text-[#d1d1d6] hover:bg-white/[0.1] hover:text-white"
+                  }`}
+                  title="Browse genres"
                 >
-                  <option value="">{t.allGenres}</option>
-                  {genres.map((g) => (
-                    <option key={g} value={g}>
-                      {g}
-                    </option>
-                  ))}
-                </select>
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                    <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                    <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                    <rect x="14" y="14" width="7" height="7" rx="1.5" />
+                  </svg>
+                  <span className="max-w-[7rem] truncate">{genreFilter || "Genres"}</span>
+                </button>
               )}
               <Link
                 href="/sources"
@@ -2799,6 +2819,60 @@ function SourcesManagerInner({
               </div>
             </div>
           </div>
+
+          {/* ── Genre Browse — colorful tiles (Spotify "Browse all" language) ── */}
+          {genreBrowseOpen ? (
+            <div className="sb-anim-rise mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setGenreFilter("");
+                  setGenreBrowseOpen(false);
+                }}
+                className={`flex h-16 items-start justify-start overflow-hidden rounded-xl p-3 text-left text-[15px] font-bold text-white transition-transform duration-150 hover:scale-[1.02] ${
+                  genreFilter === "" ? "ring-2 ring-white/70" : ""
+                }`}
+                style={{ background: "linear-gradient(135deg,#3a3a3c,#1c1c1e)" }}
+              >
+                All genres
+              </button>
+              {genres.map((g, i) => {
+                const palette = [
+                  "linear-gradient(135deg,#e13300,#8e2800)",
+                  "linear-gradient(135deg,#1e3264,#27856a)",
+                  "linear-gradient(135deg,#8d67ab,#503750)",
+                  "linear-gradient(135deg,#e8115b,#8e1e3c)",
+                  "linear-gradient(135deg,#148a08,#0d5c05)",
+                  "linear-gradient(135deg,#509bf5,#2a5f9e)",
+                  "linear-gradient(135deg,#ba5d07,#7a3d05)",
+                  "linear-gradient(135deg,#777777,#464646)",
+                  "linear-gradient(135deg,#af2896,#6d1a5e)",
+                  "linear-gradient(135deg,#0d73ec,#084a99)",
+                ];
+                /* Deterministic color per genre name — stable across sessions. */
+                let h = 0;
+                for (const ch of g) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+                const bg = palette[h % palette.length];
+                const active = genreFilter.toLowerCase() === g.toLowerCase();
+                return (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => {
+                      setGenreFilter(active ? "" : g);
+                      setGenreBrowseOpen(false);
+                    }}
+                    className={`flex h-16 items-start justify-start overflow-hidden rounded-xl p-3 text-left text-[15px] font-bold capitalize text-white transition-transform duration-150 hover:scale-[1.02] ${
+                      active ? "ring-2 ring-white/70" : ""
+                    }`}
+                    style={{ background: bg, animationDelay: `${Math.min(i * 30, 300)}ms` }}
+                  >
+                    <span className="line-clamp-2 break-words">{g}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
 
           {/* ── Library filter CHIPS (Spotify-style) — ONE library, filters in your
               face. These replaced most left-nav rows in the simplification pass. */}
@@ -3926,6 +4000,20 @@ function SourcesManagerInner({
                 : t.confirmDelete
         }
       />
+      {/* Saved-to-library confirmation — loud, unmissable, self-dismissing */}
+      {savedToast ? (
+        <div className="sb-anim-pop pointer-events-none fixed bottom-6 left-1/2 z-[9980] -translate-x-1/2">
+          <div className="flex items-center gap-2.5 rounded-full border border-white/[0.12] bg-[#141418] py-2.5 pe-5 ps-3 shadow-[0_16px_48px_rgba(0,0,0,0.6)]">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#30d158]">
+              <svg className="h-3.5 w-3.5 text-[#0a0a0c]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+            </span>
+            <span className="text-[13px] font-semibold text-[#f5f5f7]">Saved to Library</span>
+            <span className="max-w-[16rem] truncate text-[12px] text-[#a1a1a6]">{savedToast.title}</span>
+          </div>
+        </div>
+      ) : null}
       <ScheduleBlockModal
         open={playlistTileScheduleModal !== null}
         onClose={() => setPlaylistTileScheduleModal(null)}
