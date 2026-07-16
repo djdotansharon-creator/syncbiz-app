@@ -494,10 +494,37 @@ export function AudioPlayer() {
      can't pause the business. */
   const [videoActiveDeck, setVideoActiveDeck] = useState<DeckId>("A");
   useEffect(() => {
-    /* Cheap always-on mirror of the audible deck (ref → state only on change);
-       drives the visual crossfade between deck videos during automix. */
+    /* Display sync for the video background. The YT IFrame API REPLACES our
+       container divs with the iframes, so React classNames never reach them —
+       style the iframes directly through the official getIframe() handle:
+       cover-crop (120% width, 16:9, centered → no YT chrome) + active-deck
+       opacity crossfade. Pure style writes; playback is never touched. */
+    const styleDeckIframe = (player: unknown, active: boolean) => {
+      /* getIframe is a public YT.Player API not present on our minimal YTPlayerAPI type. */
+      const f = (player as { getIframe?: () => HTMLIFrameElement | null } | null)?.getIframe?.();
+      if (!f) return;
+      const s = f.style;
+      s.position = "absolute";
+      s.left = "-10%";
+      s.top = "50%";
+      s.width = "120%";
+      s.height = "auto";
+      s.aspectRatio = "16 / 9";
+      s.transform = "translateY(-50%)";
+      s.transition = "opacity 500ms ease";
+      s.opacity = active ? "1" : "0";
+      s.pointerEvents = "none";
+      s.border = "0";
+    };
     const id = setInterval(() => {
       setVideoActiveDeck((prev) => (prev === ytActiveDeckRef.current ? prev : ytActiveDeckRef.current));
+      try {
+        const activeIsA = ytActiveDeckRef.current === "A";
+        styleDeckIframe(ytPlayerRef.current, activeIsA);
+        styleDeckIframe(ytPlayerNextRef.current, !activeIsA);
+      } catch {
+        /* display-only — never interfere with playback */
+      }
     }, 500);
     return () => clearInterval(id);
   }, []);
@@ -4432,29 +4459,26 @@ export function AudioPlayer() {
            volume column. No button: it simply IS there while YouTube plays,
            with the same bottom fade language as the library cards. */
         const videoDocked = isYouTube && (displayStatus === "playing" || displayStatus === "paused");
-        /* Cover-crop: iframe is forced to a full-width 16:9 box centered
-           vertically — YouTube's own title bar and controls are cropped away. */
-        const deckVideoCls = (deck: DeckId) =>
-          videoDocked
-            ? `absolute inset-0 overflow-hidden transition-opacity duration-500 [&_iframe]:absolute [&_iframe]:left-[-10%] [&_iframe]:top-1/2 [&_iframe]:w-[120%] [&_iframe]:h-auto [&_iframe]:aspect-video [&_iframe]:-translate-y-1/2 ${
-                videoActiveDeck === deck ? "opacity-100" : "opacity-0"
-              }`
-            : "h-full w-full";
+        /* NOTE: the YT API replaces these divs with the iframes — sizing/opacity
+           for the iframes is applied directly in the videoActiveDeck poll effect
+           (getIframe().style), not via classNames. `videoActiveDeck` read here
+           keeps the wrapper re-rendering in sync with deck swaps. */
+        void videoActiveDeck;
         return (
           <div
             className={
               videoDocked
-                ? "pointer-events-none absolute -z-[1] inset-y-[5px] right-[11px] left-1/2 overflow-hidden rounded-r-xl"
+                ? "pointer-events-none absolute -z-[1] inset-y-[4px] right-[4px] left-1/2 overflow-hidden rounded-r-[14px]"
                 : "pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0"
             }
             aria-hidden
           >
-            <div ref={ytContainerRef} className={deckVideoCls("A")} />
-            <div ref={ytContainerNextRef} className={deckVideoCls("B")} />
+            <div ref={ytContainerRef} className="h-full w-full" />
+            <div ref={ytContainerNextRef} className="h-full w-full" />
             {videoDocked ? (
               /* Card-fog language, horizontal: deck-dark on the left melting into the video. */
               <div
-                className="absolute inset-y-0 left-0 w-3/5 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/60 to-transparent"
+                className="absolute inset-y-0 left-0 z-[1] w-3/5 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/60 to-transparent"
                 aria-hidden
               />
             ) : null}
