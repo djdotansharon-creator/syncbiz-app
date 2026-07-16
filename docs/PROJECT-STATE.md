@@ -84,7 +84,7 @@ Root cause of "playlist loads then vanishes from player+queue" (recurring): Play
 - Backups: branch `backup/pre-redesign-2026-07-09` = original design (fd66216). Every step committed on main.
 
 ## Workspace rails contract (9d0428b — SYMMETRIC 3 columns 240/260/280)
-LEFT rail (simplified 40c2dc0): nav = 3 rows ONLY — All Library · Scheduled · DJ AI. All other views are FILTER CHIPS above the cards pane (search `Library filter CHIPS` in sources-manager; active chip = solid white bg, Spotify-style; same `setSelection` state). `tailRows` is an empty leftover array. Collapsed "Scheduled & Ready Playlists" shelf (row 2, bordered chip).
+Phase 2 (6557cb9): genres `<select>` → "Genres" button + colorful tile grid (`genreBrowseOpen` state, deterministic gradient palette by name hash); ingest toast "Saved to Library ✓" (`savedToast` + timer ref in sources-manager, fired from `handleAdd`). LEFT rail (simplified 40c2dc0): nav = 3 rows ONLY — All Library · Scheduled · DJ AI. All other views are FILTER CHIPS above the cards pane (search `Library filter CHIPS` in sources-manager; active chip = solid white bg, Spotify-style; same `setSelection` state). `tailRows` is an empty leftover array. Collapsed "Scheduled & Ready Playlists" shelf (row 2, bordered chip).
 RIGHT rail (col-start-3, row-span-2, own scroll): DJ Creator AI card (clean sparkles tile, no gold) → YOUR PLAYLISTS compact list (cover·name·count·trash, slice(0,30), max-h-[60vh]).
 CENTER (col-start-2, row-span-2): command rail (view toggles · genres · LIBRARY · Favorites · unified search · Shazam · Guest · Link) → scrolling cards pane.
 
