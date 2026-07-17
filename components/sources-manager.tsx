@@ -126,7 +126,8 @@ type LibraryViewId =
   | "single_tracks"
   | "favorites"
   | "sources"
-  | "saved_sources";
+  | "saved_sources"
+  | "dj_ai";
 type CollectionGroupId = "curated_masters" | "dayparts_hours" | "client_specific";
 type LibrarySelection =
   | { type: "library_view"; id: LibraryViewId }
@@ -967,6 +968,10 @@ function SourcesManagerInner({
         return displaySources.filter((s) => s.playlist?.id && scheduledPlaylistIdSet.has(s.playlist.id));
       }
       if (selection.id === "favorites") return displaySources.filter((s) => favoriteIds.includes(s.id));
+      if (selection.id === "dj_ai") {
+        /* DJ AI opens like every other playlist list — plain grid view, no takeover panel. */
+        return displaySources.filter((s) => isDjCreatorWorkspacePlaylistSource(s));
+      }
       if (selection.id === "single_tracks") {
         return displaySources.filter((s) => {
           const contract = classifyLibraryEntityContract(s);
@@ -1050,14 +1055,17 @@ function SourcesManagerInner({
 
   const sectionBuckets = useMemo(() => {
     const raw = partitionSourcesByLibrarySection(visibleSources);
-    const hideDjCreatorInMainBuckets = !genreFilter;
+    /* DJ playlists stay out of the generic buckets — EXCEPT in the dedicated
+       dj_ai view (which exists to show exactly them) or under a genre filter. */
+    const isDjAiView = selection.type === "library_view" && selection.id === "dj_ai";
+    const hideDjCreatorInMainBuckets = !genreFilter && !isDjAiView;
     return {
       ...raw,
       syncbiz_playlists: hideDjCreatorInMainBuckets
         ? raw.syncbiz_playlists.filter((s) => !isDjCreatorWorkspacePlaylistSource(s))
         : raw.syncbiz_playlists,
     };
-  }, [visibleSources, genreFilter]);
+  }, [visibleSources, genreFilter, selection]);
 
   const selectedCollectionCards = useMemo(() => {
     if (selection.type === "collection_group") {
@@ -2697,12 +2705,24 @@ function SourcesManagerInner({
           ) : showLibraryCenter ? (<>
           <div className="library-command-rail flex min-w-0 flex-nowrap items-center justify-between gap-1.5 px-0.5 py-0.5">
             <div className="library-command-rail-browse flex min-w-0 flex-nowrap items-center gap-1.5">
-              <div className="library-segment-bar flex h-10 rounded-xl p-0.5" role="tablist">
+              {/* Grid/List — icon-only pill: sliding highlight glides between the
+                  two sides, thin divider, zero frames (operator direction). */}
+              <div className="relative flex h-9 shrink-0 items-center rounded-full bg-white/[0.05] p-0.5" role="tablist">
+                <span
+                  className={`absolute top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-full bg-white/[0.14] transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                    viewMode === "grid" ? "translate-x-0" : "translate-x-full"
+                  }`}
+                  aria-hidden
+                />
+                <span className="pointer-events-none absolute left-1/2 top-2 bottom-2 w-px -translate-x-1/2 bg-white/[0.08]" aria-hidden />
                 <button
                   type="button"
                   onClick={() => setViewMode("grid")}
-                  className={`flex h-full items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium transition-[color,background,box-shadow] duration-200 ease-out ${
-                    viewMode === "grid" ? "library-segment-btn-active" : "library-segment-btn-idle"
+                  title={t.gridView}
+                  aria-label={t.gridView}
+                  aria-pressed={viewMode === "grid"}
+                  className={`relative z-[1] flex h-full w-10 items-center justify-center rounded-full transition-colors duration-200 ${
+                    viewMode === "grid" ? "text-white" : "text-[#8e8e93] hover:text-white"
                   }`}
                 >
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2711,13 +2731,15 @@ function SourcesManagerInner({
                     <rect x="3" y="14" width="7" height="7" rx="1" />
                     <rect x="14" y="14" width="7" height="7" rx="1" />
                   </svg>
-                  {t.gridView}
                 </button>
                 <button
                   type="button"
                   onClick={() => setViewMode("list")}
-                  className={`flex h-full items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium transition-[color,background,box-shadow] duration-200 ease-out ${
-                    viewMode === "list" ? "library-segment-btn-active" : "library-segment-btn-idle"
+                  title={t.listView}
+                  aria-label={t.listView}
+                  aria-pressed={viewMode === "list"}
+                  className={`relative z-[1] flex h-full w-10 items-center justify-center rounded-full transition-colors duration-200 ${
+                    viewMode === "list" ? "text-white" : "text-[#8e8e93] hover:text-white"
                   }`}
                 >
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2728,7 +2750,6 @@ function SourcesManagerInner({
                     <line x1="3" y1="12" x2="3.01" y2="12" />
                     <line x1="3" y1="18" x2="3.01" y2="18" />
                   </svg>
-                  {t.listView}
                 </button>
               </div>
               {genres.length > 0 && (
@@ -3756,13 +3777,16 @@ function SourcesManagerInner({
                       <button
                         type="button"
                         onClick={() => {
+                          /* DJ AI = a NORMAL library view (operator direction) — same grid,
+                             chips and search stay visible; no takeover, no X. */
                           onDjCreatorOpenChange(false);
-                          setActiveCenterModule(activeCenterModule === "dj-creator-hub" ? null : "dj-creator-hub");
+                          setActiveCenterModule(null);
+                          setSelection({ type: "library_view", id: "dj_ai" });
                         }}
-                        aria-label="DJ Creator playlists and assistant — open workspace"
-                        title="DJ Creator — saved playlists and new sets from your catalog"
+                        aria-label="DJ Creator playlists"
+                        title="DJ Creator — saved playlists from your catalog"
                         className={`flex w-full items-center justify-between px-2 py-1.5 text-left text-[17px] font-light tracking-wide transition-colors duration-150 hover:text-white ${
-                          djHubRailActive ? "text-[#7db8ff]" : "text-[#a1a1a6]"
+                          navViewActive("dj_ai") ? "text-white" : "text-[#a1a1a6]"
                         }`}
                       >
                         <span className="flex min-w-0 items-center gap-2.5">
@@ -3796,11 +3820,13 @@ function SourcesManagerInner({
           </div>
         </aside>
 
-        {/* ── RIGHT rail — symmetric to the nav: DJ Creator AI + Your Playlists ── */}
-        <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-y-auto">
-          <div className="space-y-4">
-            <DjCreatorAiShell drawerOpen={djCreatorOpen} onDrawerOpenChange={onDjCreatorOpenChange} />
-            <section>
+        {/* ── RIGHT rail — DJ Creator AI pinned; ONE scrollbar, on the playlist list only ── */}
+        <aside className="flex w-full min-w-0 flex-col self-start p-1.5 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col gap-4">
+            <div className="shrink-0">
+              <DjCreatorAiShell drawerOpen={djCreatorOpen} onDrawerOpenChange={onDjCreatorOpenChange} />
+            </div>
+            <section className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-center justify-between gap-2 px-2 pb-1 pt-1">
                 <p className="library-section-title m-0 text-[10px] font-semibold uppercase tracking-[0.16em]">
                   Your Playlists
@@ -3822,9 +3848,9 @@ function SourcesManagerInner({
                   Create a playlist, then add songs from anywhere in the library — drag them here or use a card&apos;s ＋ button.
                 </p>
               ) : null}
-              <div className="space-y-0.5">
+              <div className="flex min-h-0 flex-1 flex-col">
                 {/* Compact rail list (cover · name · count · trash) — full view via the nav row */}
-                <div className="max-h-[60vh] space-y-0.5 overflow-y-auto pr-1">
+                <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1 max-h-[60vh] lg:max-h-none">
                 {userPlaylistContainers.slice(0, 30).map((p) => (
                   <div key={p.key} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors duration-150 hover:bg-white/[0.04]">
                     <button

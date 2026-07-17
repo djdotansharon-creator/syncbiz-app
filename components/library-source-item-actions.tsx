@@ -78,21 +78,9 @@ function CardMoreMenu({
                 onAnimationEnd={(e) => {
                   if (!open && e.target === e.currentTarget && e.animationName === "sb-pop-out") setPresent(false);
                 }}
-                className={`${open ? "sb-anim-pop" : "sb-anim-pop-out"} fixed z-[9975] min-w-[9.5rem] overflow-hidden rounded-xl border border-white/[0.1] bg-[#141418] py-1 text-[12px] shadow-[0_12px_32px_rgba(0,0,0,0.55)]`}
+                className={`${open ? "sb-anim-pop" : "sb-anim-pop-out"} fixed z-[9975] grid w-[7.5rem] grid-cols-2 gap-1 overflow-hidden rounded-xl bg-[#141418] p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.55)]`}
               >
-                {editHref ? (
-                  <a
-                    href={editHref}
-                    role="menuitem"
-                    className="flex w-full items-center gap-2.5 px-3 py-2 text-[#e5e5ea] transition-colors hover:bg-white/[0.08] hover:text-white"
-                  >
-                    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                    </svg>
-                    {editLabel}
-                  </a>
-                ) : null}
+                {/* Icon-grid menu (2×2): remove · edit · (future) · get-desktop. Frameless tiles. */}
                 {showDelete ? (
                   <button
                     type="button"
@@ -101,16 +89,49 @@ function CardMoreMenu({
                       setOpen(false);
                       onDeletePress();
                     }}
-                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[#ff6961] transition-colors hover:bg-[#ff453a]/10 hover:text-[#ff453a]"
+                    title={deleteLabel}
+                    aria-label={deleteLabel}
+                    className="flex h-12 items-center justify-center rounded-lg text-[#ff453a] transition-colors hover:bg-[#ff453a]/12"
                   >
-                    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
                       <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                       <line x1="10" y1="11" x2="10" y2="17" />
                       <line x1="14" y1="11" x2="14" y2="17" />
                     </svg>
-                    {deleteLabel}
                   </button>
-                ) : null}
+                ) : (
+                  <span className="h-12 rounded-lg bg-white/[0.03]" aria-hidden />
+                )}
+                {editHref ? (
+                  <a
+                    href={editHref}
+                    role="menuitem"
+                    title={editLabel}
+                    aria-label={editLabel}
+                    className="flex h-12 items-center justify-center rounded-lg text-[#e5e5ea] transition-colors hover:bg-white/[0.1] hover:text-white"
+                  >
+                    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                  </a>
+                ) : (
+                  <span className="h-12 rounded-lg bg-white/[0.03]" aria-hidden />
+                )}
+                <span className="h-12 rounded-lg bg-white/[0.03]" aria-hidden />
+                <a
+                  href="/settings#desktop"
+                  role="menuitem"
+                  title="Get Desktop app"
+                  aria-label="Get Desktop app"
+                  className="flex h-12 items-center justify-center rounded-lg text-[#7db8ff] transition-colors hover:bg-[#0a84ff]/15 hover:text-[#9cc8ff]"
+                >
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                </a>
               </div>
             </div>,
             document.body,

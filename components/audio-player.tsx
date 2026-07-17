@@ -47,7 +47,6 @@ import {
 } from "@/lib/yt-player-utils";
 import { PlayerDeckTransportSurface } from "@/components/player-surface/player-deck-transport-surface";
 import { PlayerVerticalVolume } from "@/components/player-surface/player-vertical-volume";
-import { DjVinylArtwork } from "@/components/player-surface/dj-vinyl-artwork";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
 import { masterPlaybackDiag } from "@/lib/master-playback-diag";
@@ -4137,28 +4136,33 @@ export function AudioPlayer() {
       role="region"
       aria-label={t.playerControllerAria}
     >
+      {/* FRAMELESS deck (operator direction): no border, no hairlines, no colored
+          strips — just the surface. The soft gradient stays (it dims the video bg). */}
       <div
-        className={`player-hero-shell relative min-w-0 w-full flex-1 rounded-2xl border px-2.5 py-2.5 sm:px-3.5 sm:py-3 ${
+        className={`player-hero-shell relative min-w-0 w-full flex-1 rounded-2xl px-2.5 py-2.5 sm:px-3.5 sm:py-3 ${
           displayStatus === "playing"
-            ? "border-white/[0.06] bg-gradient-to-b from-slate-800/38 to-slate-950/72"
-            : "border-white/[0.04] bg-gradient-to-b from-slate-900/32 to-slate-950/68"
+            ? "bg-gradient-to-b from-slate-800/38 to-slate-950/72"
+            : "bg-gradient-to-b from-slate-900/32 to-slate-950/68"
         }`}
       >
-        {displayStatus === "playing" ? (
-          <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"
-            aria-hidden
-          />
-        ) : null}
       <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
         {/* Unified hero: vinyl · metadata + progress + transport · volume */}
         <div className="grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)_auto] items-stretch gap-3 sm:gap-4 lg:gap-5">
           <div className="flex shrink-0 items-center justify-center self-center">
-            <DjVinylArtwork
-              coverSrc={displayThumbnailCover}
-              isPlaying={displayStatus === "playing"}
-              size="hero"
-            />
+            {/* Clean circle artwork — edge-to-edge cover, no vinyl ring/spin (operator direction). */}
+            <div className="h-36 w-36 shrink-0 overflow-hidden rounded-full bg-[#101014] shadow-[0_10px_36px_-10px_rgba(0,0,0,0.7)] sm:h-40 sm:w-40">
+              {displayThumbnailCover ? (
+                <HydrationSafeImage src={displayThumbnailCover} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-[#3a3a3c]">
+                  <svg className="h-10 w-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+                    <path d="M9 18V5l12-2v13" />
+                    <circle cx="6" cy="18" r="3" />
+                    <circle cx="18" cy="16" r="3" />
+                  </svg>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="library-deck-controls-col flex min-h-0 min-w-0 w-full max-w-none flex-col justify-between gap-1.5 py-1 sm:gap-2">
@@ -4291,20 +4295,20 @@ export function AudioPlayer() {
             onTouchStart={handleTouchStart}
           >
             <div
-              className={`absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-sm ${
+              className={`absolute inset-x-0 top-1/2 h-[5px] -translate-y-1/2 rounded-sm ${
                 isSourcesLibraryDeck ? "bg-[color:var(--lib-border-muted)]/80" : "bg-[#1a1a1a]"
               }`}
             />
             {displayBufferedPercent > 0 && (
               <div
-                className={`absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-sm transition-all duration-150 ${
+                className={`absolute left-0 top-1/2 h-[5px] -translate-y-1/2 rounded-sm transition-all duration-150 ${
                   isSourcesLibraryDeck ? "library-player-timeline-buffer" : "bg-neutral-700/50"
                 }`}
                 style={{ width: `${Math.min(displayBufferedPercent, 100)}%` }}
               />
             )}
             <div
-              className={`absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-sm transition-all duration-100 ${
+              className={`absolute left-0 top-1/2 h-[5px] -translate-y-1/2 rounded-sm transition-all duration-100 ${
                 isSourcesLibraryDeck ? "library-player-timeline-played" : "bg-gradient-to-r from-cyan-600/50 to-cyan-400/75"
               }`}
               style={{ width: `${displayProgressPercent}%` }}
@@ -4471,7 +4475,7 @@ export function AudioPlayer() {
           <div
             className={
               videoDocked
-                ? "pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-1/2 overflow-hidden rounded-r-[14px]"
+                ? "pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
                 : "pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0"
             }
             aria-hidden

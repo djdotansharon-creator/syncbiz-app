@@ -126,19 +126,28 @@ export function PlayerVerticalVolume({
       </div>
 
       <div className="mt-1 shrink-0 flex flex-col items-center pb-0.5">
+        {/* Frameless mute — bigger icon; a diagonal strike sweeps in (top-right →
+            bottom-left) and the icon turns red when muted; reverses on unmute. */}
         <button
           type="button"
           onClick={onMuteToggle}
           aria-label={muteLabel}
           aria-pressed={isMuted}
           title={muteLabel}
-          className={`vol-deck-mute-btn flex h-8 w-8 items-center justify-center rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 ${
-            isMuted
-              ? "border-[#ff453a]/35 bg-[#ff453a]/12 text-[#ff453a]"
-              : "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:text-[#f5f5f7]"
+          className={`vol-deck-mute-btn relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full transition-colors duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25 ${
+            isMuted ? "text-[#ff453a]" : "text-[#c7c7cc] hover:text-[#f5f5f7]"
           }`}
         >
-          <MuteIcon muted={isMuted} />
+          <span className="[&_svg]:h-5 [&_svg]:w-5">
+            <MuteIcon muted={isMuted} />
+          </span>
+          <span
+            className={`pointer-events-none absolute left-1/2 top-1/2 h-[2px] w-8 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-full bg-[#ff453a] transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+              isMuted ? "scale-x-100" : "scale-x-0"
+            }`}
+            style={{ transformOrigin: "right center" }}
+            aria-hidden
+          />
         </button>
       </div>
 
