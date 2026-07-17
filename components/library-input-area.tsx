@@ -23,6 +23,7 @@ import {
 } from "@/lib/playlist-utils";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
+import { rgbLuminance, useDominantColor } from "@/lib/use-dominant-color";
 import { inferGenre } from "@/lib/infer-genre";
 import { searchAll, searchExternal, type YouTubeSearchResult, type RadioSearchResult, type CatalogSearchResult } from "@/lib/search-service";
 import { createEphemeralLocalSearchSource } from "@/lib/play-next";
@@ -117,6 +118,61 @@ function ResultPlayIcon() {
     <svg className="ml-0.5 h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
       <path d="M8 5v14l11-7L8 5z" />
     </svg>
+  );
+}
+
+/** Top result — the artwork fills the WHOLE card; play button flips black/white
+    by the artwork's luminance (2026-07-17 design; contrast-aware color system). */
+function TopResultFullBleedCard({
+  r,
+  onPlay,
+  playLabel,
+  viewsWord,
+}: {
+  r: CatalogSearchResult;
+  onPlay: () => void;
+  playLabel: string;
+  viewsWord: string;
+}) {
+  const dominant = useDominantColor(r.thumbnail);
+  const lightArt = dominant ? rgbLuminance(dominant) > 0.55 : false;
+  const metaLine = [
+    r.artist,
+    r.genres?.length ? r.genres.slice(0, 3).join(" · ") : null,
+    r.durationSec ? formatDuration(r.durationSec) : null,
+    r.viewCount != null ? `${formatViewCount(r.viewCount)} ${viewsWord}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div className="group relative min-h-[11.5rem] overflow-hidden rounded-2xl bg-[#101014]">
+      {r.thumbnail ? (
+        <img src={r.thumbnail} alt="" className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+      ) : (
+        <TrackMediaPlaceholder chip="YT" className="absolute inset-0 h-full w-full" showCornerBadge={false} />
+      )}
+      <div className="absolute inset-x-0 bottom-0 h-3/4 bg-gradient-to-t from-black/90 via-black/45 to-transparent" aria-hidden />
+      <div className="relative flex h-full min-h-[11.5rem] flex-col justify-end p-4 pe-16">
+        <p className="flex items-center gap-2">
+          <span className="truncate text-xl font-bold leading-tight text-white drop-shadow-[0_1px_6px_rgba(0,0,0,0.8)]">{r.title}</span>
+          <ResultPlatformLogo kind="youtube" />
+        </p>
+        <p className="mt-1 truncate text-xs text-white/80 drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]">{metaLine}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onPlay}
+        className={`absolute bottom-4 right-4 inline-flex h-12 w-12 items-center justify-center rounded-full shadow-[0_6px_20px_-6px_rgba(0,0,0,0.7)] transition-transform hover:scale-105 active:scale-95 ${
+          lightArt ? "bg-[#111114] text-[#f5f5f7]" : "bg-[#f5f5f7] text-[#111114]"
+        }`}
+        title={playLabel}
+        aria-label={playLabel}
+      >
+        <svg className="ml-0.5 h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+          <path d="M8 5v14l11-7L8 5z" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -2123,45 +2179,12 @@ export function LibraryInputArea({
                   <div className="grid gap-4 lg:grid-cols-[minmax(280px,380px)_minmax(0,1fr)]">
                     <div className="min-w-0">
                       <p className={RESULT_SECTION_HEAD}>Top result</p>
-                      {(() => {
-                        const r = catalogResults[0];
-                        return (
-                          <div className="group relative overflow-hidden rounded-2xl bg-white/[0.04] p-4 transition-colors hover:bg-white/[0.07]">
-                            <div className="h-28 w-full max-w-[210px] overflow-hidden rounded-xl bg-[#101014]">
-                              {r.thumbnail ? (
-                                <img src={r.thumbnail} alt="" className="h-full w-full object-cover" />
-                              ) : (
-                                <TrackMediaPlaceholder chip="YT" className="h-full w-full" showCornerBadge={false} />
-                              )}
-                            </div>
-                            <p className="mt-3 flex items-center gap-2">
-                              <span className="truncate text-xl font-bold leading-tight text-white">{r.title}</span>
-                              <ResultPlatformLogo kind="youtube" />
-                            </p>
-                            <p className="mt-1 truncate text-xs text-[#a1a1a6]">
-                              {[
-                                r.artist,
-                                r.genres?.length ? r.genres.slice(0, 3).join(" · ") : null,
-                                r.durationSec ? formatDuration(r.durationSec) : null,
-                                r.viewCount != null ? `${formatViewCount(r.viewCount)} ${t.views ?? "views"}` : null,
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => void handlePlayCatalog(r)}
-                              className="absolute bottom-4 right-4 inline-flex h-12 w-12 items-center justify-center rounded-full text-[#f5f5f7] transition-all hover:bg-[#f5f5f7] hover:text-[#111114] hover:shadow-[0_6px_20px_-6px_rgba(0,0,0,0.7)] active:scale-95"
-                              title={t.playNow}
-                              aria-label={t.playNow}
-                            >
-                              <svg className="ml-0.5 h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                                <path d="M8 5v14l11-7L8 5z" />
-                              </svg>
-                            </button>
-                          </div>
-                        );
-                      })()}
+                      <TopResultFullBleedCard
+                        r={catalogResults[0]}
+                        onPlay={() => void handlePlayCatalog(catalogResults[0])}
+                        playLabel={t.playNow}
+                        viewsWord={t.views ?? "views"}
+                      />
                     </div>
                     {catalogResults.length > 1 ? (
                       <div className="min-w-0">
@@ -2285,13 +2308,16 @@ export function LibraryInputArea({
                           >
                             <ResultPlayIcon />
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => router.push("/sources")}
-                            className={RESULT_GHOST_BTN}
-                          >
-                            {t.open}
-                          </button>
+                          {/* Open exists on PLAYLISTS only (operator direction) */}
+                          {source.origin === "playlist" ? (
+                            <button
+                              type="button"
+                              onClick={() => router.push("/sources")}
+                              className={RESULT_GHOST_BTN}
+                            >
+                              {t.open}
+                            </button>
+                          ) : null}
                           {source.origin === "playlist" && source.playlist && (
                             <ActionButtonEdit href={`/playlists/${source.playlist.id}/edit`} variant="player" title={t.editPlaylist} aria-label={t.editPlaylist} />
                           )}

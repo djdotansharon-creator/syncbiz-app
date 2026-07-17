@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useDevicePlayer } from "@/lib/device-player-context";
 
-/** Shared quiet pill style for guest / “My link” controls in the library rail. */
+/** Rail text controls — FRAMELESS: big white text, soft bright rectangle only on hover
+    (operator direction: no borders anywhere on the command rail). */
 export const guestLinkLedButtonClass =
-  "inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.05] px-2.5 py-1.5 text-xs font-medium text-[#a1a1a6] transition-colors duration-150 hover:border-white/[0.16] hover:bg-white/[0.08] hover:text-[#f5f5f7] focus:outline-none focus:ring-2 focus:ring-white/20 active:scale-[0.97]";
+  "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[14px] font-medium text-[#f5f5f7] transition-colors duration-150 hover:bg-white/[0.12] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 active:scale-[0.97]";
 
 type GuestLinkButtonProps = { className?: string };
 

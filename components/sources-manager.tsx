@@ -2631,7 +2631,9 @@ function SourcesManagerInner({
           </details>
         </aside>
 
-        <div className="library-list-shell row-start-1 min-w-0 self-start overflow-hidden rounded-2xl p-2.5 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-stretch lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:px-3 xl:px-3">
+        <div className="library-list-shell library-list-shell--frameless relative row-start-1 min-w-0 self-start overflow-hidden p-2.5 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-stretch lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:px-3 xl:px-3">
+          {/* Divider between the library nav and the songs area — inset from top/bottom (operator direction: no box, just a quiet line) */}
+          <span className="pointer-events-none absolute left-0 top-10 bottom-10 hidden w-px bg-white/[0.09] lg:block" aria-hidden />
           {routeEmbedded ? (
             <div className="sb-anim-rise flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto p-3 sm:p-4">
               <div className="flex shrink-0 justify-end">
@@ -2734,10 +2736,10 @@ function SourcesManagerInner({
                   type="button"
                   onClick={() => setGenreBrowseOpen((v) => !v)}
                   aria-expanded={genreBrowseOpen}
-                  className={`inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3 text-sm font-medium transition-colors duration-150 ${
+                  className={`inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3 text-[14px] font-medium transition-colors duration-150 ${
                     genreFilter || genreBrowseOpen
                       ? "bg-[#f5f5f7] text-[#111114]"
-                      : "bg-white/[0.06] text-[#d1d1d6] hover:bg-white/[0.1] hover:text-white"
+                      : "text-[#f5f5f7] hover:bg-white/[0.12]"
                   }`}
                   title="Browse genres"
                 >
@@ -3717,9 +3719,10 @@ function SourcesManagerInner({
                 {(() => {
                   const navViewActive = (id: LibraryViewId) =>
                     !djHubRailActive && selection.type === "library_view" && selection.id === id;
+                  /* Big, thin type (operator direction: "פונט דק ואותיות גדולות"). */
                   const navCls = (active: boolean) =>
-                    `flex w-full items-center justify-between px-2 py-[3px] text-left text-sm transition-colors duration-150 ${
-                      active ? "font-medium text-white" : "text-[#a1a1a6] hover:text-white"
+                    `flex w-full items-center justify-between px-2 py-1.5 text-left text-[17px] font-light tracking-wide transition-colors duration-150 ${
+                      active ? "text-white" : "text-[#a1a1a6] hover:text-white"
                     }`;
                   /* Simplification pass: the nav keeps only the two DESTINATIONS.
                      Content-type filters (Recently Added / Playlists / Your
@@ -3747,7 +3750,7 @@ function SourcesManagerInner({
                             <LibraryNavGlyph kind={r.id as LibraryNavGlyphKind} />
                             <span className="truncate">{r.label}</span>
                           </span>
-                          <span className="text-xs tabular-nums">{r.count}</span>
+                          <span className="text-[15px] font-light tabular-nums">{r.count}</span>
                         </button>
                       ))}
                       <button
@@ -3758,15 +3761,15 @@ function SourcesManagerInner({
                         }}
                         aria-label="DJ Creator playlists and assistant — open workspace"
                         title="DJ Creator — saved playlists and new sets from your catalog"
-                        className={`flex w-full items-center justify-between px-2 py-[3px] text-left text-sm transition-colors duration-150 hover:text-white ${
-                          djHubRailActive ? "font-medium text-[#7db8ff]" : "text-[#a1a1a6]"
+                        className={`flex w-full items-center justify-between px-2 py-1.5 text-left text-[17px] font-light tracking-wide transition-colors duration-150 hover:text-white ${
+                          djHubRailActive ? "text-[#7db8ff]" : "text-[#a1a1a6]"
                         }`}
                       >
                         <span className="flex min-w-0 items-center gap-2.5">
                           <LibraryNavGlyph kind="dj_ai" />
                           <span className="truncate">DJ AI</span>
                         </span>
-                        <span className="text-xs tabular-nums">
+                        <span className="text-[15px] font-light tabular-nums">
                           {displaySources.filter((s) => isDjCreatorWorkspacePlaylistSource(s)).length}
                         </span>
                       </button>

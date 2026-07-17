@@ -10,6 +10,7 @@ import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { isValidStreamUrl, isValidLocalFilePlaybackPath } from "@/lib/url-validation";
 import { getPlaylistTracks } from "@/lib/playlist-types";
+import { useDominantColor } from "@/lib/use-dominant-color";
 import { formatDuration } from "@/lib/format-utils";
 import {
   libraryCardDisplayGenre,
@@ -212,7 +213,10 @@ function ArtTopRightCorner({
       {desktopDownloadCta ? (
         <DesktopGetAppBadge />
       ) : platform ? (
-        <PlatformLogoBadge platform={platform} />
+        /* Grid tiles hide this corner logo — platform reads as text under the title. */
+        <span className="library-card-platform-corner">
+          <PlatformLogoBadge platform={platform} />
+        </span>
       ) : null}
       {!desktopDownloadCta && desktopOnlyTrackCount > 0 ? (
         <DesktopGetAppBadge
@@ -380,6 +384,11 @@ export function SourceCard({
 
   const useExplicitPlaylistArt = explicitArtUrl !== undefined;
   const cardCover = useExplicitPlaylistArt ? explicitArtUrl : source.cover;
+  /* Hover halo tinted by the artwork's average color (subtle, never louder than the art). */
+  const dominant = useDominantColor(cardCover);
+  const cardHaloStyle = dominant
+    ? ({ "--card-halo": `rgba(${dominant.r}, ${dominant.g}, ${dominant.b}, 0.55)` } as React.CSSProperties)
+    : undefined;
   const usePlaylistPlaceholder = kindBadge === "LIST" && !cardCover;
   const cardGenre = libraryCardDisplayGenre(source);
   const leafMetaFooter = showLeafLibraryChips ? (
@@ -507,6 +516,7 @@ export function SourceCard({
     <article
       ref={articleRef}
       draggable={draggable}
+      style={cardHaloStyle}
       onDragStart={onDragStart}
       onClick={onPlaylistEntityOpen ? handleCardClickForOpen : undefined}
       onDoubleClick={onPlaylistEntityPlay ? handleCardDoubleClickPlay : undefined}
@@ -565,6 +575,21 @@ export function SourceCard({
                 <TrackMediaPlaceholder chip={provenanceChip} className="h-full w-full" showCornerBadge={false} />
               </div>
             ) : null}
+            {/* Playlist marker — quiet icon, bottom-right of the art (grid design) */}
+            {kindBadge === "LIST" ? (
+              <span
+                className="library-card-playlist-glyph pointer-events-none absolute bottom-2 right-2 z-[2] flex h-6 w-6 items-center justify-center rounded-md bg-black/55 text-white/90 backdrop-blur-sm"
+                title="Playlist"
+                aria-label="Playlist"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <line x1="3" y1="6" x2="13" y2="6" />
+                  <line x1="3" y1="12" x2="13" y2="12" />
+                  <line x1="3" y1="18" x2="9" y2="18" />
+                  <path d="M17 6v8.5a2.5 2.5 0 1 1-2-2.45" />
+                </svg>
+              </span>
+            ) : null}
             {durationSec > 0 && (kindBadge === "SET" || kindBadge === "LIST" || kindBadge === "RADIO") ? (
               <span
                 className={`library-pill-overlay library-pill-overlay-soft absolute bottom-2 right-2 rounded-md px-2 py-0.5 font-medium tabular-nums shadow-lg backdrop-blur-md ${
@@ -579,6 +604,25 @@ export function SourceCard({
         title={source.title}
         metaLine=""
       >
+        {/* Platform line — small logo + name under the title; playlists add the
+            item count beside it (2026-07-17 tile design). */}
+        {(() => {
+          const p = resolveCardPlatform(source);
+          if (!p) return null;
+          const pName =
+            p === "youtube" ? "YouTube" : p === "soundcloud" ? "SoundCloud" : p === "spotify" ? "Spotify" : p === "radio" ? "Radio" : "Local";
+          const itemCount =
+            kindBadge === "LIST" && source.playlist ? getPlaylistTracks(source.playlist).length : null;
+          return (
+            <p className="library-card-platform-line m-0">
+              <span className="library-card-platform-line-logo" aria-hidden>
+                <PlatformLogoBadge platform={p} />
+              </span>
+              <span>{pName}</span>
+              {itemCount != null ? <span className="library-card-platform-line-count">· {itemCount} item</span> : null}
+            </p>
+          );
+        })()}
         {/* Descriptor line — genre, DJ-Creator prompt or album name; the old
             "Genre" label lied whenever the stored text wasn't a genre. */}
         <p className="library-card-genre-line m-0">
