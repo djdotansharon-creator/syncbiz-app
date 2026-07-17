@@ -8,6 +8,7 @@ The player runs in businesses and must NEVER stop. Past incidents (all solved, d
 1. **Eject** — playlist loaded then vanished from player+queue (play-before-WS-register + CONTROL wipe → playing-player protection, see below).
 2. **Flicker** — MASTER re-claim ping-pong between two playing devices (loop breaker, max 2/60s; Electron renderer never re-claims).
 3. **Mix dead on manual switch** — headless-autoplay FALSE POSITIVE led to disabling a working crossfade; NEVER change playback code from headless-only evidence (`--autoplay-policy=no-user-gesture-required` mandatory).
+3b. **YT error 150 on ALL videos** (2026-07-17) — YouTube embed-throttles the machine's IP after many headless test plays; verify-player YT steps fail environmentally. Before suspecting code: `git stash` → rerun smoke → same failure = environment. Wait it out / test in a real browser; NEVER "fix" the engine for this.
 4. **Desktop mix gap + fader drop** — single-MPV fade-to-silence; now dual-deck A/B in playback-orchestrator.
 RULES: (a) files in the playback chain (`playback-provider`, `audio-player`, `device-player-context`, `ws-client`, `server/index.ts`, `desktop/src/main/*`) get SURGICAL edits only, each verified live before commit; (b) UI work must not import/alter playback logic; (c) verify with the CANONICAL script — do NOT write ad-hoc Playwright scripts each time: `node scripts/verify-player.mjs` (against localhost:3000; `BASE_URL=` for prod). It covers: login → play → tab round-trip survival → MASTER chip stability → automix seek-to-end transition. One run ≈ 2 min.
 
