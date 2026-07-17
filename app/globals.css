@@ -3179,12 +3179,15 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   }
 }
 
-/* Fog body: starts just under the middle of the tile; title first. */
+/* Fog body: starts around the middle of the tile (title just below center) but
+   GROWS UPWARD when the content needs more room — never clips the action row.
+   Actions pin to the tile bottom via margin-top:auto. */
 .library-source-card-grid .library-source-card .sb-lbc-body,
 .library-source-card-grid .library-source-card.library-source-card-leaf .sb-lbc-body {
-  top: 46%;
+  top: auto;
+  min-height: 58%;
   justify-content: flex-start !important;
-  padding: 1rem 0.85rem 0.55rem !important;
+  padding: 0.9rem 0.85rem 0.5rem !important;
   gap: 0.28rem !important;
   background: linear-gradient(
     to top,
@@ -3193,6 +3196,9 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
     rgba(0, 0, 0, 0.38) 80%,
     transparent 100%
   ) !important;
+}
+.library-source-card-grid .library-card-actions-wrap {
+  margin-top: auto;
 }
 .library-source-card-grid .sb-lbc-title {
   font-size: 1.05rem !important;
