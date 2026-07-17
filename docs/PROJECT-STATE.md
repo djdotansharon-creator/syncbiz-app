@@ -105,3 +105,12 @@ CENTER (col-start-2, row-span-2): command rail (view toggles · genres · LIBRAR
 
 ## User preferences (product voice)
 Hebrew speaker; wants international/Mac-clean look ("not AI-made"), zero playback risk (business player must never stop), nothing deleted — relocate into panels/menus; verify in real browser before claiming done; hates token-wasting full-file scans — keep this file current instead.
+
+## 2026-07-17b sweep (a33713d) — key anchors
+- DJ AI = library view `dj_ai` (LibraryViewId union + visibleSources case + `sectionBuckets` exemption from hide-DJ rule — WITHOUT the exemption the view renders EMPTY). Hub takeover panel code intact but unused from nav.
+- Right rail: aside `lg:overflow-hidden` + pinned DjCreatorAiShell + flex-1 scrolling list (one scrollbar).
+- Card ⋯ = 2×2 ICON grid (CardMoreMenu: red trash / edit / reserved / get-desktop link to /settings#desktop); AI playlists still use the TEXT AI menu (merged Edit/Delete) — known inconsistency.
+- Grid/List = icon pill with sliding highlight (sources-manager, `viewMode`).
+- Deck: vinyl replaced by plain circle img (DjVinylArtwork import removed); hero shell frameless (no border/hairline); timeline `library-player-timeline-played` WHITE (globals end), bars h-[5px]; video bg wrapper `left-[42%]`.
+- Mute (player-vertical-volume): frameless, diagonal strike anim via scale-x + rotate-45, red on muted.
+- Tiles: hover glow-behind (`--card-halo`) + scale, NO ring; title bottom; platform ICON only (name hidden by nth-child CSS); art-top-right badges hidden in grid; sections frameless; thumb-only scrollbars — all in globals "2026-07-17b" blocks. Restore point: backup/design-2026-07-17.
