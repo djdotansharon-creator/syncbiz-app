@@ -926,8 +926,11 @@ export function AccessControlConsole() {
         )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-12">
-        <div className="lg:col-span-8 space-y-4">
+      {/* Single stacked column — the console lives inside the workspace CENTER
+          pane (rails on both sides), so it must NOT run its own wide-page 8/4
+          split (that cramped it to half width). Opens like Settings. */}
+      <div className="space-y-4">
+        <div className="space-y-4">
           <StatusStrip />
 
           {!unlocked ? (
@@ -1375,7 +1378,7 @@ export function AccessControlConsole() {
           ) : null}
         </div>
 
-        <div className="lg:col-span-4">
+        <div>
           <div className="space-y-4">
             <ConsoleCard>
               <div className="text-sm font-semibold text-slate-100">Live access summary</div>
