@@ -544,6 +544,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (p === "/dashboard" || p === "/owner" || p === "/logs" || p === "/settings") return true;
     if (p === "/radio") return true;
     if (p.startsWith("/schedules")) return true;
+    // Access Control + Architecture open inside the workspace (rails stay) — they
+    // must fill the pane like Settings, not the narrow centered max-w-5xl.
+    if (p.startsWith("/access-control")) return true;
+    if (p.startsWith("/architecture")) return true;
     return false;
   })();
   // Unified deck treatment: every desktop (app) route gets the media-theme
