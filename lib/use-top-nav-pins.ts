@@ -21,8 +21,10 @@ export const TOP_NAV_PINS_STORAGE_KEY = "syncbiz:topnav:pins:v1";
 /** Keys that can never be removed from the top bar. */
 const ALWAYS_PINNED = new Set<string>(["library", "radio"]);
 
-/** Initial pinned set when nothing is persisted yet (preserves legacy UX). */
-const DEFAULT_PINS: readonly string[] = ["dashboard", "owner", "schedules", "logs"];
+/** Initial pinned set when nothing is persisted yet — matches the top bar the
+ *  operator sees today (Library · Schedules · Radio · Settings). library+radio
+ *  are always pinned, so only schedules+settings need to be defaults. */
+const DEFAULT_PINS: readonly string[] = ["schedules", "settings"];
 
 function readStoredPins(): string[] | null {
   if (typeof window === "undefined") return null;

@@ -128,6 +128,12 @@ function isBrowserBranchControlsOnlyRoute(pathname: string): boolean {
   // or stops the music. NOT in isBrowserNonExecutingRoute → a browser MASTER keeps
   // playing (same as /schedules, /radio).
   if (pathname === "/access-control" || pathname.startsWith("/access-control/")) return true;
+  // Operator/admin categories reachable from the top-nav gear menu — the IRON
+  // RULE covers ALL top-nav routes, so they keep the socket (AudioPlayer lives at
+  // the app-shell level, so music continues as long as the socket survives).
+  for (const r of ["/dashboard", "/owner", "/logs", "/architecture"]) {
+    if (pathname === r || pathname.startsWith(`${r}/`)) return true;
+  }
   return false;
 }
 

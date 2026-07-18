@@ -637,7 +637,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [inDesktopApp, setInDesktopApp] = useState(false);
   const [mainMenuOpen, setMainMenuOpen] = useState(false);
   const mainMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
-  const { isPinned: isCategoryPinned, togglePin: toggleCategoryPin } = useTopNavPins();
+  const { isPinned: isCategoryPinned, togglePin: toggleCategoryPin, pinnedSet } = useTopNavPins();
   // Control Room / Full Screen mode — visual-only compaction for tablet/desktop.
   // Two independent layers:
   //   1. isNativeFullscreen — actual browser Fullscreen API state.
@@ -1353,10 +1353,20 @@ export function AppShell({ children }: { children: ReactNode }) {
                 Explicit sort guarantees display order: Library → Schedules → Radio → Settings */}
             <nav className="flex shrink-0 items-end pb-0" aria-label="Main">
               {(() => {
-                const NAV_ORDER = ["library", "schedules", "radio", "settings"] as const;
+                /* Top nav = the operator's PINNED categories (gear menu toggles),
+                   in this canonical order. Toggling a category in the menu adds/
+                   removes it here. library+radio are always pinned. */
+                const NAV_ORDER = [
+                  "library", "schedules", "radio", "settings",
+                  "dashboard", "owner", "logs", "access-control", "architecture", "remote",
+                ] as const;
                 return navItems
-                  .filter((item) => (NAV_ORDER as readonly string[]).includes(item.labelKey))
-                  .sort((a, b) => (NAV_ORDER as readonly string[]).indexOf(a.labelKey) - (NAV_ORDER as readonly string[]).indexOf(b.labelKey));
+                  .filter((item) => pinnedSet.has(item.labelKey))
+                  .sort((a, b) => {
+                    const ia = (NAV_ORDER as readonly string[]).indexOf(a.labelKey);
+                    const ib = (NAV_ORDER as readonly string[]).indexOf(b.labelKey);
+                    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+                  });
               })()
                 .map((item) => {
                   const isActive =
