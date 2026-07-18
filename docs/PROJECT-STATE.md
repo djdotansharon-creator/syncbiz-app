@@ -4,7 +4,9 @@
 > Last updated: 2026-07-16.
 
 ## ⛔ PLAYER SAFETY CONTRACT (owner directive — read before ANY change)
-The player runs in businesses and must NEVER stop. Past incidents (all solved, do not reintroduce):
+The player runs in businesses and must NEVER stop.
+**IRON RULE — category switching never stops the music.** Navigating between ANY top-nav categories/routes (Library, Schedules, Radio, Settings, Access Control, …) must keep the device WS socket alive so the MASTER lease and audio survive. Enforced by `isBrowserBranchControlsOnlyRoute` in `device-player-context.tsx` — EVERY workspace route must be listed there. Adding a new top-nav route? Add it to that function (and keep it OUT of `isBrowserNonExecutingRoute` unless a browser-MASTER must be silenced there). Also keep new operator pages INSIDE the `app/(app)/(workspace)/` route group so the rails stay (like Settings / Access Control).
+Past incidents (all solved, do not reintroduce):
 1. **Eject** — playlist loaded then vanished from player+queue (play-before-WS-register + CONTROL wipe → playing-player protection, see below).
 2. **Flicker** — MASTER re-claim ping-pong between two playing devices (loop breaker, max 2/60s; Electron renderer never re-claims).
 3. **Mix dead on manual switch** — headless-autoplay FALSE POSITIVE led to disabling a working crossfade; NEVER change playback code from headless-only evidence (`--autoplay-policy=no-user-gesture-required` mandatory).

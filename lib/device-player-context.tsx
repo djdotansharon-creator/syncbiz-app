@@ -123,6 +123,11 @@ function isBrowserBranchControlsOnlyRoute(pathname: string): boolean {
   if (pathname === "/sources" || pathname.startsWith("/sources/")) return true;
   if (pathname === "/schedules" || pathname.startsWith("/schedules/")) return true;
   if (pathname === "/radio" || pathname.startsWith("/radio/")) return true;
+  // Access Control opens inside the workspace (rails stay) — it must ALSO keep the
+  // device socket so the IRON RULE holds: navigating there never drops the lease
+  // or stops the music. NOT in isBrowserNonExecutingRoute → a browser MASTER keeps
+  // playing (same as /schedules, /radio).
+  if (pathname === "/access-control" || pathname.startsWith("/access-control/")) return true;
   return false;
 }
 
