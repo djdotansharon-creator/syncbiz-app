@@ -52,7 +52,7 @@ export default async function SettingsPage() {
         <PlaceholderCard title="Startup" description="Desktop app launches at login.">
           <DesktopStartupSettingsCard />
         </PlaceholderCard>
-        <PlaceholderCard title="Local Music" description="Folder for My Music Library on Desktop.">
+        <PlaceholderCard title="PlayItPro Local Library" description="Play local music on this machine. The file location is never shown.">
           <DesktopLocalMusicSettingsCard />
         </PlaceholderCard>
         <PlaceholderCard

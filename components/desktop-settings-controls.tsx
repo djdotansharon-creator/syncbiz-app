@@ -8,7 +8,12 @@ type AutoStartState = {
 };
 
 type MusicFolderSnapshot = {
+  /** Absolute path — internal only. NEVER rendered (customer privacy). */
   path: string | null;
+  /** Safe label for the UI: folder name only, no drive letter / no location. */
+  displayLabel?: string | null;
+  /** True when the folder is a managed PlayItPro bank (label hides everything). */
+  isPlaylistProLibrary?: boolean;
 };
 
 type LoadState = "idle" | "loading" | "ready" | "web-only";
@@ -173,8 +178,11 @@ export function DesktopLocalMusicSettingsCard() {
     try {
       const result = await api.pickMusicFolder();
       if (result.status === "ok") {
-        setMusicFolder({ path: result.path });
-        setFolderStatus("Saved automatically");
+        // Re-fetch the SAFE snapshot (displayLabel, no raw path) instead of
+        // storing result.path — the raw location must never reach the UI state.
+        const safe = api?.getMusicFolder ? await api.getMusicFolder() : { path: result.path };
+        setMusicFolder(safe ?? { path: result.path });
+        setFolderStatus("Connected");
       } else if (result.status === "error") {
         setError(result.message);
       }
@@ -215,42 +223,70 @@ export function DesktopLocalMusicSettingsCard() {
   }
 
   const musicFolderReady = musicFolderApiAvailable();
+  const isOn = Boolean(musicFolder.path);
+  /* PRIVACY: never expose the raw path/location. Managed bank → generic label;
+     a user-chosen folder → its NAME only (displayLabel = basename, no drive). */
+  const connectedLabel = musicFolder.isPlaylistProLibrary
+    ? "PlayItPro managed bank"
+    : (musicFolder.displayLabel ?? "Local folder");
 
   return (
     <div className="space-y-3">
-      <div>
-        <p className="text-sm text-slate-200">Music Folder</p>
-        <p className="mt-0.5 text-[11px] text-slate-500">
-          {musicFolderReady
-            ? "Used for the My Music Library workspace. Saved as soon as you choose a folder."
-            : "Update the SyncBiz desktop app to enable this control."}
-        </p>
-        <input
-          readOnly
-          tabIndex={-1}
-          aria-readonly
-          value={musicFolder.path ?? ""}
-          placeholder="No folder selected"
-          className="mt-2 w-full cursor-default rounded-lg border border-slate-700/80 bg-slate-950/80 px-3 py-2 font-mono text-xs text-slate-400 shadow-[inset_0_1px_2px_rgba(0,0,0,0.35)] outline-none focus:ring-0"
-        />
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-100">PlayItPro Local Library</p>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
+            {musicFolderReady
+              ? "Play music stored on this machine. On managed PlayItPro machines the library connects automatically — the file location is never shown."
+              : "Update the SyncBiz desktop app to enable this control."}
+          </p>
+        </div>
+        {/* ON/OFF toggle — ON links the local library, OFF disconnects it. */}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isOn}
+          aria-label="PlayItPro Local Library"
+          disabled={!musicFolderReady || busy != null}
+          onClick={isOn ? onClearFolder : onPickFolder}
+          className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 disabled:opacity-50 ${
+            isOn ? "bg-emerald-500/90" : "bg-slate-700/80"
+          }`}
+        >
+          <span
+            className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${
+              isOn ? "translate-x-[22px]" : "translate-x-0.5"
+            }`}
+          />
+        </button>
       </div>
-      <div className="flex flex-wrap gap-2">
+
+      {/* Status — a safe label, NEVER a path */}
+      <div className="flex items-center gap-2 rounded-lg border border-slate-800/70 bg-slate-950/50 px-3 py-2">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${isOn ? "bg-emerald-400" : "bg-slate-600"}`} aria-hidden />
+        <span className="min-w-0 truncate text-xs text-slate-300">
+          {isOn ? `Connected · ${connectedLabel}` : "Off — no local library"}
+        </span>
+      </div>
+
+      {/* Link your own music folder (customer-selectable) */}
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={onPickFolder}
           disabled={!musicFolderReady || busy === "pick"}
           className="rounded-lg border border-slate-600 bg-slate-800/80 px-3 py-1.5 text-xs font-medium text-slate-100 transition hover:border-slate-500 hover:bg-slate-800 disabled:opacity-50"
         >
-          {musicFolder.path ? "Change" : "Choose folder"}
+          {isOn ? "Change my music folder" : "Link my music folder"}
         </button>
-        {musicFolder.path ? (
+        {isOn ? (
           <button
             type="button"
             onClick={onClearFolder}
             disabled={!musicFolderReady || busy === "clear"}
             className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-600 hover:text-slate-100 disabled:opacity-50"
           >
-            Clear
+            Disconnect
           </button>
         ) : null}
       </div>

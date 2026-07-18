@@ -1113,7 +1113,9 @@ export function MyMusicLibraryWorkspacePanel({
             ) : null}
             <div
               className="min-w-0 flex-1 rounded-md border border-slate-800/90 bg-slate-900/55 px-2.5 py-1.5"
-              title={`${rootPath}${relSubpath ? `${rootPath.includes("\\") ? "\\" : "/"}${relSubpath.replace(/\//g, rootPath.includes("\\") ? "\\" : "/")}` : ""}`}
+              /* PRIVACY: never expose the drive/location — tooltip shows the
+                 relative in-library path only (subfolder names), no root path. */
+              title={relSubpath ? `Library / ${relSubpath.replace(/\//g, " / ")}` : "Library root"}
             >
               <p className="text-[9px] font-medium uppercase tracking-[0.18em] text-slate-600">Location</p>
               <div className="mt-0.5 font-mono text-xs font-medium leading-snug text-slate-100 sm:text-[0.8125rem] sm:leading-snug">
@@ -1123,7 +1125,8 @@ export function MyMusicLibraryWorkspacePanel({
                     onClick={() => navigateToSegment(-1)}
                     className="break-all text-left text-sky-300/95 transition hover:text-sky-200"
                   >
-                    {rootPath}
+                    {/* Folder NAME only (no drive/location) — customer privacy. */}
+                    {(rootPath.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "Library")}
                   </button>
                 ) : (
                   <span className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
