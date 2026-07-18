@@ -47,6 +47,7 @@ import {
 } from "@/lib/yt-player-utils";
 import { PlayerDeckTransportSurface } from "@/components/player-surface/player-deck-transport-surface";
 import { PlayerVerticalVolume } from "@/components/player-surface/player-vertical-volume";
+import { DesktopVideoDock } from "@/components/player-surface/desktop-video-dock";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
 import { masterPlaybackDiag } from "@/lib/master-playback-diag";
@@ -4492,6 +4493,26 @@ export function AudioPlayer() {
           </div>
         );
       })() : null}
+      {/* DESKTOP video — MPV plays the audio (--no-video), so this muted iframe
+          shows only the picture, synced to MPV position. Audio-safe (see
+          DesktopVideoDock). Same right-half deck placement + left fog as browser. */}
+      {isDesktopMode && isYouTube && vid && (desktopMpvSnap?.status === "playing" || desktopMpvSnap?.status === "paused") ? (
+        <div
+          className="pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
+          aria-hidden
+        >
+          <DesktopVideoDock
+            videoId={vid}
+            mpvStatus={desktopMpvSnap.status}
+            mpvPosition={desktopMpvSnap.position}
+            className="absolute inset-0"
+          />
+          <div
+            className="absolute inset-y-0 left-0 z-[1] w-2/3 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/75 to-transparent"
+            aria-hidden
+          />
+        </div>
+      ) : null}
       {/* Off-screen SoundCloud embed — mount when active to avoid React removeChild conflict */}
       {isEmbedded || isYouTube || isSoundCloud ? (
         <div key={embedType ?? "none"} className="pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0" aria-hidden>
