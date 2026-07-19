@@ -936,12 +936,10 @@ function SourcesManagerInner({
     [sources]
   );
 
-  const filtered = useMemo(() => {
-    if (!genreFilter) return sources;
-    return sources.filter((s) => s.genre?.toLowerCase() === genreFilter.toLowerCase());
-  }, [sources, genreFilter]);
-
-  const displaySources = filtered;
+  /* The genre filter must NOT touch displaySources — that feeds the LIBRARY
+     counts and BOTH rails (Your Playlists / tiles), which must stay put in every
+     state. Genre scoping is applied ONLY to the center grid (sectionBuckets). */
+  const displaySources = sources;
   /** Unfiltered — use for playlist shells, drops, and composite metadata so genre filter cannot hide the active playlist. */
   const sourcesById = useMemo(
     () => new Map(sources.map((s) => [s.id, s] as const)),
@@ -1062,7 +1060,12 @@ function SourcesManagerInner({
   ]);
 
   const sectionBuckets = useMemo(() => {
-    const raw = partitionSourcesByLibrarySection(visibleSources);
+    /* Genre scoping lives HERE (center grid only) — never on displaySources,
+       so the rails and counts never disappear when a genre is picked. */
+    const genreScoped = genreFilter
+      ? visibleSources.filter((s) => (s.genre ?? "").toLowerCase() === genreFilter.toLowerCase())
+      : visibleSources;
+    const raw = partitionSourcesByLibrarySection(genreScoped);
     /* DJ playlists stay out of the generic buckets — EXCEPT in the dedicated
        dj_ai view (which exists to show exactly them) or under a genre filter. */
     const isDjAiView = selection.type === "library_view" && selection.id === "dj_ai";
