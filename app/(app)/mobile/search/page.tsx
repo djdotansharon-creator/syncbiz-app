@@ -2,6 +2,7 @@
 
 import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
 import { MobileSearchBar } from "@/components/mobile-search-bar";
+import { MobileShazamImport } from "@/components/mobile/mobile-shazam-import";
 import { useMobileSources } from "@/lib/mobile-sources-context";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { useStationController } from "@/lib/station-controller-context";
@@ -26,7 +27,7 @@ export default function MobileSearchPage() {
 
   return (
     <>
-      <MobilePageHeader title="Search" showModePill />
+      <MobilePageHeader title="Search" showModePill actions={<MobileShazamImport />} />
       <div className="px-4 pt-3 pb-6">
         <MobileSearchBar
           sources={sources}
