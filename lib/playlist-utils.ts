@@ -171,16 +171,37 @@ export function resolvePlaybackHeroCoverArt(input: {
   });
 }
 
-/** Check if URL is a Shazam song page. */
+/**
+ * Shazam song/track path — supports `/song/…`, `/track/…`, an optional locale
+ * segment (`/en-US/track/…`), on shazam.com / www.shazam.com / *.shazam.com.
+ * Query params / tracking are ignored (path-only match).
+ */
+const SHAZAM_SONG_PATH = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:song|track)\//i;
+
+/** True for a Shazam song/track page OR a shz.am short link (resolved server-side). */
 export function isShazamUrl(url: string): boolean {
-  return /shazam\.com\/song\//i.test(url.trim());
+  try {
+    const u = new URL(url.trim());
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    const host = u.hostname.replace(/^www\./i, "").toLowerCase();
+    if (host === "shz.am") return true; // short link → resolved to shazam.com server-side
+    if (host === "shazam.com" || host.endsWith(".shazam.com")) {
+      return SHAZAM_SONG_PATH.test(u.pathname);
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
-/** Extract song name from Shazam URL path (e.g. /song/123/artist-song -> "artist song"). */
+/**
+ * Extract the song name from a Shazam URL path
+ * (e.g. `/song/123/artist-song` or `/en-US/track/123/artist-song` → "artist song").
+ */
 export function extractShazamSongFromPath(url: string): string | null {
   try {
     const u = new URL(url);
-    const match = u.pathname.match(/\/song\/\d+\/([^/]+)/);
+    const match = u.pathname.match(/\/(?:song|track)\/\d+\/([^/?#]+)/i);
     if (!match) return null;
     const slug = decodeURIComponent(match[1]);
     return slug.replace(/-/g, " ").trim() || null;
@@ -219,8 +240,12 @@ export function classifyMusicUrlIngest(raw: string): MusicUrlIngestClassificatio
     return ingestIntentForProvider("generic_music_url", "unknown");
   };
 
-  // Shazam (UI keeps dedicated branch; classifier tags provider for callers / parse-url)
-  if (host.includes("shazam.com") && /\/song\//i.test(lowerPath)) {
+  // Shazam (UI keeps dedicated branch; classifier tags provider for callers / parse-url).
+  // Accepts song/track pages and shz.am short links (resolved server-side in parse-url).
+  if (host === "shz.am") {
+    return ingestIntentForProvider("shazam", "resolve_to_youtube");
+  }
+  if (host.includes("shazam.com") && /\/(song|track)\//i.test(lowerPath)) {
     return ingestIntentForProvider("shazam", "resolve_to_youtube");
   }
 

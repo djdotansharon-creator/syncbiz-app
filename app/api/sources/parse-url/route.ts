@@ -90,6 +90,69 @@ function parseOgImage(html: string): string | null {
   return m ? decodeHtml(m[1]) : null;
 }
 
+const SHAZAM_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+/** SSRF guard: only Shazam-owned domains may be fetched/redirected to. */
+function isAllowedShazamHost(hostname: string): boolean {
+  const host = hostname.replace(/^www\./i, "").toLowerCase();
+  // Reject anything that looks like an IP / loopback / metadata host.
+  if (/[^a-z0-9.-]/i.test(host) || /^\d+\./.test(host) || host === "localhost" || host.includes(":")) {
+    return false;
+  }
+  return host === "shazam.com" || host.endsWith(".shazam.com") || host === "shz.am";
+}
+
+/**
+ * Fetch a Shazam page safely, following shz.am short-link redirects by hand.
+ * Security: HTTPS only, every hop's host must pass `isAllowedShazamHost`
+ * (blocks SSRF + redirects to external domains), and hops are capped (blocks
+ * redirect loops). Reuses the existing og-metadata parse — no new scraper.
+ * Returns the final page HTML, or null on any violation/failure.
+ */
+async function safeFetchShazamPage(startUrl: string): Promise<{ finalUrl: string; html: string } | null> {
+  const MAX_HOPS = 5;
+  let current = startUrl;
+  for (let hop = 0; hop < MAX_HOPS; hop++) {
+    let u: URL;
+    try {
+      u = new URL(current);
+    } catch {
+      return null;
+    }
+    if (u.protocol !== "https:") return null;
+    if (!isAllowedShazamHost(u.hostname)) return null;
+    let res: Response;
+    try {
+      res = await fetch(current, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(8000),
+        headers: { "User-Agent": SHAZAM_UA },
+      });
+    } catch {
+      return null;
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      if (!loc) return null;
+      let next: URL;
+      try {
+        next = new URL(loc, current);
+      } catch {
+        return null;
+      }
+      if (next.protocol !== "https:" || !isAllowedShazamHost(next.hostname)) return null;
+      current = next.toString();
+      continue;
+    }
+    if (res.ok) {
+      return { finalUrl: current, html: await res.text() };
+    }
+    return null;
+  }
+  return null; // too many hops → treat as a redirect loop
+}
+
 function parseTitleTag(html: string): string | null {
   const m = html.match(/<title[^>]*>([^<]+)<\/title>/i);
   return m ? decodeHtml(m[1].trim()) : null;
@@ -181,7 +244,7 @@ function applyArtistSongSplitsFromMarketingTitle(out: ParseUrlJson): void {
   const raw = out.title?.trim();
   if (!raw || isWeakStorefrontParsedTitle(raw)) return;
   /** Beatport: "Artist · Title · Beatport" */
-  let t = raw.replace(/\s*·\s*/g, " - ");
+  const t = raw.replace(/\s*·\s*/g, " - ");
 
   const seps = [" — ", " – ", " - ", " | "];
   for (const sep of seps) {
@@ -369,29 +432,24 @@ export async function POST(req: NextRequest) {
     };
 
     if (isShazam) {
-      const songFromPath = extractShazamSongFromPath(raw);
+      // shz.am short links + shazam.com song/track pages. The safe fetcher
+      // follows redirects only within Shazam domains (SSRF-guarded, hop-capped)
+      // and reuses the existing og-metadata parse — no new scraper.
+      const page = await safeFetchShazamPage(raw);
+      const songFromPath = extractShazamSongFromPath(page?.finalUrl ?? raw) ?? extractShazamSongFromPath(raw);
       result.title = songFromPath || "Shazam track";
-      try {
-        const res = await fetch(raw, {
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (res.ok) {
-          const html = await res.text();
-          const ogTitle = parseOgTitle(html);
-          const ogImage = parseOgImage(html);
-          if (ogTitle) {
-            result.title = ogTitle;
-            const dash = ogTitle.indexOf(" - ");
-            if (dash > 0) {
-              result.artist = ogTitle.slice(0, dash).trim();
-              result.song = ogTitle.slice(dash + 3).trim();
-            }
+      if (page) {
+        const ogTitle = parseOgTitle(page.html);
+        const ogImage = parseOgImage(page.html);
+        if (ogTitle) {
+          result.title = ogTitle;
+          const dash = ogTitle.indexOf(" - ");
+          if (dash > 0) {
+            result.artist = ogTitle.slice(0, dash).trim();
+            result.song = ogTitle.slice(dash + 3).trim();
           }
-          if (ogImage) result.cover = resolveUrl(ogImage, raw);
         }
-      } catch {
-        /* Shazam may block fetch; use path-extracted song */
+        if (ogImage) result.cover = resolveUrl(ogImage, page.finalUrl);
       }
       if (!result.song && songFromPath) result.song = songFromPath;
     } else if (type === "youtube" || type === "soundcloud" || type === "spotify" || tryNoembedExternalResolve) {
