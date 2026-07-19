@@ -33,6 +33,8 @@ type StationControllerContextValue = {
   sendNext: () => void;
   sendPrev: () => void;
   sendPlaySource: (source: UnifiedSource) => void;
+  /** Add a song to the MASTER's Play-Next queue (existing QUEUE_NEXT command). */
+  sendQueueNext: (source: UnifiedSource) => void;
   sendSeek: (seconds: number) => void;
   sendSetVolume: (volume: number) => void;
   /** Toggle MASTER shuffle. Sends the absolute desired value (existing SET_SHUFFLE command). */
@@ -92,6 +94,18 @@ export function StationControllerProvider({ children }: { children: ReactNode })
     [masterDeviceId, sendCommand]
   );
 
+  // Add to queue on the MASTER — reuses the existing QUEUE_NEXT command (same
+  // sendCommand path as PLAY_SOURCE). The MASTER enqueues via addPlayNextSources
+  // and echoes the updated playNextQueue back through STATE_UPDATE. No local audio.
+  const sendQueueNext = useCallback(
+    (source: UnifiedSource) => {
+      if (masterDeviceId) {
+        sendCommand(masterDeviceId, "QUEUE_NEXT", { source: unifiedSourceToPayload(source) });
+      }
+    },
+    [masterDeviceId, sendCommand]
+  );
+
   const sendSeek = useCallback(
     (seconds: number) => {
       if (masterDeviceId && Number.isFinite(seconds)) {
@@ -145,6 +159,7 @@ export function StationControllerProvider({ children }: { children: ReactNode })
       sendNext,
       sendPrev,
       sendPlaySource,
+      sendQueueNext,
       sendSeek,
       sendSetVolume,
       sendSetShuffle,
@@ -162,6 +177,7 @@ export function StationControllerProvider({ children }: { children: ReactNode })
       sendNext,
       sendPrev,
       sendPlaySource,
+      sendQueueNext,
       sendSeek,
       sendSetVolume,
       sendSetShuffle,
@@ -203,6 +219,7 @@ export function useStationController() {
     sendNext: () => {},
     sendPrev: () => {},
     sendPlaySource: () => {},
+    sendQueueNext: () => {},
     sendSeek: () => {},
     sendSetVolume: () => {},
     sendSetShuffle: () => {},

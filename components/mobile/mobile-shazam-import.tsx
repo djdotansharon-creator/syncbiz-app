@@ -272,15 +272,18 @@ export function MobileShazamImport() {
     [withAction, deviceCtx, isController, station, playback]
   );
 
-  // Add to queue — queueNextOrSend routes to the MASTER's queue in CONTROL
-  // (existing QUEUE_NEXT command, no local audio) or the local queue as player.
+  // Add to queue — routes to the MASTER's queue via QUEUE_NEXT (existing
+  // command, no local audio). Same fallback ladder as Play now: the mobile tree
+  // has no DevicePlayerProvider, so on a CONTROL deviceCtx is null and we send
+  // through the station controller; only a true local player queues locally.
   const handleAddToQueue = useCallback(
     () =>
       withAction((u) => {
         if (deviceCtx?.queueNextOrSend) deviceCtx.queueNextOrSend(u);
+        else if (isController && station.isCrossDevice) station.sendQueueNext(u);
         else playback.addPlayNextSources([u]);
       }, "Added to the queue"),
-    [withAction, deviceCtx, playback]
+    [withAction, deviceCtx, isController, station, playback]
   );
 
   const handleAddToLibrary = useCallback(
