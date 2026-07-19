@@ -2,183 +2,22 @@
 
 import { useEffect } from "react";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
-import { useMobileRole } from "@/lib/mobile-role-context";
-import { useStationController } from "@/lib/station-controller-context";
-import { usePlayback } from "@/lib/playback-provider";
-import { useLocalPlaybackTime } from "@/lib/playback-time-store";
 import {
-  isIOS,
   primeIOSFromGesture,
   setIOSNeedsTapToResume,
   useIOSNeedsTapToResume,
 } from "@/lib/ios-audio-unlock";
-import {
-  PlaybackTransportIconNext,
-  PlaybackTransportIconPause,
-  PlaybackTransportIconPlay,
-  PlaybackTransportIconPrev,
-  PlaybackTransportIconStop,
-  PlaybackTransportIconVolume,
-} from "@/components/player-surface/playback-transport-icons";
+import { PlaybackTransportIconVolume } from "@/components/player-surface/playback-transport-icons";
+import { useMobilePlayer } from "@/components/mobile/mobile-player-core";
+import { MobileTransportControls } from "@/components/mobile/mobile-transport-controls";
+
+// Re-export so existing importers (mini-player) keep a stable path.
+export { useMobilePlayer } from "@/components/mobile/mobile-player-core";
 
 type Props = {
   open: boolean;
   onClose: () => void;
 };
-
-type Derived = {
-  mode: "controller" | "player";
-  canControl: boolean;
-  hasSource: boolean;
-  isPlaying: boolean;
-  title: string;
-  subtitle: string | null;
-  cover: string | null;
-  position: number;
-  duration: number;
-  volume: number;
-  onPlayPause: () => void;
-  onStop: () => void;
-  onNext: () => void;
-  onPrev: () => void;
-  onSeek: (seconds: number) => void;
-  onVolume: (value: number) => void;
-};
-
-/**
- * Shared derivation used by both the mini-player and the Now Playing sheet.
- *
- * Visual language rule (aligned to the main SyncBiz player's deck transport —
- * the cyan "neon pill" look defined by `.library-deck-neon-btn:not(.h-7)` in
- * `app/globals.css`, with circular art from `.library-deck-art-host`):
- * Controller and Player modes share ONE look — dark slate chrome with a
- * cyan-400 stroke + cyan-200/300 glyphs and cyan-accented sliders. Mode is
- * communicated only through the mode pill and the volume label, never
- * through different accent colors.
- */
-function useDerivedPlayer(): Derived {
-  const { mobileRole } = useMobileRole();
-  const station = useStationController();
-  const playback = usePlayback();
-  const localTime = useLocalPlaybackTime();
-
-  // iOS Safari first-gesture unlock primer.
-  // The <audio> element used in mobile PLAYER mode lives in a hidden
-  // container in app-shell, so the user can never tap it directly. iOS
-  // requires audio.play() to run synchronously inside a gesture handler
-  // for the very first activation of an element. We attach a one-shot
-  // pointerdown listener at the document level whenever mobileRole is
-  // "player" so the FIRST tap anywhere on the mobile surface (typically a
-  // track tile or the Play button) primes the audio element.
-  // No-op on non-iOS UAs because primeIOSFromGesture short-circuits.
-  useEffect(() => {
-    if (mobileRole !== "player") return;
-    if (typeof window === "undefined") return;
-    if (!isIOS()) return;
-    const onFirstGesture = () => {
-      primeIOSFromGesture();
-    };
-    window.addEventListener("pointerdown", onFirstGesture, { once: true, capture: true });
-    return () => {
-      window.removeEventListener("pointerdown", onFirstGesture, { capture: true } as EventListenerOptions);
-    };
-  }, [mobileRole]);
-
-  if (mobileRole === "controller") {
-    const rs = station.remoteState;
-    const canControl = station.isCrossDevice;
-    const src = rs?.currentSource ?? null;
-    const trk = rs?.currentTrack ?? null;
-    const status = rs?.status ?? "idle";
-    const isPlaying = canControl && status === "playing";
-    return {
-      mode: "controller",
-      canControl,
-      hasSource: canControl && !!src,
-      isPlaying,
-      title: canControl ? trk?.title ?? src?.title ?? "No playback" : "Connect a player",
-      subtitle:
-        canControl && src?.title && trk?.title !== src.title
-          ? src.title
-          : canControl
-            ? null
-            : "Go to the Remote tab to pick a MASTER device",
-      cover: canControl ? trk?.cover ?? src?.cover ?? null : null,
-      position: rs?.position ?? 0,
-      duration: rs?.duration ?? 0,
-      volume: typeof rs?.volume === "number" ? rs.volume : 80,
-      onPlayPause: () => {
-        if (!canControl) return;
-        if (isPlaying) station.sendPause();
-        else station.sendPlay();
-      },
-      onStop: () => {
-        if (canControl) station.sendStop();
-      },
-      onNext: () => {
-        if (canControl) station.sendNext();
-      },
-      onPrev: () => {
-        if (canControl) station.sendPrev();
-      },
-      onSeek: (seconds: number) => {
-        if (canControl) station.sendSeek(seconds);
-      },
-      onVolume: (value: number) => {
-        if (canControl) station.sendSetVolume(value);
-      },
-    };
-  }
-
-  const src = playback.currentSource;
-  const trk = playback.currentTrack;
-  const isPlaying = playback.status === "playing";
-  return {
-    mode: "player",
-    canControl: true,
-    hasSource: !!src,
-    isPlaying,
-    title: trk?.title ?? src?.title ?? "Nothing playing",
-    subtitle: src?.title && trk?.title !== src.title ? src.title : null,
-    cover: trk?.cover ?? src?.cover ?? null,
-    position: localTime.position,
-    duration: localTime.duration,
-    volume: playback.volume,
-    onPlayPause: () => {
-      if (!src) return;
-      if (isPlaying) {
-        playback.pause();
-        return;
-      }
-      // iOS Safari: call audio.play() *synchronously* inside this gesture
-      // handler so the <audio> element is activated before AudioPlayer's
-      // status-driven useEffect runs. No-op on non-iOS UAs.
-      primeIOSFromGesture();
-      setIOSNeedsTapToResume(false);
-      playback.play();
-    },
-    onStop: () => {
-      if (src) playback.stop();
-    },
-    onNext: () => {
-      if (src) playback.next();
-    },
-    onPrev: () => {
-      if (src) playback.prev();
-    },
-    onSeek: (seconds: number) => {
-      if (src) playback.seekTo(seconds);
-    },
-    onVolume: (value: number) => {
-      playback.setVolume(value);
-    },
-  };
-}
-
-/** Shared with `MobileMiniPlayer` so both surfaces drive state identically. */
-export function useMobilePlayer() {
-  return useDerivedPlayer();
-}
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -190,48 +29,22 @@ function formatTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-// Visual tokens — mirror the main SyncBiz player's deck transport (the cyan
-// "neon pill" language from `.library-deck-neon-btn:not(.h-7)` in
-// `app/globals.css`, lines ~358-402). Controller and Player modes share ONE
-// look; mode is communicated only through the mode pill and volume label,
-// never through different accent colors.
-//
-// IMPORTANT — corner radius is NOT baked in here. A fixed radius like
-// `rounded-2xl` (16px) reads as a soft rectangle on the sheet's 52px
-// buttons (31% of height) but as a near-full pill on the mini-player's
-// 36px buttons (44% of height) — making the mini look "more rounded" than
-// the sheet even though the CSS class is identical. Each caller sets its
-// own radius so the *visual proportion* matches across sizes (mini uses
-// `rounded-xl` / 12px = 33% on h-9, sheet uses `rounded-2xl` / 16px = 31%
-// on h-[3.25rem]).
-//
-// Secondary: `border-2` cyan stroke, dark slate fill, cyan-300 glyph,
-//            subtle cyan glow.
-// Primary:   same chrome but WIDER (stadium pill) and a stronger cyan
-//            glow — this is the "hero" play control.
-export const MOBILE_TRANSPORT_SEC =
-  "flex shrink-0 items-center justify-center border-2 border-cyan-400/65 bg-slate-900/95 text-cyan-300 transition shadow-[0_0_0_1px_rgba(34,211,238,0.28),0_0_24px_-4px_rgba(34,211,238,0.42)] hover:border-cyan-300 hover:text-cyan-100 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.55),0_0_32px_-4px_rgba(34,211,238,0.55)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60";
-
-export const MOBILE_TRANSPORT_PRIMARY =
-  "flex shrink-0 items-center justify-center border-2 border-cyan-400/75 bg-slate-900/95 text-cyan-200 transition shadow-[0_0_0_2px_rgba(34,211,238,0.5),0_0_32px_-2px_rgba(34,211,238,0.55),0_0_60px_-10px_rgba(34,211,238,0.35)] hover:border-cyan-300 hover:text-cyan-100 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.75),0_0_40px_-2px_rgba(34,211,238,0.7),0_0_72px_-10px_rgba(34,211,238,0.45)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/70";
-
 /**
  * Full-screen bottom sheet shown when the user taps the mini-player.
  *
  * Contract:
- *   - transport buttons (prev · stop · play/pause · next) are ALWAYS rendered;
- *     dim via opacity + pointer-events when `canControl`/`hasSource` is false,
- *     never hidden.
- *   - volume slider is ALWAYS rendered with a mode-specific label:
- *       Controller → "MASTER · desktop volume"
- *       Player     → "This phone · local player volume"
- *   - visual language matches the main player's deck: cyan-400 stroke,
- *     dark slate fill, cyan glow; Play is a wider stadium pill; volume and
- *     seek sliders are cyan-accented; artwork is circular with a cyan ring.
+ *   - transport (prev · stop · play/pause · next) + mode toggles (random · mix)
+ *     come from the shared `MobileTransportControls`; identical actions/state to
+ *     the main SyncBiz player. Disabled (not hidden) when there is nothing to
+ *     control.
+ *   - volume slider is ALWAYS rendered with a mode-specific label.
+ *   - visual language matches the main player's deck: cyan-400 stroke, dark
+ *     slate fill, cyan glow; Play is a wider stadium pill; sliders are
+ *     cyan-accented; artwork is circular with a cyan ring.
  *   - closes via: X button, backdrop tap, or ESC key. No swipe gestures.
  */
 export function MobileNowPlayingSheet({ open, onClose }: Props) {
-  const d = useDerivedPlayer();
+  const d = useMobilePlayer();
   const needsTapToResume = useIOSNeedsTapToResume() && d.mode === "player";
 
   useEffect(() => {
@@ -252,8 +65,6 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
     d.mode === "controller"
       ? "MASTER · desktop volume"
       : "This phone · local player volume";
-
-  const transportDisabled = !d.canControl || !d.hasSource;
 
   return (
     <div
@@ -345,54 +156,9 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
             )}
           </div>
 
-          {/* Transport — hero hierarchy: Prev · Stop · [wider Play pill] · Next.
-              Identical language to the mini-player, just scaled up:
-                - secondaries are squares (rounded-2xl), mini is 36px, sheet 52px
-                - Play is a 2.0x-wide pill at the same height (both variants)
-                - Play icon is 1 step larger than secondary icons
-              This keeps "one unified control language" across mobile while
-              letting the sheet breathe. */}
-          <div className="mt-7 flex items-center justify-center gap-2.5">
-            <button
-              type="button"
-              onClick={d.onPrev}
-              disabled={transportDisabled}
-              aria-label="Previous"
-              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.25rem] rounded-2xl`}
-            >
-              <PlaybackTransportIconPrev className="h-6 w-6" />
-            </button>
-            <button
-              type="button"
-              onClick={d.onStop}
-              disabled={transportDisabled}
-              aria-label="Stop"
-              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.25rem] rounded-2xl`}
-            >
-              <PlaybackTransportIconStop className="h-6 w-6" />
-            </button>
-            <button
-              type="button"
-              onClick={d.onPlayPause}
-              disabled={!d.canControl || !d.hasSource}
-              aria-label={d.isPlaying ? "Pause" : "Play"}
-              className={`${MOBILE_TRANSPORT_PRIMARY} h-[3.25rem] w-[6.5rem] rounded-2xl`}
-            >
-              {d.isPlaying ? (
-                <PlaybackTransportIconPause className="h-7 w-7" />
-              ) : (
-                <PlaybackTransportIconPlay className="ml-0.5 h-7 w-7" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={d.onNext}
-              disabled={transportDisabled}
-              aria-label="Next"
-              className={`${MOBILE_TRANSPORT_SEC} h-[3.25rem] w-[3.25rem] rounded-2xl`}
-            >
-              <PlaybackTransportIconNext className="h-6 w-6" />
-            </button>
+          {/* Transport + mode toggles — shared with the mini-player. */}
+          <div className="mt-7">
+            <MobileTransportControls d={d} variant="sheet" />
           </div>
 
           {/* Seek — slim row under the transport so it reads as detail, not a primary control. */}

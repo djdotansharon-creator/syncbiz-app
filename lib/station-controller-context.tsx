@@ -35,6 +35,10 @@ type StationControllerContextValue = {
   sendPlaySource: (source: UnifiedSource) => void;
   sendSeek: (seconds: number) => void;
   sendSetVolume: (volume: number) => void;
+  /** Toggle MASTER shuffle. Sends the absolute desired value (existing SET_SHUFFLE command). */
+  sendSetShuffle: (value: boolean) => void;
+  /** Toggle MASTER AutoMix/crossfade. Sends the absolute desired value (existing SET_AUTOMIX command). */
+  sendSetAutoMix: (value: boolean) => void;
 };
 
 const StationControllerContext = createContext<StationControllerContextValue | null>(null);
@@ -106,6 +110,27 @@ export function StationControllerProvider({ children }: { children: ReactNode })
     [masterDeviceId, sendCommand]
   );
 
+  // Random/AutoMix as REAL remote actions (not just mirrored display). These reuse
+  // the EXISTING protocol: the SET_SHUFFLE / SET_AUTOMIX RemoteCommands are already
+  // routed by the server and executed by the MASTER (device-player-context handles
+  // them → setShuffle/setAutoMix), which then broadcasts a fresh STATE_UPDATE back
+  // to every CONTROL. We send the ABSOLUTE desired value (not a flip): the button's
+  // displayed state comes only from remoteState, so a double-click can never desync
+  // into a wrong optimistic state — the last value simply wins.
+  const sendSetShuffle = useCallback(
+    (value: boolean) => {
+      if (masterDeviceId) sendCommand(masterDeviceId, "SET_SHUFFLE", { value });
+    },
+    [masterDeviceId, sendCommand]
+  );
+
+  const sendSetAutoMix = useCallback(
+    (value: boolean) => {
+      if (masterDeviceId) sendCommand(masterDeviceId, "SET_AUTOMIX", { value });
+    },
+    [masterDeviceId, sendCommand]
+  );
+
   const value = useMemo(
     () => ({
       isCrossDevice,
@@ -122,6 +147,8 @@ export function StationControllerProvider({ children }: { children: ReactNode })
       sendPlaySource,
       sendSeek,
       sendSetVolume,
+      sendSetShuffle,
+      sendSetAutoMix,
     }),
     [
       isCrossDevice,
@@ -137,6 +164,8 @@ export function StationControllerProvider({ children }: { children: ReactNode })
       sendPlaySource,
       sendSeek,
       sendSetVolume,
+      sendSetShuffle,
+      sendSetAutoMix,
     ]
   );
 
@@ -176,5 +205,7 @@ export function useStationController() {
     sendPlaySource: () => {},
     sendSeek: () => {},
     sendSetVolume: () => {},
+    sendSetShuffle: () => {},
+    sendSetAutoMix: () => {},
   };
 }

@@ -2,17 +2,8 @@
 
 import { useMemo } from "react";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
-import {
-  MOBILE_TRANSPORT_PRIMARY,
-  MOBILE_TRANSPORT_SEC,
-  useMobilePlayer,
-} from "@/components/mobile/mobile-now-playing-sheet";
-import {
-  PlaybackTransportIconNext,
-  PlaybackTransportIconPause,
-  PlaybackTransportIconPlay,
-  PlaybackTransportIconPrev,
-} from "@/components/player-surface/playback-transport-icons";
+import { useMobilePlayer } from "@/components/mobile/mobile-player-core";
+import { MobileTransportControls } from "@/components/mobile/mobile-transport-controls";
 
 type Variant = "bottom-dock" | "top-card";
 
@@ -33,13 +24,14 @@ type Props = {
  *
  * Visual language (shared with the Now Playing sheet): cyan "neon pill"
  * transport buttons, circular artwork with a cyan ring when playing, slim
- * cyan progress bar. Mirrors the main SyncBiz player's deck transport
- * (`.library-deck-neon-btn:not(.h-7)` + `.library-deck-art-host` in
- * `app/globals.css`) so both devices feel like one product.
+ * cyan progress bar. Transport + Random/Mix come from the shared
+ * `MobileTransportControls` so both mobile surfaces drive identical
+ * actions/state (same as the main SyncBiz player).
  *
  * Tap rules:
  *   - tapping artwork / title opens the Now Playing sheet
- *   - tapping a transport button does NOT open the sheet (event stops)
+ *   - tapping a transport button does NOT open the sheet (event stops inside
+ *     MobileTransportControls for the "mini" variant)
  */
 export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
   const d = useMobilePlayer();
@@ -48,8 +40,6 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
     if (!d.duration || d.duration <= 0) return 0;
     return Math.max(0, Math.min(100, (d.position / d.duration) * 100));
   }, [d.position, d.duration]);
-
-  const transportDisabled = !d.canControl || !d.hasSource;
 
   const containerCls =
     variant === "top-card"
@@ -116,59 +106,8 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
           </div>
         </button>
 
-        {/* Transport cluster — always visible, same cyan-neon language as the
-            Now Playing sheet. Compact sizes so the bar stays mini-height. */}
-        <div className="flex shrink-0 items-center gap-1.5">
-          {/* Same language as the Now Playing sheet: 2.0x Play-width ratio,
-              same icon hierarchy (Play icon 1 step larger than secondaries),
-              same cyan-neon tokens. `rounded-xl` here (12px on h-9 = 33%)
-              is the visual match of the sheet's `rounded-2xl` on h-[3.25rem]
-              (16px on 52px = 31%) — without this adjustment, the tiny mini
-              buttons read as full pills instead of rounded squares, making
-              Home look "more rounded" than the player. */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              d.onPrev();
-            }}
-            disabled={transportDisabled}
-            aria-label="Previous"
-            className={`${MOBILE_TRANSPORT_SEC} h-9 w-9 rounded-xl`}
-          >
-            <PlaybackTransportIconPrev className="h-4 w-4" />
-          </button>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              d.onPlayPause();
-            }}
-            disabled={!d.canControl || !d.hasSource}
-            aria-label={d.isPlaying ? "Pause" : "Play"}
-            className={`${MOBILE_TRANSPORT_PRIMARY} h-9 w-[4.5rem] rounded-xl`}
-          >
-            {d.isPlaying ? (
-              <PlaybackTransportIconPause className="h-5 w-5" />
-            ) : (
-              <PlaybackTransportIconPlay className="ml-0.5 h-5 w-5" />
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              d.onNext();
-            }}
-            disabled={transportDisabled}
-            aria-label="Next"
-            className={`${MOBILE_TRANSPORT_SEC} h-9 w-9 rounded-xl`}
-          >
-            <PlaybackTransportIconNext className="h-4 w-4" />
-          </button>
-        </div>
+        {/* Transport + Random/Mix — shared with the Now Playing sheet (compact). */}
+        <MobileTransportControls d={d} variant="mini" />
       </div>
     </div>
   );
