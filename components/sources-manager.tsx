@@ -774,6 +774,10 @@ function SourcesManagerInner({
   const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [creatingPlaylist, setCreatingPlaylist] = useState(false);
+  /* "Build" mode — after creating a playlist, the operator picks a genre and
+     adds songs into it (the ＋ on cards adds straight to this playlist). */
+  const [buildingPlaylist, setBuildingPlaylist] = useState<{ key: string; name: string } | null>(null);
+  const [buildAddedCount, setBuildAddedCount] = useState(0);
   const [selection, setSelection] = useState<LibrarySelection>({ type: "library_view", id: "all_library" });
   const [customPlaylists, setCustomPlaylists] = useState<PlaylistTile[]>([]);
   const [playlistItemAssignments, setPlaylistItemAssignments] = useState<Record<string, string[]>>({});
@@ -1773,6 +1777,20 @@ function SourcesManagerInner({
     });
   }, []);
 
+  /** ＋ on a card: in BUILD mode adds straight to the new playlist (with live
+      count feedback); otherwise opens the normal add-to-playlist picker. */
+  const handleAddLeafToPlaylist = useCallback(
+    (item: UnifiedSource) => {
+      if (buildingPlaylist) {
+        assignItemsToPlaylist(buildingPlaylist.key, [item.id]);
+        setBuildAddedCount((n) => n + 1);
+        return;
+      }
+      setAddToPlaylistLeaf(item);
+    },
+    [buildingPlaylist, assignItemsToPlaylist],
+  );
+
   const assignPlaylistToDaypart = useCallback((daypartKey: string, playlistKey: string) => {
     const canonPad = normalizeDaypartTileKey(daypartKey);
     setDaypartPlaylistAssignments((prev) => {
@@ -1969,10 +1987,13 @@ function SourcesManagerInner({
     };
 
     savePlaylistToLocal(created);
-    // New playlist goes to the TOP of the list and opens immediately so the
-    // operator can start dropping songs in right away.
     setSources((prev) => [unified, ...prev]);
-    setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: `syncbiz:${unified.id}` });
+    // Enter BUILD mode: open the genre browser so the operator picks a genre and
+    // adds songs straight into the new playlist (the ＋ on cards targets it).
+    setBuildingPlaylist({ key: `syncbiz:${unified.id}`, name: created.name });
+    setBuildAddedCount(0);
+    setSelection({ type: "library_view", id: "all_library" });
+    setGenreBrowseOpen(true);
   }, [savePlaylistToLocal, setSelection, setSources]);
 
   const handleAddPlaylistTile = useCallback(() => {
@@ -2961,6 +2982,45 @@ function SourcesManagerInner({
             })()}
           </div>
 
+          {/* BUILD mode banner — after creating a playlist: pick a genre, tap ＋
+              on songs to add them straight in, then Done. */}
+          {buildingPlaylist ? (
+            <div className="sb-anim-rise mt-2 flex flex-wrap items-center gap-3 rounded-xl border border-[#0a84ff]/30 bg-[#0a84ff]/[0.08] px-3.5 py-2.5">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#0a84ff]/20 text-[#0a84ff]">
+                <svg className="h-4.5 w-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                </svg>
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-semibold text-[#f5f5f7]">
+                  Building “{buildingPlaylist.name}”
+                  {buildAddedCount > 0 ? <span className="ml-2 text-[#0a84ff]">· {buildAddedCount} added</span> : null}
+                </p>
+                <p className="text-[11px] text-[#a1a1a6]">Pick a genre, then tap the ＋ on any song to add it here.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGenreBrowseOpen((v) => !v)}
+                className="shrink-0 rounded-lg border border-white/[0.12] px-3 py-1.5 text-[12px] font-medium text-[#d1d1d6] transition-colors hover:bg-white/[0.08] hover:text-white"
+              >
+                Genres
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const key = buildingPlaylist.key;
+                  setBuildingPlaylist(null);
+                  setGenreBrowseOpen(false);
+                  setGenreFilter("");
+                  setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key });
+                }}
+                className="shrink-0 rounded-lg bg-[#f5f5f7] px-4 py-1.5 text-[12px] font-semibold text-[#111114] transition-transform hover:scale-[1.02] active:scale-95"
+              >
+                Done
+              </button>
+            </div>
+          ) : null}
+
           <div
             key={`${viewMode}|${selection.type}|${"id" in selection ? selection.id : ""}|${"key" in selection ? selection.key : ""}`}
             className="sb-anim-rise mt-2 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1 lg:max-h-none lg:flex-1 lg:min-h-0"
@@ -3406,7 +3466,7 @@ function SourcesManagerInner({
                             itemDeleteContext={getItemDeleteContext(item)}
                             libraryTilePresentation="rich"
                             leafUnifiedBar
-                            onAddToPlaylistPress={() => setAddToPlaylistLeaf(item)}
+                            onAddToPlaylistPress={() => handleAddLeafToPlaylist(item)}
                             onLibraryDelete={deleteLibraryItem}
                             libraryDeleteEligible={libraryRowEligibleForLibraryDelete(item, displaySources)}
                           />
@@ -3517,7 +3577,7 @@ function SourcesManagerInner({
                               itemDeleteContext={getItemDeleteContext(item)}
                               libraryTilePresentation="rich"
                               leafUnifiedBar
-                              onAddToPlaylistPress={() => setAddToPlaylistLeaf(item)}
+                              onAddToPlaylistPress={() => handleAddLeafToPlaylist(item)}
                               onLibraryDelete={deleteLibraryItem}
                               libraryDeleteEligible={libraryRowEligibleForLibraryDelete(item, displaySources)}
                             />
@@ -3542,7 +3602,7 @@ function SourcesManagerInner({
                             onDeleteFromLibrary={deleteLibraryItem}
                             libraryDeleteEligible={libraryRowEligibleForLibraryDelete(item, displaySources)}
                             leafUnifiedBar
-                            onAddToPlaylistPress={() => setAddToPlaylistLeaf(item)}
+                            onAddToPlaylistPress={() => handleAddLeafToPlaylist(item)}
                           />
                         ))}
                       </div>
