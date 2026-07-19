@@ -12,7 +12,11 @@ import type {
   ImportLocalM3uUnresolvedEntry,
   ImportLocalM3uUnresolvedReason,
 } from "../shared/mvp-types";
-import { recordScanAudioFilesInSnapshot } from "./local-collection-snapshot";
+import {
+  recordScanAudioFilesInSnapshot,
+  loadLocalCollectionSnapshotCached,
+  searchLocalCollectionSnapshotInMemory,
+} from "./local-collection-snapshot";
 
 const LOG = "[SyncBiz:import-playlist-file]";
 const UNRESOLVED_REF_CAP = 2000;
@@ -486,6 +490,90 @@ async function importPlsContent(
 /**
  * Read and resolve M3U, M3U8, or PLS. Only audio files under `config.musicFolderPath` are returned.
  */
+/** Query tokens (mirror of the snapshot tokenizer) — used to gate match confidence. */
+function bankQueryTokens(q: string): string[] {
+  return q
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)
+    .map((w) => w.replace(/^[^a-z0-9֐-׿]+|[^a-z0-9֐-׿]+$/gi, ""))
+    .filter((w) => w.length >= 2);
+}
+
+/**
+ * LOCAL-BANK-FIRST fallback. For every entry the path resolver could not place
+ * (missing/relocated file OR a remote URL), search the in-memory local snapshot
+ * by its human title and, on a HIGH-CONFIDENCE match, promote it to a resolved
+ * local track. Only true misses stay unresolved and flow on to YouTube.
+ *
+ * Additive + safe: if the search finds nothing confident the entry is left
+ * exactly as-is, so this can only improve resolution, never regress it. Playlist
+ * order is carried on `resolvedSourceOrders` (parallel to `files`), so appending
+ * matches out of order does not disturb the final sequence.
+ */
+function resolveUnresolvedAgainstLocalBank(
+  userData: string,
+  config: DesktopRuntimeConfig,
+  payload: {
+    files: string[];
+    trackDisplayNames: string[];
+    resolvedSourceOrders: number[];
+    unresolved: ImportLocalM3uUnresolvedEntry[];
+  },
+): number {
+  if (payload.unresolved.length === 0) return 0;
+
+  const deviceId = (config.deviceId ?? "").trim() || "unknown";
+  let snapshot;
+  try {
+    snapshot = loadLocalCollectionSnapshotCached(userData, deviceId);
+  } catch (e) {
+    console.warn(LOG, "local-bank fallback: snapshot load failed", e);
+    return 0;
+  }
+  if (!snapshot || Object.keys(snapshot.tracks).length === 0) return 0;
+
+  const alreadyResolved = new Set(payload.files.map((f) => path.resolve(f).toLowerCase()));
+  const stillUnresolved: ImportLocalM3uUnresolvedEntry[] = [];
+  let promoted = 0;
+
+  for (const entry of payload.unresolved) {
+    const query = (entry.displayTitle ?? entry.suggestedSearchQuery ?? "").trim();
+    const tokens = bankQueryTokens(query);
+    // Need ≥2 meaningful words so a single generic word can't false-match.
+    if (tokens.length < 2) {
+      stillUnresolved.push(entry);
+      continue;
+    }
+
+    const hits = searchLocalCollectionSnapshotInMemory(snapshot, query, 3);
+    const top = hits[0];
+    // High-confidence gate: every query token present somewhere in the track's
+    // fields (score ≥ 8 per matched token — see snapshot scorer).
+    const confident = !!top && top.score >= 8 * tokens.length;
+    const absKey = top ? path.resolve(top.absolutePath).toLowerCase() : "";
+
+    if (!confident || alreadyResolved.has(absKey)) {
+      stillUnresolved.push(entry);
+      continue;
+    }
+
+    alreadyResolved.add(absKey);
+    payload.files.push(top.absolutePath);
+    payload.trackDisplayNames.push(
+      entry.displayTitle ?? top.title ?? path.basename(top.absolutePath).replace(/\.[^.]+$/, ""),
+    );
+    payload.resolvedSourceOrders.push(entry.playlistOrder);
+    promoted += 1;
+  }
+
+  payload.unresolved = stillUnresolved;
+  if (promoted > 0) {
+    console.log(LOG, `local-bank fallback resolved ${promoted} entr${promoted === 1 ? "y" : "ies"} from the local music bank`);
+  }
+  return promoted;
+}
+
 export async function importLocalM3uPlaylist(
   userData: string,
   config: DesktopRuntimeConfig,
@@ -533,6 +621,14 @@ export async function importLocalM3uPlaylist(
     ext === ".pls"
       ? await importPlsContent(text, fileRaw, rootNorm)
       : await importM3uLikeContent(text, fileRaw, rootNorm);
+
+  // LOCAL-BANK-FIRST: try to place unresolved entries against the local music
+  // bank by title before anything flows on to YouTube. Additive/safe.
+  try {
+    resolveUnresolvedAgainstLocalBank(userData, config, payload);
+  } catch (e) {
+    console.warn(LOG, "local-bank fallback failed (continuing with path-resolved only)", e);
+  }
 
   if (payload.files.length > 0) {
     try {
