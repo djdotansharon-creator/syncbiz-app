@@ -3563,6 +3563,24 @@ export function AudioPlayer() {
     return () => clearInterval(id);
   }, [isControlMirror, ms?.status]);
 
+  // CONTROL mirror: the state snapshot carries no play URL, so recover the
+  // YouTube video id for the display-only video dock. Prefer an explicit
+  // session URL if present, else pull it from the YouTube thumbnail cover
+  // (i.ytimg.com/vi/<id>/…). Returns null for non-YouTube tracks → no dock.
+  const mirrorVid = isControlMirror
+    ? (() => {
+        const idx = typeof ms?.currentTrackIndex === "number" ? ms.currentTrackIndex : -1;
+        const sessUrl = idx >= 0 ? ms?.sessionTracks?.[idx]?.url : undefined;
+        if (sessUrl && getEmbedType(sessUrl) === "youtube") {
+          const fromUrl = getYouTubeVideoId(sessUrl);
+          if (fromUrl) return fromUrl;
+        }
+        const cover = ms?.currentTrack?.cover ?? ms?.currentSource?.cover ?? "";
+        const m = cover.match(/\/vi(?:_webp)?\/([A-Za-z0-9_-]{6,})\//);
+        return m ? m[1] : null;
+      })()
+    : null;
+
   // Interpolate CONTROL position between STATE_UPDATE snapshots using positionAt timestamp.
   const displayPosition = isDesktopMode
     ? (() => {
@@ -4505,6 +4523,27 @@ export function AudioPlayer() {
             videoId={vid}
             mpvStatus={desktopMpvSnap.status}
             mpvPosition={desktopMpvSnap.position}
+            className="absolute inset-0"
+          />
+          <div
+            className="absolute inset-y-0 left-0 z-[1] w-2/3 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/75 to-transparent"
+            aria-hidden
+          />
+        </div>
+      ) : null}
+      {/* CONTROL mirror video — the control browser plays no audio (it mirrors
+          the MASTER), so a MUTED YouTube iframe shows only the clip, synced to
+          the mirrored position. Same audio-safe dock as desktop; same right-half
+          placement + left fog. Shown only for YouTube tracks while MASTER plays. */}
+      {isControlMirror && mirrorVid && (ms?.status === "playing" || ms?.status === "paused") ? (
+        <div
+          className="pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
+          aria-hidden
+        >
+          <DesktopVideoDock
+            videoId={mirrorVid}
+            mpvStatus={ms.status === "playing" ? "playing" : "paused"}
+            mpvPosition={Number.isFinite(displayPosition) ? displayPosition : 0}
             className="absolute inset-0"
           />
           <div
