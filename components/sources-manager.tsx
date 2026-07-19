@@ -770,6 +770,10 @@ function SourcesManagerInner({
   }, []);
   /* Genre Browse takeover (colorful tiles instead of the grey dropdown). */
   const [genreBrowseOpen, setGenreBrowseOpen] = useState(false);
+  /* New-playlist modal — centered (replaced the native window.prompt at the top). */
+  const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
+  const [newPlaylistName, setNewPlaylistName] = useState("");
+  const [creatingPlaylist, setCreatingPlaylist] = useState(false);
   const [selection, setSelection] = useState<LibrarySelection>({ type: "library_view", id: "all_library" });
   const [customPlaylists, setCustomPlaylists] = useState<PlaylistTile[]>([]);
   const [playlistItemAssignments, setPlaylistItemAssignments] = useState<Record<string, string[]>>({});
@@ -1933,9 +1937,8 @@ function SourcesManagerInner({
     [setSources]
   );
 
-  const handleCreatePlaylist = useCallback(async () => {
-    const nameRaw = window.prompt("Playlist name");
-    const name = (nameRaw ?? "").trim();
+  const handleCreatePlaylist = useCallback(async (nameArg: string) => {
+    const name = (nameArg ?? "").trim();
     if (!name) return;
 
     const res = await fetch("/api/playlists", {
@@ -1966,6 +1969,8 @@ function SourcesManagerInner({
     };
 
     savePlaylistToLocal(created);
+    // New playlist goes to the TOP of the list and opens immediately so the
+    // operator can start dropping songs in right away.
     setSources((prev) => [unified, ...prev]);
     setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: `syncbiz:${unified.id}` });
   }, [savePlaylistToLocal, setSelection, setSources]);
@@ -2325,16 +2330,14 @@ function SourcesManagerInner({
        * 3-column deck at lg, so workspace rails now widen to match.
        */}
       <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:h-full lg:min-h-0 lg:grid-cols-[240px_minmax(0,1fr)_240px] lg:grid-rows-[minmax(0,1fr)_auto] lg:overflow-hidden xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)_260px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px]">
-        {/* Secondary shelf — old playlists rail content, tucked under a quiet disclosure (nothing removed). */}
+        {/* Ready & Scheduled playlists — always visible (operator couldn't find
+            them behind the old collapsed disclosure). Front-and-center. */}
         <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch lg:max-h-[42vh] lg:overflow-y-auto">
-          <details className="group/shelf">
-            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c7c7cc] transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.07] hover:text-white [&::-webkit-details-marker]:hidden">
-              <svg className="h-3.5 w-3.5 shrink-0 transition-transform duration-150 group-open/shelf:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-              Scheduled & Ready Playlists
-            </summary>
-          <div className="space-y-4 pt-2">
+          <div>
+            <p className="flex items-center gap-2 px-1 pb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8e8e93]">
+              Ready &amp; Scheduled
+            </p>
+          <div className="space-y-4 pt-1">
             <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="library-section-title text-[10px] font-semibold uppercase tracking-[0.16em]">
@@ -2636,7 +2639,7 @@ function SourcesManagerInner({
               </div>
             </section>
           </div>
-          </details>
+          </div>
         </aside>
 
         <div className="library-list-shell library-list-shell--frameless relative row-start-1 min-w-0 self-start overflow-hidden p-2.5 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-stretch lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:px-3 xl:px-3">
@@ -3834,7 +3837,10 @@ function SourcesManagerInner({
                 {/* Create lives HERE — next to the list it creates into (moved from the left nav "+") */}
                 <button
                   type="button"
-                  onClick={() => void handleCreatePlaylist()}
+                  onClick={() => {
+                    setNewPlaylistName("");
+                    setCreatePlaylistOpen(true);
+                  }}
                   className="inline-flex shrink-0 items-center gap-1 rounded-full border border-white/[0.1] bg-white/[0.05] px-2.5 py-1 text-[10px] font-semibold text-[#a1a1a6] transition-colors duration-150 hover:border-white/[0.18] hover:bg-white/[0.09] hover:text-[#f5f5f7]"
                 >
                   <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
@@ -4053,6 +4059,77 @@ function SourcesManagerInner({
                 : t.confirmDelete
         }
       />
+      {/* ── New Playlist — CENTERED modal (replaced the native prompt at the top).
+          Names the playlist and explains how to fill it; opens it on create. */}
+      {createPlaylistOpen ? (
+        <div
+          className="fixed inset-0 z-[9985] flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]"
+          onClick={() => { if (!creatingPlaylist) setCreatePlaylistOpen(false); }}
+        >
+          <div
+            className="sb-anim-modal w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.1] bg-[#0f1015] shadow-[0_32px_96px_rgba(0,0,0,0.7)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const name = newPlaylistName.trim();
+                if (!name || creatingPlaylist) return;
+                setCreatingPlaylist(true);
+                void handleCreatePlaylist(name).finally(() => {
+                  setCreatingPlaylist(false);
+                  setCreatePlaylistOpen(false);
+                });
+              }}
+              className="p-5"
+            >
+              <div className="mb-4 flex items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0a84ff]/15 text-[#0a84ff]">
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                    <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                  </svg>
+                </span>
+                <div>
+                  <h2 className="text-[17px] font-semibold text-[#f5f5f7]">New playlist</h2>
+                  <p className="text-[12px] text-[#a1a1a6]">Give it a name — you can add songs right after.</p>
+                </div>
+              </div>
+              <input
+                autoFocus
+                type="text"
+                value={newPlaylistName}
+                onChange={(e) => setNewPlaylistName(e.target.value)}
+                placeholder="e.g. Friday Night, Chill Lunch, Summer Hits…"
+                className="w-full rounded-xl border border-white/[0.12] bg-white/[0.04] px-3.5 py-2.5 text-[15px] text-[#f5f5f7] placeholder:text-[#6e6e73] outline-none transition-colors focus:border-[#0a84ff]/60 focus:bg-white/[0.06]"
+              />
+              <div className="mt-3 flex items-start gap-2 rounded-xl bg-white/[0.03] px-3 py-2.5">
+                <svg className="mt-0.5 h-4 w-4 shrink-0 text-[#0a84ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" />
+                </svg>
+                <p className="text-[12px] leading-relaxed text-[#a1a1a6]">
+                  After it opens, add songs by <span className="text-[#d1d1d6]">dragging them in</span> from the library, or the <span className="text-[#d1d1d6]">＋</span> on any song card.
+                </p>
+              </div>
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => { if (!creatingPlaylist) setCreatePlaylistOpen(false); }}
+                  className="rounded-lg px-3.5 py-2 text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newPlaylistName.trim() || creatingPlaylist}
+                  className="rounded-lg bg-[#f5f5f7] px-4 py-2 text-[13px] font-semibold text-[#111114] transition-transform hover:scale-[1.02] active:scale-95 disabled:pointer-events-none disabled:opacity-40"
+                >
+                  {creatingPlaylist ? "Creating…" : "Create & open"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
       {/* Saved-to-library confirmation — loud, unmissable, self-dismissing */}
       {savedToast ? (
         <div className="sb-anim-pop pointer-events-none fixed bottom-6 left-1/2 z-[9980] -translate-x-1/2">
