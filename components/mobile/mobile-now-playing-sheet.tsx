@@ -38,9 +38,9 @@ function formatTime(seconds: number): string {
  *     the main SyncBiz player. Disabled (not hidden) when there is nothing to
  *     control.
  *   - volume slider is ALWAYS rendered with a mode-specific label.
- *   - visual language matches the main player's deck: cyan-400 stroke, dark
- *     slate fill, cyan glow; Play is a wider stadium pill; sliders are
- *     cyan-accented; artwork is circular with a cyan ring.
+ *   - visual language matches the CURRENT main player's deck: clean Apple style
+ *     — white play circle, quiet gray secondaries, subtle accent ring, white
+ *     sliders; NO neon glow.
  *   - closes via: X button, backdrop tap, or ESC key. No swipe gestures.
  */
 export function MobileNowPlayingSheet({ open, onClose }: Props) {
@@ -123,12 +123,12 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
         </div>
 
         <div className="flex flex-1 flex-col overflow-y-auto px-6 pb-6">
-          {/* Artwork — circular with cyan ring when playing, matching the main
-              SyncBiz player's `.library-deck-art-host` on `/sources`. */}
+          {/* Artwork — circular with a subtle accent ring when playing, matching
+              the current main SyncBiz player's `.library-deck-art-host`. */}
           <div
             className={`mx-auto mt-2 aspect-square w-full max-w-[220px] overflow-hidden rounded-full bg-slate-800/80 shadow-[0_10px_20px_-6px_rgba(0,0,0,0.5)] ${
               d.hasSource && d.isPlaying
-                ? "ring-2 ring-cyan-400/70 shadow-[0_0_32px_-6px_rgba(34,211,238,0.45)]"
+                ? "ring-2 ring-[color:var(--sb-accent-border)]"
                 : "ring-2 ring-slate-700/70"
             }`}
           >

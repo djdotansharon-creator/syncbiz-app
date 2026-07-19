@@ -24,10 +24,10 @@ type Props = {
  *      back-layer above the cover that hints at a multi-track container —
  *      URLs render without it so the two kinds are instantly distinguishable
  *      without reading meta.
- *   2. Play control is a cyan-neon stadium pill (NOT circular), matching the
- *      mini-player / now-playing-sheet transport buttons from
- *      `.library-deck-neon-btn` in app/globals.css — so Library and Player
- *      share one control language.
+ *   2. Play control is a solid white circle (Apple Music style), matching the
+ *      CURRENT main SyncBiz player + mini-player / now-playing-sheet transport
+ *      (clean `.deck-transport-btn--play` / `--sb-*`) — Library and Player
+ *      share one clean control language, no neon glow.
  *   3. Title below, then a single badge+count meta line — "PLAYLIST · N
  *      tracks" vs a provider-tinted "TRACK / YouTube / SoundCloud" badge.
  *
@@ -97,7 +97,7 @@ export function MobilePlaylistCard({ source, onRemove, editReturnTo }: Props) {
         <div
           className={`relative aspect-square w-full overflow-hidden rounded-xl bg-slate-800/80 ring-1 transition ${
             active
-              ? "ring-cyan-400/60 shadow-[0_0_0_1px_rgba(34,211,238,0.35),0_0_24px_-6px_rgba(34,211,238,0.5)]"
+              ? "ring-[color:var(--sb-accent-border)] shadow-[0_6px_16px_-8px_rgba(0,0,0,0.55)]"
               : "ring-slate-700/60 shadow-[0_6px_16px_-8px_rgba(0,0,0,0.55)] group-hover:ring-slate-500/70"
           }`}
         >
@@ -140,7 +140,7 @@ export function MobilePlaylistCard({ source, onRemove, editReturnTo }: Props) {
             <Link
               href={detailHref}
               aria-label={`Open ${source.title}`}
-              className="absolute inset-0 z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60"
+              className="absolute inset-0 z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/30"
             />
           )}
 
@@ -149,16 +149,14 @@ export function MobilePlaylistCard({ source, onRemove, editReturnTo }: Props) {
             <MobileSourceCardActions source={source} onRemove={onRemove} editReturnTo={editReturnTo} />
           </div>
 
-          {/* Play affordance — cyan-neon stadium pill, NOT circular.
-              Matches the mini-player Play button language (same cyan
-              border, same slate fill, same outer glow), just scaled down
-              for the card. 56x32 is a 1.75:1 stadium ratio that reads as
-              "small player pill" instead of a generic FAB. */}
+          {/* Play affordance — solid white circle with a dark glyph (Apple Music
+              style), matching the CURRENT main SyncBiz player's play control
+              (`.deck-transport-btn--play`). Clean: no border, no neon glow. */}
           <button
             type="button"
             onClick={handlePlay}
             aria-label={active ? "Pause" : "Play"}
-            className="absolute bottom-2 right-2 z-20 flex h-8 w-14 items-center justify-center rounded-xl border border-cyan-400/70 bg-slate-900/92 text-cyan-200 shadow-[0_0_0_1px_rgba(34,211,238,0.35),0_0_20px_-4px_rgba(34,211,238,0.55)] transition hover:border-cyan-300 hover:text-cyan-100 active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60"
+            className="absolute bottom-2 right-2 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-[var(--sb-text)] text-[#111114] shadow-[0_4px_16px_-6px_rgba(0,0,0,0.55)] transition hover:bg-white active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/40"
           >
             {active ? (
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden>

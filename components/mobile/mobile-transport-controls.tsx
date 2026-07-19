@@ -95,7 +95,7 @@ export function MobileTransportControls({
           onClick={tap(d.onPlayPause)}
           disabled={!d.canControl || !d.hasSource}
           aria-label={d.isPlaying ? "Pause" : "Play"}
-          className={`${MOBILE_TRANSPORT_PRIMARY} h-9 w-12 rounded-xl`}
+          className={`${MOBILE_TRANSPORT_PRIMARY} h-10 w-10 rounded-full`}
         >
           {d.isPlaying ? <PlaybackTransportIconPause className="h-5 w-5" /> : <PlaybackTransportIconPlay className="ml-0.5 h-5 w-5" />}
         </button>
@@ -142,7 +142,7 @@ export function MobileTransportControls({
           onClick={d.onPlayPause}
           disabled={!d.canControl || !d.hasSource}
           aria-label={d.isPlaying ? "Pause" : "Play"}
-          className={`${MOBILE_TRANSPORT_PRIMARY} h-[3.25rem] w-[6.5rem] rounded-2xl`}
+          className={`${MOBILE_TRANSPORT_PRIMARY} h-[3.75rem] w-[3.75rem] rounded-full`}
         >
           {d.isPlaying ? <PlaybackTransportIconPause className="h-7 w-7" /> : <PlaybackTransportIconPlay className="ml-0.5 h-7 w-7" />}
         </button>

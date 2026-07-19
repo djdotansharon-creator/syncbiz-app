@@ -22,9 +22,10 @@ type Props = {
 /**
  * Compact mobile player bar.
  *
- * Visual language (shared with the Now Playing sheet): cyan "neon pill"
- * transport buttons, circular artwork with a cyan ring when playing, slim
- * cyan progress bar. Transport + Random/Mix come from the shared
+ * Visual language (shared with the Now Playing sheet): clean Apple style — a
+ * white play circle, quiet gray secondaries, circular artwork with a subtle
+ * accent ring when playing, slim white progress bar. Transport + Random/Mix
+ * come from the shared
  * `MobileTransportControls` so both mobile surfaces drive identical
  * actions/state (same as the main SyncBiz player).
  *
@@ -43,10 +44,10 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
 
   const containerCls =
     variant === "top-card"
-      ? "relative rounded-2xl border border-cyan-400/25 bg-slate-950/80 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.55),0_0_24px_-12px_rgba(34,211,238,0.35)] backdrop-blur"
+      ? "relative rounded-2xl border border-[color:var(--sb-border)] bg-slate-950/80 shadow-[0_10px_30px_-12px_rgba(0,0,0,0.55)] backdrop-blur"
       : "relative border-t border-slate-800/80 bg-slate-950/96 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur";
 
-  // Progress bar: slim cyan, pinned to the top edge of the bar in both variants.
+  // Progress bar: slim white, pinned to the top edge of the bar in both variants.
   const progressTrackCls =
     variant === "top-card"
       ? "pointer-events-none absolute inset-x-3 top-0 h-[2px] overflow-hidden rounded-full bg-slate-800/60"
@@ -56,7 +57,7 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
     <div className={containerCls} role="region" aria-label="Mini player">
       <div aria-hidden className={progressTrackCls}>
         <div
-          className="h-full bg-cyan-400/90 shadow-[0_0_8px_rgba(34,211,238,0.55)] transition-[width] duration-200"
+          className="h-full bg-[var(--sb-text)] transition-[width] duration-200"
           style={{ width: d.hasSource ? `${progressPct}%` : "0%" }}
         />
       </div>
@@ -68,12 +69,12 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
           aria-label={d.hasSource ? "Open Now Playing" : "Open player"}
           className="flex min-w-0 flex-1 items-center gap-3 text-left transition active:scale-[0.99]"
         >
-          {/* Circular artwork with a cyan ring when playing — matches the
-              main SyncBiz player's `.library-deck-art-host`. */}
+          {/* Circular artwork with a subtle accent ring when playing — matches
+              the current main SyncBiz player's `.library-deck-art-host`. */}
           <div
             className={`relative h-11 w-11 shrink-0 overflow-hidden rounded-full bg-slate-800 ${
               d.hasSource && d.isPlaying
-                ? "ring-2 ring-cyan-400/70 shadow-[0_0_16px_-2px_rgba(34,211,238,0.45)]"
+                ? "ring-2 ring-[color:var(--sb-accent-border)]"
                 : "ring-2 ring-slate-700/70"
             }`}
             aria-hidden

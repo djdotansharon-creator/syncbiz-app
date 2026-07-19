@@ -210,25 +210,24 @@ export function useMobilePlayer(): MobilePlayerDerived {
   return useDerivedPlayer();
 }
 
-// Visual tokens — mirror the main SyncBiz player's deck transport (the cyan
-// "neon pill" language from `.library-deck-neon-btn:not(.h-7)` in
-// `app/globals.css`). Controller and Player modes share ONE look; mode is
-// communicated only through the mode pill and volume label, never through
-// different accent colors.
-//
-// Corner radius is intentionally NOT baked in — each caller sets its own so the
-// *visual proportion* matches across sizes (mini 12px on h-9 ≈ 33%, sheet 16px
-// on h-[3.25rem] ≈ 31%).
-export const MOBILE_TRANSPORT_SEC =
-  "flex shrink-0 items-center justify-center border-2 border-cyan-400/65 bg-slate-900/95 text-cyan-300 transition shadow-[0_0_0_1px_rgba(34,211,238,0.28),0_0_24px_-4px_rgba(34,211,238,0.42)] hover:border-cyan-300 hover:text-cyan-100 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.55),0_0_32px_-4px_rgba(34,211,238,0.55)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60";
+// Visual tokens — aligned to the CURRENT main SyncBiz player (clean Apple style:
+// `.deck-transport-btn` + `--sb-*` tokens in `app/globals.css`): a solid white
+// play circle, quiet gray secondaries, ONE restrained #0a84ff accent, hairline
+// surfaces, and NO neon glow. Callers append size + shape (h-.. w-.. rounded-..).
 
+// Primary play — solid white circle with a dark glyph (Apple Music style),
+// exactly like `.deck-transport-btn--play`.
 export const MOBILE_TRANSPORT_PRIMARY =
-  "flex shrink-0 items-center justify-center border-2 border-cyan-400/75 bg-slate-900/95 text-cyan-200 transition shadow-[0_0_0_2px_rgba(34,211,238,0.5),0_0_32px_-2px_rgba(34,211,238,0.55),0_0_60px_-10px_rgba(34,211,238,0.35)] hover:border-cyan-300 hover:text-cyan-100 hover:shadow-[0_0_0_2px_rgba(34,211,238,0.75),0_0_40px_-2px_rgba(34,211,238,0.7),0_0_72px_-10px_rgba(34,211,238,0.45)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/70";
+  "flex shrink-0 items-center justify-center bg-[var(--sb-text)] text-[#111114] shadow-[0_4px_16px_-6px_rgba(0,0,0,0.55)] transition hover:bg-white active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/30";
 
-// Mode toggle (Random / AutoMix) — same neon family, but ACTIVE state fills
-// cyan so ON/OFF is unmistakable (matches the main player's active-tint idea).
+// Secondary transport (Prev/Stop/Next) — quiet, borderless, muted gray glyph.
+export const MOBILE_TRANSPORT_SEC =
+  "flex shrink-0 items-center justify-center text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--sb-text)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/25";
+
+// Mode toggle (Random / AutoMix) — OFF = quiet gray; ON = soft accent tint
+// (#0a84ff), exactly like the main player's Shuffle / Automix active state.
 export const MOBILE_TOGGLE_OFF =
-  "flex shrink-0 items-center justify-center border-2 border-slate-600/70 bg-slate-900/80 text-slate-400 transition hover:border-cyan-400/60 hover:text-cyan-200 active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60";
+  "flex shrink-0 items-center justify-center text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--sb-text)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/25";
 
 export const MOBILE_TOGGLE_ON =
-  "flex shrink-0 items-center justify-center border-2 border-cyan-400/80 bg-cyan-400/20 text-cyan-100 transition shadow-[0_0_0_1px_rgba(34,211,238,0.4),0_0_22px_-4px_rgba(34,211,238,0.6)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/70";
+  "flex shrink-0 items-center justify-center bg-[var(--sb-accent-soft)] text-[#409cff] transition-colors active:scale-95 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgba(10,132,255,0.5)]";

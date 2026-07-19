@@ -83,16 +83,14 @@ export function MobileSourceRow({ source, onRemove, editReturnTo, compact = fals
     return null;
   })();
 
+  // Clean single-accent active state (#0a84ff), matching the current player /
+  // library cards — no mode-specific sky/emerald tints, no glow.
   const ringClass = active
-    ? isController
-      ? "border-sky-500/50 bg-sky-500/10"
-      : "border-emerald-500/40 bg-emerald-500/10"
+    ? "border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)]"
     : "border-slate-800/70 bg-slate-900/40 hover:bg-slate-900/70";
 
   const playIconRingClass = active
-    ? isController
-      ? "bg-sky-500/30 text-sky-300"
-      : "bg-emerald-500/30 text-emerald-300"
+    ? "bg-[var(--sb-accent-soft)] text-[#409cff]"
     : "bg-slate-800/80 text-slate-200 group-hover:bg-slate-700/90";
 
   return (
