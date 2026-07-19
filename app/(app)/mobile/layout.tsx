@@ -10,6 +10,7 @@ import {
 import { MobileBottomNav } from "@/components/mobile/mobile-bottom-nav";
 import { MobileMiniPlayer } from "@/components/mobile/mobile-mini-player";
 import { MobileNowPlayingSheet } from "@/components/mobile/mobile-now-playing-sheet";
+import { PwaRegister } from "@/components/pwa-register";
 
 /**
  * Persistent mobile shell. Every mobile tab mounts inside this layout, which:
@@ -42,6 +43,7 @@ export default function MobileLayout({ children }: { children: ReactNode }) {
     <StationControllerProvider>
       <MobileSourcesProvider>
         <MobileNowPlayingContext.Provider value={ctxValue}>
+          <PwaRegister />
           <div className="flex h-[100dvh] flex-col overflow-hidden bg-slate-950 text-slate-100">
             <div className="shrink-0 px-4 pt-3 pb-2">
               <MobileMiniPlayer onOpen={openNowPlaying} variant="top-card" />

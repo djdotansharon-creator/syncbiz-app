@@ -171,8 +171,8 @@ export function MobileShazamImport() {
     }
   }, []);
 
-  const handleResolveLink = useCallback(async () => {
-    const link = linkInput.trim();
+  const handleResolveLink = useCallback(async (linkArg?: string) => {
+    const link = (linkArg ?? linkInput).trim();
     if (!link) {
       setError("Paste a Shazam link first.");
       return;
@@ -209,6 +209,28 @@ export function MobileShazamImport() {
     const q = `${artist.trim()} ${song.trim()}`.trim();
     await runSearch(q);
   }, [artist, song, runSearch]);
+
+  // Web Share Target: a link shared into the installed PWA is stashed in
+  // sessionStorage by /mobile/shazam-share. Once enabled, open the sheet on that
+  // link and resolve it automatically — the "share from Shazam like WhatsApp" flow.
+  useEffect(() => {
+    if (enabled !== true) return;
+    let shared = "";
+    try {
+      shared = sessionStorage.getItem("syncbiz:shazamShareLink") ?? "";
+      if (shared) sessionStorage.removeItem("syncbiz:shazamShareLink");
+    } catch {
+      /* ignore */
+    }
+    if (!shared) return;
+    setReturnedPrompt(false);
+    setMode("paste");
+    setLinkInput(shared);
+    setError(null);
+    setResult(null);
+    setOpen(true);
+    void handleResolveLink(shared);
+  }, [enabled, handleResolveLink]);
 
   /** Persist the YouTube result to a real UnifiedSource once; reuse thereafter. */
   const getOrCreateSource = useCallback(async (r: YouTubeSearchResult): Promise<UnifiedSource | null> => {
@@ -394,7 +416,7 @@ export function MobileShazamImport() {
                   <button type="button" onClick={handlePasteFromClipboard} disabled={busy} className={SECONDARY_BTN}>
                     Paste
                   </button>
-                  <button type="button" onClick={handleResolveLink} disabled={busy || !linkInput.trim()} className={`${PRIMARY_BTN} flex-1`}>
+                  <button type="button" onClick={() => handleResolveLink()} disabled={busy || !linkInput.trim()} className={`${PRIMARY_BTN} flex-1`}>
                     {busy ? "Finding…" : "Find on YouTube"}
                   </button>
                 </div>

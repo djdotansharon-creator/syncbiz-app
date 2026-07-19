@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { getLocale } from "@/lib/locale-server";
@@ -17,6 +17,23 @@ export const metadata: Metadata = {
   title: "SyncBiz – Media Control & Scheduling",
   description:
     "Controller and scheduler for business playback. Sends commands to customer-owned endpoint devices. SyncBiz does not store or host media.",
+  // PWA: installable + registers as a Web Share Target (see public/manifest.webmanifest).
+  manifest: "/manifest.webmanifest",
+  applicationName: "SyncBiz",
+  appleWebApp: {
+    capable: true,
+    title: "SyncBiz",
+    statusBarStyle: "black-translucent",
+  },
+  icons: {
+    apple: "/icons/apple-touch-icon.png",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0b0f16",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default async function RootLayout({
