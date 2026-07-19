@@ -597,7 +597,7 @@ function isPersistedReadyPlaylistSource(source: UnifiedSource): boolean {
 /** Subtitle for composite contributor rows (playlist vs direct; Ready vs Your by key). */
 function compositeContributorSourceLabel(b: ScheduleContributorBlock): string {
   if (b.kind === "direct") return "Direct items";
-  if (b.sourcePlaylistKey?.startsWith("external:")) return "Ready playlist";
+  if (b.sourcePlaylistKey?.startsWith("external:")) return "Imported playlist";
   if (b.sourcePlaylistKey?.startsWith("syncbiz:")) return "Your playlist";
   return "Playlist source";
 }
@@ -1304,8 +1304,8 @@ function SourcesManagerInner({
     if (selection.type !== "collection_group") return null;
     if (selection.id === "curated_masters") {
       return {
-        title: "Ready Playlists",
-        subtitle: "Curated ready-to-use music collections.",
+        title: "Imported Playlists",
+        subtitle: "Playlists you dragged in from YouTube and elsewhere — up to 25 tracks each.",
         count: containers.curated.length,
       };
     }
@@ -2910,7 +2910,7 @@ function SourcesManagerInner({
                   count: displaySources.filter((s) => s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s)).length,
                 },
                 { id: "user_playlists", label: "Your Playlists", count: userPlaylistContainers.length },
-                { id: "external_playlists", label: "Ready", count: containers.external.length },
+                { id: "external_playlists", label: "Imported", count: containers.external.length },
                 { id: "sources", label: "Sources", count: containers.sources.length },
                 { id: "favorites", label: "Favorites", count: favoriteIds.length },
               ] as Array<{ id: LibraryViewId; label: string; count: number }>
