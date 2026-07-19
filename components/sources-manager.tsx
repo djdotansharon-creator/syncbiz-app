@@ -2330,14 +2330,13 @@ function SourcesManagerInner({
        * 3-column deck at lg, so workspace rails now widen to match.
        */}
       <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:h-full lg:min-h-0 lg:grid-cols-[240px_minmax(0,1fr)_240px] lg:grid-rows-[minmax(0,1fr)_auto] lg:overflow-hidden xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)_260px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px]">
-        {/* Ready & Scheduled playlists — always visible (operator couldn't find
-            them behind the old collapsed disclosure). Front-and-center. */}
+        {/* Scheduling tiles only — Ready Playlists removed from here (redundant
+            with the "Ready" filter chip under the search bar; the always-open
+            list looked cluttered). Keeps the daypart tiles + their Add button. */}
         <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch lg:max-h-[42vh] lg:overflow-y-auto">
           <div>
-            <p className="flex items-center gap-2 px-1 pb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8e8e93]">
-              Ready &amp; Scheduled
-            </p>
           <div className="space-y-4 pt-1">
+            {false ? (
             <section>
               <div className="mb-2 flex items-center justify-between px-1">
                 <p className="library-section-title text-[10px] font-semibold uppercase tracking-[0.16em]">
@@ -2418,6 +2417,7 @@ function SourcesManagerInner({
                 ))}
               </div>
             </section>
+            ) : null}
 
             <section>
               <div className="mb-1 flex items-center justify-between px-1">

@@ -327,6 +327,13 @@ export function classifyLibraryEntityContract(source: UnifiedSource): LibraryEnt
     if (playlistIsExternalShellUrl(source.url ?? "")) {
       return { entityKind: "collection", collectionSubtype: "external_playlist" };
     }
+    // A user-created container playlist (local://user-playlist/…) is ALWAYS a
+    // collection — even empty or with a single track. Otherwise a freshly made
+    // playlist (0 tracks) was misclassified as a single leaf and landed in
+    // "Single Tracks" instead of "Your Playlists".
+    if ((source.url ?? "").startsWith("local://user-playlist/")) {
+      return { entityKind: "collection", collectionSubtype: "syncbiz_playlist" };
+    }
     const trackCount = getPlaylistTracks(source.playlist).length;
     if (trackCount <= 1) {
       return classifyLibraryLeafEntityContract(source);
