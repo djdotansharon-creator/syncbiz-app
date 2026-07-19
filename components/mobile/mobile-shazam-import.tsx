@@ -272,9 +272,15 @@ export function MobileShazamImport() {
     [withAction, deviceCtx, isController, station, playback]
   );
 
+  // Add to queue — queueNextOrSend routes to the MASTER's queue in CONTROL
+  // (existing QUEUE_NEXT command, no local audio) or the local queue as player.
   const handleAddToQueue = useCallback(
-    () => withAction((u) => playback.addPlayNextSources([u]), "Added to the queue"),
-    [withAction, playback]
+    () =>
+      withAction((u) => {
+        if (deviceCtx?.queueNextOrSend) deviceCtx.queueNextOrSend(u);
+        else playback.addPlayNextSources([u]);
+      }, "Added to the queue"),
+    [withAction, deviceCtx, playback]
   );
 
   const handleAddToLibrary = useCallback(
@@ -362,11 +368,9 @@ export function MobileShazamImport() {
                   <button type="button" onClick={handleAddToLibrary} disabled={busy} className={SECONDARY_BTN}>
                     Add to library
                   </button>
-                  {!isController && (
-                    <button type="button" onClick={handleAddToQueue} disabled={busy} className={`${SECONDARY_BTN} col-span-2`}>
-                      Add to queue
-                    </button>
-                  )}
+                  <button type="button" onClick={handleAddToQueue} disabled={busy} className={`${SECONDARY_BTN} col-span-2`}>
+                    Add to queue
+                  </button>
                 </div>
                 <button type="button" onClick={resetFlow} disabled={busy} className="mt-3 w-full text-center text-[13px] text-slate-400 active:scale-[0.99]">
                   Search a different song

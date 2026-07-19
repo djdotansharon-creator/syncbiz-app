@@ -51,6 +51,8 @@ type DevicePlayerContextValue = {
   sendCommandToMaster: (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number }) => void;
   /** Play source locally (MASTER) or send to master (CONTROL). */
   playSourceOrSend: (source: UnifiedSource, trackIndex?: number) => void;
+  /** Add a song to the queue — local when this device plays, else QUEUE_NEXT to MASTER. */
+  queueNextOrSend: (source: UnifiedSource) => void;
   /** Play/pause/stop/next/prev - local when MASTER, send to master when CONTROL. */
   playOrSend: () => void;
   pauseOrSend: () => void;
@@ -283,6 +285,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     next,
     prev,
     playSource,
+    addPlayNextSources,
     setVolume,
     seekTo,
     shuffle,
@@ -379,9 +382,15 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         // Removed the blocking fetchUnifiedSourcesWithFallback() call that caused
         // 15+ second delays on Railway before the first track could start.
         playSource(payloadToUnifiedSource(payload), trackIdx);
+      } else if (command === "QUEUE_NEXT" && cmd.payload?.source) {
+        // A CONTROL added a song to the MASTER's Play-Next queue. Reuse the same
+        // payload→source reconstruction as PLAY_SOURCE, but enqueue instead of
+        // play — current playback is untouched. The updated playNextQueue is
+        // echoed back to every CONTROL via the normal STATE_UPDATE.
+        addPlayNextSources([payloadToUnifiedSource(cmd.payload.source as PlaySourcePayload)]);
       }
     },
-    [play, pause, stop, next, prev, playSource, seekTo, setVolume, setShuffle, setAutoMix]
+    [play, pause, stop, next, prev, playSource, addPlayNextSources, seekTo, setVolume, setShuffle, setAutoMix]
   );
 
   const effectiveUserId = (userId ?? "").trim();
@@ -866,6 +875,20 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     [useLocalDeviceTransport, playSource, sendCommandToMaster]
   );
 
+  // Add to queue — local when we ARE the player; otherwise send QUEUE_NEXT to
+  // the MASTER (existing command; no local audio on a CONTROL). Symmetric with
+  // playSourceOrSend / the master handler above.
+  const queueNextOrSend = useCallback(
+    (source: UnifiedSource) => {
+      if (useLocalDeviceTransport) {
+        addPlayNextSources([source]);
+      } else {
+        sendCommandToMaster("QUEUE_NEXT", { source: unifiedSourceToPayload(source) });
+      }
+    },
+    [useLocalDeviceTransport, addPlayNextSources, sendCommandToMaster]
+  );
+
   const playOrSend = useCallback(() => {
     if (useLocalDeviceTransport) play();
     else sendCommandToMaster("PLAY");
@@ -940,6 +963,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       sendSetControl,
       sendCommandToMaster,
       playSourceOrSend,
+      queueNextOrSend,
       playOrSend,
       pauseOrSend,
       stopOrSend,
@@ -970,6 +994,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       sendSetControl,
       sendCommandToMaster,
       playSourceOrSend,
+      queueNextOrSend,
       playOrSend,
       pauseOrSend,
       stopOrSend,
