@@ -996,3 +996,39 @@ model SpotifyConnection {
 
   @@index([expiresAt])
 }
+
+/// Owner-side playback telemetry. Every player reports playback-reliability
+/// events here (freeze detected, self-heal re-dispatch, recovery skip, error)
+/// so the platform owner can monitor stability across ALL customers from
+/// /admin/platform/telemetry — proactively, without waiting for a customer to
+/// complain. Writes are fire-and-forget from the client and MUST NEVER affect
+/// playback. Intentionally FK-free (branchId/workspaceId/deviceId are plain
+/// strings, matching the "default" single-branch V1) so a telemetry insert can
+/// never fail on a constraint or cascade-delete real data. No secrets/tokens are
+/// stored; URLs are reduced to host only.
+model PlaybackIncident {
+  id          String   @id @default(uuid())
+  createdAt   DateTime @default(now())
+  /// freeze | self_heal_redispatch | skip_recover | recovered | stall_error
+  kind        String
+  deviceId    String?
+  branchId    String?
+  workspaceId String?
+  userEmail   String?
+  deviceMode  String?
+  platform    String?
+  sourceType  String?
+  sourceTitle String?
+  urlHost     String?
+  attempt     Int?
+  frozenMs    Int?
+  recovered   Boolean?
+  mpvStatus   String?
+  engineReady Boolean?
+  appVersion  String?
+  detail      Json?
+
+  @@index([createdAt])
+  @@index([branchId])
+  @@index([kind])
+}

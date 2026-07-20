@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 
 /**
@@ -17,8 +18,12 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   await requireSuperAdmin();
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
-      <header className="border-b border-neutral-800 px-6 py-3 text-sm font-medium">
-        SyncBiz · Owner CRM
+      <header className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-neutral-800 px-6 py-3 text-sm">
+        <span className="font-medium">SyncBiz · Owner CRM</span>
+        <nav className="flex flex-wrap items-center gap-x-4 gap-y-1 text-neutral-400">
+          <Link href="/admin/platform" className="hover:text-white">Platform</Link>
+          <Link href="/admin/platform/telemetry" className="hover:text-white">Playback telemetry</Link>
+        </nav>
       </header>
       <main className="p-6">{children}</main>
     </div>

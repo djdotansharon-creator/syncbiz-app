@@ -49,6 +49,7 @@ import { PlayerDeckTransportSurface } from "@/components/player-surface/player-d
 import { PlayerVerticalVolume } from "@/components/player-surface/player-vertical-volume";
 import { DesktopVideoDock } from "@/components/player-surface/desktop-video-dock";
 import { DesktopPlaybackDiagnostic } from "@/components/desktop-playback-diagnostic";
+import { reportPlaybackIncident, hostOnly, classifySource } from "@/lib/playback-telemetry-client";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
 import { masterPlaybackDiag } from "@/lib/master-playback-diag";
@@ -3314,6 +3315,17 @@ export function AudioPlayer() {
   const mpvFrozenForUrlRef = useRef<string | null>(null);
   const mpvFrozenAttemptsRef = useRef(0);
   const mpvFrozenSkippedForUrlRef = useRef<string | null>(null);
+  const mpvRecoveredReportedForUrlRef = useRef<string | null>(null);
+  // Latest identity/context for owner telemetry — refreshed each render so the
+  // watchdog interval (which closes over stale values) reports accurate tags.
+  const playerTelemetryRef = useRef<{ deviceId: string | null; deviceMode: string | null; platform: string }>(
+    { deviceId: null, deviceMode: null, platform: "browser" },
+  );
+  playerTelemetryRef.current = {
+    deviceId: deviceCtx?.deviceId ?? null,
+    deviceMode: deviceCtx?.deviceMode ?? null,
+    platform: isDesktopMode ? "desktop" : "browser",
+  };
   /**
    * Coalesce rapid `currentPlayUrl` changes during startup/restore/adoption into
    * a SINGLE MPV `loadfile`. On cold launch multiple React effects (persistence
@@ -3539,12 +3551,39 @@ export function AudioPlayer() {
       const url = currentPlayUrlRef.current;
       if (!url) return;
       const frozenMs = Date.now() - desktopSnapPositionAtRef.current;
-      if (frozenMs < FREEZE_MS) return; // position advanced recently → healthy
+      const ctx = playerTelemetryRef.current;
+      // Fire-and-forget owner telemetry — never blocks/throws (see the client lib).
+      const tele = (kind: Parameters<typeof reportPlaybackIncident>[0]["kind"], extra: Record<string, unknown>) =>
+        reportPlaybackIncident({
+          kind,
+          deviceId: ctx.deviceId,
+          deviceMode: ctx.deviceMode,
+          platform: ctx.platform,
+          sourceType: classifySource(url),
+          urlHost: hostOnly(url),
+          mpvStatus: snap.status,
+          engineReady: snap.engineReady,
+          ...extra,
+        });
 
-      // New track resets the recovery budget.
+      if (frozenMs < FREEZE_MS) {
+        // Healthy again → if we intervened on this track, report a one-time recovery.
+        if (
+          mpvFrozenForUrlRef.current === url &&
+          mpvFrozenAttemptsRef.current > 0 &&
+          mpvRecoveredReportedForUrlRef.current !== url
+        ) {
+          mpvRecoveredReportedForUrlRef.current = url;
+          tele("recovered", { recovered: true, attempt: mpvFrozenAttemptsRef.current });
+        }
+        return; // position advanced recently → healthy
+      }
+
+      // New track resets the recovery budget + recovery-report guard.
       if (mpvFrozenForUrlRef.current !== url) {
         mpvFrozenForUrlRef.current = url;
         mpvFrozenAttemptsRef.current = 0;
+        mpvRecoveredReportedForUrlRef.current = null;
       }
 
       if (mpvFrozenAttemptsRef.current < MAX_REDISPATCH) {
@@ -3555,6 +3594,11 @@ export function AudioPlayer() {
           pos: snap.position,
           dur: snap.duration,
           url: url.slice(0, 100),
+        });
+        // First detection = the freeze itself; later kicks = re-dispatch attempts.
+        tele(mpvFrozenAttemptsRef.current === 1 ? "freeze" : "self_heal_redispatch", {
+          attempt: mpvFrozenAttemptsRef.current,
+          frozenMs,
         });
         mpvLastUrlRef.current = url; // keep the routing effect in sync
         desktopSnapPositionAtRef.current = Date.now(); // fresh window for this retry
@@ -3569,6 +3613,7 @@ export function AudioPlayer() {
         console.warn("[SyncBiz] desktop MPV still frozen after retries — skipping forward to keep playback alive", {
           url: url.slice(0, 100),
         });
+        tele("skip_recover", { recovered: false, attempt: mpvFrozenAttemptsRef.current, frozenMs });
         desktopSnapPositionAtRef.current = Date.now();
         nextRef.current?.({ auditTransportCase: "ended_auto" });
       }
