@@ -188,7 +188,9 @@ export function MobileListenIdentify() {
               ? "Couldn't recognize the song — try again closer to the speaker."
               : reason === "not_configured"
                 ? "Song recognition isn't set up yet."
-                : "Recognition failed. Please try again.",
+                : reason === "bad_token"
+                  ? "Recognition token is invalid — check AUDD_API_TOKEN in Railway."
+                  : "Recognition failed. Please try again.",
           );
           setPhase("error");
           return;

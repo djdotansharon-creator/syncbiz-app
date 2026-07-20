@@ -47,11 +47,20 @@ export async function POST(req: Request) {
   if (!res.ok) return NextResponse.json({ ok: false, reason: "service_error" });
 
   const data = (await res.json().catch(() => null)) as
-    | { status?: string; result?: { artist?: string; title?: string } | null; error?: { error_message?: string } }
+    | { status?: string; result?: { artist?: string; title?: string } | null; error?: { error_code?: number; error_message?: string } }
     | null;
 
   if (!data || data.status !== "success") {
-    return NextResponse.json({ ok: false, reason: "service_error" });
+    // Surface a token problem explicitly so the operator can fix AUDD_API_TOKEN.
+    // AudD returns e.g. error_code 900 "Wrong API token" / 901 "No api_token".
+    const em = data?.error?.error_message ?? "";
+    const code = data?.error?.error_code;
+    const isToken = code === 900 || code === 901 || /token/i.test(em);
+    return NextResponse.json({
+      ok: false,
+      reason: isToken ? "bad_token" : "service_error",
+      detail: em.slice(0, 140),
+    });
   }
   if (!data.result) {
     return NextResponse.json({ ok: false, reason: "not_found" });
