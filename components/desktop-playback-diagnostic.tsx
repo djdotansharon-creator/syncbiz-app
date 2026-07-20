@@ -2,6 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 
+// Bump on each meaningful deploy so a pasted diagnostic proves which build the
+// desktop actually loaded (Electron can keep serving an old renderer until a
+// FULL quit + relaunch). If this shows an old value, the fix hasn't loaded yet.
+const DIAG_BUILD = "sh2-2026-07-20";
+
 /**
  * DISPLAY-ONLY desktop playback diagnostic.
  *
@@ -61,6 +66,10 @@ export function DesktopPlaybackDiagnostic(props: {
   currentPlayUrl: string | null;
   dispatchedUrl: string | null;
   chAStatus: string | null;
+  /** Real wall-clock of the LAST actual dispatch to MPV (incl. self-heal re-sends). */
+  lastDispatchAt?: number | null;
+  /** How many self-heal re-dispatches have fired for the current track. */
+  selfHealAttempts?: number | null;
 }) {
   const {
     isDesktop,
@@ -74,6 +83,8 @@ export function DesktopPlaybackDiagnostic(props: {
     currentPlayUrl,
     dispatchedUrl,
     chAStatus,
+    lastDispatchAt,
+    selfHealAttempts,
   } = props;
 
   // ── Component-local tracking (no writes back into the player) ──────────────
@@ -155,6 +166,10 @@ export function DesktopPlaybackDiagnostic(props: {
   if (!visible) return null;
 
   const secsSince = (t: number | null) => (t === null ? "—" : `${((Date.now() - t) / 1000).toFixed(1)}s`);
+  // Prefer the real dispatch timestamp from the player (includes self-heal
+  // re-sends of the SAME url, which the url-change observer above can't see).
+  const effLastDispatch =
+    typeof lastDispatchAt === "number" && lastDispatchAt > 0 ? lastDispatchAt : lastDispatchAtRef.current;
   const reason = notDispatched
     ? "url NOT sent to MPV"
     : engineReady === false
@@ -166,13 +181,15 @@ export function DesktopPlaybackDiagnostic(props: {
     : "unknown";
 
   const rows: Array<[string, string]> = [
+    ["build", DIAG_BUILD],
+    ["self-heal tries", selfHealAttempts == null ? "—" : String(selfHealAttempts)],
     ["reason", reason],
     ["since Play", secsSince(playAtRef.current)],
     ["intent", intentStatus],
     ["source type", classifySource(currentPlayUrl)],
     ["url computed", currentPlayUrl ? "yes" : "NO"],
     ["url sent→MPV", dispatchedUrl ? "yes" : "NO"],
-    ["last sent ago", secsSince(lastDispatchAtRef.current)],
+    ["last sent ago", secsSince(effLastDispatch)],
     ["mpv.status", mpvStatus ?? "—"],
     ["mpv.chA", chAStatus ?? "—"],
     ["engineReady", engineReady === null ? "—" : String(engineReady)],

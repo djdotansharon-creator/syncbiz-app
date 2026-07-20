@@ -3316,6 +3316,10 @@ export function AudioPlayer() {
   const mpvFrozenAttemptsRef = useRef(0);
   const mpvFrozenSkippedForUrlRef = useRef<string | null>(null);
   const mpvRecoveredReportedForUrlRef = useRef<string | null>(null);
+  // Real wall-clock of the last actual dispatch to MPV (routing effect OR
+  // self-heal re-send). Surfaced in the diagnostic so re-sends of the same URL
+  // are visible (the URL string itself doesn't change on a re-dispatch).
+  const mpvLastDispatchAtRef = useRef<number>(0);
   // Latest identity/context for owner telemetry — refreshed each render so the
   // watchdog interval (which closes over stale values) reports accurate tags.
   const playerTelemetryRef = useRef<{ deviceId: string | null; deviceMode: string | null; platform: string }>(
@@ -3470,6 +3474,7 @@ export function AudioPlayer() {
           } else {
             void desktop.mpvPlayUrl(latest);
           }
+          mpvLastDispatchAtRef.current = Date.now();
 
           // Stall detection: if Ch-A hasn't reported "playing" within 4 s, the file
           // or engine has a problem. Reset the fake-playing state and surface the error.
@@ -3605,6 +3610,7 @@ export function AudioPlayer() {
           frozenMs,
         });
         mpvLastUrlRef.current = url; // keep the routing effect in sync
+        mpvLastDispatchAtRef.current = Date.now(); // record the actual re-send
         desktopSnapPositionAtRef.current = Date.now(); // fresh window for this retry
         void desktop.mpvPlayUrl(url); // force a fresh loadfile (== manual refresh)
         return;
@@ -4713,6 +4719,8 @@ export function AudioPlayer() {
         currentPlayUrl={currentPlayUrl}
         dispatchedUrl={mpvLastUrlRef.current}
         chAStatus={mpvChAStatusRef.current}
+        lastDispatchAt={mpvLastDispatchAtRef.current}
+        selfHealAttempts={mpvFrozenForUrlRef.current === currentPlayUrl ? mpvFrozenAttemptsRef.current : 0}
       />
     </header>
   );
