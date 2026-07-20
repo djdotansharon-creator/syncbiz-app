@@ -10,7 +10,6 @@ import {
 import { PlaybackTransportIconVolume } from "@/components/player-surface/playback-transport-icons";
 import { useMobilePlayer } from "@/components/mobile/mobile-player-core";
 import { MobileTransportControls } from "@/components/mobile/mobile-transport-controls";
-import { MobileListenIdentify } from "@/components/mobile/mobile-listen-identify";
 
 // Re-export so existing importers (mini-player) keep a stable path.
 export { useMobilePlayer } from "@/components/mobile/mobile-player-core";
@@ -207,12 +206,6 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
                 className="syncbiz-mobile-range syncbiz-mobile-range--slim flex-1"
               />
             </div>
-          </div>
-
-          {/* Shazam-style: identify what's playing in the room and add it to the
-              queue in one tap. Hidden unless AUDD_API_TOKEN is configured. */}
-          <div className="mt-6">
-            <MobileListenIdentify />
           </div>
 
           {!d.canControl && d.mode === "controller" && (

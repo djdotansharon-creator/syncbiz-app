@@ -4,6 +4,7 @@ import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
 import { MobileSearchBar } from "@/components/mobile-search-bar";
 import { MobileShazamImport } from "@/components/mobile/mobile-shazam-import";
 import { MobileInstallButton } from "@/components/mobile/mobile-install-button";
+import { MobileListenIdentify } from "@/components/mobile/mobile-listen-identify";
 import { useMobileSources } from "@/lib/mobile-sources-context";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { useStationController } from "@/lib/station-controller-context";
@@ -42,8 +43,10 @@ export default function MobileSearchPage() {
           unifiedContentScope={contentScope}
           hideRadio
         />
-        {/* Paste/share a Shazam link, under the search bar. (Mic "Identify a song"
-            now lives in the mobile player screen for a one-tap flow.) */}
+        {/* One-tap mic identify (records → recognizes → auto-adds to queue),
+            directly under the search bar. */}
+        <MobileListenIdentify />
+        {/* Paste/share a Shazam link. */}
         <MobileShazamImport variant="hero" />
       </div>
     </>

@@ -33,7 +33,7 @@ function pickMimeType(): string {
 }
 
 /**
- * In-app song recognition, streamlined to a single tap from the mobile player.
+ * In-app song recognition, streamlined to a single tap from the mobile search bar.
  *
  * Tap "Identify a song" → records ~7s from the mic → /api/sources/recognize-audio
  * (AudD, server-side token) → feeds the recognized artist+title into the EXISTING
