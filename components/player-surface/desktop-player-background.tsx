@@ -123,28 +123,33 @@ export function DesktopPlayerBackground({
 
   return (
     <>
-      {showArtwork ? (
-        <style>{"@keyframes sbBgDrift{0%{transform:scale(1.06) translateY(0)}100%{transform:scale(1.12) translateY(-1.5%)}}"}</style>
+      {showArtwork && cover ? (
+        <style>{"@keyframes sbBgDrift{0%{transform:scale(1.03)}100%{transform:scale(1.08)}}"}</style>
       ) : null}
 
       {mode === "static" ? (
         <div className="pointer-events-none absolute inset-0 -z-[2] bg-[#0b0f16]" aria-hidden />
       ) : null}
 
+      {/* ARTWORK as a crisp still in the SAME right-half slot the video uses, with
+          the left fog — it reads like a paused video frame (for YouTube the cover
+          IS a video frame) but costs ZERO video load. Full dark base behind so the
+          left/controls stay clean. */}
       {showArtwork ? (
-        <div className="pointer-events-none absolute inset-0 -z-[2] overflow-hidden bg-[#0b0f16]" aria-hidden>
-          {cover ? (
-            <HydrationSafeImage
-              src={cover}
-              alt=""
-              className="h-full w-full object-cover opacity-80 blur-xl"
-              style={{ animation: "sbBgDrift 32s ease-in-out infinite alternate", willChange: "transform" }}
-            />
-          ) : null}
-          {/* Light left-weighted wash: the artwork stays clearly visible on the
-              right while the controls (left) keep enough contrast to read. The
-              semi-transparent hero-shell above adds the rest of the dimming. */}
-          <div className="absolute inset-0 bg-gradient-to-r from-[#0b0f16]/60 via-[#0b0f16]/15 to-transparent" />
+        <div className="pointer-events-none absolute inset-0 -z-[2] bg-[#0b0f16]" aria-hidden />
+      ) : null}
+      {showArtwork && cover ? (
+        <div
+          className="pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
+          aria-hidden
+        >
+          <HydrationSafeImage
+            src={cover}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+            style={{ animation: "sbBgDrift 40s ease-in-out infinite alternate", willChange: "transform" }}
+          />
+          <div className="absolute inset-y-0 left-0 z-[1] w-2/3 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/75 to-transparent" />
         </div>
       ) : null}
 
