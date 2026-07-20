@@ -181,13 +181,28 @@ export class MpvManager {
     this.ipcReconnectAttempt = 0;
     this.clearIpcReconnectTimer();
 
-    console.log(WATCHDOG, "spawning mpv", { pipe: this.pipePath, why, bin });
+    // Audio-only + robust streaming:
+    // - `--ytdl-format=bestaudio/best` forces the CLEAN audio-only stream. Without
+    //   it, ytdl_hook's default (`bestvideo+bestaudio/best`) can hand MPV a
+    //   combined/DASH format that, under `--no-video`, opens and reports duration
+    //   but never decodes audio — the exact "loads but position frozen at 0"
+    //   YouTube freeze. Ignored for local files (only ytdl URLs use it).
+    // - cache + generous network timeout so a slow/throttled stream buffers
+    //   instead of stalling silently.
+    const mpvArgs = [
+      "--no-video",
+      "--idle",
+      "--ytdl-format=bestaudio/best",
+      "--cache=yes",
+      "--cache-secs=30",
+      "--demuxer-max-bytes=64MiB",
+      "--network-timeout=30",
+      `--input-ipc-server=${this.pipePath}`,
+      ...this.ytDlpArgFragment,
+    ];
+    console.log(WATCHDOG, "spawning mpv", { pipe: this.pipePath, why, bin, args: mpvArgs });
 
-    this.child = spawn(
-      bin,
-      ["--no-video", "--idle", `--input-ipc-server=${this.pipePath}`, ...this.ytDlpArgFragment],
-      { stdio: ["ignore", "ignore", "pipe"] },
-    );
+    this.child = spawn(bin, mpvArgs, { stdio: ["ignore", "ignore", "pipe"] });
 
     this.child.stderr?.on("data", (d: Buffer) => {
       const msg = d.toString("utf-8").trim();
