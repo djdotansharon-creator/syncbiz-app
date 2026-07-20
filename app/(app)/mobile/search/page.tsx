@@ -28,17 +28,8 @@ export default function MobileSearchPage() {
 
   return (
     <>
-      <MobilePageHeader
-        title="Search"
-        showModePill
-        actions={
-          <>
-            <MobileInstallButton />
-            <MobileShazamImport />
-          </>
-        }
-      />
-      <div className="px-4 pt-3 pb-6">
+      <MobilePageHeader title="Search" showModePill actions={<MobileInstallButton />} />
+      <div className="space-y-3 px-4 pt-3 pb-6">
         <MobileSearchBar
           sources={sources}
           onAdd={addHandler}
@@ -51,6 +42,8 @@ export default function MobileSearchPage() {
           unifiedContentScope={contentScope}
           hideRadio
         />
+        {/* Big, obvious Shazam entry directly under the search bar. */}
+        <MobileShazamImport variant="hero" />
       </div>
     </>
   );

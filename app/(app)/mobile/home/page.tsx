@@ -4,6 +4,7 @@ import Link from "next/link";
 import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
 import { MobileBrowseTile } from "@/components/mobile/mobile-browse-tile";
 import { MobileSourceRow } from "@/components/mobile/mobile-source-row";
+import { MobileInstallButton } from "@/components/mobile/mobile-install-button";
 import { useMobileSources } from "@/lib/mobile-sources-context";
 import type { UnifiedSource } from "@/lib/source-types";
 
@@ -29,16 +30,19 @@ export default function MobileHomePage() {
         title="Home"
         showModePill
         actions={
-          <Link
-            href="/mobile/search"
-            aria-label="Search"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 hover:text-slate-100"
-          >
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-              <circle cx="11" cy="11" r="7" />
-              <path d="m20 20-3.5-3.5" strokeLinecap="round" />
-            </svg>
-          </Link>
+          <>
+            <MobileInstallButton />
+            <Link
+              href="/mobile/search"
+              aria-label="Search"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-slate-300 hover:text-slate-100"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+              </svg>
+            </Link>
+          </>
         }
       />
 

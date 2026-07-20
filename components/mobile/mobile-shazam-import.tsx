@@ -37,7 +37,7 @@ function detectPlatform(): Platform {
   return "other";
 }
 
-export function MobileShazamImport() {
+export function MobileShazamImport({ variant = "icon" }: { variant?: "icon" | "hero" } = {}) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("menu");
@@ -319,18 +319,33 @@ export function MobileShazamImport() {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => openSheet(false)}
-        aria-label="Import from Shazam"
-        className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--sb-text)] active:scale-95"
-      >
-        {/* Shazam-style concentric mark (generic, not the trademark logo). */}
-        <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 8.5a3.5 3.5 0 0 1 3 5.5M12 15.5a3.5 3.5 0 0 1-3-5.5" strokeLinecap="round" />
-        </svg>
-      </button>
+      {variant === "hero" ? (
+        <button
+          type="button"
+          onClick={() => openSheet(false)}
+          aria-label="Import from Shazam"
+          className="flex w-full items-center justify-center gap-2.5 rounded-2xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-4 py-3.5 text-[15px] font-semibold text-[#409cff] transition active:scale-[0.99]"
+        >
+          <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8.5a3.5 3.5 0 0 1 3 5.5M12 15.5a3.5 3.5 0 0 1-3-5.5" strokeLinecap="round" />
+          </svg>
+          Add a song with Shazam
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => openSheet(false)}
+          aria-label="Import from Shazam"
+          className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--sb-text)] active:scale-95"
+        >
+          {/* Shazam-style concentric mark (generic, not the trademark logo). */}
+          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8.5a3.5 3.5 0 0 1 3 5.5M12 15.5a3.5 3.5 0 0 1-3-5.5" strokeLinecap="round" />
+          </svg>
+        </button>
+      )}
 
       {open && (
         <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Import from Shazam">
