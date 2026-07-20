@@ -48,6 +48,9 @@ import {
 import { PlayerDeckTransportSurface } from "@/components/player-surface/player-deck-transport-surface";
 import { PlayerVerticalVolume } from "@/components/player-surface/player-vertical-volume";
 import { DesktopVideoDock } from "@/components/player-surface/desktop-video-dock";
+import { DesktopPlayerBackground } from "@/components/player-surface/desktop-player-background";
+import { DesktopBackgroundModeToggle } from "@/components/player-surface/desktop-background-mode-toggle";
+import { useDesktopBackgroundMode } from "@/lib/desktop-background-mode";
 import { DesktopPlaybackDiagnostic } from "@/components/desktop-playback-diagnostic";
 import { reportPlaybackIncident, hostOnly, classifySource } from "@/lib/playback-telemetry-client";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
@@ -487,6 +490,8 @@ export function AudioPlayer() {
   // True once the first live MPV status push arrives — do not seed from getStatus()
   // (stale playing+position:0 snapshots caused fake PLAYING with frozen 0:00).
   const isDesktopMode = desktopMpvSnap !== null;
+  // Per-device desktop player background preference (artwork default / video / static).
+  const desktopBgMode = useDesktopBackgroundMode();
   /** Browser MASTER only — prewarm hidden YT containers + IFrame API; never on desktop MPV or CONTROL mirror. */
   const canPrewarmYoutubeEmbed = !isDesktopMode && !isControlMirror;
   /* ── Video dock (Spotify-style) — DISPLAY-ONLY, always on while YT plays.
@@ -4288,6 +4293,9 @@ export function AudioPlayer() {
       role="region"
       aria-label={t.playerControllerAria}
     >
+      {isDesktopMode ? (
+        <DesktopBackgroundModeToggle className="absolute right-2 top-2 z-[60]" />
+      ) : null}
       {/* FRAMELESS deck (operator direction): no border, no hairlines, no colored
           strips — just the surface. The soft gradient stays (it dims the video bg). */}
       <div
@@ -4644,25 +4652,20 @@ export function AudioPlayer() {
           </div>
         );
       })() : null}
-      {/* DESKTOP video — MPV plays the audio (--no-video), so this muted iframe
-          shows only the picture, synced to MPV position. Audio-safe (see
-          DesktopVideoDock). Same right-half deck placement + left fog as browser. */}
-      {isDesktopMode && isYouTube && vid && (desktopMpvSnap?.status === "playing" || desktopMpvSnap?.status === "paused") ? (
-        <div
-          className="pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
-          aria-hidden
-        >
-          <DesktopVideoDock
-            videoId={vid}
-            mpvStatus={desktopMpvSnap.status}
-            mpvPosition={desktopMpvSnap.position}
-            className="absolute inset-0"
-          />
-          <div
-            className="absolute inset-y-0 left-0 z-[1] w-2/3 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/75 to-transparent"
-            aria-hidden
-          />
-        </div>
+      {/* DESKTOP player background — artwork (default) / video / static, per-device.
+          Display-only; audio is always MPV. The clip appears only once MPV is
+          actually progressing, and falls back to artwork on any trouble. */}
+      {isDesktopMode ? (
+        <DesktopPlayerBackground
+          mode={desktopBgMode}
+          cover={displayThumbnailCover ?? null}
+          videoId={vid}
+          mpvStatus={desktopMpvSnap?.status ?? "idle"}
+          mpvPosition={desktopMpvSnap?.position ?? 0}
+          currentPlayUrl={currentPlayUrl}
+          deviceId={deviceCtx?.deviceId ?? null}
+          deviceMode={deviceCtx?.deviceMode ?? null}
+        />
       ) : null}
       {/* CONTROL mirror video — the control browser plays no audio (it mirrors
           the MASTER), so a MUTED YouTube iframe shows only the clip, synced to

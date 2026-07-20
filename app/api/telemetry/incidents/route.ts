@@ -8,7 +8,14 @@ import { getCurrentUserFromApiRequest } from "@/lib/auth-helpers";
 // bearer ws-token), so incidents are captured wherever playback runs.
 export const runtime = "nodejs";
 
-const KINDS = new Set(["freeze", "self_heal_redispatch", "skip_recover", "recovered", "stall_error"]);
+const KINDS = new Set([
+  "freeze",
+  "self_heal_redispatch",
+  "skip_recover",
+  "recovered",
+  "stall_error",
+  "background_video_fallback",
+]);
 
 const str = (v: unknown, max: number): string | null =>
   typeof v === "string" && v.length > 0 ? v.slice(0, max) : null;

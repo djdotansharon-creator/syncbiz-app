@@ -22,7 +22,17 @@ type YTPlayerLike = {
   seekTo?: (s: number, allow: boolean) => void;
   getCurrentTime?: () => number;
   getIframe?: () => HTMLIFrameElement | null;
+  getPlayerState?: () => number;
+  setPlaybackQuality?: (q: string) => void;
   destroy?: () => void;
+};
+
+/** State the dock reports up for fallback + telemetry (display-only). */
+export type DesktopVideoState = {
+  loading: boolean;
+  playing: boolean;
+  readyState: number; // YT player state: -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued
+  error: boolean;
 };
 
 type YTGlobal = { Player: new (el: HTMLElement, opts: Record<string, unknown>) => YTPlayerLike };
@@ -79,21 +89,31 @@ export function DesktopVideoDock({
   mpvStatus,
   mpvPosition,
   className,
+  onState,
+  maxQuality = "large", // ≤ 480p — background clip never needs HD (best-effort; YouTube may override)
 }: {
   videoId: string | null;
   mpvStatus: "idle" | "playing" | "paused" | "stopped";
   mpvPosition: number;
   className?: string;
+  /** Reports load/play/error state up for fallback + telemetry. Display-only. */
+  onState?: (s: DesktopVideoState) => void;
+  /** Best-effort suggested quality cap: small(240)/medium(360)/large(480). */
+  maxQuality?: "small" | "medium" | "large";
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<YTPlayerLike | null>(null);
   const currentVidRef = useRef<string | null>(null);
   const mpvPosRef = useRef(mpvPosition);
   const mpvStatusRef = useRef(mpvStatus);
+  const onStateRef = useRef(onState);
+  const maxQualityRef = useRef(maxQuality);
   useEffect(() => {
     mpvPosRef.current = mpvPosition;
     mpvStatusRef.current = mpvStatus;
-  }, [mpvPosition, mpvStatus]);
+    onStateRef.current = onState;
+    maxQualityRef.current = maxQuality;
+  }, [mpvPosition, mpvStatus, onState, maxQuality]);
 
   // Create the player once.
   useEffect(() => {
@@ -122,6 +142,8 @@ export function DesktopVideoDock({
               try {
                 e.target.mute?.();
                 e.target.setVolume?.(0);
+                e.target.setPlaybackQuality?.(maxQualityRef.current);
+                onStateRef.current?.({ loading: true, playing: false, readyState: e.target.getPlayerState?.() ?? -1, error: false });
                 const f = e.target.getIframe?.();
                 if (f) {
                   const s = f.style;
@@ -135,6 +157,24 @@ export function DesktopVideoDock({
                   s.border = "0";
                   s.pointerEvents = "none";
                 }
+              } catch {
+                /* display-only */
+              }
+            },
+            onStateChange: (e: { data: number; target: YTPlayerLike }) => {
+              try {
+                const st = e.data;
+                onStateRef.current?.({ loading: st === 3, playing: st === 1, readyState: st, error: false });
+                if (st === 1) e.target?.setPlaybackQuality?.(maxQualityRef.current);
+              } catch {
+                /* display-only */
+              }
+            },
+            onError: () => {
+              // Playback error (blocked embed, removed video, etc.) → surface so the
+              // parent can fall back to artwork. Never affects audio.
+              try {
+                onStateRef.current?.({ loading: false, playing: false, readyState: -1, error: true });
               } catch {
                 /* display-only */
               }
@@ -163,9 +203,11 @@ export function DesktopVideoDock({
     const p = playerRef.current;
     if (!p || !videoId) return;
     try {
+      onStateRef.current?.({ loading: true, playing: false, readyState: p.getPlayerState?.() ?? -1, error: false });
       p.loadVideoById?.(videoId, Math.max(0, mpvPosRef.current));
       p.mute?.();
       p.setVolume?.(0);
+      p.setPlaybackQuality?.(maxQualityRef.current);
     } catch {
       /* ignore */
     }

@@ -16,7 +16,8 @@ export type PlaybackIncidentKind =
   | "self_heal_redispatch" // watchdog re-issued loadfile to recover
   | "skip_recover" // gave up after retries and skipped forward to keep audio alive
   | "recovered" // playback resumed after an intervention
-  | "stall_error"; // engine/stall error surfaced
+  | "stall_error" // engine/stall error surfaced
+  | "background_video_fallback"; // desktop bg video failed/timed out → fell back to artwork
 
 export interface PlaybackIncidentPayload {
   kind: PlaybackIncidentKind;
