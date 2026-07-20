@@ -3546,7 +3546,11 @@ export function AudioPlayer() {
       if (statusRef.current !== "playing") return; // we must intend to play
       const snap = desktopMpvSnapRef.current;
       if (!snap || snap.status !== "playing") return; // MPV must claim it's playing
-      if (!(snap.duration > 0)) return; // file/metadata actually loaded
+      // NOTE: intentionally do NOT require duration>0. A stuck YouTube resolve
+      // sits at duration:0 / pos:0 while MPV still reports "playing" (seen in the
+      // field). Keying only on "position not advancing" covers BOTH that and the
+      // duration-known freeze. A healthy live stream (duration 0) still advances
+      // its position, so it is never mistaken for frozen.
       if (!(desktopSnapPositionAtRef.current > 0)) return; // have a real position clock
       const url = currentPlayUrlRef.current;
       if (!url) return;
