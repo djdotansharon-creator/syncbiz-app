@@ -128,7 +128,7 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
           />
         </div>
 
-        <div className="player-transport-secondary flex shrink-0 items-center gap-0.5 opacity-25 transition-opacity duration-200 hover:opacity-50 focus-within:opacity-50">
+        <div className="player-transport-secondary flex shrink-0 items-center gap-1.5 opacity-25 transition-opacity duration-200 hover:opacity-50 focus-within:opacity-50">
           {onEditClick ? (
             <ActionButtonEdit onClick={onEditClick} variant="player" aria-label={labels.edit} title={labels.edit} />
           ) : editHref ? (

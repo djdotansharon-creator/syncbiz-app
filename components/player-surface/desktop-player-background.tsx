@@ -18,7 +18,6 @@ const VIDEO_READY_TIMEOUT_MS = 8000;
  * - video: the muted YouTube clip, but ONLY once MPV audio is actually
  *   progressing; artwork shows first, and any error/timeout/heavy-load falls back
  *   to artwork. Capped ≤480p. Never gates Play / next / MPV.
- * - static: plain dark background, no artwork motion, no video.
  *
  * Constraints honored: touches neither MPV nor the self-heal, adds no audio
  * source, and reports background telemetry on failure.
@@ -125,10 +124,6 @@ export function DesktopPlayerBackground({
     <>
       {showArtwork && cover ? (
         <style>{"@keyframes sbBgDrift{0%{transform:scale(1.03)}100%{transform:scale(1.08)}}"}</style>
-      ) : null}
-
-      {mode === "static" ? (
-        <div className="pointer-events-none absolute inset-0 -z-[2] bg-[#0b0f16]" aria-hidden />
       ) : null}
 
       {/* ARTWORK as a crisp still in the SAME right-half slot the video uses, with

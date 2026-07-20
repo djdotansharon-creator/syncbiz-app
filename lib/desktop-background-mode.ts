@@ -7,23 +7,22 @@ import { useSyncExternalStore } from "react";
  * different capabilities), persisted in localStorage. Deliberately NOT tied to
  * MASTER/CONTROL or any server state.
  *
- * - "artwork" (default): full-bleed blurred song artwork, CSS-only motion, no
- *   second media stream. The recommended, lowest-load option.
+ * - "artwork" (default): the song's cover as a crisp still (a paused-video look),
+ *   no second media stream. The recommended, lowest-load option.
  * - "video": the muted YouTube clip (existing DesktopVideoDock), capped low and
  *   shown only once MPV is actually progressing; falls back to artwork on any
  *   trouble. Heavier — a second video stream alongside MPV audio.
- * - "static": a plain dark background, no artwork motion and no video.
  *
  * Every NEW install defaults to "artwork" (no stored value → artwork).
  */
-export type DesktopBackgroundMode = "artwork" | "video" | "static";
+export type DesktopBackgroundMode = "artwork" | "video";
 
 const STORAGE_KEY = "syncbiz:desktopBgMode";
 const CHANGE_EVENT = "syncbiz:desktopBgMode:changed";
 const DEFAULT_MODE: DesktopBackgroundMode = "artwork";
 
 function isMode(v: unknown): v is DesktopBackgroundMode {
-  return v === "artwork" || v === "video" || v === "static";
+  return v === "artwork" || v === "video";
 }
 
 export function getDesktopBackgroundMode(): DesktopBackgroundMode {
