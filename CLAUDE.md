@@ -4,6 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > **READ `docs/PROJECT-STATE.md` FIRST** — the living working map (design language, key symbols per file, verification recipe, open items). Keep it updated after every meaningful change. Do NOT scan the large files (sources-manager, audio-player, playback-provider, app-shell) — use the anchors listed there.
 
+## ⭐ NON-NEGOTIABLE: Player & Controller quality bar
+
+SyncBiz is heading to market as an **international, top-tier product**. The player and
+controller are the product. A business customer whose music **freezes**, **stalls**, or
+whose player feels **slow/laggy** will simply walk away — this is an existential bug class,
+not a polish item. Every change must uphold this bar:
+
+1. **The music must NEVER stop.** When something goes wrong (a stalled stream, a lost lease,
+   a dead engine, a missing URL), the system must **self-heal / fail forward** (retry, re-dispatch,
+   skip to keep audio alive) — never sit silent. Prefer recovery over an error state; never
+   introduce a code path that can leave the player stuck.
+2. **Fast & responsive.** Transport actions (play/pause/next/seek) must feel instant. Never add
+   blocking work, long awaits, or heavy re-renders to the playback hot path.
+3. **Rock-solid stability.** The playback chain (`components/audio-player.tsx`,
+   `lib/device-player-context.tsx`, `lib/playback-provider.tsx`) gets **surgical, additive edits
+   only**, each verified before commit. When a fix can't be reproduced locally (e.g. desktop MPV),
+   ship a **read-only diagnostic first**, capture the real failure, then fix precisely — never
+   guess-edit the playback chain.
+4. **Every step must be excellent.** Hold this bar for anything touching playback, sync, or the
+   controller mirror — correctness, resilience, and perceived speed come before features.
+
 ## Commands
 
 ### Development

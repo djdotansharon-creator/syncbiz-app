@@ -3310,6 +3310,10 @@ export function AudioPlayer() {
   // Tracks Ch-A MPV status from onStatus broadcasts (no re-render — refs only).
   const mpvChAStatusRef = useRef<string>("idle");
   const mpvRecoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Desktop MPV "playing but frozen" self-heal bookkeeping (see watchdog effect).
+  const mpvFrozenForUrlRef = useRef<string | null>(null);
+  const mpvFrozenAttemptsRef = useRef(0);
+  const mpvFrozenSkippedForUrlRef = useRef<string | null>(null);
   /**
    * Coalesce rapid `currentPlayUrl` changes during startup/restore/adoption into
    * a SINGLE MPV `loadfile`. On cold launch multiple React effects (persistence
@@ -3509,6 +3513,69 @@ export function AudioPlayer() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     void (window as any).syncbizDesktop.localMockTransport({ command: "SET_VOLUME", volume });
   }, [volume]);
+  // ── Desktop MPV self-heal: "playing but frozen" auto-recovery ──────────────
+  // The engine can open a YouTube/network stream, report "playing", and know the
+  // duration, yet never advance time-pos (a buffering/decode stall). The 4s stall
+  // guard misses this because the channel status IS "playing". Left alone the
+  // track can hang for minutes; a manual refresh (which re-issues loadfile) fixes
+  // it. A business player must NEVER freeze on a paying customer, so this watchdog
+  // automates that recovery: on a confirmed multi-second freeze it re-dispatches
+  // the same URL (identical to what a refresh does), up to a few times, then skips
+  // forward to keep the music alive. Additive + desktop-only; it fires ONLY after
+  // a real freeze and never stops playback.
+  useEffect(() => {
+    if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
+    if (!isDesktopMode) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const desktop = (window as any).syncbizDesktop;
+    const FREEZE_MS = 6000; // no time-pos advance for 6s while MPV claims "playing"
+    const MAX_REDISPATCH = 3; // re-loadfile this many times before skipping forward
+    const id = setInterval(() => {
+      if (statusRef.current !== "playing") return; // we must intend to play
+      const snap = desktopMpvSnapRef.current;
+      if (!snap || snap.status !== "playing") return; // MPV must claim it's playing
+      if (!(snap.duration > 0)) return; // file/metadata actually loaded
+      if (!(desktopSnapPositionAtRef.current > 0)) return; // have a real position clock
+      const url = currentPlayUrlRef.current;
+      if (!url) return;
+      const frozenMs = Date.now() - desktopSnapPositionAtRef.current;
+      if (frozenMs < FREEZE_MS) return; // position advanced recently → healthy
+
+      // New track resets the recovery budget.
+      if (mpvFrozenForUrlRef.current !== url) {
+        mpvFrozenForUrlRef.current = url;
+        mpvFrozenAttemptsRef.current = 0;
+      }
+
+      if (mpvFrozenAttemptsRef.current < MAX_REDISPATCH) {
+        mpvFrozenAttemptsRef.current += 1;
+        console.warn("[SyncBiz] desktop MPV frozen (playing, no progress) — self-heal re-dispatch", {
+          attempt: mpvFrozenAttemptsRef.current,
+          frozenMs,
+          pos: snap.position,
+          dur: snap.duration,
+          url: url.slice(0, 100),
+        });
+        mpvLastUrlRef.current = url; // keep the routing effect in sync
+        desktopSnapPositionAtRef.current = Date.now(); // fresh window for this retry
+        void desktop.mpvPlayUrl(url); // force a fresh loadfile (== manual refresh)
+        return;
+      }
+
+      // Still frozen after every re-dispatch → keep the music going: skip forward
+      // once for this stuck track.
+      if (mpvFrozenSkippedForUrlRef.current !== url) {
+        mpvFrozenSkippedForUrlRef.current = url;
+        console.warn("[SyncBiz] desktop MPV still frozen after retries — skipping forward to keep playback alive", {
+          url: url.slice(0, 100),
+        });
+        desktopSnapPositionAtRef.current = Date.now();
+        nextRef.current?.({ auditTransportCase: "ended_auto" });
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isDesktopMode]);
+
   // ── End desktop routing ───────────────────────────────────────────────────
 
   /** Unified display values: desktop MPV > CONTROL mirror > local React state. */
