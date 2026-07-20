@@ -2470,6 +2470,16 @@ export function AudioPlayer() {
       if (deviceCtx?.deviceMode === "MASTER") {
         masterPlaybackDiag("seekTo programmatic", { seconds: sec, isYouTube, isSoundCloud, isHtmlAudio });
       }
+      // Desktop plays audio through MPV — a programmatic seek (e.g. a CONTROL
+      // dragging the phone's progress bar → SEEK command) must go to MPV, NOT the
+      // muted YouTube video iframe. This mirrors the desktop's own seek bar
+      // (onSeekChange → mpvSeekTo); without it, controller SEEK moved the silent
+      // clip while the MPV audio stayed put ("seek from the phone does nothing").
+      if (isDesktopMode) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        void (window as any).syncbizDesktop?.mpvSeekTo?.(sec);
+        return;
+      }
       if (isYouTube) {
         const p = getYtActivePlayer();
         if (isYtPlayerReady(p)) {
@@ -2485,7 +2495,7 @@ export function AudioPlayer() {
       }
     };
     return registerSeekCallback(seekToLocal);
-  }, [registerSeekCallback, isYouTube, isSoundCloud, isHtmlAudio]);
+  }, [registerSeekCallback, isYouTube, isSoundCloud, isHtmlAudio, isDesktopMode]);
 
   /** Tear down embeds only when leaving YouTube/SoundCloud — NOT on every URL/track change. */
   useEffect(() => {
