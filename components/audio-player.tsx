@@ -48,6 +48,7 @@ import {
 import { PlayerDeckTransportSurface } from "@/components/player-surface/player-deck-transport-surface";
 import { PlayerVerticalVolume } from "@/components/player-surface/player-vertical-volume";
 import { DesktopVideoDock } from "@/components/player-surface/desktop-video-dock";
+import { DesktopPlaybackDiagnostic } from "@/components/desktop-playback-diagnostic";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { log as mvpLog } from "@/lib/mvp-logger";
 import { masterPlaybackDiag } from "@/lib/master-playback-diag";
@@ -4584,6 +4585,19 @@ export function AudioPlayer() {
           onClose={() => setShareOpen(false)}
         />
       )}
+      <DesktopPlaybackDiagnostic
+        isDesktop={isDesktopMode}
+        isControlMirror={isControlMirror}
+        intentStatus={status}
+        mpvStatus={desktopMpvSnap?.status ?? null}
+        engineReady={desktopMpvSnap?.engineReady ?? null}
+        lastError={desktopMpvSnap?.lastError ?? null}
+        position={desktopMpvSnap?.position ?? null}
+        duration={desktopMpvSnap?.duration ?? null}
+        currentPlayUrl={currentPlayUrl}
+        dispatchedUrl={mpvLastUrlRef.current}
+        chAStatus={mpvChAStatusRef.current}
+      />
     </header>
   );
 }
