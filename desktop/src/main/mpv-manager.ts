@@ -561,6 +561,13 @@ export class MpvManager {
     this.cmdQueue = [];
     console.log(PIPELINE, "loadfile request", { pipe: this.pipePath, kind, preview: target.slice(0, 160) });
     this.cmd(["loadfile", target, "replace"]);
+    // A freshly loaded track MUST play — never inherit a stale `pause=true` from a
+    // prior pause() on this deck. Without this, loadfile-while-paused loaded the
+    // file but left it paused: position frozen at 0 while the cache filled, and
+    // start-file still reported "playing" → the "video runs but audio is stuck"
+    // freeze. Confirmed via IPC repro: paused loadfile stays at 0:00, pause=false
+    // makes it advance. Idempotent when already unpaused.
+    this.cmd(["set_property", "pause", false]);
   }
 
   /** Explicitly pause playback. */
