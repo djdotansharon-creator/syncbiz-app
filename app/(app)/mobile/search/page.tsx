@@ -4,6 +4,7 @@ import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
 import { MobileSearchBar } from "@/components/mobile-search-bar";
 import { MobileShazamImport } from "@/components/mobile/mobile-shazam-import";
 import { MobileInstallButton } from "@/components/mobile/mobile-install-button";
+import { MobileListenIdentify } from "@/components/mobile/mobile-listen-identify";
 import { useMobileSources } from "@/lib/mobile-sources-context";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { useStationController } from "@/lib/station-controller-context";
@@ -42,7 +43,8 @@ export default function MobileSearchPage() {
           unifiedContentScope={contentScope}
           hideRadio
         />
-        {/* Big, obvious Shazam entry directly under the search bar. */}
+        {/* Identify-from-mic (star) + paste/share a Shazam link, under the search bar. */}
+        <MobileListenIdentify />
         <MobileShazamImport variant="hero" />
       </div>
     </>
