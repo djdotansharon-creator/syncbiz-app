@@ -18,7 +18,10 @@ import type { Playlist } from "@/lib/playlist-types";
 
 const LISTEN_MS = 7000;
 
-type Phase = "listening" | "resolving" | "result" | "error";
+// One-tap flow: Listen → listening → finding → ADDS TO QUEUE automatically →
+// a small confirmation with optional extras. The default action (add to queue)
+// happens with zero extra taps.
+type Phase = "listening" | "resolving" | "adding" | "done" | "error";
 
 /** Pick a MediaRecorder mime the browser supports (Chrome→webm, Safari→mp4). */
 function pickMimeType(): string {
@@ -30,12 +33,17 @@ function pickMimeType(): string {
 }
 
 /**
- * In-app song recognition ("Identify a song"). Records ~7s from the microphone,
- * sends it to /api/sources/recognize-audio (AudD, server-side token), then feeds
- * the recognized artist+title into the EXISTING YouTube resolver → add to the
- * playlist. Entirely inside SyncBiz — no leaving to another app. Works in the
- * PWA on Android AND iOS (unlike the Web Share Target). Hidden until AUDD_API_
- * TOKEN is configured.
+ * In-app song recognition, streamlined to a single tap from the mobile player.
+ *
+ * Tap "Identify a song" → records ~7s from the mic → /api/sources/recognize-audio
+ * (AudD, server-side token) → feeds the recognized artist+title into the EXISTING
+ * YouTube resolver → **automatically adds it to the queue** (the chosen default,
+ * so nothing playing is interrupted and no extra tap is needed). A compact
+ * confirmation then offers Play-now / Add-to-library / Identify-another as
+ * optional extras.
+ *
+ * Entirely inside SyncBiz — no leaving the app. Works in the PWA on Android AND
+ * iOS. Hidden until AUDD_API_TOKEN is configured.
  */
 export function MobileListenIdentify() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
@@ -44,7 +52,7 @@ export function MobileListenIdentify() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<YouTubeSearchResult | null>(null);
   const [busy, setBusy] = useState(false);
-  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [extraMsg, setExtraMsg] = useState<string | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -86,25 +94,82 @@ export function MobileListenIdentify() {
     chunksRef.current = [];
   }, []);
 
-  const runResolve = useCallback(async (artist: string, title: string) => {
-    setPhase("resolving");
-    const query = `${artist} ${title}`.trim();
-    try {
-      const { youtube } = await searchExternal(query);
-      const first = youtube.find((r) => r.type === "youtube") ?? youtube[0] ?? null;
-      if (!first) {
-        setError(`Heard "${[artist, title].filter(Boolean).join(" – ")}" but found no YouTube match.`);
+  /** Persist the YouTube result once; reuse across the auto-add and any extras. */
+  const getOrCreateSource = useCallback(async (r: YouTubeSearchResult): Promise<UnifiedSource | null> => {
+    if (persistedRef.current?.key === r.url) return persistedRef.current.source;
+    const playable = r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
+    const created = await createPlaylistFromUrl(playable, {
+      title: r.title,
+      genre: "Mixed",
+      cover: r.cover,
+      type: r.type,
+      viewCount: r.viewCount,
+      durationSeconds: r.durationSeconds,
+    });
+    if (!created) return null;
+    savePlaylistToLocal(created);
+    const source: UnifiedSource = {
+      id: `pl-${created.id}`,
+      title: created.name,
+      genre: created.genre || "Mixed",
+      cover: created.thumbnail || null,
+      type: created.type as UnifiedSource["type"],
+      url: created.url,
+      origin: "playlist",
+      playlist: created as Playlist,
+    };
+    persistedRef.current = { key: r.url, source };
+    return source;
+  }, []);
+
+  /** Add-to-queue ladder — CONTROLLER forwards to MASTER, player queues locally. */
+  const queueSource = useCallback(
+    (u: UnifiedSource) => {
+      if (deviceCtx?.queueNextOrSend) deviceCtx.queueNextOrSend(u);
+      else if (isController && station.isCrossDevice) station.sendQueueNext(u);
+      else playback.addPlayNextSources([u]);
+    },
+    [deviceCtx, isController, station, playback],
+  );
+
+  /** Resolve the recognized song to YouTube and AUTO-ADD it to the queue. */
+  const runResolveAndQueue = useCallback(
+    async (artist: string, title: string) => {
+      setPhase("resolving");
+      const heard = [artist, title].filter(Boolean).join(" – ");
+      const query = `${artist} ${title}`.trim();
+      let first: YouTubeSearchResult | null = null;
+      try {
+        const { youtube } = await searchExternal(query);
+        first = youtube.find((r) => r.type === "youtube") ?? youtube[0] ?? null;
+      } catch {
+        setError("Search failed. Please try again.");
         setPhase("error");
         return;
       }
-      persistedRef.current = null;
+      if (!first) {
+        setError(`Heard "${heard}" but found no YouTube match.`);
+        setPhase("error");
+        return;
+      }
       setResult(first);
-      setPhase("result");
-    } catch {
-      setError("Search failed. Please try again.");
-      setPhase("error");
-    }
-  }, []);
+      setPhase("adding");
+      try {
+        const u = await getOrCreateSource(first);
+        if (!u) {
+          setError("Couldn't save the track. Please try again.");
+          setPhase("error");
+          return;
+        }
+        queueSource(u); // ← the default action, automatic (no extra tap)
+        setPhase("done");
+      } catch {
+        setError("Couldn't add the track. Please try again.");
+        setPhase("error");
+      }
+    },
+    [getOrCreateSource, queueSource],
+  );
 
   const recognizeBlob = useCallback(
     async (blob: Blob) => {
@@ -128,20 +193,20 @@ export function MobileListenIdentify() {
           setPhase("error");
           return;
         }
-        await runResolve(data.artist ?? "", data.title ?? "");
+        await runResolveAndQueue(data.artist ?? "", data.title ?? "");
       } catch {
         setError("Recognition failed. Please try again.");
         setPhase("error");
       }
     },
-    [runResolve],
+    [runResolveAndQueue],
   );
 
   const startListening = useCallback(async () => {
     setOpen(true);
     setError(null);
     setResult(null);
-    setActionMsg(null);
+    setExtraMsg(null);
     persistedRef.current = null;
     setPhase("listening");
 
@@ -201,35 +266,8 @@ export function MobileListenIdentify() {
 
   useEffect(() => () => cleanupCapture(), [cleanupCapture]);
 
-  /** Persist the YouTube result once; reuse across actions. */
-  const getOrCreateSource = useCallback(async (r: YouTubeSearchResult): Promise<UnifiedSource | null> => {
-    if (persistedRef.current?.key === r.url) return persistedRef.current.source;
-    const playable = r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
-    const created = await createPlaylistFromUrl(playable, {
-      title: r.title,
-      genre: "Mixed",
-      cover: r.cover,
-      type: r.type,
-      viewCount: r.viewCount,
-      durationSeconds: r.durationSeconds,
-    });
-    if (!created) return null;
-    savePlaylistToLocal(created);
-    const source: UnifiedSource = {
-      id: `pl-${created.id}`,
-      title: created.name,
-      genre: created.genre || "Mixed",
-      cover: created.thumbnail || null,
-      type: created.type as UnifiedSource["type"],
-      url: created.url,
-      origin: "playlist",
-      playlist: created as Playlist,
-    };
-    persistedRef.current = { key: r.url, source };
-    return source;
-  }, []);
-
-  const withAction = useCallback(
+  /** Optional extras from the confirmation card (source already persisted). */
+  const withExtra = useCallback(
     async (fn: (u: UnifiedSource) => void, msg: string) => {
       if (!result) return;
       setBusy(true);
@@ -237,11 +275,11 @@ export function MobileListenIdentify() {
       try {
         const u = await getOrCreateSource(result);
         if (!u) {
-          setError("Couldn't save the track. Please try again.");
+          setError("Something went wrong. Please try again.");
           return;
         }
         fn(u);
-        setActionMsg(msg);
+        setExtraMsg(msg);
       } catch {
         setError("Something went wrong. Please try again.");
       } finally {
@@ -253,25 +291,16 @@ export function MobileListenIdentify() {
 
   const playNow = useCallback(
     () =>
-      withAction((u) => {
+      withExtra((u) => {
         if (deviceCtx?.playSourceOrSend) deviceCtx.playSourceOrSend(u);
         else if (isController && station.isCrossDevice) station.sendPlaySource(u);
         else playback.playSource(u);
       }, "Playing now"),
-    [withAction, deviceCtx, isController, station, playback],
-  );
-  const addToQueue = useCallback(
-    () =>
-      withAction((u) => {
-        if (deviceCtx?.queueNextOrSend) deviceCtx.queueNextOrSend(u);
-        else if (isController && station.isCrossDevice) station.sendQueueNext(u);
-        else playback.addPlayNextSources([u]);
-      }, "Added to the queue"),
-    [withAction, deviceCtx, isController, station, playback],
+    [withExtra, deviceCtx, isController, station, playback],
   );
   const addToLibrary = useCallback(
-    () => withAction((u) => mobileSources.addSource(u), "Added to your library"),
-    [withAction, mobileSources],
+    () => withExtra((u) => mobileSources.addSource(u), "Added to your library"),
+    [withExtra, mobileSources],
   );
 
   if (enabled !== true) return null;
@@ -281,10 +310,10 @@ export function MobileListenIdentify() {
       <button
         type="button"
         onClick={() => void startListening()}
-        aria-label="Identify a song"
-        className="flex w-full items-center justify-center gap-2.5 rounded-2xl bg-[var(--sb-text)] px-4 py-3.5 text-[15px] font-semibold text-[#111114] transition active:scale-[0.99]"
+        aria-label="Identify a song and add it to the queue"
+        className="flex w-full items-center justify-center gap-2.5 rounded-2xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-4 py-3 text-[15px] font-semibold text-[#409cff] transition active:scale-[0.99]"
       >
-        <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <rect x="9" y="3" width="6" height="11" rx="3" />
           <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
         </svg>
@@ -313,6 +342,8 @@ export function MobileListenIdentify() {
               </div>
             ) : phase === "resolving" ? (
               <div className="py-10 text-center text-[15px] font-semibold text-slate-200">Finding the song…</div>
+            ) : phase === "adding" ? (
+              <div className="py-10 text-center text-[15px] font-semibold text-slate-200">Adding to the queue…</div>
             ) : phase === "error" ? (
               <div className="py-6 text-center">
                 <p className="mb-4 text-[14px] text-amber-100">{error}</p>
@@ -320,31 +351,40 @@ export function MobileListenIdentify() {
                   Try again
                 </button>
               </div>
-            ) : result ? (
+            ) : phase === "done" && result ? (
               <div>
-                <div className="flex items-center gap-3 rounded-xl border border-slate-700/60 bg-slate-900/60 p-3">
+                <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
                   <span className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-800">
                     {result.cover ? <HydrationSafeImage src={result.cover} alt="" className="h-full w-full object-cover" /> : null}
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[14px] font-semibold text-slate-50">{result.title}</p>
-                    <p className="text-[12px] text-slate-400">Identified · YouTube</p>
+                    <p className="mt-0.5 flex items-center gap-1 text-[12px] font-medium text-emerald-300">
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                      Added to the queue
+                    </p>
                   </div>
                 </div>
-                {actionMsg ? (
+                {extraMsg ? (
                   <p className="mt-3 rounded-lg border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-3 py-2 text-center text-[13px] text-[#409cff]">
-                    {actionMsg}
+                    {extraMsg}
                   </p>
                 ) : null}
                 {error ? <p className="mt-3 text-center text-[13px] text-amber-100">{error}</p> : null}
                 <div className="mt-4 grid grid-cols-2 gap-2">
-                  <button type="button" onClick={playNow} disabled={busy} className={PRIMARY_BTN}>Play now</button>
+                  <button type="button" onClick={playNow} disabled={busy} className={SECONDARY_BTN}>Play now</button>
                   <button type="button" onClick={addToLibrary} disabled={busy} className={SECONDARY_BTN}>Add to library</button>
-                  <button type="button" onClick={addToQueue} disabled={busy} className={`${SECONDARY_BTN} col-span-2`}>Add to queue</button>
                 </div>
-                <button type="button" onClick={() => void startListening()} disabled={busy} className="mt-3 w-full text-center text-[13px] text-slate-400 active:scale-[0.99]">
-                  Identify another
-                </button>
+                <div className="mt-3 flex items-center justify-between">
+                  <button type="button" onClick={() => void startListening()} disabled={busy} className="text-[13px] text-slate-400 active:scale-[0.99]">
+                    Identify another
+                  </button>
+                  <button type="button" onClick={close} className="text-[13px] font-semibold text-slate-200 active:scale-[0.99]">
+                    Done
+                  </button>
+                </div>
               </div>
             ) : null}
           </div>
@@ -354,7 +394,5 @@ export function MobileListenIdentify() {
   );
 }
 
-const PRIMARY_BTN =
-  "flex items-center justify-center rounded-xl bg-[var(--sb-text)] px-4 py-2.5 text-[14px] font-semibold text-[#111114] transition active:scale-95 disabled:opacity-40 disabled:pointer-events-none";
 const SECONDARY_BTN =
   "flex items-center justify-center rounded-xl border border-white/[0.12] bg-white/[0.04] px-4 py-2.5 text-[14px] font-semibold text-slate-100 transition hover:bg-white/[0.08] active:scale-95 disabled:opacity-40 disabled:pointer-events-none";
