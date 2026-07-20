@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 /**
  * In-shell deck transport row — shared by `AudioPlayer` (browser + desktop).
  * Timeline/seek stays in the player; this slice is transport + deck volume + share only.
@@ -56,5 +58,8 @@ export type PlayerDeckTransportSurfaceProps = {
    * `onEditClick` wins.
    */
   onEditClick?: (() => void) | null;
+  /** Optional extra action(s) rendered in the secondary row, after Share
+   *  (e.g. the desktop background-mode toggle). Display-only slot. */
+  secondaryExtra?: ReactNode;
   labels: PlayerDeckTransportLabels;
 };

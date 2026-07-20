@@ -43,6 +43,7 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
     shareDisabled,
     editHref,
     onEditClick,
+    secondaryExtra,
     labels,
   } = props;
 
@@ -153,6 +154,7 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
               </svg>
             </button>
           )}
+          {secondaryExtra}
         </div>
       </div>
     </div>

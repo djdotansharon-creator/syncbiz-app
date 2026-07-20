@@ -14,7 +14,7 @@ const LABEL: Record<DesktopBackgroundMode, string> = {
 };
 
 function ModeIcon({ mode }: { mode: DesktopBackgroundMode }) {
-  const common = { className: "h-3.5 w-3.5", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  const common = { className: "h-3 w-3", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
   if (mode === "artwork") {
     return (
       <svg {...common}>
@@ -53,10 +53,10 @@ export function DesktopBackgroundModeToggle({ className }: { className?: string 
       onClick={cycle}
       title={`Player background: ${LABEL[mode]} — click to change (Artwork · Video · Static)`}
       aria-label={`Player background: ${LABEL[mode]}. Click to change.`}
-      className={`inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/30 px-2.5 py-1 text-[11px] font-medium text-white/70 backdrop-blur-sm transition hover:bg-black/45 hover:text-white active:scale-95 ${className ?? ""}`}
+      // Square + white-glow, matching the player's Share/Edit action buttons.
+      className={`inline-flex h-7 w-7 items-center justify-center rounded-lg border-2 border-white/60 bg-slate-900/95 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.2),0_0_20px_rgba(255,255,255,0.15)] transition-all duration-200 hover:border-white hover:shadow-[0_0_0_2px_rgba(255,255,255,0.4),0_0_28px_rgba(255,255,255,0.25)] hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-white/50 active:scale-[0.97] ${className ?? ""}`}
     >
       <ModeIcon mode={mode} />
-      <span>{LABEL[mode]}</span>
     </button>
   );
 }

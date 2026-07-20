@@ -137,12 +137,14 @@ export function DesktopPlayerBackground({
             <HydrationSafeImage
               src={cover}
               alt=""
-              className="h-full w-full object-cover opacity-40 blur-2xl"
+              className="h-full w-full object-cover opacity-80 blur-xl"
               style={{ animation: "sbBgDrift 32s ease-in-out infinite alternate", willChange: "transform" }}
             />
           ) : null}
-          {/* Dark wash so the controls stay readable. */}
-          <div className="absolute inset-0 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/85 to-[#0b0f16]/60" />
+          {/* Light left-weighted wash: the artwork stays clearly visible on the
+              right while the controls (left) keep enough contrast to read. The
+              semi-transparent hero-shell above adds the rest of the dimming. */}
+          <div className="absolute inset-0 bg-gradient-to-r from-[#0b0f16]/60 via-[#0b0f16]/15 to-transparent" />
         </div>
       ) : null}
 

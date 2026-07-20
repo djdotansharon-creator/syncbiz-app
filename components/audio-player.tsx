@@ -4293,9 +4293,6 @@ export function AudioPlayer() {
       role="region"
       aria-label={t.playerControllerAria}
     >
-      {isDesktopMode ? (
-        <DesktopBackgroundModeToggle className="absolute right-2 top-2 z-[60]" />
-      ) : null}
       {/* FRAMELESS deck (operator direction): no border, no hairlines, no colored
           strips — just the surface. The soft gradient stays (it dims the video bg). */}
       <div
@@ -4579,6 +4576,7 @@ export function AudioPlayer() {
                       : null
                   : null
               }
+              secondaryExtra={isDesktopMode ? <DesktopBackgroundModeToggle /> : undefined}
               labels={{
                 previousTrack: t.previousTrack,
                 stopPlayback: t.stopPlayback,
