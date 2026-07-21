@@ -50,6 +50,31 @@ function isSupportedMusicUrl(url: string): boolean {
   }
 }
 
+/**
+ * Injected into the WhatsApp page: watches for NEW incoming message bubbles and
+ * reports any music link (anchor) via console — the main process forwards it to
+ * the Guest inbox. Read-only DOM observation; skips our own outgoing messages
+ * (`.message-out`) and de-dupes. Auto-capture so the operator never has to click
+ * or drag — a link just appears in the inbox.
+ */
+const CAPTURE_MARKER = "[[SBWA]]";
+const OBSERVER_SCRIPT = `(function(){
+  if (window.__sbWaObs) return; window.__sbWaObs = 1;
+  var seen = {};
+  var HOSTS = ["youtube.com","youtu.be","music.youtube.com","soundcloud.com","on.soundcloud.com","spotify.com","open.spotify.com"];
+  function isMusic(u){ try{ var h=new URL(u).hostname.replace(/^www\\./,'').toLowerCase(); for(var i=0;i<HOSTS.length;i++){var x=HOSTS[i]; if(h===x||h.slice(-(x.length+1))==="."+x) return true;} }catch(e){} return false; }
+  function scan(node){ try{
+    if(!node||!node.querySelectorAll) return;
+    var as=node.querySelectorAll('a[href]');
+    for(var i=0;i<as.length;i++){ var a=as[i];
+      if(a.closest&&a.closest('.message-out')) continue;
+      var u=a.href; if(u&&isMusic(u)&&!seen[u]){ seen[u]=1; console.log('${CAPTURE_MARKER}'+u); }
+    }
+  }catch(e){} }
+  var obs=new MutationObserver(function(muts){ for(var i=0;i<muts.length;i++){ var an=muts[i].addedNodes; for(var j=0;j<an.length;j++) scan(an[j]); } });
+  obs.observe(document.body,{childList:true,subtree:true});
+})();`;
+
 export type WhatsAppCallbacks = {
   /** A supported music URL was clicked in WhatsApp — forward to the Guest inbox. */
   onUrl: (url: string) => void;
@@ -130,6 +155,27 @@ export class WhatsAppWindow {
         /* ignore */
       }
     });
+
+    // AUTO-CAPTURE: (re)inject the DOM observer on every load; forward the music
+    // links it reports (via console) to the Guest inbox. No clicking/dragging.
+    this.win.webContents.on("did-finish-load", () => {
+      this.win?.webContents.executeJavaScript(OBSERVER_SCRIPT).catch(() => {});
+    });
+    this.win.webContents.on(
+      "console-message",
+      (_event: unknown, _level: unknown, message: string) => {
+        const idx = message.indexOf(CAPTURE_MARKER);
+        if (idx < 0) return;
+        const url = message.slice(idx + CAPTURE_MARKER.length).trim();
+        if (isSupportedMusicUrl(url)) {
+          try {
+            this.cb.onUrl(url);
+          } catch {
+            /* ignore */
+          }
+        }
+      },
+    );
 
     this.win.on("show", () => this.emit());
     this.win.on("hide", () => this.emit());

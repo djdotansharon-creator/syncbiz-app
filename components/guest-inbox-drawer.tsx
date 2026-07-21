@@ -66,7 +66,7 @@ const EN: Copy = {
   waConnected: "WhatsApp connected",
   waOpen: "Open WhatsApp Web",
   waDisconnect: "Disconnect",
-  waHint: "In WhatsApp, tap a music link (YouTube / SoundCloud / Spotify) — it lands here.",
+  waHint: "Keep it connected (you can minimize it). Music links from new messages land here automatically.",
 };
 
 const HE: Copy = {
@@ -90,7 +90,7 @@ const HE: Copy = {
   waConnected: "WhatsApp מחובר",
   waOpen: "פתח WhatsApp Web",
   waDisconnect: "נתק",
-  waHint: "ב-WhatsApp, הקישו על קישור לשיר (YouTube / SoundCloud / Spotify) — הוא יופיע כאן.",
+  waHint: "השאירו מחובר (אפשר למזער). קישורי מוזיקה מהודעות חדשות יופיעו כאן אוטומטית.",
 };
 
 let cardSeq = 0;
