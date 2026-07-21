@@ -58,17 +58,30 @@ function isSupportedMusicUrl(url: string): boolean {
  * or drag — a link just appears in the inbox.
  */
 const CAPTURE_MARKER = "[[SBWA]]";
+// Burst-suppression: opening a chat / scrolling renders a BATCH of old messages
+// at once; only a genuinely-new arrival trickles in alone. We buffer candidates
+// for 900ms — a small buffer (≤3) is real arrivals → report; a large buffer is
+// history → drop. `seen` de-dupes permanently so nothing repeats.
 const OBSERVER_SCRIPT = `(function(){
   if (window.__sbWaObs) return; window.__sbWaObs = 1;
-  var seen = {};
+  var seen = {}, buffer = [], timer = null, MARK = '${CAPTURE_MARKER}';
   var HOSTS = ["youtube.com","youtu.be","music.youtube.com","soundcloud.com","on.soundcloud.com","spotify.com","open.spotify.com"];
   function isMusic(u){ try{ var h=new URL(u).hostname.replace(/^www\\./,'').toLowerCase(); for(var i=0;i<HOSTS.length;i++){var x=HOSTS[i]; if(h===x||h.slice(-(x.length+1))==="."+x) return true;} }catch(e){} return false; }
+  function consider(u){
+    if(seen[u]) return; seen[u]=1;
+    buffer.push(u);
+    if(timer) clearTimeout(timer);
+    timer=setTimeout(function(){
+      if(buffer.length<=3){ for(var i=0;i<buffer.length;i++) console.log(MARK+buffer[i]); }
+      buffer=[];
+    },900);
+  }
   function scan(node){ try{
     if(!node||!node.querySelectorAll) return;
     var as=node.querySelectorAll('a[href]');
     for(var i=0;i<as.length;i++){ var a=as[i];
       if(a.closest&&a.closest('.message-out')) continue;
-      var u=a.href; if(u&&isMusic(u)&&!seen[u]){ seen[u]=1; console.log('${CAPTURE_MARKER}'+u); }
+      var u=a.href; if(u&&isMusic(u)) consider(u);
     }
   }catch(e){} }
   var obs=new MutationObserver(function(muts){ for(var i=0;i<muts.length;i++){ var an=muts[i].addedNodes; for(var j=0;j<an.length;j++) scan(an[j]); } });
