@@ -26,6 +26,7 @@ import type {
   LocalMetadataBankStatusResult,
   PickLocalMetadataBankFolderResult,
   RefreshLocalMetadataBankResult,
+  WhatsAppStatus,
 } from "./mvp-types";
 
 /** Preload `contextBridge` contract (renderer uses `window.syncbizDesktop`). */
@@ -53,6 +54,19 @@ export type SyncBizDesktopMvp = {
   setDuckPercent: (n: number) => Promise<void>;
   /** Seek MPV Channel A to an absolute position in seconds. */
   mpvSeekTo: (seconds: number) => Promise<void>;
+  // ── GUESTS × WhatsApp Web (desktop-only) ──
+  /** Open/show the WhatsApp Web window (scan the QR the first time). */
+  connectWhatsApp: () => Promise<WhatsAppStatus>;
+  /** Log out + close the WhatsApp window (clears the persisted session). */
+  disconnectWhatsApp: () => Promise<WhatsAppStatus>;
+  /** Bring the WhatsApp window to the front. */
+  showWhatsAppWindow: () => Promise<void>;
+  /** Hide the WhatsApp window (session stays alive). */
+  hideWhatsAppWindow: () => Promise<void>;
+  /** Push: a supported music URL the operator clicked inside WhatsApp Web. */
+  onWhatsAppUrl: (cb: (url: string) => void) => () => void;
+  /** Push: WhatsApp window/connection status. */
+  onWhatsAppStatus: (cb: (status: WhatsAppStatus) => void) => () => void;
   /** Desktop: list supported audio files in a directory (absolute paths for MPV). */
   scanLocalAudioFolder: (dir: string) => Promise<ScanLocalAudioFolderResult>;
   /** Native absolute path for a dropped/selected `File` (replaces deprecated `file.path` in modern Electron). */

@@ -20,6 +20,16 @@ export const MVP_IPC = {
   MPV_PLAY_INTERRUPT: "mvp:mpv-play-interrupt",
   SET_DUCK_PERCENT: "mvp:set-duck-percent",
   MPV_SEEK_TO: "mvp:mpv-seek-to",
+  /** GUESTS × WhatsApp Web (desktop-only). Open/close the WhatsApp window and
+   *  push captured music-link clicks back to the renderer's Guest inbox. */
+  WHATSAPP_CONNECT: "mvp:whatsapp-connect",
+  WHATSAPP_DISCONNECT: "mvp:whatsapp-disconnect",
+  WHATSAPP_SHOW: "mvp:whatsapp-show",
+  WHATSAPP_HIDE: "mvp:whatsapp-hide",
+  /** main→renderer push: a supported music URL the operator clicked in WhatsApp. */
+  WHATSAPP_URL: "mvp:whatsapp-url",
+  /** main→renderer push: connection/window status snapshot. */
+  WHATSAPP_STATUS: "mvp:whatsapp-status",
   /** Running desktop app version (`app.getVersion()`) for the update-available check. */
   GET_APP_VERSION: "mvp:get-app-version",
   /** Main process: list audio files in a directory (Desktop only). */
@@ -64,6 +74,14 @@ export const MVP_IPC = {
   REMOVE_ADDITIONAL_MUSIC_FOLDER: "mvp:remove-additional-music-folder",
   SCAN_MUSIC_LIBRARY: "mvp:scan-music-library",
 } as const;
+
+/** WhatsApp Web window/connection state pushed to the renderer's Guest inbox. */
+export type WhatsAppStatus = {
+  /** The WhatsApp window exists (session partition is live). */
+  connected: boolean;
+  /** The window is currently visible/focused. */
+  windowOpen: boolean;
+};
 
 /** Why a playlist line was not imported (V1: Music Folder + scan-local audio ext only). */
 export type ImportLocalM3uUnresolvedReason =

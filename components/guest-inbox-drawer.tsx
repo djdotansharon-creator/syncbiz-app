@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { useLocale } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
@@ -38,6 +38,11 @@ type Copy = {
   playing: string;
   failed: string;
   badUrl: string;
+  waConnect: string;
+  waConnected: string;
+  waOpen: string;
+  waDisconnect: string;
+  waHint: string;
 };
 
 const EN: Copy = {
@@ -57,6 +62,11 @@ const EN: Copy = {
   playing: "Playing",
   failed: "Something went wrong — try again",
   badUrl: "That doesn't look like a link",
+  waConnect: "Connect WhatsApp",
+  waConnected: "WhatsApp connected",
+  waOpen: "Open WhatsApp Web",
+  waDisconnect: "Disconnect",
+  waHint: "In WhatsApp, tap a music link (YouTube / SoundCloud / Spotify) — it lands here.",
 };
 
 const HE: Copy = {
@@ -76,9 +86,30 @@ const HE: Copy = {
   playing: "מנגן",
   failed: "משהו השתבש — נסו שוב",
   badUrl: "זה לא נראה כמו קישור",
+  waConnect: "התחבר ל-WhatsApp",
+  waConnected: "WhatsApp מחובר",
+  waOpen: "פתח WhatsApp Web",
+  waDisconnect: "נתק",
+  waHint: "ב-WhatsApp, הקישו על קישור לשיר (YouTube / SoundCloud / Spotify) — הוא יופיע כאן.",
 };
 
 let cardSeq = 0;
+
+type WaStatus = { connected: boolean; windowOpen: boolean };
+type DesktopWA = {
+  connectWhatsApp: () => Promise<WaStatus>;
+  disconnectWhatsApp: () => Promise<WaStatus>;
+  showWhatsAppWindow: () => Promise<void>;
+  onWhatsAppUrl: (cb: (url: string) => void) => () => void;
+  onWhatsAppStatus: (cb: (s: WaStatus) => void) => () => void;
+};
+
+/** The desktop bridge is only present in the Electron app (not the browser/mobile). */
+function getDesktopWA(): DesktopWA | null {
+  if (typeof window === "undefined") return null;
+  const d = (window as unknown as { syncbizDesktop?: Partial<DesktopWA> }).syncbizDesktop;
+  return d && typeof d.connectWhatsApp === "function" ? (d as DesktopWA) : null;
+}
 
 export function GuestInboxDrawer({
   drawerOpen,
@@ -112,23 +143,64 @@ export function GuestInboxDrawer({
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, ...p } : c)));
   }, []);
 
+  /** Resolve any URL (manual paste OR a WhatsApp click) into a card. */
+  const addCardFromUrl = useCallback(async (rawUrl: string): Promise<boolean> => {
+    const url = rawUrl.trim();
+    if (!url) return false;
+    const card = await resolveGuestCard(url);
+    if (!card) return false;
+    setCards((prev) => {
+      if (prev.some((c) => c.card.rawUrl === card.rawUrl)) return prev; // de-dupe
+      return [{ id: `g-${++cardSeq}`, card, source: null, busy: false, note: null }, ...prev];
+    });
+    return true;
+  }, []);
+
   const handleResolve = useCallback(async () => {
     const raw = input.trim();
     if (!raw) return;
     setInputError(null);
     setResolving(true);
     try {
-      const card = await resolveGuestCard(raw);
-      if (!card) {
-        setInputError(t.badUrl);
-        return;
-      }
-      setCards((prev) => [{ id: `g-${++cardSeq}`, card, source: null, busy: false, note: null }, ...prev]);
-      setInput("");
+      const ok = await addCardFromUrl(raw);
+      if (ok) setInput("");
+      else setInputError(t.badUrl);
     } finally {
       setResolving(false);
     }
-  }, [input, t.badUrl]);
+  }, [input, addCardFromUrl, t.badUrl]);
+
+  // ── WhatsApp (desktop-only) ──
+  const wa = useMemo(() => getDesktopWA(), []);
+  const [waStatus, setWaStatus] = useState<WaStatus>({ connected: false, windowOpen: false });
+  const [waBusy, setWaBusy] = useState(false);
+  useEffect(() => {
+    if (!wa) return;
+    const offUrl = wa.onWhatsAppUrl((url) => void addCardFromUrl(url));
+    const offStatus = wa.onWhatsAppStatus((s) => setWaStatus(s));
+    return () => {
+      offUrl();
+      offStatus();
+    };
+  }, [wa, addCardFromUrl]);
+  const connectWa = useCallback(async () => {
+    if (!wa) return;
+    setWaBusy(true);
+    try {
+      setWaStatus(await wa.connectWhatsApp());
+    } finally {
+      setWaBusy(false);
+    }
+  }, [wa]);
+  const disconnectWa = useCallback(async () => {
+    if (!wa) return;
+    setWaBusy(true);
+    try {
+      setWaStatus(await wa.disconnectWhatsApp());
+    } finally {
+      setWaBusy(false);
+    }
+  }, [wa]);
 
   /** Resolve → UnifiedSource once, cached on the card. */
   const ensureSource = useCallback(
@@ -262,6 +334,50 @@ export function GuestInboxDrawer({
               </div>
               {inputError ? <p className="mt-1.5 text-[12px] text-amber-300">{inputError}</p> : null}
             </div>
+
+            {/* WhatsApp (desktop app only) */}
+            {wa ? (
+              <div className="border-b border-white/[0.06] px-3 py-2.5">
+                {!waStatus.connected ? (
+                  <button
+                    type="button"
+                    onClick={() => void connectWa()}
+                    disabled={waBusy}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-3 py-2 text-[13px] font-semibold text-[#409cff] transition active:scale-[0.99] disabled:opacity-50"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                    </svg>
+                    {waBusy ? "…" : t.waConnect}
+                  </button>
+                ) : (
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="flex flex-1 items-center gap-1.5 text-[12px] font-medium text-emerald-300">
+                        <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                        {t.waConnected}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void wa.showWhatsAppWindow()}
+                        className="rounded-lg border border-white/[0.12] bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-100 transition hover:bg-white/[0.08]"
+                      >
+                        {t.waOpen}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void disconnectWa()}
+                        disabled={waBusy}
+                        className="rounded-lg px-2 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 disabled:opacity-50"
+                      >
+                        {t.waDisconnect}
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-slate-500">{t.waHint}</p>
+                  </div>
+                )}
+              </div>
+            ) : null}
 
             {/* Cards */}
             <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">

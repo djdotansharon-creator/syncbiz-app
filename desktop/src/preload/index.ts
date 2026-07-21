@@ -30,6 +30,7 @@ import type {
   LocalMetadataBankStatusResult,
   PickLocalMetadataBankFolderResult,
   RefreshLocalMetadataBankResult,
+  WhatsAppStatus,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import type { SyncBizDesktopMvp } from "../shared/mvp-desktop-api";
@@ -119,6 +120,21 @@ const api: SyncBizDesktopMvp = {
     return () => {
       ipcRenderer.removeListener(MVP_IPC.STATUS, handler);
     };
+  },
+  // ── GUESTS × WhatsApp Web ──
+  connectWhatsApp: (): Promise<WhatsAppStatus> => ipcRenderer.invoke(MVP_IPC.WHATSAPP_CONNECT),
+  disconnectWhatsApp: (): Promise<WhatsAppStatus> => ipcRenderer.invoke(MVP_IPC.WHATSAPP_DISCONNECT),
+  showWhatsAppWindow: (): Promise<void> => ipcRenderer.invoke(MVP_IPC.WHATSAPP_SHOW),
+  hideWhatsAppWindow: (): Promise<void> => ipcRenderer.invoke(MVP_IPC.WHATSAPP_HIDE),
+  onWhatsAppUrl: (cb) => {
+    const handler = (_: unknown, url: string) => cb(url);
+    ipcRenderer.on(MVP_IPC.WHATSAPP_URL, handler);
+    return () => ipcRenderer.removeListener(MVP_IPC.WHATSAPP_URL, handler);
+  },
+  onWhatsAppStatus: (cb) => {
+    const handler = (_: unknown, status: WhatsAppStatus) => cb(status);
+    ipcRenderer.on(MVP_IPC.WHATSAPP_STATUS, handler);
+    return () => ipcRenderer.removeListener(MVP_IPC.WHATSAPP_STATUS, handler);
   },
 };
 
