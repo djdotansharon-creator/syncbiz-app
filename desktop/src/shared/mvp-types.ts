@@ -26,6 +26,9 @@ export const MVP_IPC = {
   WHATSAPP_DISCONNECT: "mvp:whatsapp-disconnect",
   WHATSAPP_SHOW: "mvp:whatsapp-show",
   WHATSAPP_HIDE: "mvp:whatsapp-hide",
+  /** Renderer → main: place the embedded WhatsApp view over this logical (CSS px)
+   *  rect inside the Guest drawer. Main scales by the current zoom factor. */
+  WHATSAPP_SET_BOUNDS: "mvp:whatsapp-set-bounds",
   /** main→renderer push: a supported music URL the operator clicked in WhatsApp. */
   WHATSAPP_URL: "mvp:whatsapp-url",
   /** main→renderer push: connection/window status snapshot. */
@@ -77,11 +80,14 @@ export const MVP_IPC = {
 
 /** WhatsApp Web window/connection state pushed to the renderer's Guest inbox. */
 export type WhatsAppStatus = {
-  /** The WhatsApp window exists (session partition is live). */
+  /** The embedded WhatsApp view exists (session partition is live). */
   connected: boolean;
-  /** The window is currently visible/focused. */
+  /** The view is currently attached/visible inside the Guest drawer. */
   windowOpen: boolean;
 };
+
+/** Logical (CSS px, viewport-relative) rect for the embedded WhatsApp view. */
+export type WhatsAppBounds = { x: number; y: number; width: number; height: number };
 
 /** Why a playlist line was not imported (V1: Music Folder + scan-local audio ext only). */
 export type ImportLocalM3uUnresolvedReason =

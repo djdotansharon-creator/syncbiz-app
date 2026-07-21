@@ -28,6 +28,7 @@ import type {
   PickLocalMetadataBankFolderResult,
   RefreshLocalMetadataBankResult,
   WhatsAppStatus,
+  WhatsAppBounds,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import { WhatsAppWindow } from "./whatsapp-view";
@@ -179,20 +180,34 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   ipcMain.handle(MVP_IPC.GET_APP_VERSION, (): string => app.getVersion());
 
   // ── GUESTS × WhatsApp Web (desktop-only) ──
-  const whatsapp = new WhatsAppWindow({
-    onUrl: (url) => {
-      const w = getWindow();
-      if (w && !w.isDestroyed()) w.webContents.send(MVP_IPC.WHATSAPP_URL, url);
+  const whatsapp = new WhatsAppWindow(
+    {
+      onUrl: (url) => {
+        const w = getWindow();
+        if (w && !w.isDestroyed()) w.webContents.send(MVP_IPC.WHATSAPP_URL, url);
+      },
+      onStatus: (status) => {
+        const w = getWindow();
+        if (w && !w.isDestroyed()) w.webContents.send(MVP_IPC.WHATSAPP_STATUS, status);
+      },
     },
-    onStatus: (status) => {
-      const w = getWindow();
-      if (w && !w.isDestroyed()) w.webContents.send(MVP_IPC.WHATSAPP_STATUS, status);
-    },
-  });
+    getWindow,
+  );
   ipcMain.handle(MVP_IPC.WHATSAPP_CONNECT, (): WhatsAppStatus => whatsapp.connect());
   ipcMain.handle(MVP_IPC.WHATSAPP_DISCONNECT, (): Promise<WhatsAppStatus> => whatsapp.disconnect());
   ipcMain.handle(MVP_IPC.WHATSAPP_SHOW, (): void => whatsapp.show());
   ipcMain.handle(MVP_IPC.WHATSAPP_HIDE, (): void => whatsapp.hide());
+  ipcMain.handle(MVP_IPC.WHATSAPP_SET_BOUNDS, (_e, bounds: WhatsAppBounds): void => {
+    if (
+      bounds &&
+      typeof bounds.x === "number" &&
+      typeof bounds.y === "number" &&
+      typeof bounds.width === "number" &&
+      typeof bounds.height === "number"
+    ) {
+      whatsapp.setBounds(bounds);
+    }
+  });
 
   ipcMain.handle(MVP_IPC.SAVE_CONFIG, (_e, patch: MvpConfigPatch): DesktopRuntimeConfig => {
     const cur = loadRuntimeConfig(getUserData());

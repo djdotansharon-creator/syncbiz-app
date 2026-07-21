@@ -40,9 +40,9 @@ type Copy = {
   badUrl: string;
   waConnect: string;
   waConnected: string;
-  waOpen: string;
   waDisconnect: string;
-  waHint: string;
+  waConnectHint: string;
+  waLoading: string;
 };
 
 const EN: Copy = {
@@ -53,7 +53,7 @@ const EN: Copy = {
   placeholder: "Paste a music link (YouTube, SoundCloud…)",
   resolve: "Add",
   resolving: "Resolving…",
-  empty: "No guest links yet. Paste a link above.",
+  empty: "No guest links yet. Paste a link above, or they arrive from WhatsApp.",
   playNow: "Play now",
   addToGuests: "Add to GUESTS",
   reject: "Dismiss",
@@ -64,9 +64,10 @@ const EN: Copy = {
   badUrl: "That doesn't look like a link",
   waConnect: "Connect WhatsApp",
   waConnected: "WhatsApp connected",
-  waOpen: "Open WhatsApp Web",
   waDisconnect: "Disconnect",
-  waHint: "Keep it connected (you can minimize it). Music links from new messages land here automatically.",
+  waConnectHint:
+    "Connect once (scan the QR here in the app). Music links from new messages land in the inbox automatically.",
+  waLoading: "Loading WhatsApp…",
 };
 
 const HE: Copy = {
@@ -77,7 +78,7 @@ const HE: Copy = {
   placeholder: "הדביקו קישור לשיר (YouTube, SoundCloud…)",
   resolve: "הוסף",
   resolving: "מזהה…",
-  empty: "עדיין אין קישורים. הדביקו קישור למעלה.",
+  empty: "עדיין אין קישורים. הדביקו קישור למעלה, או שהם יגיעו מ-WhatsApp.",
   playNow: "נגן עכשיו",
   addToGuests: "הוסף ל-GUESTS",
   reject: "הסר",
@@ -88,18 +89,22 @@ const HE: Copy = {
   badUrl: "זה לא נראה כמו קישור",
   waConnect: "התחבר ל-WhatsApp",
   waConnected: "WhatsApp מחובר",
-  waOpen: "פתח WhatsApp Web",
   waDisconnect: "נתק",
-  waHint: "השאירו מחובר (אפשר למזער). קישורי מוזיקה מהודעות חדשות יופיעו כאן אוטומטית.",
+  waConnectHint:
+    "התחברו פעם אחת (סרקו את ה-QR כאן בתוך האפליקציה). קישורי מוזיקה מהודעות חדשות יופיעו בתיבה אוטומטית.",
+  waLoading: "טוען WhatsApp…",
 };
 
 let cardSeq = 0;
 
 type WaStatus = { connected: boolean; windowOpen: boolean };
+type WaBounds = { x: number; y: number; width: number; height: number };
 type DesktopWA = {
   connectWhatsApp: () => Promise<WaStatus>;
   disconnectWhatsApp: () => Promise<WaStatus>;
   showWhatsAppWindow: () => Promise<void>;
+  hideWhatsAppWindow: () => Promise<void>;
+  setWhatsAppBounds: (bounds: WaBounds) => Promise<void>;
   onWhatsAppUrl: (cb: (url: string) => void) => () => void;
   onWhatsAppStatus: (cb: (s: WaStatus) => void) => () => void;
 };
@@ -108,7 +113,9 @@ type DesktopWA = {
 function getDesktopWA(): DesktopWA | null {
   if (typeof window === "undefined") return null;
   const d = (window as unknown as { syncbizDesktop?: Partial<DesktopWA> }).syncbizDesktop;
-  return d && typeof d.connectWhatsApp === "function" ? (d as DesktopWA) : null;
+  return d && typeof d.connectWhatsApp === "function" && typeof d.setWhatsAppBounds === "function"
+    ? (d as DesktopWA)
+    : null;
 }
 
 export function GuestInboxDrawer({
@@ -143,7 +150,7 @@ export function GuestInboxDrawer({
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, ...p } : c)));
   }, []);
 
-  /** Resolve any URL (manual paste OR a WhatsApp click) into a card. */
+  /** Resolve any URL (manual paste OR a WhatsApp message) into a card. */
   const addCardFromUrl = useCallback(async (rawUrl: string): Promise<boolean> => {
     const url = rawUrl.trim();
     if (!url) return false;
@@ -170,10 +177,12 @@ export function GuestInboxDrawer({
     }
   }, [input, addCardFromUrl, t.badUrl]);
 
-  // ── WhatsApp (desktop-only) ──
+  // ── WhatsApp (desktop-only, embedded) ──
   const wa = useMemo(() => getDesktopWA(), []);
   const [waStatus, setWaStatus] = useState<WaStatus>({ connected: false, windowOpen: false });
   const [waBusy, setWaBusy] = useState(false);
+  const waRegionRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     if (!wa) return;
     const offUrl = wa.onWhatsAppUrl((url) => void addCardFromUrl(url));
@@ -183,6 +192,7 @@ export function GuestInboxDrawer({
       offStatus();
     };
   }, [wa, addCardFromUrl]);
+
   const connectWa = useCallback(async () => {
     if (!wa) return;
     setWaBusy(true);
@@ -201,6 +211,48 @@ export function GuestInboxDrawer({
       setWaBusy(false);
     }
   }, [wa]);
+
+  const embedded = !!wa && waStatus.connected;
+
+  // Keep the embedded WhatsApp view glued to the region rect (survives resize/zoom).
+  useEffect(() => {
+    if (!wa || !drawerOpen || !waStatus.connected) return;
+    const el = waRegionRef.current;
+    if (!el) return;
+    const push = () => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 4 && r.height > 4) {
+        void wa.setWhatsAppBounds({ x: r.left, y: r.top, width: r.width, height: r.height });
+      }
+    };
+    push();
+    const ro = new ResizeObserver(push);
+    ro.observe(el);
+    window.addEventListener("resize", push);
+    // Safety net: also re-push on a light cadence so a late zoom settle can't
+    // leave the view a few pixels off.
+    const iv = window.setInterval(push, 800);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", push);
+      window.clearInterval(iv);
+    };
+  }, [wa, drawerOpen, waStatus.connected]);
+
+  // Detach the embedded view whenever it shouldn't be showing (drawer closed /
+  // not connected). The session stays alive so background capture keeps working.
+  useEffect(() => {
+    if (!wa) return;
+    if (drawerOpen && waStatus.connected) return;
+    void wa.hideWhatsAppWindow();
+  }, [wa, drawerOpen, waStatus.connected]);
+
+  // On unmount, make sure the overlay never floats over the app.
+  useEffect(() => {
+    return () => {
+      getDesktopWA()?.hideWhatsAppWindow();
+    };
+  }, []);
 
   /** Resolve → UnifiedSource once, cached on the card. */
   const ensureSource = useCallback(
@@ -252,6 +304,123 @@ export function GuestInboxDrawer({
     if (drawerOpen) inputRef.current?.focus();
   }, [drawerOpen]);
 
+  // ── Reusable blocks ──
+  const inputBlock = (
+    <div className="border-b border-white/[0.06] px-3 py-3">
+      <div className="flex items-center gap-2">
+        <input
+          ref={inputRef}
+          value={input}
+          onChange={(e) => {
+            setInput(e.target.value);
+            if (inputError) setInputError(null);
+          }}
+          onKeyDown={(e) => e.key === "Enter" && void handleResolve()}
+          placeholder={t.placeholder}
+          className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-black/30 px-3 py-2 text-[13px] text-slate-100 placeholder:text-slate-600 focus:border-[color:var(--sb-accent-border)] focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={() => void handleResolve()}
+          disabled={resolving || !input.trim()}
+          className="shrink-0 rounded-xl bg-[var(--sb-text)] px-3 py-2 text-[12px] font-semibold text-[#111114] transition active:scale-95 disabled:opacity-40"
+        >
+          {resolving ? t.resolving : t.resolve}
+        </button>
+      </div>
+      {inputError ? <p className="mt-1.5 text-[12px] text-amber-300">{inputError}</p> : null}
+    </div>
+  );
+
+  const cardsBlock = (
+    <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
+      {cards.length === 0 ? (
+        <p className="px-1 py-6 text-center text-[12px] text-slate-600">{t.empty}</p>
+      ) : (
+        cards.map((c) => (
+          <div key={c.id} className="rounded-xl border border-white/[0.07] bg-black/25 p-2.5">
+            <div className="flex items-center gap-2.5">
+              <span className="h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                {c.card.cover ? (
+                  <HydrationSafeImage src={c.card.cover} alt="" className="h-full w-full object-cover" />
+                ) : null}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-semibold text-slate-50">{c.card.title}</p>
+                <p className="truncate text-[11px] text-slate-400">{c.card.artist ?? c.card.type}</p>
+              </div>
+            </div>
+            {c.note ? (
+              <p className="mt-2 rounded-lg border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-2 py-1 text-center text-[11px] text-[#409cff]">
+                {c.note}
+              </p>
+            ) : null}
+            <div className="mt-2 grid grid-cols-3 gap-1.5">
+              <button type="button" onClick={() => void addToGuests(c)} disabled={c.busy} className={BTN_PRIMARY}>
+                {t.addToGuests}
+              </button>
+              <button type="button" onClick={() => void playNow(c)} disabled={c.busy} className={BTN_SECONDARY}>
+                {t.playNow}
+              </button>
+              <button type="button" onClick={() => reject(c.id)} disabled={c.busy} className={BTN_GHOST}>
+                {t.reject}
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+
+  const header = (
+    <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
+      <div className="flex items-center gap-2">
+        <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-[color:var(--sb-accent-soft)] text-[#409cff]">
+          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+          </svg>
+        </span>
+        <span className="text-[14px] font-semibold text-slate-100">{t.title}</span>
+        {embedded ? (
+          <span className="ml-1 flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            {t.waConnected}
+          </span>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        onClick={close}
+        aria-label={t.close}
+        className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-200"
+      >
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  );
+
+  // WhatsApp connect prompt (shown when the desktop bridge exists but not connected).
+  const waConnectBlock = wa ? (
+    <div className="border-b border-white/[0.06] px-3 py-2.5">
+      <button
+        type="button"
+        onClick={() => void connectWa()}
+        disabled={waBusy}
+        className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-3 py-2 text-[13px] font-semibold text-[#409cff] transition active:scale-[0.99] disabled:opacity-50"
+      >
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+        </svg>
+        {waBusy ? "…" : t.waConnect}
+      </button>
+      <p className="mt-1.5 text-[11px] text-slate-500">{t.waConnectHint}</p>
+    </div>
+  ) : null;
+
   return (
     <>
       {/* Launcher card in the rail (mirrors the DJ Creator shell). */}
@@ -284,139 +453,59 @@ export function GuestInboxDrawer({
             aria-modal="true"
             aria-label={t.title}
             dir={dir}
-            className="fixed bottom-3 right-3 z-[120] flex h-[min(680px,calc(100vh-3rem))] w-[min(420px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101014] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)]"
+            className={`fixed bottom-3 right-3 z-[120] flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101014] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)] ${
+              embedded
+                ? "h-[min(760px,calc(100vh-1.5rem))] w-[min(920px,calc(100vw-1.5rem))]"
+                : "h-[min(680px,calc(100vh-3rem))] w-[min(420px,calc(100vw-1.5rem))]"
+            }`}
           >
-            <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-              <div className="flex items-center gap-2">
-                <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-[color:var(--sb-accent-soft)] text-[#409cff]">
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                    <circle cx="9" cy="7" r="4" />
-                    <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-                  </svg>
-                </span>
-                <span className="text-[14px] font-semibold text-slate-100">{t.title}</span>
-              </div>
-              <button
-                type="button"
-                onClick={close}
-                aria-label={t.close}
-                className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-200"
-              >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                  <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
+            {header}
 
-            {/* URL input */}
-            <div className="border-b border-white/[0.06] px-3 py-3">
-              <div className="flex items-center gap-2">
-                <input
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => {
-                    setInput(e.target.value);
-                    if (inputError) setInputError(null);
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && void handleResolve()}
-                  placeholder={t.placeholder}
-                  className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-black/30 px-3 py-2 text-[13px] text-slate-100 placeholder:text-slate-600 focus:border-[color:var(--sb-accent-border)] focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => void handleResolve()}
-                  disabled={resolving || !input.trim()}
-                  className="shrink-0 rounded-xl bg-[var(--sb-text)] px-3 py-2 text-[12px] font-semibold text-[#111114] transition active:scale-95 disabled:opacity-40"
-                >
-                  {resolving ? t.resolving : t.resolve}
-                </button>
-              </div>
-              {inputError ? <p className="mt-1.5 text-[12px] text-amber-300">{inputError}</p> : null}
-            </div>
-
-            {/* WhatsApp (desktop app only) */}
-            {wa ? (
-              <div className="border-b border-white/[0.06] px-3 py-2.5">
-                {!waStatus.connected ? (
-                  <button
-                    type="button"
-                    onClick={() => void connectWa()}
-                    disabled={waBusy}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-3 py-2 text-[13px] font-semibold text-[#409cff] transition active:scale-[0.99] disabled:opacity-50"
+            {embedded ? (
+              // Two panes: embedded WhatsApp (left) + Guest inbox (right).
+              <div className="flex min-h-0 flex-1">
+                <div className="flex w-[54%] min-w-0 shrink-0 flex-col border-e border-white/[0.06]">
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="flex items-center gap-1.5 text-[12px] font-medium text-emerald-300">
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                      </svg>
+                      WhatsApp
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void disconnectWa()}
+                      disabled={waBusy}
+                      className="rounded-lg px-2 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 disabled:opacity-50"
+                    >
+                      {t.waDisconnect}
+                    </button>
+                  </div>
+                  {/* The native WhatsApp view is overlaid exactly on this box. The
+                      text behind it only shows in the brief moment before load. */}
+                  <div
+                    ref={waRegionRef}
+                    className="relative m-2 mt-0 flex-1 overflow-hidden rounded-xl bg-black/50"
                   >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-                    </svg>
-                    {waBusy ? "…" : t.waConnect}
-                  </button>
-                ) : (
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="flex flex-1 items-center gap-1.5 text-[12px] font-medium text-emerald-300">
-                        <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                        {t.waConnected}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => void wa.showWhatsAppWindow()}
-                        className="rounded-lg border border-white/[0.12] bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-100 transition hover:bg-white/[0.08]"
-                      >
-                        {t.waOpen}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void disconnectWa()}
-                        disabled={waBusy}
-                        className="rounded-lg px-2 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 disabled:opacity-50"
-                      >
-                        {t.waDisconnect}
-                      </button>
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                      <span className="text-[12px] text-slate-600">{t.waLoading}</span>
                     </div>
-                    <p className="mt-1.5 text-[11px] text-slate-500">{t.waHint}</p>
                   </div>
-                )}
-              </div>
-            ) : null}
+                </div>
 
-            {/* Cards */}
-            <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
-              {cards.length === 0 ? (
-                <p className="px-1 py-6 text-center text-[12px] text-slate-600">{t.empty}</p>
-              ) : (
-                cards.map((c) => (
-                  <div key={c.id} className="rounded-xl border border-white/[0.07] bg-black/25 p-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <span className="h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-slate-800">
-                        {c.card.cover ? (
-                          <HydrationSafeImage src={c.card.cover} alt="" className="h-full w-full object-cover" />
-                        ) : null}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[13px] font-semibold text-slate-50">{c.card.title}</p>
-                        <p className="truncate text-[11px] text-slate-400">{c.card.artist ?? c.card.type}</p>
-                      </div>
-                    </div>
-                    {c.note ? (
-                      <p className="mt-2 rounded-lg border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-2 py-1 text-center text-[11px] text-[#409cff]">
-                        {c.note}
-                      </p>
-                    ) : null}
-                    <div className="mt-2 grid grid-cols-3 gap-1.5">
-                      <button type="button" onClick={() => void addToGuests(c)} disabled={c.busy} className={BTN_PRIMARY}>
-                        {t.addToGuests}
-                      </button>
-                      <button type="button" onClick={() => void playNow(c)} disabled={c.busy} className={BTN_SECONDARY}>
-                        {t.playNow}
-                      </button>
-                      <button type="button" onClick={() => reject(c.id)} disabled={c.busy} className={BTN_GHOST}>
-                        {t.reject}
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+                <div className="flex min-w-0 flex-1 flex-col">
+                  {inputBlock}
+                  {cardsBlock}
+                </div>
+              </div>
+            ) : (
+              // Single column: paste + connect prompt + cards.
+              <>
+                {inputBlock}
+                {waConnectBlock}
+                {cardsBlock}
+              </>
+            )}
           </div>
         </>
       ) : null}

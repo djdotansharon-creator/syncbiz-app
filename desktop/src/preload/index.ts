@@ -31,6 +31,7 @@ import type {
   PickLocalMetadataBankFolderResult,
   RefreshLocalMetadataBankResult,
   WhatsAppStatus,
+  WhatsAppBounds,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import type { SyncBizDesktopMvp } from "../shared/mvp-desktop-api";
@@ -126,6 +127,8 @@ const api: SyncBizDesktopMvp = {
   disconnectWhatsApp: (): Promise<WhatsAppStatus> => ipcRenderer.invoke(MVP_IPC.WHATSAPP_DISCONNECT),
   showWhatsAppWindow: (): Promise<void> => ipcRenderer.invoke(MVP_IPC.WHATSAPP_SHOW),
   hideWhatsAppWindow: (): Promise<void> => ipcRenderer.invoke(MVP_IPC.WHATSAPP_HIDE),
+  setWhatsAppBounds: (bounds: WhatsAppBounds): Promise<void> =>
+    ipcRenderer.invoke(MVP_IPC.WHATSAPP_SET_BOUNDS, bounds),
   onWhatsAppUrl: (cb) => {
     const handler = (_: unknown, url: string) => cb(url);
     ipcRenderer.on(MVP_IPC.WHATSAPP_URL, handler);

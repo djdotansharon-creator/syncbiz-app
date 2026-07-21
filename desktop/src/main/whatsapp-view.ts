@@ -1,20 +1,30 @@
-import { BrowserWindow, session } from "electron";
-import type { WhatsAppStatus } from "../shared/mvp-types";
+import { WebContentsView, BrowserWindow, session } from "electron";
+import type { WhatsAppStatus, WhatsAppBounds } from "../shared/mvp-types";
 
 /**
- * GUESTS × WhatsApp Web (desktop-only).
+ * GUESTS × WhatsApp Web (desktop-only) — EMBEDDED inside the player.
  *
- * Loads web.whatsapp.com in a SEPARATE BrowserWindow (not an overlay — the main
- * window's zoom logic assumes a single full-window renderer, so a dedicated
- * window is the low-risk choice). The operator scans the QR once; the login
- * persists via a `persist:whatsapp` session partition (on disk under userData).
+ * Loads web.whatsapp.com in a `WebContentsView` that is added as a child of the
+ * MAIN window's contentView and positioned over a rectangle the renderer marks
+ * out inside the Guest drawer (like the "Moni" Chrome add-on embeds WhatsApp
+ * inside Monday). It is NOT a separate OS window — it feels like part of the app.
  *
- * We NEVER read messages in the background. Instead, when the operator clicks a
- * supported music link inside WhatsApp Web, WhatsApp tries to open it externally
- * (window.open / target=_blank); we intercept that via setWindowOpenHandler,
- * capture the URL, deny the popup (WhatsApp Web keeps running untouched), and
- * forward the URL to the hosted renderer's Guest inbox. No DOM scraping, no
- * automation of sending — receive-only.
+ * Coordinate mapping: the main renderer is zoomed via `setZoomFactor` (0.55–1.0),
+ * so the renderer's `getBoundingClientRect` is in *logical* CSS px. A WebContentsView
+ * lives in the window's *content* (DIP) space, so we multiply the rect by the
+ * current zoom factor before `setBounds`. The renderer re-sends the rect on
+ * resize/scroll so zoom changes stay in sync.
+ *
+ * The operator scans the QR once; the login persists via a `persist:whatsapp`
+ * session partition (on disk under userData). The view stays ALIVE even when the
+ * drawer is closed (just detached from the view tree) so incoming music links are
+ * still auto-captured in the background.
+ *
+ * We NEVER read messages off to a server. When the operator clicks a supported
+ * music link inside WhatsApp Web, WhatsApp tries to open it externally
+ * (window.open / target=_blank); we intercept via setWindowOpenHandler, capture
+ * the URL, deny the popup, and forward it to the renderer's Guest inbox. A DOM
+ * observer also auto-captures links from newly-arrived messages. Receive-only.
  *
  * Security: contextIsolation + sandbox on, and NO preload — syncbizDesktop is
  * never exposed to WhatsApp's untrusted page.
@@ -91,21 +101,25 @@ const OBSERVER_SCRIPT = `(function(){
 export type WhatsAppCallbacks = {
   /** A supported music URL was clicked in WhatsApp — forward to the Guest inbox. */
   onUrl: (url: string) => void;
-  /** Window/connection status changed. */
+  /** View/connection status changed. */
   onStatus: (status: WhatsAppStatus) => void;
 };
 
 export class WhatsAppWindow {
-  private win: BrowserWindow | null = null;
+  private view: WebContentsView | null = null;
+  private attached = false;
+  private lastBounds: WhatsAppBounds | null = null;
   private readonly cb: WhatsAppCallbacks;
+  private readonly getWindow: () => BrowserWindow | null;
 
-  constructor(cb: WhatsAppCallbacks) {
+  constructor(cb: WhatsAppCallbacks, getWindow: () => BrowserWindow | null) {
     this.cb = cb;
+    this.getWindow = getWindow;
   }
 
   private snapshot(): WhatsAppStatus {
-    const live = !!this.win && !this.win.isDestroyed();
-    return { connected: live, windowOpen: live && this.win!.isVisible() };
+    const live = !!this.view;
+    return { connected: live, windowOpen: live && this.attached };
   }
 
   private emit(): void {
@@ -120,31 +134,12 @@ export class WhatsAppWindow {
     return this.snapshot();
   }
 
-  /** Create (or focus) the WhatsApp window. First run shows the QR to scan. */
-  connect(): WhatsAppStatus {
-    if (this.win && !this.win.isDestroyed()) {
-      this.win.show();
-      this.win.focus();
-      this.emit();
-      return this.snapshot();
-    }
-    const waSession = session.fromPartition(WA_PARTITION);
-    this.win = new BrowserWindow({
-      width: 480,
-      height: 760,
-      show: true,
-      title: "SyncBiz — WhatsApp",
-      autoHideMenuBar: true,
-      webPreferences: {
-        session: waSession,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
-    });
+  /** Wire capture handlers on the WhatsApp webContents (once, at creation). */
+  private wire(view: WebContentsView): void {
+    const wc = view.webContents;
 
     // Capture clicked music links; deny the popup so WhatsApp Web is undisturbed.
-    this.win.webContents.setWindowOpenHandler(({ url }) => {
+    wc.setWindowOpenHandler(({ url }) => {
       if (isSupportedMusicUrl(url)) {
         try {
           this.cb.onUrl(url);
@@ -155,9 +150,9 @@ export class WhatsAppWindow {
       return { action: "deny" };
     });
 
-    // Keep the window pinned to web.whatsapp.com; if a click causes an in-page
+    // Keep the view pinned to web.whatsapp.com; if a click causes an in-page
     // navigation away, block it and (if it's music) still capture the URL.
-    this.win.webContents.on("will-navigate", (e, url) => {
+    wc.on("will-navigate", (e, url) => {
       try {
         const host = new URL(url).hostname.toLowerCase();
         if (!host.endsWith("whatsapp.com")) {
@@ -171,70 +166,147 @@ export class WhatsAppWindow {
 
     // AUTO-CAPTURE: (re)inject the DOM observer on every load; forward the music
     // links it reports (via console) to the Guest inbox. No clicking/dragging.
-    this.win.webContents.on("did-finish-load", () => {
-      this.win?.webContents.executeJavaScript(OBSERVER_SCRIPT).catch(() => {});
+    wc.on("did-finish-load", () => {
+      wc.executeJavaScript(OBSERVER_SCRIPT).catch(() => {});
     });
-    this.win.webContents.on(
-      "console-message",
-      (_event: unknown, _level: unknown, message: string) => {
-        const idx = message.indexOf(CAPTURE_MARKER);
-        if (idx < 0) return;
-        const url = message.slice(idx + CAPTURE_MARKER.length).trim();
-        if (isSupportedMusicUrl(url)) {
-          try {
-            this.cb.onUrl(url);
-          } catch {
-            /* ignore */
-          }
+    wc.on("console-message", (_event: unknown, _level: unknown, message: string) => {
+      const idx = message.indexOf(CAPTURE_MARKER);
+      if (idx < 0) return;
+      const url = message.slice(idx + CAPTURE_MARKER.length).trim();
+      if (isSupportedMusicUrl(url)) {
+        try {
+          this.cb.onUrl(url);
+        } catch {
+          /* ignore */
         }
-      },
-    );
-
-    this.win.on("show", () => this.emit());
-    this.win.on("hide", () => this.emit());
-    this.win.on("closed", () => {
-      this.win = null;
-      this.emit();
+      }
     });
+  }
 
-    // Spoof a standard Chrome UA (both the request header and navigator.userAgent)
-    // so WhatsApp Web doesn't reject the Electron browser.
-    this.win.webContents.setUserAgent(CHROME_UA);
-    void this.win.loadURL(WA_URL, { userAgent: CHROME_UA });
+  /** Convert the logical (CSS px) rect to window-content DIP and apply it. */
+  private applyBounds(mainWin: BrowserWindow, rect: WhatsAppBounds): void {
+    if (!this.view) return;
+    let z = 1;
+    try {
+      z = mainWin.webContents.getZoomFactor() || 1;
+    } catch {
+      z = 1;
+    }
+    this.view.setBounds({
+      x: Math.round(rect.x * z),
+      y: Math.round(rect.y * z),
+      width: Math.max(0, Math.round(rect.width * z)),
+      height: Math.max(0, Math.round(rect.height * z)),
+    });
+  }
+
+  /** Ensure the view is in the main window's view tree and positioned. */
+  private attach(mainWin: BrowserWindow): void {
+    if (!this.view) return;
+    if (!this.attached) {
+      mainWin.contentView.addChildView(this.view);
+      this.attached = true;
+    }
+    if (this.lastBounds) this.applyBounds(mainWin, this.lastBounds);
+  }
+
+  /** Create (or re-show) the embedded WhatsApp view. First run shows the QR. */
+  connect(): WhatsAppStatus {
+    const mainWin = this.getWindow();
+    if (!mainWin || mainWin.isDestroyed()) return this.snapshot();
+
+    if (!this.view) {
+      const waSession = session.fromPartition(WA_PARTITION);
+      this.view = new WebContentsView({
+        webPreferences: {
+          session: waSession,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        },
+      });
+      this.wire(this.view);
+      this.view.webContents.setUserAgent(CHROME_UA);
+      void this.view.webContents.loadURL(WA_URL, { userAgent: CHROME_UA });
+    }
+
+    this.attach(mainWin);
     this.emit();
     return this.snapshot();
   }
 
+  /** Renderer sends the target rect (logical CSS px). Implies "show". */
+  setBounds(rect: WhatsAppBounds): void {
+    this.lastBounds = rect;
+    const mainWin = this.getWindow();
+    if (!this.view || !mainWin || mainWin.isDestroyed()) return;
+    this.attach(mainWin);
+  }
+
+  /** Re-attach the view (used by an explicit "Open" action). */
   show(): void {
-    if (this.win && !this.win.isDestroyed()) {
-      this.win.show();
-      this.win.focus();
-      this.emit();
-    }
+    const mainWin = this.getWindow();
+    if (mainWin && !mainWin.isDestroyed()) this.attach(mainWin);
+    this.emit();
   }
 
+  /** Detach from the view tree (drawer closed). The webContents stays alive so
+   *  background auto-capture of new messages keeps working. */
   hide(): void {
-    if (this.win && !this.win.isDestroyed()) {
-      this.win.hide();
-      this.emit();
+    const mainWin = this.getWindow();
+    if (this.view && this.attached && mainWin && !mainWin.isDestroyed()) {
+      mainWin.contentView.removeChildView(this.view);
     }
+    this.attached = false;
+    this.emit();
   }
 
-  /** Log out: clear the persisted session and close the window. */
+  /** Log out: clear the persisted session and destroy the view. */
   async disconnect(): Promise<WhatsAppStatus> {
+    const mainWin = this.getWindow();
+    if (this.view) {
+      if (this.attached && mainWin && !mainWin.isDestroyed()) {
+        try {
+          mainWin.contentView.removeChildView(this.view);
+        } catch {
+          /* ignore */
+        }
+      }
+      try {
+        this.view.webContents.close();
+      } catch {
+        /* ignore */
+      }
+      this.view = null;
+    }
+    this.attached = false;
+    this.lastBounds = null;
     try {
       await session.fromPartition(WA_PARTITION).clearStorageData();
     } catch {
       /* ignore */
     }
-    if (this.win && !this.win.isDestroyed()) this.win.destroy();
-    this.win = null;
     this.emit();
     return this.snapshot();
   }
 
   dispose(): void {
-    if (this.win && !this.win.isDestroyed()) this.win.destroy();
-    this.win = null;
+    const mainWin = this.getWindow();
+    if (this.view) {
+      if (this.attached && mainWin && !mainWin.isDestroyed()) {
+        try {
+          mainWin.contentView.removeChildView(this.view);
+        } catch {
+          /* ignore */
+        }
+      }
+      try {
+        this.view.webContents.close();
+      } catch {
+        /* ignore */
+      }
+      this.view = null;
+    }
+    this.attached = false;
   }
 }

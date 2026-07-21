@@ -27,6 +27,7 @@ import type {
   PickLocalMetadataBankFolderResult,
   RefreshLocalMetadataBankResult,
   WhatsAppStatus,
+  WhatsAppBounds,
 } from "./mvp-types";
 
 /** Preload `contextBridge` contract (renderer uses `window.syncbizDesktop`). */
@@ -54,15 +55,18 @@ export type SyncBizDesktopMvp = {
   setDuckPercent: (n: number) => Promise<void>;
   /** Seek MPV Channel A to an absolute position in seconds. */
   mpvSeekTo: (seconds: number) => Promise<void>;
-  // ── GUESTS × WhatsApp Web (desktop-only) ──
-  /** Open/show the WhatsApp Web window (scan the QR the first time). */
+  // ── GUESTS × WhatsApp Web (desktop-only, embedded in the Guest drawer) ──
+  /** Create/show the embedded WhatsApp view (scan the QR the first time). */
   connectWhatsApp: () => Promise<WhatsAppStatus>;
-  /** Log out + close the WhatsApp window (clears the persisted session). */
+  /** Log out + destroy the WhatsApp view (clears the persisted session). */
   disconnectWhatsApp: () => Promise<WhatsAppStatus>;
-  /** Bring the WhatsApp window to the front. */
+  /** Re-attach the embedded WhatsApp view over the Guest drawer. */
   showWhatsAppWindow: () => Promise<void>;
-  /** Hide the WhatsApp window (session stays alive). */
+  /** Detach the embedded view (drawer closed); the session stays alive so new
+   *  message links are still auto-captured in the background. */
   hideWhatsAppWindow: () => Promise<void>;
+  /** Position the embedded WhatsApp view over this logical (CSS px) rect. */
+  setWhatsAppBounds: (bounds: WhatsAppBounds) => Promise<void>;
   /** Push: a supported music URL the operator clicked inside WhatsApp Web. */
   onWhatsAppUrl: (cb: (url: string) => void) => () => void;
   /** Push: WhatsApp window/connection status. */
