@@ -51,7 +51,7 @@ const EN: Copy = {
   empty: "No guest links yet. Paste a link above.",
   playNow: "Play now",
   addToGuests: "Add to GUESTS",
-  reject: "Reject",
+  reject: "Dismiss",
   added: "Added to GUESTS",
   alreadyThere: "Already in GUESTS",
   playing: "Playing",
@@ -70,7 +70,7 @@ const HE: Copy = {
   empty: "עדיין אין קישורים. הדביקו קישור למעלה.",
   playNow: "נגן עכשיו",
   addToGuests: "הוסף ל-GUESTS",
-  reject: "דחה",
+  reject: "הסר",
   added: "נוסף ל-GUESTS",
   alreadyThere: "כבר ב-GUESTS",
   playing: "מנגן",
@@ -287,11 +287,11 @@ export function GuestInboxDrawer({
                       </p>
                     ) : null}
                     <div className="mt-2 grid grid-cols-3 gap-1.5">
-                      <button type="button" onClick={() => void playNow(c)} disabled={c.busy} className={BTN_PRIMARY}>
-                        {t.playNow}
-                      </button>
-                      <button type="button" onClick={() => void addToGuests(c)} disabled={c.busy} className={BTN_SECONDARY}>
+                      <button type="button" onClick={() => void addToGuests(c)} disabled={c.busy} className={BTN_PRIMARY}>
                         {t.addToGuests}
+                      </button>
+                      <button type="button" onClick={() => void playNow(c)} disabled={c.busy} className={BTN_SECONDARY}>
+                        {t.playNow}
                       </button>
                       <button type="button" onClick={() => reject(c.id)} disabled={c.busy} className={BTN_GHOST}>
                         {t.reject}

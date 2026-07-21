@@ -1,10 +1,10 @@
 "use client";
 
-import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
+import { resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { savePlaylistToLocal } from "@/lib/unified-sources-client";
 import { appendSourcesToPlaylistTracks } from "@/lib/playlist-append-sources";
 import type { UnifiedSource, ParseUrlJson } from "@/lib/source-types";
-import type { Playlist } from "@/lib/playlist-types";
+import type { Playlist, PlaylistTrack, PlaylistType } from "@/lib/playlist-types";
 
 /**
  * GUESTS ingestion — reuses the EXISTING resolver + playlist mechanism. A guest
@@ -54,31 +54,47 @@ export async function resolveGuestCard(url: string): Promise<GuestCard | null> {
   };
 }
 
+const rid = (p: string) => `${p}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
 /**
- * Build a playable UnifiedSource from a resolved card. Creates a Playlist row via
- * the existing /api/playlists path (same as ad-hoc URL plays). Used for Play-now
- * and as the leaf for Add-to-GUESTS.
+ * Build a playable UnifiedSource from a resolved card — IN MEMORY, no DB write.
+ * Used for Play-now and as the leaf for Add-to-GUESTS. Deliberately does NOT
+ * persist a playlist row (the old createPlaylistFromUrl scaffold showed up under
+ * SINGLE TRACKS and triggered a library refresh); only Add-to-GUESTS persists,
+ * and only into the GUESTS playlist.
  */
-export async function guestCardToSource(card: GuestCard): Promise<UnifiedSource | null> {
+export async function guestCardToSource(card: GuestCard): Promise<UnifiedSource> {
   const playable =
     card.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(card.rawUrl) : card.rawUrl;
-  const created = await createPlaylistFromUrl(playable, {
+  const type = card.type as PlaylistType;
+  const trackId = rid("t-guest");
+  const track: PlaylistTrack = {
+    id: trackId,
+    name: card.title,
+    type,
+    url: playable,
+    cover: card.cover ?? undefined,
+  };
+  const playlist: Playlist = {
+    id: rid("guest-pl"),
+    name: card.title,
+    genre: "Guests",
+    type,
+    url: playable,
+    thumbnail: card.cover ?? "",
+    createdAt: new Date().toISOString(),
+    tracks: [track],
+    order: [trackId],
+  };
+  return {
+    id: `pl-${playlist.id}`,
     title: card.title,
     genre: "Guests",
     cover: card.cover,
-    type: card.type,
-  });
-  if (!created) return null;
-  savePlaylistToLocal(created);
-  return {
-    id: `pl-${created.id}`,
-    title: created.name,
-    genre: created.genre || "Guests",
-    cover: created.thumbnail || null,
-    type: created.type as UnifiedSource["type"],
-    url: created.url,
+    type: card.type as UnifiedSource["type"],
+    url: playable,
     origin: "playlist",
-    playlist: created,
+    playlist,
   };
 }
 
