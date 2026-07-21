@@ -67,6 +67,8 @@ export type SyncBizDesktopMvp = {
   hideWhatsAppWindow: () => Promise<void>;
   /** Position the embedded WhatsApp view over this logical (CSS px) rect. */
   setWhatsAppBounds: (bounds: WhatsAppBounds) => Promise<void>;
+  /** MONI-style solo view: hide the chat list (true) or reveal it to switch chats (false). */
+  setWhatsAppSolo: (on: boolean) => Promise<void>;
   /** Push: a supported music URL the operator clicked inside WhatsApp Web. */
   onWhatsAppUrl: (cb: (url: string) => void) => () => void;
   /** Push: WhatsApp window/connection status. */

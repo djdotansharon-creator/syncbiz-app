@@ -129,6 +129,8 @@ const api: SyncBizDesktopMvp = {
   hideWhatsAppWindow: (): Promise<void> => ipcRenderer.invoke(MVP_IPC.WHATSAPP_HIDE),
   setWhatsAppBounds: (bounds: WhatsAppBounds): Promise<void> =>
     ipcRenderer.invoke(MVP_IPC.WHATSAPP_SET_BOUNDS, bounds),
+  setWhatsAppSolo: (on: boolean): Promise<void> =>
+    ipcRenderer.invoke(MVP_IPC.WHATSAPP_SET_SOLO, on),
   onWhatsAppUrl: (cb) => {
     const handler = (_: unknown, url: string) => cb(url);
     ipcRenderer.on(MVP_IPC.WHATSAPP_URL, handler);

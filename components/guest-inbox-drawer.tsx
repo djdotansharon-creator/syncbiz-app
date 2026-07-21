@@ -43,6 +43,8 @@ type Copy = {
   waDisconnect: string;
   waConnectHint: string;
   waLoading: string;
+  waSolo: string;
+  waAllChats: string;
 };
 
 const EN: Copy = {
@@ -68,6 +70,8 @@ const EN: Copy = {
   waConnectHint:
     "Connect once (scan the QR here in the app). Music links from new messages land in the inbox automatically.",
   waLoading: "Loading WhatsApp…",
+  waSolo: "Only this chat",
+  waAllChats: "All chats",
 };
 
 const HE: Copy = {
@@ -93,6 +97,8 @@ const HE: Copy = {
   waConnectHint:
     "התחברו פעם אחת (סרקו את ה-QR כאן בתוך האפליקציה). קישורי מוזיקה מהודעות חדשות יופיעו בתיבה אוטומטית.",
   waLoading: "טוען WhatsApp…",
+  waSolo: "רק הצ'אט הזה",
+  waAllChats: "כל הצ'אטים",
 };
 
 let cardSeq = 0;
@@ -105,6 +111,7 @@ type DesktopWA = {
   showWhatsAppWindow: () => Promise<void>;
   hideWhatsAppWindow: () => Promise<void>;
   setWhatsAppBounds: (bounds: WaBounds) => Promise<void>;
+  setWhatsAppSolo: (on: boolean) => Promise<void>;
   onWhatsAppUrl: (cb: (url: string) => void) => () => void;
   onWhatsAppStatus: (cb: (s: WaStatus) => void) => () => void;
 };
@@ -181,7 +188,16 @@ export function GuestInboxDrawer({
   const wa = useMemo(() => getDesktopWA(), []);
   const [waStatus, setWaStatus] = useState<WaStatus>({ connected: false, windowOpen: false });
   const [waBusy, setWaBusy] = useState(false);
+  const [waSolo, setWaSolo] = useState(true); // MONI-style: only the open chat, default on
   const waRegionRef = useRef<HTMLDivElement | null>(null);
+
+  const toggleSolo = useCallback(() => {
+    setWaSolo((prev) => {
+      const next = !prev;
+      void wa?.setWhatsAppSolo(next);
+      return next;
+    });
+  }, [wa]);
 
   useEffect(() => {
     if (!wa) return;
@@ -455,7 +471,7 @@ export function GuestInboxDrawer({
             dir={dir}
             className={`fixed bottom-3 right-3 z-[120] flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101014] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)] ${
               embedded
-                ? "h-[min(760px,calc(100vh-1.5rem))] w-[min(920px,calc(100vw-1.5rem))]"
+                ? "h-[min(760px,calc(100vh-1.5rem))] w-[min(960px,calc(100vw-1.5rem))]"
                 : "h-[min(680px,calc(100vh-3rem))] w-[min(420px,calc(100vw-1.5rem))]"
             }`}
           >
@@ -464,7 +480,7 @@ export function GuestInboxDrawer({
             {embedded ? (
               // Two panes: embedded WhatsApp (left) + Guest inbox (right).
               <div className="flex min-h-0 flex-1">
-                <div className="flex w-[54%] min-w-0 shrink-0 flex-col border-e border-white/[0.06]">
+                <div className="flex w-[58%] min-w-0 shrink-0 flex-col border-e border-white/[0.06]">
                   <div className="flex items-center justify-between px-3 py-2">
                     <span className="flex items-center gap-1.5 text-[12px] font-medium text-emerald-300">
                       <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -472,14 +488,24 @@ export function GuestInboxDrawer({
                       </svg>
                       WhatsApp
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => void disconnectWa()}
-                      disabled={waBusy}
-                      className="rounded-lg px-2 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 disabled:opacity-50"
-                    >
-                      {t.waDisconnect}
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={toggleSolo}
+                        title={waSolo ? t.waAllChats : t.waSolo}
+                        className="rounded-lg border border-white/[0.12] bg-white/[0.04] px-2 py-1 text-[11px] font-semibold text-slate-100 transition hover:bg-white/[0.08]"
+                      >
+                        {waSolo ? t.waAllChats : t.waSolo}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void disconnectWa()}
+                        disabled={waBusy}
+                        className="rounded-lg px-2 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 disabled:opacity-50"
+                      >
+                        {t.waDisconnect}
+                      </button>
+                    </div>
                   </div>
                   {/* The native WhatsApp view is overlaid exactly on this box. The
                       text behind it only shows in the brief moment before load. */}

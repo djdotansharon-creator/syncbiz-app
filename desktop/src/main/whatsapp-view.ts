@@ -72,6 +72,17 @@ const CAPTURE_MARKER = "[[SBWA]]";
 // at once; only a genuinely-new arrival trickles in alone. We buffer candidates
 // for 900ms — a small buffer (≤3) is real arrivals → report; a large buffer is
 // history → drop. `seen` de-dupes permanently so nothing repeats.
+// "Solo chat" declutter (MONI-style): hide WhatsApp's left chat-LIST column so
+// only the open conversation shows — WhatsApp's own conversation header already
+// carries the sender's photo + name (or phone when not a saved contact), which is
+// exactly the look the operator wants. Gated by a class on <html> so we can toggle
+// it live. `#side`/`#pane-side` are WhatsApp Web's long-stable list-column IDs;
+// hiding the sibling lets `#main` (the conversation) reflow to full width.
+const DECLUTTER_CSS = `
+  html.sb-solo #side, html.sb-solo #pane-side { display: none !important; }
+  html.sb-solo #main { flex: 1 1 auto !important; }
+`;
+
 const OBSERVER_SCRIPT = `(function(){
   if (window.__sbWaObs) return; window.__sbWaObs = 1;
   var seen = {}, buffer = [], timer = null, MARK = '${CAPTURE_MARKER}';
@@ -109,6 +120,8 @@ export class WhatsAppWindow {
   private view: WebContentsView | null = null;
   private attached = false;
   private lastBounds: WhatsAppBounds | null = null;
+  /** MONI-style: show only the open conversation (hide the chat list). Default on. */
+  private soloMode = true;
   private readonly cb: WhatsAppCallbacks;
   private readonly getWindow: () => BrowserWindow | null;
 
@@ -164,9 +177,13 @@ export class WhatsAppWindow {
       }
     });
 
-    // AUTO-CAPTURE: (re)inject the DOM observer on every load; forward the music
-    // links it reports (via console) to the Guest inbox. No clicking/dragging.
+    // On every load: apply the declutter CSS + current solo state, then (re)inject
+    // the DOM observer that auto-forwards music links to the Guest inbox.
     wc.on("did-finish-load", () => {
+      wc.insertCSS(DECLUTTER_CSS).catch(() => {});
+      wc.executeJavaScript(
+        `document.documentElement.classList.toggle('sb-solo', ${this.soloMode});`,
+      ).catch(() => {});
       wc.executeJavaScript(OBSERVER_SCRIPT).catch(() => {});
     });
     wc.on("console-message", (_event: unknown, _level: unknown, message: string) => {
@@ -241,6 +258,20 @@ export class WhatsAppWindow {
     const mainWin = this.getWindow();
     if (!this.view || !mainWin || mainWin.isDestroyed()) return;
     this.attach(mainWin);
+  }
+
+  /** Toggle MONI-style solo view (only the open conversation, list hidden). */
+  setSoloMode(on: boolean): void {
+    this.soloMode = on;
+    if (this.view) {
+      this.view.webContents
+        .executeJavaScript(`document.documentElement.classList.toggle('sb-solo', ${on});`)
+        .catch(() => {});
+    }
+  }
+
+  isSolo(): boolean {
+    return this.soloMode;
   }
 
   /** Re-attach the view (used by an explicit "Open" action). */

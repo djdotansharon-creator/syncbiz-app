@@ -208,6 +208,9 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       whatsapp.setBounds(bounds);
     }
   });
+  ipcMain.handle(MVP_IPC.WHATSAPP_SET_SOLO, (_e, on: unknown): void => {
+    whatsapp.setSoloMode(on !== false);
+  });
 
   ipcMain.handle(MVP_IPC.SAVE_CONFIG, (_e, patch: MvpConfigPatch): DesktopRuntimeConfig => {
     const cur = loadRuntimeConfig(getUserData());

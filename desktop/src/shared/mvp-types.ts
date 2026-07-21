@@ -29,6 +29,9 @@ export const MVP_IPC = {
   /** Renderer → main: place the embedded WhatsApp view over this logical (CSS px)
    *  rect inside the Guest drawer. Main scales by the current zoom factor. */
   WHATSAPP_SET_BOUNDS: "mvp:whatsapp-set-bounds",
+  /** Renderer → main: MONI-style solo view — hide the chat list, show only the
+   *  open conversation (true) or reveal the full list to switch chats (false). */
+  WHATSAPP_SET_SOLO: "mvp:whatsapp-set-solo",
   /** main→renderer push: a supported music URL the operator clicked in WhatsApp. */
   WHATSAPP_URL: "mvp:whatsapp-url",
   /** main→renderer push: connection/window status snapshot. */
