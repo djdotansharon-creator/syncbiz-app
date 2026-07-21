@@ -23,6 +23,12 @@ import type { WhatsAppStatus } from "../shared/mvp-types";
 const WA_URL = "https://web.whatsapp.com";
 const WA_PARTITION = "persist:whatsapp";
 
+// WhatsApp Web sniffs the User-Agent and rejects Electron (it sees "Electron" +
+// the productName and can't parse a Chrome version → "update Chrome" screen).
+// Present a clean, current desktop-Chrome UA so it loads normally.
+const CHROME_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
+
 const SUPPORTED_MUSIC_HOSTS = [
   "youtube.com",
   "youtu.be",
@@ -132,7 +138,10 @@ export class WhatsAppWindow {
       this.emit();
     });
 
-    void this.win.loadURL(WA_URL);
+    // Spoof a standard Chrome UA (both the request header and navigator.userAgent)
+    // so WhatsApp Web doesn't reject the Electron browser.
+    this.win.webContents.setUserAgent(CHROME_UA);
+    void this.win.loadURL(WA_URL, { userAgent: CHROME_UA });
     this.emit();
     return this.snapshot();
   }
