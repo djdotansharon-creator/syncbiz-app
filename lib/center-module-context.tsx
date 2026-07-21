@@ -14,6 +14,7 @@ export type CenterModule =
   | "jingles"
   | "my-music-library"
   | "dj-creator-hub"
+  | "dj-creator-assistant"
   | "guests"
   | { kind: "edit-current"; target: CenterModuleEditTarget }
   | null;
@@ -46,6 +47,10 @@ export function isDjCreatorHubModule(m: CenterModule): m is "dj-creator-hub" {
 
 export function isGuestsModule(m: CenterModule): m is "guests" {
   return m === "guests";
+}
+
+export function isDjCreatorAssistantModule(m: CenterModule): m is "dj-creator-assistant" {
+  return m === "dj-creator-assistant";
 }
 
 export function isEditCurrentModule(

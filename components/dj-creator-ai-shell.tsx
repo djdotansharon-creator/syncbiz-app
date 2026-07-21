@@ -99,9 +99,6 @@ function parsePlaylistIdFromJson(body: unknown): string | null {
 /** Premium CTA inside assistant panel — cyan */
 const accentBtn =
   "rounded-xl border border-cyan-400/25 bg-gradient-to-r from-sky-500/22 via-cyan-500/20 to-sky-400/22 font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_6px_20px_rgba(34,211,238,0.08)] hover:from-sky-500/32 hover:via-cyan-500/28 hover:to-sky-400/30";
-/** Launcher card only — warm frame; radius matches library rail (Guest / My link). */
-const launcherOpenBtn =
-  "rounded-lg border border-white/[0.1] bg-white/[0.06] font-semibold text-[#f5f5f7] text-[10px] transition-colors duration-150 hover:border-white/[0.18] hover:bg-white/[0.1] active:scale-[0.98]";
 /** Inner surface once gradient chrome is applied (see panel wrapper). */
 const sidePanelInner =
   "relative flex min-h-0 w-full flex-col overflow-hidden rounded-[15px] bg-[#0b121c] ring-1 ring-inset ring-cyan-400/12";
@@ -542,9 +539,18 @@ const PLAYER_GUIDE_VIDEOS: GuideItem[] = [
 export type DjCreatorAiShellProps = {
   drawerOpen: boolean;
   onDrawerOpenChange: (open: boolean) => void;
+  /** "launcher" = the right-rail card only; "panel" = the assistant in the CENTER monitor. */
+  variant?: "launcher" | "panel";
+  /** Launcher click (opens the center monitor panel). */
+  onOpen?: () => void;
 };
 
-export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAiShellProps) {
+export function DjCreatorAiShell({
+  drawerOpen,
+  onDrawerOpenChange,
+  variant = "launcher",
+  onOpen,
+}: DjCreatorAiShellProps) {
   const { locale } = useLocale();
   const he = locale === "he";
   const t = he ? COPY_HE : COPY_EN;
@@ -569,7 +575,6 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [lastSavedPlaylistId, setLastSavedPlaylistId] = useState<string | null>(null);
-  const [panelSize, setPanelSize] = useState<"comfortable" | "compact">("comfortable");
 
   const [editorNote, setEditorNote] = useState("");
   const [editorBusy, setEditorBusy] = useState(false);
@@ -740,27 +745,6 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [drawerOpen, closeDrawer]);
-
-  useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem("djc-panel-size");
-      if (raw === "compact" || raw === "comfortable") setPanelSize(raw);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const togglePanelSize = useCallback(() => {
-    setPanelSize((prev) => {
-      const next = prev === "comfortable" ? "compact" : "comfortable";
-      try {
-        sessionStorage.setItem("djc-panel-size", next);
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }, []);
 
   const runSearch = useCallback(async () => {
     const copy = locale === "he" ? COPY_HE : COPY_EN;
@@ -1078,53 +1062,45 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
 
   const progress = step >= reviewStep ? 1 : (step + 1) / (lastBubbleStep + 1);
 
+  if (variant === "launcher") {
+    // One clean clickable card (no button-inside-a-button). Opens the CENTER monitor.
+    return (
+      <button
+        type="button"
+        onClick={() => (onOpen ? onOpen() : onDrawerOpenChange(true))}
+        dir={dir}
+        className="group flex w-full items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-3 text-start shadow-[0_8px_28px_rgba(0,0,0,0.35)] transition-colors duration-150 hover:border-white/[0.16] hover:bg-white/[0.06] active:scale-[0.99]"
+      >
+        <span
+          aria-hidden
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.05] text-[#7db8ff]"
+        >
+          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 4l1.7 4.3L18 10l-4.3 1.7L12 16l-1.7-4.3L6 10l4.3-1.7L12 4z" />
+            <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z" />
+          </svg>
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="library-text-title block text-sm font-semibold tracking-tight text-[#faf8f5]">{t.launcherTitle}</span>
+          <span className="mt-0.5 block text-[11px] text-slate-500">{t.openAssistant}</span>
+        </span>
+        <svg className="h-4 w-4 shrink-0 text-slate-500 transition-transform duration-150 group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+    );
+  }
+
   return (
     <>
-      <section className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03] p-3 shadow-[0_8px_28px_rgba(0,0,0,0.35)]">
-        <div className="relative flex flex-col items-center gap-3 sm:flex-row sm:items-center" dir={dir}>
-          <span
-            aria-hidden
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.05] text-[#7db8ff] sm:h-12 sm:w-12"
-          >
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 4l1.7 4.3L18 10l-4.3 1.7L12 16l-1.7-4.3L6 10l4.3-1.7L12 4z" />
-              <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z" />
-            </svg>
-          </span>
-          <div className="min-w-0 w-full flex-1 text-center sm:text-start">
-            <p className="library-text-title text-sm font-semibold tracking-tight text-[#faf8f5]">{t.launcherTitle}</p>
-            <button
-              type="button"
-              onClick={() => onDrawerOpenChange(true)}
-              className={`mt-2 inline-flex w-full max-w-[200px] justify-center px-3 py-1.5 sm:mt-1.5 ${launcherOpenBtn}`}
-            >
-              {t.openAssistant}
-            </button>
-          </div>
-        </div>
-      </section>
-
       {drawerOpen ? (
-        <>
-          <button
-            type="button"
-            aria-label={t.ariaClose}
-            className="fixed inset-0 z-[119] bg-slate-950/20"
-            onClick={closeDrawer}
-          />
-          <div
-            className={`fixed right-3 bottom-3 z-[120] flex flex-col rounded-2xl border border-white/[0.1] bg-[#101014] p-px shadow-[0_18px_48px_rgba(0,0,0,0.5)] ${
-              panelSize === "compact"
-                ? "w-[min(calc(100vw-1.5rem),320px)]"
-                : "w-[min(calc(100vw-1.5rem),428px)]"
-            }`}
-            role="dialog"
-            aria-labelledby="djc-assistant-title"
-            dir={dir}
-          >
-            <div
-              className={`${sidePanelInner} h-[min(680px,calc(100vh-3rem))] max-h-[calc(100vh-3rem)]`}
-            >
+        <div
+          className="sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-1 flex-col rounded-2xl border border-white/[0.1] bg-[#101014] p-px shadow-[0_18px_48px_rgba(0,0,0,0.5)]"
+          role="dialog"
+          aria-labelledby="djc-assistant-title"
+          dir={dir}
+        >
+            <div className={`${sidePanelInner} min-h-0 flex-1`}>
             <header className="shrink-0 border-b border-white/8 px-4 pb-3 pt-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1 pe-1">
@@ -1143,25 +1119,6 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
                   ) : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={togglePanelSize}
-                    aria-label={panelSize === "compact" ? t.widenPanel : t.narrowPanel}
-                    title={panelSize === "compact" ? t.widenPanel : t.narrowPanel}
-                    className="rounded-xl border border-white/10 bg-white/[0.05] px-2 py-2 text-slate-200 hover:bg-white/10"
-                  >
-                    {panelSize === "compact" ? (
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-                        <rect x="3" y="5" width="10" height="14" rx="2" />
-                        <rect x="15" y="5" width="6" height="14" rx="1.5" />
-                      </svg>
-                    ) : (
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-                        <rect x="3" y="5" width="14" height="14" rx="2" />
-                        <rect x="19" y="5" width="2.5" height="14" rx="0.75" />
-                      </svg>
-                    )}
-                  </button>
                   <button
                     type="button"
                     onClick={closeDrawer}
@@ -1520,7 +1477,6 @@ export function DjCreatorAiShell({ drawerOpen, onDrawerOpenChange }: DjCreatorAi
             ) : null}
             </div>
           </div>
-        </>
       ) : null}
     </>
   );

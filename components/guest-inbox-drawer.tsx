@@ -138,21 +138,30 @@ export function GuestInboxLauncher({ onOpen }: { onOpen: () => void }): ReactEle
   const t = he ? HE : EN;
   const dir: "rtl" | "ltr" = he ? "rtl" : "ltr";
   return (
-    <section className="rounded-2xl border border-white/[0.06] bg-[#101014] p-3.5" dir={dir}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-[13px] font-semibold text-slate-100">{t.title}</p>
-          <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-500">{t.subtitle}</p>
-        </div>
-        <button
-          type="button"
-          onClick={onOpen}
-          className="shrink-0 rounded-xl bg-[var(--sb-text)] px-3 py-2 text-[12px] font-semibold text-[#111114] transition active:scale-95"
-        >
-          {t.open}
-        </button>
-      </div>
-    </section>
+    <button
+      type="button"
+      onClick={onOpen}
+      dir={dir}
+      className="group flex w-full items-center gap-3 rounded-2xl border border-white/[0.06] bg-[#101014] p-3.5 text-start transition-colors duration-150 hover:border-white/[0.16] hover:bg-white/[0.04] active:scale-[0.99]"
+    >
+      <span
+        aria-hidden
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-[color:var(--sb-accent-soft)] text-[#409cff]"
+      >
+        <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px] font-semibold text-slate-100">{t.title}</span>
+        <span className="mt-0.5 line-clamp-1 block text-[11px] text-slate-500">{t.open}</span>
+      </span>
+      <svg className="h-4 w-4 shrink-0 text-slate-500 transition-transform duration-150 group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+        <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
   );
 }
 
@@ -174,6 +183,8 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
   const [resolving, setResolving] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
   const [cards, setCards] = useState<CardState[]>([]);
+  // URLs currently being resolved → shown as "thinking" spinner cards (paste OR WhatsApp).
+  const [pending, setPending] = useState<string[]>([]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -185,17 +196,23 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, ...p } : c)));
   }, []);
 
-  /** Resolve any URL (manual paste OR a WhatsApp message) into a card. */
+  /** Resolve any URL (manual paste OR a WhatsApp message) into a card. Shows a
+   *  "thinking" spinner card while the metadata is being fetched. */
   const addCardFromUrl = useCallback(async (rawUrl: string): Promise<boolean> => {
     const url = rawUrl.trim();
     if (!url) return false;
-    const card = await resolveGuestCard(url);
-    if (!card) return false;
-    setCards((prev) => {
-      if (prev.some((c) => c.card.rawUrl === card.rawUrl)) return prev; // de-dupe
-      return [{ id: `g-${++cardSeq}`, card, source: null, busy: false, note: null }, ...prev];
-    });
-    return true;
+    setPending((p) => (p.includes(url) ? p : [url, ...p]));
+    try {
+      const card = await resolveGuestCard(url);
+      if (!card) return false;
+      setCards((prev) => {
+        if (prev.some((c) => c.card.rawUrl === card.rawUrl)) return prev; // de-dupe
+        return [{ id: `g-${++cardSeq}`, card, source: null, busy: false, note: null }, ...prev];
+      });
+      return true;
+    } finally {
+      setPending((p) => p.filter((u) => u !== url));
+    }
   }, []);
 
   const handleResolve = useCallback(async () => {
@@ -377,7 +394,25 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
 
   const cardsBlock = (
     <div className="flex-1 space-y-2 overflow-y-auto px-3 pb-3">
-      {cards.length === 0 ? (
+      {/* "Thinking" cards while links resolve (paste OR WhatsApp arrivals). */}
+      {pending.map((url) => (
+        <div
+          key={`p-${url}`}
+          className="flex items-center gap-2.5 rounded-xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)]/40 p-2.5"
+        >
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-black/20">
+            <svg className="h-5 w-5 animate-spin text-[#409cff]" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-semibold text-slate-100">{t.resolving}</p>
+            <p className="truncate text-[11px] text-slate-500" dir="ltr">{url}</p>
+          </div>
+        </div>
+      ))}
+      {cards.length === 0 && pending.length === 0 ? (
         <p className="px-1 py-6 text-center text-[12px] text-slate-600">{t.empty}</p>
       ) : (
         cards.map((c) => (

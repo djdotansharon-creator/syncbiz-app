@@ -18,6 +18,7 @@ import {
   isDjCreatorHubModule,
   isEditCurrentModule,
   isGuestsModule,
+  isDjCreatorAssistantModule,
 } from "@/lib/center-module-context";
 import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
 import { MyMusicLibraryWorkspacePanel } from "@/components/my-music-library-workspace-panel";
@@ -256,7 +257,6 @@ export function SourcesManager({
   workspaceRouteCenter,
 }: Props) {
   const [effectiveSources, setEffectiveSources] = useState<UnifiedSource[]>(initialSources);
-  const [djCreatorOpen, setDjCreatorOpen] = useState(false);
   const prevIdsRef = useRef<string>("");
 
   const refetchSources = useCallback(() => {
@@ -289,8 +289,6 @@ export function SourcesManager({
       <SourcesManagerInner
         pageTitle={pageTitle}
         pageSubtitle={pageSubtitle}
-        djCreatorOpen={djCreatorOpen}
-        onDjCreatorOpenChange={setDjCreatorOpen}
         playerWorkspaceMode={playerWorkspaceMode}
         workspaceRouteCenter={workspaceRouteCenter}
       />
@@ -743,15 +741,11 @@ function makeCollectionContainers(sources: UnifiedSource[]) {
 function SourcesManagerInner({
   pageTitle,
   pageSubtitle,
-  djCreatorOpen,
-  onDjCreatorOpenChange,
   playerWorkspaceMode,
   workspaceRouteCenter,
 }: {
   pageTitle?: string;
   pageSubtitle?: string;
-  djCreatorOpen: boolean;
-  onDjCreatorOpenChange: (open: boolean) => void;
   playerWorkspaceMode?: boolean;
   workspaceRouteCenter?: ReactNode;
 }) {
@@ -2720,8 +2714,7 @@ function SourcesManagerInner({
               playlists={djCreatorHubSources}
               onClose={() => setActiveCenterModule(null)}
               onCreateNew={() => {
-                setActiveCenterModule(null);
-                onDjCreatorOpenChange(true);
+                setActiveCenterModule("dj-creator-assistant");
               }}
               onPlayPlaylist={(s) => playCollectionSelection("syncbiz_playlist", `syncbiz:${s.id}`)}
               onPlaylistDragStart={handleDjHubPlaylistDragStart}
@@ -2733,6 +2726,14 @@ function SourcesManagerInner({
             />
           ) : isGuestsModule(activeCenterModule) ? (
             <GuestInboxWorkspacePanel onClose={() => setActiveCenterModule(null)} />
+          ) : isDjCreatorAssistantModule(activeCenterModule) ? (
+            <DjCreatorAiShell
+              variant="panel"
+              drawerOpen
+              onDrawerOpenChange={(open) => {
+                if (!open) setActiveCenterModule(null);
+              }}
+            />
           ) : showLibraryCenter ? (<>
           <div className="library-command-rail flex min-w-0 flex-nowrap items-center justify-between gap-1.5 px-0.5 py-0.5">
             <div className="library-command-rail-browse flex min-w-0 flex-nowrap items-center gap-1.5">
@@ -3849,7 +3850,6 @@ function SourcesManagerInner({
                         onClick={() => {
                           /* DJ AI = a NORMAL library view (operator direction) — same grid,
                              chips and search stay visible; no takeover, no X. */
-                          onDjCreatorOpenChange(false);
                           setActiveCenterModule(null);
                           setSelection({ type: "library_view", id: "dj_ai" });
                         }}
@@ -3894,7 +3894,12 @@ function SourcesManagerInner({
         <aside className="flex w-full min-w-0 flex-col self-start p-1.5 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-hidden">
           <div className="flex min-h-0 flex-1 flex-col gap-4">
             <div className="shrink-0">
-              <DjCreatorAiShell drawerOpen={djCreatorOpen} onDrawerOpenChange={onDjCreatorOpenChange} />
+              <DjCreatorAiShell
+                variant="launcher"
+                drawerOpen={false}
+                onDrawerOpenChange={() => {}}
+                onOpen={() => setActiveCenterModule("dj-creator-assistant")}
+              />
             </div>
             <div className="shrink-0">
               <GuestInboxLauncher onOpen={() => setActiveCenterModule("guests")} />
