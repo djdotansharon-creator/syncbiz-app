@@ -45,13 +45,14 @@ type Copy = {
   waLoading: string;
   waSolo: string;
   waAllChats: string;
+  inboxTitle: string;
 };
 
 const EN: Copy = {
   title: "Guests",
   subtitle: "Paste a music link — review, then play or add to the GUESTS playlist.",
   open: "Open Guest inbox",
-  close: "Close Guest inbox",
+  close: "Close",
   placeholder: "Paste a music link (YouTube, SoundCloud…)",
   resolve: "Add",
   resolving: "Resolving…",
@@ -72,13 +73,14 @@ const EN: Copy = {
   waLoading: "Loading WhatsApp…",
   waSolo: "Only this chat",
   waAllChats: "All chats",
+  inboxTitle: "Inbox",
 };
 
 const HE: Copy = {
   title: "אורחים",
   subtitle: "הדביקו קישור לשיר — לבדוק, ואז לנגן או להוסיף לפלייליסט GUESTS.",
   open: "פתיחת תיבת האורחים",
-  close: "סגירת תיבת האורחים",
+  close: "סגור",
   placeholder: "הדביקו קישור לשיר (YouTube, SoundCloud…)",
   resolve: "הוסף",
   resolving: "מזהה…",
@@ -99,6 +101,7 @@ const HE: Copy = {
   waLoading: "טוען WhatsApp…",
   waSolo: "רק הצ'אט הזה",
   waAllChats: "כל הצ'אטים",
+  inboxTitle: "תיבה",
 };
 
 let cardSeq = 0;
@@ -125,13 +128,40 @@ function getDesktopWA(): DesktopWA | null {
     : null;
 }
 
-export function GuestInboxDrawer({
-  drawerOpen,
-  onDrawerOpenChange,
-}: {
-  drawerOpen: boolean;
-  onDrawerOpenChange: (open: boolean) => void;
-}): ReactElement {
+/**
+ * Right-rail launcher card. Clicking it opens the Guest inbox in the CENTER
+ * "monitor" area (like Jingles / DJ Creator) — see SourcesManager wiring.
+ */
+export function GuestInboxLauncher({ onOpen }: { onOpen: () => void }): ReactElement {
+  const { locale } = useLocale();
+  const he = locale === "he";
+  const t = he ? HE : EN;
+  const dir: "rtl" | "ltr" = he ? "rtl" : "ltr";
+  return (
+    <section className="rounded-2xl border border-white/[0.06] bg-[#101014] p-3.5" dir={dir}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[13px] font-semibold text-slate-100">{t.title}</p>
+          <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-500">{t.subtitle}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="shrink-0 rounded-xl bg-[var(--sb-text)] px-3 py-2 text-[12px] font-semibold text-[#111114] transition active:scale-95"
+        >
+          {t.open}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Guest inbox — opens in the CENTER monitor area (full-width panel like the
+ * Jingles console). When WhatsApp is connected on desktop, the panel splits into
+ * two: the embedded WhatsApp conversation (left) + the resolved-link inbox (right).
+ */
+export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): ReactElement {
   const { locale } = useLocale();
   const he = locale === "he";
   const t = he ? HE : EN;
@@ -145,13 +175,11 @@ export function GuestInboxDrawer({
   const [inputError, setInputError] = useState<string | null>(null);
   const [cards, setCards] = useState<CardState[]>([]);
 
-  const close = useCallback(() => onDrawerOpenChange(false), [onDrawerOpenChange]);
   useEffect(() => {
-    if (!drawerOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [drawerOpen, close]);
+  }, [onClose]);
 
   const patch = useCallback((id: string, p: Partial<CardState>) => {
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, ...p } : c)));
@@ -232,7 +260,7 @@ export function GuestInboxDrawer({
 
   // Keep the embedded WhatsApp view glued to the region rect (survives resize/zoom).
   useEffect(() => {
-    if (!wa || !drawerOpen || !waStatus.connected) return;
+    if (!wa || !waStatus.connected) return;
     const el = waRegionRef.current;
     if (!el) return;
     const push = () => {
@@ -253,17 +281,16 @@ export function GuestInboxDrawer({
       window.removeEventListener("resize", push);
       window.clearInterval(iv);
     };
-  }, [wa, drawerOpen, waStatus.connected]);
+  }, [wa, waStatus.connected]);
 
-  // Detach the embedded view whenever it shouldn't be showing (drawer closed /
-  // not connected). The session stays alive so background capture keeps working.
+  // Detach the embedded view whenever it shouldn't show (not connected). The
+  // session stays alive so background capture keeps working.
   useEffect(() => {
-    if (!wa) return;
-    if (drawerOpen && waStatus.connected) return;
+    if (!wa || waStatus.connected) return;
     void wa.hideWhatsAppWindow();
-  }, [wa, drawerOpen, waStatus.connected]);
+  }, [wa, waStatus.connected]);
 
-  // On unmount, make sure the overlay never floats over the app.
+  // On unmount (panel closed / switched away), never leave the overlay floating.
   useEffect(() => {
     return () => {
       getDesktopWA()?.hideWhatsAppWindow();
@@ -317,12 +344,12 @@ export function GuestInboxDrawer({
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
-    if (drawerOpen) inputRef.current?.focus();
-  }, [drawerOpen]);
+    inputRef.current?.focus();
+  }, []);
 
   // ── Reusable blocks ──
   const inputBlock = (
-    <div className="border-b border-white/[0.06] px-3 py-3">
+    <div className="px-3 py-3">
       <div className="flex items-center gap-2">
         <input
           ref={inputRef}
@@ -349,7 +376,7 @@ export function GuestInboxDrawer({
   );
 
   const cardsBlock = (
-    <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
+    <div className="flex-1 space-y-2 overflow-y-auto px-3 pb-3">
       {cards.length === 0 ? (
         <p className="px-1 py-6 text-center text-[12px] text-slate-600">{t.empty}</p>
       ) : (
@@ -388,40 +415,9 @@ export function GuestInboxDrawer({
     </div>
   );
 
-  const header = (
-    <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-      <div className="flex items-center gap-2">
-        <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-[color:var(--sb-accent-soft)] text-[#409cff]">
-          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-            <circle cx="9" cy="7" r="4" />
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-          </svg>
-        </span>
-        <span className="text-[14px] font-semibold text-slate-100">{t.title}</span>
-        {embedded ? (
-          <span className="ml-1 flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            {t.waConnected}
-          </span>
-        ) : null}
-      </div>
-      <button
-        type="button"
-        onClick={close}
-        aria-label={t.close}
-        className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-200"
-      >
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
-        </svg>
-      </button>
-    </div>
-  );
-
-  // WhatsApp connect prompt (shown when the desktop bridge exists but not connected).
+  // WhatsApp connect prompt (desktop bridge present but not connected yet).
   const waConnectBlock = wa ? (
-    <div className="border-b border-white/[0.06] px-3 py-2.5">
+    <div className="border-t border-white/[0.06] px-3 py-2.5">
       <button
         type="button"
         onClick={() => void connectWa()}
@@ -438,104 +434,97 @@ export function GuestInboxDrawer({
   ) : null;
 
   return (
-    <>
-      {/* Launcher card in the rail (mirrors the DJ Creator shell). */}
-      <section className="rounded-2xl border border-white/[0.06] bg-[#101014] p-3.5" dir={dir}>
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-[13px] font-semibold text-slate-100">{t.title}</p>
-            <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-500">{t.subtitle}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => onDrawerOpenChange(true)}
-            className="shrink-0 rounded-xl bg-[var(--sb-text)] px-3 py-2 text-[12px] font-semibold text-[#111114] transition active:scale-95"
-          >
-            {t.open}
-          </button>
+    <div
+      dir={dir}
+      className="sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101014]"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-[color:var(--sb-accent-soft)] text-[#409cff]">
+            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+          </span>
+          <span className="text-[15px] font-semibold text-slate-100">{t.title}</span>
+          {embedded ? (
+            <span className="ml-1 flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              {t.waConnected}
+            </span>
+          ) : null}
         </div>
-      </section>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t.close}
+          className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-200"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
 
-      {drawerOpen ? (
-        <>
-          <button
-            type="button"
-            aria-label={t.close}
-            onClick={close}
-            className="fixed inset-0 z-[119] bg-slate-950/20"
-          />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={t.title}
-            dir={dir}
-            className={`fixed bottom-3 right-3 z-[120] flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101014] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)] ${
-              embedded
-                ? "h-[min(760px,calc(100vh-1.5rem))] w-[min(960px,calc(100vw-1.5rem))]"
-                : "h-[min(680px,calc(100vh-3rem))] w-[min(420px,calc(100vw-1.5rem))]"
-            }`}
-          >
-            {header}
-
-            {embedded ? (
-              // Two panes: embedded WhatsApp (left) + Guest inbox (right).
-              <div className="flex min-h-0 flex-1">
-                <div className="flex w-[58%] min-w-0 shrink-0 flex-col border-e border-white/[0.06]">
-                  <div className="flex items-center justify-between px-3 py-2">
-                    <span className="flex items-center gap-1.5 text-[12px] font-medium text-emerald-300">
-                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-                      </svg>
-                      WhatsApp
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={toggleSolo}
-                        title={waSolo ? t.waAllChats : t.waSolo}
-                        className="rounded-lg border border-white/[0.12] bg-white/[0.04] px-2 py-1 text-[11px] font-semibold text-slate-100 transition hover:bg-white/[0.08]"
-                      >
-                        {waSolo ? t.waAllChats : t.waSolo}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void disconnectWa()}
-                        disabled={waBusy}
-                        className="rounded-lg px-2 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 disabled:opacity-50"
-                      >
-                        {t.waDisconnect}
-                      </button>
-                    </div>
-                  </div>
-                  {/* The native WhatsApp view is overlaid exactly on this box. The
-                      text behind it only shows in the brief moment before load. */}
-                  <div
-                    ref={waRegionRef}
-                    className="relative m-2 mt-0 flex-1 overflow-hidden rounded-xl bg-black/50"
-                  >
-                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                      <span className="text-[12px] text-slate-600">{t.waLoading}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex min-w-0 flex-1 flex-col">
-                  {inputBlock}
-                  {cardsBlock}
-                </div>
+      {embedded ? (
+        // Two panes: embedded WhatsApp (left) + Guest inbox (right).
+        <div className="flex min-h-0 flex-1">
+          <div className="flex w-[58%] min-w-0 shrink-0 flex-col border-e border-white/[0.06]">
+            <div className="flex items-center justify-between px-3 py-2">
+              <span className="flex items-center gap-1.5 text-[12px] font-medium text-emerald-300">
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                </svg>
+                WhatsApp
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={toggleSolo}
+                  title={waSolo ? t.waAllChats : t.waSolo}
+                  className="rounded-lg border border-white/[0.12] bg-white/[0.04] px-2 py-1 text-[11px] font-semibold text-slate-100 transition hover:bg-white/[0.08]"
+                >
+                  {waSolo ? t.waAllChats : t.waSolo}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void disconnectWa()}
+                  disabled={waBusy}
+                  className="rounded-lg px-2 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 disabled:opacity-50"
+                >
+                  {t.waDisconnect}
+                </button>
               </div>
-            ) : (
-              // Single column: paste + connect prompt + cards.
-              <>
-                {inputBlock}
-                {waConnectBlock}
-                {cardsBlock}
-              </>
-            )}
+            </div>
+            {/* The native WhatsApp view is overlaid exactly on this box. */}
+            <div
+              ref={waRegionRef}
+              className="relative m-2 mt-0 flex-1 overflow-hidden rounded-xl bg-black/50"
+            >
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <span className="text-[12px] text-slate-600">{t.waLoading}</span>
+              </div>
+            </div>
           </div>
-        </>
-      ) : null}
-    </>
+
+          <div className="flex min-w-0 flex-1 flex-col">
+            {inputBlock}
+            <div className="border-t border-white/[0.06]" />
+            {cardsBlock}
+          </div>
+        </div>
+      ) : (
+        // Single column: paste + connect prompt + cards.
+        <div className="flex min-h-0 flex-1 flex-col">
+          {inputBlock}
+          <div className="border-t border-white/[0.06]" />
+          {cardsBlock}
+          {waConnectBlock}
+        </div>
+      )}
+    </div>
   );
 }
 

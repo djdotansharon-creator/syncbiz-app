@@ -17,6 +17,7 @@ import {
   isMyMusicLibraryModule,
   isDjCreatorHubModule,
   isEditCurrentModule,
+  isGuestsModule,
 } from "@/lib/center-module-context";
 import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
 import { MyMusicLibraryWorkspacePanel } from "@/components/my-music-library-workspace-panel";
@@ -41,7 +42,7 @@ import { LibrarySourceItemActions } from "@/components/library-source-item-actio
 import { LibraryInputArea } from "@/components/library-input-area";
 import { PlaylistAiShellMenu } from "@/components/playlist-ai-shell-menu";
 import { DjCreatorAiShell } from "@/components/dj-creator-ai-shell";
-import { GuestInboxDrawer } from "@/components/guest-inbox-drawer";
+import { GuestInboxLauncher, GuestInboxWorkspacePanel } from "@/components/guest-inbox-drawer";
 import { EditPlaylistForm } from "@/components/edit-playlist-form";
 import { EditSourceForm } from "@/components/edit-source-form";
 import { GuestLinkButton, guestLinkLedButtonClass } from "@/components/guest-link-button";
@@ -256,7 +257,6 @@ export function SourcesManager({
 }: Props) {
   const [effectiveSources, setEffectiveSources] = useState<UnifiedSource[]>(initialSources);
   const [djCreatorOpen, setDjCreatorOpen] = useState(false);
-  const [guestsOpen, setGuestsOpen] = useState(false);
   const prevIdsRef = useRef<string>("");
 
   const refetchSources = useCallback(() => {
@@ -291,8 +291,6 @@ export function SourcesManager({
         pageSubtitle={pageSubtitle}
         djCreatorOpen={djCreatorOpen}
         onDjCreatorOpenChange={setDjCreatorOpen}
-        guestsOpen={guestsOpen}
-        onGuestsOpenChange={setGuestsOpen}
         playerWorkspaceMode={playerWorkspaceMode}
         workspaceRouteCenter={workspaceRouteCenter}
       />
@@ -747,8 +745,6 @@ function SourcesManagerInner({
   pageSubtitle,
   djCreatorOpen,
   onDjCreatorOpenChange,
-  guestsOpen,
-  onGuestsOpenChange,
   playerWorkspaceMode,
   workspaceRouteCenter,
 }: {
@@ -756,8 +752,6 @@ function SourcesManagerInner({
   pageSubtitle?: string;
   djCreatorOpen: boolean;
   onDjCreatorOpenChange: (open: boolean) => void;
-  guestsOpen: boolean;
-  onGuestsOpenChange: (open: boolean) => void;
   playerWorkspaceMode?: boolean;
   workspaceRouteCenter?: ReactNode;
 }) {
@@ -2737,6 +2731,8 @@ function SourcesManagerInner({
               target={activeCenterModule.target}
               onClose={() => setActiveCenterModule(null)}
             />
+          ) : isGuestsModule(activeCenterModule) ? (
+            <GuestInboxWorkspacePanel onClose={() => setActiveCenterModule(null)} />
           ) : showLibraryCenter ? (<>
           <div className="library-command-rail flex min-w-0 flex-nowrap items-center justify-between gap-1.5 px-0.5 py-0.5">
             <div className="library-command-rail-browse flex min-w-0 flex-nowrap items-center gap-1.5">
@@ -3901,7 +3897,7 @@ function SourcesManagerInner({
               <DjCreatorAiShell drawerOpen={djCreatorOpen} onDrawerOpenChange={onDjCreatorOpenChange} />
             </div>
             <div className="shrink-0">
-              <GuestInboxDrawer drawerOpen={guestsOpen} onDrawerOpenChange={onGuestsOpenChange} />
+              <GuestInboxLauncher onOpen={() => setActiveCenterModule("guests")} />
             </div>
             <section className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-center justify-between gap-2 px-2 pb-1 pt-1">

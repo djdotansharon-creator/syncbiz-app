@@ -77,6 +77,9 @@ UI (React/Next.js)
   → Device client  (browser tab, Electron, or remote agent)
 ```
 
+### Center Monitor (UI principle — owner directive)
+The central pane below the player is the system's **monitor**: it swaps "channels" by what the operator clicks. The Library grid, Jingles console, DJ Creator hub, My Music, and the Guests/WhatsApp inbox all render in the **same center slot** — never as floating drawers/popups over the player. Add a new full-surface feature by adding a `CenterModule` id (`lib/center-module-context.tsx`) + a `*WorkspacePanel({ onClose })` (root `sb-anim-rise … max-h-[min(85vh,760px)]`) wired into the `sources-manager.tsx` center ternary, plus a launcher that calls `setActiveCenterModule(<id>)`. See `docs/PROJECT-STATE.md` → "CENTER MONITOR principle".
+
 ### Key Patterns
 
 **Store (lib/store.ts)**  
