@@ -9,7 +9,10 @@ import {
   resolveGuestCard,
   guestCardToSource,
   addSourceToGuestsPlaylist,
+  loadGuestsPlaylistTracks,
+  guestSavedTrackToSource,
   type GuestCard,
+  type GuestSavedTrack,
 } from "@/lib/guest-playlist-client";
 import type { UnifiedSource } from "@/lib/source-types";
 
@@ -46,6 +49,9 @@ type Copy = {
   waSolo: string;
   waAllChats: string;
   inboxTitle: string;
+  incomingTitle: string;
+  savedTitle: string;
+  savedEmpty: string;
 };
 
 const EN: Copy = {
@@ -74,6 +80,9 @@ const EN: Copy = {
   waSolo: "Only this chat",
   waAllChats: "All chats",
   inboxTitle: "Inbox",
+  incomingTitle: "New links",
+  savedTitle: "In GUESTS",
+  savedEmpty: "Songs you add to GUESTS show up here.",
 };
 
 const HE: Copy = {
@@ -102,6 +111,9 @@ const HE: Copy = {
   waSolo: "רק הצ'אט הזה",
   waAllChats: "כל הצ'אטים",
   inboxTitle: "תיבה",
+  incomingTitle: "קישורים חדשים",
+  savedTitle: "ב-GUESTS",
+  savedEmpty: "שירים שתוסיפו ל-GUESTS יופיעו כאן.",
 };
 
 let cardSeq = 0;
@@ -185,6 +197,18 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
   const [cards, setCards] = useState<CardState[]>([]);
   // URLs currently being resolved → shown as "thinking" spinner cards (paste OR WhatsApp).
   const [pending, setPending] = useState<string[]>([]);
+  // Songs already saved in the GUESTS playlist — always findable/playable here.
+  const [saved, setSaved] = useState<GuestSavedTrack[]>([]);
+
+  const refreshSaved = useCallback(() => {
+    void loadGuestsPlaylistTracks().then(setSaved);
+  }, []);
+  useEffect(() => {
+    refreshSaved();
+    const onLib = () => refreshSaved();
+    window.addEventListener("library-updated", onLib);
+    return () => window.removeEventListener("library-updated", onLib);
+  }, [refreshSaved]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -350,11 +374,22 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
         if (!src) return patch(c.id, { busy: false, note: t.failed });
         const res = await addSourceToGuestsPlaylist(src);
         patch(c.id, { busy: false, note: res.ok ? (res.alreadyThere ? t.alreadyThere : t.added) : t.failed });
+        if (res.ok) refreshSaved();
       } catch {
         patch(c.id, { busy: false, note: t.failed });
       }
     },
-    [ensureSource, patch, t.added, t.alreadyThere, t.failed],
+    [ensureSource, patch, t.added, t.alreadyThere, t.failed, refreshSaved],
+  );
+
+  /** Play a song already saved in GUESTS (routes CONTROL → MASTER, else local). */
+  const playSaved = useCallback(
+    (tk: GuestSavedTrack) => {
+      const src = guestSavedTrackToSource(tk);
+      if (deviceCtx?.playSourceOrSend) deviceCtx.playSourceOrSend(src);
+      else playback.playSource(src);
+    },
+    [deviceCtx, playback],
   );
 
   const reject = useCallback((id: string) => setCards((prev) => prev.filter((c) => c.id !== id)), []);
@@ -392,8 +427,47 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
     </div>
   );
 
+  const sectionHeader = (label: string, count?: number) => (
+    <p className="px-1 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+      {label}
+      {typeof count === "number" && count > 0 ? <span className="ml-1 text-slate-600">· {count}</span> : null}
+    </p>
+  );
+
+  const savedBlock = (
+    <div className="max-h-[42%] shrink-0 overflow-y-auto border-t border-white/[0.06] px-3 py-2">
+      {sectionHeader(t.savedTitle, saved.length)}
+      {saved.length === 0 ? (
+        <p className="px-1 py-2 text-[11px] text-slate-600">{t.savedEmpty}</p>
+      ) : (
+        <div className="space-y-1.5">
+          {saved.map((tk) => (
+            <div key={tk.id} className="flex items-center gap-2.5 rounded-xl border border-white/[0.06] bg-black/20 p-2">
+              <span className="h-9 w-9 shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                {tk.cover ? <HydrationSafeImage src={tk.cover} alt="" className="h-full w-full object-cover" /> : null}
+              </span>
+              <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-slate-100">{tk.title}</p>
+              <button
+                type="button"
+                onClick={() => playSaved(tk)}
+                aria-label={t.playNow}
+                title={t.playNow}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--sb-text)] text-[#111114] transition active:scale-90"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   const cardsBlock = (
     <div className="flex-1 space-y-2 overflow-y-auto px-3 pb-3">
+      {pending.length > 0 || cards.length > 0 ? sectionHeader(t.incomingTitle) : null}
       {/* "Thinking" cards while links resolve (paste OR WhatsApp arrivals). */}
       {pending.map((url) => (
         <div
@@ -548,14 +622,16 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
             {inputBlock}
             <div className="border-t border-white/[0.06]" />
             {cardsBlock}
+            {savedBlock}
           </div>
         </div>
       ) : (
-        // Single column: paste + connect prompt + cards.
+        // Single column: paste + connect prompt + cards + saved GUESTS.
         <div className="flex min-h-0 flex-1 flex-col">
           {inputBlock}
           <div className="border-t border-white/[0.06]" />
           {cardsBlock}
+          {savedBlock}
           {waConnectBlock}
         </div>
       )}

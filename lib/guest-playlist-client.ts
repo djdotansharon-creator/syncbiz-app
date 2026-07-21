@@ -98,6 +98,84 @@ export async function guestCardToSource(card: GuestCard): Promise<UnifiedSource>
   };
 }
 
+/** One track already saved in the GUESTS playlist (for the "In GUESTS" list). */
+export type GuestSavedTrack = {
+  id: string;
+  title: string;
+  cover: string | null;
+  url: string;
+  type: string;
+};
+
+/** Read the saved GUESTS playlist tracks so the inbox can always show/play them. */
+export async function loadGuestsPlaylistTracks(): Promise<GuestSavedTrack[]> {
+  try {
+    const r = await fetch("/api/playlists");
+    if (!r.ok) return [];
+    const j = await r.json();
+    if (!Array.isArray(j)) return [];
+    const gp = (j as Playlist[]).find(
+      (p) => (p.name ?? "").trim().toUpperCase() === GUESTS_PLAYLIST_NAME,
+    );
+    if (!gp) return [];
+    const g = await fetch(`/api/playlists/${gp.id}`);
+    if (!g.ok) return [];
+    const full = (await g.json()) as Playlist;
+    // Read tracks directly (order → track by id), robust to getPlaylistTracks edge cases.
+    const rawTracks = Array.isArray(full.tracks) ? full.tracks : [];
+    const order = Array.isArray(full.order) && full.order.length > 0 ? full.order : rawTracks.map((t) => t.id);
+    const ordered = order
+      .map((id) => rawTracks.find((t) => t.id === id))
+      .filter((t): t is PlaylistTrack => !!t);
+    const finalTracks = ordered.length > 0 ? ordered : rawTracks;
+    return finalTracks
+      .filter((tk) => typeof tk.url === "string" && tk.url.trim().length > 0)
+      .map((tk) => ({
+        id: tk.id,
+        title: tk.name || "Untitled",
+        cover: (tk.cover ?? null) || null,
+        url: tk.url,
+        type: tk.type ?? "stream-url",
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/** Build a playable UnifiedSource from a saved GUESTS track (url already resolved). */
+export function guestSavedTrackToSource(tk: GuestSavedTrack): UnifiedSource {
+  const type = tk.type as PlaylistType;
+  const trackId = tk.id || rid("t-guest");
+  const track: PlaylistTrack = {
+    id: trackId,
+    name: tk.title,
+    type,
+    url: tk.url,
+    cover: tk.cover ?? undefined,
+  };
+  const playlist: Playlist = {
+    id: rid("guest-pl"),
+    name: tk.title,
+    genre: "Guests",
+    type,
+    url: tk.url,
+    thumbnail: tk.cover ?? "",
+    createdAt: new Date().toISOString(),
+    tracks: [track],
+    order: [trackId],
+  };
+  return {
+    id: `pl-${playlist.id}`,
+    title: tk.title,
+    genre: "Guests",
+    cover: tk.cover,
+    type: tk.type as UnifiedSource["type"],
+    url: tk.url,
+    origin: "playlist",
+    playlist,
+  };
+}
+
 export type AddToGuestsResult = { ok: boolean; created: boolean; alreadyThere: boolean };
 
 /** Append a resolved source to the workspace "GUESTS" playlist (create-if-missing). */
