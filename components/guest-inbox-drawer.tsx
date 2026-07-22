@@ -52,6 +52,8 @@ type Copy = {
   incomingTitle: string;
   savedTitle: string;
   savedEmpty: string;
+  copyLink: string;
+  linkCopied: string;
 };
 
 const EN: Copy = {
@@ -83,6 +85,8 @@ const EN: Copy = {
   incomingTitle: "New links",
   savedTitle: "In GUESTS",
   savedEmpty: "Songs you add to GUESTS show up here.",
+  copyLink: "Copy guest link",
+  linkCopied: "Copied!",
 };
 
 const HE: Copy = {
@@ -114,6 +118,8 @@ const HE: Copy = {
   incomingTitle: "קישורים חדשים",
   savedTitle: "ב-GUESTS",
   savedEmpty: "שירים שתוסיפו ל-GUESTS יופיעו כאן.",
+  copyLink: "העתק לינק אורחים",
+  linkCopied: "הועתק!",
 };
 
 let cardSeq = 0;
@@ -399,6 +405,21 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
     inputRef.current?.focus();
   }, []);
 
+  // "Copy guest link" — the branch's guest-recommendation link (moved here from the
+  // old toolbar button, so guests without WhatsApp can still recommend a song).
+  const guestLink = (deviceCtx as { guestLink?: string | null } | null)?.guestLink ?? null;
+  const [linkCopied, setLinkCopied] = useState(false);
+  const copyGuestLink = useCallback(async () => {
+    if (!guestLink) return;
+    try {
+      await navigator.clipboard.writeText(guestLink);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  }, [guestLink]);
+
   // ── Reusable blocks ──
   const inputBlock = (
     <div className="px-3 py-3">
@@ -565,16 +586,32 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
             </span>
           ) : null}
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t.close}
-          className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-200"
-        >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1.5">
+          {guestLink ? (
+            <button
+              type="button"
+              onClick={() => void copyGuestLink()}
+              title={t.copyLink}
+              className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-medium text-slate-200 transition hover:bg-white/[0.08]"
+            >
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+              </svg>
+              {linkCopied ? t.linkCopied : t.copyLink}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t.close}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-200"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {embedded ? (

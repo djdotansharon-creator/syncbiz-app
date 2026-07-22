@@ -43,10 +43,10 @@ import { LibrarySourceItemActions } from "@/components/library-source-item-actio
 import { LibraryInputArea } from "@/components/library-input-area";
 import { PlaylistAiShellMenu } from "@/components/playlist-ai-shell-menu";
 import { DjCreatorAiShell } from "@/components/dj-creator-ai-shell";
-import { GuestInboxLauncher, GuestInboxWorkspacePanel } from "@/components/guest-inbox-drawer";
+import { GuestInboxWorkspacePanel } from "@/components/guest-inbox-drawer";
 import { EditPlaylistForm } from "@/components/edit-playlist-form";
 import { EditSourceForm } from "@/components/edit-source-form";
-import { GuestLinkButton, guestLinkLedButtonClass } from "@/components/guest-link-button";
+import { guestLinkLedButtonClass } from "@/components/guest-link-button";
 import { getFavorites, addFavorite as addFav, removeFavorite as removeFav } from "@/lib/favorites-store";
 import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal, removePlaylistFromLocal, removeRadioFromLocal } from "@/lib/unified-sources-client";
 import { getPlaylistTracks, type Playlist, type ScheduleContributorBlock } from "@/lib/playlist-types";
@@ -2838,7 +2838,22 @@ function SourcesManagerInner({
                   </svg>
                   <span>Shazam</span>
                 </button>
-                <GuestLinkButton className="h-10 shrink-0 justify-center px-3" />
+                {/* Single Guest entry point — opens the Guest inbox in the center
+                    monitor (the right-rail launcher was removed). */}
+                <button
+                  type="button"
+                  onClick={() => setActiveCenterModule("guests")}
+                  className={[guestLinkLedButtonClass, "h-10 shrink-0 justify-center px-3"].join(" ")}
+                  title="Open Guest inbox"
+                  aria-label="Open Guest inbox"
+                >
+                  <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+                  </svg>
+                  <span>Guest</span>
+                </button>
                 <button
                   type="button"
                   className={[guestLinkLedButtonClass, "h-10 shrink-0 justify-center px-3"].join(" ")}
@@ -3900,9 +3915,6 @@ function SourcesManagerInner({
                 onDrawerOpenChange={() => {}}
                 onOpen={() => setActiveCenterModule("dj-creator-assistant")}
               />
-            </div>
-            <div className="shrink-0">
-              <GuestInboxLauncher onOpen={() => setActiveCenterModule("guests")} />
             </div>
             <section className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-center justify-between gap-2 px-2 pb-1 pt-1">
