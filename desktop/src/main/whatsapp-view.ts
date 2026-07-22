@@ -72,16 +72,31 @@ const CAPTURE_MARKER = "[[SBWA]]";
 // at once; only a genuinely-new arrival trickles in alone. We buffer candidates
 // for 900ms — a small buffer (≤3) is real arrivals → report; a large buffer is
 // history → drop. `seen` de-dupes permanently so nothing repeats.
-// "Solo chat" declutter (MONI-style): hide WhatsApp's left chat-LIST column so
-// only the open conversation shows — WhatsApp's own conversation header already
-// carries the sender's photo + name (or phone when not a saved contact), which is
-// exactly the look the operator wants. Gated by a class on <html> so we can toggle
-// it live. `#side`/`#pane-side` are WhatsApp Web's long-stable list-column IDs;
-// hiding the sibling lets `#main` (the conversation) reflow to full width.
-const DECLUTTER_CSS = `
-  html.sb-solo #side, html.sb-solo #pane-side { display: none !important; }
-  html.sb-solo #main { flex: 1 1 auto !important; }
-`;
+// "Solo chat" declutter (MONI-style): show ONLY the open conversation. Rather than
+// guess WhatsApp's ever-changing class names, we hide every SIBLING of `#main`
+// (the conversation) — that removes both the chat-LIST column (#side) AND the left
+// icon NAV rail in one shot, whatever they're called — and stretch `#main` to full
+// width. `#main` only exists once a chat is open, so before that the list stays
+// visible (the operator can pick a chat); the 1s re-apply then goes solo. Toggling
+// `window.__sbSolo` + calling `window.__sbSoloApply()` switches it live.
+const SOLO_INSTALL = `(function(){
+  function apply(){
+    try {
+      var main = document.getElementById('main');
+      if (!main || !main.parentElement) return;
+      var kids = main.parentElement.children;
+      for (var i=0;i<kids.length;i++){
+        var el = kids[i];
+        if (el === main){ el.style.flex='1 1 100%'; el.style.maxWidth='100%'; el.style.width='100%'; }
+        else { el.style.display = window.__sbSolo ? 'none' : ''; }
+      }
+      if (!window.__sbSolo){ main.style.flex=''; main.style.maxWidth=''; main.style.width=''; }
+    } catch(e){}
+  }
+  window.__sbSoloApply = apply;
+  apply();
+  if (!window.__sbSoloInt) window.__sbSoloInt = setInterval(apply, 1000);
+})();`;
 
 const OBSERVER_SCRIPT = `(function(){
   if (window.__sbWaObs) return; window.__sbWaObs = 1;
@@ -177,13 +192,11 @@ export class WhatsAppWindow {
       }
     });
 
-    // On every load: apply the declutter CSS + current solo state, then (re)inject
-    // the DOM observer that auto-forwards music links to the Guest inbox.
+    // On every load: set the current solo state + install the solo controller, then
+    // (re)inject the DOM observer that auto-forwards music links to the Guest inbox.
     wc.on("did-finish-load", () => {
-      wc.insertCSS(DECLUTTER_CSS).catch(() => {});
-      wc.executeJavaScript(
-        `document.documentElement.classList.toggle('sb-solo', ${this.soloMode});`,
-      ).catch(() => {});
+      wc.executeJavaScript(`window.__sbSolo=${this.soloMode};`).catch(() => {});
+      wc.executeJavaScript(SOLO_INSTALL).catch(() => {});
       wc.executeJavaScript(OBSERVER_SCRIPT).catch(() => {});
     });
     wc.on("console-message", (_event: unknown, _level: unknown, message: string) => {
@@ -260,12 +273,12 @@ export class WhatsAppWindow {
     this.attach(mainWin);
   }
 
-  /** Toggle MONI-style solo view (only the open conversation, list hidden). */
+  /** Toggle MONI-style solo view (only the open conversation; list + nav hidden). */
   setSoloMode(on: boolean): void {
     this.soloMode = on;
     if (this.view) {
       this.view.webContents
-        .executeJavaScript(`document.documentElement.classList.toggle('sb-solo', ${on});`)
+        .executeJavaScript(`window.__sbSolo=${on}; window.__sbSoloApply && window.__sbSoloApply();`)
         .catch(() => {});
     }
   }
