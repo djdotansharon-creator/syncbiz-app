@@ -18,9 +18,12 @@ import {
 } from "@/lib/recommendations/catalog-item-eligibility";
 import {
   computeCatalogTagSuggestions,
+  computeRelatedTagSuggestions,
+  suggestedEnergyBandForPicks,
   inferCatalogLanguageSignals,
   type CatalogTagSuggestion,
 } from "@/lib/catalog-tagging-suggestions";
+import { loadTagPacks } from "@/lib/recommendations/load-tag-packs";
 
 type TaxonomyTagRow = {
   id: string;
@@ -370,6 +373,74 @@ export function CatalogItemTaxonomyEditor({
     linkedIds,
     metadataSuggestions,
   ]);
+
+  // ── Related-tag suggestions from curated packs (driven by the admin's picks) ──
+  const tagPacks = useMemo(() => loadTagPacks(), []);
+
+  /** Slugs of tags currently linked OR pending — the "picks" that drive pack matches. */
+  const pickedSlugs = useMemo(() => {
+    const ids = new Set<string>([...linkedIds, ...pendingIds]);
+    const slugs: string[] = [];
+    for (const t of dictionary) if (ids.has(t.id)) slugs.push(t.slug);
+    return slugs;
+  }, [dictionary, linkedIds, pendingIds]);
+
+  const categoryByTagId = useMemo(() => {
+    const m = new Map<string, MusicTaxonomyCategory>();
+    for (const t of dictionary) m.set(t.id, t.category);
+    return m;
+  }, [dictionary]);
+
+  /** Cross-dimension chips: for each picked genre/style, the related business/daypart/
+   *  energy tags from its pack (avoid-filtered, deduped against picks + other bands). */
+  const relatedSuggestions = useMemo(() => {
+    if (!catalogItemId || pickedSlugs.length === 0) return [];
+    const exclude = new Set<string>([
+      ...linkedIds,
+      ...pendingIds,
+      ...suggestions.map((s) => s.taxonomyTagId),
+    ]);
+    return computeRelatedTagSuggestions({
+      pickedSlugs,
+      dictionary: dictionary.map((t) => ({
+        id: t.id,
+        slug: t.slug,
+        labelEn: t.labelEn,
+        labelHe: t.labelHe,
+        aliases: t.aliases ?? [],
+      })),
+      packs: tagPacks,
+      excludeIds: exclude,
+    });
+  }, [catalogItemId, pickedSlugs, dictionary, tagPacks, linkedIds, pendingIds, suggestions]);
+
+  /** Group the related chips by category so cross-dimension relatedness is legible. */
+  const relatedByCategory = useMemo(() => {
+    const groups = new Map<MusicTaxonomyCategory, CatalogTagSuggestion[]>();
+    for (const s of relatedSuggestions) {
+      const cat = categoryByTagId.get(s.taxonomyTagId);
+      if (!cat) continue;
+      const arr = groups.get(cat) ?? [];
+      if (arr.length < 4) arr.push(s); // cap ~4 per category
+      groups.set(cat, arr);
+    }
+    // Stable, meaningful order.
+    const order: MusicTaxonomyCategory[] = ["BUSINESS_FIT", "DAYPART_FIT", "VIBE_ENERGY", "STYLE_TAGS"];
+    return order
+      .filter((c) => groups.has(c))
+      .map((c) => ({ category: c, items: groups.get(c)! }))
+      .concat(
+        [...groups.keys()]
+          .filter((c) => !order.includes(c))
+          .map((c) => ({ category: c, items: groups.get(c)! })),
+      );
+  }, [relatedSuggestions, categoryByTagId]);
+
+  /** Energy nudge: strongest band the picks imply, shown when manual energy is unset. */
+  const suggestedEnergyBand = useMemo(
+    () => suggestedEnergyBandForPicks(pickedSlugs, tagPacks),
+    [pickedSlugs, tagPacks],
+  );
 
   const languageSignals = useMemo(() => {
     const raw = [
@@ -740,6 +811,60 @@ export function CatalogItemTaxonomyEditor({
           </div>
         )}
       </div>
+
+      {relatedSuggestions.length > 0 || (suggestedEnergyBand && catalogManualEnergyRating == null) ? (
+        <div className="rounded-md border border-sky-900/45 bg-sky-950/15 px-3 py-3">
+          <h3 className="text-sm font-medium text-neutral-100">Related to your picks</h3>
+          <p className="mt-1 text-[11px] text-neutral-500">
+            Tags that usually go with what you picked (from curated genre packs) — one click adds
+            to pending. Review only; nothing auto-saves.
+          </p>
+
+          {suggestedEnergyBand && catalogManualEnergyRating == null ? (
+            <p className="mt-2 rounded border border-amber-900/45 bg-amber-950/25 px-2.5 py-1.5 text-[11px] text-amber-100/95">
+              Suggested energy for this genre: <strong className="font-semibold">{suggestedEnergyBand}</strong>
+              {" "}— set it in the Energy rating panel above (helps DJ Creator + coverage).
+            </p>
+          ) : null}
+
+          {relatedByCategory.map(({ category, items }) => (
+            <div key={category} className="mt-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-300/80">
+                {taxonomyCategoryLabel(category)}
+              </p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {items.map((s) => {
+                  const inPending = pendingIds.has(s.taxonomyTagId);
+                  const tip = `${s.labelEn}\n${s.slug}\n\n${s.reason}`;
+                  return (
+                    <button
+                      key={s.taxonomyTagId}
+                      type="button"
+                      title={tip}
+                      className={`inline-flex max-w-[10.5rem] flex-col rounded-lg border px-2 py-1 text-left transition-colors ${
+                        inPending
+                          ? "border-sky-500/75 bg-sky-950/50 ring-1 ring-sky-500/25"
+                          : "border-neutral-700 bg-neutral-950/55 hover:border-sky-700/70 hover:bg-neutral-900/85"
+                      }`}
+                      onClick={() => togglePending(s.taxonomyTagId)}
+                    >
+                      <span className="line-clamp-2 text-[11px] font-semibold leading-snug text-neutral-100">
+                        {s.labelEn}
+                      </span>
+                      <span className="mt-0.5 truncate font-mono text-[9px] text-sky-300/90">{s.slug}</span>
+                      {inPending ? (
+                        <span className="mt-1 w-fit rounded bg-sky-900/65 px-1 py-px text-[8px] font-semibold uppercase text-sky-100">
+                          Pending
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="space-y-3 border-t border-neutral-800 pt-4">
         <h3 className="text-sm font-medium text-neutral-200">Add tags (search &amp; multi-select)</h3>
