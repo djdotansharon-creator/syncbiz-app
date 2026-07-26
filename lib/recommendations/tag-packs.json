@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "generatedFrom": "fit-rules.json",
+  "note": "Owner-editable curated tag bundles. Seed slug (a genre/style) -> related cross-dimension slugs (business fit / daypart / energy) an admin usually adds with it, honoring avoidTagSlugs. Regenerate with scripts/generate-tag-packs-from-fit-rules.mjs (overwrites hand edits). All slugs are validated against the ACTIVE taxonomy at load + at suggestion time.",
+  "packs": [
+    {
+      "id": "pack-jazz",
+      "seedTagSlugs": ["jazz"],
+      "relatedTagSlugs": ["restaurant", "cafe", "hotel", "bar", "morning", "lunch", "dinner", "night", "chill-mellow", "vibe-energy-medium"],
+      "avoidTagSlugs": ["gym"],
+      "suggestEnergyBand": "LOW",
+      "isActive": true,
+      "explainHuman": "Jazz fits boutique hotels, lobby listening, quality cafés, wine bars, business lunch, and elegant dinner — calm-to-medium energy listening spaces."
+    },
+    {
+      "id": "pack-smooth-jazz",
+      "seedTagSlugs": ["smooth-jazz"],
+      "relatedTagSlugs": ["restaurant", "hotel", "cafe", "bar", "morning", "lunch", "dinner", "night", "chill-mellow", "vibe-energy-medium"],
+      "avoidTagSlugs": ["gym"],
+      "suggestEnergyBand": "LOW",
+      "isActive": true,
+      "explainHuman": "Smooth jazz works as unobtrusive background for hotels, cafés, and hospitality floors — lobby-friendly when energy stays refined."
+    },
+    {
+      "id": "pack-bossa-nova",
+      "seedTagSlugs": ["bossa-nova"],
+      "relatedTagSlugs": ["restaurant", "cafe", "hotel", "bar", "morning", "lunch", "dinner", "chill-mellow", "vibe-energy-medium"],
+      "avoidTagSlugs": ["gym"],
+      "suggestEnergyBand": "LOW",
+      "isActive": true,
+      "explainHuman": "Bossa nova suits cafés, restaurants, and hotels from morning through dinner — relaxed, polished atmosphere."
+    },
+    {
+      "id": "pack-afro",
+      "seedTagSlugs": ["afro"],
+      "relatedTagSlugs": ["gym", "bar", "restaurant", "morning", "lunch", "dinner", "night", "vibe-energy-medium", "high-energy"],
+      "avoidTagSlugs": ["office"],
+      "suggestEnergyBand": "MEDIUM",
+      "isActive": true,
+      "explainHuman": "Afro-leaning grooves fit gyms (morning/afternoon energy), beach bars, young bars early evening, and tourist-heavy venues — medium/high energy; not ideal for desk-heavy office lunch contexts."
+    },
+    {
+      "id": "pack-deep-house",
+      "seedTagSlugs": ["deep-house"],
+      "relatedTagSlugs": ["bar", "hotel", "restaurant", "dinner", "night", "vibe-energy-medium", "high-energy"],
+      "avoidTagSlugs": ["office"],
+      "suggestEnergyBand": "MEDIUM",
+      "isActive": true,
+      "explainHuman": "Deep house fits bars, lounges, and youthful restaurants — evening/night, medium/high energy; poor fit for quiet desk or clinical-feeling spaces."
+    },
+    {
+      "id": "pack-organic-house",
+      "seedTagSlugs": ["organic-house"],
+      "relatedTagSlugs": ["bar", "restaurant", "hotel", "cafe", "lunch", "dinner", "night", "vibe-energy-medium", "high-energy"],
+      "avoidTagSlugs": ["office"],
+      "suggestEnergyBand": "MEDIUM",
+      "isActive": true,
+      "explainHuman": "Organic house suits hospitality floors and contemporary bars/restaurants — afternoon-through-night groove without harsh peaks."
+    },
+    {
+      "id": "pack-latin-house",
+      "seedTagSlugs": ["latin-house"],
+      "relatedTagSlugs": ["bar", "restaurant", "hotel", "dinner", "night", "vibe-energy-medium", "high-energy"],
+      "avoidTagSlugs": [],
+      "suggestEnergyBand": "MEDIUM",
+      "isActive": true,
+      "explainHuman": "Latin house adds movement for bars and evening dining — best when the room can handle rhythm and warmth."
+    },
+    {
+      "id": "pack-funk",
+      "seedTagSlugs": ["funk"],
+      "relatedTagSlugs": ["bar", "restaurant", "gym", "lunch", "dinner", "night", "vibe-energy-medium", "high-energy"],
+      "avoidTagSlugs": ["office"],
+      "suggestEnergyBand": "MEDIUM",
+      "isActive": true,
+      "explainHuman": "Funk brings forward motion — retail brand moments, energetic dining, bars, or training floors; weaker for silent office cores."
+    },
+    {
+      "id": "pack-soul",
+      "seedTagSlugs": ["soul"],
+      "relatedTagSlugs": ["bar", "restaurant", "cafe", "hotel", "lunch", "dinner", "night", "chill-mellow", "vibe-energy-medium"],
+      "avoidTagSlugs": ["gym"],
+      "suggestEnergyBand": "LOW",
+      "isActive": true,
+      "explainHuman": "Soul fits warm hospitality listening — cafés, restaurants, hotel bars — depth without sprinting the room."
+    },
+    {
+      "id": "pack-reggae-dub",
+      "seedTagSlugs": ["reggae-dub"],
+      "relatedTagSlugs": ["bar", "restaurant", "cafe", "lunch", "dinner", "night", "chill-mellow", "vibe-energy-medium", "high-energy"],
+      "avoidTagSlugs": ["office"],
+      "suggestEnergyBand": "LOW",
+      "isActive": true,
+      "explainHuman": "Reggae/dub suits laid-back bars and beach-adjacent dining — easygoing or medium energy; rarely a match for sterile office environments."
+    },
+    {
+      "id": "pack-mediterranean-pop",
+      "seedTagSlugs": ["mediterranean-pop"],
+      "relatedTagSlugs": ["restaurant", "cafe", "bar", "hotel", "lunch", "dinner", "chill-mellow", "vibe-energy-medium"],
+      "avoidTagSlugs": [],
+      "suggestEnergyBand": "LOW",
+      "isActive": true,
+      "explainHuman": "Mediterranean pop fits Mediterranean-themed dining and hospitality — daytime-through-evening sunshine vibes."
+    },
+    {
+      "id": "pack-italian-classics",
+      "seedTagSlugs": ["italian-classics"],
+      "relatedTagSlugs": ["restaurant", "cafe", "bar", "lunch", "dinner", "chill-mellow", "vibe-energy-medium"],
+      "avoidTagSlugs": ["gym"],
+      "suggestEnergyBand": "LOW",
+      "isActive": true,
+      "explainHuman": "Italian classics anchor trattoria and casual-upscale Italian dining — lunch and dinner storytelling playlists."
+    }
+  ]
+}

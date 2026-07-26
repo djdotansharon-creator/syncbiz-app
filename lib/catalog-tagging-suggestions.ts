@@ -3,6 +3,8 @@
  * Not AI; rules-only + dictionary substring checks.
  */
 
+import type { TagPack, TagPackEnergyBand } from "@/lib/recommendations/tag-packs.types";
+
 export type CatalogTagSuggestionDictionaryRow = {
   id: string;
   slug: string;
@@ -236,4 +238,74 @@ export function computeCatalogTagSuggestions(input: CatalogTagSuggestionInput): 
   }
 
   return out;
+}
+
+// ─── Related-tag suggestions from CURATED TAG PACKS (pick-driven) ──────────────
+// When the admin picks a genre/style tag, surface the cross-dimension tags that
+// usually go with it (business fit / daypart / energy), honoring the pack's
+// avoidTagSlugs. Pure + client-safe; nothing is auto-saved — these become one-click
+// chips that call the existing togglePending path.
+
+export type RelatedTagSuggestionInput = {
+  /** Slugs currently linked or pending (the admin's picks). */
+  pickedSlugs: readonly string[];
+  dictionary: readonly CatalogTagSuggestionDictionaryRow[];
+  packs: readonly TagPack[];
+  /** Tag ids already linked or pending — excluded from suggestions. */
+  excludeIds: ReadonlySet<string>;
+};
+
+/**
+ * For every pack whose seed intersects the picks, emit its related slugs (that exist
+ * in the ACTIVE dictionary, aren't already picked/excluded, and aren't in any matched
+ * pack's avoidTagSlugs) as CatalogTagSuggestion chips.
+ */
+export function computeRelatedTagSuggestions(input: RelatedTagSuggestionInput): CatalogTagSuggestion[] {
+  const picked = new Set(input.pickedSlugs);
+  if (picked.size === 0) return [];
+
+  const bySlug = new Map<string, CatalogTagSuggestionDictionaryRow>();
+  for (const t of input.dictionary) bySlug.set(t.slug, t);
+
+  const avoid = new Set<string>();
+  const relatedReason = new Map<string, string>(); // slug -> reason
+  for (const pack of input.packs) {
+    if (pack.isActive === false) continue;
+    const matchedSeed = pack.seedTagSlugs.find((s) => picked.has(s));
+    if (!matchedSeed) continue;
+    for (const a of pack.avoidTagSlugs) avoid.add(a);
+    for (const rel of pack.relatedTagSlugs) {
+      if (picked.has(rel)) continue;
+      if (!relatedReason.has(rel)) relatedReason.set(rel, `goes with ${matchedSeed}`);
+    }
+  }
+
+  const out: CatalogTagSuggestion[] = [];
+  const seen = new Set<string>();
+  for (const [slug, reason] of relatedReason) {
+    if (avoid.has(slug)) continue; // never push a tag a matched pack says to avoid
+    const tag = bySlug.get(slug);
+    if (!tag) continue; // slug not in ACTIVE dictionary → skip (no dead chips)
+    if (input.excludeIds.has(tag.id) || seen.has(tag.id)) continue;
+    seen.add(tag.id);
+    out.push({ taxonomyTagId: tag.id, slug: tag.slug, labelEn: tag.labelEn, reason });
+  }
+  return out;
+}
+
+/** Strongest suggested energy band across the packs matching the current picks (for the
+ *  manualEnergyRating nudge). HIGH wins over MEDIUM over LOW when packs disagree. */
+export function suggestedEnergyBandForPicks(
+  pickedSlugs: readonly string[],
+  packs: readonly TagPack[],
+): TagPackEnergyBand | null {
+  const picked = new Set(pickedSlugs);
+  const rank: Record<TagPackEnergyBand, number> = { LOW: 1, MEDIUM: 2, HIGH: 3 };
+  let best: TagPackEnergyBand | null = null;
+  for (const pack of packs) {
+    if (pack.isActive === false || !pack.suggestEnergyBand) continue;
+    if (!pack.seedTagSlugs.some((s) => picked.has(s))) continue;
+    if (!best || rank[pack.suggestEnergyBand] > rank[best]) best = pack.suggestEnergyBand;
+  }
+  return best;
 }
