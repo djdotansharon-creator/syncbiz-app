@@ -740,7 +740,23 @@ export default async function CatalogTaggingAdminPage({
           <span className="text-neutral-600"> · </span>
           Catalog tagging
         </p>
-        <h1 className="mt-1 text-2xl font-semibold text-neutral-50">Catalog taxonomy tagging</h1>
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold text-neutral-50">Catalog taxonomy tagging</h1>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/admin/platform/catalog-by-genre"
+              className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
+            >
+              Catalog by genre
+            </Link>
+            <Link
+              href="/admin/platform/ready-playlists"
+              className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
+            >
+              Ready playlists
+            </Link>
+          </div>
+        </div>
         <p className="mt-2 max-w-2xl text-sm text-neutral-400">
           Stage 4–5 — browse the catalog, filter by tag status or provider, then link dictionary tags to rows (manual SUPER_ADMIN only).
         </p>

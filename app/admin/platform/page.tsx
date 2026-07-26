@@ -167,6 +167,18 @@ export default async function AdminPlatformPage({
               Catalog tagging
             </Link>
             <Link
+              href="/admin/platform/catalog-by-genre"
+              className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
+            >
+              Catalog by genre
+            </Link>
+            <Link
+              href="/admin/platform/ready-playlists"
+              className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
+            >
+              Ready playlists
+            </Link>
+            <Link
               href="/admin/platform/recommendation-preview"
               className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
             >
