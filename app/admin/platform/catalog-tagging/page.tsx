@@ -279,6 +279,8 @@ function catalogTaggingHref(parts: {
   catalogItemId?: string;
   filter?: FilterMode;
   provider?: string;
+  genre?: string;
+  page?: number;
   /** When true, preserve browse mode that includes archived catalog rows. */
   includeArchived?: boolean;
 }): string {
@@ -288,6 +290,9 @@ function catalogTaggingHref(parts: {
   if (parts.filter && parts.filter !== "all") u.set("filter", parts.filter);
   const prov = parts.provider?.trim() ?? "";
   if (prov.length >= 1) u.set("provider", prov);
+  const genre = parts.genre?.trim() ?? "";
+  if (genre.length >= 1) u.set("genre", genre);
+  if (typeof parts.page === "number" && parts.page > 1) u.set("page", String(parts.page));
   if (parts.catalogItemId?.trim()) u.set("catalogItemId", parts.catalogItemId.trim());
   if (parts.includeArchived) u.set("includeArchived", "1");
   const qs = u.toString();
@@ -297,7 +302,14 @@ function catalogTaggingHref(parts: {
 function computeNextUntaggedHref(
   currentId: string,
   queue: Array<{ id: string }>,
-  baseParams: { q: string; filter: FilterMode; provider: string; includeArchived?: boolean },
+  baseParams: {
+    q: string;
+    filter: FilterMode;
+    provider: string;
+    genre?: string;
+    page?: number;
+    includeArchived?: boolean;
+  },
 ): string | null {
   const ids = queue.map((x) => x.id);
   if (ids.length === 0) return null;
@@ -320,6 +332,8 @@ export default async function CatalogTaggingAdminPage({
     catalogItemId?: string;
     filter?: string;
     provider?: string;
+    genre?: string;
+    page?: string;
     includeArchived?: string;
     fromCoverage?: string;
     coveragePack?: string;
@@ -337,6 +351,9 @@ export default async function CatalogTaggingAdminPage({
   const catalogItemId = typeof sp.catalogItemId === "string" ? sp.catalogItemId.trim() : "";
   const filterMode = parseFilter(sp.filter);
   const providerQ = typeof sp.provider === "string" ? sp.provider.trim() : "";
+  const genreQ = typeof sp.genre === "string" ? sp.genre.trim() : "";
+  const pageRaw = typeof sp.page === "string" ? parseInt(sp.page, 10) : 1;
+  const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.floor(pageRaw) : 1;
   const includeArchived =
     typeof sp.includeArchived === "string" &&
     (sp.includeArchived === "1" || sp.includeArchived.toLowerCase() === "true");
@@ -383,6 +400,12 @@ export default async function CatalogTaggingAdminPage({
     clauses.push({ provider: { contains: providerQ, mode: "insensitive" } });
   }
 
+  if (genreQ.length >= 1) {
+    clauses.push({
+      taxonomyLinks: { some: { taxonomyTag: { slug: genreQ, category: "MAIN_SOUND_GENRE" } } },
+    });
+  }
+
   const where: Prisma.CatalogItemWhereInput = clauses.length > 0 ? { AND: clauses } : {};
 
   const discoveryScope = includeArchived ? {} : { archivedAt: null };
@@ -400,6 +423,8 @@ export default async function CatalogTaggingAdminPage({
     totalCatalog,
     taggedCount,
     untaggedCount,
+    filteredCount,
+    genreTags,
     providerSuggestions,
     results,
     selected,
@@ -407,6 +432,13 @@ export default async function CatalogTaggingAdminPage({
     prisma.catalogItem.count({ where: discoveryScope }),
     prisma.catalogItem.count({ where: taggedWhere }),
     prisma.catalogItem.count({ where: untaggedWhere }),
+    prisma.catalogItem.count({ where }),
+    prisma.musicTaxonomyTag.findMany({
+      where: { category: "MAIN_SOUND_GENRE", status: "ACTIVE" },
+      select: { slug: true, labelEn: true, labelHe: true },
+      orderBy: [{ sortOrder: "asc" }, { labelEn: "asc" }],
+      take: 200,
+    }),
     prisma.catalogItem.findMany({
       where: providerWhere,
       select: { provider: true },
@@ -417,6 +449,7 @@ export default async function CatalogTaggingAdminPage({
     prisma.catalogItem.findMany({
       where,
       take: LIST_LIMIT,
+      skip: (page - 1) * LIST_LIMIT,
       orderBy: [{ taxonomyLinks: { _count: "asc" } }, { updatedAt: "desc" }],
       select: {
         id: true,
@@ -477,7 +510,22 @@ export default async function CatalogTaggingAdminPage({
         }
       : null;
 
-  const baseParams = { q, filter: filterMode, provider: providerQ, includeArchived };
+  const baseParams = { q, filter: filterMode, provider: providerQ, genre: genreQ, page, includeArchived };
+
+  // Pagination over the filtered result set (list was previously capped at 100 with
+  // no way to reach the rest — this pages through ALL matching rows).
+  const totalPages = Math.max(1, Math.ceil(filteredCount / LIST_LIMIT));
+  const firstItemNo = results.length === 0 ? 0 : (page - 1) * LIST_LIMIT + 1;
+  const lastItemNo = (page - 1) * LIST_LIMIT + results.length;
+  const hasPrevPage = page > 1;
+  const hasNextPage = page < totalPages;
+  const pageNavParams = { q, filter: filterMode, provider: providerQ, genre: genreQ, includeArchived };
+  const genreLabelForActive = genreQ
+    ? (() => {
+        const g = genreTags.find((t) => t.slug === genreQ);
+        return g ? g.labelEn : genreQ;
+      })()
+    : null;
 
   let serializedLatestSnapshot: CatalogSourceSnapshotDTO | null = null;
   let metadataSuggestionsFromSnapshot: CatalogTagSuggestion[] = [];
@@ -760,6 +808,21 @@ export default async function CatalogTaggingAdminPage({
                   <option key={p} value={p} />
                 ))}
             </datalist>
+          </label>
+          <label className="flex min-w-[160px] flex-col gap-1 text-xs text-neutral-500">
+            Genre
+            <select
+              name="genre"
+              defaultValue={genreQ}
+              className="rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm text-neutral-100"
+            >
+              <option value="">All genres</option>
+              {genreTags.map((g) => (
+                <option key={g.slug} value={g.slug}>
+                  {g.labelHe?.trim() ? `${g.labelEn} · ${g.labelHe}` : g.labelEn}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="flex cursor-pointer items-center gap-2 rounded border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-xs text-neutral-400">
             <input
@@ -1132,21 +1195,24 @@ export default async function CatalogTaggingAdminPage({
       <section className="rounded-md border border-neutral-800 bg-neutral-950/40">
         <div className="border-b border-neutral-800 px-4 py-2">
           <p className="text-xs font-medium text-neutral-400">
-            {q.length >= 1 ? (
-              <>
-                Search &amp; filtered results ({results.length}
-                {results.length >= LIST_LIMIT ? ` · capped at ${LIST_LIMIT}` : ""})
-              </>
-            ) : (
-              <>
-                Catalog items ({results.length}
-                {results.length >= LIST_LIMIT ? ` · showing first ${LIST_LIMIT}` : ""}) — untagged first
-              </>
-            )}
+            Catalog items · showing{" "}
+            <span className="tabular-nums text-neutral-200">
+              {firstItemNo}–{lastItemNo}
+            </span>{" "}
+            of <span className="tabular-nums text-neutral-200">{filteredCount}</span>
+            <span className="text-neutral-600"> · untagged first</span>
+            {totalPages > 1 ? (
+              <span className="text-neutral-600">
+                {" "}
+                · page {page} / {totalPages}
+              </span>
+            ) : null}
           </p>
           <p className="mt-1 text-[11px] text-neutral-600">
             Filters: {filterMode === "all" ? "All" : filterMode === "untagged" ? "Untagged" : "Tagged"}
+            {genreLabelForActive ? ` · genre “${genreLabelForActive}”` : ""}
             {providerQ ? ` · provider contains “${providerQ}”` : ""}
+            {q ? ` · search “${q}”` : ""}
             {includeArchived ? ` · including archived` : ""}
           </p>
         </div>
@@ -1339,6 +1405,38 @@ export default async function CatalogTaggingAdminPage({
             })}
           </ul>
         )}
+
+        {totalPages > 1 ? (
+          <div className="flex items-center justify-between gap-3 border-t border-neutral-800 px-4 py-3">
+            {hasPrevPage ? (
+              <Link
+                href={catalogTaggingHref({ ...pageNavParams, page: page - 1 })}
+                className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-neutral-800"
+              >
+                ← Previous
+              </Link>
+            ) : (
+              <span className="rounded border border-neutral-900 bg-neutral-950 px-3 py-1.5 text-xs text-neutral-700">
+                ← Previous
+              </span>
+            )}
+            <span className="text-[11px] tabular-nums text-neutral-500">
+              Page {page} of {totalPages} · {filteredCount} items
+            </span>
+            {hasNextPage ? (
+              <Link
+                href={catalogTaggingHref({ ...pageNavParams, page: page + 1 })}
+                className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-neutral-800"
+              >
+                Next →
+              </Link>
+            ) : (
+              <span className="rounded border border-neutral-900 bg-neutral-950 px-3 py-1.5 text-xs text-neutral-700">
+                Next →
+              </span>
+            )}
+          </div>
+        ) : null}
       </section>
     </div>
   );
