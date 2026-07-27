@@ -133,6 +133,24 @@ function slugParts(slug: string): string[] {
   return slug.split("-").filter((p) => p.length >= 2);
 }
 
+/**
+ * Word-boundary containment — the term must appear as a whole word, not as a
+ * substring inside another word. Fixes false positives like the alias "oud"
+ * (from "Arabic Lounge") matching inside loud / cloud / would / could / proud,
+ * which was wrongly pre-selecting Arabic tags on unrelated tracks. Unicode-aware
+ * so Hebrew/Latin both work.
+ */
+function haystackHasWord(hay: string, term: string): boolean {
+  const t = term.trim().toLowerCase();
+  if (t.length < 2) return false;
+  const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  try {
+    return new RegExp(`(^|[^\\p{L}\\p{N}])${esc}([^\\p{L}\\p{N}]|$)`, "u").test(hay);
+  } catch {
+    return hay.includes(t);
+  }
+}
+
 /** Exported for Stage 5.9 metadata-derived taxonomy hints (same matching rules). */
 export function matchTaxonomyDictionaryTagAgainstHaystack(
   tag: CatalogTagSuggestionDictionaryRow,
@@ -143,12 +161,12 @@ export function matchTaxonomyDictionaryTagAgainstHaystack(
 
 function tagMatchesHaystack(tag: CatalogTagSuggestionDictionaryRow, hay: string): { match: boolean; reason?: string } {
   const slugSpaced = tag.slug.replace(/-/g, " ");
-  if (slugSpaced.length >= 3 && hay.includes(slugSpaced)) {
+  if (slugSpaced.length >= 3 && haystackHasWord(hay, slugSpaced)) {
     return { match: true, reason: `matched title/URL text for slug “${tag.slug}”` };
   }
 
   const parts = slugParts(tag.slug).filter((p) => p.length >= 4);
-  if (parts.length >= 1 && parts.every((p) => hay.includes(p))) {
+  if (parts.length >= 1 && parts.every((p) => haystackHasWord(hay, p))) {
     return { match: true, reason: `matched slug fragments: ${tag.slug}` };
   }
 
@@ -157,20 +175,20 @@ function tagMatchesHaystack(tag: CatalogTagSuggestionDictionaryRow, hay: string)
     .map((w) => w.trim().toLowerCase())
     .filter((w) => w.length >= 3);
   for (const w of enWords) {
-    if (hay.includes(w)) {
+    if (haystackHasWord(hay, w)) {
       return { match: true, reason: `matched label word “${w}” (${tag.slug})` };
     }
   }
 
   for (const a of tag.aliases ?? []) {
     const al = a.trim().toLowerCase();
-    if (al.length >= 3 && hay.includes(al)) {
+    if (al.length >= 3 && haystackHasWord(hay, al)) {
       return { match: true, reason: `matched alias “${a}” (${tag.slug})` };
     }
   }
 
   const he = tag.labelHe.trim();
-  if (he.length >= 2 && hay.includes(he)) {
+  if (he.length >= 2 && haystackHasWord(hay, he)) {
     return { match: true, reason: `matched Hebrew label (${tag.slug})` };
   }
 
