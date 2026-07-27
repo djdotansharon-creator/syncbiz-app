@@ -31,6 +31,8 @@ import {
   eligibilityShortSummary,
 } from "@/lib/recommendations/catalog-item-eligibility";
 import { CatalogTaggingScrollToEditor } from "@/components/admin/catalog-tagging-scroll-to-editor";
+import { resolveGenreFacetClauses } from "@/lib/recommendations/resolve-genre-facet-filter";
+import { facetValues } from "@/lib/recommendations/genre-facets";
 
 export const dynamic = "force-dynamic";
 
@@ -280,6 +282,9 @@ function catalogTaggingHref(parts: {
   filter?: FilterMode;
   provider?: string;
   genre?: string;
+  decade?: string;
+  style?: string;
+  intensity?: string;
   page?: number;
   /** When true, preserve browse mode that includes archived catalog rows. */
   includeArchived?: boolean;
@@ -292,6 +297,12 @@ function catalogTaggingHref(parts: {
   if (prov.length >= 1) u.set("provider", prov);
   const genre = parts.genre?.trim() ?? "";
   if (genre.length >= 1) u.set("genre", genre);
+  const decade = parts.decade?.trim() ?? "";
+  if (decade.length >= 1) u.set("decade", decade);
+  const style = parts.style?.trim() ?? "";
+  if (style.length >= 1) u.set("style", style);
+  const intensity = parts.intensity?.trim() ?? "";
+  if (intensity.length >= 1) u.set("intensity", intensity);
   if (typeof parts.page === "number" && parts.page > 1) u.set("page", String(parts.page));
   if (parts.catalogItemId?.trim()) u.set("catalogItemId", parts.catalogItemId.trim());
   if (parts.includeArchived) u.set("includeArchived", "1");
@@ -307,6 +318,9 @@ function computeNextUntaggedHref(
     filter: FilterMode;
     provider: string;
     genre?: string;
+    decade?: string;
+    style?: string;
+    intensity?: string;
     page?: number;
     includeArchived?: boolean;
   },
@@ -333,6 +347,9 @@ export default async function CatalogTaggingAdminPage({
     filter?: string;
     provider?: string;
     genre?: string;
+    decade?: string;
+    style?: string;
+    intensity?: string;
     page?: string;
     includeArchived?: string;
     fromCoverage?: string;
@@ -352,6 +369,9 @@ export default async function CatalogTaggingAdminPage({
   const filterMode = parseFilter(sp.filter);
   const providerQ = typeof sp.provider === "string" ? sp.provider.trim() : "";
   const genreQ = typeof sp.genre === "string" ? sp.genre.trim() : "";
+  const decadeQ = typeof sp.decade === "string" ? sp.decade.trim() : "";
+  const styleQ = typeof sp.style === "string" ? sp.style.trim() : "";
+  const intensityQ = typeof sp.intensity === "string" ? sp.intensity.trim() : "";
   const pageRaw = typeof sp.page === "string" ? parseInt(sp.page, 10) : 1;
   const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.floor(pageRaw) : 1;
   const includeArchived =
@@ -400,11 +420,11 @@ export default async function CatalogTaggingAdminPage({
     clauses.push({ provider: { contains: providerQ, mode: "insensitive" } });
   }
 
-  if (genreQ.length >= 1) {
-    clauses.push({
-      taxonomyLinks: { some: { taxonomyTag: { slug: genreQ, category: "MAIN_SOUND_GENRE" } } },
-    });
-  }
+  // Faceted genre filter (decade × style × intensity) + legacy single ?genre= slug,
+  // ANDed over the existing tag join. Zero migration — see lib/recommendations/genre-facets.
+  clauses.push(
+    ...resolveGenreFacetClauses({ genre: genreQ, decade: decadeQ, style: styleQ, intensity: intensityQ }),
+  );
 
   const where: Prisma.CatalogItemWhereInput = clauses.length > 0 ? { AND: clauses } : {};
 
@@ -510,7 +530,7 @@ export default async function CatalogTaggingAdminPage({
         }
       : null;
 
-  const baseParams = { q, filter: filterMode, provider: providerQ, genre: genreQ, page, includeArchived };
+  const baseParams = { q, filter: filterMode, provider: providerQ, genre: genreQ, decade: decadeQ, style: styleQ, intensity: intensityQ, page, includeArchived };
 
   // Pagination over the filtered result set (list was previously capped at 100 with
   // no way to reach the rest — this pages through ALL matching rows).
@@ -519,7 +539,10 @@ export default async function CatalogTaggingAdminPage({
   const lastItemNo = (page - 1) * LIST_LIMIT + results.length;
   const hasPrevPage = page > 1;
   const hasNextPage = page < totalPages;
-  const pageNavParams = { q, filter: filterMode, provider: providerQ, genre: genreQ, includeArchived };
+  const pageNavParams = { q, filter: filterMode, provider: providerQ, genre: genreQ, decade: decadeQ, style: styleQ, intensity: intensityQ, includeArchived };
+  const decadeOptions = facetValues("decade");
+  const styleOptions = facetValues("style");
+  const intensityOptions = facetValues("intensity");
   const genreLabelForActive = genreQ
     ? (() => {
         const g = genreTags.find((t) => t.slug === genreQ);
@@ -825,17 +848,48 @@ export default async function CatalogTaggingAdminPage({
                 ))}
             </datalist>
           </label>
-          <label className="flex min-w-[160px] flex-col gap-1 text-xs text-neutral-500">
-            Genre
+          {/* Faceted genre filter — decade × style × intensity, any combination. */}
+          <label className="flex min-w-[110px] flex-col gap-1 text-xs text-neutral-500">
+            Decade
             <select
-              name="genre"
-              defaultValue={genreQ}
+              name="decade"
+              defaultValue={decadeQ}
               className="rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm text-neutral-100"
             >
-              <option value="">All genres</option>
-              {genreTags.map((g) => (
-                <option key={g.slug} value={g.slug}>
-                  {g.labelHe?.trim() ? `${g.labelEn} · ${g.labelHe}` : g.labelEn}
+              <option value="">Any</option>
+              {decadeOptions.map((d) => (
+                <option key={d.value} value={d.value}>
+                  {d.value} ({d.slugCount})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex min-w-[150px] flex-col gap-1 text-xs text-neutral-500">
+            Style
+            <select
+              name="style"
+              defaultValue={styleQ}
+              className="rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm text-neutral-100"
+            >
+              <option value="">Any style</option>
+              {styleOptions.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.value} ({s.slugCount})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex min-w-[110px] flex-col gap-1 text-xs text-neutral-500">
+            Intensity
+            <select
+              name="intensity"
+              defaultValue={intensityQ}
+              className="rounded border border-neutral-700 bg-neutral-950 px-2 py-2 text-sm text-neutral-100"
+            >
+              <option value="">Any</option>
+              {intensityOptions.map((i) => (
+                <option key={i.value} value={i.value}>
+                  {i.value} ({i.slugCount})
                 </option>
               ))}
             </select>
@@ -1227,6 +1281,9 @@ export default async function CatalogTaggingAdminPage({
           <p className="mt-1 text-[11px] text-neutral-600">
             Filters: {filterMode === "all" ? "All" : filterMode === "untagged" ? "Untagged" : "Tagged"}
             {genreLabelForActive ? ` · genre “${genreLabelForActive}”` : ""}
+            {decadeQ ? ` · decade ${decadeQ}` : ""}
+            {styleQ ? ` · style ${styleQ}` : ""}
+            {intensityQ ? ` · intensity ${intensityQ}` : ""}
             {providerQ ? ` · provider contains “${providerQ}”` : ""}
             {q ? ` · search “${q}”` : ""}
             {includeArchived ? ` · including archived` : ""}

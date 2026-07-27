@@ -1,0 +1,153 @@
+/**
+ * Phase 1 — DERIVED GENRE FACETS (zero migration).
+ *
+ * Reads the live ACTIVE MAIN_SOUND_GENRE slugs and derives a facet triple
+ * {decade, style, intensity, region} for each by PARSING the slug (the DB slugs
+ * are self-descriptive: playlist-pro-rock-1980-s-easy, playlist-pro-house-club,
+ * genre-pop, jazz, …). Hand fixes live in genre-facets-overrides.json and win over
+ * the parser. Prints the full map JSON to stdout + a coverage report to stderr.
+ *
+ *   node scripts/build-genre-facets.mjs > lib/recommendations/genre-facets.generated.json
+ *
+ * Filtering never renames or re-tags anything — it AND-composes these facet
+ * slug-sets over the existing CatalogItemTaxonomyTag many-to-many.
+ */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { PrismaClient } from "@prisma/client";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(__dirname, "..");
+
+function loadOverrides() {
+  try {
+    return JSON.parse(readFileSync(join(ROOT, "lib/recommendations/genre-facets-overrides.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+// ── decade parsing ──
+function parseDecade(s) {
+  if (/\b(19)?70(-?s|'s)?\b|1970/.test(s)) return "1970s";
+  if (/\b(19)?80(-?s|'s)?\b|1980/.test(s)) return "1980s";
+  if (/\b(19)?90(-?s|'s)?\b|1990/.test(s)) return "1990s";
+  if (/2000/.test(s)) return "2000s";
+  if (/2010/.test(s)) return "2010s";
+  if (/\b50s-and-60s\b|\boldies\b/.test(s)) return "oldies";
+  return null;
+}
+
+// ── style parsing (keyword → canonical style; first hit wins by priority order) ──
+const STYLE_RULES = [
+  [/\bmediterranean\b/, "mediterranean"],
+  [/\brock-and-roll\b|\bclassic-rock\b|\brock\b/, "rock"],
+  [/\bhouse\b|\btrance\b|\bchillhouse\b/, "house"],
+  [/\breggaeton\b/, "reggaeton"],
+  [/\breggae\b/, "reggae"],
+  [/\bhip-hop\b/, "hip-hop"],
+  [/\bslow-and-ballads\b|\bballads?\b/, "ballads"],
+  [/\bdisco-and-funk\b|\bdisco\b/, "disco"],
+  [/\beurodance\b|\bdance\b/, "dance"],
+  [/\bnew-wave\b/, "new-wave"],
+  [/\bsoul-funk\b|\bfunk\b/, "funk"],
+  [/\bsoul\b|\br-and-b\b/, "soul"],
+  [/\bacid-jazz\b|\bjazz\b/, "jazz"],
+  [/\btechno\b/, "techno"],
+  [/\belectronic\b/, "electronic"],
+  [/\bafro\b/, "afro"],
+  [/\bchillout\b/, "chillout"],
+  [/\bambient\b/, "ambient"],
+  [/\bindie\b/, "indie"],
+  [/\bgipsy\b|\bklezmer\b/, "gipsy"],
+  [/\boriental\b|\bmaroko\b|\balgir\b|\brai\b/, "oriental"],
+  [/\bgreek\b/, "greek"],
+  [/\bitalian\b/, "italian"],
+  [/\bspain\b|\bspanish\b/, "spanish"],
+  [/\bargentina\b/, "argentinian"],
+  [/\bcuba\b|\bsalsa\b/, "cuban"],
+  [/\bbrazil\b|\bbossa\b|\bcarnaval\b/, "brazilian"],
+  [/\bclassical\b/, "classical"],
+  [/\bcountry\b/, "country"],
+  [/\bmetal\b/, "metal"],
+  [/\blatin\b/, "latin"],
+  [/\bworld\b/, "world"],
+  [/\bnostalgia\b|\bcontemporary\b|\bnew-wave-pop\b|\bpop-and-disco\b|\bpop\b/, "pop"],
+];
+
+const REGION_STYLES = new Set(["greek", "italian", "spanish", "argentinian", "cuban", "brazilian", "oriental", "mediterranean"]);
+
+function parseStyle(s) {
+  for (const [re, style] of STYLE_RULES) if (re.test(s)) return style;
+  return null;
+}
+
+function parseIntensity(s) {
+  if (/\beasy\b/.test(s)) return "easy";
+  return "general";
+}
+
+function deriveFacets(slug) {
+  // Normalize separators so word-boundary regexes work (1980-s → 1980 s).
+  const s = slug.toLowerCase();
+  const decade = parseDecade(s);
+  const style = parseStyle(s);
+  const intensity = parseIntensity(s);
+  const region = style && REGION_STYLES.has(style) ? style : null;
+  return { decade, style, intensity, region };
+}
+
+async function main() {
+  const prisma = new PrismaClient();
+  const rows = await prisma.musicTaxonomyTag.findMany({
+    where: { category: "MAIN_SOUND_GENRE", status: "ACTIVE" },
+    select: { slug: true, labelEn: true },
+    orderBy: { sortOrder: "asc" },
+  });
+  await prisma.$disconnect();
+
+  const overrides = loadOverrides();
+  const map = {};
+  const noDecade = [];
+  const noStyle = [];
+  const unclassified = []; // neither decade nor style — a true gap
+
+  for (const { slug } of rows) {
+    const parsed = deriveFacets(slug);
+    const ov = overrides[slug] ?? {};
+    const facets = {
+      decade: ov.decade !== undefined ? ov.decade : parsed.decade,
+      style: ov.style !== undefined ? ov.style : parsed.style,
+      intensity: ov.intensity !== undefined ? ov.intensity : parsed.intensity,
+      region: ov.region !== undefined ? ov.region : parsed.region,
+    };
+    map[slug] = facets;
+    // A null style is VALID for pure-decade rows (e.g. "1980s general" = 80s across
+    // all styles). Only a slug with NEITHER a decade NOR a style is a real gap.
+    if (!facets.decade) noDecade.push(slug);
+    if (!facets.style) noStyle.push(slug);
+    if (!facets.decade && !facets.style) unclassified.push(slug);
+  }
+
+  const bundle = {
+    version: 1,
+    note: "Generated by scripts/build-genre-facets.mjs from ACTIVE MAIN_SOUND_GENRE slugs. Overrides in genre-facets-overrides.json win. Phase 1 = zero migration; used to AND-filter over the existing tag join.",
+    facets: map,
+  };
+
+  console.error(`Classified ${rows.length} genre slugs.`);
+  console.error(`  with a decade: ${rows.length - noDecade.length} · with a style: ${rows.length - noStyle.length}`);
+  console.error(`  decade-only (no specific style — valid, "any style in that decade"): ${noStyle.length}`);
+  if (unclassified.length) {
+    console.error(`  ⚠ UNCLASSIFIED (no decade AND no style — add to overrides): ${unclassified.join(", ")}`);
+  } else {
+    console.error("  every slug has a decade or a style ✓");
+  }
+  process.stdout.write(JSON.stringify(bundle, null, 2) + "\n");
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
