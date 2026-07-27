@@ -529,6 +529,210 @@
       "style": "electronic",
       "intensity": "general",
       "region": null
+    },
+    "organic-house": {
+      "decade": null,
+      "style": "house",
+      "intensity": "general",
+      "region": null
+    },
+    "melodic-techno": {
+      "decade": null,
+      "style": "techno",
+      "intensity": "general",
+      "region": null
+    },
+    "oriental": {
+      "decade": null,
+      "style": "oriental",
+      "intensity": "general",
+      "region": "oriental"
+    },
+    "nu-disco": {
+      "decade": null,
+      "style": "disco",
+      "intensity": "general",
+      "region": null
+    },
+    "deep-house": {
+      "decade": null,
+      "style": "house",
+      "intensity": "general",
+      "region": null
+    },
+    "acid-jazz": {
+      "decade": null,
+      "style": "jazz",
+      "intensity": "general",
+      "region": null
+    },
+    "reggae-dub": {
+      "decade": null,
+      "style": "reggae",
+      "intensity": "general",
+      "region": null
+    },
+    "style-electronic-edm": {
+      "decade": null,
+      "style": "electronic",
+      "intensity": "general",
+      "region": null
+    },
+    "tech-house": {
+      "decade": null,
+      "style": "house",
+      "intensity": "general",
+      "region": null
+    },
+    "style-electronic-deep-house": {
+      "decade": null,
+      "style": "house",
+      "intensity": "general",
+      "region": null
+    },
+    "tropical-house": {
+      "decade": null,
+      "style": "house",
+      "intensity": "general",
+      "region": null
+    },
+    "disco-house": {
+      "decade": null,
+      "style": "house",
+      "intensity": "general",
+      "region": null
+    },
+    "deep-techno": {
+      "decade": null,
+      "style": "techno",
+      "intensity": "general",
+      "region": null
+    },
+    "soft-pop": {
+      "decade": null,
+      "style": "pop",
+      "intensity": "general",
+      "region": null
+    },
+    "progressive-house": {
+      "decade": null,
+      "style": "house",
+      "intensity": "general",
+      "region": null
+    },
+    "minimal-techno": {
+      "decade": null,
+      "style": "techno",
+      "intensity": "general",
+      "region": null
+    },
+    "latin-house": {
+      "decade": null,
+      "style": "house",
+      "intensity": "general",
+      "region": null
+    },
+    "smooth-jazz": {
+      "decade": null,
+      "style": "jazz",
+      "intensity": "general",
+      "region": null
+    },
+    "bossa-nova": {
+      "decade": null,
+      "style": "brazilian",
+      "intensity": "general",
+      "region": "brazilian"
+    },
+    "soul-blues": {
+      "decade": null,
+      "style": "soul",
+      "intensity": "general",
+      "region": null
+    },
+    "gipsy-jazz": {
+      "decade": null,
+      "style": "jazz",
+      "intensity": "general",
+      "region": null
+    },
+    "old-school-hip-hop": {
+      "decade": null,
+      "style": "hip-hop",
+      "intensity": "general",
+      "region": null
+    },
+    "r-and-b-contemporary": {
+      "decade": null,
+      "style": "soul",
+      "intensity": "general",
+      "region": null
+    },
+    "soft-rock": {
+      "decade": null,
+      "style": "rock",
+      "intensity": "general",
+      "region": null
+    },
+    "indie-folk": {
+      "decade": null,
+      "style": "indie",
+      "intensity": "general",
+      "region": null
+    },
+    "psychedelic-rock": {
+      "decade": null,
+      "style": "rock",
+      "intensity": "general",
+      "region": null
+    },
+    "afro-cuban": {
+      "decade": null,
+      "style": "afro",
+      "intensity": "general",
+      "region": null
+    },
+    "italian-classics": {
+      "decade": null,
+      "style": "italian",
+      "intensity": "general",
+      "region": "italian"
+    },
+    "playlist-pro-mtv-dance": {
+      "decade": null,
+      "style": "dance",
+      "intensity": "general",
+      "region": null
+    },
+    "playlist-pro-mtv-dance-classics": {
+      "decade": null,
+      "style": "dance",
+      "intensity": "general",
+      "region": null
+    },
+    "playlist-pro-mtv-pop-easy": {
+      "decade": null,
+      "style": "pop",
+      "intensity": "easy",
+      "region": null
+    },
+    "playlist-pro-mtv-pop-general": {
+      "decade": null,
+      "style": "pop",
+      "intensity": "general",
+      "region": null
+    },
+    "playlist-pro-dj-sets-club-house": {
+      "decade": null,
+      "style": "house",
+      "intensity": "general",
+      "region": null
+    },
+    "playlist-pro-dj-sets-dance-and-hits": {
+      "decade": null,
+      "style": "dance",
+      "intensity": "general",
+      "region": null
     }
   }
 }

@@ -100,11 +100,21 @@ function deriveFacets(slug) {
 
 async function main() {
   const prisma = new PrismaClient();
-  const rows = await prisma.musicTaxonomyTag.findMany({
-    where: { category: "MAIN_SOUND_GENRE", status: "ACTIVE" },
-    select: { slug: true, labelEn: true },
-    orderBy: { sortOrder: "asc" },
-  });
+  // Genre-ish tags live in BOTH categories: MAIN_SOUND_GENRE (playlist-pro-* + genre-*)
+  // AND STYLE_TAGS (deep-house, smooth-jazz, bossa-nova, …). Classify both so the style
+  // filter catches items tagged in either. MAIN rows are always kept (a decade-only row
+  // is valid); STYLE_TAGS rows are kept ONLY when the parser yields a style (skips pure
+  // feel/production tags like "instrumental" that aren't genres).
+  const [mainRows, styleRows] = await Promise.all([
+    prisma.musicTaxonomyTag.findMany({
+      where: { category: "MAIN_SOUND_GENRE", status: "ACTIVE" },
+      select: { slug: true }, orderBy: { sortOrder: "asc" },
+    }),
+    prisma.musicTaxonomyTag.findMany({
+      where: { category: "STYLE_TAGS", status: "ACTIVE" },
+      select: { slug: true }, orderBy: { sortOrder: "asc" },
+    }),
+  ]);
   await prisma.$disconnect();
 
   const overrides = loadOverrides();
@@ -112,8 +122,9 @@ async function main() {
   const noDecade = [];
   const noStyle = [];
   const unclassified = []; // neither decade nor style — a true gap
+  let styleTagsIncluded = 0;
 
-  for (const { slug } of rows) {
+  function classify(slug, { keepIfNoStyle }) {
     const parsed = deriveFacets(slug);
     const ov = overrides[slug] ?? {};
     const facets = {
@@ -122,13 +133,18 @@ async function main() {
       intensity: ov.intensity !== undefined ? ov.intensity : parsed.intensity,
       region: ov.region !== undefined ? ov.region : parsed.region,
     };
+    // STYLE_TAGS with no genre-style (and no decade) are feel tags — skip them.
+    if (!keepIfNoStyle && !facets.style && !facets.decade) return false;
     map[slug] = facets;
-    // A null style is VALID for pure-decade rows (e.g. "1980s general" = 80s across
-    // all styles). Only a slug with NEITHER a decade NOR a style is a real gap.
     if (!facets.decade) noDecade.push(slug);
     if (!facets.style) noStyle.push(slug);
     if (!facets.decade && !facets.style) unclassified.push(slug);
+    return true;
   }
+
+  for (const { slug } of mainRows) classify(slug, { keepIfNoStyle: true });
+  for (const { slug } of styleRows) if (classify(slug, { keepIfNoStyle: false })) styleTagsIncluded++;
+  const rows = { length: Object.keys(map).length };
 
   const bundle = {
     version: 1,
@@ -136,7 +152,7 @@ async function main() {
     facets: map,
   };
 
-  console.error(`Classified ${rows.length} genre slugs.`);
+  console.error(`Classified ${rows.length} genre slugs (${mainRows.length} MAIN_SOUND_GENRE + ${styleTagsIncluded} genre-ish STYLE_TAGS).`);
   console.error(`  with a decade: ${rows.length - noDecade.length} · with a style: ${rows.length - noStyle.length}`);
   console.error(`  decade-only (no specific style — valid, "any style in that decade"): ${noStyle.length}`);
   if (unclassified.length) {
