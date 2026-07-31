@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseSearchIntent } from "@/lib/search-intent";
 import { searchYouTubeWithApi } from "@/lib/youtube-api-search";
-import { searchYouTubeWithYtDlp } from "@/lib/yt-dlp-search";
+import { searchYouTubeWithYtDlp, searchYouTubePlaylists } from "@/lib/yt-dlp-search";
 import { rankMusicFirst, rankRadioMusicFirst } from "@/lib/music-search-relevance";
 
 type SearchResult = {
@@ -11,6 +11,15 @@ type SearchResult = {
   type: "youtube" | "soundcloud";
   viewCount?: number;
   durationSeconds?: number;
+};
+
+/** A full-album result — a YouTube PLAYLIST url that ingests into a complete album. */
+type AlbumSearchResult = {
+  title: string;
+  url: string;
+  cover: string | null;
+  uploader?: string;
+  videoCount?: number;
 };
 
 export type RadioSearchResult = {
@@ -101,7 +110,7 @@ export async function GET(req: NextRequest) {
   }
 
   // 4. Radio Browser API – internet radio stations (in parallel, non-blocking)
-  let radioResults: RadioSearchResult[] = [];
+  const radioResults: RadioSearchResult[] = [];
   try {
     const radioRes = await fetch(
       `${RADIO_BROWSER_API}/json/stations/search?name=${encodeURIComponent(parsed.query)}&limit=${RADIO_LIMIT}`,
@@ -131,9 +140,28 @@ export async function GET(req: NextRequest) {
     console.warn("[sources/search] Radio Browser API failed:", e);
   }
 
+  // 5. Album search — when the query asks for a full album ("album"/"אלבום"), find
+  //    YouTube PLAYLISTS (whole albums) so the UI can surface an "Albums" row on top.
+  //    Ingesting one builds the complete album, not scattered singles.
+  let albumResults: AlbumSearchResult[] = [];
+  if (parsed.findAlbum) {
+    try {
+      const playlists = await searchYouTubePlaylists(parsed.query, 6);
+      albumResults = playlists.map((p) => ({
+        title: p.title,
+        url: p.url,
+        cover: p.cover,
+        uploader: p.uploader,
+        videoCount: p.videoCount,
+      }));
+    } catch (e) {
+      console.warn("[sources/search] album (playlist) search failed:", e);
+    }
+  }
+
   const rankedYoutube = results.length > 0 ? rankMusicFirst(results, q, { maxResults: RESULT_LIMIT }) : [];
   const rankedRadio =
     radioResults.length > 0 ? rankRadioMusicFirst(radioResults, q, RADIO_LIMIT) : [];
 
-  return NextResponse.json({ results: rankedYoutube, radioResults: rankedRadio });
+  return NextResponse.json({ results: rankedYoutube, radioResults: rankedRadio, albumResults });
 }

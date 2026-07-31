@@ -30,6 +30,15 @@ export type RadioSearchResult = {
   genre: string;
 };
 
+/** A full album — a YouTube playlist url that ingests into a complete album playlist. */
+export type AlbumSearchResult = {
+  title: string;
+  url: string;
+  cover: string | null;
+  uploader?: string;
+  videoCount?: number;
+};
+
 export type CatalogSearchResult = {
   id: string;
   url: string;
@@ -47,6 +56,8 @@ export type ExternalSearchResults = {
   youtube: YouTubeSearchResult[];
   radio: RadioSearchResult[];
   catalog: CatalogSearchResult[];
+  /** Full-album results (YouTube playlists) — present only when the query asks for an album. */
+  albums: AlbumSearchResult[];
 };
 
 /** Internal search – filters existing library content. No API calls. */
@@ -91,7 +102,7 @@ function asResultArray<T>(raw: unknown): T[] {
 /** External discovery – calls API. Extensible: add more providers to the response. */
 export async function searchExternal(query: string, genreFilter?: string): Promise<ExternalSearchResults> {
   if (!query.trim() || query.trim().length < 2) {
-    return { youtube: [], radio: [], catalog: [] };
+    return { youtube: [], radio: [], catalog: [], albums: [] };
   }
   const q = encodeURIComponent(query.trim());
   const catalogUrl = genreFilter
@@ -109,6 +120,7 @@ export async function searchExternal(query: string, genreFilter?: string): Promi
 
   const youtube = asResultArray<YouTubeSearchResult>(externalData.results);
   const radio = asResultArray<RadioSearchResult>(externalData.radioResults);
+  const albums = asResultArray<AlbumSearchResult>(externalData.albumResults);
   const catalogRaw = catalogData.items ?? (catalogData.data as Record<string, unknown> | undefined)?.items;
   const plainCatalog = asResultArray<CatalogSearchResult>(catalogRaw);
 
@@ -158,7 +170,7 @@ export async function searchExternal(query: string, genreFilter?: string): Promi
   const seen = new Set(smartRelevant.map((c) => c.url || c.id));
   const catalog = [...smartRelevant, ...plainCatalog.filter((c) => !seen.has(c.url || c.id))];
 
-  return { youtube, radio, catalog };
+  return { youtube, radio, catalog, albums };
 }
 
 /** Run both internal and external search in parallel. */
@@ -172,7 +184,7 @@ export async function searchAll(
 }> {
   const q = query.trim();
   if (!q || q.length < 2) {
-    return { internal: [], external: { youtube: [], radio: [], catalog: [] } };
+    return { internal: [], external: { youtube: [], radio: [], catalog: [], albums: [] } };
   }
   const [internal, external] = await Promise.all([
     Promise.resolve(searchInternal(sources, q)),

@@ -37,6 +37,15 @@ const GENRE_MAP: Record<string, string> = {
   "דאבסטפ": "dubstep",
 };
 
+/** Album-intent: user wants a FULL ALBUM (a playlist), not scattered singles.
+ *  Kept to distinctive tokens only — "album"/"אלבום" already cover full/the/whole
+ *  album phrasings; avoids substrings that hide inside other words (e.g. "lp"→help,
+ *  "דיסק"→דיסקוטק). */
+const ALBUM_KEYWORDS = [
+  "album", "discography",
+  "אלבום", "האלבום", "דיסקוגרפיה",
+] as const;
+
 const LIVE_PERFORMANCE_KEYWORDS = [
   "live", "live performance", "live concert", "live show", "in concert",
   "הופעה חיה", "הופעה בקיסריה", "הופעה באולם", "תמצא לי הופעה", "מצא הופעה",
@@ -50,6 +59,8 @@ export type ParsedSearch = {
   publishedBefore?: string;
   addLive?: boolean;
   addSets?: boolean;
+  /** User asked for a full album — the route also runs a playlist (album) search. */
+  findAlbum?: boolean;
 };
 
 export function shouldSortByViews(query: string): boolean {
@@ -66,6 +77,13 @@ export function shouldAddLive(query: string): boolean {
 export function shouldAddSets(query: string): boolean {
   const q = query.trim().toLowerCase();
   return SETS_MIX_KEYWORDS.some((kw) => q.includes(kw.toLowerCase()));
+}
+
+/** True when the user is asking for a full ALBUM → search YouTube playlists, not singles. */
+export function shouldFindAlbum(query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q || q.length < 3) return false;
+  return ALBUM_KEYWORDS.some((kw) => q.includes(kw.toLowerCase()));
 }
 
 /**
@@ -101,6 +119,7 @@ export function parseSearchIntent(rawQuery: string): ParsedSearch {
   const sortByViews = shouldSortByViews(q);
   const addLive = shouldAddLive(q);
   const addSets = shouldAddSets(q);
+  const findAlbum = shouldFindAlbum(q);
 
   const { after, before, rest } = extractDateRange(q);
   q = rest;
@@ -132,6 +151,7 @@ export function parseSearchIntent(rawQuery: string): ParsedSearch {
     publishedBefore: before,
     addLive: addLive || undefined,
     addSets: addSets || undefined,
+    findAlbum: findAlbum || undefined,
   };
 }
 

@@ -299,6 +299,115 @@ export async function searchYouTubeWithYtDlp(
   return results;
 }
 
+/** One YouTube PLAYLIST (album) search hit — a full album/playlist, not a single video. */
+export type YtDlpPlaylistResult = {
+  /** Canonical playlist URL (`https://www.youtube.com/playlist?list=...`) — ingesting it builds a full playlist. */
+  url: string;
+  playlistId: string;
+  title: string;
+  cover: string | null;
+  uploader?: string;
+  videoCount?: number;
+};
+
+/**
+ * Search YouTube for PLAYLISTS (albums), not videos. Uses YouTube's own results
+ * page with the "playlist" search filter (`sp=EgIQAw%3D%3D`) — yt-dlp treats that
+ * page as a flat playlist-of-playlists, so each entry is a full album/playlist we
+ * can ingest whole. This is what makes "album of X" return a complete album
+ * instead of scattered singles. Validated against real album queries.
+ */
+export async function searchYouTubePlaylists(
+  query: string,
+  limit = 6,
+): Promise<YtDlpPlaylistResult[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const cap = Math.min(Math.max(1, limit), 12);
+  const resultsUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}&sp=EgIQAw%3D%3D`;
+
+  return runWithTimeout(
+    (async () => {
+      const wrap = await getYtDlp();
+      if (!wrap) return [];
+      const stdout = await wrap.execPromise([
+        resultsUrl,
+        "--dump-json",
+        "--no-warnings",
+        "--no-download",
+        "--flat-playlist",
+        "--playlist-end",
+        String(cap),
+      ]);
+      const lines = (typeof stdout === "string" ? stdout : "")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      const out: YtDlpPlaylistResult[] = [];
+      const seen = new Set<string>();
+      for (const line of lines) {
+        if (out.length >= cap) break;
+        let obj: Record<string, unknown>;
+        try {
+          obj = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        // A playlist-filtered results page yields entries whose url points at a
+        // playlist (or carries a playlist id). Keep only real playlists.
+        const rawUrl = typeof obj.url === "string" ? obj.url : "";
+        const idFromField =
+          typeof obj.id === "string" && /^(PL|OLAK|RDCLAK)/i.test(obj.id) ? obj.id : "";
+        const listMatch = rawUrl.match(/[?&]list=([^&\s]+)/i);
+        const playlistId =
+          idFromField ||
+          (listMatch ? listMatch[1] : "") ||
+          (/\/playlist\?/.test(rawUrl) && typeof obj.id === "string" ? obj.id : "");
+        if (!playlistId || seen.has(playlistId)) continue;
+        // Skip auto-generated "Mix"/radio lists (RD...) — those are infinite radios,
+        // not albums. Albums are PL / OLAK (YouTube Music album) lists.
+        if (/^RD/i.test(playlistId) && !/^RDCLAK/i.test(playlistId)) continue;
+        seen.add(playlistId);
+
+        const title =
+          (typeof obj.title === "string" && obj.title.trim()) ||
+          (typeof obj.playlist_title === "string" && obj.playlist_title.trim()) ||
+          "Album";
+        const thumbnail =
+          typeof obj.thumbnail === "string"
+            ? obj.thumbnail
+            : Array.isArray(obj.thumbnails) && obj.thumbnails.length > 0
+              ? ((obj.thumbnails[obj.thumbnails.length - 1] as { url?: string })?.url ?? null)
+              : null;
+        const uploader =
+          typeof obj.uploader === "string"
+            ? obj.uploader
+            : typeof obj.channel === "string"
+              ? obj.channel
+              : undefined;
+        const videoCount =
+          typeof obj.playlist_count === "number"
+            ? obj.playlist_count
+            : typeof obj.video_count === "number"
+              ? obj.video_count
+              : undefined;
+
+        out.push({
+          url: `https://www.youtube.com/playlist?list=${playlistId}`,
+          playlistId,
+          title,
+          cover: thumbnail,
+          uploader,
+          videoCount,
+        });
+      }
+      return out;
+    })(),
+    TIMEOUT_MS,
+  ).catch(() => []);
+}
+
 const YT_DLP_TIMEOUT_MS = 10000;
 
 /** Fetch view count and duration for a single YouTube URL via yt-dlp. Returns undefined if unavailable. */

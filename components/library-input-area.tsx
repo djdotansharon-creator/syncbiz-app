@@ -25,7 +25,7 @@ import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { rgbLuminance, useDominantColor } from "@/lib/use-dominant-color";
 import { inferGenre } from "@/lib/infer-genre";
-import { searchAll, searchExternal, type YouTubeSearchResult, type RadioSearchResult, type CatalogSearchResult } from "@/lib/search-service";
+import { searchAll, searchExternal, type YouTubeSearchResult, type RadioSearchResult, type CatalogSearchResult, type AlbumSearchResult } from "@/lib/search-service";
 import { createEphemeralLocalSearchSource } from "@/lib/play-next";
 import { radioToUnified } from "@/lib/radio-utils";
 import {
@@ -452,6 +452,7 @@ export function LibraryInputArea({
   const [youtubeResults, setYoutubeResults] = useState<YouTubeSearchResult[]>([]);
   const [radioResults, setRadioResults] = useState<RadioSearchResult[]>([]);
   const [catalogResults, setCatalogResults] = useState<CatalogSearchResult[]>([]);
+  const [albumResults, setAlbumResults] = useState<AlbumSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [listening, setListening] = useState(false);
   const [aiPlaylistBusy, setAiPlaylistBusy] = useState(false);
@@ -466,7 +467,8 @@ export function LibraryInputArea({
   const hasYoutube = youtubeResults.length > 0;
   const hasRadio = radioResults.length > 0;
   const hasCatalog = catalogResults.length > 0;
-  const hasResults = hasMusicBankLocal || hasLocal || hasYoutube || hasRadio || hasCatalog;
+  const hasAlbums = albumResults.length > 0;
+  const hasResults = hasMusicBankLocal || hasLocal || hasYoutube || hasRadio || hasCatalog || hasAlbums;
 
   const ingestStripBusy = urlIngesting || searching || externalYtSaveBusy;
   const ingestShellPhaseClass = ingestStripBusy
@@ -490,6 +492,7 @@ export function LibraryInputArea({
       setYoutubeResults([]);
       setRadioResults([]);
       setCatalogResults([]);
+      setAlbumResults([]);
       return;
     }
     searchQueryRef.current = q;
@@ -497,6 +500,7 @@ export function LibraryInputArea({
     setYoutubeResults([]);
     setRadioResults([]);
     setCatalogResults([]);
+    setAlbumResults([]);
     try {
       const [allRes, mblRes] = await Promise.all([
         searchAll(sources, q),
@@ -507,6 +511,7 @@ export function LibraryInputArea({
         setYoutubeResults(allRes.external.youtube);
         setRadioResults(allRes.external.radio);
         setCatalogResults(allRes.external.catalog);
+        setAlbumResults(allRes.external.albums);
         setMusicBankLocalResults(mblRes);
       }
     } catch {
@@ -516,6 +521,7 @@ export function LibraryInputArea({
         setYoutubeResults([]);
         setRadioResults([]);
         setCatalogResults([]);
+        setAlbumResults([]);
       }
     } finally {
       setSearching(false);
@@ -529,6 +535,7 @@ export function LibraryInputArea({
       setYoutubeResults([]);
       setRadioResults([]);
       setCatalogResults([]);
+      setAlbumResults([]);
       setShowResults(false);
       searchQueryRef.current = "";
       return;
@@ -1566,6 +1573,21 @@ export function LibraryInputArea({
     [query, onAdd, router, tx]
   );
 
+  /**
+   * Add a full ALBUM: the album's URL is a YouTube playlist. Routing it through
+   * `ingestUrl` hits the same `isYouTubeMultiTrackUrl` branch a pasted playlist link
+   * does → opens the mix-import panel which enumerates the WHOLE album into one
+   * playlist (not scattered singles). Close the results dropdown so that panel shows.
+   */
+  const handleAddAlbum = useCallback(
+    (album: AlbumSearchResult) => {
+      setShowResults(false);
+      setAlbumResults([]);
+      void ingestUrl(album.url);
+    },
+    [ingestUrl]
+  );
+
   const handleAddRadio = useCallback(
     async (r: RadioSearchResult) => {
       const res = await fetch("/api/radio", {
@@ -1683,6 +1705,7 @@ export function LibraryInputArea({
       effectivePlaySource(u);
       setQuery("");
       setCatalogResults([]);
+      setAlbumResults([]);
       setYoutubeResults([]);
       setRadioResults([]);
       setLocalResults([]);
@@ -1826,6 +1849,7 @@ export function LibraryInputArea({
                 setYoutubeResults([]);
                 setRadioResults([]);
                 setCatalogResults([]);
+                setAlbumResults([]);
                 setShowResults(false);
                 inputRef.current?.focus();
               }}
@@ -2173,6 +2197,58 @@ export function LibraryInputArea({
             </div>
           ) : (
             <>
+              {/* ── ALBUMS FIRST — full-album playlists when the query asks for an album ── */}
+              {hasAlbums && (
+                <div className="border-b border-white/[0.05] p-2.5">
+                  <p className={RESULT_SECTION_HEAD}>{locale === "he" ? "אלבומים" : "Albums"}</p>
+                  <div className="space-y-0.5">
+                    {albumResults.map((album, i) => (
+                      <div
+                        key={album.url || i}
+                        className={`${RESULT_ROW} cursor-pointer`}
+                        onClick={() => handleAddAlbum(album)}
+                      >
+                        <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md bg-[#101014]">
+                          {album.cover ? (
+                            <img src={album.cover} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <TrackMediaPlaceholder chip="YT" className="h-full w-full" showCornerBadge={false} />
+                          )}
+                          <span className="absolute bottom-0 right-0 rounded-tl-md bg-black/70 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-white/90">
+                            {locale === "he" ? "אלבום" : "Album"}
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="flex items-center gap-2">
+                            <span className={RESULT_TITLE}>{album.title}</span>
+                            <ResultPlatformLogo kind="youtube" />
+                          </p>
+                          <p className={RESULT_META}>
+                            {[
+                              album.uploader,
+                              album.videoCount
+                                ? `${album.videoCount} ${locale === "he" ? "שירים" : "tracks"}`
+                                : locale === "he" ? "אלבום מלא" : "Full album",
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddAlbum(album);
+                          }}
+                          className={RESULT_GHOST_BTN}
+                        >
+                          {locale === "he" ? "הוסף אלבום" : "Add album"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {/* ── CATALOG FIRST — Spotify-style: big Top result + Songs list ── */}
               {hasCatalog && (
                 <div className="border-b border-white/[0.05] p-3">
