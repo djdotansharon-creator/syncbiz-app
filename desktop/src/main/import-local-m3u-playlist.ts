@@ -191,7 +191,7 @@ async function tryAddAudioFromPathLine(
   rawRef: string,
   pathLine: string,
   playlistDir: string,
-  rootNorm: string,
+  rootNorms: string[],
   pendingTitle: string | null,
   pendingDurationSec: number | null,
 ): Promise<void> {
@@ -282,7 +282,7 @@ async function tryAddAudioFromPathLine(
     return;
   }
 
-  if (!isUnderMusicRoot(abs, rootNorm)) {
+  if (!rootNorms.some((root) => isUnderMusicRoot(abs, root))) {
     pushUnresolved(state, {
       rawRef,
       trimmedPathLine: trimmed,
@@ -359,7 +359,7 @@ function parsePlsPlaylistName(text: string): string | null {
 async function importM3uLikeContent(
   text: string,
   playlistFileAbs: string,
-  rootNorm: string,
+  rootNorms: string[],
 ): Promise<{
   playlistName: string;
   files: string[];
@@ -415,7 +415,7 @@ async function importM3uLikeContent(
       trimmed,
       trimmed,
       playlistDir,
-      rootNorm,
+      rootNorms,
       titleForRow,
       durationForRow,
     );
@@ -439,7 +439,7 @@ async function importM3uLikeContent(
 async function importPlsContent(
   text: string,
   playlistFileAbs: string,
-  rootNorm: string,
+  rootNorms: string[],
 ): Promise<{
   playlistName: string;
   files: string[];
@@ -467,7 +467,7 @@ async function importPlsContent(
       e.rawRef,
       e.pathLine,
       playlistDir,
-      rootNorm,
+      rootNorms,
       e.title,
       e.lengthSec,
     );
@@ -579,8 +579,18 @@ export async function importLocalM3uPlaylist(
   config: DesktopRuntimeConfig,
   playlistAbsolutePath: string,
 ): Promise<ImportLocalM3uPlaylistResult> {
-  const rootNorm = normalizeMusicRoot(config.musicFolderPath ?? null);
-  if (!rootNorm) {
+  // Resolve against the primary music folder AND every additional folder the operator
+  // added — a track that lives under any configured root counts as in-library. Dedupe
+  // so overlapping roots don't cost extra work.
+  const rawRoots = [config.musicFolderPath ?? null, ...(config.additionalMusicFolders ?? [])];
+  const rootNorms = Array.from(
+    new Set(
+      rawRoots
+        .map((r) => normalizeMusicRoot(r))
+        .filter((r): r is string => Boolean(r)),
+    ),
+  );
+  if (rootNorms.length === 0) {
     return { status: "error", message: "Music folder is not configured. Choose a folder in Settings first." };
   }
 
@@ -619,8 +629,8 @@ export async function importLocalM3uPlaylist(
 
   const payload =
     ext === ".pls"
-      ? await importPlsContent(text, fileRaw, rootNorm)
-      : await importM3uLikeContent(text, fileRaw, rootNorm);
+      ? await importPlsContent(text, fileRaw, rootNorms)
+      : await importM3uLikeContent(text, fileRaw, rootNorms);
 
   // LOCAL-BANK-FIRST: try to place unresolved entries against the local music
   // bank by title before anything flows on to YouTube. Additive/safe.

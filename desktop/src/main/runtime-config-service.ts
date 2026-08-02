@@ -1,9 +1,36 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { DesktopRuntimeConfig } from "../shared/mvp-types";
 
 const CONFIG_NAME = "syncbiz-player-runtime.json";
+
+/**
+ * Known music-library locations to auto-adopt when the operator hasn't picked one.
+ * Ordered by preference: the PlaylistPro standard Dropbox library first, then the
+ * OS Music folder. This is what makes M3U import (and local playback) work out of
+ * the box on a fresh player PC — no "Music folder is not configured" wall. The
+ * operator can still change it or add more folders in Settings.
+ */
+function candidateDefaultMusicFolders(): string[] {
+  return [
+    "D:\\Playlistpro\\Dropbox\\MUSIC",
+    join(homedir(), "Music"),
+  ];
+}
+
+/** First known music location that actually exists on this machine, or undefined. */
+export function resolveDefaultMusicFolder(): string | undefined {
+  for (const candidate of candidateDefaultMusicFolders()) {
+    try {
+      if (candidate && existsSync(candidate)) return candidate;
+    } catch {
+      /* unreadable candidate — skip */
+    }
+  }
+  return undefined;
+}
 
 function newDeviceId(): string {
   return `dsk-${randomUUID()}`;
@@ -19,7 +46,7 @@ export function defaultRuntimeConfig(): DesktopRuntimeConfig {
     wsToken: "",
     lastAuthEmail: undefined,
     desktopTokenExpiresAtIso: undefined,
-    musicFolderPath: undefined,
+    musicFolderPath: resolveDefaultMusicFolder(),
   };
 }
 
@@ -58,6 +85,16 @@ export function loadRuntimeConfig(userData: string): DesktopRuntimeConfig {
           ? data.musicFolderPath.trim()
           : undefined,
     };
+    // Existing installs whose music folder was never picked (key absent/blank) adopt
+    // the known default so import/local playback work without a manual Settings step.
+    // A folder the operator explicitly set is preserved above; only the empty case defaults.
+    if (!merged.musicFolderPath) {
+      const fallback = resolveDefaultMusicFolder();
+      if (fallback) {
+        merged.musicFolderPath = fallback;
+        saveRuntimeConfig(userData, merged);
+      }
+    }
     return merged;
   } catch {
     const fresh = defaultRuntimeConfig();
