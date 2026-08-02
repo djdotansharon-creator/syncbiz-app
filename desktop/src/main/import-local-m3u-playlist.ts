@@ -47,6 +47,40 @@ function stripBom(s: string): string {
 }
 
 /**
+ * Decode a playlist file to text with encoding detection. `.m3u` files from
+ * Windows/Hebrew tools (e.g. PlayIt Pro) are frequently NOT UTF-8 — they use the
+ * legacy ANSI code page (Windows-1255 for Hebrew) or UTF-16. Reading those bytes as
+ * UTF-8 turns every Hebrew character — including the file PATHS — into U+FFFD (���),
+ * so nothing resolves and track names show as gibberish. We detect BOMs, prefer
+ * strict UTF-8, and fall back to Windows-1255 when the bytes aren't valid UTF-8.
+ */
+function decodePlaylistBuffer(buf: Buffer): string {
+  // BOM-based detection (most reliable).
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) {
+    return new TextDecoder("utf-16le").decode(buf.subarray(2));
+  }
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
+    return new TextDecoder("utf-16be").decode(buf.subarray(2));
+  }
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+    return buf.subarray(3).toString("utf8");
+  }
+  // No BOM: trust UTF-8 only if the bytes are valid UTF-8; otherwise the file is a
+  // legacy single-byte ANSI export — decode as Windows-1255 (Hebrew). This preserves
+  // ASCII-only playlists exactly while rescuing Hebrew ones.
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    try {
+      return new TextDecoder("windows-1255").decode(buf);
+    } catch {
+      // ICU missing this label (shouldn't happen on Electron) — last resort.
+      return buf.toString("latin1");
+    }
+  }
+}
+
+/**
  * Split playlist text into lines. `\r` alone (old Mac / some exporters) must split —
  * `String.split(/\r?\n/)` leaves the whole file as one line and only the first path is imported.
  */
@@ -621,7 +655,7 @@ export async function importLocalM3uPlaylist(
 
   let text: string;
   try {
-    text = stripBom(readFileSync(fileRaw, "utf8"));
+    text = stripBom(decodePlaylistBuffer(readFileSync(fileRaw)));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { status: "error", message: `Could not read playlist: ${msg}` };
