@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { useStationController } from "@/lib/station-controller-context";
 import { usePlayback } from "@/lib/playback-provider";
@@ -58,11 +58,68 @@ export type MobilePlayerDerived = {
   onToggleAutoMix: () => void;
 };
 
+/**
+ * Controller-mode position clock. In controller mode the mini-player mirrors the
+ * MASTER's `remoteState.position`, but STATE_UPDATE snapshots only arrive ~1×/sec
+ * (and only on events for some MASTERs), so a raw binding makes the seek bar look
+ * STUCK and never shows the current minute advancing. This advances the displayed
+ * position locally between snapshots (the same technique the desktop control-mirror
+ * uses) and re-anchors to the MASTER's truth on every fresh snapshot / track change
+ * / play-pause flip — so it's smooth AND seek-safe (a SEEK echoes back and re-anchors).
+ */
+function useInterpolatedRemotePosition(
+  remotePosition: number,
+  duration: number,
+  isPlaying: boolean,
+  syncKey: string | null,
+): number {
+  const [display, setDisplay] = useState(0);
+  const anchorPosRef = useRef(0);
+  const anchorAtRef = useRef(0);
+
+  // Re-anchor to the MASTER whenever it reports a new position, the track changes,
+  // or play/pause flips. Keeps the local clock honest instead of free-running.
+  useEffect(() => {
+    anchorPosRef.current = Number.isFinite(remotePosition) ? Math.max(0, remotePosition) : 0;
+    anchorAtRef.current = Date.now();
+    setDisplay(anchorPosRef.current);
+  }, [remotePosition, syncKey, isPlaying]);
+
+  // While playing, tick the displayed position forward between snapshots.
+  useEffect(() => {
+    if (!isPlaying) return;
+    const id = setInterval(() => {
+      const elapsed = (Date.now() - anchorAtRef.current) / 1000;
+      let next = anchorPosRef.current + elapsed;
+      if (duration > 0) next = Math.min(next, duration);
+      setDisplay(next);
+    }, 250);
+    return () => clearInterval(id);
+  }, [isPlaying, duration]);
+
+  return display;
+}
+
 function useDerivedPlayer(): MobilePlayerDerived {
   const { mobileRole } = useMobileRole();
   const station = useStationController();
   const playback = usePlayback();
   const localTime = useLocalPlaybackTime();
+
+  // Controller-mode position clock — computed unconditionally (hook rules); unused
+  // in player mode (remoteState is null there → not playing → stays at 0).
+  const rsTop = station.remoteState;
+  const rsPlaying = station.isCrossDevice && (rsTop?.status ?? "idle") === "playing";
+  const rsSyncKey =
+    rsTop?.currentSource?.id != null
+      ? `${rsTop.currentSource.id}#${rsTop.currentTrackIndex ?? 0}`
+      : null;
+  const controllerPosition = useInterpolatedRemotePosition(
+    rsTop?.position ?? 0,
+    rsTop?.duration ?? 0,
+    rsPlaying,
+    rsSyncKey,
+  );
 
   // AutoMix is an app-wide preference (lib/mix-preferences); the real AudioPlayer
   // in app-shell reads the same store, so toggling it here in PLAYER mode drives
@@ -113,7 +170,7 @@ function useDerivedPlayer(): MobilePlayerDerived {
             ? null
             : "Go to the Remote tab to pick a MASTER device",
       cover: canControl ? trk?.cover ?? src?.cover ?? null : null,
-      position: rs?.position ?? 0,
+      position: canControl ? controllerPosition : 0,
       duration: rs?.duration ?? 0,
       volume: typeof rs?.volume === "number" ? rs.volume : 80,
       // Mirror the MASTER's mode state; only meaningful when connected.
