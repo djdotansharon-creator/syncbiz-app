@@ -15,6 +15,7 @@ const KINDS = new Set([
   "recovered",
   "stall_error",
   "background_video_fallback",
+  "track_repeat_no_advance",
 ]);
 
 const str = (v: unknown, max: number): string | null =>

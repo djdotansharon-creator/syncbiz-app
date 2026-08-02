@@ -17,7 +17,8 @@ export type PlaybackIncidentKind =
   | "skip_recover" // gave up after retries and skipped forward to keep audio alive
   | "recovered" // playback resumed after an intervention
   | "stall_error" // engine/stall error surfaced
-  | "background_video_fallback"; // desktop bg video failed/timed out → fell back to artwork
+  | "background_video_fallback" // desktop bg video failed/timed out → fell back to artwork
+  | "track_repeat_no_advance"; // natural end replayed the SAME track while the playlist has >1 track
 
 export interface PlaybackIncidentPayload {
   kind: PlaybackIncidentKind;

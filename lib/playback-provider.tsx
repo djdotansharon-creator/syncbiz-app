@@ -33,6 +33,7 @@ import {
 import { getShuffle, setShufflePreference, getRepeatMode } from "./mix-preferences";
 import { supportsEmbedded, getSourceArtworkUrl } from "./player-utils";
 import { log as mvpLog } from "./mvp-logger";
+import { reportPlaybackIncident, classifySource as classifyIncidentSource, hostOnly as incidentHost } from "./playback-telemetry-client";
 import {
   syncbizAuditCurrentSourceTransition,
   syncbizAuditNextInvoked,
@@ -1978,6 +1979,37 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         const track = sessionTracks[nextIdx];
         const url = track?.url ?? s.currentSource.url;
         const embedded = track ? canEmbedInCard(track.type) : false;
+        // READ-ONLY diagnostic (never alters the transport): a natural end is about
+        // to replay the SAME track index while the playlist genuinely has >1 track —
+        // the "song loops instead of advancing" bug. Report it (fire-and-forget) so
+        // the collapsed session state shows up on the telemetry dashboard and we can
+        // fix precisely instead of guessing in the playback chain.
+        if (
+          auditTransportCase === "ended_auto" &&
+          effectiveRepeatMode !== "track" &&
+          nextIdx === s.currentTrackIndex &&
+          plTracksForNext.length > 1
+        ) {
+          try {
+            reportPlaybackIncident({
+              kind: "track_repeat_no_advance",
+              sourceType: classifyIncidentSource(url),
+              urlHost: incidentHost(url),
+              detail: {
+                sessionTracksLen: sessionTracks.length,
+                playlistTrackCount: plTracksForNext.length,
+                currentTrackIndex: s.currentTrackIndex,
+                nextIndex: nextIdx,
+                branch,
+                shuffle: s.shuffle,
+                repeatMode: effectiveRepeatMode,
+                playlistId: plSnap?.id ?? null,
+              },
+            });
+          } catch {
+            /* diagnostics must never affect playback */
+          }
+        }
         mvpLog("playback_next", {
           scope: "playlist",
           branch,
