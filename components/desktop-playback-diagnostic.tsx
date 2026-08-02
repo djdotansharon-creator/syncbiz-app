@@ -5,7 +5,36 @@ import { useEffect, useRef, useState } from "react";
 // Bump on each meaningful deploy so a pasted diagnostic proves which build the
 // desktop actually loaded (Electron can keep serving an old renderer until a
 // FULL quit + relaunch). If this shows an old value, the fix hasn't loaded yet.
-const DIAG_BUILD = "sh2-2026-07-20";
+const DIAG_BUILD = "gated-2026-08-02";
+
+/**
+ * Owner/debug gate. This overlay is a developer tool and must NEVER surface on a
+ * customer's player — a red "playback stuck" panel popping up looks like a broken
+ * product. It stays OFF by default and is opt-in per machine:
+ *   • `?diag=1` in the URL turns it on (and remembers it); `?diag=0` turns it off.
+ *   • Otherwise it reads localStorage `syncbiz-playback-diag === "1"`.
+ * Playback telemetry still reports stalls to the server regardless of this flag,
+ * so the owner can watch client freezes on the admin telemetry page without the
+ * customer ever seeing the overlay.
+ */
+const DIAG_FLAG_KEY = "syncbiz-playback-diag";
+function readDiagnosticsEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const qp = new URL(window.location.href).searchParams.get("diag");
+    if (qp === "1") {
+      window.localStorage.setItem(DIAG_FLAG_KEY, "1");
+      return true;
+    }
+    if (qp === "0") {
+      window.localStorage.removeItem(DIAG_FLAG_KEY);
+      return false;
+    }
+    return window.localStorage.getItem(DIAG_FLAG_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * DISPLAY-ONLY desktop playback diagnostic.
@@ -87,6 +116,13 @@ export function DesktopPlaybackDiagnostic(props: {
     selfHealAttempts,
   } = props;
 
+  // Owner/debug gate — resolved once on mount. Off ⇒ this overlay never renders
+  // (customers stay clean); telemetry reporting is unaffected.
+  const [diagEnabled, setDiagEnabled] = useState(false);
+  useEffect(() => {
+    setDiagEnabled(readDiagnosticsEnabled());
+  }, []);
+
   // ── Component-local tracking (no writes back into the player) ──────────────
   // When the play intent last began.
   const playAtRef = useRef<number | null>(null);
@@ -163,7 +199,7 @@ export function DesktopPlaybackDiagnostic(props: {
 
   const [copied, setCopied] = useState(false);
 
-  if (!visible) return null;
+  if (!diagEnabled || !visible) return null;
 
   const secsSince = (t: number | null) => (t === null ? "—" : `${((Date.now() - t) / 1000).toFixed(1)}s`);
   // Prefer the real dispatch timestamp from the player (includes self-heal
