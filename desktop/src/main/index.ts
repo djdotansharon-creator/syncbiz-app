@@ -1,6 +1,6 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { app, BrowserWindow, screen } from "electron";
+import { app, BrowserWindow, screen, shell } from "electron";
 
 import { initFileLogger, fileLog, getLogFilePath } from "./file-logger";
 import { registerMvpIpc } from "./ipc-mvp";
@@ -161,8 +161,21 @@ function attachRemoteSecurity(win: BrowserWindow, allowedOrigin: string): void {
     event.preventDefault();
   });
 
-  // Deny window.open and target="_blank" links.
+  // Never open an in-app popup window. But a target="_blank" / window.open to a
+  // real web URL (the update pill's installer download, the GitHub releases page,
+  // "open in browser" links) must reach the user's system browser — otherwise the
+  // click silently does nothing. Open http(s) externally, deny everything else.
   win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const proto = new URL(url).protocol;
+      if (proto === "https:" || proto === "http:") {
+        void shell.openExternal(url);
+        fileLog("INFO", "security: opened external link in system browser", { url });
+        return { action: "deny" };
+      }
+    } catch {
+      /* invalid URL — fall through to deny */
+    }
     fileLog("WARN", "security: denied popup / window.open", { url });
     return { action: "deny" };
   });
