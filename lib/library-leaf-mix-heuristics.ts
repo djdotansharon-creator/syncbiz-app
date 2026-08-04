@@ -80,6 +80,32 @@ export function strongLongFormTitleCue(title: string | undefined | null): boolea
   return false;
 }
 
+/**
+ * STRONG compilation cues that make a leaf a SET even with unknown duration —
+ * distinct from single-track suffixes like "(Original Mix)" / "(Radio Edit)".
+ * "Afro House Mix 2025 · The Best of…", "Vol. 2", "Megamix", "Top 100" are sets.
+ */
+export function strongCompilationTitleCue(title: string | undefined | null): boolean {
+  const t = (title ?? "").toLowerCase();
+  if (!t) return false;
+  // Single-track markers veto (a song titled "… (Extended Mix)" is NOT a set).
+  if (/\(([^)]*\b(original|extended|radio|club|instrumental|acoustic)\s+(mix|edit|version)[^)]*)\)/.test(t)) {
+    return false;
+  }
+  return (
+    /\bbest of\b/.test(t) ||
+    /\bmega\s?mix\b/.test(t) ||
+    /\bnon[\s-]?stop\b/.test(t) ||
+    /\bcompilation\b/.test(t) ||
+    /\bgreatest hits\b/.test(t) ||
+    /\bthe ultimate\b/.test(t) ||
+    /\btop\s?\d{2,3}\b/.test(t) ||
+    /\bvol\.?\s?\d+\b/.test(t) ||
+    /\bmix\b[^)]*\b(19|20)\d{2}\b/.test(t) || // "… Mix 2025", "House Mix 2026"
+    /\b(19|20)\d{2}\b[^)]*\bmix\b/.test(t)
+  );
+}
+
 function durationFromUnified(source: UnifiedSource): number | null {
   if (typeof source.leafDurationSeconds === "number" && source.leafDurationSeconds > 0) {
     return source.leafDurationSeconds;
@@ -112,7 +138,12 @@ export function shouldClassifyLeafUrlAsMixSet(source: UnifiedSource): boolean {
     return durationSeconds >= MIX_SET_MIN_DURATION_SECONDS;
   }
 
-  return isExplicitLeafMixStyleUrl(source.url?.trim() ?? "");
+  // Unknown duration: explicit YouTube mix URL, OR an unambiguous compilation title
+  // ("Best of…", "… Mix 2025", "Vol. 2") — those are sets even without a duration.
+  return (
+    isExplicitLeafMixStyleUrl(source.url?.trim() ?? "") ||
+    strongCompilationTitleCue(source.title)
+  );
 }
 
 /** Map contentNodeKind — mix_set is resolved only via shouldClassifyLeafUrlAsMixSet, not here. */

@@ -74,7 +74,7 @@ export function RadioStreamsManager({ initialStations }: Props) {
             aria-current="page"
           >
             <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-            {labels.radio?.[locale] ?? "Radio"}
+            {(labels.radio as Record<string, string> | undefined)?.[locale] ?? "Radio"}
           </Link>
         </div>
       </div>

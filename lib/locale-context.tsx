@@ -12,8 +12,9 @@ import {
 import { useRouter } from "next/navigation";
 import { LOCALE_COOKIE_NAME } from "@/lib/constants";
 import { getTranslations } from "@/lib/translations";
+import { isKnownLocale, DEFAULT_LOCALE, type Locale } from "@/lib/locales";
 
-export type Locale = "en" | "he";
+export type { Locale };
 
 type LocaleContextValue = {
   locale: Locale;
@@ -25,10 +26,9 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
 const STORAGE_KEY = "syncbiz-locale";
 
 function readStoredLocale(): Locale {
-  if (typeof window === "undefined") return "en";
+  if (typeof window === "undefined") return DEFAULT_LOCALE;
   const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === "he" || stored === "en") return stored;
-  return "en";
+  return isKnownLocale(stored) ? stored : DEFAULT_LOCALE;
 }
 
 function setLocaleCookie(locale: Locale) {
@@ -45,7 +45,8 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     setLocaleState(stored);
     setLocaleCookie(stored);
     document.documentElement.lang = stored;
-    document.documentElement.dir = stored === "he" ? "rtl" : "ltr";
+    // Layout stays LTR for every language — only the text changes (owner directive).
+    document.documentElement.dir = "ltr";
   }, []);
 
   const setLocale = useCallback(
@@ -55,7 +56,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(STORAGE_KEY, next);
         setLocaleCookie(next);
         document.documentElement.lang = next;
-        document.documentElement.dir = next === "he" ? "rtl" : "ltr";
+        document.documentElement.dir = "ltr"; // always LTR — only text localizes
         router.refresh();
       }
     },
@@ -111,5 +112,7 @@ export const labels: Record<string, { en: string; he: string }> = {
 export function useLabel(key: keyof typeof labels): string {
   const { locale } = useLocale();
   const pair = labels[key];
-  return pair ? pair[locale] : String(key);
+  if (!pair) return String(key);
+  // Only en/he are authored here; every other locale falls back to English.
+  return (pair as Record<string, string>)[locale] ?? pair.en;
 }

@@ -3836,10 +3836,10 @@ function SourcesManagerInner({
                      Playlists / Ready / Sources / Favorites) live as chips above
                      the cards — one library, filters in your face. */
                   const rows: Array<{ id: LibraryViewId; label: string; count: number }> = [
-                    { id: "all_library", label: "All Library", count: displaySources.length },
+                    { id: "all_library", label: t.libraryAll, count: displaySources.length },
                     {
                       id: "scheduled_playlists",
-                      label: "Scheduled",
+                      label: t.libraryScheduled,
                       count: displaySources.filter((s) => s.playlist?.id && scheduledPlaylistIdSet.has(s.playlist.id)).length,
                     },
                   ];
@@ -4622,7 +4622,7 @@ function SourceLogo({ type, origin, size }: { type: UnifiedSource["type"]; origi
     return (
       <span
         className={`library-badge-logo flex ${sizeClass} items-center justify-center rounded-lg p-1 text-rose-400`}
-        title={labels.radio[locale]}
+        title={(labels.radio as Record<string, string>)[locale] ?? labels.radio.en}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={sizeClass}>
           <path d="M4 9a5 5 0 0 1 5 5v1h6v-1a5 5 0 0 1 5-5" />

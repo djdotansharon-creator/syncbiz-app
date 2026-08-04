@@ -175,7 +175,7 @@ function FavoritesManagerInner({
               <path d="M4 14h16" />
               <circle cx="12" cy="18" r="2" />
             </svg>
-            {labels.radio?.[locale] ?? "Radio"}
+            {(labels.radio as Record<string, string> | undefined)?.[locale] ?? "Radio"}
           </Link>
         </div>
       </div>

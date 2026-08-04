@@ -27,6 +27,7 @@ import { unifiedFoundationHints, type UnifiedSource, type ParseUrlJson, type Rad
 import { searchExternal } from "@/lib/search-service";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { HeaderDeviceIndicators } from "@/components/header-device-indicators";
+import { LanguageSelector } from "@/components/language-selector";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
 import { DesktopUpdatePill } from "@/components/desktop-update-pill";
@@ -419,7 +420,7 @@ function HeaderProfileButton({
 
             {/* Workspace switcher (only when multiple workspaces) */}
             {activeWorkspaceId && workspaceList && workspaceList.length > 1 && (
-              <div className="border-t border-slate-700/50 px-4 py-2.5" dir={locale === "he" ? "rtl" : "ltr"}>
+              <div className="border-t border-slate-700/50 px-4 py-2.5" dir="ltr">
                 <WorkspaceSwitcher workspaces={workspaceList} activeId={activeWorkspaceId} />
               </div>
             )}
@@ -764,7 +765,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       return {
         key: item.href,
         href: item.href,
-        label: labels[item.labelKey]?.[locale] ?? item.labelKey,
+        label: (labels[item.labelKey] as Record<string, string> | undefined)?.[locale] ?? labels[item.labelKey]?.en ?? item.labelKey,
         icon: <Icon />,
         isActive,
         isPinned: isCategoryPinned(item.labelKey),
@@ -1339,8 +1340,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               isMediaThemeRoute ? " sources-app-header-row1" : ""
             }`}
           >
-            {/* ── LEFT: Logo — flex-1 basis-0 anchors the three-column balance ── */}
-            <div className="flex flex-1 basis-0 items-center min-w-0">
+            {/* ── LEFT: Logo + device state (MASTER / Agents) — flex-1 basis-0 anchors the balance ── */}
+            <div className="flex flex-1 basis-0 items-center gap-3 min-w-0">
               <Link href="/library" className="flex shrink-0 items-center gap-2" aria-label="SyncBiz">
                 <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-[13px] font-semibold text-sky-400 ring-1 ring-sky-500/30">
                   SB
@@ -1349,6 +1350,16 @@ export function AppShell({ children }: { children: ReactNode }) {
                   SyncBiz
                 </span>
               </Link>
+              {/* MASTER / On Air / device mode indicators */}
+              <HeaderDeviceIndicators />
+              {/* Agents healthy — quiet chip, small green dot */}
+              <span
+                className="hidden items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-[5px] text-[11px] font-medium text-[#a1a1a6] sm:flex"
+                title={t.agentsHealthy}
+              >
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#30d158]" aria-hidden />
+                <span className="hidden md:inline">{t.agentsHealthy}</span>
+              </span>
             </div>
 
             {/* ── CENTER: Nav tabs — perfectly centered between left and right columns ──
@@ -1377,7 +1388,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     item.href === "/dashboard"
                       ? pathname === "/dashboard"
                       : pathname.startsWith(item.href);
-                  const label = labels[item.labelKey]?.[locale] ?? item.labelKey;
+                  const label = (labels[item.labelKey] as Record<string, string> | undefined)?.[locale] ?? labels[item.labelKey]?.en ?? item.labelKey;
                   return (
                     <Link
                       key={item.href}
@@ -1404,7 +1415,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               {/* ── Clock chip — quiet: time · first name (greeting on xl+ only) ── */}
               <div
                 className="me-0.5 hidden items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3.5 py-1.5 sm:flex"
-                dir={locale === "he" ? "rtl" : "ltr"}
+                dir="ltr"
                 suppressHydrationWarning
               >
                 <span className="tabular-nums text-[13px] font-semibold text-slate-100" suppressHydrationWarning>
@@ -1424,17 +1435,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 ) : null}
               </div>
 
-              {/* MASTER / On Air / device mode indicators */}
-              <HeaderDeviceIndicators />
-
-              {/* Agents healthy — quiet chip, small green dot */}
-              <span
-                className="hidden items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-[5px] text-[11px] font-medium text-[#a1a1a6] sm:flex"
-                title={t.agentsHealthy}
-              >
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#30d158]" aria-hidden />
-                <span className="hidden md:inline">{t.agentsHealthy}</span>
-              </span>
+              {/* Language picker — round flag, opens all supported languages */}
+              <LanguageSelector />
 
               {/* Profile avatar → dropdown with full info + logout */}
               <HeaderProfileButton
@@ -1495,7 +1497,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   items={mainMenuItems}
                   title={t.mainMenu ?? "Main menu"}
                   pinLabel={t.pinToTop ?? "Pin to top"}
-                  dir={locale === "he" ? "rtl" : "ltr"}
+                  dir="ltr"
                 />
               </div>
 

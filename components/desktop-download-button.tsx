@@ -217,7 +217,7 @@ function DesktopDownloadModal({ onClose, payload }: DesktopDownloadModalProps) {
       ? data.releasesPageUrl
       : "https://github.com/djdotansharon-creator/syncbiz-app/releases";
   const extraFiles = (data.downloads ?? []).filter((d) => d.name && d.url);
-  const dir = locale === "he" ? "rtl" : "ltr";
+  const dir = "ltr"; // always LTR — only text localizes
 
   const panel = (
     <div

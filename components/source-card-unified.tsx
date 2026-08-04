@@ -319,6 +319,11 @@ export function SourceCard({
   const badgeText = libraryKindBadgeUpper(kindBadge);
   const showLeafLibraryChips = kindBadge !== "LIST" && kindBadge !== "RADIO";
   const provenanceChip = inferTrackSourceChip(source);
+  // Local files: surface the container format (MP3/WAV/FLAC/MP4…) from the path.
+  const localFormat =
+    provenanceChip === "LOCAL" && typeof source.url === "string"
+      ? (source.url.match(/\.([a-z0-9]{2,4})(?:[?#].*)?$/i)?.[1] ?? "")
+      : "";
   const showDesktopOnly =
     isLibraryLocalSource(source) && kindBadge !== "LIST" && kindBadge !== "RADIO" && isBrowserShell;
   const playDisabled = showDesktopOnly;
@@ -572,7 +577,7 @@ export function SourceCard({
             ) : null}
             {!cardCover && !usePlaylistPlaceholder && !useExplicitPlaylistArt ? (
               <div className="relative h-full w-full">
-                <TrackMediaPlaceholder chip={provenanceChip} className="h-full w-full" showCornerBadge={false} />
+                <TrackMediaPlaceholder chip={provenanceChip} className="h-full w-full" showCornerBadge={false} format={localFormat} />
               </div>
             ) : null}
             {/* Playlist marker — quiet icon, bottom-right of the art (grid design) */}

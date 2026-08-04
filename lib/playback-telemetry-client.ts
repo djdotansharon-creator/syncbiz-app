@@ -18,7 +18,8 @@ export type PlaybackIncidentKind =
   | "recovered" // playback resumed after an intervention
   | "stall_error" // engine/stall error surfaced
   | "background_video_fallback" // desktop bg video failed/timed out → fell back to artwork
-  | "track_repeat_no_advance"; // natural end replayed the SAME track while the playlist has >1 track
+  | "track_repeat_no_advance" // natural end replayed the SAME track while the playlist has >1 track
+  | "dual_deck_overlap"; // both YouTube decks played together past the crossfade window (manual switch didn't stop deck A)
 
 export interface PlaybackIncidentPayload {
   kind: PlaybackIncidentKind;

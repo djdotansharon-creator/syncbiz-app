@@ -1,23 +1,24 @@
 "use client";
 
 import { LibraryThemeMenu } from "@/components/library-theme-menu";
-import { useLocale } from "@/lib/locale-context";
+import { useLocale, useTranslations } from "@/lib/locale-context";
 
 export function SettingsPreferencesControls() {
   const { locale, setLocale } = useLocale();
+  const { t } = useTranslations();
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Theme</p>
-        <p className="mt-0.5 text-[11px] text-slate-500">Library visual mode for /sources.</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">{t.settingsTheme}</p>
+        <p className="mt-0.5 text-[11px] text-slate-500">{t.settingsThemeDesc}</p>
         <div className="mt-2 inline-flex">
           <LibraryThemeMenu />
         </div>
       </div>
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Language</p>
-        <p className="mt-0.5 text-[11px] text-slate-500">Application display language.</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">{t.settingsLanguage}</p>
+        <p className="mt-0.5 text-[11px] text-slate-500">{t.settingsLanguageDesc}</p>
         <div
           className="mt-2 inline-flex rounded-lg border border-slate-700/80 bg-slate-900/60 p-0.5"
           role="group"

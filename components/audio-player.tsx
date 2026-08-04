@@ -3646,6 +3646,58 @@ export function AudioPlayer() {
     return () => clearInterval(id);
   }, [isDesktopMode]);
 
+  /**
+   * READ-ONLY diagnostic for the rare "two YouTube decks play together" overlap
+   * (intermittent — a manual SET switch that crossfades but never stops deck A).
+   * A healthy crossfade has both decks audible for ~mixDuration (6s). If BOTH decks
+   * report "playing" for >12s straight, deck A didn't stop — report it (once per
+   * occurrence) so we can see the state on the telemetry dashboard and fix precisely.
+   * Never touches playback — pure observation on the browser YT decks.
+   */
+  const dualDeckSinceRef = useRef<number | null>(null);
+  const dualDeckReportedRef = useRef(false);
+  useEffect(() => {
+    if (isDesktopMode || isControlMirror) return;
+    const id = setInterval(() => {
+      const a = isYtPlayerReady(ytPlayerRef.current) ? safeGetPlayerState(ytPlayerRef.current) : -1;
+      const b = isYtPlayerReady(ytPlayerNextRef.current) ? safeGetPlayerState(ytPlayerNextRef.current) : -1;
+      const bothPlaying = a === 1 && b === 1; // 1 = YT.PlayerState.PLAYING
+      if (!bothPlaying) {
+        dualDeckSinceRef.current = null;
+        dualDeckReportedRef.current = false;
+        return;
+      }
+      if (dualDeckSinceRef.current === null) {
+        dualDeckSinceRef.current = Date.now();
+        return;
+      }
+      const overlapMs = Date.now() - dualDeckSinceRef.current;
+      if (overlapMs >= 12000 && !dualDeckReportedRef.current) {
+        dualDeckReportedRef.current = true;
+        const ctx = playerTelemetryRef.current;
+        try {
+          reportPlaybackIncident({
+            kind: "dual_deck_overlap",
+            deviceId: ctx.deviceId,
+            deviceMode: ctx.deviceMode,
+            platform: ctx.platform,
+            sourceType: classifySource(currentPlayUrlRef.current),
+            urlHost: hostOnly(currentPlayUrlRef.current),
+            detail: {
+              overlapMs,
+              activeDeck: ytActiveDeckRef.current,
+              crossfadeActive: crossfadeStartedRef.current,
+              autoMix: autoMixRef.current,
+            },
+          });
+        } catch {
+          /* diagnostics must never affect playback */
+        }
+      }
+    }, 2000);
+    return () => clearInterval(id);
+  }, [isDesktopMode, isControlMirror]);
+
   // ── End desktop routing ───────────────────────────────────────────────────
 
   /** Unified display values: desktop MPV > CONTROL mirror > local React state. */
@@ -3924,7 +3976,7 @@ export function AudioPlayer() {
     : isControlMirror
       ? t.providerRemote
       : originForTooltip === "radio"
-        ? labels.radio[locale]
+        ? (labels.radio as Record<string, string>)[locale] ?? labels.radio.en
         : trackTypeForTooltip === "youtube"
           ? t.providerYouTube
           : trackTypeForTooltip === "soundcloud"

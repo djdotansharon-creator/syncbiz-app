@@ -15,6 +15,7 @@ import {
   mergeDjCreatorAvoidSlugs,
 } from "@/lib/recommendations/dj-creator-client-filters";
 import { shouldAppendFreeTextToDjCreatorCatalogQuery } from "@/lib/recommendations/dj-creator-catalog-query";
+import { parseDjBrief } from "@/lib/recommendations/dj-brief-parser";
 import { computeDjCreatorMatrixKey } from "@/lib/recommendations/dj-creator-search-context";
 import { useLocale } from "@/lib/locale-context";
 import { getYouTubeThumbnail, inferPlaylistType } from "@/lib/playlist-utils";
@@ -144,9 +145,15 @@ const VIBE_BUBBLES: Bubble[] = [
 
 const STYLE_BUBBLES: Bubble[] = [
   { id: "auto", label: "Let DJ Creator choose", labelHe: "DJ Creator יבחר", query: "" },
+  // World / local — the heart of the catalog we tagged (Mediterranean, Israeli, Mizrahi).
+  { id: "mediterranean", label: "Mediterranean", labelHe: "ים תיכוני", query: "mediterranean" },
+  { id: "israeli", label: "Israeli", labelHe: "ישראלי", query: "israeli hebrew" },
+  { id: "mizrahi", label: "Mizrahi / Oriental", labelHe: "מזרחי", query: "mizrahi middle eastern oriental" },
+  { id: "greek-italian", label: "Greek / Italian", labelHe: "יווני / איטלקי", query: "greek italian mediterranean" },
+  // Lounge / soft.
   { id: "lounge", label: "Lounge", labelHe: "לאונג׳", query: "lounge" },
-  { id: "bossa", label: "Bossa Nova", labelHe: "בוסה נובה", query: "bossa nova" },
-  { id: "jazz", label: "Smooth jazz / Lounge jazz", labelHe: "ג׳אז רך / לאונג׳", query: "smooth jazz jazz lounge" },
+  { id: "bossa", label: "Bossa / Latin", labelHe: "בוסה / לטיני", query: "bossa nova latin" },
+  { id: "jazz", label: "Smooth jazz", labelHe: "ג׳אז רך", query: "smooth jazz jazz lounge" },
   { id: "chill", label: "Chill / downtempo", labelHe: "צ׳יל", query: "chill downtempo ambient" },
   { id: "acoustic", label: "Acoustic / Soft", labelHe: "אקוסטי רך", query: "acoustic soft mellow easy listening" },
   {
@@ -155,6 +162,12 @@ const STYLE_BUBBLES: Bubble[] = [
     labelHe: "פופ רך / האזנה קלה",
     query: "soft pop easy listening gentle covers piano ballad",
   },
+  // Popular / upbeat.
+  { id: "pop-hits", label: "Pop hits", labelHe: "להיטי פופ", query: "pop hits contemporary" },
+  { id: "oldies", label: "Oldies / Retro", labelHe: "אולדיז / רטרו", query: "oldies retro classics 80s 90s" },
+  { id: "rock", label: "Rock", labelHe: "רוק", query: "rock classic rock" },
+  { id: "funk-soul", label: "Funk / Soul", labelHe: "פאנק / סול", query: "funk soul groove disco" },
+  { id: "afro", label: "Afro / World", labelHe: "אפרו / עולם", query: "afro afrobeat world" },
 ];
 
 /** Non-gym “rhythmic” vibe — explicit clubbier directions (still catalog-scoped). */
@@ -263,7 +276,7 @@ const COPY_EN: Copy = {
   addNoteQ: "Want to add a note? Type below, then get your picks.",
   addNoteHint:
     "Optional — e.g. romantic boutique dinner; beach sunset reggae; calm 90s hits; sexy lounge (not clubby).",
-  composerPlaceholder: "Type anything extra…",
+  composerPlaceholder: "Tell me about your place — e.g. “calm morning cafe”, “Mediterranean dinner, romantic”… or tap the mic 🎤",
   getPicks: "Get my 10 picks",
   getPicksLoading: "Finding picks…",
   thinkingLine: "DJ Creator AI is building your music direction…",
@@ -337,7 +350,7 @@ const COPY_HE: Copy = {
   tapOne: "בחר אחת:",
   addNoteQ: "רוצה להוסיף משהו? כתוב למטה, ואז קבל את ההמלצות.",
   addNoteHint: "רשות — למשל: רומנטי למסעדת בוטיק; רגאיי שקיעה בחוף; היטים שקטים משנות ה־90; לאונג׳ סקסי בלי מועדון.",
-  composerPlaceholder: "אפשר לכתוב כאן…",
+  composerPlaceholder: "ספרו לי על המקום — למשל: “קפה בוקר רגוע”, “מסעדה ים-תיכונית לערב, רומנטי”… או לחצו על המיקרופון 🎤",
   getPicks: "תביא לי 10 המלצות",
   getPicksLoading: "מחפש המלצות…",
   thinkingLine: "DJ Creator AI מכין את כיוון המוזיקה…",
@@ -400,6 +413,13 @@ type WizardStep = 0 | 1 | 2 | 3 | 4 | 5;
 type WizardPick = { id: string; label: string; query: string; daypartApi?: string };
 
 const emptyPick: WizardPick = { id: "", label: "", query: "" };
+
+/** Convert a bubble (or none) to a WizardPick — used by the free-text/voice parser path. */
+function bubbleToPick(bubbles: readonly Bubble[], id: string | null): WizardPick | null {
+  if (!id) return null;
+  const b = bubbles.find((x) => x.id === id);
+  return b ? { id: b.id, label: b.label, query: b.query, daypartApi: b.daypartApi } : null;
+}
 
 function bubbleLabel(b: Bubble, he: boolean): string {
   return he ? b.labelHe : b.label;
@@ -778,6 +798,7 @@ export function DjCreatorAiShell({
         vibe.id,
         rule?.avoidStyleSlugs,
         djCreatorRhythmicOptIn(vibe.id, style.id),
+        style.id,
       );
       if (mergedAvoid.length > 0) {
         u.searchParams.set("avoidSlugs", mergedAvoid.join(","));
@@ -831,6 +852,79 @@ export function DjCreatorAiShell({
     reviewStep,
     locale,
   ]);
+
+  /**
+   * Phase 1 (DJ-Creator-as-agent): understand what the owner TYPED or SPOKE.
+   * Parse the free text into wizard picks (business/daypart/vibe/style + avoid),
+   * fill them, jump to the review step, and flag an auto-generate. State is set
+   * here; the effect below fires runSearch on the NEXT render (fresh builtQuery).
+   */
+  const autoGenRef = useRef(false);
+  const runFromText = useCallback(() => {
+    const brief = parseDjBrief(freeText);
+    if (!brief.matched && brief.remainder.trim().length < 2) {
+      setError(locale === "he" ? "ספרו לי קצת יותר — סוג העסק, שעה, או תחושה." : "Tell me a bit more — the venue, time, or feeling.");
+      return;
+    }
+    const b = bubbleToPick(BUSINESS_BUBBLES, brief.businessId);
+    const d = bubbleToPick(DAYPART_BUBBLES, brief.daypartId);
+    const v = bubbleToPick(VIBE_BUBBLES, brief.vibeId);
+    const s = bubbleToPick(STYLE_BUBBLES, brief.styleId);
+    if (b) setBusiness(b);
+    if (d) setDaypart(d);
+    if (v) setVibe(v);
+    if (s) setStyle(s);
+    // Keep only the leftover keywords (genres etc.) as free text so the query isn't double-fed.
+    setFreeText(brief.remainder);
+    setStep(reviewStep);
+    setError(null);
+    autoGenRef.current = true;
+  }, [freeText, reviewStep, locale]);
+
+  // Auto-generate once picks/step have settled from runFromText.
+  useEffect(() => {
+    if (!autoGenRef.current) return;
+    autoGenRef.current = false;
+    void runSearch();
+  }, [step, business, daypart, vibe, style, runSearch]);
+
+  // Voice input (laptop mic) → fills the composer, then the owner can send it.
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<unknown>(null);
+  const startVoice = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const SR = (window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown });
+    const Ctor = (SR.SpeechRecognition ?? SR.webkitSpeechRecognition) as
+      | (new () => {
+          lang: string; interimResults: boolean; continuous: boolean;
+          onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+          onend: (() => void) | null; onerror: (() => void) | null;
+          start: () => void; stop: () => void;
+        })
+      | undefined;
+    if (!Ctor) {
+      setError(locale === "he" ? "הדפדפן לא תומך בהקלטה — הקלד/י במקום." : "Voice input isn't supported here — type instead.");
+      return;
+    }
+    try {
+      const rec = new Ctor();
+      recognitionRef.current = rec;
+      rec.lang = locale === "he" ? "he-IL" : "en-US";
+      rec.interimResults = true;
+      rec.continuous = false;
+      rec.onresult = (e) => {
+        let text = "";
+        for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
+        setFreeText(text);
+      };
+      rec.onend = () => setListening(false);
+      rec.onerror = () => setListening(false);
+      setListening(true);
+      rec.start();
+    } catch {
+      setListening(false);
+    }
+  }, [locale]);
 
   const savePlaylist = useCallback(async () => {
     if (!DJ_CREATOR_SAVE_PLAYLIST_ENABLED) return;
@@ -1404,8 +1498,27 @@ export function DjCreatorAiShell({
                   <div className="mt-2 flex gap-2">
                     <button
                       type="button"
-                      disabled={loading || step < reviewStep}
-                      onClick={() => void runSearch()}
+                      onClick={startVoice}
+                      aria-label={locale === "he" ? "דבר עם ה-DJ" : "Talk to the DJ"}
+                      title={locale === "he" ? "דבר עם ה-DJ" : "Talk to the DJ"}
+                      className={`flex min-h-[2.5rem] w-11 shrink-0 items-center justify-center rounded-xl border ${
+                        listening
+                          ? "border-rose-400/60 bg-rose-500/15 text-rose-300 animate-pulse"
+                          : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
+                      }`}
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="9" y="2" width="6" height="12" rx="3" />
+                        <path d="M5 10a7 7 0 0 0 14 0" /><line x1="12" y1="19" x2="12" y2="22" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={loading || (!freeText.trim() && step < reviewStep)}
+                      onClick={() => {
+                        if (freeText.trim() && !business.id) runFromText();
+                        else void runSearch();
+                      }}
                       className={`flex-1 min-h-[2.5rem] px-3 text-[13px] disabled:opacity-40 ${accentBtn}`}
                     >
                       {loading ? t.getPicksLoading : t.getPicks}

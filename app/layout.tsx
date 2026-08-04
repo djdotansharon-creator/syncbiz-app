@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "flag-icons/css/flag-icons.min.css";
 import { getLocale } from "@/lib/locale-server";
 
 const geistSans = Geist({
@@ -42,8 +43,9 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const locale = await getLocale();
-  const dir = locale === "he" ? "rtl" : "ltr";
-  const lang = locale === "he" ? "he" : "en";
+  // Layout is always LTR — only the text localizes (owner directive). No RTL flip.
+  const dir = "ltr";
+  const lang = locale;
 
   return (
     <html lang={lang} dir={dir}>

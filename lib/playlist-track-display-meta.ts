@@ -98,7 +98,7 @@ const SOURCE_LABELS: Record<TrackChipSource, { en: string; he: string }> = {
   other: { en: "Other", he: "אחר" },
 };
 
-const UNCLASSIFIED_LABEL: Record<Locale, string> = {
+const UNCLASSIFIED_LABEL: Record<string, string> = {
   en: "Unclassified",
   he: "לא סווג",
 };
@@ -205,7 +205,8 @@ export function resolveTrackDisplayMetadata(
 ): TrackDisplayMetadata {
   const locale = localeOrDefault(options.locale);
   const sourceKind = pickSourceKind(track);
-  const sourceLabel = SOURCE_LABELS[sourceKind][locale];
+  const sourceLabel =
+    (SOURCE_LABELS[sourceKind] as Record<string, string>)[locale] ?? SOURCE_LABELS[sourceKind].en;
 
   const cached = options.trackMetaCache?.[track.id] ?? null;
 

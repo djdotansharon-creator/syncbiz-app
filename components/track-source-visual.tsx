@@ -15,15 +15,22 @@ const CHIP_META: Record<
     label: "LOCAL",
     badgeBg: "border-sky-500/55 bg-sky-950/80 text-sky-100/95",
     badgeText: "LOCAL",
-    placeholderBg: "bg-gradient-to-br from-sky-600/35 via-slate-900 to-slate-950",
-    iconGlow: "text-sky-400/85",
+    placeholderBg: "bg-[linear-gradient(145deg,#1b2a4a_0%,#12203c_38%,#0b1424_72%,#070c16_100%)]",
+    iconGlow: "text-sky-300/90",
   },
   YT: {
-    label: "YT",
+    label: "YouTube",
     badgeBg: "border-rose-500/50 bg-black/85 text-[#ffe0e8]",
     badgeText: "YT",
     placeholderBg: "bg-gradient-to-br from-rose-900/40 via-slate-950 to-black",
     iconGlow: "text-rose-500/95",
+  },
+  SC: {
+    label: "SoundCloud",
+    badgeBg: "border-orange-500/55 bg-black/85 text-[#ffe3cc]",
+    badgeText: "SC",
+    placeholderBg: "bg-gradient-to-br from-orange-900/45 via-slate-950 to-black",
+    iconGlow: "text-orange-400/95",
   },
   CAT: {
     label: "CAT",
@@ -82,6 +89,18 @@ function PlaceholderIcon({
       </svg>
     );
   }
+  if (chip === "SC") {
+    // SoundCloud — the authentic mark: rising sound bars + a filled cloud.
+    return (
+      <svg className={`${className} ${glow}`} viewBox="0 0 40 24" fill="currentColor" aria-hidden>
+        <rect x="2" y="13" width="2.4" height="7" rx="1.2" />
+        <rect x="6" y="9" width="2.4" height="11" rx="1.2" />
+        <rect x="10" y="6" width="2.4" height="14" rx="1.2" />
+        <rect x="14" y="10" width="2.4" height="10" rx="1.2" />
+        <path d="M19 20V11c3-2 7 0 7 3 0 .4 0 .7-.1 1 .5-.3 1.2-.5 1.8-.5 2 0 3.3 1.6 3.3 3.5S30.7 20 28 20H19z" />
+      </svg>
+    );
+  }
   if (chip === "RADIO") {
     return (
       <svg className={`${className} ${glow}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
@@ -110,11 +129,11 @@ function PlaceholderIcon({
       </svg>
     );
   }
+  // LOCAL — a clean audio-wave / equalizer (a track playing from the computer),
+  // not a "screen". Reads as music, feels premium.
   return (
-    <svg className={`${className} ${glow}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-      <path d="M5 17h14V7H5v10zM8 5h8M12 21V17" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="9.5" cy="12.5" r="1.5" fill="currentColor" />
-      <path d="M15 13l-2 2 2 2" strokeLinecap="round" strokeLinejoin="round" />
+    <svg className={`${className} ${glow}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+      <path d="M4 9.5v5M8 5v14M12 8v8M16 4v16M20 10v4" />
     </svg>
   );
 }
@@ -126,20 +145,30 @@ export function TrackMediaPlaceholder({
   chip,
   className = "",
   showCornerBadge = false,
+  format,
 }: {
   chip: TrackSourceChip;
   className?: string;
   /** Dropdown / dense lists can show the chip overlay; tiles often use the kind strip instead. */
   showCornerBadge?: boolean;
+  /** File format for local tracks (e.g. "MP3", "WAV", "MP4") — shown as a small badge. */
+  format?: string | null;
 }): React.ReactElement {
   const m = CHIP_META[chip];
+  const fmt = format ? format.replace(/^\./, "").toUpperCase().slice(0, 4) : "";
   return (
     <div
       role="presentation"
-      className={`relative flex h-full w-full items-center justify-center overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${m.placeholderBg} ${className}`}
+      className={`relative flex h-full w-full items-center justify-center overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.06),inset_0_-14px_28px_rgba(0,0,0,0.35)] ${m.placeholderBg} ${className}`}
     >
-      <div className="pointer-events-none absolute inset-0 opacity-[0.18] bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.2),transparent_72%)]" />
+      {/* Soft top sheen for depth (clean, no neon). */}
+      <div className="pointer-events-none absolute inset-0 opacity-[0.22] bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.28),transparent_60%)]" />
       <PlaceholderIcon chip={chip} />
+      {fmt ? (
+        <span className="pointer-events-none absolute bottom-1 left-1.5 font-mono text-[9px] font-bold uppercase tracking-wider text-white/95 [text-shadow:0_1px_2px_rgba(0,0,0,0.85)]">
+          {fmt}
+        </span>
+      ) : null}
       {showCornerBadge ? (
         <span className="pointer-events-none absolute bottom-0.5 right-0.5">
           <CompactSourceBadge chip={chip} />

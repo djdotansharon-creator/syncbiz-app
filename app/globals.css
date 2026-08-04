@@ -3279,7 +3279,37 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 }
 /* Get-Desktop badge leaves the tile face — it lives in the ⋯ menu now */
 .library-source-card-grid .library-card-art-top-right {
+  display: flex !important;
+}
+/* …but the desktop-app chrome stays off the face (only the clean source logo shows). */
+.library-source-card-grid .library-card-art-top-right > button,
+.library-source-card-grid .library-card-desktop-only-badge {
   display: none !important;
+}
+
+/* ── Card refresh: clean source logo top-right (bigger), SET/SINGLE frameless ── */
+.library-source-card-grid .library-card-platform-corner {
+  display: inline-flex !important;
+  transform: scale(1.28);
+  transform-origin: top right;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
+}
+/* Logo now lives top-right → drop the tiny under-title logo (keep the item count). */
+.library-source-card-grid .library-card-platform-line-logo {
+  display: none;
+}
+/* SET / SINGLE indicator — show it, frameless clean text (no box). */
+.library-source-card-grid .library-card-kind-badge {
+  display: inline-flex !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
 }
 
 /* ── Song sections: no boxes, headers = clean bold white, everything higher ── */

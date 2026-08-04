@@ -12,6 +12,12 @@ const TRANSLATIONS = {
     logs: "Logs",
     announcements: "Announcements",
     settings: "Settings",
+    settingsTheme: "Theme",
+    settingsThemeDesc: "Library visual mode for /sources.",
+    settingsLanguage: "Language",
+    settingsLanguageDesc: "Application display language.",
+    libraryAll: "All Library",
+    libraryScheduled: "Scheduled",
     architecture: "Architecture",
     headerSubtitle: "Schedule playback and send commands to endpoint devices",
     businessMediaScheduler: "Business Media Scheduler",
@@ -425,6 +431,12 @@ const TRANSLATIONS = {
     logs: "לוגים",
     announcements: "הכרזות",
     settings: "הגדרות",
+    settingsTheme: "ערכת נושא",
+    settingsThemeDesc: "מצב תצוגה של הספרייה.",
+    settingsLanguage: "שפה",
+    settingsLanguageDesc: "שפת התצוגה של האפליקציה.",
+    libraryAll: "כל הספרייה",
+    libraryScheduled: "מתוזמנים",
     architecture: "ארכיטקטורה",
     headerSubtitle: "תזמן השמעה ושלוח פקודות למכשירי קצה",
     businessMediaScheduler: "Business Media Scheduler",
@@ -831,8 +843,12 @@ const TRANSLATIONS = {
 } as const;
 
 export function getTranslations(locale: Locale): Record<string, string> {
-  const L = TRANSLATIONS[locale] ?? TRANSLATIONS.en;
-  return { ...L } as Record<string, string>;
+  // English is the base; a locale's own strings (when present) override per key.
+  // Any key a locale hasn't translated yet falls back to English — so a partial
+  // or absent translation can never blank out or break the UI.
+  const base = TRANSLATIONS.en as Record<string, string>;
+  const override = (TRANSLATIONS as Record<string, Record<string, string>>)[locale];
+  return override ? { ...base, ...override } : { ...base };
 }
 
 export { TRANSLATIONS };

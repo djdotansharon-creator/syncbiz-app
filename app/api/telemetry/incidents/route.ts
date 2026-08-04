@@ -16,6 +16,7 @@ const KINDS = new Set([
   "stall_error",
   "background_video_fallback",
   "track_repeat_no_advance",
+  "dual_deck_overlap",
 ]);
 
 const str = (v: unknown, max: number): string | null =>

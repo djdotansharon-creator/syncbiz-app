@@ -13,17 +13,39 @@ export const DJ_CREATOR_REFINED_VIBE_IDS = new Set(["romantic", "premium", "calm
 export const DJ_CREATOR_REFINED_VIBE_EXTRA_AVOID_SLUGS = [
   "style-electronic-deep-house",
   "style-electronic-edm",
+  "style-electronic-house",
   "deep-house",
+  "house",
+  "genre-house",
   "afro",
   "afro-house",
   "electro-afro",
   "techno",
   "edm",
   "club",
+  "dance",
+  "genre-dance",
   "trap",
   "style-electronic-trance",
   "trance",
 ];
+
+/**
+ * Calm / acoustic style directions (jazz, lounge, bossa, chill…) should exclude club/house
+ * even when the user gave no "refined" vibe — asking for "a jazz set" must never surface a
+ * house set. Ids match STYLE_BUBBLES in dj-creator-ai-shell.
+ */
+export const DJ_CREATOR_CALM_STYLE_IDS = new Set([
+  "jazz",
+  "lounge",
+  "bossa",
+  "chill",
+  "acoustic",
+  "soft-pop",
+  "mediterranean",
+  "greek-italian",
+  "oldies",
+]);
 
 export type WizardStyleBubble = {
   id: string;
@@ -49,6 +71,7 @@ export function mergeDjCreatorAvoidSlugs(
   vibeId: string,
   ruleAvoid: string[] | undefined,
   rhythmicOptIn?: boolean,
+  styleId?: string,
 ): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -60,7 +83,8 @@ export function mergeDjCreatorAvoidSlugs(
   };
   for (const s of ruleAvoid ?? []) push(s);
   const refined = DJ_CREATOR_REFINED_VIBE_IDS.has(normKey(vibeId));
-  if (refined && !rhythmicOptIn) {
+  const calmStyle = styleId ? DJ_CREATOR_CALM_STYLE_IDS.has(normKey(styleId)) : false;
+  if ((refined || calmStyle) && !rhythmicOptIn) {
     for (const s of DJ_CREATOR_REFINED_VIBE_EXTRA_AVOID_SLUGS) push(s);
   }
   return out;
