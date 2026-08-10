@@ -18,6 +18,7 @@ import { isValidLocalFilePlaybackPath, isValidPlaybackUrl } from "@/lib/url-vali
 import { effectivePlaybackPlaylistAttachment, derivePlaylistTrackCoverArt } from "@/lib/playlist-utils";
 import type { UnifiedSource } from "@/lib/source-types";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
+import { SuggestMetadataButton } from "@/components/suggest-metadata-button";
 
 type TrackExtra = PlaylistTrack & { durationSeconds?: number; genre?: string; artist?: string };
 
@@ -967,6 +968,10 @@ export function LiveQueuePanel() {
                     </div>
                     {artistLine ? (
                       <span dir="auto" className="mt-1 line-clamp-1 text-[12px] leading-snug text-[#a1a1a6]">{artistLine}</span>
+                    ) : null}
+                    {/* USER suggestion (vertical slice: now-playing track only). Saved as PENDING; never edits the catalog/MP3. */}
+                    {isCurrent ? (
+                      <SuggestMetadataButton trackTitle={title} trackArtist={tr.artist ? String(tr.artist) : null} />
                     ) : null}
                   </div>
                   <span className="shrink-0 text-right font-mono text-sm font-medium tabular-nums text-slate-500">

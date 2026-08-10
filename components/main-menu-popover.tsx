@@ -34,6 +34,8 @@ export type MainMenuPopoverProps = {
   pinLabel?: string;
   /** Direction hint (mirrors header `dir`) so the panel hugs the correct edge. */
   dir?: "ltr" | "rtl";
+  /** Optional action area rendered below the items (e.g. Log out). */
+  footer?: ReactElement | null;
 };
 
 export function MainMenuPopover({
@@ -44,6 +46,7 @@ export function MainMenuPopover({
   title,
   pinLabel,
   dir = "ltr",
+  footer,
 }: MainMenuPopoverProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   // The parent app header uses overflow:hidden to contain its glow/blur
@@ -177,6 +180,7 @@ export function MainMenuPopover({
           </li>
         ))}
       </ul>
+      {footer ? <div className="border-t border-slate-800/70 p-2">{footer}</div> : null}
       <style jsx>{`
         .main-menu-pin-toggle {
           position: relative;

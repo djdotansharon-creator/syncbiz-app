@@ -545,7 +545,24 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
     </div>
   );
 
-  // WhatsApp connect prompt (desktop bridge present but not connected yet).
+  // Open the SyncBiz Player desktop download (installer if available, else the releases page).
+  const openDesktopDownload = async () => {
+    let url = "https://github.com/djdotansharon-creator/syncbiz-app/releases";
+    try {
+      const resp = await fetch("/api/desktop/download", { cache: "no-store" });
+      const d = (await resp.json().catch(() => ({}))) as { url?: string; releasesPageUrl?: string };
+      url = (typeof d.url === "string" && d.url.trim()) || (typeof d.releasesPageUrl === "string" && d.releasesPageUrl) || url;
+    } catch { /* fall back to the releases page */ }
+    if (typeof window !== "undefined") window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const waIcon = (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+    </svg>
+  );
+
+  // WhatsApp connect prompt. Desktop → real connect. Browser (no desktop bridge) → download CTA (English).
   const waConnectBlock = wa ? (
     <div className="border-t border-white/[0.06] px-3 py-2.5">
       <button
@@ -554,14 +571,28 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
         disabled={waBusy}
         className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-3 py-2 text-[13px] font-semibold text-[#409cff] transition active:scale-[0.99] disabled:opacity-50"
       >
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-        </svg>
+        {waIcon}
         {waBusy ? "…" : t.waConnect}
       </button>
       <p className="mt-1.5 text-[11px] text-slate-500">{t.waConnectHint}</p>
     </div>
-  ) : null;
+  ) : (
+    // Browser: WhatsApp connection runs only in the desktop app — point the user to download it.
+    <div dir="ltr" className="border-t border-white/[0.06] px-3 py-2.5 text-left">
+      <button
+        type="button"
+        onClick={() => void openDesktopDownload()}
+        className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-3 py-2 text-[13px] font-semibold text-[#409cff] transition active:scale-[0.99]"
+      >
+        {waIcon}
+        Connect WhatsApp — get the desktop app
+        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+      </button>
+      <p className="mt-1.5 text-[11px] text-slate-500">WhatsApp connection runs in the SyncBiz Player desktop app. Download the desktop version to connect.</p>
+    </div>
+  );
 
   return (
     <div

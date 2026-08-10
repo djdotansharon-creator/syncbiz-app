@@ -53,6 +53,8 @@ yarn-error.log*
 # Exception: production WS URL baked into the desktop installer. Public value,
 # no secrets — MUST be committed so CI builds pick it up.
 !desktop/.env.electron-web
+# Exception: placeholder-only template for local dev DB setup (no secrets).
+!.env.development.example
 
 # vercel
 .vercel

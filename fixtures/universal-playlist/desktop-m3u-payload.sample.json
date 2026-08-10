@@ -1,0 +1,13 @@
+{
+  "_note": "FIXTURE — the resolved payload the desktop sends to the server (already resolved by import-local-m3u-playlist). localRef is an opaque desktop hash, never a path.",
+  "name": "Desktop Resolved Mix",
+  "sourceKey": "desktop-m3u:validation-device:seed-desktop",
+  "sourceUrl": "seed-desktop.m3u",
+  "entries": [
+    { "kind": "local", "position": 0, "title": "Midnight Avenue", "artists": ["Nova Kane"], "durationMs": 210000, "localRef": "loc_desktopabc0000000000000000000001", "filename": "midnight-avenue.mp3", "availability": "available", "enrichment": { "bpm": 122, "comment": "peak time", "rating": 4.5, "genres": ["House"], "year": "2025", "isrc": "ILNKX2500001", "metadataHash": "mh_midnight_001" } },
+    { "kind": "youtube", "position": 1, "title": "Some Brand New Song", "artists": ["Fresh Artist"], "durationMs": 200000, "videoId": "ytdeskAAA01", "url": "https://www.youtube.com/watch?v=ytdeskAAA01" },
+    { "kind": "local", "position": 2, "title": "Golden Hour", "artists": ["Ivy Sol"], "durationMs": 200000, "localRef": "loc_desktopabc0000000000000000000003", "filename": "golden-hour.mp3", "availability": "available" },
+    { "kind": "unresolved", "position": 3, "title": "Totally Unknown Track", "artists": ["Nobody At All"], "durationMs": 180000 },
+    { "kind": "local", "position": 4, "title": "שיר הקיץ", "artists": ["עדן ברזל"], "durationMs": 200000, "localRef": "loc_desktopabc0000000000000000000005", "filename": "shir-hakayitz.mp3", "availability": "missing" }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "_note": "FIXTURE — yt-dlp enumerate-style candidates (YouTubeMixImportCandidate shape). Fabricated. YouTube titles are unstructured (no separate artist), so the resolver is conservatively cautious — this fixture demonstrates that honest behavior.",
+  "candidates": [
+    { "videoId": "yt00000001a", "title": "Nova Kane - Midnight Avenue", "url": "https://www.youtube.com/watch?v=yt00000001a", "thumbnailUrl": "https://fixtures.local/yt/1.jpg", "durationSeconds": 210, "viewCount": 12000 },
+    { "videoId": "yt00000002b", "title": "Ivy Sol - Paper Planes (Official Audio)", "url": "https://www.youtube.com/watch?v=yt00000002b", "thumbnailUrl": "https://fixtures.local/yt/2.jpg", "durationSeconds": 190, "viewCount": 8000 },
+    { "videoId": "yt00000003c", "title": "Neon Skyline", "url": "https://www.youtube.com/watch?v=yt00000003c", "thumbnailUrl": "https://fixtures.local/yt/3.jpg", "durationSeconds": 200, "viewCount": 5000 },
+    { "videoId": "yt00000004d", "title": "Crimson Tide - Zara Lin", "url": "https://www.youtube.com/watch?v=yt00000004d", "thumbnailUrl": "https://fixtures.local/yt/4.jpg", "durationSeconds": 195, "viewCount": 3000 },
+    { "videoId": "yt00000005e", "title": "Golden Hour (Lyric Video)", "url": "https://www.youtube.com/watch?v=yt00000005e", "thumbnailUrl": "https://fixtures.local/yt/5.jpg", "durationSeconds": 200, "viewCount": 9000 },
+    { "videoId": "yt00000006f", "title": "DJ Petra — Long Jam", "url": "https://www.youtube.com/watch?v=yt00000006f", "thumbnailUrl": "https://fixtures.local/yt/6.jpg", "durationSeconds": 200, "viewCount": 4000 }
+  ]
+}

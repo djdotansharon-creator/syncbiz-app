@@ -272,17 +272,17 @@ model User {
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
-  ownedWorkspaces      Workspace[]            @relation("WorkspaceOwner")
-  memberships          WorkspaceMember[]
-  branchAssignments    UserBranchAssignment[]
-  passwordResetTokens  PasswordResetToken[]
-  auditLogs            AuditLog[]
-  createdGuestSessions GuestSession[]
-  aiDjSessions         AiDjSession[]
-  platformAuditActions PlatformAuditLog[]     @relation("PlatformAuditActor")
+  ownedWorkspaces            Workspace[]              @relation("WorkspaceOwner")
+  memberships                WorkspaceMember[]
+  branchAssignments          UserBranchAssignment[]
+  passwordResetTokens        PasswordResetToken[]
+  auditLogs                  AuditLog[]
+  createdGuestSessions       GuestSession[]
+  aiDjSessions               AiDjSession[]
+  platformAuditActions       PlatformAuditLog[]       @relation("PlatformAuditActor")
   catalogTaxonomyTagsCreated CatalogItemTaxonomyTag[] @relation("CatalogTaxonomyTagCreatedBy")
-  catalogItemsArchivedByMe CatalogItem[]           @relation("CatalogItemArchivedBy")
-  spotifyConnection    SpotifyConnection?
+  catalogItemsArchivedByMe   CatalogItem[]            @relation("CatalogItemArchivedBy")
+  spotifyConnection          SpotifyConnection?
 }
 
 model Workspace {
@@ -320,24 +320,24 @@ model Workspace {
 /// 1:1 business & music identity for a workspace (source of truth for future tagging / recommendations).
 /// Does not replace or sync Branch.businessType — branches may later override for branch-specific context.
 model WorkspaceBusinessProfile {
-  id                    String              @id @default(uuid())
-  workspaceId           String              @unique
-  primaryBusinessType   BusinessType        @default(OTHER)
-  cuisineOrConcept      String?
-  conceptTags           String[]            @default([])
-  countryCode           String?
-  cultureNotes          String?
-  primaryLanguage       String?
-  additionalLanguages   String[]            @default([])
-  audienceDescriptors   String[]            @default([])
-  desiredMoodNotes      String?
-  energyLevel           WorkspaceEnergyLevel?
-  openingHoursSummary   String?
+  id                     String                @id @default(uuid())
+  workspaceId            String                @unique
+  primaryBusinessType    BusinessType          @default(OTHER)
+  cuisineOrConcept       String?
+  conceptTags            String[]              @default([])
+  countryCode            String?
+  cultureNotes           String?
+  primaryLanguage        String?
+  additionalLanguages    String[]              @default([])
+  audienceDescriptors    String[]              @default([])
+  desiredMoodNotes       String?
+  energyLevel            WorkspaceEnergyLevel?
+  openingHoursSummary    String?
   openingHoursStructured Json?
-  daypartPreferences    Json?
-  preferredStyleHints   String[]            @default([])
-  blockedStyleHints     String[]            @default([])
-  adminNotes            String?
+  daypartPreferences     Json?
+  preferredStyleHints    String[]              @default([])
+  blockedStyleHints      String[]              @default([])
+  adminNotes             String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -482,14 +482,14 @@ model Source {
 }
 
 model Playlist {
-  id                        String   @id @default(uuid())
+  id                        String                   @id @default(uuid())
   workspaceId               String
   name                      String
   description               String?
-  genre                     String   @default("")
-  playlistType              String   @default("youtube")
-  url                       String   @default("")
-  thumbnail                 String   @default("")
+  genre                     String                   @default("")
+  playlistType              String                   @default("youtube")
+  url                       String                   @default("")
+  thumbnail                 String                   @default("")
   branchId                  String?
   catalogItemId             String?
   viewCount                 Int?
@@ -505,16 +505,19 @@ model Playlist {
   playlistOwnershipScope    String?
   trackOrder                String[]
   scheduleContributorBlocks Json?
-  isShared                  Boolean  @default(false)
+  isShared                  Boolean                  @default(false)
   sharedById                String?
   publicationScope          PlaylistPublicationScope @default(PRIVATE)
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
 
-  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  items         PlaylistItem[]
-  schedules     Schedule[]
-  aiDjPlaylists AiDjPlaylist[]
+  workspace        Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  items            PlaylistItem[]
+  schedules        Schedule[]
+  aiDjPlaylists    AiDjPlaylist[]
+  /// Phase C — export rows that materialized a UniversalPlaylist into this Playlist.
+  /// Virtual back-relation only (FK lives on UniversalPlaylistExport); additive.
+  universalExports UniversalPlaylistExport[] @relation("PlaylistUniversalExport")
 
   @@index([workspaceId])
   @@index([isShared])
@@ -587,25 +590,25 @@ model Schedule {
 // ─────────────────────────────────────────────
 
 model MusicTaxonomyTag {
-  id                  String                   @id @default(uuid())
-  slug                String                   @unique
-  category            MusicTaxonomyCategory
-  labelEn             String
-  labelHe             String
-  descriptionHeUser   String?                  @db.Text
-  descriptionAi       String?                  @db.Text
-  aliases             String[]                 @default([])
-  status              MusicTaxonomyTagStatus   @default(ACTIVE)
-  parentId            String?
-  mergedIntoId        String?
-  sortOrder           Int                      @default(0)
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
+  id                String                 @id @default(uuid())
+  slug              String                 @unique
+  category          MusicTaxonomyCategory
+  labelEn           String
+  labelHe           String
+  descriptionHeUser String?                @db.Text
+  descriptionAi     String?                @db.Text
+  aliases           String[]               @default([])
+  status            MusicTaxonomyTagStatus @default(ACTIVE)
+  parentId          String?
+  mergedIntoId      String?
+  sortOrder         Int                    @default(0)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
 
-  parent     MusicTaxonomyTag?  @relation("TaxonomyParent", fields: [parentId], references: [id], onDelete: SetNull)
-  children   MusicTaxonomyTag[] @relation("TaxonomyParent")
-  mergedInto MusicTaxonomyTag?  @relation("TaxonomyMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
-  mergedFrom MusicTaxonomyTag[] @relation("TaxonomyMerge")
+  parent       MusicTaxonomyTag?        @relation("TaxonomyParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children     MusicTaxonomyTag[]       @relation("TaxonomyParent")
+  mergedInto   MusicTaxonomyTag?        @relation("TaxonomyMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom   MusicTaxonomyTag[]       @relation("TaxonomyMerge")
   catalogLinks CatalogItemTaxonomyTag[]
 
   @@index([category])
@@ -619,37 +622,41 @@ model MusicTaxonomyTag {
 // ─────────────────────────────────────────────
 
 model CatalogItem {
-  id            String         @id @default(uuid())
-  url           String         @unique
-  canonicalUrl  String?        @unique
-  videoId       String?
-  provider      String?
-  title         String
-  artist        String?
-  durationSec   Int?
-  thumbnail     String?
-  genres        String[]       @default([])
-  businessTypes BusinessType[]
+  id                 String         @id @default(uuid())
+  url                String         @unique
+  canonicalUrl       String?        @unique
+  videoId            String?
+  provider           String?
+  title              String
+  artist             String?
+  durationSec        Int?
+  thumbnail          String?
+  genres             String[]       @default([])
+  businessTypes      BusinessType[]
   /// Manual SyncBiz/editorial rating — not YouTube metrics, popularity, or auto-calculated scores.
-  curationRating Int           @default(0)
-  curationNotes  String?       @db.Text
+  curationRating     Int            @default(0)
+  curationNotes      String?        @db.Text
   /// Stage 6.2A — manual music energy / tempo-feeling score (1–10); nullable = unset. BPM bands are display-only hints.
   manualEnergyRating Int?
-  addedById     String?
+  addedById          String?
   /// SUPER_ADMIN soft-remove from discovery — playlists keep URL + catalogId FK.
-  archivedAt          DateTime?
-  archivedByUserId    String?
-  archiveReason       String?       @db.Text
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  archivedAt         DateTime?
+  archivedByUserId   String?
+  archiveReason      String?        @db.Text
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
   archivedBy User? @relation("CatalogItemArchivedBy", fields: [archivedByUserId], references: [id], onDelete: SetNull)
 
-  playlistItems            PlaylistItem[]
-  analytics                CatalogAnalytics?
-  playsByBusinessType      CatalogPlayByBusiness[]
-  taxonomyLinks            CatalogItemTaxonomyTag[]
-  catalogSourceSnapshots   CatalogSourceSnapshot[]
+  playlistItems          PlaylistItem[]
+  analytics              CatalogAnalytics?
+  playsByBusinessType    CatalogPlayByBusiness[]
+  taxonomyLinks          CatalogItemTaxonomyTag[]
+  catalogSourceSnapshots CatalogSourceSnapshot[]
+  /// Phase A1 — reversible bridge to the platform-agnostic identity layer.
+  /// Virtual back-relation only (the FK column lives on UniversalTrack); adding
+  /// this NEVER alters or migrates existing CatalogItem rows.
+  universalTrack         UniversalTrack?          @relation("CatalogItemUniversalTrack")
 
   @@index([videoId])
   @@index([archivedAt])
@@ -688,18 +695,18 @@ model CatalogSourceSnapshot {
 
 /// Stage 4 V1 — global manual tagging of catalog rows against the platform taxonomy dictionary.
 model CatalogItemTaxonomyTag {
-  id             String                       @id @default(uuid())
-  catalogItemId  String
-  taxonomyTagId  String
-  source         CatalogItemTaxonomyTagSource @default(MANUAL)
-  confidence     Float?
-  createdById    String?
-  createdAt      DateTime                     @default(now())
-  updatedAt      DateTime                     @updatedAt
+  id            String                       @id @default(uuid())
+  catalogItemId String
+  taxonomyTagId String
+  source        CatalogItemTaxonomyTagSource @default(MANUAL)
+  confidence    Float?
+  createdById   String?
+  createdAt     DateTime                     @default(now())
+  updatedAt     DateTime                     @updatedAt
 
   catalogItem CatalogItem      @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
-  taxonomyTag MusicTaxonomyTag   @relation(fields: [taxonomyTagId], references: [id], onDelete: Cascade)
-  createdBy   User?              @relation("CatalogTaxonomyTagCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  taxonomyTag MusicTaxonomyTag @relation(fields: [taxonomyTagId], references: [id], onDelete: Cascade)
+  createdBy   User?            @relation("CatalogTaxonomyTagCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@unique([catalogItemId, taxonomyTagId])
   @@index([catalogItemId])
@@ -1031,4 +1038,830 @@ model PlaybackIncident {
   @@index([createdAt])
   @@index([branchId])
   @@index([kind])
+}
+
+// ─────────────────────────────────────────────
+// UNIVERSAL MUSIC IDENTITY (Phase A1) — global, no tenancy
+//
+// Platform-agnostic canonical identity for a recording, deliberately NOT tied to
+// YouTube. It sits ABOVE the legacy YouTube-keyed CatalogItem (bridged, never
+// replacing it). Volatile, source/territory/date-dependent signals (chart rank,
+// popularity, trend) are intentionally kept OFF UniversalTrack and live in the
+// ChartSnapshot / ChartEntry / TrendSignal tables so charts can be added later
+// without a UniversalTrack migration. All models here are ADDITIVE; nothing in
+// this section reads, mutates, or deletes existing data.
+// ─────────────────────────────────────────────
+
+/// Controlled recording-version vocabulary — the identity signal used later to
+/// avoid resolving to a wrong edit (Live/Cover/Karaoke/Sped-up …). Nullable = unknown.
+enum TrackVersionType {
+  ORIGINAL
+  RADIO_EDIT
+  EXTENDED
+  REMIX
+  LIVE
+  ACOUSTIC
+  INSTRUMENTAL
+  REMASTER
+  COVER
+  KARAOKE
+  SPED_UP
+  SLOWED
+  OTHER
+}
+
+/// Whether a specific provider mapping can actually be played (per provider, may
+/// vary by territory/account — resolved by the PlaybackProvider layer, not here).
+enum ProviderPlayableStatus {
+  PLAYABLE
+  RESTRICTED
+  UNAVAILABLE
+  UNKNOWN
+}
+
+/// Chart flavor captured in a ChartSnapshot (matches the planned providers' chart types).
+enum ChartType {
+  TOP
+  VIRAL
+  DISCOVERY
+  GENRE
+  CITY
+}
+
+/// Canonical, provider-independent recording identity. One row = one recording.
+model UniversalTrack {
+  id                  String            @id @default(uuid())
+  /// Lowercased, punctuation/feat/paren-stripped title for fuzzy matching (resolver-computed).
+  normalizedTitle     String
+  displayTitle        String
+  durationMs          Int?
+  /// International Standard Recording Code — the strongest cross-platform identity key.
+  canonicalIsrc       String?           @unique
+  versionType         TrackVersionType?
+  firstReleaseDate    DateTime?
+  explicit            Boolean?
+  /// Field-level metadata provenance for precedence: { field: "manual"|"excel"|"mp3"|"youtube"|… }.
+  /// A re-scan of a lower-precedence source never overwrites a higher-precedence field.
+  metadataProvenance  Json?
+  /// Reversible bridge to a legacy CatalogItem. Nullable + SetNull: building or
+  /// deleting a UniversalTrack never touches the CatalogItem's own lifecycle.
+  legacyCatalogItemId String?           @unique
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  legacyCatalogItem       CatalogItem?               @relation("CatalogItemUniversalTrack", fields: [legacyCatalogItemId], references: [id], onDelete: SetNull)
+  artists                 TrackArtist[]
+  providerMappings        ProviderMapping[]
+  provenance              SourceProvenance[]
+  releases                TrackRelease[]
+  chartEntries            ChartEntry[]
+  trendSignals            TrendSignal[]
+  externalObservations    ExternalTrackObservation[]
+  radioAirplayEvents      RadioAirplayEvent[]
+  stationPlaylistEntries  StationPlaylistEntry[]
+  chartObservationEntries ChartObservationEntry[]
+  UniversalPlaylistItem   UniversalPlaylistItem[]
+  localTrackFiles         LocalTrackFile[]
+
+  @@index([normalizedTitle])
+  @@index([legacyCatalogItemId])
+}
+
+/// A performing artist (canonical). Multi-artist tracks link through TrackArtist.
+model Artist {
+  id             String   @id @default(uuid())
+  /// Lowercased/normalized for dedupe; displayName keeps original casing.
+  normalizedName String   @unique
+  displayName    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tracks TrackArtist[]
+}
+
+/// Ordered many-to-many between a track and its artists (replaces the single
+/// free-text `artist` string on the legacy catalog).
+model TrackArtist {
+  id               String   @id @default(uuid())
+  universalTrackId String
+  artistId         String
+  /// 0-based credit order (primary first).
+  order            Int      @default(0)
+  /// Free-form for now: "primary" | "featured" | "remixer" | …
+  role             String?
+  createdAt        DateTime @default(now())
+
+  track  UniversalTrack @relation(fields: [universalTrackId], references: [id], onDelete: Cascade)
+  artist Artist         @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@unique([universalTrackId, artistId])
+  @@index([universalTrackId])
+  @@index([artistId])
+}
+
+/// Where a canonical track exists on a specific provider. The CatalogResolver
+/// writes these; the PlaybackProvider reads playableStatus to choose a source.
+model ProviderMapping {
+  id                  String                 @id @default(uuid())
+  universalTrackId    String
+  /// youtube | spotify | apple_music | soundcloud | deezer | tidal | amazon_music | …
+  provider            String
+  externalId          String
+  externalUrl         String?
+  providerIsrc        String?
+  providerReleaseDate DateTime?
+  playableStatus      ProviderPlayableStatus @default(UNKNOWN)
+  /// 0..1 confidence this mapping is the correct recording (resolver output).
+  matchConfidence     Float?
+  /// The recording version this mapping points at (guards against Live/Cover/Karaoke/Remix).
+  version             TrackVersionType?
+  /// How the mapping was chosen: exact_id | isrc | title_artist | safe_search | manual | …
+  matchMethod         String?
+  lastVerifiedAt      DateTime?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  track UniversalTrack @relation(fields: [universalTrackId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalId])
+  @@index([universalTrackId])
+  @@index([provider])
+}
+
+/// Audit trail of how a track record entered the system (import, chart match, …).
+model SourceProvenance {
+  id                String   @id @default(uuid())
+  universalTrackId  String
+  /// spotify_playlist | youtube_playlist | m3u | manual | chart_match | …
+  source            String
+  /// playlist | album | track | chart | trend | …
+  sourceType        String?
+  externalReference String?
+  fetchedAt         DateTime @default(now())
+  /// Pointer to a raw metadata blob (e.g. a CatalogSourceSnapshot id) — not the blob itself.
+  rawMetadataRef    String?
+  confidence        Float?
+  createdAt         DateTime @default(now())
+
+  track UniversalTrack @relation(fields: [universalTrackId], references: [id], onDelete: Cascade)
+
+  @@index([universalTrackId])
+  @@index([source])
+}
+
+/// Release/album context for a recording (may differ per provider).
+model TrackRelease {
+  id               String    @id @default(uuid())
+  universalTrackId String
+  provider         String?
+  albumTitle       String?
+  releaseDate      DateTime?
+  label            String?
+  artworkUrl       String?
+  externalId       String?
+  rawJson          Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  track UniversalTrack @relation(fields: [universalTrackId], references: [id], onDelete: Cascade)
+
+  @@index([universalTrackId])
+}
+
+// ── Charts & Trends (schema/types prepared now; NO ingestion in Phase A) ──
+
+/// One captured chart at a point in time from one source/territory/city/genre.
+/// chartPosition/popularity live HERE (per snapshot), never on UniversalTrack.
+model ChartSnapshot {
+  id                String    @id @default(uuid())
+  /// apple_music | shazam | youtube_trending | soundcharts | chartmetric | manual_csv
+  source            String
+  chartType         ChartType
+  /// ISO-3166 alpha-2; null = global.
+  territory         String?
+  city              String?
+  genre             String?
+  /// Edition label for a recurring chart, e.g. "2026-W31" or "2026-08-04". Empty for one-off pulls.
+  editionKey        String    @default("")
+  /// Deterministic dedupe key = hash(source|chartType|territory|city|genre|editionKey).
+  /// UNIQUE so re-ingesting the SAME edition upserts one snapshot (idempotency), regardless
+  /// of capturedAt. Build it with buildChartEditionUid() — never null-collide on discriminators.
+  editionUid        String    @unique
+  /// The date the chart itself represents (distinct from when we captured it).
+  chartDate         DateTime?
+  periodStart       DateTime?
+  periodEnd         DateTime?
+  publishedAt       DateTime?
+  capturedAt        DateTime
+  sourceReference   String?
+  /// Hash of the raw provider payload — a retry with the same payload is a no-op.
+  sourcePayloadHash String?
+  providerVersion   String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  entries            ChartEntry[]
+  observationEntries ChartObservationEntry[]
+
+  @@index([source, chartType])
+  @@index([capturedAt])
+  @@index([territory])
+  @@index([editionKey])
+}
+
+/// A ranked row inside a ChartSnapshot. universalTrackId is nullable — matching a
+/// chart entry to a canonical track happens later (Charts & Music Intelligence stage).
+model ChartEntry {
+  id                 String   @id @default(uuid())
+  snapshotId         String
+  universalTrackId   String?
+  rank               Int
+  previousRank       Int?
+  peakRank           Int?
+  daysOnChart        Int?
+  providerExternalId String?
+  matchConfidence    Float?
+  createdAt          DateTime @default(now())
+
+  snapshot                 ChartSnapshot           @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  track                    UniversalTrack?         @relation(fields: [universalTrackId], references: [id], onDelete: SetNull)
+  promotedFromObservations ChartObservationEntry[]
+
+  @@index([snapshotId])
+  @@index([universalTrackId])
+  @@index([snapshotId, rank])
+}
+
+/// A time-stamped, territory-scoped trend observation for a track (velocity,
+/// spikes, Shazam counts, view deltas). Prepared now; populated in a later stage.
+model TrendSignal {
+  id               String   @id @default(uuid())
+  universalTrackId String
+  /// shazam | youtube_trending | soundcharts | …
+  source           String
+  territory        String?
+  city             String?
+  /// velocity | spike | shazam_count | views_delta | …
+  signalType       String
+  value            Float
+  observedAt       DateTime
+  provenance       String?
+  createdAt        DateTime @default(now())
+
+  track UniversalTrack @relation(fields: [universalTrackId], references: [id], onDelete: Cascade)
+
+  @@index([universalTrackId])
+  @@index([source])
+  @@index([observedAt])
+}
+
+// ─────────────────────────────────────────────
+// UNRESOLVED INGESTION (Phase B0.3) — nothing lost before identity match
+// ─────────────────────────────────────────────
+
+/// Match lifecycle for an externally-observed track (chart/radio/provider row)
+/// against the canonical UniversalTrack layer.
+enum ExternalMatchStatus {
+  PENDING
+  MATCHED
+  AMBIGUOUS
+  REJECTED
+  IGNORED
+}
+
+/// A raw track sighting from a chart, radio log, or external provider. It is stored
+/// BEFORE (and independently of) any UniversalTrack match, so a song from a chart or
+/// station is never lost just because it isn't in the catalog yet. The resolver later
+/// fills matchedUniversalTrackId / matchStatus. Additive; no ingestion runs in B0.
+model ExternalTrackObservation {
+  id                      String              @id @default(uuid())
+  /// apple_music | shazam | galgalatz | official_uk | radio_station | soundcharts | …
+  source                  String
+  /// chart | airplay | station_playlist | import | …
+  sourceType              String
+  sourceTrackId           String?
+  sourceUrl               String?
+  rawTitle                String
+  rawArtists              String[]            @default([])
+  rawAlbum                String?
+  rawIsrc                 String?
+  rawDurationMs           Int?
+  rawReleaseDate          DateTime?
+  territory               String?
+  city                    String?
+  genre                   String?
+  observedAt              DateTime
+  rawMetadata             Json?
+  matchStatus             ExternalMatchStatus @default(PENDING)
+  matchedUniversalTrackId String?
+  matchConfidence         Float?
+  matchMethod             String?
+  matchReasons            Json?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  matchedTrack            UniversalTrack?         @relation(fields: [matchedUniversalTrackId], references: [id], onDelete: SetNull)
+  chartObservationEntries ChartObservationEntry[]
+
+  @@index([source])
+  @@index([matchStatus])
+  @@index([matchedUniversalTrackId])
+  @@index([observedAt])
+  @@index([rawIsrc])
+}
+
+// ─────────────────────────────────────────────
+// RADIO INTELLIGENCE FOUNDATION (Phase B0.4) — schema only, NO ingestion
+//
+// Charts (Galgalatz, Official UK, Shazam, Apple Music) reuse ChartSnapshot/ChartEntry.
+// The models below capture NON-chart radio signal: stations, airplay spins, and
+// editorial/rotation station playlists (A/B/C lists). Nothing is populated in B0.
+// ─────────────────────────────────────────────
+
+/// Editorial vs rotation tiers used by broadcasters (e.g. BBC Radio 1 A/B/C lists).
+enum StationPlaylistType {
+  EDITORIAL
+  A_LIST
+  B_LIST
+  C_LIST
+  ROTATION
+}
+
+/// A radio station (broadcaster), distinct from a chart. BBC Radio 1 is a station;
+/// the Official UK Singles Chart is a ChartSnapshot source — kept separate on purpose.
+model RadioStation {
+  id              String   @id @default(uuid())
+  name            String
+  country         String
+  city            String?
+  market          String?
+  /// e.g. "CHR" | "AC" | "public" | "dance" (free-form for now).
+  stationFormat   String?
+  /// Provider-native ids keyed by source, e.g. { "soundcharts": "…" }.
+  externalIds     Json?
+  /// Where this station record came from + a reference for provenance.
+  source          String?
+  sourceReference String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  airplayEvents     RadioAirplayEvent[]
+  playlistSnapshots StationPlaylistSnapshot[]
+
+  @@index([country])
+  @@index([name])
+}
+
+/// A single spin (airplay) of a track on a station. universalTrackId is nullable —
+/// unmatched spins still record via externalObservationId so nothing is lost.
+model RadioAirplayEvent {
+  id                    String   @id @default(uuid())
+  stationId             String
+  universalTrackId      String?
+  externalObservationId String?
+  playedAt              DateTime
+  source                String
+  matchConfidence       Float?
+  collectedAt           DateTime @default(now())
+  createdAt             DateTime @default(now())
+
+  station RadioStation    @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  track   UniversalTrack? @relation(fields: [universalTrackId], references: [id], onDelete: SetNull)
+
+  @@index([stationId])
+  @@index([universalTrackId])
+  @@index([playedAt])
+  @@index([externalObservationId])
+}
+
+/// A captured editorial/rotation playlist for a station at a point in time.
+model StationPlaylistSnapshot {
+  id              String              @id @default(uuid())
+  stationId       String
+  playlistType    StationPlaylistType
+  capturedAt      DateTime
+  sourceReference String?
+  createdAt       DateTime            @default(now())
+
+  station RadioStation           @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  entries StationPlaylistEntry[]
+
+  @@index([stationId, capturedAt])
+  @@index([playlistType])
+}
+
+/// A track within a StationPlaylistSnapshot. universalTrackId nullable until matched.
+model StationPlaylistEntry {
+  id                    String    @id @default(uuid())
+  snapshotId            String
+  universalTrackId      String?
+  externalObservationId String?
+  position              Int?
+  /// e.g. "A" | "B" | "C" | "power" (free-form).
+  rotationLevel         String?
+  addedAt               DateTime?
+  matchConfidence       Float?
+  createdAt             DateTime  @default(now())
+
+  snapshot StationPlaylistSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  track    UniversalTrack?         @relation(fields: [universalTrackId], references: [id], onDelete: SetNull)
+
+  @@index([snapshotId])
+  @@index([universalTrackId])
+  @@index([externalObservationId])
+}
+
+// ─────────────────────────────────────────────
+// CHART INGESTION SAFETY (Phase B0.5) — raw-first, idempotent, auditable
+// ─────────────────────────────────────────────
+
+/// Status of a single provider data-pull.
+enum IngestionRunStatus {
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+/// The RAW, always-kept chart row. Every chart entry is written here FIRST, tied to its
+/// ChartSnapshot and rank, BEFORE any identity match. If the resolver later finds a safe
+/// match, a normal ChartEntry is created/updated and linked via promotedChartEntryId —
+/// but this row is NEVER deleted, preserving the full audit trail from raw source to
+/// UniversalTrack. Unresolved/ambiguous rows stay here, still linked to snapshot + rank.
+model ChartObservationEntry {
+  id                         String              @id @default(uuid())
+  chartSnapshotId            String
+  externalTrackObservationId String
+  rank                       Int
+  previousRank               Int?
+  peakRank                   Int?
+  daysOnChart                Int?
+  weeksOnChart               Int?
+  /// e.g. "up" | "down" | "new" | "re_entry" | "nonmover" (free-form).
+  movement                   String?
+  sourceExternalId           String?
+  rawEntryMetadata           Json?
+  matchStatus                ExternalMatchStatus @default(PENDING)
+  matchedUniversalTrackId    String?
+  /// Set when this observation has been promoted to a canonical ChartEntry.
+  promotedChartEntryId       String?
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
+
+  chartSnapshot            ChartSnapshot            @relation(fields: [chartSnapshotId], references: [id], onDelete: Cascade)
+  externalTrackObservation ExternalTrackObservation @relation(fields: [externalTrackObservationId], references: [id], onDelete: Cascade)
+  matchedTrack             UniversalTrack?          @relation(fields: [matchedUniversalTrackId], references: [id], onDelete: SetNull)
+  promotedChartEntry       ChartEntry?              @relation(fields: [promotedChartEntryId], references: [id], onDelete: SetNull)
+
+  @@index([chartSnapshotId])
+  @@index([externalTrackObservationId])
+  @@index([matchStatus])
+  @@index([matchedUniversalTrackId])
+  @@index([chartSnapshotId, rank])
+}
+
+/// Audit record for every provider data-pull. A retry of the same payload (same
+/// sourcePayloadHash / edition) must be a no-op — this run row makes that observable and
+/// gives per-run counts. NO provider is implemented in B0.5; this is the audit contract.
+model MusicIngestionRun {
+  id                   String             @id @default(uuid())
+  provider             String
+  /// chart | airplay | station_playlist | catalog_backfill | …
+  ingestionType        String
+  sourceReference      String?
+  startedAt            DateTime           @default(now())
+  completedAt          DateTime?
+  status               IngestionRunStatus @default(RUNNING)
+  fetchedCount         Int                @default(0)
+  matchedCount         Int                @default(0)
+  ambiguousCount       Int                @default(0)
+  unresolvedCount      Int                @default(0)
+  rejectedCount        Int                @default(0)
+  createdSnapshotCount Int                @default(0)
+  cursor               String?
+  sourcePayloadHash    String?
+  errorSummary         Json?
+  metadata             Json?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([provider])
+  @@index([status])
+  @@index([sourcePayloadHash])
+  @@index([startedAt])
+}
+
+// ─────────────────────────────────────────────
+// UNIVERSAL PLAYLIST (Phase C MVP) — platform-agnostic playlist + export history
+//
+// Additive. Does NOT replace Playlist/PlaylistItem. A UniversalPlaylist is the neutral
+// representation of an imported playlist or a DJ Creator result; it is then materialized
+// into targets (SyncBiz Playlist first) via UniversalPlaylistExport, which keeps the link
+// + export history. PRIVACY: local-file items store only a hashed reference + filename —
+// never an absolute path.
+// ─────────────────────────────────────────────
+
+enum UniversalPlaylistSourceType {
+  IMPORTED_URL
+  LOCAL_M3U
+  DJ_CREATOR
+}
+
+enum UniversalPlaylistItemStatus {
+  RESOLVED
+  /// Matched to a provider (e.g. a valid YouTube videoId) even if not in the catalog by title.
+  PROVIDER_RESOLVED
+  AMBIGUOUS
+  UNRESOLVED
+  /// Still in the playlist, but the underlying file/source is not currently available.
+  MISSING
+  /// The entry was dropped from the source playlist on re-import (kept for audit, never deleted).
+  REMOVED_FROM_SOURCE
+}
+
+enum PlaylistExportTarget {
+  SYNCBIZ
+  YOUTUBE
+  SPOTIFY
+}
+
+enum PlaylistExportStatus {
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+model UniversalPlaylist {
+  id               String                      @id @default(uuid())
+  name             String
+  description      String?
+  /// youtube | m3u | dj_creator | spotify | …
+  sourceProvider   String
+  sourceType       UniversalPlaylistSourceType
+  sourcePlaylistId String?
+  sourceUrl        String?
+  /// Deterministic idempotency key (source+edition). Re-import upserts the same row.
+  sourceKey        String                      @unique
+  totalDurationMs  Int?
+  /// ready | partial | building
+  status           String                      @default("ready")
+  itemCount        Int                         @default(0)
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  items   UniversalPlaylistItem[]
+  exports UniversalPlaylistExport[]
+
+  @@index([sourceProvider])
+  @@index([sourceType])
+}
+
+model UniversalPlaylistItem {
+  id               String                      @id @default(uuid())
+  playlistId       String
+  position         Int
+  universalTrackId String?
+  rawTitle         String
+  rawArtists       String[]                    @default([])
+  rawDurationMs    Int?
+  /// Provider-native id (youtube videoId / spotify id / …).
+  sourceExternalId String?
+  /// PRIVACY: hashed/opaque device-local reference. NEVER an absolute filesystem path.
+  sourceRef        String?
+  /// Basename only (no directory structure) — safe to display/share.
+  filename         String?
+  status           UniversalPlaylistItemStatus
+  matchConfidence  Float?
+  matchMethod      String?
+  matchReasons     Json?
+  bpm              Float?
+  comment          String?
+  rating           Float?
+  isrc             String?
+  metadataHash     String?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  playlist UniversalPlaylist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  track    UniversalTrack?   @relation(fields: [universalTrackId], references: [id], onDelete: SetNull)
+
+  @@index([playlistId])
+  @@index([playlistId, position])
+  @@index([universalTrackId])
+  @@index([status])
+}
+
+model UniversalPlaylistExport {
+  id                  String               @id @default(uuid())
+  universalPlaylistId String
+  target              PlaylistExportTarget
+  /// External platform playlist id (YOUTUBE/SPOTIFY). Null for SyncBiz (uses FK below).
+  targetExternalId    String?
+  /// FK to the SyncBiz Playlist created (target = SYNCBIZ).
+  syncbizPlaylistId   String?
+  status              PlaylistExportStatus @default(RUNNING)
+  tracksTotal         Int                  @default(0)
+  tracksExported      Int                  @default(0)
+  tracksMissing       Int                  @default(0)
+  startedAt           DateTime             @default(now())
+  completedAt         DateTime?
+  errorSummary        Json?
+  createdAt           DateTime             @default(now())
+
+  universalPlaylist UniversalPlaylist @relation(fields: [universalPlaylistId], references: [id], onDelete: Cascade)
+  syncbizPlaylist   Playlist?         @relation("PlaylistUniversalExport", fields: [syncbizPlaylistId], references: [id], onDelete: SetNull)
+
+  @@index([universalPlaylistId])
+  @@index([target])
+  @@index([syncbizPlaylistId])
+}
+
+// ─────────────────────────────────────────────
+// LOCAL LIBRARY SYNC (Phase C) — desktop music bank ↔ UniversalTrack
+//
+// PRIVACY: an absolute file path NEVER reaches Postgres. Only an opaque, device-local
+// `localRef` (hashed on the desktop) + a bare `filename` are stored. The path stays on
+// the desktop, which resolves localRef → path for playback.
+// ─────────────────────────────────────────────
+
+model LocalLibrarySource {
+  id        String   @id @default(uuid())
+  /// Device that owns this local music bank.
+  deviceId  String   @unique
+  label     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  files LocalTrackFile[]
+}
+
+model LocalTrackFile {
+  id               String    @id @default(uuid())
+  sourceId         String
+  /// Opaque, device-local reference (hash). NOT a filesystem path.
+  localRef         String
+  filename         String
+  fileSize         Int?
+  modifiedAt       DateTime?
+  metadataHash     String?
+  universalTrackId String?
+  lastScannedAt    DateTime  @default(now())
+  /// available | changed | missing (never auto-deleted).
+  status           String    @default("available")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // LAYER A — ORIGINAL MP3 METADATA (READ-ONLY MIRROR of the music file).
+  // Filled ONLY by "Refresh From Music Bank" reading the file. NEVER edited by
+  // the UI, and NEVER written back to any music file. This is a one-way mirror:
+  //   music file  ──read──▶  these columns.   (never the reverse)
+  // ─────────────────────────────────────────────────────────────────────────
+  originalTitle      String?
+  originalArtists    String[] @default([])
+  originalAlbum      String?
+  originalGenres     String[] @default([])
+  originalYear       Int?
+  originalBpm        Float?
+  /// EVERY comment frame/entry, preserved separately — nothing merged or lost.
+  originalComments   String[] @default([])
+  /// Read-only convenience join of originalComments for display ONLY (never a source of truth).
+  displayComment     String?
+  originalRating     Float?
+  originalIsrc       String[] @default([])
+  /// TXXX / custom frames as { key: value }. Read-only mirror.
+  originalCustomTags Json?
+  /// available | missing — reflects whether the file was seen on the last refresh.
+  availability       String   @default("available")
+  /// When Layer A was last read from the music file.
+  lastReadAt         DateTime @default(now())
+
+  source     LocalLibrarySource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  track      UniversalTrack?    @relation(fields: [universalTrackId], references: [id], onDelete: SetNull)
+  enrichment TrackEnrichment?
+
+  @@unique([sourceId, localRef])
+  @@index([universalTrackId])
+  @@index([status])
+  @@index([availability])
+}
+
+/// Scope of a track's SyncBiz enrichment (owner directive: default REVIEW, never auto-interpret).
+/// Only GENERAL may ever feed the shared General DJ-Creator pool.
+enum EnrichmentScope {
+  GENERAL // safe for the shared / General DJ-Creator pool
+  CLIENT_SPECIFIC // tied to one client; NOT for the general pool
+  EVENT_SPECIFIC // tied to one event/occasion; NOT for the general pool
+  INTERNAL // internal/back-office use only
+  REVIEW // needs a human decision (default)
+  IGNORE // intentionally excluded
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// LAYER B — SYNCBIZ ENRICHMENT (fully editable, lives ONLY in Postgres).
+// Nothing here is ever written to a music file. A "Refresh From Music Bank"
+// updates Layer A only and leaves every field here untouched.
+// ───────────────────────────────────────────────────────────────────────────
+model TrackEnrichment {
+  id          String  @id @default(uuid())
+  localFileId String  @unique
+  /// Free-text SyncBiz comment (separate from the read-only originalComments).
+  myComment   String?
+  myTags      String[] @default([])
+  /// Overrides that shadow Layer A for playback/scheduling — file is untouched.
+  genreOverride  String?
+  bpmOverride    Float?
+  ratingOverride Float?
+  /// TRUE = manually marked SELECTED, FALSE = manually un-marked, null = defer to original.
+  manualSelected Boolean?
+  scope          EnrichmentScope @default(REVIEW)
+  mood           String?
+  energy         String? // LOW | MEDIUM | HIGH
+  familiarity    String?
+  businessType   String?
+  daypart        String?
+  clientEvent    String?
+  includeInGeneralDjCreator Boolean @default(false)
+  notes          String?
+  /// Values for active CustomFieldDefinition rows: { fieldName: value }.
+  customFields   Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  localFile LocalTrackFile @relation(fields: [localFileId], references: [id], onDelete: Cascade)
+
+  @@index([scope])
+}
+
+/// Operator-defined enrichment column. Stored in SyncBiz only; never an MP3 tag.
+model CustomFieldDefinition {
+  id           String   @id @default(uuid())
+  /// machine key used inside TrackEnrichment.customFields JSON.
+  name         String   @unique
+  label        String
+  /// text | number | boolean | select | multi_select
+  type         String
+  allowedOptions String[] @default([])
+  defaultValue Json?
+  active       Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([active])
+}
+
+/// Status of a user's metadata suggestion.
+enum ContributionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// A regular USER's SUGGESTION of public metadata for a track. Stored as PENDING only — it
+/// NEVER edits the official catalog, a music file, or private data. An ADMIN approves/rejects later.
+/// Track is referenced ONLY by a public id + public title/artist — never localRef/filename/metadataHash.
+model UserMetadataContribution {
+  id            String   @id @default(uuid())
+  userId        String
+  userEmail     String?
+  /// Opaque PUBLIC track ref (hash of title+artist). NEVER a localRef/filename/path/metadataHash.
+  trackPublicId String
+  trackTitle    String?
+  trackArtist   String?
+  // Suggested PUBLIC fields (all optional).
+  genre         String?
+  mood          String?
+  energy        String?
+  daypart       String?
+  businessType  String?
+  publicTags    String[] @default([])
+  note          String?
+  status        ContributionStatus @default(PENDING)
+  createdAt     DateTime @default(now())
+  reviewedAt    DateTime?
+  reviewedBy    String?
+
+  @@index([status])
+  @@index([userId])
+  @@index([trackPublicId])
+}
+
+/// Global token-review record. e.g. Raw Token "SELECTES" → suggested "SELECTED",
+/// category possible_typo, approved=false. NEVER auto-applied and NEVER edits a comment.
+model CommentTokenReview {
+  id               String   @id @default(uuid())
+  rawToken         String   @unique
+  suggestedMeaning String?
+  /// possible_typo | needs_review
+  category         String   @default("needs_review")
+  confidence       String   @default("low")
+  occurrences      Int      @default(0)
+  approved         Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([category])
+  @@index([approved])
 }

@@ -5,6 +5,7 @@
 import type { MusicTaxonomyCategory, WorkspaceBusinessProfile } from "@prisma/client";
 import type { DaypartSegment } from "@/lib/recommendations/business-daypart-vibe.types";
 import { prisma } from "@/lib/prisma";
+import { loadSelectedTitleSet, normalizeTitleForSelected } from "@/lib/recommendations/dj-creator-selected";
 import { loadValidatedFitRules } from "@/lib/recommendations/load-fit-rules";
 import { loadBusinessDaypartVibeRules } from "@/lib/recommendations/load-business-daypart-vibe";
 import {
@@ -394,13 +395,22 @@ export async function runSmartCatalogSearch(args: {
     });
   }
 
+  // SELECTED = INTERNAL quality boost (owner's hand-picked marker). Applied AFTER fit as a small
+  // additive term so it prefers SELECTED WITHIN already-matched rows without overriding the match.
+  // Never exposed to the client. Dev-scale title scan (could use a normalized-title index later).
+  const SELECTED_BOOST = 0.12;
+  const selectedTitleSet = rankedRescorePool.length
+    ? await loadSelectedTitleSet(prisma, rankedRescorePool.map((r) => r.title))
+    : new Set<string>();
+
   const enriched: SmartCatalogSearchResultRow[] = rankedRescorePool.map((row) => {
     const meta = metaById.get(row.catalogItemId)!;
     const snap = snapById.get(row.catalogItemId)!;
     const baseFit = row.score;
     const cB = Math.max(0, meta.curationRating) * CURATION_WEIGHT;
     const pB = popBoost(snap.viewCount);
-    const displayScore = Math.round((baseFit + cB + pB) * 10000) / 10000;
+    const sB = selectedTitleSet.has(normalizeTitleForSelected(row.title)) ? SELECTED_BOOST : 0;
+    const displayScore = Math.round((baseFit + cB + pB + sB) * 10000) / 10000;
 
     const rowSlugSet = slugSetById.get(row.catalogItemId);
     const taxonomySlugsSorted =

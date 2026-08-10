@@ -15,6 +15,7 @@ import {
   useCenterModule,
   isJinglesModule,
   isMyMusicLibraryModule,
+  isMusicLibraryMetadataModule,
   isDjCreatorHubModule,
   isEditCurrentModule,
   isGuestsModule,
@@ -22,6 +23,7 @@ import {
 } from "@/lib/center-module-context";
 import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
 import { MyMusicLibraryWorkspacePanel } from "@/components/my-music-library-workspace-panel";
+import { MusicLibraryMetadataWorkspacePanel } from "@/components/music-library-metadata-workspace-panel";
 import { EditCurrentWorkspacePanel } from "@/components/edit-current-workspace-panel";
 import { DjCreatorHubPanel } from "@/components/dj-creator-hub-panel";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -2709,6 +2711,8 @@ function SourcesManagerInner({
               userPlaylists={myMusicPlaylistPickerOptions}
               onAppendLocalUnifiedToPlaylist={appendLocalUnifiedFromMyMusic}
             />
+          ) : isMusicLibraryMetadataModule(activeCenterModule) ? (
+            <MusicLibraryMetadataWorkspacePanel onClose={() => setActiveCenterModule(null)} />
           ) : isDjCreatorHubModule(activeCenterModule) ? (
             <DjCreatorHubPanel
               playlists={djCreatorHubSources}
@@ -2854,6 +2858,9 @@ function SourcesManagerInner({
                   </svg>
                   <span>Guest</span>
                 </button>
+                {/* Music Library Metadata is ADMIN-only internal management — intentionally NOT
+                    launched from the player UI. The center module + panel + API remain wired
+                    (center-module id "music-library-metadata"); no user-facing launcher here. */}
                 <button
                   type="button"
                   className={[guestLinkLedButtonClass, "h-10 shrink-0 justify-center px-3"].join(" ")}

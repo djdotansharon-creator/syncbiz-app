@@ -299,6 +299,59 @@ export async function searchYouTubeWithYtDlp(
   return results;
 }
 
+/**
+ * FAST search — flat extraction (`--flat-playlist`) skips fetching each video's full page, so a
+ * `ytsearchN` returns in ~a few seconds instead of ~30s+ per-video. Single attempt (no empty-retry).
+ * Used by the DJ Creator "Charts" fallback where speed matters more than full per-video metadata;
+ * does NOT touch `searchYouTubeWithYtDlp` (still used by library search).
+ */
+function runYtDlpSearchFast(query: string, limit: number): Promise<YtDlpResult[]> {
+  return runWithTimeout(
+    (async () => {
+      const wrap = await getYtDlp();
+      if (!wrap) return [];
+      const stdout = await wrap.execPromise([
+        "--dump-json",
+        "--flat-playlist",
+        "--no-warnings",
+        `ytsearch${limit}:${query}`,
+      ]);
+      const results: YtDlpResult[] = [];
+      for (const line of (stdout || "").split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const obj = JSON.parse(line) as {
+            id?: string; title?: string; url?: string; webpage_url?: string;
+            view_count?: number; duration?: number; thumbnail?: string;
+            thumbnails?: Array<{ url?: string }>;
+          };
+          const id = obj.id || "";
+          const url = obj.webpage_url || obj.url || (id ? `https://www.youtube.com/watch?v=${id}` : "");
+          if (!url) continue;
+          const flatUrl = /^https?:\/\//i.test(url) ? url : (id ? `https://www.youtube.com/watch?v=${id}` : url);
+          results.push({
+            id,
+            title: obj.title || "YouTube video",
+            url: flatUrl,
+            cover: obj.thumbnail || obj.thumbnails?.[obj.thumbnails.length - 1]?.url || (id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : null),
+            view_count: typeof obj.view_count === "number" ? obj.view_count : undefined,
+            duration: typeof obj.duration === "number" ? obj.duration : undefined,
+          });
+        } catch {
+          /* skip */
+        }
+      }
+      results.sort((a, b) => (b.view_count ?? 0) - (a.view_count ?? 0));
+      return results;
+    })(),
+    TIMEOUT_MS
+  ).catch(() => []);
+}
+
+export async function searchYouTubeFast(query: string, limit = 10): Promise<YtDlpResult[]> {
+  return runYtDlpSearchFast(query, limit);
+}
+
 /** One YouTube PLAYLIST (album) search hit — a full album/playlist, not a single video. */
 export type YtDlpPlaylistResult = {
   /** Canonical playlist URL (`https://www.youtube.com/playlist?list=...`) — ingesting it builds a full playlist. */

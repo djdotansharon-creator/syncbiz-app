@@ -344,7 +344,6 @@ function HeaderProfileButton({
   activeWorkspaceId?: string | null;
   locale: string;
 }) {
-  const router = useRouter();
   const { t } = useTranslations();
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -381,11 +380,9 @@ function HeaderProfileButton({
     setLogoutLoading(true);
     try {
       await fetch("/api/auth/logout", { method: "POST" });
-      router.push("/login");
-      router.refresh();
-    } finally {
-      setLogoutLoading(false);
-    }
+    } catch { /* ignore — redirect anyway */ }
+    // Hard redirect (not router.push) so the heavy media UI fully unmounts on logout.
+    if (typeof window !== "undefined") window.location.assign("/login");
   }
 
   const initials = sessionName
@@ -641,7 +638,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   // ────────────────────────────────────────────────────────────────────────
   const [inDesktopApp, setInDesktopApp] = useState(false);
   const [mainMenuOpen, setMainMenuOpen] = useState(false);
+  const [menuLogoutBusy, setMenuLogoutBusy] = useState(false);
   const mainMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+  // Log out from the gear menu. Hard redirect guarantees a clean logged-out reload
+  // (a soft client nav leaves the heavy media UI mounted and looks like "nothing happened").
+  const handleMenuLogout = async () => {
+    setMenuLogoutBusy(true);
+    setMainMenuOpen(false);
+    try { await fetch("/api/auth/logout", { method: "POST" }); } catch { /* ignore — redirect anyway */ }
+    if (typeof window !== "undefined") window.location.assign("/login");
+  };
   const { isPinned: isCategoryPinned, togglePin: toggleCategoryPin, pinnedSet } = useTopNavPins();
   // Control Room / Full Screen mode — visual-only compaction for tablet/desktop.
   // Two independent layers:
@@ -1438,15 +1444,20 @@ export function AppShell({ children }: { children: ReactNode }) {
               {/* Language picker — round flag, opens all supported languages */}
               <LanguageSelector />
 
-              {/* Profile avatar → dropdown with full info + logout */}
-              <HeaderProfileButton
-                sessionName={sessionName}
-                sessionAccountName={sessionAccountName}
-                timeStr={timeStr}
-                workspaceList={workspaceList}
-                activeWorkspaceId={activeWorkspaceId}
-                locale={locale}
-              />
+              {/* Profile avatar → dropdown with full info + workspace switcher.
+                  Logout now lives in the gear menu, so we only keep this extra circle
+                  when there's more than one workspace to switch between (avoids a redundant
+                  top-bar button). The signed-in first name still shows next to the clock. */}
+              {workspaceList && workspaceList.length > 1 ? (
+                <HeaderProfileButton
+                  sessionName={sessionName}
+                  sessionAccountName={sessionAccountName}
+                  timeStr={timeStr}
+                  workspaceList={workspaceList}
+                  activeWorkspaceId={activeWorkspaceId}
+                  locale={locale}
+                />
+              ) : null}
 
               {/* Fullscreen / Control Room toggle */}
               <button
@@ -1498,6 +1509,21 @@ export function AppShell({ children }: { children: ReactNode }) {
                   title={t.mainMenu ?? "Main menu"}
                   pinLabel={t.pinToTop ?? "Pin to top"}
                   dir="ltr"
+                  footer={
+                    <button
+                      type="button"
+                      onClick={() => void handleMenuLogout()}
+                      disabled={menuLogoutBusy}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-slate-300 transition hover:bg-slate-800/70 hover:text-rose-300 focus:outline-none disabled:opacity-50"
+                    >
+                      <span aria-hidden className="inline-flex h-5 w-5 items-center justify-center text-slate-400">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+                        </svg>
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-start">{menuLogoutBusy ? "…" : (t.logout ?? "Log out")}</span>
+                    </button>
+                  }
                 />
               </div>
 

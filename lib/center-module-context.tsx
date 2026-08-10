@@ -13,6 +13,7 @@ export type CenterModuleEditTarget = { kind: "playlist" | "source"; id: string }
 export type CenterModule =
   | "jingles"
   | "my-music-library"
+  | "music-library-metadata"
   | "dj-creator-hub"
   | "dj-creator-assistant"
   | "guests"
@@ -39,6 +40,10 @@ export function isJinglesModule(m: CenterModule): m is "jingles" {
 
 export function isMyMusicLibraryModule(m: CenterModule): m is "my-music-library" {
   return m === "my-music-library";
+}
+
+export function isMusicLibraryMetadataModule(m: CenterModule): m is "music-library-metadata" {
+  return m === "music-library-metadata";
 }
 
 export function isDjCreatorHubModule(m: CenterModule): m is "dj-creator-hub" {
