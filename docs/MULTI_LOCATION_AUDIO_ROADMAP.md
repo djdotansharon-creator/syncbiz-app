@@ -8,11 +8,12 @@
 
 ## 📍 STATUS (update this block first, every milestone)
 
-- **Current Milestone:** P1.1 — Playback Regression Harness — **AWAITING OWNER APPROVAL** (do not start automatically).
-- **Current Gate:** n/a until P1.1 is approved and scoped.
-- **Last Completed:** **P0 — Safety & Deploy-Unblock** (this session). All gates green (see P0 below).
-- **Next Approved Step:** P0 only was approved and is done. Next step **P1.1** requires explicit approval; after the harness is green we jointly decide whether Source P1 follows or the code justifies a different order.
+- **Current Milestone:** P1.2 — MASTER Crash / Lease Recovery Reliability — **AWAITING OWNER APPROVAL** (do not start automatically).
+- **Current Gate:** n/a until P1.2 is approved and scoped.
+- **Last Completed:** **P1.1 — Playback Regression Harness** — **Gate: PASS.** 5 consecutive green full-suite runs against a local production-like build (`next build`+`next start`); Automix now a real PASS (multi-track playlist idx0→idx1). Automated: Play · Navigation-Survival · Automix · Queue-Integrity · Reconnect. Integration/Manual (documented): CONTROL lifecycle, Desktop/MPV interruption. Root cause of prior flakiness = `next dev` (RSC remounts / token churn), proven by determinism under the production build.
+- **Next Approved Step:** P1.2 requires explicit approval. Do NOT auto-start Source P1.
 - **Blockers:** none blocking. Latent: production is 11 migrations behind (deploy is owner-gated; NOT a bug).
+- **Known Reliability Finding:** stale primary MASTER lease during the 90s grace after a crash can force a new playing device to CONTROL → `stopForControlHandoff` wipes the session (eject class). → P1.2.
 - **Key Decisions:** see "Decisions log" below.
 
 ---
@@ -62,9 +63,13 @@ Next.js app (`app/`,`components/`,`lib/`) + standalone WS server (`server/`, :30
 - **Risk:** low (rehearsed on throwaway DB before touching dev). **Parallel-safe:** yes (independent of playback).
 
 ### P1 — Foundation Lock (before any feature expansion)
-- **P1.1 Playback Regression Harness** *(next; separate milestone; approval required)* — make TEST 01–06 real and reliable; fix the flaky SETUP; decide automatable (nav-survival, automix, reconnect) vs integration-only (network interruption, long-running, multi-device). **Gate:** reproducible green on a real browser; documented what stays manual. *This is the Non-Negotiable-A lock.*
-- **P1.2 Source P1** *(deferred; re-decide after P1.1)* — reader interface v2 / provider descriptors, minimum additive for Drive/Dropbox. Confirmed P0 is the correct base.
-- **P1.3 Org/Branch foundation** *(design only)*.
+- **P1.1 Playback Regression Harness ✅ COMPLETE (Gate: PASS).** `scripts/verify-player.mjs` (`npm run test:playback` / `:soak`) + read-only `HarnessPlaybackProbe` (`window.__sbState`, gated on `NEXT_PUBLIC_SB_HARNESS=1`, absent in real deploys). Condition-based (no hidden sleeps), SETUP↔PLAYBACK failure-code separation. **Runs against a local production-like build** (`next build`+`next start`, local DB+WS overrides) — 5 consecutive green.
+  - **Automated (PASS ×5):** Play Starts · Navigation Survival · Automix/end-of-track (multi-track playlist idx0→idx1) · Queue Integrity · Reconnect.
+  - **Integration/Manual (documented, not auto-PASS):** CONTROL lifecycle (multi-device) · Desktop/MPV local interruption. **Soak:** `--soak` mode.
+  - **Finding:** `next dev` was the flakiness source (RSC remounts / ws-token churn); deterministic under prod build.
+- **P1.2 MASTER Crash / Lease Recovery Reliability** *(next; approval required; do NOT auto-start)* — a crashed MASTER leaves `primaryMasterByBranch` pointing at the dead device for the 90s grace; a new playing device gets forced to CONTROL → `stopForControlHandoff` wipes the session (eject class). Goal: MASTER crash → playback continuity/recovery; a new MASTER is never falsely ejected by a stale primary lease. **Anchors:** `server/index.ts` (grace/primary gate), `server/master-lease-store.ts` (no TTL; persists across restart), `lib/device-player-context.tsx` (`stopForControlHandoff`).
+- **P1.3 Source P1** *(deferred; re-decide after P1.2)* — reader interface v2 / provider descriptors, minimum additive for Drive/Dropbox. Confirmed P0 is the correct base.
+- **P1.4 Org/Branch foundation** *(design only)*.
 
 ### P2 — Core Multi-Location
 Device-presence persistence (WS→DB) + "stores online / now-playing" surface · **Proof-of-Play** model · **server-side schedule executor** (replace client-poll) · Organization/Region hierarchy + branches table + friendly Users/Permissions UX · **minimal Scope primitive** (apply-to-branches shared by playlists/schedules/announcements).
@@ -87,6 +92,8 @@ Retail Campaign Engine · AI Radio Personality · capability-ACL enforcement · 
 
 ## 10. Decisions log
 - **Playback accepted GREEN** for browser single-MASTER (4 risk seams verified; none reproduces). CONTROL-mirror staleness + live/huge-duration parked as backlog — touch only on real repro.
+- **P1.1 harness runs against a production-like build, not `next dev`.** `next dev` (RSC remounts / ws-token churn) caused all observed harness flakiness; the production build is deterministic (5/5 green). The harness probe is a read-only diagnostic gated on `NEXT_PUBLIC_SB_HARNESS=1` — never present in a real deploy. Multi-track Automix uses an existing DJ-AI playlist (no new fixture / no data change).
+- **MASTER-lease reliability FINDING (→ P1.2):** the lease has no TTL and persists across WS restart (`master-lease-store.ts`); cleanup is lazy (on next access after 90s grace). The accumulation of many stale keys was a test artifact, BUT the underlying mechanism — a ghost `primaryMasterByBranch` within the 90s grace after a crash forcing a new playing device to CONTROL (`stopForControlHandoff` → session wiped) — is a **real reliability risk** in that window. Not fixed (flagged for P1.2).
 - **Source architecture:** separate `SourceLocator` (not a `ProviderMapping` God-Object); `stableExternalId` is strong identity only within a provider; cross-source identity via ISRC → future fingerprint; `contentHashAlgorithm` stored; local uniqueness by `deviceId`. `SourceConnection` is a superset of `SpotifyConnection`/`LocalLibrarySource` for future lossless migration (not now).
 - **Migration safety:** forward-only reorder (prod never applied the broken pair); prod-guard makes local the default, prod requires explicit `SYNCBIZ_ALLOW_PROD_DB=1`.
 - **Honesty corrections vs vision:** Permissions backend is binary (no ACL) — friendly UX would sit on a binary model; granular permissions need net-new modeling. Announcements are PARTIAL (console/TTS/desktop-injection exist; web-injection + DB-executor missing). Scheduling executor is client-poll, not production-grade for unattended stores.

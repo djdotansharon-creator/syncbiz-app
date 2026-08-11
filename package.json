@@ -23,7 +23,9 @@
     "db:migrate": "node scripts/prisma-safe.mjs migrate dev",
     "db:migrate:status": "node scripts/prisma-safe.mjs migrate status",
     "db:migrate:deploy": "node scripts/prisma-safe.mjs migrate deploy",
-    "db:studio": "node scripts/prisma-safe.mjs studio"
+    "db:studio": "node scripts/prisma-safe.mjs studio",
+    "test:playback": "node scripts/verify-player.mjs",
+    "test:playback:soak": "node scripts/verify-player.mjs --soak"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

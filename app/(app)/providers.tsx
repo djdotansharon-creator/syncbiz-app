@@ -9,6 +9,7 @@ import { DevicePlayerProvider } from "@/lib/device-player-context";
 import { ScheduleEngineProvider } from "@/lib/schedule-engine-context";
 import { ScheduleAutoPlayer } from "@/components/schedule-auto-player";
 import { JingleScheduleAutoPlayer } from "@/components/jingles-control/JingleScheduleAutoPlayer";
+import { HarnessPlaybackProbe } from "@/components/harness-playback-probe";
 
 /**
  * Single client boundary for all app providers.
@@ -26,6 +27,8 @@ export function AppProviders({ children }: { children: ReactNode }) {
                 {children}
                 <ScheduleAutoPlayer />
                 <JingleScheduleAutoPlayer />
+                {/* Read-only diagnostic probe for the P1.1 playback harness (dev-only, renders null). */}
+                <HarnessPlaybackProbe />
               </DevicePlayerProvider>
             </MobileRoleProvider>
           </LibraryThemeProvider>
