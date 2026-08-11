@@ -3,6 +3,8 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > **READ `docs/PROJECT-STATE.md` FIRST** — the living working map (design language, key symbols per file, verification recipe, open items). Keep it updated after every meaningful change. Do NOT scan the large files (sources-manager, audio-player, playback-provider, app-shell) — use the anchors listed there.
+>
+> **For product roadmap / current milestone / next approved step → `docs/MULTI_LOCATION_AUDIO_ROADMAP.md`** (the living product source-of-truth).
 
 ## ⭐ NON-NEGOTIABLE: Player & Controller quality bar
 

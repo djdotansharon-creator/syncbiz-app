@@ -19,7 +19,11 @@
     "e2e:seed-user": "npx tsx scripts/seed-e2e-user.ts",
     "catalog-coverage:report": "npx tsx scripts/report-catalog-coverage.ts",
     "catalog-coverage:work-queue": "npx tsx scripts/report-catalog-editor-work-queue.ts",
-    "db:check": "npx tsx scripts/check-db-target.ts"
+    "db:check": "npx tsx scripts/check-db-target.ts",
+    "db:migrate": "node scripts/prisma-safe.mjs migrate dev",
+    "db:migrate:status": "node scripts/prisma-safe.mjs migrate status",
+    "db:migrate:deploy": "node scripts/prisma-safe.mjs migrate deploy",
+    "db:studio": "node scripts/prisma-safe.mjs studio"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

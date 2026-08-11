@@ -2,6 +2,7 @@
 
 > Read this FIRST instead of scanning files. Update it after every meaningful change.
 > Last updated: 2026-07-16.
+> **Product roadmap / milestones / current step live in `docs/MULTI_LOCATION_AUDIO_ROADMAP.md`** (this file stays the architecture/anchors map).
 
 ## ⛔ PLAYER SAFETY CONTRACT (owner directive — read before ANY change)
 The player runs in businesses and must NEVER stop.

@@ -1122,6 +1122,7 @@ model UniversalTrack {
   chartObservationEntries ChartObservationEntry[]
   UniversalPlaylistItem   UniversalPlaylistItem[]
   localTrackFiles         LocalTrackFile[]
+  sourceLocators          SourceLocator[]
 
   @@index([normalizedTitle])
   @@index([legacyCatalogItemId])
@@ -1864,4 +1865,188 @@ model CommentTokenReview {
 
   @@index([category])
   @@index([approved])
+}
+
+// ═════════════════════════════════════════════════════════════════
+// P0 — SOURCE ARCHITECTURE (Provider / Connection / Container / Locator)
+//
+// ADDITIVE ONLY. Prepares Local / Google Drive / Dropbox / YouTube / SoundCloud /
+// Spotify under ONE model — no per-provider architecture, and WITHOUT touching the
+// working Playback chain.
+//
+//   Provider/Adapter = CODE (an adapter registry + the `provider` string), NOT a table.
+//   Connection       = SourceConnection  (an authenticated account link)
+//   Container        = SourceContainer   (a folder / playlist / device library within a connection)
+//   Locator          = SourceLocator     (the STABLE location of one recording; points to UniversalTrack)
+//
+// IDENTITY LAW: `stableExternalId` is the strong identity of the ASSET AT THIS PROVIDER.
+// It is NOT proof that two DIFFERENT provider IDs are different recordings. Cross-source
+// recording identity comes from ISRC, and later Audio Fingerprint — never from path/filename/URL.
+// False Duplicate > False Merge.
+//
+// A signed/temporary URL is EPHEMERAL: minted at play time by a future resolveLocator() (P4),
+// may expire and be re-minted, and is NEVER stored as an identity key.
+//
+// ProviderMapping stays lean (public Track↔provider identity) and is deliberately NOT merged
+// into SourceLocator (avoids a God Object). SpotifyConnection / LocalLibrarySource stay as-is;
+// SourceConnection is a SUPERSET so they can migrate later without a second permanent architecture.
+// ═════════════════════════════════════════════════════════════════
+
+enum SourceAuthType {
+  OAUTH2
+  API_KEY
+  DEVICE_LOCAL
+  NONE
+}
+
+enum SourceConnectionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  ERROR
+  DISCONNECTED
+}
+
+enum SourceContainerType {
+  FOLDER
+  PLAYLIST
+  ALBUM
+  DEVICE_LIBRARY
+  ROOT
+}
+
+enum SourceContainerStatus {
+  ACTIVE
+  GONE
+  ERROR
+}
+
+enum LocatorAddressKind {
+  SIGNED_URL
+  PUBLIC_URL
+  LOCAL_PATH_REF
+  RESOLVE_TARGET
+}
+
+enum LocatorStatus {
+  RESOLVED
+  UNRESOLVED
+  AMBIGUOUS
+  MISSING
+  MOVED
+  REMOVED
+}
+
+/// An authenticated link between a user/workspace and a source-provider account.
+/// Generalizes SpotifyConnection (which stays as-is for now); Drive/Dropbox are new rows.
+model SourceConnection {
+  id                   String                 @id @default(uuid())
+  /// google_drive | dropbox | spotify | youtube | soundcloud | local | … (free-text, matches ProviderMapping.provider)
+  provider             String
+  authType             SourceAuthType         @default(OAUTH2)
+  /// Who authorized the connection.
+  userId               String
+  /// Optional workspace scope (for shared/workspace-level connections later).
+  workspaceId          String?
+  /// Provider's stable account id (null for device_local). Part of the cloud-account uniqueness.
+  externalAccountId    String?
+  /// Human label for the UI, e.g. "dotan@gmail — Dropbox".
+  accountLabel         String?
+  /// For provider=local (device_local): the owning device — gives local its OWN uniqueness (see @@unique).
+  deviceId             String?
+  /// AES-256-GCM ciphertext of the token JSON — SAME pattern as SpotifyConnection (never plaintext).
+  encryptedTokenBlob   Bytes?
+  tokenIv              Bytes?
+  /// Space-delimited granted scopes (audit only; authorization is evaluated at runtime, never stored as a static flag).
+  scope                String?
+  accessTokenExpiresAt DateTime?
+  status               SourceConnectionStatus @default(ACTIVE)
+  lastError            String?
+  lastSyncedAt         DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  containers SourceContainer[]
+  locators   SourceLocator[]
+
+  /// Cloud accounts: one connection per (user, provider, external account).
+  @@unique([userId, provider, externalAccountId])
+  /// Device-scoped providers (local): one connection per (provider, device) — does NOT rely on externalAccountId (null for local).
+  @@unique([provider, deviceId])
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([provider])
+  @@index([status])
+}
+
+/// A browsable scope within a connection: a Drive/Dropbox folder, a playlist, an album,
+/// or a device library. Containment is MODELED (parent/child) — not inferred from a URL.
+model SourceContainer {
+  id                  String                @id @default(uuid())
+  connectionId        String
+  containerType       SourceContainerType
+  /// Provider's stable folder/playlist id (NOT a display path).
+  externalContainerId String
+  parentContainerId   String?
+  name                String
+  /// Display breadcrumb ONLY — may change on move/rename; never an identity key.
+  displayPath         String?
+  /// Provider delta/sync cursor for incremental add/modify/move/delete sync.
+  syncCursor          String?
+  lastListedAt        DateTime?
+  status              SourceContainerStatus @default(ACTIVE)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  connection SourceConnection  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  parent     SourceContainer?  @relation("SourceContainerTree", fields: [parentContainerId], references: [id], onDelete: SetNull)
+  children   SourceContainer[] @relation("SourceContainerTree")
+  locators   SourceLocator[]
+
+  @@unique([connectionId, externalContainerId])
+  @@index([connectionId])
+  @@index([parentContainerId])
+  @@index([connectionId, status])
+}
+
+/// The STABLE location of one recording within a connection/container, bound to a UniversalTrack.
+/// Move/rename keep the same row (identity = stableExternalId); delete → REMOVED (row kept so
+/// enrichment/ratings on the UniversalTrack survive). Signed URLs are minted at play time, never stored.
+model SourceLocator {
+  id                   String             @id @default(uuid())
+  connectionId         String
+  containerId          String?
+  universalTrackId     String?
+  /// Denormalized copy of connection.provider for fast queries.
+  provider             String
+  /// STRONG identity of the asset AT THIS PROVIDER (Drive fileId / Dropbox id / local hash).
+  /// NOT a path/filename/URL, and NOT cross-provider proof — see the section-header identity law.
+  stableExternalId     String
+  addressKind          LocatorAddressKind
+  /// Basename for display only.
+  filename             String?
+  mimeType             String?
+  sizeBytes            BigInt?
+  /// Audio content hash — detects modify, and (with its algorithm) enables future cross-source matching.
+  contentHash          String?
+  /// Algorithm that produced contentHash (e.g. "sha256", "chromaprint") — never compare hashes across algorithms.
+  contentHashAlgorithm String?
+  status               LocatorStatus      @default(UNRESOLVED)
+  lastSeenAt           DateTime?
+  lastResolvedAt       DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  connection SourceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  container  SourceContainer? @relation(fields: [containerId], references: [id], onDelete: SetNull)
+  track      UniversalTrack?  @relation(fields: [universalTrackId], references: [id], onDelete: SetNull)
+
+  /// The same asset in the same account is a single locator.
+  @@unique([connectionId, stableExternalId])
+  @@index([universalTrackId])
+  @@index([connectionId])
+  @@index([containerId])
+  @@index([provider, stableExternalId])
+  @@index([status])
+  @@index([contentHash])
 }
