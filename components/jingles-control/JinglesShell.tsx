@@ -28,6 +28,7 @@ import {
   SAMPLER_PADS,
 } from "./seed-data";
 import { loadJingleSchedule, persistJingleSchedule } from "./schedule-storage";
+import { useAudioPreview } from "./use-audio-preview";
 
 type State = {
   drawerOpen: boolean;
@@ -774,71 +775,6 @@ function useIsDesktopPlayer(): boolean {
   return isDesktop;
 }
 
-/**
- * Browser-native, OFF-PLAYBACK preview player for generated jingle/announcement MP3s.
- * A single local <audio> audition on the operator's own machine — it NEVER touches the
- * music player / MASTER / CONTROL / WS / MPV / interrupt queue / Automix. Only one preview
- * plays at a time; switching clips stops the previous; it always stops on unmount.
- * This is an audition, NOT On-Air playback to the store.
- */
-function useAudioPreview() {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const stop = useCallback(() => {
-    const a = audioRef.current;
-    if (a) {
-      a.pause();
-      a.removeAttribute("src");
-    }
-    setPreviewUrl(null);
-  }, []);
-
-  const toggle = useCallback(
-    (url: string) => {
-      if (!url) return;
-      setError(null);
-      // Same clip already previewing → toggle off.
-      if (audioRef.current && previewUrl === url) {
-        stop();
-        return;
-      }
-      let a = audioRef.current;
-      if (!a) {
-        a = new Audio();
-        audioRef.current = a;
-      }
-      a.pause(); // stop any prior preview before starting the new one
-      a.onended = () => setPreviewUrl((cur) => (cur === url ? null : cur));
-      a.onerror = () => {
-        setError("Preview failed to play this audio.");
-        setPreviewUrl(null);
-      };
-      a.src = url;
-      setPreviewUrl(url);
-      void a.play().catch(() => {
-        setError("Preview could not start (browser blocked or file error).");
-        setPreviewUrl(null);
-      });
-    },
-    [previewUrl, stop]
-  );
-
-  // Never leave preview audio running in the background after the panel closes.
-  useEffect(() => {
-    return () => {
-      const a = audioRef.current;
-      if (a) {
-        a.pause();
-        a.removeAttribute("src");
-      }
-    };
-  }, []);
-
-  return { previewUrl, error, toggle, stop };
-}
-
 // ─── JcModal — shared popup primitive (portal, backdrop, ESC, centered) ─────
 
 function JcModal({
@@ -912,7 +848,7 @@ function TriggerPads({
 }): React.ReactElement {
   return (
     <section className="jc-trigger-section" aria-label="Jingle trigger pads">
-      <p className="jc-rail-head" style={{ marginBottom: "0.5rem" }}>Trigger Pads</p>
+      <p className="jc-rail-head jcx-quickpads-head">Quick Pads</p>
       <div className="jc-trigger-grid">
         {pads.map((p) => {
           const assigned = Boolean(p.url);
@@ -1059,7 +995,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
   const [pads, setPads] = useState<SamplerPadItem[]>(() => loadPads());
   const [flashPadId, setFlashPadId] = useState<string | null>(null);
   const [resultCard, setResultCard] = useState<JingleAsset | null>(null);
-  const [activeTab, setActiveTab] = useState<"create" | "library" | "schedule" | "lab">("create");
+  const [activeTab, setActiveTab] = useState<"create" | "library" | "schedule">("create");
   const [draft, setDraft] = useState<AnnouncementDraft>({ ...initialDraft });
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -1077,243 +1013,6 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
   // Web = local browser Preview (audition); Desktop = On-Air MPV playback. OFF-PLAYBACK.
   const isDesktop = useIsDesktopPlayer();
   const preview = useAudioPreview();
-
-  // ── Hebrew Voice Benchmark v0 — isolated eval tool. OFF-PLAYBACK (Browser Preview only). ──
-  const [benchOriginal, setBenchOriginal] = useState("");
-  const [benchSpoken, setBenchSpoken] = useState("");
-  const [benchGender, setBenchGender] = useState<"male" | "female">("male");
-  const [benchStyle, setBenchStyle] = useState<"Neutral" | "Energetic" | "Premium" | "Urgent">("Neutral");
-  const [benchResults, setBenchResults] = useState<
-    Record<"A" | "B" | "C", { url?: string; label?: string; error?: string; loading?: boolean }>
-  >({ A: {}, B: {}, C: {} });
-  const runBenchmark = useCallback(
-    async (candidate: "A" | "B" | "C") => {
-      const text = benchSpoken.trim();
-      if (!text) return;
-      setBenchResults((r) => ({ ...r, [candidate]: { loading: true } }));
-      try {
-        // Each candidate is an independent request → one engine's failure never affects the others.
-        const res = await fetch("/api/jingles/benchmark", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ candidate, text, gender: benchGender, style: benchStyle }),
-        });
-        const j = (await res.json()) as { url?: string; provider?: string; model?: string; voice?: string; error?: string };
-        if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
-        setBenchResults((r) => ({ ...r, [candidate]: { url: j.url, label: `${j.provider} · ${j.model} · ${j.voice}` } }));
-      } catch (e) {
-        setBenchResults((r) => ({ ...r, [candidate]: { error: e instanceof Error ? e.message : String(e) } }));
-      }
-    },
-    [benchSpoken, benchGender, benchStyle]
-  );
-
-  // ── INTERNAL Voice Lab — dynamic, locale-aware voice catalog. OFF-PLAYBACK. ──
-  // Customer never sees this; it's an internal listening/eval surface. Provider/model
-  // strings are intentionally exposed HERE (internal lab = powerful).
-  type LabVoiceSource = "eleven-account" | "eleven-shared" | "google-chirp" | "gemini-official" | "house";
-  type LabVoice = {
-    provider: "elevenlabs" | "google-chirp" | "google-gemini";
-    model: string;
-    voiceId: string;
-    name: string;
-    gender: "male" | "female" | "unknown";
-    locale: string;
-    previewUrl: string | null;
-    supportsStyle: boolean;
-    source: LabVoiceSource;
-    house?: boolean;
-  };
-  type LabLocale = { code: string; label: string; enabled: boolean; state: "verified" | "beta" | "future" };
-  const [labLocale, setLabLocale] = useState("he-IL");
-  const [labLocales, setLabLocales] = useState<LabLocale[]>([]);
-  const [labVoices, setLabVoices] = useState<LabVoice[]>([]);
-  const [labLoading, setLabLoading] = useState(false);
-  const [labError, setLabError] = useState<string | null>(null);
-  const [labSpoken, setLabSpoken] = useState("");
-  const [labStyle, setLabStyle] = useState<"Neutral" | "Sales" | "Energetic" | "Premium" | "Urgent">("Neutral");
-  const [labProvider, setLabProvider] = useState<"all" | LabVoice["provider"]>("all");
-  const [labGender, setLabGender] = useState<"all" | "male" | "female">("all");
-  const [labSearch, setLabSearch] = useState("");
-  const [labFavOnly, setLabFavOnly] = useState(false);
-  const [labFavorites, setLabFavorites] = useState<Set<string>>(() => {
-    if (typeof window === "undefined") return new Set();
-    try {
-      return new Set(JSON.parse(localStorage.getItem("syncbiz.voicelab.favorites") ?? "[]") as string[]);
-    } catch {
-      return new Set();
-    }
-  });
-  const [labResults, setLabResults] = useState<Record<string, { loading?: boolean; url?: string; error?: string }>>({});
-
-  const labKey = useCallback((v: LabVoice) => `${v.source}:${v.voiceId}`, []);
-
-  // Shared ElevenLabs library (paginated, on-demand — never bulk-loaded with the base catalog).
-  const [sharedVoices, setSharedVoices] = useState<LabVoice[]>([]);
-  const [sharedPage, setSharedPage] = useState(0);
-  const [sharedHasMore, setSharedHasMore] = useState(false);
-  const [sharedLoading, setSharedLoading] = useState(false);
-  const [sharedError, setSharedError] = useState<string | null>(null);
-  const [sharedSearch, setSharedSearch] = useState("");
-  const [sharedOpen, setSharedOpen] = useState(false);
-
-  const loadShared = useCallback(
-    async (locale: string, page: number, opts?: { gender?: string; search?: string }) => {
-      setSharedLoading(true);
-      setSharedError(null);
-      try {
-        const params = new URLSearchParams({ locale, page: String(page) });
-        if (opts?.gender && opts.gender !== "all") params.set("gender", opts.gender);
-        if (opts?.search?.trim()) params.set("search", opts.search.trim());
-        const res = await fetch(`/api/jingles/shared-voices?${params.toString()}`);
-        const j = await res.json();
-        if (!res.ok) throw new Error(j.error || `shared ${res.status}`);
-        setSharedVoices((prev) => (page === 0 ? j.voices ?? [] : [...prev, ...(j.voices ?? [])]));
-        setSharedHasMore(!!j.hasMore);
-        setSharedPage(page);
-      } catch (e) {
-        setSharedError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setSharedLoading(false);
-      }
-    },
-    []
-  );
-
-  const loadCatalog = useCallback(async (locale: string) => {
-    setLabLoading(true);
-    setLabError(null);
-    try {
-      const res = await fetch(`/api/jingles/voice-catalog?locale=${encodeURIComponent(locale)}`);
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error || `catalog ${res.status}`);
-      setLabVoices(j.voices ?? []);
-      if (j.locales) setLabLocales(j.locales);
-    } catch (e) {
-      setLabError(e instanceof Error ? e.message : String(e));
-      setLabVoices([]);
-    } finally {
-      setLabLoading(false);
-    }
-  }, []);
-
-  // Load the catalog the first time the Voice Lab tab is opened, and on locale change.
-  // Shared-library results are locale-specific, so reset them on locale change.
-  useEffect(() => {
-    if (activeTab !== "lab") return;
-    void loadCatalog(labLocale);
-    setSharedVoices([]);
-    setSharedPage(0);
-    setSharedHasMore(false);
-    setSharedOpen(false);
-  }, [activeTab, labLocale, loadCatalog]);
-
-  const toggleFavorite = useCallback((key: string) => {
-    setLabFavorites((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      try {
-        localStorage.setItem("syncbiz.voicelab.favorites", JSON.stringify([...next]));
-      } catch {
-        /* ignore quota */
-      }
-      return next;
-    });
-  }, []);
-
-  const generateLabVoice = useCallback(
-    async (v: LabVoice) => {
-      const text = labSpoken.trim();
-      if (!text) return;
-      const key = labKey(v);
-      setLabResults((r) => ({ ...r, [key]: { loading: true } }));
-      try {
-        const res = await fetch("/api/jingles/benchmark", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            provider: v.provider,
-            voiceId: v.voiceId,
-            text,
-            locale: v.locale === "*" ? labLocale : v.locale,
-            style: v.supportsStyle ? labStyle : undefined,
-          }),
-        });
-        const j = await res.json();
-        if (!res.ok) throw new Error(j.error || `generate ${res.status}`);
-        setLabResults((r) => ({ ...r, [key]: { url: j.url } }));
-      } catch (e) {
-        setLabResults((r) => ({ ...r, [key]: { error: e instanceof Error ? e.message : String(e) } }));
-      }
-    },
-    [labSpoken, labStyle, labLocale, labKey]
-  );
-
-  const filteredLabVoices = labVoices.filter((v) => {
-    if (labProvider !== "all" && v.provider !== labProvider) return false;
-    if (labGender !== "all" && v.gender !== labGender) return false;
-    if (labFavOnly && !labFavorites.has(labKey(v))) return false;
-    if (labSearch.trim()) {
-      const q = labSearch.trim().toLowerCase();
-      if (!v.name.toLowerCase().includes(q) && !v.voiceId.toLowerCase().includes(q)) return false;
-    }
-    return true;
-  });
-
-  // INTERNAL source tag (customer never sees this — internal lab only).
-  const SOURCE_TAG: Record<LabVoiceSource, string> = {
-    "eleven-account": "acct",
-    "eleven-shared": "lib",
-    "google-chirp": "chirp",
-    "gemini-official": "gemini",
-    house: "house",
-  };
-
-  // Shared row renderer — reused for the base catalog and the shared library so both lists
-  // behave identically (favorite · native preview · on-demand Generate · generated Preview).
-  const renderVoiceRow = (v: LabVoice) => {
-    const key = labKey(v);
-    const r = labResults[key] ?? {};
-    const playingGen = !!r.url && preview.previewUrl === r.url;
-    const playingNative = !!v.previewUrl && preview.previewUrl === v.previewUrl;
-    const fav = labFavorites.has(key);
-    return (
-      <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderTop: "1px solid rgba(255,255,255,0.08)", flexWrap: "wrap" }}>
-        <button
-          type="button"
-          onClick={() => toggleFavorite(key)}
-          title={fav ? "Remove from shortlist" : "Add to shortlist"}
-          style={{ background: "none", border: "none", cursor: "pointer", color: fav ? "#f5c518" : "rgba(255,255,255,0.35)", fontSize: 16, lineHeight: 1 }}
-        >
-          {fav ? "★" : "☆"}
-        </button>
-        <span style={{ minWidth: 118, fontSize: 13, fontWeight: 600 }}>
-          {v.house ? "👑 " : ""}
-          {v.name}
-        </span>
-        <span style={{ fontSize: 10, opacity: 0.5, textTransform: "uppercase", letterSpacing: 0.4, border: "1px solid rgba(255,255,255,0.16)", borderRadius: 5, padding: "1px 4px" }}>
-          {SOURCE_TAG[v.source]}
-        </span>
-        <span style={{ fontSize: 11, opacity: 0.55, minWidth: 140 }}>
-          {v.provider === "elevenlabs" ? "ElevenLabs" : "Google"} · {v.model}
-          {v.gender !== "unknown" ? ` · ${v.gender}` : ""}
-        </span>
-        {v.previewUrl ? (
-          <button type="button" className="jc-btn jc-btn--small jc-btn--ghost" onClick={() => v.previewUrl && preview.toggle(v.previewUrl)}>
-            {playingNative ? "■ Stop" : "♪ Native"}
-          </button>
-        ) : null}
-        <button type="button" className="jc-btn jc-btn--small jc-btn--ghost" disabled={!labSpoken.trim() || r.loading} onClick={() => void generateLabVoice(v)}>
-          {r.loading ? "Generating…" : "Generate"}
-        </button>
-        <button type="button" className="jc-btn jc-btn--small jc-btn--primary" disabled={!r.url} onClick={() => r.url && preview.toggle(r.url)}>
-          {playingGen ? "■ Stop" : "▶ Preview"}
-        </button>
-        {r.error ? <span style={{ fontSize: 11, color: "#ff6b6b" }}>{r.error.slice(0, 80)}</span> : null}
-      </div>
-    );
-  };
 
   // Persist library to localStorage whenever it changes. The MP3 files
   // themselves are server-owned, so this only stores metadata — cheap and
@@ -1504,7 +1203,6 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                 ["create", "Create"],
                 ["library", "Library"],
                 ["schedule", "Schedule"],
-                ["lab", "Voice Lab"],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -1520,9 +1218,20 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
             ))}
           </nav>
 
-          {/* ── CREATE ─────────────────────────────────────────────── */}
+          {/* ── Quick Pads — horizontal quick-action strip (top) ────── */}
+          <div className="jcx-quickpads">
+            <TriggerPads
+              pads={pads}
+              flashPadId={flashPadId}
+              onPlay={handlePadPlay}
+              onEdit={(id) => setEditPadId(id)}
+            />
+          </div>
+
+          {/* ── CREATE — 2-pane studio: compose (left) · result (right) ── */}
           {activeTab === "create" ? (
-            <div className="jc-ws-panel jc-form">
+            <div className="jcx-create-grid">
+            <div className="jc-ws-panel jc-form jcx-compose">
               <div className="jc-field-row">
                 <label className="jc-field jc-field--stretch">
                   <span>Title</span>
@@ -1638,232 +1347,47 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                 </div>
               ) : null}
 
-              <div className="jc-actions">
+              <div className="jc-actions jcx-generate-row">
                 <button
                   type="button"
-                  className="jc-btn jc-btn--primary jc-btn--lg"
+                  className="jc-btn jc-btn--primary jc-btn--lg jcx-generate-cta"
                   disabled={generating}
                   onClick={() => void handleGenerate()}
                 >
-                  {generating ? "Generating…" : "Generate"}
+                  {generating ? "Generating…" : "Generate Announcement"}
                 </button>
-              </div>
-
-              {/* ── Hebrew Voice Benchmark v0 — isolated eval (OFF-PLAYBACK, Browser Preview only) ── */}
-              <div style={{ marginTop: 18, padding: 12, border: "1px dashed rgba(255,255,255,0.18)", borderRadius: 10 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85, marginBottom: 8 }}>
-                  Hebrew Voice Benchmark <span style={{ opacity: 0.55, fontWeight: 400 }}>· eval tool · A/B/C same spoken text</span>
-                </div>
-                <textarea
-                  rows={2}
-                  dir="auto"
-                  value={benchOriginal}
-                  onChange={(e) => setBenchOriginal(e.target.value)}
-                  placeholder="Original text (reference only — not sent)"
-                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", color: "inherit", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, padding: 8, fontSize: 13, marginBottom: 6 }}
-                />
-                <textarea
-                  rows={2}
-                  dir="auto"
-                  value={benchSpoken}
-                  onChange={(e) => setBenchSpoken(e.target.value)}
-                  placeholder="Spoken text — sent identically to A/B/C (paste niqqud-vocalized here)"
-                  style={{ width: "100%", background: "rgba(255,255,255,0.07)", color: "inherit", border: "1px solid rgba(255,255,255,0.18)", borderRadius: 8, padding: 8, fontSize: 13 }}
-                />
-                <div style={{ display: "flex", gap: 14, alignItems: "center", margin: "8px 0", flexWrap: "wrap" }}>
-                  <div>
-                    <span style={{ fontSize: 12, opacity: 0.65, marginRight: 6 }}>Voice</span>
-                    {(["male", "female"] as const).map((g) => (
-                      <button key={g} type="button" className={`jc-btn jc-btn--small ${benchGender === g ? "jc-btn--primary" : "jc-btn--ghost"}`} onClick={() => setBenchGender(g)}>
-                        {g === "male" ? "Male" : "Female"}
-                      </button>
-                    ))}
-                  </div>
-                  <div>
-                    <span style={{ fontSize: 12, opacity: 0.65, marginRight: 6 }}>Gemini style</span>
-                    {(["Neutral", "Energetic", "Premium", "Urgent"] as const).map((s) => (
-                      <button key={s} type="button" className={`jc-btn jc-btn--small ${benchStyle === s ? "jc-btn--primary" : "jc-btn--ghost"}`} onClick={() => setBenchStyle(s)}>
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {([["A", "A · Eleven v3"], ["B", "B · Google Chirp"], ["C", "C · Gemini TTS"]] as const).map(([cand, title]) => {
-                  const r = benchResults[cand];
-                  const playing = !!r.url && preview.previewUrl === r.url;
-                  return (
-                    <div key={cand} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      <span style={{ minWidth: 128, fontSize: 13, fontWeight: 600 }}>{title}</span>
-                      <button type="button" className="jc-btn jc-btn--small jc-btn--ghost" disabled={!benchSpoken.trim() || r.loading} onClick={() => void runBenchmark(cand)}>
-                        {r.loading ? "Generating…" : "Generate"}
-                      </button>
-                      <button type="button" className="jc-btn jc-btn--small jc-btn--primary" disabled={!r.url} onClick={() => r.url && preview.toggle(r.url)}>
-                        {playing ? "■ Stop" : "▶ Preview"}
-                      </button>
-                      <span style={{ fontSize: 12, opacity: 0.7 }}>
-                        {r.error ? <span style={{ color: "#ff6b6b" }}>{r.error.slice(0, 90)}</span> : r.label || ""}
-                      </span>
-                    </div>
-                  );
-                })}
               </div>
             </div>
-          ) : null}
 
-          {/* ── VOICE LAB (internal, dynamic catalog) ──────────────── */}
-          {activeTab === "lab" ? (
-            <div className="jc-ws-panel jc-form">
-              <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>
-                Internal Voice Lab
-                <span style={{ opacity: 0.55, fontWeight: 400 }}> · dynamic catalog · same text → many voices · on-demand</span>
-              </div>
-
-              {/* Locale + verification badge (INTERNAL) */}
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                <span style={{ fontSize: 12, opacity: 0.65 }}>Language</span>
-                {(labLocales.length ? labLocales : [{ code: "he-IL", label: "Hebrew", enabled: true, state: "verified" as const }]).map((l) => {
-                  const badge = l.state === "verified" ? { t: "Verified", c: "#30d158" } : l.state === "beta" ? { t: "Beta", c: "#ffd60a" } : { t: "Future", c: "#8b9098" };
-                  return (
-                    <button
-                      key={l.code}
-                      type="button"
-                      className={`jc-btn jc-btn--small ${labLocale === l.code ? "jc-btn--primary" : "jc-btn--ghost"}`}
-                      onClick={() => setLabLocale(l.code)}
-                      title={`${l.label} — ${badge.t}${l.enabled ? "" : " (not enabled)"}`}
-                    >
-                      {l.label}
-                      <span style={{ marginLeft: 5, fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: badge.c }}>{badge.t}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Spoken text (one text → every voice tested) */}
-              <textarea
-                rows={2}
-                dir="auto"
-                value={labSpoken}
-                onChange={(e) => setLabSpoken(e.target.value)}
-                placeholder="Spoken / vocalized text — sent identically to every voice you Generate"
-                style={{ width: "100%", background: "rgba(255,255,255,0.07)", color: "inherit", border: "1px solid rgba(255,255,255,0.18)", borderRadius: 8, padding: 8, fontSize: 13 }}
-              />
-
-              {/* Filters */}
-              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                <div>
-                  <span style={{ fontSize: 12, opacity: 0.65, marginRight: 6 }}>Provider</span>
-                  {(["all", "elevenlabs", "google-chirp", "google-gemini"] as const).map((p) => (
-                    <button key={p} type="button" className={`jc-btn jc-btn--small ${labProvider === p ? "jc-btn--primary" : "jc-btn--ghost"}`} onClick={() => setLabProvider(p)}>
-                      {p === "all" ? "All" : p === "elevenlabs" ? "Eleven" : p === "google-chirp" ? "Chirp" : "Gemini"}
-                    </button>
-                  ))}
-                </div>
-                <div>
-                  <span style={{ fontSize: 12, opacity: 0.65, marginRight: 6 }}>Gender</span>
-                  {(["all", "male", "female"] as const).map((g) => (
-                    <button key={g} type="button" className={`jc-btn jc-btn--small ${labGender === g ? "jc-btn--primary" : "jc-btn--ghost"}`} onClick={() => setLabGender(g)}>
-                      {g === "all" ? "All" : g === "male" ? "Male" : "Female"}
-                    </button>
-                  ))}
-                </div>
-                <button type="button" className={`jc-btn jc-btn--small ${labFavOnly ? "jc-btn--primary" : "jc-btn--ghost"}`} onClick={() => setLabFavOnly((x) => !x)}>
-                  ★ Favorites
-                </button>
-                <input
-                  value={labSearch}
-                  onChange={(e) => setLabSearch(e.target.value)}
-                  placeholder="Search voice…"
-                  style={{ flex: 1, minWidth: 120, background: "rgba(255,255,255,0.05)", color: "inherit", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, padding: "6px 8px", fontSize: 13 }}
-                />
-              </div>
-
-              {/* Gemini delivery style (only affects Gemini voices) */}
-              <div>
-                <span style={{ fontSize: 12, opacity: 0.65, marginRight: 6 }}>Gemini delivery</span>
-                {(["Neutral", "Sales", "Energetic", "Premium", "Urgent"] as const).map((s) => (
-                  <button key={s} type="button" className={`jc-btn jc-btn--small ${labStyle === s ? "jc-btn--primary" : "jc-btn--ghost"}`} onClick={() => setLabStyle(s)}>
-                    {s}
-                  </button>
-                ))}
-              </div>
-
-              {labError ? <div className="jc-err-msg" role="alert">{labError}</div> : null}
-              <div style={{ fontSize: 12, opacity: 0.6 }}>
-                {labLoading ? "Loading catalog…" : `${filteredLabVoices.length} voice${filteredLabVoices.length === 1 ? "" : "s"}`}
-              </div>
-
-              {/* Base voice list (account ElevenLabs + Chirp + official Gemini) */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {filteredLabVoices.map(renderVoiceRow)}
-                {!labLoading && filteredLabVoices.length === 0 ? (
-                  <div style={{ fontSize: 12, opacity: 0.5, padding: "10px 0" }}>No voices match. Try another provider/locale or clear filters.</div>
-                ) : null}
-              </div>
-
-              {/* ── ElevenLabs shared library (paginated, on-demand) ── */}
-              <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.14)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>
-                    ElevenLabs shared library <span style={{ opacity: 0.5, fontWeight: 400 }}>· community · loaded on demand</span>
-                  </span>
-                  {!sharedOpen ? (
-                    <button
-                      type="button"
-                      className="jc-btn jc-btn--small jc-btn--ghost"
-                      onClick={() => {
-                        setSharedOpen(true);
-                        void loadShared(labLocale, 0, { gender: labGender, search: sharedSearch });
-                      }}
-                    >
-                      Load library
-                    </button>
+            {/* Result / Preview pane */}
+            <aside className="jcx-result-pane" aria-label="Result">
+              {resultCard ? (
+                <>
+                  <ResultStrip
+                    asset={resultCard}
+                    onPlay={isDesktop ? handleResultPlay : () => preview.toggle(resultCard.url)}
+                    previewMode={!isDesktop}
+                    isPreviewing={preview.previewUrl === resultCard.url}
+                    onAssign={() => setAssignForAsset(resultCard)}
+                    onSchedule={() => setScheduleForAsset(resultCard)}
+                    onSave={handleResultSaveToLibrary}
+                    onDismiss={() => {
+                      preview.stop();
+                      setResultCard(null);
+                    }}
+                  />
+                  {preview.error ? (
+                    <p className="jc-hint jcx-result-err" role="alert">{preview.error}</p>
                   ) : null}
+                </>
+              ) : (
+                <div className="jcx-result-empty">
+                  <span className="jcx-result-empty-icon" aria-hidden>🎙</span>
+                  <p>Your announcement will appear here</p>
+                  <span className="jcx-result-empty-sub">Write a script and press Generate</span>
                 </div>
-
-                {sharedOpen ? (
-                  <>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0", flexWrap: "wrap" }}>
-                      <input
-                        value={sharedSearch}
-                        onChange={(e) => setSharedSearch(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") void loadShared(labLocale, 0, { gender: labGender, search: sharedSearch });
-                        }}
-                        placeholder="Search shared library…"
-                        style={{ flex: 1, minWidth: 140, background: "rgba(255,255,255,0.05)", color: "inherit", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, padding: "6px 8px", fontSize: 13 }}
-                      />
-                      <button type="button" className="jc-btn jc-btn--small jc-btn--primary" onClick={() => void loadShared(labLocale, 0, { gender: labGender, search: sharedSearch })}>
-                        Search
-                      </button>
-                      <span style={{ fontSize: 11, opacity: 0.5 }}>
-                        lang {labLocale.split("-")[0]}
-                        {labGender !== "all" ? ` · ${labGender}` : ""}
-                      </span>
-                    </div>
-
-                    {sharedError ? <div className="jc-err-msg" role="alert">{sharedError}</div> : null}
-
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      {sharedVoices.map(renderVoiceRow)}
-                      {!sharedLoading && sharedVoices.length === 0 && !sharedError ? (
-                        <div style={{ fontSize: 12, opacity: 0.5, padding: "10px 0" }}>No shared voices for this language/filter.</div>
-                      ) : null}
-                    </div>
-
-                    <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
-                      {sharedLoading ? (
-                        <span style={{ fontSize: 12, opacity: 0.6 }}>Loading…</span>
-                      ) : sharedHasMore ? (
-                        <button type="button" className="jc-btn jc-btn--small jc-btn--ghost" onClick={() => void loadShared(labLocale, sharedPage + 1, { gender: labGender, search: sharedSearch })}>
-                          Load more
-                        </button>
-                      ) : sharedVoices.length > 0 ? (
-                        <span style={{ fontSize: 11, opacity: 0.4 }}>End of results</span>
-                      ) : null}
-                    </div>
-                  </>
-                ) : null}
-              </div>
+              )}
+            </aside>
             </div>
           ) : null}
 
@@ -1881,7 +1405,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                         <div>
                           <div className="jc-lib-title">{a.title}</div>
                           <div className="jc-lib-meta">
-                            {a.kind} · {a.durationLabel} · {a.url || "no URL"}
+                            {a.kind} · {a.durationLabel}
                           </div>
                         </div>
                         <div className="jc-lib-actions">
@@ -2015,39 +1539,6 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
           ) : null}
         </div>
 
-        {/* ── Result strip — between content and pads ─────────────── */}
-        {resultCard ? (
-          <>
-            <ResultStrip
-              asset={resultCard}
-              onPlay={
-                isDesktop ? handleResultPlay : () => preview.toggle(resultCard.url)
-              }
-              previewMode={!isDesktop}
-              isPreviewing={preview.previewUrl === resultCard.url}
-              onAssign={() => setAssignForAsset(resultCard)}
-              onSchedule={() => setScheduleForAsset(resultCard)}
-              onSave={handleResultSaveToLibrary}
-              onDismiss={() => {
-                preview.stop();
-                setResultCard(null);
-              }}
-            />
-            {preview.error ? (
-              <p className="jc-hint" role="alert" style={{ color: "#ff6b6b" }}>
-                {preview.error}
-              </p>
-            ) : null}
-          </>
-        ) : null}
-
-        {/* ── Trigger pads ────────────────────────────────────────── */}
-        <TriggerPads
-          pads={pads}
-          flashPadId={flashPadId}
-          onPlay={handlePadPlay}
-          onEdit={(id) => setEditPadId(id)}
-        />
       </div>
 
       {/* ── Modals ────────────────────────────────────────────────── */}

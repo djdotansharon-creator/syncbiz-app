@@ -1875,3 +1875,74 @@
   background: #fbbf24;
   box-shadow: 0 0 6px rgba(251, 191, 36, 0.6);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PREMIUM FLAT REDESIGN — scoped to .jc-workspace-panel (web center module).
+   The Electron mock (JinglesShell) mounts under a different root, so none of
+   these rules reach it. Principle: fewer boxes/borders; spacing + typography
+   carry the hierarchy. Added 2026-08 for the customer Jingles redesign.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* Header — quiet + compact; status must not compete with content */
+.jc-workspace-panel .jc-ws-header { align-items: center; }
+.jc-workspace-panel .jc-drawer-title { font-size: 0.95rem; letter-spacing: 0.02em; }
+.jc-workspace-panel .jc-ws-header-status-mini { opacity: 0.68; }
+
+/* Quick Pads — horizontal quick-action strip under the tabs */
+.jcx-quickpads { flex-shrink: 0; }
+.jcx-quickpads .jc-trigger-section { border-top: 0; padding-top: 0; }
+.jcx-quickpads-head {
+  font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase;
+  color: #64748b; margin: 0 0 0.4rem;
+}
+.jcx-quickpads .jc-trigger-grid {
+  display: flex; flex-wrap: nowrap; gap: 0.4rem;
+  overflow-x: auto; padding-bottom: 0.3rem;
+  scrollbar-width: thin; scrollbar-color: rgba(51, 65, 85, 0.6) transparent;
+}
+.jcx-quickpads .jc-trigger-pad-wrap { flex: 0 0 auto; }
+.jcx-quickpads .jc-trigger-pad {
+  min-height: 2.5rem; min-width: 6.75rem;
+  padding: 0.4rem 0.55rem 0.4rem 1.15rem;
+}
+.jcx-quickpads .jc-trigger-pad-label { font-size: 0.7rem; }
+.jcx-quickpads .jc-pad-led { top: 50%; transform: translateY(-50%); left: 0.5rem; }
+
+/* Create — 2-pane studio: compose (~60%) · result (~40%) */
+.jcx-create-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+.jcx-compose { gap: 0.7rem; }
+.jcx-compose .jc-script-wrap textarea { min-height: 6.5rem; }
+
+/* Primary CTA — the single loudest control in the area */
+.jcx-generate-row { margin-top: 0.5rem; }
+.jcx-generate-cta { width: 100%; justify-content: center; font-size: 0.9rem; }
+
+/* Result / Preview pane */
+.jcx-result-pane {
+  position: sticky; top: 0;
+  display: flex; flex-direction: column; gap: 0.5rem;
+  min-width: 0;
+}
+.jcx-result-pane .jc-result-strip { flex-direction: column; align-items: stretch; }
+.jcx-result-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0.3rem; text-align: center;
+  min-height: 9rem; padding: 1.5rem 1rem;
+  border: 1px dashed rgba(51, 65, 85, 0.5); border-radius: 0.9rem;
+  color: #64748b;
+}
+.jcx-result-empty-icon { font-size: 1.7rem; opacity: 0.85; }
+.jcx-result-empty p { margin: 0; font-size: 0.82rem; color: #94a3b8; }
+.jcx-result-empty-sub { font-size: 0.68rem; color: #64748b; }
+.jcx-result-err { color: #f87171; }
+
+/* Narrow: stack compose over result; Quick Pads stay horizontal */
+@media (max-width: 720px) {
+  .jcx-create-grid { grid-template-columns: 1fr; }
+  .jcx-result-pane { position: static; }
+}
