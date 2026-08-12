@@ -1230,12 +1230,12 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
 
           {/* Active workspace — the ONLY scroll region; header/tabs/pads stay fixed above */}
           <div className="jcx-active-workspace">
-          {/* ── CREATE — 2-pane studio: compose (left) · result (right) ── */}
+          {/* ── CREATE — compact: settings bar · script hero + result · action bar ── */}
           {activeTab === "create" ? (
-            <div className="jcx-create-grid">
-            <div className="jc-ws-panel jc-form jcx-compose">
-              <div className="jc-field-row">
-                <label className="jc-field jc-field--stretch">
+            <div className="jcx-create jc-form">
+              {/* Compact settings bar — one row of compact selects (same values/handlers) */}
+              <div className="jcx-settings-bar">
+                <label className="jc-field jcx-set jcx-set--title">
                   <span>Title</span>
                   <input
                     value={draft.title}
@@ -1243,113 +1243,135 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                     placeholder="e.g. Weekend fresh produce"
                   />
                 </label>
-                <div className="jc-field">
+                <label className="jc-field jcx-set">
                   <span>Type</span>
-                  <SegBtn
-                    options={[
-                      { value: "jingle", label: "Jingle" },
-                      { value: "announcement", label: "Announcement" },
-                      { value: "broadcast", label: "Broadcast" },
-                    ]}
+                  <select
                     value={draft.kind}
-                    onChange={(v) =>
-                      setDraft((d) => ({ ...d, kind: v as AnnouncementDraft["kind"] }))
-                    }
-                  />
-                </div>
-              </div>
-
-              <div className="jc-field jc-script-wrap">
-                <span>Script</span>
-                <textarea
-                  rows={3}
-                  value={draft.body}
-                  onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
-                  placeholder={
-                    draft.language === "he"
-                      ? "מה על הקריין להגיד?"
-                      : "What should the announcer say?"
-                  }
-                  dir={draft.language === "he" ? "rtl" : "ltr"}
-                />
-                <button
-                  type="button"
-                  className="jc-script-ai-btn"
-                  onClick={() => setAiModalOpen(true)}
-                  title="Let AI write this"
-                  aria-label="Open AI compose"
-                >
-                  <span className="jc-script-ai-btn-spark" aria-hidden>✦</span>
-                  <span>AI</span>
-                </button>
-              </div>
-
-              <div className="jc-field-row jc-field-row--lang-speed">
-                <div className="jc-field">
+                    onChange={(e) => setDraft((d) => ({ ...d, kind: e.target.value as AnnouncementDraft["kind"] }))}
+                  >
+                    <option value="jingle">Jingle</option>
+                    <option value="announcement">Announcement</option>
+                    <option value="broadcast">Broadcast</option>
+                  </select>
+                </label>
+                <label className="jc-field jcx-set">
                   <span>Language</span>
-                  <SegBtn
-                    options={[
-                      { value: "en", label: "English" },
-                      { value: "he", label: "עברית" },
-                    ]}
+                  <select
                     value={draft.language}
-                    onChange={(v) =>
+                    onChange={(e) =>
                       setDraft((d) => ({
                         ...d,
-                        language: v as JingleLanguage,
-                        voice: VOICE_PRESETS_BY_LANG[v as JingleLanguage][0].voiceId,
+                        language: e.target.value as JingleLanguage,
+                        voice: VOICE_PRESETS_BY_LANG[e.target.value as JingleLanguage][0].voiceId,
                       }))
                     }
-                  />
-                </div>
-                <div className="jc-field">
+                  >
+                    <option value="en">English</option>
+                    <option value="he">עברית</option>
+                  </select>
+                </label>
+                <label className="jc-field jcx-set">
+                  <span>Voice</span>
+                  <select value={draft.voice} onChange={(e) => setDraft((d) => ({ ...d, voice: e.target.value }))}>
+                    {VOICE_PRESETS_BY_LANG[draft.language].map((v) => (
+                      <option key={v.voiceId} value={v.voiceId}>{v.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="jc-field jcx-set">
                   <span>Speed</span>
-                  <SegBtn
-                    options={[
-                      { value: "slow", label: "Slow" },
-                      { value: "normal", label: "Normal" },
-                      { value: "fast", label: "Fast" },
-                    ]}
-                    value={draft.speed}
-                    onChange={(v) => setDraft((d) => ({ ...d, speed: v as JingleSpeed }))}
+                  <select value={draft.speed} onChange={(e) => setDraft((d) => ({ ...d, speed: e.target.value as JingleSpeed }))}>
+                    <option value="slow">Slow</option>
+                    <option value="normal">Normal</option>
+                    <option value="fast">Fast</option>
+                  </select>
+                </label>
+                <label className="jc-field jcx-set">
+                  <span>Bell</span>
+                  <select
+                    value={draft.preRoll ? draft.bellStyle : "off"}
+                    onChange={(e) =>
+                      setDraft((d) => ({
+                        ...d,
+                        preRoll: e.target.value !== "off",
+                        bellStyle: e.target.value === "off" ? d.bellStyle : (e.target.value as JingleBellStyle),
+                      }))
+                    }
+                  >
+                    {BELL_PRESETS.map((b) => (
+                      <option key={b.value} value={b.value}>{b.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              {/* Main: Script hero (left) + Result (right) — fills remaining height */}
+              <div className="jcx-create-main">
+                <div className="jc-script-wrap jcx-script-hero">
+                  <textarea
+                    value={draft.body}
+                    onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
+                    placeholder={draft.language === "he" ? "מה על הקריין להגיד?" : "What should the announcer say?"}
+                    dir={draft.language === "he" ? "rtl" : "ltr"}
                   />
+                  <button
+                    type="button"
+                    className="jc-script-ai-btn"
+                    onClick={() => setAiModalOpen(true)}
+                    title="Let AI write this"
+                    aria-label="Open AI compose"
+                  >
+                    <span className="jc-script-ai-btn-spark" aria-hidden>✦</span>
+                    <span>AI</span>
+                  </button>
                 </div>
+
+                <aside className="jcx-result-pane" aria-label="Result">
+                  {resultCard ? (
+                    <div className="jcx-result">
+                      <div className="jcx-result-head">
+                        <span className="jcx-result-title">{resultCard.title || "Untitled"}</span>
+                        <span className="jcx-result-meta">
+                          {resultCard.kind} · {resultCard.durationLabel || "—"}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="jcx-result-play"
+                        disabled={!resultCard.url}
+                        onClick={isDesktop ? handleResultPlay : () => preview.toggle(resultCard.url)}
+                        title={isDesktop ? "Play On-Air" : "Preview in your browser"}
+                      >
+                        {!isDesktop && preview.previewUrl === resultCard.url ? "■ Stop" : "▶ Preview"}
+                      </button>
+                      <button
+                        type="button"
+                        className="jcx-result-dismiss"
+                        onClick={() => {
+                          preview.stop();
+                          setResultCard(null);
+                        }}
+                        aria-label="Dismiss result"
+                        title="Dismiss"
+                      >
+                        ✕
+                      </button>
+                      {preview.error ? <p className="jc-hint jcx-result-err" role="alert">{preview.error}</p> : null}
+                    </div>
+                  ) : (
+                    <div className="jcx-result-empty">
+                      <span className="jcx-result-empty-icon" aria-hidden>🎙</span>
+                      <p>Your announcement will appear here</p>
+                    </div>
+                  )}
+                </aside>
               </div>
 
-              <div className="jc-field">
-                <span>Voice</span>
-                <SegBtn
-                  options={VOICE_PRESETS_BY_LANG[draft.language].map((v) => ({
-                    value: v.voiceId,
-                    label: v.label,
-                  }))}
-                  value={draft.voice}
-                  onChange={(v) => setDraft((d) => ({ ...d, voice: v }))}
-                />
-              </div>
-
-              <div className="jc-field">
-                <span>Bell (pre-roll)</span>
-                <SegBtn
-                  options={BELL_PRESETS.map((b) => ({ value: b.value, label: b.label }))}
-                  value={draft.preRoll ? draft.bellStyle : "off"}
-                  onChange={(v) =>
-                    setDraft((d) => ({
-                      ...d,
-                      preRoll: v !== "off",
-                      bellStyle: v === "off" ? d.bellStyle : (v as JingleBellStyle),
-                    }))
-                  }
-                />
-              </div>
-
+              {/* Bottom action bar — Generate always visible; result actions after generation */}
               {generateError ? (
-                <div className="jc-err-msg" role="alert">
-                  {generateError}
-                </div>
+                <div className="jc-err-msg jcx-action-err" role="alert">{generateError}</div>
               ) : null}
-
-              <div className="jc-actions jcx-generate-row">
+              <div className="jcx-action-bar">
                 <button
                   type="button"
                   className="jc-btn jc-btn--primary jc-btn--lg jcx-generate-cta"
@@ -1358,38 +1380,14 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                 >
                   {generating ? "Generating…" : "Generate Announcement"}
                 </button>
+                {resultCard ? (
+                  <>
+                    <button type="button" className="jc-btn jc-btn--ghost" onClick={handleResultSaveToLibrary}>Save</button>
+                    <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setAssignForAsset(resultCard)}>Add to Pad</button>
+                    <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setScheduleForAsset(resultCard)}>Schedule</button>
+                  </>
+                ) : null}
               </div>
-            </div>
-
-            {/* Result / Preview pane */}
-            <aside className="jcx-result-pane" aria-label="Result">
-              {resultCard ? (
-                <>
-                  <ResultStrip
-                    asset={resultCard}
-                    onPlay={isDesktop ? handleResultPlay : () => preview.toggle(resultCard.url)}
-                    previewMode={!isDesktop}
-                    isPreviewing={preview.previewUrl === resultCard.url}
-                    onAssign={() => setAssignForAsset(resultCard)}
-                    onSchedule={() => setScheduleForAsset(resultCard)}
-                    onSave={handleResultSaveToLibrary}
-                    onDismiss={() => {
-                      preview.stop();
-                      setResultCard(null);
-                    }}
-                  />
-                  {preview.error ? (
-                    <p className="jc-hint jcx-result-err" role="alert">{preview.error}</p>
-                  ) : null}
-                </>
-              ) : (
-                <div className="jcx-result-empty">
-                  <span className="jcx-result-empty-icon" aria-hidden>🎙</span>
-                  <p>Your announcement will appear here</p>
-                  <span className="jcx-result-empty-sub">Write a script and press Generate</span>
-                </div>
-              )}
-            </aside>
             </div>
           ) : null}
 
