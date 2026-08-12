@@ -1946,3 +1946,50 @@
   .jcx-create-grid { grid-template-columns: 1fr; }
   .jcx-result-pane { position: static; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FULL CENTER WORKSPACE — scoped to .jc-workspace-panel (web center module).
+   The shared center grid already provides full height (lg:h-full + explicit
+   grid-rows + overflow-hidden). The panel simply claims it and stops behaving
+   like a short content-sized floating card. Height rules are gated to lg+
+   (where the shell is h-full); narrow/mobile keep the previous bounded card.
+   Nothing here touches the shared grid, other center modules, or the Electron
+   mock (different root). Added 2026-08.
+   ════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 1024px) {
+  .jc-workspace-panel {
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 0;
+    max-height: none;        /* drop the 85vh / 760px island cap */
+    border: 0;               /* frameless monitor surface (shell is --frameless) */
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0.85rem 0.25rem 0.25rem;
+  }
+  /* The panel body/content no longer scroll as a whole — only the active area does */
+  .jc-workspace-panel .jc-ws-content {
+    overflow: hidden;
+    min-height: 0;
+  }
+}
+
+/* Active workspace: the single scroll region below the fixed command area
+   (header + tabs + Quick Pads). Fills remaining height so short content never
+   leaves a dead gap, and long content scrolls internally. */
+.jcx-active-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(51, 65, 85, 0.6) transparent;
+}
+/* Exactly one tab panel is rendered at a time — make it fill the workspace
+   height so Schedule/Library with few rows still reach the bottom. */
+.jcx-active-workspace > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}

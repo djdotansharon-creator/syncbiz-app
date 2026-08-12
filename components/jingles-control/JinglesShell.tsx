@@ -1228,6 +1228,8 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
             />
           </div>
 
+          {/* Active workspace — the ONLY scroll region; header/tabs/pads stay fixed above */}
+          <div className="jcx-active-workspace">
           {/* ── CREATE — 2-pane studio: compose (left) · result (right) ── */}
           {activeTab === "create" ? (
             <div className="jcx-create-grid">
@@ -1537,6 +1539,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
               </ul>
             </div>
           ) : null}
+          </div>
         </div>
 
       </div>
