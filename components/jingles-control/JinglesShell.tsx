@@ -1111,6 +1111,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
   // ── INTERNAL Voice Lab — dynamic, locale-aware voice catalog. OFF-PLAYBACK. ──
   // Customer never sees this; it's an internal listening/eval surface. Provider/model
   // strings are intentionally exposed HERE (internal lab = powerful).
+  type LabVoiceSource = "eleven-account" | "eleven-shared" | "google-chirp" | "gemini-official" | "house";
   type LabVoice = {
     provider: "elevenlabs" | "google-chirp" | "google-gemini";
     model: string;
@@ -1120,10 +1121,12 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
     locale: string;
     previewUrl: string | null;
     supportsStyle: boolean;
+    source: LabVoiceSource;
     house?: boolean;
   };
+  type LabLocale = { code: string; label: string; enabled: boolean; state: "verified" | "beta" | "future" };
   const [labLocale, setLabLocale] = useState("he-IL");
-  const [labLocales, setLabLocales] = useState<{ code: string; label: string; enabled: boolean }[]>([]);
+  const [labLocales, setLabLocales] = useState<LabLocale[]>([]);
   const [labVoices, setLabVoices] = useState<LabVoice[]>([]);
   const [labLoading, setLabLoading] = useState(false);
   const [labError, setLabError] = useState<string | null>(null);
@@ -1143,7 +1146,39 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
   });
   const [labResults, setLabResults] = useState<Record<string, { loading?: boolean; url?: string; error?: string }>>({});
 
-  const labKey = useCallback((v: LabVoice) => `${v.provider}:${v.voiceId}`, []);
+  const labKey = useCallback((v: LabVoice) => `${v.source}:${v.voiceId}`, []);
+
+  // Shared ElevenLabs library (paginated, on-demand — never bulk-loaded with the base catalog).
+  const [sharedVoices, setSharedVoices] = useState<LabVoice[]>([]);
+  const [sharedPage, setSharedPage] = useState(0);
+  const [sharedHasMore, setSharedHasMore] = useState(false);
+  const [sharedLoading, setSharedLoading] = useState(false);
+  const [sharedError, setSharedError] = useState<string | null>(null);
+  const [sharedSearch, setSharedSearch] = useState("");
+  const [sharedOpen, setSharedOpen] = useState(false);
+
+  const loadShared = useCallback(
+    async (locale: string, page: number, opts?: { gender?: string; search?: string }) => {
+      setSharedLoading(true);
+      setSharedError(null);
+      try {
+        const params = new URLSearchParams({ locale, page: String(page) });
+        if (opts?.gender && opts.gender !== "all") params.set("gender", opts.gender);
+        if (opts?.search?.trim()) params.set("search", opts.search.trim());
+        const res = await fetch(`/api/jingles/shared-voices?${params.toString()}`);
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.error || `shared ${res.status}`);
+        setSharedVoices((prev) => (page === 0 ? j.voices ?? [] : [...prev, ...(j.voices ?? [])]));
+        setSharedHasMore(!!j.hasMore);
+        setSharedPage(page);
+      } catch (e) {
+        setSharedError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setSharedLoading(false);
+      }
+    },
+    []
+  );
 
   const loadCatalog = useCallback(async (locale: string) => {
     setLabLoading(true);
@@ -1163,9 +1198,14 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
   }, []);
 
   // Load the catalog the first time the Voice Lab tab is opened, and on locale change.
+  // Shared-library results are locale-specific, so reset them on locale change.
   useEffect(() => {
     if (activeTab !== "lab") return;
     void loadCatalog(labLocale);
+    setSharedVoices([]);
+    setSharedPage(0);
+    setSharedHasMore(false);
+    setSharedOpen(false);
   }, [activeTab, labLocale, loadCatalog]);
 
   const toggleFavorite = useCallback((key: string) => {
@@ -1220,6 +1260,60 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
     }
     return true;
   });
+
+  // INTERNAL source tag (customer never sees this — internal lab only).
+  const SOURCE_TAG: Record<LabVoiceSource, string> = {
+    "eleven-account": "acct",
+    "eleven-shared": "lib",
+    "google-chirp": "chirp",
+    "gemini-official": "gemini",
+    house: "house",
+  };
+
+  // Shared row renderer — reused for the base catalog and the shared library so both lists
+  // behave identically (favorite · native preview · on-demand Generate · generated Preview).
+  const renderVoiceRow = (v: LabVoice) => {
+    const key = labKey(v);
+    const r = labResults[key] ?? {};
+    const playingGen = !!r.url && preview.previewUrl === r.url;
+    const playingNative = !!v.previewUrl && preview.previewUrl === v.previewUrl;
+    const fav = labFavorites.has(key);
+    return (
+      <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderTop: "1px solid rgba(255,255,255,0.08)", flexWrap: "wrap" }}>
+        <button
+          type="button"
+          onClick={() => toggleFavorite(key)}
+          title={fav ? "Remove from shortlist" : "Add to shortlist"}
+          style={{ background: "none", border: "none", cursor: "pointer", color: fav ? "#f5c518" : "rgba(255,255,255,0.35)", fontSize: 16, lineHeight: 1 }}
+        >
+          {fav ? "★" : "☆"}
+        </button>
+        <span style={{ minWidth: 118, fontSize: 13, fontWeight: 600 }}>
+          {v.house ? "👑 " : ""}
+          {v.name}
+        </span>
+        <span style={{ fontSize: 10, opacity: 0.5, textTransform: "uppercase", letterSpacing: 0.4, border: "1px solid rgba(255,255,255,0.16)", borderRadius: 5, padding: "1px 4px" }}>
+          {SOURCE_TAG[v.source]}
+        </span>
+        <span style={{ fontSize: 11, opacity: 0.55, minWidth: 140 }}>
+          {v.provider === "elevenlabs" ? "ElevenLabs" : "Google"} · {v.model}
+          {v.gender !== "unknown" ? ` · ${v.gender}` : ""}
+        </span>
+        {v.previewUrl ? (
+          <button type="button" className="jc-btn jc-btn--small jc-btn--ghost" onClick={() => v.previewUrl && preview.toggle(v.previewUrl)}>
+            {playingNative ? "■ Stop" : "♪ Native"}
+          </button>
+        ) : null}
+        <button type="button" className="jc-btn jc-btn--small jc-btn--ghost" disabled={!labSpoken.trim() || r.loading} onClick={() => void generateLabVoice(v)}>
+          {r.loading ? "Generating…" : "Generate"}
+        </button>
+        <button type="button" className="jc-btn jc-btn--small jc-btn--primary" disabled={!r.url} onClick={() => r.url && preview.toggle(r.url)}>
+          {playingGen ? "■ Stop" : "▶ Preview"}
+        </button>
+        {r.error ? <span style={{ fontSize: 11, color: "#ff6b6b" }}>{r.error.slice(0, 80)}</span> : null}
+      </div>
+    );
+  };
 
   // Persist library to localStorage whenever it changes. The MP3 files
   // themselves are server-owned, so this only stores metadata — cheap and
@@ -1624,21 +1718,24 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                 <span style={{ opacity: 0.55, fontWeight: 400 }}> · dynamic catalog · same text → many voices · on-demand</span>
               </div>
 
-              {/* Locale */}
+              {/* Locale + verification badge (INTERNAL) */}
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                 <span style={{ fontSize: 12, opacity: 0.65 }}>Language</span>
-                {(labLocales.length ? labLocales : [{ code: "he-IL", label: "Hebrew", enabled: true }]).map((l) => (
-                  <button
-                    key={l.code}
-                    type="button"
-                    className={`jc-btn jc-btn--small ${labLocale === l.code ? "jc-btn--primary" : "jc-btn--ghost"}`}
-                    onClick={() => setLabLocale(l.code)}
-                    title={l.enabled ? l.label : `${l.label} — not yet enabled for production`}
-                  >
-                    {l.label}
-                    {!l.enabled ? " ·soon" : ""}
-                  </button>
-                ))}
+                {(labLocales.length ? labLocales : [{ code: "he-IL", label: "Hebrew", enabled: true, state: "verified" as const }]).map((l) => {
+                  const badge = l.state === "verified" ? { t: "Verified", c: "#30d158" } : l.state === "beta" ? { t: "Beta", c: "#ffd60a" } : { t: "Future", c: "#8b9098" };
+                  return (
+                    <button
+                      key={l.code}
+                      type="button"
+                      className={`jc-btn jc-btn--small ${labLocale === l.code ? "jc-btn--primary" : "jc-btn--ghost"}`}
+                      onClick={() => setLabLocale(l.code)}
+                      title={`${l.label} — ${badge.t}${l.enabled ? "" : " (not enabled)"}`}
+                    >
+                      {l.label}
+                      <span style={{ marginLeft: 5, fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, color: badge.c }}>{badge.t}</span>
+                    </button>
+                  );
+                })}
               </div>
 
               {/* Spoken text (one text → every voice tested) */}
@@ -1695,49 +1792,76 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                 {labLoading ? "Loading catalog…" : `${filteredLabVoices.length} voice${filteredLabVoices.length === 1 ? "" : "s"}`}
               </div>
 
-              {/* Voice list */}
+              {/* Base voice list (account ElevenLabs + Chirp + official Gemini) */}
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {filteredLabVoices.map((v) => {
-                  const key = labKey(v);
-                  const r = labResults[key] ?? {};
-                  const playingGen = !!r.url && preview.previewUrl === r.url;
-                  const playingNative = !!v.previewUrl && preview.previewUrl === v.previewUrl;
-                  const fav = labFavorites.has(key);
-                  return (
-                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderTop: "1px solid rgba(255,255,255,0.08)", flexWrap: "wrap" }}>
-                      <button
-                        type="button"
-                        onClick={() => toggleFavorite(key)}
-                        title={fav ? "Remove from shortlist" : "Add to shortlist"}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: fav ? "#f5c518" : "rgba(255,255,255,0.35)", fontSize: 16, lineHeight: 1 }}
-                      >
-                        {fav ? "★" : "☆"}
-                      </button>
-                      <span style={{ minWidth: 120, fontSize: 13, fontWeight: 600 }}>
-                        {v.house ? "👑 " : ""}
-                        {v.name}
-                      </span>
-                      <span style={{ fontSize: 11, opacity: 0.55, minWidth: 150 }}>
-                        {v.provider === "elevenlabs" ? "ElevenLabs" : "Google"} · {v.model}
-                        {v.gender !== "unknown" ? ` · ${v.gender}` : ""}
-                      </span>
-                      {v.previewUrl ? (
-                        <button type="button" className="jc-btn jc-btn--small jc-btn--ghost" onClick={() => v.previewUrl && preview.toggle(v.previewUrl)}>
-                          {playingNative ? "■ Stop" : "♪ Native"}
-                        </button>
-                      ) : null}
-                      <button type="button" className="jc-btn jc-btn--small jc-btn--ghost" disabled={!labSpoken.trim() || r.loading} onClick={() => void generateLabVoice(v)}>
-                        {r.loading ? "Generating…" : "Generate"}
-                      </button>
-                      <button type="button" className="jc-btn jc-btn--small jc-btn--primary" disabled={!r.url} onClick={() => r.url && preview.toggle(r.url)}>
-                        {playingGen ? "■ Stop" : "▶ Preview"}
-                      </button>
-                      {r.error ? <span style={{ fontSize: 11, color: "#ff6b6b" }}>{r.error.slice(0, 80)}</span> : null}
-                    </div>
-                  );
-                })}
+                {filteredLabVoices.map(renderVoiceRow)}
                 {!labLoading && filteredLabVoices.length === 0 ? (
                   <div style={{ fontSize: 12, opacity: 0.5, padding: "10px 0" }}>No voices match. Try another provider/locale or clear filters.</div>
+                ) : null}
+              </div>
+
+              {/* ── ElevenLabs shared library (paginated, on-demand) ── */}
+              <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.14)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>
+                    ElevenLabs shared library <span style={{ opacity: 0.5, fontWeight: 400 }}>· community · loaded on demand</span>
+                  </span>
+                  {!sharedOpen ? (
+                    <button
+                      type="button"
+                      className="jc-btn jc-btn--small jc-btn--ghost"
+                      onClick={() => {
+                        setSharedOpen(true);
+                        void loadShared(labLocale, 0, { gender: labGender, search: sharedSearch });
+                      }}
+                    >
+                      Load library
+                    </button>
+                  ) : null}
+                </div>
+
+                {sharedOpen ? (
+                  <>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0", flexWrap: "wrap" }}>
+                      <input
+                        value={sharedSearch}
+                        onChange={(e) => setSharedSearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void loadShared(labLocale, 0, { gender: labGender, search: sharedSearch });
+                        }}
+                        placeholder="Search shared library…"
+                        style={{ flex: 1, minWidth: 140, background: "rgba(255,255,255,0.05)", color: "inherit", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, padding: "6px 8px", fontSize: 13 }}
+                      />
+                      <button type="button" className="jc-btn jc-btn--small jc-btn--primary" onClick={() => void loadShared(labLocale, 0, { gender: labGender, search: sharedSearch })}>
+                        Search
+                      </button>
+                      <span style={{ fontSize: 11, opacity: 0.5 }}>
+                        lang {labLocale.split("-")[0]}
+                        {labGender !== "all" ? ` · ${labGender}` : ""}
+                      </span>
+                    </div>
+
+                    {sharedError ? <div className="jc-err-msg" role="alert">{sharedError}</div> : null}
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      {sharedVoices.map(renderVoiceRow)}
+                      {!sharedLoading && sharedVoices.length === 0 && !sharedError ? (
+                        <div style={{ fontSize: 12, opacity: 0.5, padding: "10px 0" }}>No shared voices for this language/filter.</div>
+                      ) : null}
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "center", marginTop: 8 }}>
+                      {sharedLoading ? (
+                        <span style={{ fontSize: 12, opacity: 0.6 }}>Loading…</span>
+                      ) : sharedHasMore ? (
+                        <button type="button" className="jc-btn jc-btn--small jc-btn--ghost" onClick={() => void loadShared(labLocale, sharedPage + 1, { gender: labGender, search: sharedSearch })}>
+                          Load more
+                        </button>
+                      ) : sharedVoices.length > 0 ? (
+                        <span style={{ fontSize: 11, opacity: 0.4 }}>End of results</span>
+                      ) : null}
+                    </div>
+                  </>
                 ) : null}
               </div>
             </div>
