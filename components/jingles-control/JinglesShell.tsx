@@ -1059,7 +1059,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
   const [pads, setPads] = useState<SamplerPadItem[]>(() => loadPads());
   const [flashPadId, setFlashPadId] = useState<string | null>(null);
   const [resultCard, setResultCard] = useState<JingleAsset | null>(null);
-  const [activeTab, setActiveTab] = useState<"create" | "library" | "schedule">("create");
+  const [activeTab, setActiveTab] = useState<"create" | "library" | "schedule" | "lab">("create");
   const [draft, setDraft] = useState<AnnouncementDraft>({ ...initialDraft });
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -1107,6 +1107,119 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
     },
     [benchSpoken, benchGender, benchStyle]
   );
+
+  // ── INTERNAL Voice Lab — dynamic, locale-aware voice catalog. OFF-PLAYBACK. ──
+  // Customer never sees this; it's an internal listening/eval surface. Provider/model
+  // strings are intentionally exposed HERE (internal lab = powerful).
+  type LabVoice = {
+    provider: "elevenlabs" | "google-chirp" | "google-gemini";
+    model: string;
+    voiceId: string;
+    name: string;
+    gender: "male" | "female" | "unknown";
+    locale: string;
+    previewUrl: string | null;
+    supportsStyle: boolean;
+    house?: boolean;
+  };
+  const [labLocale, setLabLocale] = useState("he-IL");
+  const [labLocales, setLabLocales] = useState<{ code: string; label: string; enabled: boolean }[]>([]);
+  const [labVoices, setLabVoices] = useState<LabVoice[]>([]);
+  const [labLoading, setLabLoading] = useState(false);
+  const [labError, setLabError] = useState<string | null>(null);
+  const [labSpoken, setLabSpoken] = useState("");
+  const [labStyle, setLabStyle] = useState<"Neutral" | "Sales" | "Energetic" | "Premium" | "Urgent">("Neutral");
+  const [labProvider, setLabProvider] = useState<"all" | LabVoice["provider"]>("all");
+  const [labGender, setLabGender] = useState<"all" | "male" | "female">("all");
+  const [labSearch, setLabSearch] = useState("");
+  const [labFavOnly, setLabFavOnly] = useState(false);
+  const [labFavorites, setLabFavorites] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      return new Set(JSON.parse(localStorage.getItem("syncbiz.voicelab.favorites") ?? "[]") as string[]);
+    } catch {
+      return new Set();
+    }
+  });
+  const [labResults, setLabResults] = useState<Record<string, { loading?: boolean; url?: string; error?: string }>>({});
+
+  const labKey = useCallback((v: LabVoice) => `${v.provider}:${v.voiceId}`, []);
+
+  const loadCatalog = useCallback(async (locale: string) => {
+    setLabLoading(true);
+    setLabError(null);
+    try {
+      const res = await fetch(`/api/jingles/voice-catalog?locale=${encodeURIComponent(locale)}`);
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || `catalog ${res.status}`);
+      setLabVoices(j.voices ?? []);
+      if (j.locales) setLabLocales(j.locales);
+    } catch (e) {
+      setLabError(e instanceof Error ? e.message : String(e));
+      setLabVoices([]);
+    } finally {
+      setLabLoading(false);
+    }
+  }, []);
+
+  // Load the catalog the first time the Voice Lab tab is opened, and on locale change.
+  useEffect(() => {
+    if (activeTab !== "lab") return;
+    void loadCatalog(labLocale);
+  }, [activeTab, labLocale, loadCatalog]);
+
+  const toggleFavorite = useCallback((key: string) => {
+    setLabFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      try {
+        localStorage.setItem("syncbiz.voicelab.favorites", JSON.stringify([...next]));
+      } catch {
+        /* ignore quota */
+      }
+      return next;
+    });
+  }, []);
+
+  const generateLabVoice = useCallback(
+    async (v: LabVoice) => {
+      const text = labSpoken.trim();
+      if (!text) return;
+      const key = labKey(v);
+      setLabResults((r) => ({ ...r, [key]: { loading: true } }));
+      try {
+        const res = await fetch("/api/jingles/benchmark", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: v.provider,
+            voiceId: v.voiceId,
+            text,
+            locale: v.locale === "*" ? labLocale : v.locale,
+            style: v.supportsStyle ? labStyle : undefined,
+          }),
+        });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.error || `generate ${res.status}`);
+        setLabResults((r) => ({ ...r, [key]: { url: j.url } }));
+      } catch (e) {
+        setLabResults((r) => ({ ...r, [key]: { error: e instanceof Error ? e.message : String(e) } }));
+      }
+    },
+    [labSpoken, labStyle, labLocale, labKey]
+  );
+
+  const filteredLabVoices = labVoices.filter((v) => {
+    if (labProvider !== "all" && v.provider !== labProvider) return false;
+    if (labGender !== "all" && v.gender !== labGender) return false;
+    if (labFavOnly && !labFavorites.has(labKey(v))) return false;
+    if (labSearch.trim()) {
+      const q = labSearch.trim().toLowerCase();
+      if (!v.name.toLowerCase().includes(q) && !v.voiceId.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
 
   // Persist library to localStorage whenever it changes. The MP3 files
   // themselves are server-owned, so this only stores metadata — cheap and
@@ -1297,6 +1410,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                 ["create", "Create"],
                 ["library", "Library"],
                 ["schedule", "Schedule"],
+                ["lab", "Voice Lab"],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -1498,6 +1612,133 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          ) : null}
+
+          {/* ── VOICE LAB (internal, dynamic catalog) ──────────────── */}
+          {activeTab === "lab" ? (
+            <div className="jc-ws-panel jc-form">
+              <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85 }}>
+                Internal Voice Lab
+                <span style={{ opacity: 0.55, fontWeight: 400 }}> · dynamic catalog · same text → many voices · on-demand</span>
+              </div>
+
+              {/* Locale */}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                <span style={{ fontSize: 12, opacity: 0.65 }}>Language</span>
+                {(labLocales.length ? labLocales : [{ code: "he-IL", label: "Hebrew", enabled: true }]).map((l) => (
+                  <button
+                    key={l.code}
+                    type="button"
+                    className={`jc-btn jc-btn--small ${labLocale === l.code ? "jc-btn--primary" : "jc-btn--ghost"}`}
+                    onClick={() => setLabLocale(l.code)}
+                    title={l.enabled ? l.label : `${l.label} — not yet enabled for production`}
+                  >
+                    {l.label}
+                    {!l.enabled ? " ·soon" : ""}
+                  </button>
+                ))}
+              </div>
+
+              {/* Spoken text (one text → every voice tested) */}
+              <textarea
+                rows={2}
+                dir="auto"
+                value={labSpoken}
+                onChange={(e) => setLabSpoken(e.target.value)}
+                placeholder="Spoken / vocalized text — sent identically to every voice you Generate"
+                style={{ width: "100%", background: "rgba(255,255,255,0.07)", color: "inherit", border: "1px solid rgba(255,255,255,0.18)", borderRadius: 8, padding: 8, fontSize: 13 }}
+              />
+
+              {/* Filters */}
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <div>
+                  <span style={{ fontSize: 12, opacity: 0.65, marginRight: 6 }}>Provider</span>
+                  {(["all", "elevenlabs", "google-chirp", "google-gemini"] as const).map((p) => (
+                    <button key={p} type="button" className={`jc-btn jc-btn--small ${labProvider === p ? "jc-btn--primary" : "jc-btn--ghost"}`} onClick={() => setLabProvider(p)}>
+                      {p === "all" ? "All" : p === "elevenlabs" ? "Eleven" : p === "google-chirp" ? "Chirp" : "Gemini"}
+                    </button>
+                  ))}
+                </div>
+                <div>
+                  <span style={{ fontSize: 12, opacity: 0.65, marginRight: 6 }}>Gender</span>
+                  {(["all", "male", "female"] as const).map((g) => (
+                    <button key={g} type="button" className={`jc-btn jc-btn--small ${labGender === g ? "jc-btn--primary" : "jc-btn--ghost"}`} onClick={() => setLabGender(g)}>
+                      {g === "all" ? "All" : g === "male" ? "Male" : "Female"}
+                    </button>
+                  ))}
+                </div>
+                <button type="button" className={`jc-btn jc-btn--small ${labFavOnly ? "jc-btn--primary" : "jc-btn--ghost"}`} onClick={() => setLabFavOnly((x) => !x)}>
+                  ★ Favorites
+                </button>
+                <input
+                  value={labSearch}
+                  onChange={(e) => setLabSearch(e.target.value)}
+                  placeholder="Search voice…"
+                  style={{ flex: 1, minWidth: 120, background: "rgba(255,255,255,0.05)", color: "inherit", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, padding: "6px 8px", fontSize: 13 }}
+                />
+              </div>
+
+              {/* Gemini delivery style (only affects Gemini voices) */}
+              <div>
+                <span style={{ fontSize: 12, opacity: 0.65, marginRight: 6 }}>Gemini delivery</span>
+                {(["Neutral", "Sales", "Energetic", "Premium", "Urgent"] as const).map((s) => (
+                  <button key={s} type="button" className={`jc-btn jc-btn--small ${labStyle === s ? "jc-btn--primary" : "jc-btn--ghost"}`} onClick={() => setLabStyle(s)}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+
+              {labError ? <div className="jc-err-msg" role="alert">{labError}</div> : null}
+              <div style={{ fontSize: 12, opacity: 0.6 }}>
+                {labLoading ? "Loading catalog…" : `${filteredLabVoices.length} voice${filteredLabVoices.length === 1 ? "" : "s"}`}
+              </div>
+
+              {/* Voice list */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {filteredLabVoices.map((v) => {
+                  const key = labKey(v);
+                  const r = labResults[key] ?? {};
+                  const playingGen = !!r.url && preview.previewUrl === r.url;
+                  const playingNative = !!v.previewUrl && preview.previewUrl === v.previewUrl;
+                  const fav = labFavorites.has(key);
+                  return (
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderTop: "1px solid rgba(255,255,255,0.08)", flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        onClick={() => toggleFavorite(key)}
+                        title={fav ? "Remove from shortlist" : "Add to shortlist"}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: fav ? "#f5c518" : "rgba(255,255,255,0.35)", fontSize: 16, lineHeight: 1 }}
+                      >
+                        {fav ? "★" : "☆"}
+                      </button>
+                      <span style={{ minWidth: 120, fontSize: 13, fontWeight: 600 }}>
+                        {v.house ? "👑 " : ""}
+                        {v.name}
+                      </span>
+                      <span style={{ fontSize: 11, opacity: 0.55, minWidth: 150 }}>
+                        {v.provider === "elevenlabs" ? "ElevenLabs" : "Google"} · {v.model}
+                        {v.gender !== "unknown" ? ` · ${v.gender}` : ""}
+                      </span>
+                      {v.previewUrl ? (
+                        <button type="button" className="jc-btn jc-btn--small jc-btn--ghost" onClick={() => v.previewUrl && preview.toggle(v.previewUrl)}>
+                          {playingNative ? "■ Stop" : "♪ Native"}
+                        </button>
+                      ) : null}
+                      <button type="button" className="jc-btn jc-btn--small jc-btn--ghost" disabled={!labSpoken.trim() || r.loading} onClick={() => void generateLabVoice(v)}>
+                        {r.loading ? "Generating…" : "Generate"}
+                      </button>
+                      <button type="button" className="jc-btn jc-btn--small jc-btn--primary" disabled={!r.url} onClick={() => r.url && preview.toggle(r.url)}>
+                        {playingGen ? "■ Stop" : "▶ Preview"}
+                      </button>
+                      {r.error ? <span style={{ fontSize: 11, color: "#ff6b6b" }}>{r.error.slice(0, 80)}</span> : null}
+                    </div>
+                  );
+                })}
+                {!labLoading && filteredLabVoices.length === 0 ? (
+                  <div style={{ fontSize: 12, opacity: 0.5, padding: "10px 0" }}>No voices match. Try another provider/locale or clear filters.</div>
+                ) : null}
               </div>
             </div>
           ) : null}

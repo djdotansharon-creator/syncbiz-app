@@ -115,6 +115,14 @@ CENTER (col-start-2, row-span-2): command rail (view toggles · genres · LIBRAR
 5. Phase-2 sweep: ~30 files still contain old glow classes (radio page, schedules, mobile, modals).
 6. Real waveform peaks (server-side ffprobe → catalog) — designed, not built; strip component ready.
 
+## Voice Lab + Mobile Announcer v1 (2026-08-12) — anchors
+INTERNAL voice-creation layer, OFF-PLAYBACK (no MPV/MASTER/CONTROL/queue). "Customer UX = simple, internal lab = powerful."
+- `lib/voice-lab.ts` — shared server helpers (NOT a framework): `buildCatalog(locale)` (ElevenLabs `/v1/voices` account voices + Google `voices?languageCode=` Chirp3-HD → paired Gemini persona entries), `synthElevenV3/synthGoogleChirp/synthGoogleGemini` (all → MP3 Buffer via `saveMp3` → `/api/jingles/audio/<id>`), `googleHeaders()` = ADC `client.getRequestHeaders()` (carries x-goog-user-project), `houseAnnouncer()` (env `SYNCBIZ_HOUSE_ANNOUNCER` JSON, no hardcoded id), `VOICE_LOCALES` (he-IL/en-US/en-GB/it-IT enabled; ar-XA disabled), `GEMINI_PROMPTS` (Neutral/Sales/Energetic/Premium/Urgent).
+- `GET /api/jingles/voice-catalog?locale=` — dynamic catalog. `POST /api/jingles/benchmark` — now dual-shape: legacy `{candidate:A|B|C}` (unchanged) OR `{provider,voiceId,locale,style?}` (Voice Lab generate). `POST /api/voice/convert` — Voice-to-Voice BOUNDARY only, always 501 (`STS_PROVEN_LOCALES=[]`, Hebrew NOT proven; no audio sent to any provider).
+- UI: JinglesWorkspacePanel (`components/jingles-control/JinglesShell.tsx`) 4th tab **"Voice Lab"** (`activeTab==="lab"`): locale/provider/gender/search/favorites(localStorage `syncbiz.voicelab.favorites`) filters, one spoken text → per-voice on-demand Generate + native Preview (ElevenLabs preview_url) + generated Preview via shared `useAudioPreview` (single-instance/no-overlap). Verified 90 he-IL voices (30 Eleven+30 Chirp+30 Gemini); all 3 providers generate valid MP3.
+- Mobile: `/mobile/announcer` (`app/(app)/mobile/announcer/page.tsx` → `components/mobile/mobile-announcer.tsx`) — premium full-screen fixed(z-60) takeover escaping mobile layout chrome. Real MediaRecorder (reuses mobile-listen-identify pattern: pickMimeType webm→mp4→ogg→wav, getUserMedia→MediaRecorder→Blob→onstop cleanup, mic released on unmount). States ready→recording(live timer+pulse ring)→recorded(Listen/Re-record/"Make it sound professional")→processing→unavailable(501 honest, no fake). Local browser preview only.
+- Intentionally NOT built: customer-facing voice architecture, branch distribution/Play-Now/scheduling, Hebrew Nakdan, any real voice-to-voice, DB migration (type-only `VoiceCreation`).
+
 ## User preferences (product voice)
 Hebrew speaker; wants international/Mac-clean look ("not AI-made"), zero playback risk (business player must never stop), nothing deleted — relocate into panels/menus; verify in real browser before claiming done; hates token-wasting full-file scans — keep this file current instead.
 
