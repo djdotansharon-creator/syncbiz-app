@@ -105,11 +105,11 @@ export default function MobileHomePage() {
                   icon={<CalendarIcon />}
                 />
                 <MobileBrowseTile
-                  label="Remote"
-                  subtitle="Control the player"
-                  href="/mobile/remote"
+                  label="Create Announcement"
+                  subtitle="Record a professional announcement"
+                  href="/mobile/announcer"
                   gradient="from-amber-500 to-orange-700"
-                  icon={<RemoteIcon />}
+                  icon={<MicIcon />}
                 />
               </div>
             </section>
@@ -154,12 +154,12 @@ function CalendarIcon() {
   );
 }
 
-function RemoteIcon() {
+function MicIcon() {
   return (
-    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <rect x="6" y="3" width="12" height="18" rx="3" />
-      <circle cx="12" cy="8" r="1.2" fill="currentColor" stroke="none" />
-      <path d="M9 12h6M9 15h6M10 18h4" strokeLinecap="round" />
+    <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <path d="M12 18v3" />
     </svg>
   );
 }
