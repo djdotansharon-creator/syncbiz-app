@@ -1078,6 +1078,36 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
   const isDesktop = useIsDesktopPlayer();
   const preview = useAudioPreview();
 
+  // ── Hebrew Voice Benchmark v0 — isolated eval tool. OFF-PLAYBACK (Browser Preview only). ──
+  const [benchOriginal, setBenchOriginal] = useState("");
+  const [benchSpoken, setBenchSpoken] = useState("");
+  const [benchGender, setBenchGender] = useState<"male" | "female">("male");
+  const [benchStyle, setBenchStyle] = useState<"Neutral" | "Energetic" | "Premium" | "Urgent">("Neutral");
+  const [benchResults, setBenchResults] = useState<
+    Record<"A" | "B" | "C", { url?: string; label?: string; error?: string; loading?: boolean }>
+  >({ A: {}, B: {}, C: {} });
+  const runBenchmark = useCallback(
+    async (candidate: "A" | "B" | "C") => {
+      const text = benchSpoken.trim();
+      if (!text) return;
+      setBenchResults((r) => ({ ...r, [candidate]: { loading: true } }));
+      try {
+        // Each candidate is an independent request → one engine's failure never affects the others.
+        const res = await fetch("/api/jingles/benchmark", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ candidate, text, gender: benchGender, style: benchStyle }),
+        });
+        const j = (await res.json()) as { url?: string; provider?: string; model?: string; voice?: string; error?: string };
+        if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+        setBenchResults((r) => ({ ...r, [candidate]: { url: j.url, label: `${j.provider} · ${j.model} · ${j.voice}` } }));
+      } catch (e) {
+        setBenchResults((r) => ({ ...r, [candidate]: { error: e instanceof Error ? e.message : String(e) } }));
+      }
+    },
+    [benchSpoken, benchGender, benchStyle]
+  );
+
   // Persist library to localStorage whenever it changes. The MP3 files
   // themselves are server-owned, so this only stores metadata — cheap and
   // resilient to reloads (including Electron app restarts).
@@ -1409,6 +1439,65 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                 >
                   {generating ? "Generating…" : "Generate"}
                 </button>
+              </div>
+
+              {/* ── Hebrew Voice Benchmark v0 — isolated eval (OFF-PLAYBACK, Browser Preview only) ── */}
+              <div style={{ marginTop: 18, padding: 12, border: "1px dashed rgba(255,255,255,0.18)", borderRadius: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, opacity: 0.85, marginBottom: 8 }}>
+                  Hebrew Voice Benchmark <span style={{ opacity: 0.55, fontWeight: 400 }}>· eval tool · A/B/C same spoken text</span>
+                </div>
+                <textarea
+                  rows={2}
+                  dir="auto"
+                  value={benchOriginal}
+                  onChange={(e) => setBenchOriginal(e.target.value)}
+                  placeholder="Original text (reference only — not sent)"
+                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", color: "inherit", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 8, padding: 8, fontSize: 13, marginBottom: 6 }}
+                />
+                <textarea
+                  rows={2}
+                  dir="auto"
+                  value={benchSpoken}
+                  onChange={(e) => setBenchSpoken(e.target.value)}
+                  placeholder="Spoken text — sent identically to A/B/C (paste niqqud-vocalized here)"
+                  style={{ width: "100%", background: "rgba(255,255,255,0.07)", color: "inherit", border: "1px solid rgba(255,255,255,0.18)", borderRadius: 8, padding: 8, fontSize: 13 }}
+                />
+                <div style={{ display: "flex", gap: 14, alignItems: "center", margin: "8px 0", flexWrap: "wrap" }}>
+                  <div>
+                    <span style={{ fontSize: 12, opacity: 0.65, marginRight: 6 }}>Voice</span>
+                    {(["male", "female"] as const).map((g) => (
+                      <button key={g} type="button" className={`jc-btn jc-btn--small ${benchGender === g ? "jc-btn--primary" : "jc-btn--ghost"}`} onClick={() => setBenchGender(g)}>
+                        {g === "male" ? "Male" : "Female"}
+                      </button>
+                    ))}
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 12, opacity: 0.65, marginRight: 6 }}>Gemini style</span>
+                    {(["Neutral", "Energetic", "Premium", "Urgent"] as const).map((s) => (
+                      <button key={s} type="button" className={`jc-btn jc-btn--small ${benchStyle === s ? "jc-btn--primary" : "jc-btn--ghost"}`} onClick={() => setBenchStyle(s)}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {([["A", "A · Eleven v3"], ["B", "B · Google Chirp"], ["C", "C · Gemini TTS"]] as const).map(([cand, title]) => {
+                  const r = benchResults[cand];
+                  const playing = !!r.url && preview.previewUrl === r.url;
+                  return (
+                    <div key={cand} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                      <span style={{ minWidth: 128, fontSize: 13, fontWeight: 600 }}>{title}</span>
+                      <button type="button" className="jc-btn jc-btn--small jc-btn--ghost" disabled={!benchSpoken.trim() || r.loading} onClick={() => void runBenchmark(cand)}>
+                        {r.loading ? "Generating…" : "Generate"}
+                      </button>
+                      <button type="button" className="jc-btn jc-btn--small jc-btn--primary" disabled={!r.url} onClick={() => r.url && preview.toggle(r.url)}>
+                        {playing ? "■ Stop" : "▶ Preview"}
+                      </button>
+                      <span style={{ fontSize: 12, opacity: 0.7 }}>
+                        {r.error ? <span style={{ color: "#ff6b6b" }}>{r.error.slice(0, 90)}</span> : r.label || ""}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ) : null}
