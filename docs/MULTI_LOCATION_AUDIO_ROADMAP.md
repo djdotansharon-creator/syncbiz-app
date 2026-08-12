@@ -8,12 +8,12 @@
 
 ## 📍 STATUS (update this block first, every milestone)
 
-- **Current Milestone:** P1.2 — MASTER Crash / Lease Recovery Reliability — **AWAITING OWNER APPROVAL** (do not start automatically).
-- **Current Gate:** n/a until P1.2 is approved and scoped.
-- **Last Completed:** **P1.1 — Playback Regression Harness** — **Gate: PASS.** 5 consecutive green full-suite runs against a local production-like build (`next build`+`next start`); Automix now a real PASS (multi-track playlist idx0→idx1). Automated: Play · Navigation-Survival · Automix · Queue-Integrity · Reconnect. Integration/Manual (documented): CONTROL lifecycle, Desktop/MPV interruption. Root cause of prior flakiness = `next dev` (RSC remounts / token churn), proven by determinism under the production build.
-- **Next Approved Step:** P1.2 requires explicit approval. Do NOT auto-start Source P1.
+- **Current Milestone:** P1.3 — Source P1 (reader interface v2 / Drive-Dropbox prep) — **AUDIT phase** (read-only; implementation awaits owner approval).
+- **Current Gate:** n/a until the Source P1 audit is reviewed and scope approved.
+- **Last Completed:** **P1.1 — Playback Regression Harness** — Gate: PASS (5 consecutive green full-suite runs against a local production-like build; Automix a real PASS). Automated: Play · Navigation-Survival · Automix · Queue-Integrity · Reconnect. Integration/Manual: CONTROL lifecycle, Desktop/MPV interruption.
+- **P1.2 — MASTER Crash / Lease Recovery: AUDITED → DEFERRED (no build now).** Audit concluded the mechanism is sound and mostly by-design (same-device reclaim, grace, grace-sweep, playing-lock, desktop-MPV audio independence); the harness "eject" was a **test artifact** (fresh per-run deviceId + ghost leases). Real risk is narrow (≤90s resume delay for a *different*/lost-id device after a crash — not a music-stop in normal operation). Two small additive hardenings **parked as backlog** (for the next WS-server touch): **(A)** telemetry on grace-blocked registrations, **(B)** persist the grace-sweep timer across WS restart. Do NOT touch the 90s grace / primary-reservation / playing-lock semantics without a real field repro.
+- **Next Approved Step:** Source P1 **audit only**; stop and present before any code.
 - **Blockers:** none blocking. Latent: production is 11 migrations behind (deploy is owner-gated; NOT a bug).
-- **Known Reliability Finding:** stale primary MASTER lease during the 90s grace after a crash can force a new playing device to CONTROL → `stopForControlHandoff` wipes the session (eject class). → P1.2.
 - **Key Decisions:** see "Decisions log" below.
 
 ---
@@ -67,8 +67,8 @@ Next.js app (`app/`,`components/`,`lib/`) + standalone WS server (`server/`, :30
   - **Automated (PASS ×5):** Play Starts · Navigation Survival · Automix/end-of-track (multi-track playlist idx0→idx1) · Queue Integrity · Reconnect.
   - **Integration/Manual (documented, not auto-PASS):** CONTROL lifecycle (multi-device) · Desktop/MPV local interruption. **Soak:** `--soak` mode.
   - **Finding:** `next dev` was the flakiness source (RSC remounts / ws-token churn); deterministic under prod build.
-- **P1.2 MASTER Crash / Lease Recovery Reliability** *(next; approval required; do NOT auto-start)* — a crashed MASTER leaves `primaryMasterByBranch` pointing at the dead device for the 90s grace; a new playing device gets forced to CONTROL → `stopForControlHandoff` wipes the session (eject class). Goal: MASTER crash → playback continuity/recovery; a new MASTER is never falsely ejected by a stale primary lease. **Anchors:** `server/index.ts` (grace/primary gate), `server/master-lease-store.ts` (no TTL; persists across restart), `lib/device-player-context.tsx` (`stopForControlHandoff`).
-- **P1.3 Source P1** *(deferred; re-decide after P1.2)* — reader interface v2 / provider descriptors, minimum additive for Drive/Dropbox. Confirmed P0 is the correct base.
+- **P1.2 MASTER Crash / Lease Recovery Reliability — AUDITED → DEFERRED (no build now).** Audit found the mechanism sound and mostly by-design; harness "eject" was a test artifact (fresh per-run deviceId + ghost leases). Real risk is narrow (≤90s resume delay for a *different*/lost-id device after crash; not a normal-operation music-stop). Parked backlog (next WS-server touch): **(A)** telemetry on grace-blocked registers, **(B)** persist grace-sweep timer across WS restart. Do NOT change 90s grace / primary-reservation / playing-lock without a real field repro. **Anchors:** `server/index.ts` (election/register/SET_MASTER/close `:700-1290`, grace/primary `:66,261-270`, grace-sweep `:1271-1290`), `server/master-lease-store.ts`, `lib/device-player-context.tsx` (`stopForControlHandoff`, playing-protection).
+- **P1.3 Source P1 — AUDIT phase (current)** — reader interface v2 / provider descriptors, minimum additive for Drive/Dropbox. P0 (Connection/Container/Locator) is the base. Additive, off-playback (signed-URL → existing HTML-audio path).
 - **P1.4 Org/Branch foundation** *(design only)*.
 
 ### P2 — Core Multi-Location
@@ -91,6 +91,7 @@ No milestone starts before the previous one passes a **measurable** gate — nev
 Retail Campaign Engine · AI Radio Personality · capability-ACL enforcement · enterprise Scope engine · rights-cleared catalog — all require P1/P2 foundations first.
 
 ## 10. Decisions log
+- **Product principle — Web = Management/Creation/Preview; Desktop Player = Store Playback Runtime (On-Air).** A manager works from any browser (create/preview/save/assign/schedule); On-Air playback (music + jingle/announcement ducking) stays on Desktop/Electron/MPV. Browser jingle **Preview** is a local `HTMLAudioElement` audition — OFF-PLAYBACK (never the music player / MASTER / WS / MPV / interrupt queue). No browser announcement-injection or browser ducking (deferred).
 - **Playback accepted GREEN** for browser single-MASTER (4 risk seams verified; none reproduces). CONTROL-mirror staleness + live/huge-duration parked as backlog — touch only on real repro.
 - **P1.1 harness runs against a production-like build, not `next dev`.** `next dev` (RSC remounts / ws-token churn) caused all observed harness flakiness; the production build is deterministic (5/5 green). The harness probe is a read-only diagnostic gated on `NEXT_PUBLIC_SB_HARNESS=1` — never present in a real deploy. Multi-track Automix uses an existing DJ-AI playlist (no new fixture / no data change).
 - **MASTER-lease reliability FINDING (→ P1.2):** the lease has no TTL and persists across WS restart (`master-lease-store.ts`); cleanup is lazy (on next access after 90s grace). The accumulation of many stale keys was a test artifact, BUT the underlying mechanism — a ghost `primaryMasterByBranch` within the 90s grace after a crash forcing a new playing device to CONTROL (`stopForControlHandoff` → session wiped) — is a **real reliability risk** in that window. Not fixed (flagged for P1.2).

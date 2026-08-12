@@ -3,7 +3,7 @@
  * - Lives in its own React root (`jingles-shell-bridge`); open/close/tab changes are local state only.
  * - Does not call transport, WS, MPV, or main-process playback — hero/dock/library roots are unrelated.
  */
-import React, { useReducer, useCallback, useState, useEffect, type Dispatch } from "react";
+import React, { useReducer, useCallback, useState, useEffect, useRef, type Dispatch } from "react";
 import { createPortal } from "react-dom";
 import type {
   AnnouncementDraft,
@@ -765,6 +765,80 @@ function triggerPlayInterrupt(url: string): void {
   }
 }
 
+/** True only inside the Electron desktop player (where On-Air MPV playback exists). */
+function useIsDesktopPlayer(): boolean {
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    setIsDesktop(typeof window !== "undefined" && "syncbizDesktop" in window);
+  }, []);
+  return isDesktop;
+}
+
+/**
+ * Browser-native, OFF-PLAYBACK preview player for generated jingle/announcement MP3s.
+ * A single local <audio> audition on the operator's own machine — it NEVER touches the
+ * music player / MASTER / CONTROL / WS / MPV / interrupt queue / Automix. Only one preview
+ * plays at a time; switching clips stops the previous; it always stops on unmount.
+ * This is an audition, NOT On-Air playback to the store.
+ */
+function useAudioPreview() {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const stop = useCallback(() => {
+    const a = audioRef.current;
+    if (a) {
+      a.pause();
+      a.removeAttribute("src");
+    }
+    setPreviewUrl(null);
+  }, []);
+
+  const toggle = useCallback(
+    (url: string) => {
+      if (!url) return;
+      setError(null);
+      // Same clip already previewing → toggle off.
+      if (audioRef.current && previewUrl === url) {
+        stop();
+        return;
+      }
+      let a = audioRef.current;
+      if (!a) {
+        a = new Audio();
+        audioRef.current = a;
+      }
+      a.pause(); // stop any prior preview before starting the new one
+      a.onended = () => setPreviewUrl((cur) => (cur === url ? null : cur));
+      a.onerror = () => {
+        setError("Preview failed to play this audio.");
+        setPreviewUrl(null);
+      };
+      a.src = url;
+      setPreviewUrl(url);
+      void a.play().catch(() => {
+        setError("Preview could not start (browser blocked or file error).");
+        setPreviewUrl(null);
+      });
+    },
+    [previewUrl, stop]
+  );
+
+  // Never leave preview audio running in the background after the panel closes.
+  useEffect(() => {
+    return () => {
+      const a = audioRef.current;
+      if (a) {
+        a.pause();
+        a.removeAttribute("src");
+      }
+    };
+  }, []);
+
+  return { previewUrl, error, toggle, stop };
+}
+
 // ─── JcModal — shared popup primitive (portal, backdrop, ESC, centered) ─────
 
 function JcModal({
@@ -903,6 +977,8 @@ function ResultStrip({
   onSchedule,
   onSave,
   onDismiss,
+  previewMode = false,
+  isPreviewing = false,
 }: {
   asset: JingleAsset;
   onPlay: () => void;
@@ -910,7 +986,16 @@ function ResultStrip({
   onSchedule: () => void;
   onSave: () => void;
   onDismiss: () => void;
+  /** Web: the primary button auditions the MP3 locally (Preview). Desktop: it plays On-Air. */
+  previewMode?: boolean;
+  isPreviewing?: boolean;
 }): React.ReactElement {
+  const playLabel = previewMode ? (isPreviewing ? "■ Stop" : "▶ Preview") : "▶ Play";
+  const playTitle = !asset.url
+    ? "No audio to play"
+    : previewMode
+      ? "Preview this audio in your browser (not On-Air)"
+      : "Play On-Air (ducks store music)";
   return (
     <div className="jc-result-strip">
       <div className="jc-result-strip-info">
@@ -924,10 +1009,10 @@ function ResultStrip({
           type="button"
           className="jc-btn jc-btn--primary jc-btn--small"
           disabled={!asset.url}
-          title={asset.url ? "Play now" : "No URL to play"}
+          title={playTitle}
           onClick={onPlay}
         >
-          ▶ Play
+          {playLabel}
         </button>
         <button
           type="button"
@@ -988,6 +1073,10 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
   // Status (display-only; no selector)
   const branchStatus: MockBranchLinkStatus = "online";
   const engineStatus: MockEngineStatus = "ready";
+
+  // Web = local browser Preview (audition); Desktop = On-Air MPV playback. OFF-PLAYBACK.
+  const isDesktop = useIsDesktopPlayer();
+  const preview = useAudioPreview();
 
   // Persist library to localStorage whenever it changes. The MP3 files
   // themselves are server-owned, so this only stores metadata — cheap and
@@ -1346,10 +1435,12 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                             type="button"
                             className="jc-btn jc-btn--small jc-btn--primary"
                             disabled={!a.url}
-                            onClick={() => triggerPlayInterrupt(a.url)}
-                            title="Play"
+                            onClick={() =>
+                              isDesktop ? triggerPlayInterrupt(a.url) : preview.toggle(a.url)
+                            }
+                            title={isDesktop ? "Play On-Air" : "Preview in browser"}
                           >
-                            ▶
+                            {!isDesktop && preview.previewUrl === a.url ? "■" : "▶"}
                           </button>
                           <button
                             type="button"
@@ -1472,14 +1563,28 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
 
         {/* ── Result strip — between content and pads ─────────────── */}
         {resultCard ? (
-          <ResultStrip
-            asset={resultCard}
-            onPlay={handleResultPlay}
-            onAssign={() => setAssignForAsset(resultCard)}
-            onSchedule={() => setScheduleForAsset(resultCard)}
-            onSave={handleResultSaveToLibrary}
-            onDismiss={() => setResultCard(null)}
-          />
+          <>
+            <ResultStrip
+              asset={resultCard}
+              onPlay={
+                isDesktop ? handleResultPlay : () => preview.toggle(resultCard.url)
+              }
+              previewMode={!isDesktop}
+              isPreviewing={preview.previewUrl === resultCard.url}
+              onAssign={() => setAssignForAsset(resultCard)}
+              onSchedule={() => setScheduleForAsset(resultCard)}
+              onSave={handleResultSaveToLibrary}
+              onDismiss={() => {
+                preview.stop();
+                setResultCard(null);
+              }}
+            />
+            {preview.error ? (
+              <p className="jc-hint" role="alert" style={{ color: "#ff6b6b" }}>
+                {preview.error}
+              </p>
+            ) : null}
+          </>
         ) : null}
 
         {/* ── Trigger pads ────────────────────────────────────────── */}
