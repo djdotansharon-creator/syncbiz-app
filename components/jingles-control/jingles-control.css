@@ -2117,3 +2117,61 @@
 .jcx-settings-bar .jc-seg-btn { padding: 0.28rem 0.5rem; font-size: 0.68rem; }
 .jcx-settings-bar .jcx-set--title { flex: 1 1 9rem; min-width: 7rem; }
 .jcx-settings-bar .jcx-set--title input { padding: 0.32rem 0.5rem; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PADS + MODALS POLISH (2026-08). Quick Pads become a full-width command
+   strip (equal widths); modal fields regain stacked labels + styled inputs
+   (modals aren't wrapped in .jc-form). Scoped; direction follows the ambient
+   UI direction (RTL for Hebrew, LTR default) — no hardcoded reversal.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* Quick Pads — 8 equal pads sharing the full workspace width; scroll only when
+   they can't keep a usable min-width. Overrides the earlier fixed-size rule. */
+.jcx-quickpads .jc-trigger-pad-wrap { flex: 1 1 0; min-width: 0; }
+.jcx-quickpads .jc-trigger-pad { min-width: 5rem; }
+
+/* Modal fields: give .jc-field the stacked-label + styled-input treatment that
+   .jc-form normally provides (modal bodies are not .jc-form, so labels used to
+   collapse inline with inputs → "Whenmm/dd/yyyy"). Fixes Schedule + PadEdit. */
+.jc-modal-body .jc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+}
+.jc-modal-body .jc-field > span {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #64748b;
+}
+.jc-modal-body input,
+.jc-modal-body select {
+  width: 100%;
+  font-size: 0.8rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(51, 65, 85, 0.8);
+  background: rgba(2, 6, 23, 0.6);
+  color: #f1f5f9;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.jc-modal-body input:focus,
+.jc-modal-body select:focus {
+  outline: none;
+  border-color: rgba(56, 189, 248, 0.5);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.1);
+}
+
+/* When row — Date + Time side by side */
+.jcx-when-row { display: flex; gap: 0.5rem; }
+.jcx-when-row input { flex: 1 1 0; min-width: 0; }
+
+/* Assign-to-Pad picker — name left, status dot trailing; RTL-safe via dir=auto */
+.jc-pad-picker-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

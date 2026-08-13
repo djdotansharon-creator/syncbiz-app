@@ -1426,7 +1426,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                             disabled={!a.url}
                             onClick={() => setAssignForAsset(a)}
                           >
-                            Assign
+                            Add to Pad
                           </button>
                           <button
                             type="button"
@@ -1489,7 +1489,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                           className="jc-btn jc-btn--small jc-btn--ghost"
                           onClick={() => setAssignForAsset(itemAsset)}
                         >
-                          Assign
+                          Add to Pad
                         </button>
                         <button
                           type="button"
@@ -1826,11 +1826,11 @@ function AssignToPadModal({
   return (
     <JcModal
       open={open}
-      title={asset ? `Assign "${asset.title}" to pad` : ""}
+      title={asset ? `Add "${asset.title}" to Pad` : ""}
       onClose={onClose}
       width="28rem"
     >
-      <p className="jc-hint">Pick a pad. Assigned pads will be overwritten.</p>
+      <p className="jc-hint">Choose a pad. Existing assignments will be replaced.</p>
       <div className="jc-pad-picker-grid">
         {pads.map((p) => (
           <button
@@ -1838,9 +1838,9 @@ function AssignToPadModal({
             type="button"
             className={`jc-pad-picker-btn ${p.url ? "jc-pad-picker-btn--has" : ""}`}
             onClick={() => onPick(p.id)}
-            title={p.url ? "Currently assigned — will overwrite" : "Empty"}
+            title={p.url ? "In use — will be replaced" : "Empty pad"}
           >
-            <span>{p.label}</span>
+            <span className="jc-pad-picker-name" dir="auto">{p.label}</span>
             <span className={`jc-pad-picker-dot ${p.url ? "jc-pad-picker-dot--on" : ""}`} />
           </button>
         ))}
@@ -1879,9 +1879,14 @@ function ScheduleAssetModalBody({
   onConfirm: (scheduledAt: string, repeat: string, target: string) => void;
   onClose: () => void;
 }): React.ReactElement {
-  const [when, setWhen] = useState("");
+  // Date + Time are split for a cleaner UI, then recombined into the exact
+  // wall-clock string ("2026-04-21T09:00") the existing handler already expects
+  // (same shape `datetime-local` produced) — no scheduling-logic change.
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
   const [repeat, setRepeat] = useState("once");
   const [target, setTarget] = useState("default");
+  const when = date && time ? `${date}T${time}` : "";
 
   return (
     <JcModal
@@ -1900,20 +1905,18 @@ function ScheduleAssetModalBody({
             disabled={!when}
             onClick={() => onConfirm(when, repeat, target)}
           >
-            Confirm
+            Schedule
           </button>
         </>
       }
     >
-      <label className="jc-field">
+      <div className="jc-field">
         <span>When</span>
-        <input
-          type="datetime-local"
-          className="jc-datetime"
-          value={when}
-          onChange={(e) => setWhen(e.target.value)}
-        />
-      </label>
+        <div className="jcx-when-row">
+          <input type="date" className="jc-datetime" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Date" />
+          <input type="time" className="jc-datetime" value={time} onChange={(e) => setTime(e.target.value)} aria-label="Time" />
+        </div>
+      </div>
       <div className="jc-field">
         <span>Repeat</span>
         <SegBtn
@@ -1927,8 +1930,8 @@ function ScheduleAssetModalBody({
         />
       </div>
       <label className="jc-field">
-        <span>Target branch / device</span>
-        <input value={target} onChange={(e) => setTarget(e.target.value)} />
+        <span>Where</span>
+        <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="Branch / device" dir="auto" />
       </label>
     </JcModal>
   );
