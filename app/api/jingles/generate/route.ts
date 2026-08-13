@@ -16,6 +16,13 @@ const MODEL_BY_LANG: Record<"en" | "he", string> = {
   en: "eleven_turbo_v2_5",
   he: "eleven_multilingual_v2",
 };
+// Per-voice model override (takes precedence over MODEL_BY_LANG). The two professional
+// Hebrew voices were verified ONLY on eleven_v3, so they are pinned to it regardless of
+// language. No global Hebrew→v3 switch — every other voice keeps MODEL_BY_LANG exactly.
+const MODEL_BY_VOICE: Record<string, string> = {
+  JXH3lbmtWF1cUL9JEL4S: "eleven_v3", // Professional Announcer
+  "9sc3z1AF9BP2mmepHnXH": "eleven_v3", // Radio Announcer
+};
 // Speed presets → ElevenLabs `speed` param (turbo model) / stability nudge (multilingual).
 const SPEED_VALUES: Record<"slow" | "normal" | "fast", number> = {
   slow:   0.75,
@@ -61,7 +68,7 @@ export async function POST(req: NextRequest) {
   const speedKey: "slow" | "normal" | "fast" =
     body.speed === "slow" || body.speed === "fast" ? body.speed : "normal";
   const speedValue = SPEED_VALUES[speedKey];
-  const modelId = MODEL_BY_LANG[language];
+  const modelId = MODEL_BY_VOICE[voiceId] ?? MODEL_BY_LANG[language];
 
   /** `speed` is a top-level param on turbo_v2_5; multilingual_v2 ignores it
    *  silently but accepts it in the payload. For multilingual we also push
@@ -71,12 +78,21 @@ export async function POST(req: NextRequest) {
       ? { stability: 0.6, similarity_boost: 0.85, style: 0.15, use_speaker_boost: true }
       : { stability: 0.55, similarity_boost: 0.75 };
 
-  const ttsBody: Record<string, unknown> = {
-    text,
-    model_id: modelId,
-    speed: speedValue,
-    voice_settings: voiceSettings,
-  };
+  // eleven_v3 (the two professional Hebrew voices) — use the empirically verified shape:
+  // NO `speed` (top-level speed is a proven no-op on v3; nested speed is unreliable).
+  const ttsBody: Record<string, unknown> =
+    modelId === "eleven_v3"
+      ? {
+          text,
+          model_id: modelId,
+          voice_settings: { stability: 0.6, similarity_boost: 0.85, style: 0.15, use_speaker_boost: true },
+        }
+      : {
+          text,
+          model_id: modelId,
+          speed: speedValue,
+          voice_settings: voiceSettings,
+        };
 
   let audioBuffer: Buffer;
   try {

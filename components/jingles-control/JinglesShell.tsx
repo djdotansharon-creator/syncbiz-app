@@ -67,10 +67,11 @@ const VOICE_PRESETS_BY_LANG: Record<JingleLanguage, readonly { label: string; vo
     { label: "Energetic Female", voiceId: "cgSgspJ2msm6clMCkdW9" }, // Jessica
   ],
   he: [
-    { label: "Host M",    voiceId: "pNInz6obpgDQGcFmaJgB" }, // Adam (multilingual)
-    { label: "Host F",    voiceId: "XrExE9yKIg1WjnnlVkGX" }, // Matilda
-    { label: "Energetic", voiceId: "ErXwobaYiN019PkySvjV" }, // Antoni
-    { label: "Warm",      voiceId: "21m00Tcm4TlvDq8ikWAM" }, // Rachel
+    // Professional Hebrew voices (ElevenLabs account, generated) — routed through
+    // eleven_v3 by a per-voice override in /api/jingles/generate. Labels are
+    // customer-facing only; the voice IDs / provider are never shown.
+    { label: "Professional Announcer", voiceId: "JXH3lbmtWF1cUL9JEL4S" },
+    { label: "Radio Announcer",        voiceId: "9sc3z1AF9BP2mmepHnXH" },
   ],
 };
 
@@ -1278,14 +1279,16 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                     ))}
                   </select>
                 </label>
-                <label className="jc-field jcx-set">
-                  <span>Speed</span>
-                  <select value={draft.speed} onChange={(e) => setDraft((d) => ({ ...d, speed: e.target.value as JingleSpeed }))}>
-                    <option value="slow">Slow</option>
-                    <option value="normal">Normal</option>
-                    <option value="fast">Fast</option>
-                  </select>
-                </label>
+                {draft.language !== "he" ? (
+                  <label className="jc-field jcx-set">
+                    <span>Speed</span>
+                    <select value={draft.speed} onChange={(e) => setDraft((d) => ({ ...d, speed: e.target.value as JingleSpeed }))}>
+                      <option value="slow">Slow</option>
+                      <option value="normal">Normal</option>
+                      <option value="fast">Fast</option>
+                    </select>
+                  </label>
+                ) : null}
                 <label className="jc-field jcx-set">
                   <span>Bell</span>
                   <select
