@@ -2175,3 +2175,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LIBRARY → QUICK PAD drag & drop (2026-08, desktop-first, native HTML5).
+   Direction-agnostic (works RTL/LTR). Scoped to jingle-only classes.
+   ════════════════════════════════════════════════════════════════════════ */
+.jcx-lib-drag[draggable="true"] { cursor: grab; }
+.jcx-lib-drag[draggable="true"]:active { cursor: grabbing; }
+/* Drop highlight — minimal sky ring in the existing SyncBiz accent, no extra chrome */
+.jc-trigger-pad-wrap--drop .jc-trigger-pad {
+  outline: 2px solid rgba(56, 189, 248, 0.75);
+  outline-offset: 1px;
+  background: rgba(56, 189, 248, 0.12);
+}

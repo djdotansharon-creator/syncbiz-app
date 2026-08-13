@@ -768,6 +768,26 @@ function triggerPlayInterrupt(url: string): void {
   }
 }
 
+// ── Library → Quick Pad drag & drop (native HTML5; desktop-first) ───────────
+const JINGLE_DND_MIME = "application/x-syncbiz-jingle";
+type JingleDragPayload = { url: string; title: string; preRoll?: boolean; bellStyle?: JingleBellStyle };
+/** Serialize a library item onto the drag event (custom MIME + JSON, copy effect). */
+function startJingleDrag(e: React.DragEvent, payload: JingleDragPayload): void {
+  e.dataTransfer.setData(JINGLE_DND_MIME, JSON.stringify(payload));
+  e.dataTransfer.effectAllowed = "copy";
+}
+/** Parse a dropped library item, or null if the drop is not a jingle payload. */
+function readJingleDrag(e: React.DragEvent): JingleDragPayload | null {
+  const raw = e.dataTransfer.getData(JINGLE_DND_MIME);
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw) as JingleDragPayload;
+    return typeof p?.url === "string" ? p : null;
+  } catch {
+    return null;
+  }
+}
+
 /** True only inside the Electron desktop player (where On-Air MPV playback exists). */
 function useIsDesktopPlayer(): boolean {
   const [isDesktop, setIsDesktop] = useState(false);
@@ -843,6 +863,7 @@ function TriggerPads({
   scheduledPadIds,
   onPlay,
   onEdit,
+  onAssignDrop,
 }: {
   pads: SamplerPadItem[];
   flashPadId: string | null;
@@ -850,7 +871,10 @@ function TriggerPads({
   scheduledPadIds: Set<string>;
   onPlay: (pad: SamplerPadItem) => void;
   onEdit: (padId: string) => void;
+  /** A library item was dropped on a pad — assigns via the existing handler. */
+  onAssignDrop: (padId: string, payload: JingleDragPayload) => void;
 }): React.ReactElement {
+  const [dropPadId, setDropPadId] = useState<string | null>(null);
   return (
     <section className="jc-trigger-section" aria-label="Jingle trigger pads">
       <p className="jc-rail-head jcx-quickpads-head">Quick Pads</p>
@@ -862,7 +886,26 @@ function TriggerPads({
           const schedTooltip = isScheduled ? " · scheduled" : "";
           const colorClass = `jc-trigger-pad--color-${p.color ?? "default"}`;
           return (
-            <div key={p.id} className="jc-trigger-pad-wrap">
+            <div
+              key={p.id}
+              className={`jc-trigger-pad-wrap${dropPadId === p.id ? " jc-trigger-pad-wrap--drop" : ""}`}
+              onDragOver={(e) => {
+                // Only react to jingle drags; allow the drop + show highlight.
+                if (e.dataTransfer.types.includes(JINGLE_DND_MIME)) {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "copy";
+                  if (dropPadId !== p.id) setDropPadId(p.id);
+                }
+              }}
+              onDragLeave={() => setDropPadId((cur) => (cur === p.id ? null : cur))}
+              onDrop={(e) => {
+                const payload = readJingleDrag(e);
+                setDropPadId(null);
+                if (!payload || !payload.url) return; // ignore empty/foreign drops
+                e.preventDefault();
+                onAssignDrop(p.id, payload);
+              }}
+            >
               <button
                 type="button"
                 className={[
@@ -1305,6 +1348,19 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
               scheduledPadIds={scheduledPadIds}
               onPlay={handlePadPlay}
               onEdit={(id) => setEditPadId(id)}
+              onAssignDrop={(padId, payload) =>
+                handleAssignToPad(padId, {
+                  id: hid(),
+                  title: payload.title,
+                  script: "",
+                  url: payload.url,
+                  kind: "announcement",
+                  durationLabel: "—",
+                  voiceId: "",
+                  preRoll: payload.preRoll ?? false,
+                  bellStyle: payload.bellStyle,
+                })
+              }
             />
           </div>
 
@@ -1484,7 +1540,12 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                   <ul className="jc-lib">
                     {savedAssets.map((a) => (
                       <li key={a.id} className="jc-lib-row">
-                        <div>
+                        <div
+                          className="jcx-lib-drag"
+                          draggable={!!a.url}
+                          onDragStart={(e) => startJingleDrag(e, { url: a.url, title: a.title, preRoll: a.preRoll, bellStyle: a.bellStyle })}
+                          title={a.url ? "Drag onto a Quick Pad" : undefined}
+                        >
                           <div className="jc-lib-title">{a.title}</div>
                           <div className="jc-lib-meta">
                             {a.kind} · {a.durationLabel}
@@ -1552,7 +1613,12 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                   };
                   return (
                     <li key={item.id} className="jc-lib-row">
-                      <div>
+                      <div
+                        className="jcx-lib-drag"
+                        draggable={!!itemAsset.url}
+                        onDragStart={(e) => startJingleDrag(e, { url: itemAsset.url, title: itemAsset.title, preRoll: itemAsset.preRoll, bellStyle: itemAsset.bellStyle })}
+                        title={itemAsset.url ? "Drag onto a Quick Pad" : undefined}
+                      >
                         <div className="jc-lib-title">
                           {item.favorite ? (
                             <span className="jc-star" aria-hidden>
