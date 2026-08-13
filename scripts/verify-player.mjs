@@ -24,7 +24,8 @@
 import { chromium } from "@playwright/test";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
-const EMAIL = process.env.SB_EMAIL ?? "djdotansharon@gmail.com"; // cookie = base64(email)
+const EMAIL = process.env.SB_EMAIL ?? "djdotansharon@gmail.com";
+const PASSWORD = process.env.SB_PASSWORD ?? "test123"; // dev fallback; overridable for real accounts
 const SOAK = process.argv.includes("--soak");
 const SOAK_MS = Number(process.env.SOAK_MS ?? 120_000);
 
@@ -127,9 +128,11 @@ async function positionAdvances(page, { windowMs = 6000 } = {}) {
 
 // ═════════════════════════════ SETUP ═════════════════════════════════════════
 async function runSetup(page, context) {
-  // 1. Auth — inject the session cookie (base64 of email). Robust vs dev login-form flake.
+  // 1. Auth — log in through the REAL auth path (POST /api/auth/login) so the harness
+  // exercises signed-cookie minting instead of forging the cookie itself.
   try {
-    await context.addCookies([{ name: "syncbiz-session", value: Buffer.from(EMAIL).toString("base64"), url: BASE }]);
+    const resp = await context.request.post(`${BASE}/api/auth/login`, { data: { email: EMAIL, password: PASSWORD } });
+    if (!resp.ok()) throw Object.assign(new Error(`login HTTP ${resp.status()}`), { code: C.SETUP_AUTH_FAILED, detail: `POST /api/auth/login → ${resp.status()}` });
     await page.goto(`${BASE}/sources`, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await waitUntil(() => page.evaluate(() => location.pathname === "/sources"), { timeout: 20_000, code: C.SETUP_AUTH_FAILED, label: "reach /sources (not redirected to /login)" });
     S("Authenticated", true);

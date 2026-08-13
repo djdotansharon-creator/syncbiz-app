@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     const user = await getOrCreateUserByEmail(normEmail);
     emitEvent(EVENT_TYPES.USER_LOGIN, { userId: user.id, email: user.email });
 
-    const sessionValue = createSessionValue(normEmail);
+    const sessionValue = await createSessionValue(normEmail);
     const res = NextResponse.json({ ok: true });
     res.cookies.set(COOKIE_NAME, sessionValue, {
       httpOnly: true,

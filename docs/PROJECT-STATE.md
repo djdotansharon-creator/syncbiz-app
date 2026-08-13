@@ -16,7 +16,7 @@ Past incidents (all solved, do not reintroduce):
 RULES: (a) files in the playback chain (`playback-provider`, `audio-player`, `device-player-context`, `ws-client`, `server/index.ts`, `desktop/src/main/*`) get SURGICAL edits only, each verified live before commit; (b) UI work must not import/alter playback logic; (c) verify with the CANONICAL script — do NOT write ad-hoc Playwright scripts each time: `node scripts/verify-player.mjs` (against localhost:3000; `BASE_URL=` for prod). It covers: login → play → tab round-trip survival → MASTER chip stability → automix seek-to-end transition. One run ≈ 2 min.
 
 ## What this app is
-Business media player: Next.js 16 app (`app/`, `components/`, `lib/`) + standalone WS server (`server/`, port 3001) + Electron desktop player (`desktop/`, MPV). DB = PostgreSQL/Prisma. Auth cookie `syncbiz-session`. Main workspace route: `/sources` (rendered by `SourcesManager` via `app/(app)/(workspace)/layout.tsx`; the page itself is empty).
+Business media player: Next.js 16 app (`app/`, `components/`, `lib/`) + standalone WS server (`server/`, port 3001) + Electron desktop player (`desktop/`, MPV). DB = PostgreSQL/Prisma. Auth cookie `syncbiz-session` — **HMAC-SHA256 signed**, format `v1.<base64url({email,exp})>.<sig>` (`lib/auth-session.ts`, Web Crypto, Edge-safe, fail-closed on missing `SYNCBIZ_SESSION_SECRET`); legacy plain-base64 cookies are rejected → one-time re-login. `test123` demo fallback (`lib/auth.ts`) is **dev-only** (gated `NODE_ENV!=="production"` on both sync+async paths). Main workspace route: `/sources` (rendered by `SourcesManager` via `app/(app)/(workspace)/layout.tsx`; the page itself is empty).
 
 ## Design language (2026-07 redesign — "clean Apple/Mac")
 - Tokens in `app/globals.css` `:root`: `--sb-bg #0a0a0c`, surfaces `white/4–7%`, borders `white/8–14%`, text `#f5f5f7 / #a1a1a6 / #6e6e73`, accent **#0a84ff** (soft tint for active), on-air green #30d158, danger #ff453a.
@@ -56,7 +56,7 @@ Business media player: Next.js 16 app (`app/`, `components/`, `lib/`) + standalo
 
 ## How to verify (saves tokens — do this, not guessing)
 - Dev server usually already running on :3000 (user's or my background task). Check: `curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/login`.
-- Playwright login: `test@syncbiz.com` / `test123` (fill `#email`,`#password`, wait `/api/auth/login` response). **Always launch chromium with `--autoplay-policy=no-user-gesture-required`** — without it YT playback "bugs" are FALSE POSITIVES (deck crossfade freeze incident).
+- Playwright login: `test@syncbiz.com` / `test123` (fill `#email`,`#password`, wait `/api/auth/login` response). `scripts/verify-player.mjs` now logs in via `POST /api/auth/login` (real signed cookie) — no longer injects a base64 cookie; run dev with `NEXT_PUBLIC_SB_HARNESS=1` so the `__sbState` probe mounts, and ensure `SYNCBIZ_SESSION_SECRET` is set in `.env.development`. **Always launch chromium with `--autoplay-policy=no-user-gesture-required`** — without it YT playback "bugs" are FALSE POSITIVES (deck crossfade freeze incident).
 - Test account has 2 YT singles + small playlists + 18 DJ-AI e2e playlists. No local files.
 - `npx tsc --noEmit` (root covers app only). ESLint: pre-existing errors in sources-manager/app-shell — only check touched files; rule `react-hooks/set-state-in-effect` is enforced.
 

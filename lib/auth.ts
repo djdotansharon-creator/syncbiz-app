@@ -13,11 +13,20 @@ const TEST_USERS: Record<string, string> = {
   "djdotansharon@gmail.com": "test123",
 };
 
+/**
+ * The legacy TEST_USERS shortcut is DEVELOPMENT-ONLY. In production the fallback is never
+ * accepted — real accounts must authenticate via their bcrypt passwordHash. Centralized so
+ * both validateCredentials and validateCredentialsAsync stay guarded (no drift).
+ */
+function devTestUserMatches(email: string, password: string): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  return !!email && TEST_USERS[email] === password;
+}
+
 export function validateCredentials(email: string, password: string): boolean {
   const normalized = email?.trim().toLowerCase();
   if (!normalized || !password) return false;
-  const expected = TEST_USERS[normalized];
-  return !!expected && expected === password;
+  return devTestUserMatches(normalized, password);
 }
 
 /**
@@ -36,10 +45,8 @@ export async function validateCredentialsAsync(email: string, password: string):
   if (user?.passwordHash) {
     return verifyPassword(password, user.passwordHash);
   }
-  if (TEST_USERS[normalized]) {
-    return TEST_USERS[normalized] === password;
-  }
-  return false;
+  // Legacy demo fallback — development only (production returns false here).
+  return devTestUserMatches(normalized, password);
 }
 
 export { parseSessionValue, createSessionValue };

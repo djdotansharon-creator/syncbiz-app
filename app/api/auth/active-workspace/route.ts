@@ -16,7 +16,7 @@ const ACTIVE_WS_MAX_AGE_SEC = 60 * 60 * 24 * 365;
 export async function POST(req: Request) {
   const cookieStore = await cookies();
   const sessionVal = cookieStore.get(SESSION_COOKIE)?.value;
-  const email = sessionVal ? parseSessionValue(sessionVal) : null;
+  const email = sessionVal ? await parseSessionValue(sessionVal) : null;
   const normalized = email?.trim().toLowerCase() ?? "";
   if (!normalized) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });

@@ -41,7 +41,7 @@ function logIdentity(event: string, data: Record<string, unknown>) {
 export async function getCurrentUserFromCookies(): Promise<User | null> {
   const cookieStore = await cookies();
   const cookie = cookieStore.get(COOKIE_NAME)?.value;
-  const email = cookie ? parseSessionValue(cookie) : null;
+  const email = cookie ? await parseSessionValue(cookie) : null;
   const activeWs = cookieStore.get(ACTIVE_WORKSPACE_COOKIE_NAME)?.value ?? null;
   if (!email?.trim()) {
     logIdentity("session_resolve", { result: "no_cookie" });

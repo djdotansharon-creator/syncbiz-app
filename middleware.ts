@@ -66,10 +66,10 @@ function mobileRouteFor(pathname: string): string {
   return "/mobile/home";
 }
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const cookie = req.cookies.get(COOKIE_NAME)?.value;
-  const email = cookie ? parseSessionValue(cookie) : null;
+  const email = cookie ? await parseSessionValue(cookie) : null;
 
   const deviceParam = req.nextUrl.searchParams.get("device");
   const modeParam = req.nextUrl.searchParams.get("mode");

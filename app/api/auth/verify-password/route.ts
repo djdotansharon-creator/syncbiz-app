@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
   try {
     const cookieStore = await cookies();
     const cookie = cookieStore.get(COOKIE_NAME)?.value;
-    const email = cookie ? parseSessionValue(cookie) : null;
+    const email = cookie ? await parseSessionValue(cookie) : null;
 
     if (!email) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
