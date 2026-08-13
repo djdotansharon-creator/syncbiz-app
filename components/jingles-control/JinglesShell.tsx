@@ -17,6 +17,7 @@ import type {
   MockEngineStatus,
   MockHistoryEvent,
   MockHistoryEventKind,
+  MockScheduleItem,
   PadColor,
   SamplerPadItem,
 } from "./types";
@@ -27,7 +28,7 @@ import {
   MOCK_SCHEDULE_ITEMS,
   SAMPLER_PADS,
 } from "./seed-data";
-import { loadJingleSchedule, persistJingleSchedule } from "./schedule-storage";
+import { loadJingleSchedule, persistJingleSchedule, JINGLE_SCHEDULE_EVENT } from "./schedule-storage";
 import { useAudioPreview } from "./use-audio-preview";
 
 type State = {
@@ -839,11 +840,14 @@ function JcModal({
 function TriggerPads({
   pads,
   flashPadId,
+  scheduledPadIds,
   onPlay,
   onEdit,
 }: {
   pads: SamplerPadItem[];
   flashPadId: string | null;
+  /** Pad IDs with a REAL schedule item in the engine — drives the orange dot. */
+  scheduledPadIds: Set<string>;
   onPlay: (pad: SamplerPadItem) => void;
   onEdit: (padId: string) => void;
 }): React.ReactElement {
@@ -854,9 +858,8 @@ function TriggerPads({
         {pads.map((p) => {
           const assigned = Boolean(p.url);
           const isFlashing = flashPadId === p.id;
-          const schedTooltip = p.scheduledAt
-            ? ` · scheduled ${new Date(p.scheduledAt).toLocaleString()}`
-            : "";
+          const isScheduled = scheduledPadIds.has(p.id);
+          const schedTooltip = isScheduled ? " · scheduled" : "";
           const colorClass = `jc-trigger-pad--color-${p.color ?? "default"}`;
           return (
             <div key={p.id} className="jc-trigger-pad-wrap">
@@ -883,7 +886,7 @@ function TriggerPads({
                   aria-hidden
                 />
                 <span className="jc-trigger-pad-label">{p.label}</span>
-                {p.scheduledAt ? <span className="jc-pad-sched-dot" aria-hidden /> : null}
+                {isScheduled ? <span className="jc-pad-sched-dot" aria-hidden /> : null}
               </button>
               <button
                 type="button"
@@ -1028,6 +1031,75 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
     persistJingleSchedule(schedItems);
   }, [schedItems]);
 
+  // ── Pad scheduling — routes Pad Edit "Schedule at" into the SAME engine as
+  // Library/Result (syncbiz:jingle-schedule → JingleScheduleAutoPlayer). Each pad
+  // gets a stable schedule id `pad:<padId>`, so we upsert/remove without a second
+  // scheduler or a duplicate source of truth. The legacy `pad.scheduledAt` field is
+  // NOT used for firing or the indicator anymore — only these engine items are.
+  const padScheduleId = (padId: string) => `pad:${padId}`;
+
+  const removePadSchedule = useCallback((padId: string) => {
+    setSchedItems((prev) => prev.filter((x) => x.id !== padScheduleId(padId)));
+  }, []);
+
+  const upsertPadSchedule = useCallback(
+    (
+      pad: { id: string; url?: string; label?: string; bellStyle?: JingleBellStyle; preRoll?: boolean },
+      localDateTime: string,
+    ) => {
+      const url = (pad.url ?? "").trim();
+      // Empty pad or no time → ensure no orphan schedule survives.
+      if (!url || !localDateTime) {
+        removePadSchedule(pad.id);
+        return;
+      }
+      const when = new Date(localDateTime);
+      if (Number.isNaN(when.getTime())) {
+        removePadSchedule(pad.id);
+        return;
+      }
+      const item: MockScheduleItem = {
+        id: padScheduleId(pad.id),
+        label: pad.label || "Pad",
+        whenLabel: when.toLocaleString(),
+        repeatLabel: "Once",
+        targetLabel: "This pad",
+        url,
+        preRoll: pad.preRoll,
+        bellStyle: pad.bellStyle ?? "ding",
+        scheduledAtIso: when.toISOString(), // local → UTC, exactly like the Library path
+        repeat: "once", // Pad Edit has no Repeat UI in this scope
+      };
+      setSchedItems((prev) => [item, ...prev.filter((x) => x.id !== item.id)]);
+    },
+    [removePadSchedule],
+  );
+
+  // Re-sync from the shared engine when it mutates storage externally (e.g. the
+  // AutoPlayer removes a fired "once" item) so the pad indicator clears. Reuses
+  // the EXISTING event/channel — no new scheduler. The JSON guard makes our own
+  // persist-write (which also dispatches the event) a no-op, avoiding a loop.
+  useEffect(() => {
+    const sync = () => {
+      const fresh = loadJingleSchedule();
+      setSchedItems((prev) => (JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh));
+    };
+    window.addEventListener(JINGLE_SCHEDULE_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(JINGLE_SCHEDULE_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+
+  /** Pad IDs that currently have a REAL schedule item in the engine (drives the dot). */
+  const scheduledPadIds = new Set(
+    schedItems
+      .map((s) => s.id)
+      .filter((id) => id.startsWith("pad:"))
+      .map((id) => id.slice(4)),
+  );
+
   // Modal state — only one open at a time in practice
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiIntent, setAiIntent] = useState("");
@@ -1058,9 +1130,15 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
         persistPads(next);
         return next;
       });
+      // Route the pad's schedule into the shared engine (upsert when a time + audio
+      // exist; remove otherwise). Empty-pad/no-time is handled inside upsert.
+      upsertPadSchedule(
+        { id: padId, url: patch.url, label: patch.label, bellStyle: patch.bellStyle, preRoll: patch.preRoll },
+        patch.scheduledAt ?? "",
+      );
       setEditPadId(null);
     },
-    [],
+    [upsertPadSchedule],
   );
 
   const handleAssignToPad = useCallback(
@@ -1074,14 +1152,18 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                 label: (asset.title || p.label).slice(0, 20),
                 preRoll: asset.preRoll,
                 bellStyle: asset.bellStyle ?? p.bellStyle ?? "ding",
+                scheduledAt: undefined, // clear legacy field on reassign
               }
             : p,
         );
         persistPads(next);
         return next;
       });
+      // Safety: a reassigned pad must not keep an old schedule that would fire the
+      // NEW audio at the OLD time. Drop the linked schedule; user can re-schedule.
+      removePadSchedule(padId);
     },
-    [],
+    [removePadSchedule],
   );
 
   // ── Create / Generate ──────────────────────────────────────────────────────
@@ -1224,6 +1306,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
             <TriggerPads
               pads={pads}
               flashPadId={flashPadId}
+              scheduledPadIds={scheduledPadIds}
               onPlay={handlePadPlay}
               onEdit={(id) => setEditPadId(id)}
             />
@@ -1806,7 +1889,11 @@ function PadEditModalBody({
           className="jc-datetime"
           value={scheduledAt}
           onChange={(e) => setScheduledAt(e.target.value)}
+          disabled={!url.trim()}
         />
+        {!url.trim() ? (
+          <span className="jc-hint" style={{ marginTop: "0.25rem" }}>Assign audio before scheduling.</span>
+        ) : null}
       </label>
     </JcModal>
   );
