@@ -1206,15 +1206,11 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
         language: draft.language,
         speed: draft.speed,
       };
+      // Generate produces a TRANSIENT result only — it is NOT added to the Library.
+      // Adding to the Library is an explicit Save action (handleResultSaveToLibrary).
+      // The MP3 already lives on the server (data/jingles/<id>.mp3); Add to Pad and
+      // Schedule persist the url on their own, so an unsaved result is never orphaned.
       setResultCard(asset);
-      // Auto-save every successful generation to the persistent library so
-      // a reload of the player doesn't lose the jingle. The audio MP3 already
-      // lives on the server (data/jingles/<id>.mp3); we only need to persist
-      // the metadata (title, script, voice, language, bell, url) so it can be
-      // re-listed and re-played after restart.
-      setSavedAssets((prev) =>
-        prev.some((a) => a.id === asset.id) ? prev : [asset, ...prev],
-      );
     } catch (err) {
       setGenerateError(err instanceof Error ? err.message : String(err));
     } finally {
