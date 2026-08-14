@@ -490,6 +490,23 @@ export function AudioPlayer() {
   // True once the first live MPV status push arrives — do not seed from getStatus()
   // (stale playing+position:0 snapshots caused fake PLAYING with frozen 0:00).
   const isDesktopMode = desktopMpvSnap !== null;
+
+  // Desktop MPV MASTER → CONTROL live progress. The desktop's authoritative position lives in
+  // `desktopMpvSnap` (MPV IPC) but the browser-engine ticks that call `reportPosition` never run
+  // here, so `reportedPositionRef` stayed empty and CONTROL got no advancing position. Mirror the
+  // MPV position into the EXISTING pipeline: `reportPosition` only writes a ref, and the ~1s
+  // STATE_UPDATE interval + CONTROL 250ms interpolation are reused as-is (no new timer, no new WS
+  // message). MASTER-only + branch-connected + finite guards so a CONTROL desktop or a non-MPV
+  // runtime never reports — CONTROL must never become the authoritative position source.
+  useEffect(() => {
+    if (!isDesktopMode || !desktopMpvSnap) return;
+    if (!deviceCtx?.isBranchConnected || deviceCtx.deviceMode !== "MASTER") return;
+    const { position, duration } = desktopMpvSnap;
+    if (Number.isFinite(position) && Number.isFinite(duration) && duration > 0) {
+      deviceCtx.reportPosition(position, duration);
+    }
+  }, [desktopMpvSnap, isDesktopMode, deviceCtx]);
+
   // Per-device desktop player background preference (artwork default / video / static).
   const desktopBgMode = useDesktopBackgroundMode();
   /** Browser MASTER only — prewarm hidden YT containers + IFrame API; never on desktop MPV or CONTROL mirror. */
