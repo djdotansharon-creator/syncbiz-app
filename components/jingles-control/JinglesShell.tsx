@@ -30,6 +30,7 @@ import {
 } from "./seed-data";
 import { loadJingleSchedule, persistJingleSchedule, JINGLE_SCHEDULE_EVENT } from "./schedule-storage";
 import { useAudioPreview } from "./use-audio-preview";
+import { useDevicePlayer } from "@/lib/device-player-context";
 
 type State = {
   drawerOpen: boolean;
@@ -1061,6 +1062,21 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
   const isDesktop = useIsDesktopPlayer();
   const preview = useAudioPreview();
 
+  // Remote On-Air: a normal Web browser has no MPV bridge, so an On-Air trigger is routed
+  // through the EXISTING device→MASTER command path (cloud WS) as PLAY_INTERRUPT. Inside the
+  // Electron desktop the local bridge runs directly (unchanged). This never touches Preview.
+  const devicePlayer = useDevicePlayer();
+  const fireOnAir = useCallback(
+    (url: string) => {
+      if (isDesktop) {
+        triggerPlayInterrupt(url); // Electron desktop → existing local MPV interrupt (unchanged)
+      } else {
+        devicePlayer?.sendCommandToMaster("PLAY_INTERRUPT", { url }); // Web → cloud WS → branch MASTER
+      }
+    },
+    [isDesktop, devicePlayer],
+  );
+
   // Persist library to localStorage whenever it changes. The MP3 files
   // themselves are server-owned, so this only stores metadata — cheap and
   // resilient to reloads (including Electron app restarts).
@@ -1156,12 +1172,12 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
     if (!pad.url) return;
     if (pad.preRoll) {
       const bell = bellUrlFor(pad.bellStyle ?? "ding");
-      if (bell) triggerPlayInterrupt(bell);
+      if (bell) fireOnAir(bell);
     }
-    triggerPlayInterrupt(pad.url);
+    fireOnAir(pad.url);
     setFlashPadId(pad.id);
     setTimeout(() => setFlashPadId(null), 650);
-  }, []);
+  }, [fireOnAir]);
 
   const handlePadSave = useCallback(
     (
@@ -1267,10 +1283,10 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
     if (!resultCard?.url) return;
     if (resultCard.preRoll) {
       const bell = bellUrlFor(resultCard.bellStyle ?? "ding");
-      if (bell) triggerPlayInterrupt(bell);
+      if (bell) fireOnAir(bell);
     }
-    triggerPlayInterrupt(resultCard.url);
-  }, [resultCard]);
+    fireOnAir(resultCard.url);
+  }, [resultCard, fireOnAir]);
 
   const handleResultSaveToLibrary = useCallback(() => {
     if (!resultCard) return;

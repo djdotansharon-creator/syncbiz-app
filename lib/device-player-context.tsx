@@ -388,6 +388,25 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         // play — current playback is untouched. The updated playNextQueue is
         // echoed back to every CONTROL via the normal STATE_UPDATE.
         addPlayNextSources([payloadToUnifiedSource(cmd.payload.source as PlaySourcePayload)]);
+      } else if (command === "PLAY_INTERRUPT" && cmd.payload?.url) {
+        // Remote On-Air jingle/announcement executed on the branch MASTER. Duck / play-once /
+        // restore ALL live in the desktop PlaybackOrchestrator — we only hand it the URL via the
+        // EXISTING bridge. Streamer/browser MASTERs have no bridge → safe no-op + report (browser
+        // On-Air is a later phase). We never implement HTML5 ducking here.
+        const bridge =
+          typeof window !== "undefined"
+            ? (window as unknown as { syncbizDesktop?: { mpvPlayInterrupt?: (url: string) => Promise<void> } }).syncbizDesktop
+            : undefined;
+        if (bridge?.mpvPlayInterrupt) {
+          // MPV needs an absolute URL; resolve relative paths against THIS MASTER's origin.
+          const raw = cmd.payload.url;
+          const absolute = raw.startsWith("/") ? `${window.location.origin}${raw}` : raw;
+          void bridge.mpvPlayInterrupt(absolute);
+        } else {
+          console.warn(
+            "[SyncBiz] PLAY_INTERRUPT ignored — no desktop MPV bridge on this runtime (browser/streamer On-Air is a later phase)",
+          );
+        }
       }
     },
     [play, pause, stop, next, prev, playSource, addPlayNextSources, seekTo, setVolume, setShuffle, setAutoMix]

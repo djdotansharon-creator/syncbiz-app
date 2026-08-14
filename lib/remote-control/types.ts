@@ -19,7 +19,10 @@ export type RemoteCommand =
   | "SEEK"
   | "SET_VOLUME"
   | "SET_SHUFFLE"
-  | "SET_AUTOMIX";
+  | "SET_AUTOMIX"
+  // On-air announcement/jingle: duck current playback, play the given audio once, restore.
+  // Executed on the branch MASTER via the existing desktop bridge (mpvPlayInterrupt).
+  | "PLAY_INTERRUPT";
 
 export type ClientRole = "device" | "controller" | "owner_global";
 
@@ -180,6 +183,10 @@ export type ClientMessage =
         volume?: number;
         value?: boolean;
         trackIndex?: number;
+        /** PLAY_INTERRUPT: play a pre-roll bell before the main audio. */
+        preRoll?: boolean;
+        /** PLAY_INTERRUPT: bell style hint when preRoll is set. */
+        bellStyle?: string;
       };
     }
   | {
@@ -212,6 +219,10 @@ export type ServerMessage =
         volume?: number;
         value?: boolean;
         trackIndex?: number;
+        /** PLAY_INTERRUPT: play a pre-roll bell before the main audio. */
+        preRoll?: boolean;
+        /** PLAY_INTERRUPT: bell style hint when preRoll is set. */
+        bellStyle?: string;
       };
     }
   | {
