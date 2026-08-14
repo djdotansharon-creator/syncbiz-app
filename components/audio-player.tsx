@@ -3788,6 +3788,18 @@ export function AudioPlayer() {
       })()
     : null;
 
+  // ── CONTROL seek: optimistic local preview state (owns the display until reconciliation) ──
+  // A CONTROL drag previews locally and sends exactly ONE SEEK on release; the pending value
+  // owns the CONTROL timeline until the authoritative MASTER STATE_UPDATE lands (or a safety
+  // timeout fires). CONTROL-only — declared before displayPosition so the timeline can read it.
+  const [controlPendingSeek, setControlPendingSeek] = useState<number | null>(null);
+  const controlSeekTargetRef = useRef<number | null>(null);
+  const controlSeekReconcileRef = useRef<{ target: number; baselineAt: number | undefined } | null>(null);
+  const controlSeekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const msPositionAtRef = useRef<number | undefined>(undefined);
+  useEffect(() => { msPositionAtRef.current = ms?.positionAt; }, [ms?.positionAt]);
+  useEffect(() => () => { if (controlSeekTimeoutRef.current) clearTimeout(controlSeekTimeoutRef.current); }, []);
+
   // Interpolate CONTROL position between STATE_UPDATE snapshots using positionAt timestamp.
   const displayPosition = isDesktopMode
     ? (() => {
@@ -3803,6 +3815,7 @@ export function AudioPlayer() {
       })()
     : isControlMirror
       ? (() => {
+          if (controlPendingSeek != null) return controlPendingSeek;
           const pos = ms?.position;
           const at = ms?.positionAt;
           if (typeof pos !== "number" || !Number.isFinite(pos)) return Number.NaN;
@@ -4238,14 +4251,50 @@ export function AudioPlayer() {
         void (window as any).syncbizDesktop.mpvSeekTo((pct / 100) * displayDuration);
       } else if (isControlMirror) {
         if (displayDuration <= 0) return;
-        deviceCtx!.seekOrSend((pct / 100) * displayDuration);
+        // CONTROL: preview only — the single SEEK is sent on commit (mouseup/touchend/click end),
+        // NOT on every mousemove. The pending value owns the timeline until reconciliation.
+        const target = (pct / 100) * displayDuration;
+        controlSeekTargetRef.current = target;
+        setControlPendingSeek(target);
       } else {
         if (!canSeek || duration <= 0) return;
         seekTo((pct / 100) * duration);
       }
     },
-    [isDesktopMode, isControlMirror, deviceCtx, displayDuration, canSeek, duration, seekTo]
+    [isDesktopMode, isControlMirror, displayDuration, canSeek, duration, seekTo]
   );
+
+  // Commit a CONTROL seek: send exactly one authoritative SEEK, keep the pending value owning
+  // the display, and arm a ~2s safety timeout so it can never remain stuck.
+  const commitControlSeek = useCallback(() => {
+    if (!isControlMirror) return;
+    const target = controlSeekTargetRef.current;
+    if (target == null) return;
+    controlSeekTargetRef.current = null;
+    deviceCtx?.seekOrSend(target);
+    controlSeekReconcileRef.current = { target, baselineAt: msPositionAtRef.current };
+    if (controlSeekTimeoutRef.current) clearTimeout(controlSeekTimeoutRef.current);
+    controlSeekTimeoutRef.current = setTimeout(() => {
+      controlSeekReconcileRef.current = null;
+      controlSeekTimeoutRef.current = null;
+      setControlPendingSeek(null);
+    }, 2000);
+  }, [isControlMirror, deviceCtx]);
+
+  // Reconcile: when a fresh MASTER STATE_UPDATE lands near the requested target, clear the
+  // pending value and resume normal interpolation.
+  useEffect(() => {
+    const rec = controlSeekReconcileRef.current;
+    if (!rec) return;
+    const pos = ms?.position;
+    const at = ms?.positionAt;
+    if (typeof pos !== "number" || !Number.isFinite(pos)) return;
+    if (at !== rec.baselineAt && Math.abs(pos - rec.target) <= 3) {
+      if (controlSeekTimeoutRef.current) { clearTimeout(controlSeekTimeoutRef.current); controlSeekTimeoutRef.current = null; }
+      controlSeekReconcileRef.current = null;
+      setControlPendingSeek(null);
+    }
+  }, [ms?.position, ms?.positionAt]);
 
   const getPercentFromClientX = useCallback((clientX: number): number => {
     const el = timelineRef.current;
@@ -4290,7 +4339,8 @@ export function AudioPlayer() {
   const handleSeekEnd = useCallback(() => {
     isDraggingRef.current = false;
     isSeekingRef.current = false;
-  }, []);
+    commitControlSeek();
+  }, [commitControlSeek]);
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
