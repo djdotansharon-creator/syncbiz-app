@@ -11,15 +11,16 @@ import { canonicalYouTubeWatchUrlForPlayback } from "@/lib/playlist-utils";
 
 export function unifiedSourceToPayload(source: UnifiedSource): PlaySourcePayload {
   let url = (source.url ?? "").trim();
+  const playlistTracks = source.playlist ? getPlaylistTracks(source.playlist) : [];
   if (!url && source.playlist) {
-    for (const t of getPlaylistTracks(source.playlist)) {
+    for (const t of playlistTracks) {
       const raw = (t?.url ?? "").trim();
       if (!raw || raw.startsWith("local://")) continue;
       url = canonicalYouTubeWatchUrlForPlayback(raw);
       break;
     }
   }
-  return {
+  const payload: PlaySourcePayload = {
     id: source.id,
     title: source.title,
     genre: source.genre ?? "Mixed",
@@ -28,4 +29,18 @@ export function unifiedSourceToPayload(source: UnifiedSource): PlaySourcePayload
     url,
     origin: source.origin,
   };
+  // Playlist sources: carry the playlist id + the FULL ordered track snapshot (existing
+  // SessionTrackMirror shape) so the MASTER rebuilds the complete queue rather than a 1-track
+  // shell. Single-source (non-playlist) payloads are unchanged — no extra fields added.
+  if (source.playlist?.id && playlistTracks.length > 0) {
+    payload.playlistId = source.playlist.id;
+    payload.sessionTracks = playlistTracks.map((t) => ({
+      id: t.id,
+      title: t.title ?? t.name,
+      cover: t.cover ?? null,
+      ...(typeof t.durationSeconds === "number" ? { durationSeconds: t.durationSeconds } : {}),
+      ...(t.url ? { url: t.url } : {}),
+    }));
+  }
+  return payload;
 }
