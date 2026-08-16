@@ -746,16 +746,48 @@ function loadLibrary(): JingleAsset[] {
   }
 }
 
-function persistLibrary(assets: JingleAsset[]): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    localStorage.setItem(
-      LIBRARY_STORAGE_KEY,
-      JSON.stringify(assets.slice(0, LIBRARY_MAX_ITEMS)),
-    );
-  } catch {
-    /* quota / unavailable — ignore */
-  }
+// ── Cloud Jingle Library (workspace-authoritative) ──────────────────────────
+// The saved-jingle list now lives in SyncBiz Cloud (GET/POST /api/jingles/library), so Desktop,
+// Browser CONTROL and Mobile all read the SAME list. localStorage (LIBRARY_STORAGE_KEY) is kept
+// untouched as a one-time import source + read-only fallback if the cloud is unreachable.
+type CloudJingle = { id: string; title: string; url: string; script: string; voiceId: string; durationSec: number | null; createdAt: string };
+
+function durationLabelToSec(label?: string): number | null {
+  if (!label) return null;
+  const m = label.match(/^(\d+):(\d{1,2})$/);
+  return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+}
+function secToDurationLabel(sec?: number | null): string {
+  if (typeof sec !== "number" || !Number.isFinite(sec) || sec < 0) return "—";
+  return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
+}
+function cloudItemToAsset(it: CloudJingle): JingleAsset {
+  return {
+    id: it.id,
+    title: it.title,
+    script: it.script ?? "",
+    url: it.url,
+    kind: "announcement",
+    durationLabel: secToDurationLabel(it.durationSec),
+    voiceId: it.voiceId ?? "",
+    preRoll: false,
+  };
+}
+async function fetchCloudLibrary(): Promise<JingleAsset[]> {
+  const res = await fetch("/api/jingles/library", { cache: "no-store" });
+  if (!res.ok) throw new Error(`library GET ${res.status}`);
+  const data = (await res.json()) as { items?: CloudJingle[] };
+  return (data.items ?? []).map(cloudItemToAsset).slice(0, LIBRARY_MAX_ITEMS);
+}
+async function saveJingleToCloud(a: JingleAsset): Promise<JingleAsset> {
+  const res = await fetch("/api/jingles/library", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: a.title, url: a.url, voiceId: a.voiceId, script: a.script, durationSec: durationLabelToSec(a.durationLabel) }),
+  });
+  if (!res.ok) throw new Error(`library POST ${res.status}`);
+  const data = (await res.json()) as { item: CloudJingle };
+  return cloudItemToAsset(data.item);
 }
 
 function triggerPlayInterrupt(url: string): void {
@@ -1077,12 +1109,34 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
     [isDesktop, devicePlayer],
   );
 
-  // Persist library to localStorage whenever it changes. The MP3 files
-  // themselves are server-owned, so this only stores metadata — cheap and
-  // resilient to reloads (including Electron app restarts).
+  // Load the workspace-authoritative cloud library on open. localStorage is only a fallback +
+  // a one-time import source — it is never overwritten here, so existing jingles are preserved.
+  const cloudLibLoadedRef = useRef(false);
   useEffect(() => {
-    persistLibrary(savedAssets);
-  }, [savedAssets]);
+    if (cloudLibLoadedRef.current) return;
+    cloudLibLoadedRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        let cloud = await fetchCloudLibrary();
+        // One-time import: push local jingles whose audio URL isn't already in the cloud. The POST
+        // dedupes by audioUrl, so reopening the client never creates duplicates.
+        const cloudUrls = new Set(cloud.map((a) => a.url));
+        const localOnly = loadLibrary().filter((a) => a.url && !cloudUrls.has(a.url));
+        if (localOnly.length > 0) {
+          for (const a of localOnly) {
+            try { await saveJingleToCloud(a); } catch { /* best-effort per item */ }
+          }
+          try { cloud = await fetchCloudLibrary(); } catch { /* keep pre-import list */ }
+        }
+        if (!cancelled) setSavedAssets(cloud);
+      } catch {
+        // Cloud unreachable: fall back to the local list; never blank out existing jingles.
+        if (!cancelled) setSavedAssets(loadLibrary());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Persist jingle schedule items (payload + timing) so the root-level
   // auto-player can fire them even when this drawer is closed.
@@ -1288,11 +1342,22 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
     fireOnAir(resultCard.url);
   }, [resultCard, fireOnAir]);
 
-  const handleResultSaveToLibrary = useCallback(() => {
+  const handleResultSaveToLibrary = useCallback(async () => {
     if (!resultCard) return;
-    setSavedAssets((prev) =>
-      prev.some((a) => a.id === resultCard.id) ? prev : [resultCard, ...prev],
-    );
+    try {
+      const saved = await saveJingleToCloud(resultCard);
+      // Cloud is authoritative — refetch so this client shows the same list every other client sees.
+      try {
+        setSavedAssets(await fetchCloudLibrary());
+      } catch {
+        // Save succeeded but the refetch failed — show the saved item optimistically (dedupe by url).
+        setSavedAssets((prev) => (prev.some((a) => a.url === saved.url) ? prev : [saved, ...prev]));
+      }
+      setGenerateError(null);
+    } catch {
+      // Never claim a successful save. Surface the failure; keep the transient result for retry.
+      setGenerateError("Couldn't save to the cloud library — check your connection and try again.");
+    }
   }, [resultCard]);
 
   const editingPad = editPadId ? pads.find((p) => p.id === editPadId) ?? null : null;

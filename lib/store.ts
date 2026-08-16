@@ -477,8 +477,11 @@ export const db = {
   // ─── ANNOUNCEMENTS ────────────────────────────────────────────────────────
 
   async getAnnouncements(accountId?: string): Promise<Announcement[]> {
-    const where = accountId ? { workspaceId: (await resolveWorkspaceId(accountId)) ?? "" } : {};
-    const rows = await prisma.announcement.findMany({ where });
+    const base = accountId ? { workspaceId: (await resolveWorkspaceId(accountId)) ?? "" } : {};
+    // Exclude cloud Jingle Library rows (announcementType "jingle") — they share the Announcement
+    // table but belong to the Jingles feature, not the scheduled-announcements list. `NOT` includes
+    // rows whose announcementType is null, so existing announcements are unaffected.
+    const rows = await prisma.announcement.findMany({ where: { ...base, NOT: { announcementType: "jingle" } } });
     return rows.map(rowToAnnouncement);
   },
 
