@@ -479,9 +479,13 @@ export const db = {
   async getAnnouncements(accountId?: string): Promise<Announcement[]> {
     const base = accountId ? { workspaceId: (await resolveWorkspaceId(accountId)) ?? "" } : {};
     // Exclude cloud Jingle Library rows (announcementType "jingle") — they share the Announcement
-    // table but belong to the Jingles feature, not the scheduled-announcements list. `NOT` includes
-    // rows whose announcementType is null, so existing announcements are unaffected.
-    const rows = await prisma.announcement.findMany({ where: { ...base, NOT: { announcementType: "jingle" } } });
+    // table but belong to the Jingles feature, not the scheduled-announcements list. An explicit
+    // NULL-inclusive OR is required: under PostgreSQL three-valued logic `NOT (type = 'jingle')`
+    // drops rows where announcementType IS NULL, which is the shape every announcement created via
+    // /api/announcements has (addAnnouncement stores `type ?? null`).
+    const rows = await prisma.announcement.findMany({
+      where: { ...base, OR: [{ announcementType: null }, { announcementType: { not: "jingle" } }] },
+    });
     return rows.map(rowToAnnouncement);
   },
 

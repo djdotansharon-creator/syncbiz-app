@@ -19,6 +19,37 @@ export const dynamic = "force-dynamic";
 
 const JINGLE_TYPE = "jingle";
 
+// Every jingle MP3 is written by the generate route / saveMp3, both of which use crypto.randomUUID()
+// and expose it at `/api/jingles/audio/<uuid>`. A jingle url must resolve to exactly that internal
+// audio path — either relative, or absolute against the SAME origin as this request. Anything else
+// (external origin, javascript:/data:/file:, arbitrary path) is rejected so the library can never
+// store — or later hand to playback — an arbitrary URL.
+const AUDIO_PATH_RE =
+  /^\/api\/jingles\/audio\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function requestHost(req: Request): string | null {
+  const h = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  return h ? h.split(",")[0].trim().toLowerCase() : null;
+}
+
+function isLegitJingleUrl(url: string, req: Request): boolean {
+  // Relative internal path (the shape the generate route returns). Handled first because a bare
+  // path has no base for `new URL`. Anchored regex also rejects "//evil.com/..." (protocol-relative)
+  // and any query/fragment/traversal.
+  if (url.startsWith("/")) return AUDIO_PATH_RE.test(url);
+  // Absolute URL: must be http(s), same host as the current request, and the audio path.
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false; // reject javascript:/data:/file:
+  const host = requestHost(req);
+  if (!host || u.host.toLowerCase() !== host) return false; // reject external origin
+  return AUDIO_PATH_RE.test(u.pathname);
+}
+
 type JingleLibraryItem = {
   id: string;
   title: string;
@@ -71,6 +102,9 @@ export async function POST(req: Request) {
   const url = typeof body.url === "string" ? body.url.trim() : "";
   if (!title || !url) {
     return NextResponse.json({ error: "title and url are required" }, { status: 400 });
+  }
+  if (!isLegitJingleUrl(url, req)) {
+    return NextResponse.json({ error: "url must be a SyncBiz jingle audio path" }, { status: 400 });
   }
   const voiceId = typeof body.voiceId === "string" && body.voiceId ? body.voiceId : null;
   const script = typeof body.script === "string" ? body.script : "";
