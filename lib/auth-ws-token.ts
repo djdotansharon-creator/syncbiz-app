@@ -29,26 +29,48 @@ function signPayload(payloadB64: string): string {
   return createHmac("sha256", getSecret()).update(payloadB64).digest("base64url");
 }
 
+/**
+ * Optional authoritative branch claims, computed server-side (never from the client) and embedded
+ * additively in the token so the DB-less WS server can authorize the requested branch. Omitting them
+ * (or minting via the legacy path) yields a token with no branch claim → the WS server restricts it
+ * to "default" only.
+ */
+export type WsTokenClaims = {
+  workspaceId?: string | null;
+  authorizedBranches?: string[];
+};
+
 function mintToken(
   userId: string,
   purpose: typeof PURPOSE_WS_REGISTER | typeof PURPOSE_DESKTOP_ACCESS,
   ttlSec: number,
+  claims?: WsTokenClaims,
 ): string {
   const now = Math.floor(Date.now() / 1000);
-  const payload = {
+  const payload: {
+    purpose: string;
+    userId: string;
+    iat: number;
+    exp: number;
+    workspaceId?: string;
+    authorizedBranches?: string[];
+  } = {
     purpose,
     userId: userId.trim(),
     iat: now,
     exp: now + ttlSec,
   };
+  // Additive only — legacy consumers ignore unknown fields.
+  if (claims?.workspaceId) payload.workspaceId = claims.workspaceId;
+  if (Array.isArray(claims?.authorizedBranches)) payload.authorizedBranches = claims!.authorizedBranches;
   const payloadB64 = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
   const sig = signPayload(payloadB64);
   return `${payloadB64}.${sig}`;
 }
 
 /** Create short-lived token for WS REGISTER. Minted by GET /api/auth/ws-token. */
-export function createWsToken(userId: string): string {
-  return mintToken(userId, PURPOSE_WS_REGISTER, 60);
+export function createWsToken(userId: string, claims?: WsTokenClaims): string {
+  return mintToken(userId, PURPOSE_WS_REGISTER, 60, claims);
 }
 
 /**
@@ -60,8 +82,8 @@ export function getDesktopTokenTtlSeconds(): number {
   return Number.isFinite(raw) && raw > 60 && raw <= MAX_DESKTOP_TTL_SEC ? Math.floor(raw) : DEFAULT_DESKTOP_TTL_SEC;
 }
 
-export function createDesktopAccessToken(userId: string): string {
-  return mintToken(userId, PURPOSE_DESKTOP_ACCESS, getDesktopTokenTtlSeconds());
+export function createDesktopAccessToken(userId: string, claims?: WsTokenClaims): string {
+  return mintToken(userId, PURPOSE_DESKTOP_ACCESS, getDesktopTokenTtlSeconds(), claims);
 }
 
 /**

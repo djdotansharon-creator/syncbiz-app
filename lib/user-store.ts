@@ -1160,6 +1160,35 @@ export async function getBranchesForUser(userId: string, workspaceId?: string | 
   return getAssignedBranchIds(userId, workspaceId);
 }
 
+/**
+ * Concrete list of branch IDs a user is authorized to operate, for embedding in a WS/desktop token
+ * so the DB-less WS server can validate REGISTER/target branchId without querying Prisma.
+ *
+ * - TENANT_OWNER / TENANT_ADMIN → every real Branch row in their workspace (the `*` sentinel is
+ *   expanded here to concrete ids, since the WS server cannot expand it).
+ * - BRANCH_USER → their explicit UserBranchAssignment branch ids.
+ * - `DEFAULT_BRANCH_ID` is always unioned in during the branch-identity transition: every client
+ *   still REGISTERs "default" in this phase, so it must always pass. This is intentionally broad
+ *   for "default" only (a per-user namespace keyed by userId in the lease), never for other branches.
+ */
+export async function getAuthorizedBranchIds(
+  userId: string,
+  workspaceId?: string | null,
+): Promise<string[]> {
+  const ws = workspaceId ?? (await getUserById(userId))?.tenantId ?? null;
+  const assigned = await getAssignedBranchIds(userId, ws);
+  let ids: string[];
+  if (assigned.includes(ALL_BRANCHES_SENTINEL)) {
+    const rows = ws
+      ? await prisma.branch.findMany({ where: { workspaceId: ws }, select: { id: true } })
+      : [];
+    ids = rows.map((r) => r.id);
+  } else {
+    ids = assigned;
+  }
+  return [...new Set([...ids, DEFAULT_BRANCH_ID])];
+}
+
 export async function hasBranchAccess(
   userId: string,
   branchId: string,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateCredentialsAsync } from "@/lib/auth";
 import { getOrCreateUserByEmail } from "@/lib/user-store";
 import { createDesktopAccessToken, getDesktopTokenTtlSeconds } from "@/lib/auth-ws-token";
+import { getAuthorizedBranchIds } from "@/lib/user-store";
 import { emitEvent, EVENT_TYPES } from "@/lib/analytics-boundary";
 
 /**
@@ -25,7 +26,9 @@ export async function POST(req: NextRequest) {
     emitEvent(EVENT_TYPES.USER_LOGIN, { userId: user.id, email: user.email, via: "desktop_token" });
 
     const ttlSec = getDesktopTokenTtlSeconds();
-    const token = createDesktopAccessToken(user.id);
+    // Authoritative branch claim, computed from the user's DB authorization — never from the client.
+    const authorizedBranches = await getAuthorizedBranchIds(user.id, user.tenantId);
+    const token = createDesktopAccessToken(user.id, { workspaceId: user.tenantId, authorizedBranches });
     const expiresAt = new Date(Date.now() + ttlSec * 1000).toISOString();
 
     return NextResponse.json({ token, expiresAt, expiresInSec: ttlSec });

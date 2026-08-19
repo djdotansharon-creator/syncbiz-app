@@ -53,7 +53,6 @@ if (!WS_SECRET || WS_SECRET.length < 16) {
 
 const PORT = Number(process.env.PORT) || 3001;
 const REGISTER_TIMEOUT_MS = 5000;
-const ALLOWED_BRANCH_IDS = ["default"] as const;
 
 /** Heartbeat: ping interval (ms). Default 30s. */
 const HEARTBEAT_PING_INTERVAL_MS = Number(process.env.HEARTBEAT_PING_INTERVAL_MS) || 30_000;
@@ -88,7 +87,7 @@ type DeviceConnection = {
 const devices = new Map<string, DeviceConnection>();
 type ControllerEntry = { ws: import("ws").WebSocket; userId: string; branchId: string };
 const controllers: ControllerEntry[] = [];
-type OwnerEntry = { ws: import("ws").WebSocket; userId: string };
+type OwnerEntry = { ws: import("ws").WebSocket; userId: string; authorizedBranches: string[] | null };
 const owners: OwnerEntry[] = [];
 
 /** Per-socket heartbeat: last pong timestamp. Used to detect stale connections. */
@@ -533,9 +532,16 @@ function sendBranchListToOwner(ws: import("ws").WebSocket, userId: string) {
   if (ws.readyState === 1) ws.send(JSON.stringify(msg));
 }
 
-function isBranchAuthorized(branchId: string): boolean {
+/**
+ * Phase 1 branch authorization: a REGISTER/target branchId is allowed only if it is in the token's
+ * authoritative `authorizedBranches` claim (minted from DB authorization by the app layer). A legacy
+ * token (claim === null) is restricted to the default branch only — a missing claim is NEVER treated
+ * as "all branches".
+ */
+function isBranchAllowed(branchId: string, authorizedBranches: string[] | null): boolean {
   const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
-  return (ALLOWED_BRANCH_IDS as unknown as string[]).includes(normalized);
+  if (authorizedBranches === null) return normalized === DEFAULT_BRANCH_ID;
+  return authorizedBranches.includes(normalized);
 }
 
 function validateRegisterPayload(
@@ -551,7 +557,7 @@ function validateRegisterPayload(
   const authToken = typeof m.authToken === "string" ? m.authToken.trim() : "";
   if (!authToken) return { ok: false, error: "Authentication required" };
   const branchId = (typeof m.branchId === "string" ? m.branchId : "").trim() || DEFAULT_BRANCH_ID;
-  if (!isBranchAuthorized(branchId)) return { ok: false, error: "Branch not authorized" };
+  // Branch authorization is deferred to after token verification (needs the token's branch claim).
   if (role === "device") {
     const deviceId = typeof m.deviceId === "string" ? m.deviceId.trim() : "";
     if (!deviceId) return { ok: false, error: "deviceId required for device registration" };
@@ -668,17 +674,28 @@ wss.on("connection", (ws) => {
         ws.close(4004, validation.error);
         return;
       }
-      const userId = verifyWsToken(validation.authToken);
-      if (!userId) {
+      const auth = verifyWsToken(validation.authToken);
+      if (!auth) {
         clearTimeout(timeout);
         ws.send(JSON.stringify({ type: "ERROR", message: "Invalid or expired token" } as ServerMessage));
         ws.close(4005, "Invalid token");
         return;
       }
+      const userId = auth.userId;
+      const authorizedBranches = auth.authorizedBranches;
       registered = true;
       clearTimeout(timeout);
       role = validation.role as "device" | "controller" | "owner_global";
       const branchId = validation.branchId;
+
+      // Phase 1 branch authorization: the requested REGISTER branch must be in the token's claim.
+      // owner_global carries no register branch (it targets a branch per-COMMAND), so it is
+      // validated in the COMMAND handler instead.
+      if (role !== "owner_global" && !isBranchAllowed(branchId, authorizedBranches)) {
+        ws.send(JSON.stringify({ type: "ERROR", message: "Branch not authorized" } as ServerMessage));
+        ws.close(4004, "Branch not authorized");
+        return;
+      }
 
       if (role === "owner_global") {
         const regIntent = sanitizeRegistrationIntent(
@@ -687,7 +704,7 @@ wss.on("connection", (ws) => {
         if (process.env.NODE_ENV === "development" && regIntent) {
           console.info("[SyncBiz WS] register owner_global intent", regIntent);
         }
-        owners.push({ ws, userId });
+        owners.push({ ws, userId, authorizedBranches });
         ws.send(JSON.stringify({ type: "REGISTERED" } as ServerMessage));
         sendBranchListToOwner(ws, userId);
         console.log("[SyncBiz WS] register owner", { userId });
@@ -1163,6 +1180,11 @@ wss.on("connection", (ws) => {
         const owner = owners.find((o) => o.ws === ws);
         const userId = owner?.userId ?? "";
         const targetBranchId = (msg.targetBranchId ?? "").trim() || DEFAULT_BRANCH_ID;
+        // Phase 1: an owner may only target a branch present in its token claim.
+        if (!owner || !isBranchAllowed(targetBranchId, owner.authorizedBranches)) {
+          ws.send(JSON.stringify({ type: "ERROR", message: "Branch not authorized" } as ServerMessage));
+          return;
+        }
         masterId = getMasterForBranch(userId, targetBranchId);
       } else {
         const userId = role === "controller"
