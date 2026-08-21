@@ -28,6 +28,8 @@ import {
   MOCK_SCHEDULE_ITEMS,
   SAMPLER_PADS,
 } from "./seed-data";
+import { VOICE_PRESETS_BY_LANG } from "./voice-presets";
+import { fetchCloudPads, savePadToCloud, padsFromCloud } from "./cloud-pads";
 import { loadJingleSchedule, persistJingleSchedule, JINGLE_SCHEDULE_EVENT } from "./schedule-storage";
 import { useAudioPreview } from "./use-audio-preview";
 import { useDevicePlayer } from "@/lib/device-player-context";
@@ -58,24 +60,8 @@ function hid(): string {
   return `jc-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-// ─── Voice presets ────────────────────────────────────────────────────────────
-// Curated per language. All IDs confirmed on ElevenLabs' shared library.
-// The multilingual model `eleven_multilingual_v2` handles Hebrew via these voices.
-const VOICE_PRESETS_BY_LANG: Record<JingleLanguage, readonly { label: string; voiceId: string }[]> = {
-  en: [
-    { label: "Announcer Male",   voiceId: "JBFqnCBsd6RMkjVDRZzb" }, // George
-    { label: "Announcer Female", voiceId: "EXAVITQu4vr4xnSDxMaL" }, // Sarah
-    { label: "Energetic Male",   voiceId: "TX3LPaxmHKxFdv7VOQHJ" }, // Liam
-    { label: "Energetic Female", voiceId: "cgSgspJ2msm6clMCkdW9" }, // Jessica
-  ],
-  he: [
-    // Professional Hebrew voices (ElevenLabs account, generated) — routed through
-    // eleven_v3 by a per-voice override in /api/jingles/generate. Labels are
-    // customer-facing only; the voice IDs / provider are never shown.
-    { label: "Professional Announcer", voiceId: "JXH3lbmtWF1cUL9JEL4S" },
-    { label: "Radio Announcer",        voiceId: "9sc3z1AF9BP2mmepHnXH" },
-  ],
-};
+// Voice presets are the shared source of truth in ./voice-presets (imported above) so Mobile
+// mirrors Desktop exactly rather than defining a parallel list.
 
 /** Synthesized bell presets served from /api/jingles/bell/[style]. `off` = no pre-roll. */
 const BELL_PRESETS: readonly { value: JingleBellStyle; label: string }[] = [
@@ -1138,6 +1124,35 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
     return () => { cancelled = true; };
   }, []);
 
+  // Load the shared cloud pads on open (same pattern as the library). localStorage is only a
+  // one-time import source + fallback — Desktop and Mobile read/write the SAME pads via the cloud.
+  const cloudPadsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (cloudPadsLoadedRef.current) return;
+    cloudPadsLoadedRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        let cloud = await fetchCloudPads();
+        // One-time import: push local pad ASSIGNMENTS (url set) not yet in the cloud. POST upserts
+        // by padId, so reopening never duplicates.
+        const cloudIds = new Set(cloud.map((c) => c.padId));
+        const localOnly = loadPads().filter((p) => p.url && p.url.trim() && !cloudIds.has(p.id));
+        if (localOnly.length > 0) {
+          for (const p of localOnly) {
+            try { await savePadToCloud(p); } catch { /* best-effort per pad */ }
+          }
+          try { cloud = await fetchCloudPads(); } catch { /* keep pre-import list */ }
+        }
+        if (!cancelled) setPads(padsFromCloud(cloud));
+      } catch {
+        // Cloud unreachable: keep the local pads; never blank the board.
+        if (!cancelled) setPads(loadPads());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Persist jingle schedule items (payload + timing) so the root-level
   // auto-player can fire them even when this drawer is closed.
   useEffect(() => {
@@ -1240,7 +1255,9 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
     ) => {
       setPads((prev) => {
         const next = prev.map((p) => (p.id === padId ? { ...p, ...patch } : p));
-        persistPads(next);
+        persistPads(next); // localStorage fallback
+        const changed = next.find((p) => p.id === padId);
+        if (changed) void savePadToCloud(changed).catch(() => {}); // shared cloud (best-effort)
         return next;
       });
       // Route the pad's schedule into the shared engine (upsert when a time + audio
@@ -1269,7 +1286,9 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
               }
             : p,
         );
-        persistPads(next);
+        persistPads(next); // localStorage fallback
+        const changed = next.find((p) => p.id === padId);
+        if (changed) void savePadToCloud(changed).catch(() => {}); // shared cloud (best-effort)
         return next;
       });
       // Safety: a reassigned pad must not keep an old schedule that would fire the

@@ -105,11 +105,11 @@ export default function MobileHomePage() {
                   icon={<CalendarIcon />}
                 />
                 <MobileBrowseTile
-                  label="Create Announcement"
-                  subtitle="Record a professional announcement"
-                  href="/mobile/announcer"
-                  gradient="from-amber-500 to-orange-700"
-                  icon={<MicIcon />}
+                  label="Jingles"
+                  subtitle="Type or record → generate"
+                  href="/mobile/jingles"
+                  gradient="from-rose-500 to-pink-700"
+                  icon={<JingleIcon />}
                 />
               </div>
             </section>
@@ -154,12 +154,11 @@ function CalendarIcon() {
   );
 }
 
-function MicIcon() {
+function JingleIcon() {
   return (
     <svg className="h-14 w-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0" />
-      <path d="M12 18v3" />
+      <path d="M11 5 6 9H3v6h3l5 4z" />
+      <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
     </svg>
   );
 }

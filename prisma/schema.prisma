@@ -933,6 +933,27 @@ model AnnouncementChannel {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
+/// Cloud Quick Pads — the shared per-branch pad board. One row per (workspace, branch, pad slot),
+/// so Desktop and Mobile see and edit the SAME 8 canonical pads instead of per-device localStorage.
+/// Intentionally FK-free (branchId is a plain string, matching the "default" single-branch V1); the
+/// pad's audio url is denormalized so playback never needs a DB lookup.
+model JinglePadAssignment {
+  id          String   @id @default(uuid())
+  workspaceId String
+  branchId    String   @default("default")
+  padId       String
+  label       String   @default("")
+  url         String   @default("")
+  color       String?
+  bellStyle   String?
+  preRoll     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, branchId, padId])
+  @@index([workspaceId, branchId])
+}
+
 // ─────────────────────────────────────────────
 // AI DJ CREATOR
 // ─────────────────────────────────────────────
