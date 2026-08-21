@@ -1415,6 +1415,33 @@ function SourcesManagerInner({
     [resolveSourcesForSelection, setQueue, playSourceOverride, playSource]
   );
 
+  // Collection cards support BOTH single-click (drill in / open) and double-click (play).
+  // In the browser the event order is click → click → dblclick, so an immediate `setSelection`
+  // on the first click swaps the grid out from under the card and the dblclick is lost. Mirror
+  // the SourceCard pattern: defer the open by a short delay, and let a double-click cancel that
+  // pending open before it fires. Drag/drop is unaffected (dragstart never produces a click).
+  const collectionOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleCollectionCardOpen = useCallback(
+    (subtype: LibraryCollectionSubtype, key: string) => {
+      if (collectionOpenTimerRef.current) clearTimeout(collectionOpenTimerRef.current);
+      collectionOpenTimerRef.current = setTimeout(() => {
+        collectionOpenTimerRef.current = null;
+        setSelection({ type: "collection_container", subtype, key });
+      }, 220);
+    },
+    [setSelection]
+  );
+  const handleCollectionCardPlay = useCallback(
+    (subtype: LibraryCollectionSubtype, key: string) => {
+      if (collectionOpenTimerRef.current) {
+        clearTimeout(collectionOpenTimerRef.current);
+        collectionOpenTimerRef.current = null;
+      }
+      playCollectionSelection(subtype, key);
+    },
+    [playCollectionSelection]
+  );
+
   const handleDjHubPlaylistDragStart = useCallback(
     (e: DragEvent<HTMLElement>, s: UnifiedSource) => {
       const key = `syncbiz:${s.id}`;
@@ -3130,8 +3157,8 @@ function SourcesManagerInner({
                               }
                             : undefined
                         }
-                        onDoubleClick={() => playCollectionSelection(c.subtype, c.key)}
-                        onClick={() => setSelection({ type: "collection_container", subtype: c.subtype, key: c.key })}
+                        onDoubleClick={() => handleCollectionCardPlay(c.subtype, c.key)}
+                        onClick={() => handleCollectionCardOpen(c.subtype, c.key)}
                         aria-busy={c.subtype === "external_playlist" && externalPlaylistDropBusyKey === c.key}
                         className={`library-source-card flex h-[252px] w-full flex-col overflow-hidden rounded-2xl p-4 text-left ${
                           c.subtype === "external_playlist" && externalPlaylistDropBusyKey === c.key ? "opacity-60" : ""
@@ -3215,9 +3242,8 @@ function SourcesManagerInner({
                         rowProps={{
                           "aria-busy": isExternalDropBusy ? true : undefined,
                           className: isExternalDropBusy ? "opacity-60" : undefined,
-                          onClick: () =>
-                            setSelection({ type: "collection_container", subtype: c.subtype, key: c.key }),
-                          onDoubleClick: () => playCollectionSelection(c.subtype, c.key),
+                          onClick: () => handleCollectionCardOpen(c.subtype, c.key),
+                          onDoubleClick: () => handleCollectionCardPlay(c.subtype, c.key),
                           onDragStart: (e) => {
                             const sourcesForDrop =
                               c.subtype === "external_playlist" || c.subtype === "syncbiz_playlist"
@@ -3585,7 +3611,14 @@ function SourcesManagerInner({
                       </h3>
                       <span className="library-card-meta text-xs tabular-nums">{visibleSources.length}</span>
                     </div>
-                    {viewMode === "grid" ? (
+                    {selection.type === "collection_container" && visibleSources.length === 0 ? (
+                      <div className="library-list-shell rounded-2xl px-6 py-12 text-center">
+                        <p className="library-empty-text text-sm">This collection has no tracks yet.</p>
+                        <p className="library-text-subtitle mt-1 text-xs">
+                          Add tracks to see them here — your library is unchanged.
+                        </p>
+                      </div>
+                    ) : viewMode === "grid" ? (
                       <div className={LIBRARY_CARD_GRID_CLASS}>
                         {visibleSources.map((item) => (
                           <div
