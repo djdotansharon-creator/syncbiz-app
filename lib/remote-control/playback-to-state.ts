@@ -10,6 +10,17 @@ import { derivePlaylistTrackCoverArt, derivePlaylistUnifiedCoverArt, effectivePl
 import { resolvePlaylistOriginBadgeKey } from "@/lib/deck-source-badge";
 import { getPlaylistTracks, type Playlist, type PlaylistTrack } from "@/lib/playlist-types";
 import { isPlayNextSourceId } from "@/lib/play-next";
+import { isValidLocalFilePlaybackPath } from "@/lib/url-validation";
+
+/**
+ * A track url that must NEVER leave this device over WS: an absolute local filesystem path,
+ * a `file:` URI, or a `local://` reference. Remote http(s)/YouTube urls are NOT local.
+ */
+function isLocalOnlyTrackUrl(u: string | null | undefined): boolean {
+  const s = (u ?? "").trim();
+  if (!s) return false;
+  return s.startsWith("local://") || isValidLocalFilePlaybackPath(s);
+}
 
 /** Session + Play Next rows mirrored to CONTROL Live Queue. */
 export type PlaybackSessionMirrorInput = {
@@ -23,17 +34,26 @@ export type PlaybackSessionMirrorInput = {
 };
 
 function mirrorSessionTracksFromRows(tracks: PlaylistTrack[]): SessionTrackMirror[] {
-  return tracks.map((t) => ({
-    id: t.id,
-    title: t.name ?? (t as { title?: string }).title ?? t.url ?? "Track",
-    cover: derivePlaylistTrackCoverArt({
-      cover: t.cover,
-      url: t.url ?? "",
-      type: t.type,
-    }),
-    durationSeconds: (t as { durationSeconds?: number }).durationSeconds,
-    url: t.url,
-  }));
+  return tracks.map((t) => {
+    // Local filesystem paths / local:// refs NEVER leave the device over WS — they can expose the
+    // OS username, folder layout, and cache location. CONTROL doesn't need the url for local tracks
+    // (playback is index/command-driven); only remote http(s)/YouTube urls are mirrored.
+    const local = isLocalOnlyTrackUrl(t.url);
+    const rawTitle = t.name ?? (t as { title?: string }).title ?? null;
+    return {
+      id: t.id,
+      // Never let a local path land in the title fallback either.
+      title: rawTitle ?? (local ? "Track" : t.url ?? "Track"),
+      cover: derivePlaylistTrackCoverArt({
+        cover: t.cover,
+        url: local ? "" : t.url ?? "",
+        type: t.type,
+      }),
+      durationSeconds: (t as { durationSeconds?: number }).durationSeconds,
+      // Omit url for local tracks (SessionTrackMirror.url is optional); keep remote urls intact.
+      ...(local ? {} : { url: t.url }),
+    };
+  });
 }
 
 function buildSessionMirrorFields(

@@ -8,14 +8,27 @@ import type { PlaySourcePayload } from "./types";
 import type { UnifiedSource } from "@/lib/source-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { canonicalYouTubeWatchUrlForPlayback } from "@/lib/playlist-utils";
+import { isValidLocalFilePlaybackPath } from "@/lib/url-validation";
+
+/**
+ * A track url that must NEVER leave this device over WS (absolute local filesystem path, `file:`
+ * URI, or `local://` ref). A remote MASTER can't play another device's local path anyway, so
+ * stripping it is fail-safe and does not change remote http(s)/YouTube behavior.
+ */
+function isLocalOnlyTrackUrl(u: string | null | undefined): boolean {
+  const s = (u ?? "").trim();
+  if (!s) return false;
+  return s.startsWith("local://") || isValidLocalFilePlaybackPath(s);
+}
 
 export function unifiedSourceToPayload(source: UnifiedSource): PlaySourcePayload {
   let url = (source.url ?? "").trim();
+  if (isLocalOnlyTrackUrl(url)) url = ""; // never send a local filesystem path as the top-level url
   const playlistTracks = source.playlist ? getPlaylistTracks(source.playlist) : [];
   if (!url && source.playlist) {
     for (const t of playlistTracks) {
       const raw = (t?.url ?? "").trim();
-      if (!raw || raw.startsWith("local://")) continue;
+      if (!raw || isLocalOnlyTrackUrl(raw)) continue; // skip ALL local urls, not just local://
       url = canonicalYouTubeWatchUrlForPlayback(raw);
       break;
     }
@@ -39,7 +52,7 @@ export function unifiedSourceToPayload(source: UnifiedSource): PlaySourcePayload
       title: t.title ?? t.name,
       cover: t.cover ?? null,
       ...(typeof t.durationSeconds === "number" ? { durationSeconds: t.durationSeconds } : {}),
-      ...(t.url ? { url: t.url } : {}),
+      ...(t.url && !isLocalOnlyTrackUrl(t.url) ? { url: t.url } : {}), // omit local paths on the wire
     }));
   }
   return payload;
