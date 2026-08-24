@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
 import { VOICE_PRESETS_BY_LANG } from "@/components/jingles-control/voice-presets";
 import { fetchCloudPads, padsFromCloud, savePadToCloud } from "@/components/jingles-control/cloud-pads";
-import type { SamplerPadItem } from "@/components/jingles-control/types";
+import type { SamplerPadItem, JingleBellStyle } from "@/components/jingles-control/types";
 import { useVoiceRecorder } from "@/components/mobile/use-voice-recorder";
 import { useDevicePlayer } from "@/lib/device-player-context";
 
@@ -39,6 +39,27 @@ function fmt(ms: number): string {
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
+/** Per-pad color → button classes (mobile). Full literal strings so Tailwind keeps them in the build. */
+const PAD_COLOR_CLASSES: Record<string, { assigned: string; empty: string; dot: string }> = {
+  default: { assigned: "border-slate-600 bg-slate-700/40 active:bg-slate-700/60", empty: "border-slate-800 bg-slate-900/40", dot: "bg-slate-400" },
+  sky:     { assigned: "border-sky-500/60 bg-sky-500/15 active:bg-sky-500/25", empty: "border-sky-500/25 bg-sky-500/[0.06]", dot: "bg-sky-400" },
+  violet:  { assigned: "border-violet-500/60 bg-violet-500/15 active:bg-violet-500/25", empty: "border-violet-500/25 bg-violet-500/[0.06]", dot: "bg-violet-400" },
+  pink:    { assigned: "border-pink-500/60 bg-pink-500/15 active:bg-pink-500/25", empty: "border-pink-500/25 bg-pink-500/[0.06]", dot: "bg-pink-400" },
+  amber:   { assigned: "border-amber-500/60 bg-amber-500/15 active:bg-amber-500/25", empty: "border-amber-500/25 bg-amber-500/[0.06]", dot: "bg-amber-400" },
+  rose:    { assigned: "border-rose-500/60 bg-rose-500/15 active:bg-rose-500/25", empty: "border-rose-500/25 bg-rose-500/[0.06]", dot: "bg-rose-400" },
+  teal:    { assigned: "border-teal-500/60 bg-teal-500/15 active:bg-teal-500/25", empty: "border-teal-500/25 bg-teal-500/[0.06]", dot: "bg-teal-400" },
+  lime:    { assigned: "border-lime-500/60 bg-lime-500/15 active:bg-lime-500/25", empty: "border-lime-500/25 bg-lime-500/[0.06]", dot: "bg-lime-400" },
+  indigo:  { assigned: "border-indigo-500/60 bg-indigo-500/15 active:bg-indigo-500/25", empty: "border-indigo-500/25 bg-indigo-500/[0.06]", dot: "bg-indigo-400" },
+};
+
+/** Pre-roll bell choices — mirrors the desktop JingleBellStyle set. */
+const BELL_OPTIONS: { value: JingleBellStyle; label: string }[] = [
+  { value: "off", label: "No bell" },
+  { value: "ding", label: "Ding" },
+  { value: "chime", label: "Chime" },
+  { value: "soft", label: "Soft" },
+];
+
 export function MobileJingles() {
   const [mode, setMode] = useState<Mode>("write");
 
@@ -59,6 +80,7 @@ export function MobileJingles() {
   const [assignMode, setAssignMode] = useState(false);
   const [padMsg, setPadMsg] = useState<string | null>(null);
   const [padBusy, setPadBusy] = useState<string | null>(null);
+  const [bellStyle, setBellStyle] = useState<JingleBellStyle>("off"); // pre-roll bell applied when assigning to a pad
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const generatingRef = useRef(false);
@@ -209,7 +231,8 @@ export function MobileJingles() {
             ...pad,
             label: derivedTitle().slice(0, 20),
             url: result.url,
-            preRoll: false,
+            bellStyle,
+            preRoll: bellStyle !== "off",
           });
           await refreshPads();
           setAssignMode(false);
@@ -233,7 +256,7 @@ export function MobileJingles() {
         setPadMsg("This pad is empty. Save a jingle, then tap a pad to assign it.");
       }
     },
-    [assignMode, result, derivedTitle, refreshPads, deviceCtx],
+    [assignMode, result, derivedTitle, refreshPads, deviceCtx, bellStyle],
   );
 
   const recPhase = recorder.phase;
@@ -436,6 +459,26 @@ export function MobileJingles() {
                 </button>
               </div>
               <p className="mt-0.5 text-xs text-sky-100/80">Tap a pad to assign “{derivedTitle().slice(0, 20)}”. It won’t play — assign only.</p>
+              <div className="mt-3">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-sky-200/70">Pre-roll bell</span>
+                <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+                  {BELL_OPTIONS.map((b) => (
+                    <button
+                      key={b.value}
+                      type="button"
+                      onClick={() => setBellStyle(b.value)}
+                      aria-pressed={bellStyle === b.value}
+                      className={`rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${
+                        bellStyle === b.value
+                          ? "border-sky-400 bg-sky-400/20 text-sky-100"
+                          : "border-sky-500/25 bg-transparent text-sky-200/70 active:bg-sky-500/10"
+                      }`}
+                    >
+                      {b.value === "off" ? "🔕" : "🔔"} {b.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : (
             <h2 className="mb-3 text-sm font-semibold tracking-tight text-slate-200">Pads</h2>
@@ -454,6 +497,7 @@ export function MobileJingles() {
               {pads.map((p) => {
                 const assigned = !!(p.url && p.url.trim());
                 const busy = padBusy === p.id;
+                const palette = PAD_COLOR_CLASSES[(p.color as string | undefined) ?? "default"] ?? PAD_COLOR_CLASSES.default;
                 return (
                   <button
                     key={p.id}
@@ -464,12 +508,12 @@ export function MobileJingles() {
                       assignMode
                         ? "border-sky-500/60 bg-sky-500/15 active:bg-sky-500/25"
                         : assigned
-                          ? "border-slate-700 bg-slate-800/50 active:bg-slate-700/60"
-                          : "border-slate-800 bg-slate-900/40"
+                          ? palette.assigned
+                          : palette.empty
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <span className={`h-2 w-2 shrink-0 rounded-full ${assigned ? "bg-emerald-400" : "bg-slate-600"}`} />
+                      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${assigned ? palette.dot : "bg-slate-600"}`} />
                       <span className="truncate text-sm text-slate-100">{p.label}</span>
                     </div>
                     <span className="mt-1 block text-[11px] text-slate-500">
