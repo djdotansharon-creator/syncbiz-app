@@ -19,6 +19,7 @@ import { effectivePlaybackPlaylistAttachment, derivePlaylistTrackCoverArt } from
 import type { UnifiedSource } from "@/lib/source-types";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { SuggestMetadataButton } from "@/components/suggest-metadata-button";
+import { CommunityFeedbackSummary } from "@/components/community-feedback-summary";
 
 type TrackExtra = PlaylistTrack & { durationSeconds?: number; genre?: string; artist?: string };
 
@@ -971,7 +972,10 @@ export function LiveQueuePanel() {
                     ) : null}
                     {/* USER suggestion (vertical slice: now-playing track only). Saved as PENDING; never edits the catalog/MP3. */}
                     {isCurrent ? (
-                      <SuggestMetadataButton trackTitle={title} trackArtist={tr.artist ? String(tr.artist) : null} />
+                      <>
+                        <SuggestMetadataButton trackTitle={title} trackArtist={tr.artist ? String(tr.artist) : null} catalogItemId={tr.catalogItemId ?? null} />
+                        <CommunityFeedbackSummary catalogItemId={tr.catalogItemId ?? null} />
+                      </>
                     ) : null}
                   </div>
                   <span className="shrink-0 text-right font-mono text-sm font-medium tabular-nums text-slate-500">

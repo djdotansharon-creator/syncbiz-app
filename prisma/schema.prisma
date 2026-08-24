@@ -1850,6 +1850,10 @@ model UserMetadataContribution {
   userEmail     String?
   /// Opaque PUBLIC track ref (hash of title+artist). NEVER a localRef/filename/path/metadataHash.
   trackPublicId String
+  /// RELIABLE optional link to the centralized catalog row (Phase 1). Captured at submit time from
+  /// the track being suggested — the trustworthy join to catalog (the title/artist hash is lossy).
+  /// This is a SEPARATE community-feedback layer; it NEVER overwrites official CatalogItem metadata.
+  catalogItemId String?
   trackTitle    String?
   trackArtist   String?
   // Suggested PUBLIC fields (all optional).
@@ -1860,6 +1864,8 @@ model UserMetadataContribution {
   businessType  String?
   publicTags    String[] @default([])
   note          String?
+  /// User's "this is a great track" signal (a soft community endorsement). Default false.
+  greatTrack    Boolean  @default(false)
   status        ContributionStatus @default(PENDING)
   createdAt     DateTime @default(now())
   reviewedAt    DateTime?
@@ -1868,6 +1874,7 @@ model UserMetadataContribution {
   @@index([status])
   @@index([userId])
   @@index([trackPublicId])
+  @@index([catalogItemId])
 }
 
 /// Global token-review record. e.g. Raw Token "SELECTES" → suggested "SELECTED",

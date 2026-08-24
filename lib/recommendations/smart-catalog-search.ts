@@ -7,6 +7,11 @@ import type { DaypartSegment } from "@/lib/recommendations/business-daypart-vibe
 import { prisma } from "@/lib/prisma";
 import { loadSelectedTitleSet, normalizeTitleForSelected } from "@/lib/recommendations/dj-creator-selected";
 import { loadValidatedFitRules } from "@/lib/recommendations/load-fit-rules";
+import {
+  loadCommunityFeedbackByCatalogId,
+  computeCommunityBoost,
+  type CommunityFeedbackAgg,
+} from "@/lib/recommendations/community-feedback-signal";
 import { loadBusinessDaypartVibeRules } from "@/lib/recommendations/load-business-daypart-vibe";
 import {
   daypartSlugSchema,
@@ -206,6 +211,7 @@ function buildRecommendedBecause(
   baseFit: number,
   cB: number,
   pB: number,
+  communityReasons: string[] = [],
 ): string {
   const parts: string[] = [];
   parts.push(`Base catalog fit score ${baseFit.toFixed(3)} from taxonomy rules`);
@@ -222,6 +228,7 @@ function buildRecommendedBecause(
   }
   if (cB > 0) parts.push(`tiny curation boost +${cB.toFixed(4)}`);
   if (pB > 0) parts.push(`optional popularity hint +${pB.toFixed(4)}`);
+  for (const reason of communityReasons) parts.push(reason);
   return `Recommended because ${parts.join("; ")}.`;
 }
 
@@ -403,6 +410,17 @@ export async function runSmartCatalogSearch(args: {
     ? await loadSelectedTitleSet(prisma, rankedRescorePool.map((r) => r.title))
     : new Set<string>();
 
+  // Community feedback (catalog Phase 2) — SOFT, low-weight signal read from user suggestions.
+  // Kept below editorial (curation/SELECTED); can only mildly reprioritize crowd-endorsed rows.
+  const communityById = rankedRescorePool.length
+    ? await loadCommunityFeedbackByCatalogId(prisma, rankedRescorePool.map((r) => r.catalogItemId))
+    : new Map<string, CommunityFeedbackAgg>();
+  const communityCuesLc = new Set<string>(
+    [...parsed.styleTaxonomySlugs, ...parsed.matchedPhrases]
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
   const enriched: SmartCatalogSearchResultRow[] = rankedRescorePool.map((row) => {
     const meta = metaById.get(row.catalogItemId)!;
     const snap = snapById.get(row.catalogItemId)!;
@@ -410,7 +428,9 @@ export async function runSmartCatalogSearch(args: {
     const cB = Math.max(0, meta.curationRating) * CURATION_WEIGHT;
     const pB = popBoost(snap.viewCount);
     const sB = selectedTitleSet.has(normalizeTitleForSelected(row.title)) ? SELECTED_BOOST : 0;
-    const displayScore = Math.round((baseFit + cB + pB + sB) * 10000) / 10000;
+    const community = computeCommunityBoost(communityById.get(row.catalogItemId), communityCuesLc);
+    const fB = community.boost;
+    const displayScore = Math.round((baseFit + cB + pB + sB + fB) * 10000) / 10000;
 
     const rowSlugSet = slugSetById.get(row.catalogItemId);
     const taxonomySlugsSorted =
@@ -428,7 +448,7 @@ export async function runSmartCatalogSearch(args: {
       likeCount: snap.likeCount,
       baseFitScore: baseFit,
       displayScore,
-      recommendedBecause: buildRecommendedBecause(row, parsed, baseFit, cB, pB),
+      recommendedBecause: buildRecommendedBecause(row, parsed, baseFit, cB, pB, community.reasons),
       ...(taxonomySlugsSorted ? { taxonomySlugs: taxonomySlugsSorted } : {}),
     };
   });

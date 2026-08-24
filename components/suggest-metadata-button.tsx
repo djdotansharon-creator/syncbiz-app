@@ -10,14 +10,15 @@
 import { useState, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 
-type Props = { trackTitle?: string | null; trackArtist?: string | null };
+type Props = { trackTitle?: string | null; trackArtist?: string | null; catalogItemId?: string | null };
 type Phase = { kind: "idle" } | { kind: "saving" } | { kind: "ok" } | { kind: "error"; message: string };
 
 const ENERGY = ["", "LOW", "MEDIUM", "HIGH"];
 
-export function SuggestMetadataButton({ trackTitle, trackArtist }: Props): ReactElement {
+export function SuggestMetadataButton({ trackTitle, trackArtist, catalogItemId }: Props): ReactElement {
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+  const [greatTrack, setGreatTrack] = useState(false);
   const [form, setForm] = useState({ genre: "", mood: "", energy: "", daypart: "", businessType: "", publicTags: "", note: "" });
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -32,6 +33,7 @@ export function SuggestMetadataButton({ trackTitle, trackArtist }: Props): React
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           trackTitle: trackTitle ?? null, trackArtist: trackArtist ?? null,
+          catalogItemId: catalogItemId ?? null, greatTrack,
           genre: form.genre, mood: form.mood, energy: form.energy, daypart: form.daypart,
           businessType: form.businessType, note: form.note,
           publicTags: form.publicTags.split(",").map((t) => t.trim()).filter(Boolean),
@@ -61,8 +63,8 @@ export function SuggestMetadataButton({ trackTitle, trackArtist }: Props): React
       </button>
 
       {open && typeof document !== "undefined" && createPortal(
-        <div onClick={close} className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4">
-          <div onClick={stop} className="w-full max-w-[420px] rounded-2xl border border-[var(--sb-border,#2a2a2e)] bg-[var(--sb-surface,#141416)] text-[var(--sb-text,#eee)] shadow-2xl">
+        <div onClick={close} className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4">
+          <div onClick={stop} className="max-h-[calc(100dvh-2rem)] w-full max-w-[460px] overflow-y-auto rounded-2xl border border-white/10 bg-[#141418] text-[var(--sb-text,#f5f5f7)] shadow-2xl">
             <div className="flex items-center justify-between border-b border-white/10 px-5 py-3.5">
               <div className="min-w-0">
                 <h3 className="text-[14px] font-semibold">Suggest info</h3>
@@ -80,6 +82,19 @@ export function SuggestMetadataButton({ trackTitle, trackArtist }: Props): React
               </div>
             ) : (
               <div className="flex flex-col gap-2.5 p-5">
+                <button
+                  type="button"
+                  onClick={() => setGreatTrack((v) => !v)}
+                  aria-pressed={greatTrack}
+                  className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-[13px] font-semibold transition-colors ${
+                    greatTrack
+                      ? "border-amber-400/60 bg-amber-400/10 text-amber-300"
+                      : "border-white/10 bg-black/20 text-slate-300 hover:border-white/20"
+                  }`}
+                >
+                  <span aria-hidden className="text-[15px] leading-none">{greatTrack ? "⭐" : "☆"}</span>
+                  This is a great track
+                </button>
                 <Field label="Genre"><input value={form.genre} onChange={set("genre")} className={inputCls} placeholder="e.g. Soul" /></Field>
                 <Field label="Mood"><input value={form.mood} onChange={set("mood")} className={inputCls} placeholder="e.g. Warm" /></Field>
                 <Field label="Energy">
