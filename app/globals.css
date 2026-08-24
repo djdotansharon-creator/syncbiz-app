@@ -238,6 +238,27 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   height: 12px;
 }
 
+/* Thick modifier — bigger, easier-to-grab volume slider on a phone (chunkier track + thumb,
+   taller touch area). Used by the mobile Now Playing sheet volume control. */
+.syncbiz-mobile-range--thick {
+  padding: 9px 0;
+}
+.syncbiz-mobile-range--thick::-webkit-slider-runnable-track {
+  height: 8px;
+}
+.syncbiz-mobile-range--thick::-moz-range-track {
+  height: 8px;
+}
+.syncbiz-mobile-range--thick::-webkit-slider-thumb {
+  width: 22px;
+  height: 22px;
+  margin-top: -7px;
+}
+.syncbiz-mobile-range--thick::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+}
+
 /* Player volume slider only – 3px track, solid cyan, no glow */
 .player-volume-slider {
   -webkit-appearance: none;

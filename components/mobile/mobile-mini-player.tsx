@@ -62,13 +62,15 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
         />
       </div>
 
-      <div className="flex items-center gap-2 px-2.5 py-2.5">
-        <button
-          type="button"
-          onClick={onOpen}
-          aria-label={d.hasSource ? "Open Now Playing" : "Open player"}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left transition active:scale-[0.99]"
-        >
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onOpen}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+        aria-label={d.hasSource ? "Open Now Playing" : "Open player"}
+        className="flex cursor-pointer items-center gap-2 px-2.5 py-2.5 transition active:scale-[0.99]"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-3 text-left">
           {/* Circular artwork with a subtle accent ring when playing — matches
               the current main SyncBiz player's `.library-deck-art-host`. */}
           <div
@@ -105,9 +107,14 @@ export function MobileMiniPlayer({ onOpen, variant = "bottom-dock" }: Props) {
               </p>
             )}
           </div>
-        </button>
+          {/* Subtle "tap to expand" affordance so the whole card reads as openable. */}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden className="ml-1 h-4 w-4 shrink-0 text-slate-500">
+            <path d="m6 15 6-6 6 6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
 
-        {/* Transport + Random/Mix — shared with the Now Playing sheet (compact). */}
+        {/* Transport + Random/Mix — shared with the Now Playing sheet (compact). Stops tap
+            propagation (mini variant) so its buttons don't also open the sheet; the whole card opens it. */}
         <MobileTransportControls d={d} variant="mini" />
       </div>
     </div>

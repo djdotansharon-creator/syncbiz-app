@@ -192,8 +192,8 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
                 {Math.round(d.volume)}
               </span>
             </div>
-            <div className="flex items-center gap-3">
-              <PlaybackTransportIconVolume className="h-4 w-4 shrink-0 text-cyan-400/80" />
+            <div className="flex items-center gap-3.5 rounded-2xl border border-slate-800/70 bg-slate-900/40 px-4 py-3.5">
+              <PlaybackTransportIconVolume className="h-5 w-5 shrink-0 text-cyan-400/90" />
               <input
                 type="range"
                 min={0}
@@ -203,7 +203,7 @@ export function MobileNowPlayingSheet({ open, onClose }: Props) {
                 onChange={(e) => d.onVolume(Number(e.target.value))}
                 disabled={!d.canControl}
                 aria-label={volumeLabel}
-                className="syncbiz-mobile-range syncbiz-mobile-range--slim flex-1"
+                className="syncbiz-mobile-range syncbiz-mobile-range--thick flex-1"
               />
             </div>
           </div>
