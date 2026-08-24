@@ -106,6 +106,7 @@ export function playbackToStationState(
   queueIndex: number,
   shuffle?: boolean,
   autoMix?: boolean,
+  repeatMode?: "playlist" | "track" | "off",
   positionDuration?: { position: number; duration: number },
   volume?: number,
   sessionInput?: PlaybackSessionMirrorInput,
@@ -163,6 +164,7 @@ export function playbackToStationState(
     queueIndex,
     shuffle: typeof shuffle === "boolean" ? shuffle : undefined,
     autoMix: typeof autoMix === "boolean" ? autoMix : undefined,
+    repeatMode: repeatMode ?? undefined,
     ...buildSessionMirrorFields(currentSource, currentTrackIndex, sessionInput),
   };
 

@@ -24,7 +24,7 @@ import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
 import { deviceModeAllowsLocalPlayback } from "@/lib/device-mode-guard";
-import { getAutoMix, setAutoMix, onAutoMixChanged } from "@/lib/mix-preferences";
+import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, setRepeatMode, onRepeatModeChanged, type RepeatMode } from "@/lib/mix-preferences";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { isStreamerDeviceMode } from "@/lib/streamer-device-mode";
 
@@ -304,6 +304,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const [masterConfirmOpen, setMasterConfirmOpen] = useState(false);
   const [masterState, setMasterState] = useState<StationPlaybackState | null>(null);
   const [autoMixState, setAutoMixState] = useState<boolean>(() => getAutoMix());
+  const [repeatModeState, setRepeatModeState] = useState<RepeatMode>(() => getRepeatMode());
   const lastConnectedModeRef = useRef<DeviceMode | null>(null);
   const prevEffectiveModeRef = useRef<DeviceMode>("MASTER");
   const pendingMasterAdoptionRef = useRef(false);
@@ -319,10 +320,14 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     return onAutoMixChanged((v) => setAutoMixState(v));
   }, []);
 
+  useEffect(() => {
+    return onRepeatModeChanged((m) => setRepeatModeState(m));
+  }, []);
+
   const onCommand = useCallback(
     (cmd: {
       command: string;
-      payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number };
+      payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number; mode?: "playlist" | "track" | "off" };
     }) => {
       const command = cmd.command as RemoteCommand;
       if (command === "PLAY") play();
@@ -367,6 +372,14 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       }
       else if (command === "SET_SHUFFLE" && typeof cmd.payload?.value === "boolean") setShuffle(cmd.payload.value);
       else if (command === "SET_AUTOMIX" && typeof cmd.payload?.value === "boolean") setAutoMix(cmd.payload.value);
+      else if (
+        command === "SET_REPEAT_MODE" &&
+        (cmd.payload?.mode === "playlist" || cmd.payload?.mode === "track" || cmd.payload?.mode === "off")
+      ) {
+        // MASTER loop control from a CONTROL device — drives the same app-wide repeat store the
+        // desktop LoopToggleButton uses; the new mode echoes back in the next STATE_UPDATE.
+        setRepeatMode(cmd.payload.mode);
+      }
       else if (command === "SEEK" && typeof cmd.payload?.position === "number") {
         seekTo(cmd.payload.position);
       } else if (command === "SET_VOLUME" && typeof cmd.payload?.volume === "number") {
@@ -841,12 +854,13 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       queueIndex,
       shuffle,
       autoMixState,
+      repeatModeState,
       pd ? { position: pd.position, duration: pd.duration } : undefined,
       volume,
       sessionMirrorInput,
     );
     sendState(state);
-  }, [isActive, status, deviceMode, sendState, playStatus, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState, sessionMirrorInput]);
+  }, [isActive, status, deviceMode, sendState, playStatus, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState, repeatModeState, sessionMirrorInput]);
 
   // When playing, send state more frequently so CONTROL progress stays in sync
   useEffect(() => {
@@ -861,6 +875,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         queueIndex,
         shuffle,
         autoMixState,
+        repeatModeState,
         pd ? { position: pd.position, duration: pd.duration } : undefined,
         volume,
         sessionMirrorInput,
@@ -868,7 +883,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       sendState(state);
     }, 1000);
     return () => clearInterval(id);
-  }, [isActive, status, deviceMode, playStatus, sendState, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState, sessionMirrorInput]);
+  }, [isActive, status, deviceMode, playStatus, sendState, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState, repeatModeState, sessionMirrorInput]);
 
   const sendCommandToMaster = useCallback(
     (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number }) => {

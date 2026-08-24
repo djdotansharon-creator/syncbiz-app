@@ -41,6 +41,8 @@ type StationControllerContextValue = {
   sendSetShuffle: (value: boolean) => void;
   /** Toggle MASTER AutoMix/crossfade. Sends the absolute desired value (existing SET_AUTOMIX command). */
   sendSetAutoMix: (value: boolean) => void;
+  /** Set MASTER loop mode (playlist / track / off). Sends the absolute desired mode (SET_REPEAT_MODE). */
+  sendSetRepeatMode: (mode: "playlist" | "track" | "off") => void;
 };
 
 const StationControllerContext = createContext<StationControllerContextValue | null>(null);
@@ -145,6 +147,13 @@ export function StationControllerProvider({ children }: { children: ReactNode })
     [masterDeviceId, sendCommand]
   );
 
+  const sendSetRepeatMode = useCallback(
+    (mode: "playlist" | "track" | "off") => {
+      if (masterDeviceId) sendCommand(masterDeviceId, "SET_REPEAT_MODE", { mode });
+    },
+    [masterDeviceId, sendCommand]
+  );
+
   const value = useMemo(
     () => ({
       isCrossDevice,
@@ -164,6 +173,7 @@ export function StationControllerProvider({ children }: { children: ReactNode })
       sendSetVolume,
       sendSetShuffle,
       sendSetAutoMix,
+      sendSetRepeatMode,
     }),
     [
       isCrossDevice,
@@ -182,6 +192,7 @@ export function StationControllerProvider({ children }: { children: ReactNode })
       sendSetVolume,
       sendSetShuffle,
       sendSetAutoMix,
+      sendSetRepeatMode,
     ]
   );
 
@@ -224,5 +235,6 @@ export function useStationController() {
     sendSetVolume: () => {},
     sendSetShuffle: () => {},
     sendSetAutoMix: () => {},
+    sendSetRepeatMode: () => {},
   };
 }

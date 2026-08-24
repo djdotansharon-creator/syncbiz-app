@@ -29,7 +29,7 @@ export function useRemoteControlWs(
   deviceId: string | null,
   onCommand?: (cmd: {
     command: string;
-    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number };
+    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number; mode?: "playlist" | "track" | "off" };
   }) => void,
   onDeviceMode?: (mode: DeviceMode) => void,
   options?: {
@@ -303,7 +303,7 @@ export function useRemoteControlWs(
   const sendCommand = (
     targetDeviceId: string,
     command: RemoteCommand,
-    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number }
+    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number; mode?: "playlist" | "track" | "off" }
   ) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === 1) {
@@ -554,7 +554,7 @@ export function useRemoteController(options?: {
   const sendCommand = (
     targetDeviceId: string,
     command: RemoteCommand,
-    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number }
+    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number; mode?: "playlist" | "track" | "off" }
   ) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== 1) return;
@@ -788,7 +788,7 @@ export function useRemoteOwner() {
 
   const sendCommand = (
     command: RemoteCommand,
-    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number }
+    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number; mode?: "playlist" | "track" | "off" }
   ) => {
     const ws = wsRef.current;
     const bid = selectedBranchId;

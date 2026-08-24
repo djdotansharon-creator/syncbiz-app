@@ -47,6 +47,26 @@ function MixIcon({ className }: { className?: string }) {
   );
 }
 
+/** Loop = repeat arrows; a small "1" overlay when the mode repeats a single track. */
+function LoopIcon({ className, mode }: { className?: string; mode: "playlist" | "track" | "off" }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <polyline points="17 1 21 5 17 9" />
+      <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+      <polyline points="7 23 3 19 7 15" />
+      <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+      {mode === "track" ? (
+        <text x="12" y="15" textAnchor="middle" fontSize="9" fontWeight="700" fill="currentColor" stroke="none">1</text>
+      ) : null}
+    </svg>
+  );
+}
+
+/** Human label for the current loop mode. */
+function loopLabel(mode: "playlist" | "track" | "off"): string {
+  return mode === "playlist" ? "Loop: playlist" : mode === "track" ? "Loop: this song" : "Loop: off";
+}
+
 /**
  * Shared transport cluster for BOTH mobile surfaces (Now Playing sheet + Mini
  * player). All actions/state come from `MobilePlayerDerived` — identical to the
@@ -151,8 +171,9 @@ export function MobileTransportControls({
         </button>
       </div>
 
-      {/* Mode row — Random / Mix as labeled pills so ON/OFF is unmistakable. */}
-      <div className="flex items-center justify-center gap-3">
+      {/* Mode row — Random / Mix / Loop as labeled pills so state is unmistakable.
+          Wraps on very narrow phones so three pills never overflow the sheet. */}
+      <div className="flex flex-wrap items-center justify-center gap-2">
         <button
           type="button"
           onClick={d.onToggleShuffle}
@@ -174,6 +195,17 @@ export function MobileTransportControls({
         >
           <MixIcon className="h-[18px] w-[18px]" />
           Mix
+        </button>
+        <button
+          type="button"
+          onClick={d.onCycleRepeat}
+          disabled={modeDisabled}
+          aria-label={loopLabel(d.repeatMode)}
+          title={loopLabel(d.repeatMode)}
+          className={`${d.repeatMode !== "off" ? MOBILE_TOGGLE_ON : MOBILE_TOGGLE_OFF} h-11 gap-2 rounded-full px-4 text-[11px] font-semibold uppercase tracking-[0.12em]`}
+        >
+          <LoopIcon className="h-[18px] w-[18px]" mode={d.repeatMode} />
+          {d.repeatMode === "track" ? "Loop 1" : "Loop"}
         </button>
       </div>
     </div>

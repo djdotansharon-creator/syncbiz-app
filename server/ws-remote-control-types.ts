@@ -18,6 +18,8 @@ export type RemoteCommand =
   | "SET_VOLUME"
   | "SET_SHUFFLE"
   | "SET_AUTOMIX"
+  // Loop mode (playlist / track / off) — MASTER-controlled, mirrored back in StationPlaybackState.
+  | "SET_REPEAT_MODE"
   // On-air announcement/jingle: duck current playback, play the given audio once, restore.
   // Executed on the branch MASTER via the existing desktop bridge (mpvPlayInterrupt).
   | "PLAY_INTERRUPT";
@@ -46,6 +48,7 @@ export type StationPlaybackState = {
   queueIndex: number;
   shuffle?: boolean;
   autoMix?: boolean;
+  repeatMode?: "playlist" | "track" | "off";
   position?: number;
   duration?: number;
   positionAt?: number;
@@ -128,6 +131,8 @@ export type ClientMessage =
         preRoll?: boolean;
         /** PLAY_INTERRUPT: bell style hint when preRoll is set. */
         bellStyle?: string;
+        /** SET_REPEAT_MODE: desired loop mode. */
+        mode?: "playlist" | "track" | "off";
       };
     }
   | { type: "STATE_UPDATE"; state: StationPlaybackState }
@@ -161,6 +166,8 @@ export type ServerMessage =
         preRoll?: boolean;
         /** PLAY_INTERRUPT: bell style hint when preRoll is set. */
         bellStyle?: string;
+        /** SET_REPEAT_MODE: desired loop mode. */
+        mode?: "playlist" | "track" | "off";
       };
     }
   | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string; secondaryDesktop?: boolean }

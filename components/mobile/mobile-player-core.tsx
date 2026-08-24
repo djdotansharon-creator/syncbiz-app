@@ -9,7 +9,16 @@ import {
   getAutoMix,
   setAutoMix as persistAutoMix,
   onAutoMixChanged,
+  getRepeatMode,
+  setRepeatMode,
+  onRepeatModeChanged,
+  type RepeatMode,
 } from "@/lib/mix-preferences";
+
+/** Desktop LoopToggleButton cycle: playlist → track → off → playlist. */
+function nextRepeatMode(mode: RepeatMode): RepeatMode {
+  return mode === "playlist" ? "track" : mode === "track" ? "off" : "playlist";
+}
 import {
   isIOS,
   primeIOSFromGesture,
@@ -46,6 +55,8 @@ export type MobilePlayerDerived = {
   shuffle: boolean;
   /** AutoMix/crossfade ON state (mirrors MASTER in controller mode). */
   autoMix: boolean;
+  /** Loop mode (mirrors MASTER in controller mode): playlist / track / off. */
+  repeatMode: RepeatMode;
   /** Whether Random/Mix toggles are actionable (player: always; controller: MASTER connected). */
   canToggleModes: boolean;
   onPlayPause: () => void;
@@ -56,6 +67,8 @@ export type MobilePlayerDerived = {
   onVolume: (value: number) => void;
   onToggleShuffle: () => void;
   onToggleAutoMix: () => void;
+  /** Cycle the loop mode (playlist → track → off). Controller mode drives the MASTER. */
+  onCycleRepeat: () => void;
 };
 
 /**
@@ -131,6 +144,14 @@ function useDerivedPlayer(): MobilePlayerDerived {
     () => false,
   );
 
+  // Loop mode preference (app-wide, same store the desktop LoopToggleButton uses). Drives the real
+  // engine in PLAYER mode; in CONTROLLER mode the button sends SET_REPEAT_MODE and mirrors the MASTER.
+  const repeatModePref = useSyncExternalStore(
+    (cb) => onRepeatModeChanged(() => cb()),
+    () => getRepeatMode(),
+    () => "playlist" as RepeatMode,
+  );
+
   // iOS Safari first-gesture unlock primer.
   // The <audio> element used in mobile PLAYER mode lives in a hidden container
   // in app-shell, so the user can never tap it directly. iOS requires
@@ -176,6 +197,7 @@ function useDerivedPlayer(): MobilePlayerDerived {
       // Mirror the MASTER's mode state; only meaningful when connected.
       shuffle: canControl ? !!rs?.shuffle : false,
       autoMix: canControl ? !!rs?.autoMix : false,
+      repeatMode: canControl ? (rs?.repeatMode ?? "playlist") : "playlist",
       canToggleModes: canControl,
       onPlayPause: () => {
         if (!canControl) return;
@@ -206,6 +228,9 @@ function useDerivedPlayer(): MobilePlayerDerived {
       onToggleAutoMix: () => {
         if (canControl) station.sendSetAutoMix(!rs?.autoMix);
       },
+      onCycleRepeat: () => {
+        if (canControl) station.sendSetRepeatMode(nextRepeatMode(rs?.repeatMode ?? "playlist"));
+      },
     };
   }
 
@@ -225,6 +250,7 @@ function useDerivedPlayer(): MobilePlayerDerived {
     volume: playback.volume,
     shuffle: playback.shuffle,
     autoMix: autoMixPref,
+    repeatMode: repeatModePref,
     canToggleModes: true,
     onPlayPause: () => {
       if (!src) return;
@@ -259,6 +285,8 @@ function useDerivedPlayer(): MobilePlayerDerived {
     onToggleShuffle: () => playback.toggleShuffle(),
     // persistAutoMix updates the shared store; useSyncExternalStore re-reads it.
     onToggleAutoMix: () => persistAutoMix(!autoMixPref),
+    // setRepeatMode updates the shared store; useSyncExternalStore re-reads it (drives the engine).
+    onCycleRepeat: () => setRepeatMode(nextRepeatMode(repeatModePref)),
   };
 }
 
