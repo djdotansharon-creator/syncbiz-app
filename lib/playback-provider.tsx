@@ -44,6 +44,7 @@ import {
 } from "./syncbiz-transport-audit";
 import { isValidPlaybackUrl, isValidLocalFilePlaybackPath } from "./url-validation";
 import { EPHEMERAL_LOCAL_PLAYLIST_PREFIX } from "./local-playlist-artwork";
+import { appendMediaToken, redactMediaToken } from "./media/media-session";
 import {
   isPlayNextSourceId,
   playNextLog,
@@ -756,13 +757,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, [state]);
 
   const getPlayUrl = useCallback((source: UnifiedSource, trackIdx: number): string | null => {
+    // appendMediaToken is a synchronous no-op for local / YouTube / regular-HTTPS / existing tracks —
+    // it appends the in-memory Media Session Token ONLY to a SyncBiz Music Bank media URL
+    // (/api/media/<assetId>). No I/O, no await, no DB, no fetch. The token is NEVER stored on the
+    // track (so it never reaches WS/CONTROL/persist); it is injected here on the MASTER at read time.
     if (source.playlist) {
       const tracks = getPlaylistTracks(source.playlist);
       const t = tracks[trackIdx] ?? tracks[0];
       const raw = t?.url ?? source.url ?? null;
-      return raw ? canonicalYouTubeWatchUrlForPlayback(raw) : null;
+      return raw ? appendMediaToken(canonicalYouTubeWatchUrlForPlayback(raw)) : null;
     }
-    return canonicalYouTubeWatchUrlForPlayback(source.url);
+    return appendMediaToken(canonicalYouTubeWatchUrlForPlayback(source.url));
   }, []);
 
   const isEmbeddedSource = useCallback((source: UnifiedSource, trackIdx: number): boolean => {
@@ -820,7 +825,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         firstThreeIds: st.slice(0, 3).map((t) => t.id),
       });
       console.log("[SyncBiz Audit] runtime currentPlayUrl final", {
-        url: cpu ? cpu.slice(0, 200) : null,
+        url: cpu ? redactMediaToken(cpu).slice(0, 200) : null,
       });
     },
     [getPlayUrl],

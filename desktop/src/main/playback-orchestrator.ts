@@ -20,6 +20,7 @@
  */
 
 import { MpvManager, type MpvBinaries, type MpvStatus, createInitialMpvStatus } from "./mpv-manager";
+import { redactMediaToken } from "../shared/redact-media-token";
 
 const ORCH = "[SyncBiz:desktop-mpv:orchestrator] music";
 
@@ -274,7 +275,7 @@ export class PlaybackOrchestrator {
   playMusic(url: string): void {
     const u = url.trim();
     if (!u) return;
-    console.log(ORCH, "playMusic (→ active deck loadfile/replace)", { preview: u.slice(0, 200), deck: this.activeMusicDeck });
+    console.log(ORCH, "playMusic (→ active deck loadfile/replace)", { preview: redactMediaToken(u).slice(0, 200), deck: this.activeMusicDeck });
     this.abortXfade("cold_play_request");
     this.activeMpv().setVolume(this.currentMusicTarget());
     this.activeMpv().play(u);
@@ -293,7 +294,7 @@ export class PlaybackOrchestrator {
     const activeStatus = this.activeSt().status;
     if (activeStatus !== "playing" && activeStatus !== "paused") {
       // Nothing audible to fade from — clean start, no dip.
-      console.log(ORCH, "playMusicCrossfade → cold start (active deck idle)", { preview: u.slice(0, 120) });
+      console.log(ORCH, "playMusicCrossfade → cold start (active deck idle)", { preview: redactMediaToken(u).slice(0, 120) });
       this.playMusic(u);
       return;
     }
@@ -304,7 +305,7 @@ export class PlaybackOrchestrator {
 
     const standby = this.standbyMpv();
     console.log(ORCH, "playMusicCrossfade → A/B overlap", {
-      preview: u.slice(0, 200),
+      preview: redactMediaToken(u).slice(0, 200),
       fadeSec,
       activeDeck: this.activeMusicDeck,
       standbyDeck: this.standbyDeckId(),
@@ -316,7 +317,7 @@ export class PlaybackOrchestrator {
     this.xfadeStartTimeoutId = setTimeout(() => {
       // Incoming track never started (bad URL / yt-dlp failure): keep the
       // business audio alive on the current track — never fade into silence.
-      console.warn(ORCH, "crossfade standby load timeout — keeping current track", { preview: u.slice(0, 120) });
+      console.warn(ORCH, "crossfade standby load timeout — keeping current track", { preview: redactMediaToken(u).slice(0, 120) });
       this.abortXfade("standby_load_timeout");
     }, XFADE_LOAD_TIMEOUT_MS);
   }

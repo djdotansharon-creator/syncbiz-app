@@ -33,6 +33,7 @@ import type {
   WhatsAppBounds,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
+import { redactMediaToken } from "../shared/redact-media-token";
 import { WhatsAppWindow } from "./whatsapp-view";
 import {
   addAdditionalMusicFolder,
@@ -286,7 +287,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   ipcMain.handle(MVP_IPC.MPV_PLAY_URL, (_e, url: string): void => {
     const u = typeof url === "string" ? url.trim() : "";
     if (!u) return;
-    console.log("[SyncBiz:desktop-mpv:ipc] MPV_PLAY_URL → playMusic", { preview: u.slice(0, 160) });
+    console.log("[SyncBiz:desktop-mpv:ipc] MPV_PLAY_URL → playMusic", { preview: redactMediaToken(u).slice(0, 160) });
     orchestratorInstance?.playMusic(u);
     // Immediately push state snapshot so the renderer's desktopMpvSnap reflects any
     // synchronous failures (binary missing, null child) as well as engine-ready status.
@@ -311,7 +312,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
           ? Math.max(1, Math.min(30, payload.fadeSec))
           : (orchestratorInstance?.getCrossfadeSec() ?? 6);
       console.log("[SyncBiz:desktop-mpv:ipc] MPV_PLAY_URL_CROSSFADE", {
-        preview: u.slice(0, 160),
+        preview: redactMediaToken(u).slice(0, 160),
         fadeSec,
       });
       orchestratorInstance?.playMusicCrossfade(u, fadeSec);

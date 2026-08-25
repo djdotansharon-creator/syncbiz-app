@@ -18,7 +18,7 @@
  * disabled "Coming soon" until a payment layer exists.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlayback } from "@/lib/playback-provider";
 import { EPHEMERAL_LOCAL_PLAYLIST_PREFIX } from "@/lib/local-playlist-artwork";
 import { formatDuration } from "@/lib/format-utils";
@@ -27,9 +27,12 @@ import type { UnifiedSource } from "@/lib/source-types";
 import { POC_MUSIC_BANK_CATALOG } from "@/lib/music-bank/poc-catalog";
 import type { MusicBankGenrePack, MusicBankSampleTrack } from "@/lib/music-bank/catalog-types";
 import { GENRE_PRICE_LABEL, FULL_BANK_PRICE_LABEL } from "@/lib/music-bank/pricing";
+import { setMediaSessionToken, clearMediaSessionToken, mediaTokenRemainingSec } from "@/lib/media/media-session";
 
 type PreviewPathMap = Map<string, string>;
 type ActiveView = "all" | string; // "all" or a genre id
+type PlaybackMode = "stream" | "local"; // Stage A: "stream" = token-free /api/media/<id> via SyncBiz; "local" = preview-cache path
+const TOKEN_REFRESH_THRESHOLD_SEC = 8 * 60; // refresh while ≥ this remains → an active track (~2–6 min) never expires mid-play
 
 function totalDuration(tracks: MusicBankSampleTrack[]): number | null {
   const known = tracks.filter((t) => typeof t.durationSeconds === "number");
@@ -47,6 +50,10 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   const [bridgeChecked, setBridgeChecked] = useState(false);
   const [view, setView] = useState<ActiveView>("all");
   const [nowPlaying, setNowPlaying] = useState<{ genreId: string; trackId: string | null } | null>(null);
+  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("stream");
+  const [streamReady, setStreamReady] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const catalog = POC_MUSIC_BANK_CATALOG;
   const genres = catalog.genres;
@@ -82,37 +89,97 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
     };
   }, []);
 
+  // Streaming authorization (Stage A): mint a scoped, memory-only Media Session Token and keep it
+  // fresh in the background. The token is NEVER stored on a track/WS — it is appended to the media
+  // URL only at playback time by getPlayUrl on the MASTER. Refresh runs while enough TTL remains so
+  // an in-flight track can never expire mid-playback.
+  useEffect(() => {
+    let cancelled = false;
+    const authorize = async (): Promise<boolean> => {
+      try {
+        const res = await fetch("/api/music-bank/authorize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ deviceId: "rfm-preview" }),
+        });
+        const raw = await res.text();
+        let j: { ok?: boolean; token?: string; exp?: number; error?: string } = {};
+        if (raw) { try { j = JSON.parse(raw); } catch { j = {}; } }
+        if (!res.ok || !j.ok || !j.token || !j.exp) throw new Error(j.error ?? `authorize failed (HTTP ${res.status})`);
+        setMediaSessionToken(j.token, j.exp);
+        if (!cancelled) { setStreamReady(true); setStreamError(null); }
+        return true;
+      } catch (e) {
+        if (!cancelled) setStreamError(e instanceof Error ? e.message : "authorize failed");
+        return false;
+      }
+    };
+    void authorize();
+    refreshTimer.current = setInterval(() => {
+      if (mediaTokenRemainingSec() < TOKEN_REFRESH_THRESHOLD_SEC) void authorize();
+    }, 60 * 1000);
+    return () => {
+      cancelled = true;
+      if (refreshTimer.current) { clearInterval(refreshTimer.current); refreshTimer.current = null; }
+      clearMediaSessionToken();
+    };
+  }, []);
+
   const isDesktop = useMemo(
     () => typeof window !== "undefined" && !!(window as unknown as { syncbizDesktop?: unknown }).syncbizDesktop,
     [],
   );
 
+  /** True if a given track can play in the current mode. */
+  const trackPlayable = useCallback(
+    (id: string) => (playbackMode === "stream" ? streamReady : previewPaths.has(id)),
+    [playbackMode, streamReady, previewPaths],
+  );
+
   const buildSource = useCallback(
     (genre: MusicBankGenrePack, tracks: MusicBankSampleTrack[]): { source: UnifiedSource; playable: MusicBankSampleTrack[] } | null => {
-      const playable = tracks.filter((t) => previewPaths.has(t.id));
-      if (playable.length === 0) return null;
-      const plTracks: PlaylistTrack[] = playable.map((t) => ({
-        id: t.id,
-        name: t.title,
-        type: "local" as const,
-        url: previewPaths.get(t.id)!, // absolute local path → mpv-input-normalize → file:// on desktop
-      }));
+      let plTracks: PlaylistTrack[];
+      let playable: MusicBankSampleTrack[];
+      if (playbackMode === "stream") {
+        // Token-free SyncBiz media URL. getPlayUrl appends ?mt=<session token> on the MASTER at play
+        // time — the token is NEVER stored here, so it never travels over WS / reaches CONTROL.
+        if (!streamReady) return null;
+        const base = typeof window !== "undefined" ? window.location.origin : "";
+        playable = tracks;
+        plTracks = playable.map((t) => ({
+          id: t.id,
+          name: t.title,
+          type: "stream-url" as const,
+          url: `${base}/api/media/${encodeURIComponent(t.id)}`,
+        }));
+      } else {
+        // POC local preview cache (kept for A/B comparison): absolute local path → file:// on desktop.
+        playable = tracks.filter((t) => previewPaths.has(t.id));
+        plTracks = playable.map((t) => ({
+          id: t.id,
+          name: t.title,
+          type: "local" as const,
+          url: previewPaths.get(t.id)!,
+        }));
+      }
+      if (plTracks.length === 0) return null;
       const first = plTracks[0].url;
+      const ptype = playbackMode === "stream" ? "stream-url" : "local";
       const playlist: Playlist = {
-        id: `${EPHEMERAL_LOCAL_PLAYLIST_PREFIX}musicbank-${genre.id}-samples`,
+        id: `${EPHEMERAL_LOCAL_PLAYLIST_PREFIX}musicbank-${genre.id}-${playbackMode}`,
         name: `${genre.name} — Samples`,
         genre: genre.name,
-        type: "local",
+        type: ptype,
         url: first,
         thumbnail: "",
         createdAt: new Date().toISOString(),
         tracks: plTracks,
         order: plTracks.map((t) => t.id),
       };
-      const source: UnifiedSource = { id: playlist.id, title: playlist.name, genre: genre.name, cover: null, type: "local", url: first, origin: "playlist", playlist };
+      const source: UnifiedSource = { id: playlist.id, title: playlist.name, genre: genre.name, cover: null, type: ptype, url: first, origin: "playlist", playlist };
       return { source, playable };
     },
-    [previewPaths],
+    [playbackMode, streamReady, previewPaths],
   );
 
   const playGenreSamples = useCallback(
@@ -137,11 +204,17 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   );
 
   const notPlayableHint =
-    bridgeChecked && !isDesktop
-      ? "Open this catalog in the SyncBiz desktop player to preview the samples."
-      : bridgeChecked && isDesktop && previewPaths.size === 0
-        ? "No samples cached on this device yet — run the catalog sync."
-        : null;
+    playbackMode === "stream"
+      ? streamReady
+        ? null
+        : streamError
+          ? `Streaming unavailable: ${streamError}`
+          : "Authorizing streaming…"
+      : bridgeChecked && !isDesktop
+        ? "Open this catalog in the SyncBiz desktop player to preview the local samples."
+        : bridgeChecked && isDesktop && previewPaths.size === 0
+          ? "No samples cached on this device yet — run the catalog sync."
+          : null;
 
   const totalSamples = catalog.totalTracks;
 
@@ -154,7 +227,23 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
           <h2 className="text-sm font-semibold tracking-tight">Royalty-Free Music</h2>
           <span className="hidden text-xs text-[#6b6b70] sm:inline">· {genres.length} genres · {totalSamples} samples</span>
         </div>
-        <button type="button" onClick={onClose} className="rounded-md border border-white/[0.08] px-2.5 py-1 text-xs text-[#a1a1a6] transition hover:border-white/20 hover:text-[#f5f5f7]">Close</button>
+        <div className="flex items-center gap-2">
+          {/* Stage A A/B toggle (dev): Stream = SyncBiz HTTPS media transport; Local = preview-cache path. */}
+          <div className="inline-flex overflow-hidden rounded-md border border-white/[0.1] text-[11px]">
+            {(["stream", "local"] as PlaybackMode[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setPlaybackMode(m)}
+                className={`px-2.5 py-1 font-medium transition ${playbackMode === m ? "bg-[#0a84ff] text-white" : "text-[#a1a1a6] hover:text-[#f5f5f7]"}`}
+                title={m === "stream" ? "SyncBiz HTTPS media streaming" : "Local preview cache (POC)"}
+              >
+                {m === "stream" ? "Stream" : "Local"}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md border border-white/[0.08] px-2.5 py-1 text-xs text-[#a1a1a6] transition hover:border-white/20 hover:text-[#f5f5f7]">Close</button>
+        </div>
       </header>
 
       {/* Genre navigation — dynamic, horizontal scroll */}
@@ -169,7 +258,7 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
         {selectedGenre ? (
           <GenreDetail
             genre={selectedGenre}
-            previewPaths={previewPaths}
+            trackPlayable={trackPlayable}
             nowPlaying={nowPlaying}
             onPlaySamples={() => playGenreSamples(selectedGenre)}
             onPlayTrack={(t) => playTrack(selectedGenre, t)}
@@ -263,7 +352,7 @@ function CatalogHome({
 
 function GenreDetail({
   genre,
-  previewPaths,
+  trackPlayable,
   nowPlaying,
   onPlaySamples,
   onPlayTrack,
@@ -271,7 +360,7 @@ function GenreDetail({
   notPlayableHint,
 }: {
   genre: MusicBankGenrePack;
-  previewPaths: PreviewPathMap;
+  trackPlayable: (id: string) => boolean;
   nowPlaying: { genreId: string; trackId: string | null } | null;
   onPlaySamples: () => void;
   onPlayTrack: (t: MusicBankSampleTrack) => void;
@@ -279,7 +368,7 @@ function GenreDetail({
   notPlayableHint: string | null;
 }) {
   const total = totalDuration(genre.tracks);
-  const genrePlayable = genre.tracks.some((t) => previewPaths.has(t.id));
+  const genrePlayable = genre.tracks.some((t) => trackPlayable(t.id));
   return (
     <>
       {/* Genre header */}
@@ -312,21 +401,21 @@ function GenreDetail({
       {/* Dense track list */}
       <ul className="px-2 py-2">
         {genre.tracks.map((track, i) => {
-          const trackPlayable = previewPaths.has(track.id);
+          const isPlayable = trackPlayable(track.id);
           const active = nowPlaying?.genreId === genre.id && nowPlaying?.trackId === track.id;
           return (
             <li key={track.id} className={`group flex items-center gap-3 rounded-md px-2.5 py-1.5 transition ${active ? "bg-[#0a84ff]/12" : "hover:bg-white/[0.03]"}`}>
               <span className={`w-5 shrink-0 text-right text-[11px] tabular-nums ${active ? "text-[#7db8ff]" : "text-[#5a5a5f]"}`}>{i + 1}</span>
               <button
                 type="button"
-                disabled={!trackPlayable}
+                disabled={!isPlayable}
                 onClick={() => onPlayTrack(track)}
                 className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded text-white transition disabled:cursor-not-allowed"
                 style={{ backgroundImage: `linear-gradient(140deg, ${genre.gradient[0]} 0%, ${genre.gradient[1]} 100%)` }}
                 aria-label={`Play ${track.title}`}
               >
-                <span className={`absolute inset-0 transition ${trackPlayable ? "bg-black/30 group-hover:bg-black/10" : "bg-black/55"}`} />
-                <PlayIcon className={`relative h-3.5 w-3.5 ${trackPlayable ? "" : "opacity-40"}`} />
+                <span className={`absolute inset-0 transition ${isPlayable ? "bg-black/30 group-hover:bg-black/10" : "bg-black/55"}`} />
+                <PlayIcon className={`relative h-3.5 w-3.5 ${isPlayable ? "" : "opacity-40"}`} />
               </button>
               <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-medium text-[#f5f5f7]" : "text-[#d1d1d6]"}`}>{track.title}</span>
               {active ? <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[#7db8ff]">Playing</span> : null}

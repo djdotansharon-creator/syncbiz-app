@@ -16,6 +16,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import net from "node:net";
 import { normalizeMpvLoadTarget } from "./mpv-input-normalize";
+import { redactMediaToken } from "../shared/redact-media-token";
 
 const PIPELINE = "[SyncBiz:desktop-mpv:bridge]";
 const WATCHDOG = "[SyncBiz:desktop-mpv:watchdog]";
@@ -531,7 +532,7 @@ export class MpvManager {
     if (this.disposed) return;
     if (!this.socket || this.socket.destroyed) {
       if (this.child) {
-        console.log(PIPELINE, "socket not ready — queuing (IPC may still connect)", { pipe: this.pipePath, preview: json.slice(0, 120) });
+        console.log(PIPELINE, "socket not ready — queuing (IPC may still connect)", { pipe: this.pipePath, preview: redactMediaToken(json).slice(0, 120) });
         this.cmdQueue.push(json);
       }
       return;
@@ -559,7 +560,7 @@ export class MpvManager {
     const { target, kind } = normalizeMpvLoadTarget(u);
     if (!target) return;
     this.cmdQueue = [];
-    console.log(PIPELINE, "loadfile request", { pipe: this.pipePath, kind, preview: target.slice(0, 160) });
+    console.log(PIPELINE, "loadfile request", { pipe: this.pipePath, kind, preview: redactMediaToken(target).slice(0, 160) });
     this.cmd(["loadfile", target, "replace"]);
     // A freshly loaded track MUST play — never inherit a stale `pause=true` from a
     // prior pause() on this deck. Without this, loadfile-while-paused loaded the
