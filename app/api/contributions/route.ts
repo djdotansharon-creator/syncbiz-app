@@ -42,23 +42,30 @@ export async function POST(req: NextRequest) {
   const catalogItemId = clip(body.catalogItemId, 64);
   const greatTrack = body.greatTrack === true;
 
-  const contribution = await prisma.userMetadataContribution.create({
-    data: {
-      userId: user.id,
-      userEmail: user.email ?? null,
-      trackPublicId, catalogItemId, trackTitle, trackArtist,
-      genre: clip(body.genre),
-      mood: clip(body.mood),
-      energy: energy && ENERGY.has(energy) ? energy : null,
-      daypart: clip(body.daypart),
-      businessType: clip(body.businessType),
-      publicTags,
-      note: clip(body.note, 500),
-      greatTrack,
-      status: "PENDING", // always PENDING — a user can never publish to the catalog
-    },
-    select: { id: true, status: true, createdAt: true },
-  });
-
-  return NextResponse.json({ ok: true, contribution });
+  try {
+    const contribution = await prisma.userMetadataContribution.create({
+      data: {
+        userId: user.id,
+        userEmail: user.email ?? null,
+        trackPublicId, catalogItemId, trackTitle, trackArtist,
+        genre: clip(body.genre),
+        mood: clip(body.mood),
+        energy: energy && ENERGY.has(energy) ? energy : null,
+        daypart: clip(body.daypart),
+        businessType: clip(body.businessType),
+        publicTags,
+        note: clip(body.note, 500),
+        greatTrack,
+        status: "PENDING", // always PENDING — a user can never publish to the catalog
+      },
+      select: { id: true, status: true, createdAt: true },
+    });
+    return NextResponse.json({ ok: true, contribution });
+  } catch (err) {
+    // Surface the real cause server-side (never hidden) — e.g. a missing table/column when the
+    // connected DB is behind on the community-feedback migrations. Always answer with valid JSON so
+    // the client never hits "Unexpected end of JSON input".
+    console.error("[contributions] create failed:", err);
+    return NextResponse.json({ error: "Could not save your suggestion. Please try again." }, { status: 500 });
+  }
 }

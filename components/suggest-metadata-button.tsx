@@ -39,8 +39,12 @@ export function SuggestMetadataButton({ trackTitle, trackArtist, catalogItemId }
           publicTags: form.publicTags.split(",").map((t) => t.trim()).filter(Boolean),
         }),
       });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error ?? "Could not save your suggestion.");
+      // Parse defensively: an empty/non-JSON body (e.g. an unexpected 500) must not surface as
+      // "Unexpected end of JSON input" — fall back to a status-based message instead.
+      const raw = await res.text();
+      let j: { ok?: boolean; error?: string } = {};
+      if (raw) { try { j = JSON.parse(raw); } catch { j = {}; } }
+      if (!res.ok) throw new Error(j.error ?? `Could not save your suggestion (HTTP ${res.status}).`);
       setPhase({ kind: "ok" });
     } catch (e) { setPhase({ kind: "error", message: (e as Error).message }); }
   };
