@@ -31,7 +31,7 @@ import { LanguageSelector } from "@/components/language-selector";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
 import { DesktopUpdatePill } from "@/components/desktop-update-pill";
-import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule } from "@/lib/center-module-context";
+import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule, isRoyaltyFreeMusicModule, isGuestsModule } from "@/lib/center-module-context";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { useTopNavPins } from "@/lib/use-top-nav-pins";
 import {
@@ -1609,7 +1609,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                         Pads
                       </p>
                     </header>
-                    <div className="grid grid-cols-2 gap-1.5">
+                    {/* PADS: 3 rows × 2 cols. Guest and Royalty-Free Music are real pads (Guest also has a
+                        rail launcher for now). Placeholder pads (key:null) stay "Soon". The grid can grow to
+                        more rows and scrolls only if it ever overflows the deck height — tiles are never cut. */}
+                    <div className="grid grid-cols-2 gap-1.5 min-h-0 flex-1 content-start overflow-y-auto">
                       {(
                         [
                           {
@@ -1620,11 +1623,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                             dot: "bg-sky-400",
                           },
                           {
-                            key: null,
-                            title: "Birthdays",
-                            tone: "border-white/[0.05] bg-white/[0.02] text-[#48484d]",
-                            activeTone: "",
-                            dot: "bg-[#48484d]",
+                            key: "royalty-free-music" as const,
+                            title: "Royalty-Free Music",
+                            tone: "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.07] hover:text-[#f5f5f7]",
+                            activeTone: "border-[#0a84ff]/40 bg-[#0a84ff]/12 text-[#7db8ff]",
+                            dot: "bg-emerald-400",
                           },
                           {
                             key: "my-music-library" as const,
@@ -1634,8 +1637,22 @@ export function AppShell({ children }: { children: ReactNode }) {
                             dot: "bg-amber-400",
                           },
                           {
+                            key: "guests" as const,
+                            title: "Guest",
+                            tone: "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.07] hover:text-[#f5f5f7]",
+                            activeTone: "border-[#0a84ff]/40 bg-[#0a84ff]/12 text-[#7db8ff]",
+                            dot: "bg-violet-400",
+                          },
+                          {
                             key: null,
                             title: "Alerts",
+                            tone: "border-white/[0.05] bg-white/[0.02] text-[#48484d]",
+                            activeTone: "",
+                            dot: "bg-[#48484d]",
+                          },
+                          {
+                            key: null,
+                            title: "Future",
                             tone: "border-white/[0.05] bg-white/[0.02] text-[#48484d]",
                             activeTone: "",
                             dot: "bg-[#48484d]",
@@ -1644,10 +1661,22 @@ export function AppShell({ children }: { children: ReactNode }) {
                       ).map((group) => {
                         const isMusicPad = group.key === "my-music-library";
                         const isJinglesPad = group.key === "jingles";
+                        const isRfmPad = group.key === "royalty-free-music";
+                        const isGuestPad = group.key === "guests";
                         const isActive =
                           (isJinglesPad && isJinglesModule(activeCenterModule)) ||
-                          (isMusicPad && isMyMusicLibraryModule(activeCenterModule));
+                          (isMusicPad && isMyMusicLibraryModule(activeCenterModule)) ||
+                          (isRfmPad && isRoyaltyFreeMusicModule(activeCenterModule)) ||
+                          (isGuestPad && isGuestsModule(activeCenterModule));
                         const padDisabled = group.key === null || (isMusicPad && !inDesktopApp);
+                        const isTogglePad = isJinglesPad || isRfmPad || isGuestPad || (isMusicPad && inDesktopApp);
+                        let statusLabel: string;
+                        if (isMusicPad && !inDesktopApp) statusLabel = "Desktop only";
+                        else if (isMusicPad) statusLabel = isActive ? "Close panel" : "Open console";
+                        else if (isJinglesPad) statusLabel = isActive ? "Close console" : "Open console";
+                        else if (isRfmPad) statusLabel = isActive ? "Close catalog" : "Open catalog";
+                        else if (isGuestPad) statusLabel = isActive ? "Close inbox" : "Open inbox";
+                        else statusLabel = "Soon";
                         return (
                           <button
                             key={group.title}
@@ -1657,40 +1686,30 @@ export function AppShell({ children }: { children: ReactNode }) {
                             } ${padDisabled ? "opacity-45 cursor-default" : "hover:opacity-90 active:opacity-75"}`}
                             disabled={padDisabled}
                             aria-disabled={padDisabled}
-                            aria-pressed={!padDisabled && (isJinglesPad || isMusicPad) ? isActive : undefined}
+                            aria-pressed={!padDisabled && isTogglePad ? isActive : undefined}
                             onClick={
                               isJinglesPad
-                                ? () =>
-                                    setActiveCenterModule((v) => (isJinglesModule(v) ? null : "jingles"))
-                                : isMusicPad && inDesktopApp
+                                ? () => setActiveCenterModule((v) => (isJinglesModule(v) ? null : "jingles"))
+                                : isRfmPad
                                   ? () =>
                                       setActiveCenterModule((v) =>
-                                        isMyMusicLibraryModule(v) ? null : "my-music-library",
+                                        isRoyaltyFreeMusicModule(v) ? null : "royalty-free-music",
                                       )
-                                  : undefined
+                                  : isGuestPad
+                                    ? () => setActiveCenterModule((v) => (isGuestsModule(v) ? null : "guests"))
+                                    : isMusicPad && inDesktopApp
+                                      ? () =>
+                                          setActiveCenterModule((v) =>
+                                            isMyMusicLibraryModule(v) ? null : "my-music-library",
+                                          )
+                                      : undefined
                             }
                           >
                             <p className="text-xs font-semibold tracking-tight">{group.title}</p>
-                            {isMusicPad && !inDesktopApp ? (
-                              <p className="mt-1 flex items-center gap-1 text-[10px] opacity-60">
-                                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />
-                                Desktop only
-                              </p>
-                            ) : isMusicPad && inDesktopApp ? (
-                              <p className="mt-1 flex flex-wrap items-center gap-1 text-[10px] opacity-90">
-                                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />
-                                {isActive ? "Close panel" : "Open console"}
-                              </p>
-                            ) : (
-                              <p className="mt-1 flex flex-wrap items-center gap-1 text-[10px] opacity-90">
-                                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />
-                                {isJinglesPad
-                                  ? isActive
-                                    ? "Close console"
-                                    : "Open console"
-                                  : "Soon"}
-                              </p>
-                            )}
+                            <p className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] ${isMusicPad && !inDesktopApp ? "opacity-60" : "opacity-90"}`}>
+                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />
+                              {statusLabel}
+                            </p>
                           </button>
                         );
                       })}

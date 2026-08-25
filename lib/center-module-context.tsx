@@ -12,6 +12,7 @@ export type CenterModuleEditTarget = { kind: "playlist" | "source"; id: string }
 
 export type CenterModule =
   | "jingles"
+  | "royalty-free-music"
   | "my-music-library"
   | "music-library-metadata"
   | "dj-creator-hub"
@@ -36,6 +37,10 @@ export function useCenterModule(): CenterModuleCtx {
 
 export function isJinglesModule(m: CenterModule): m is "jingles" {
   return m === "jingles";
+}
+
+export function isRoyaltyFreeMusicModule(m: CenterModule): m is "royalty-free-music" {
+  return m === "royalty-free-music";
 }
 
 export function isMyMusicLibraryModule(m: CenterModule): m is "my-music-library" {

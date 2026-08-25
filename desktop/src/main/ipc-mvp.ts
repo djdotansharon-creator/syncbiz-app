@@ -683,6 +683,36 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     }
   });
 
+  // POC-ONLY, read-only: resolve Royalty-Free Music sample assets from the SEPARATE preview cache
+  // (.poc-preview-cache, distinct from the offline .poc-cache). Returns absolute local paths keyed by
+  // stable asset id so the catalog can play samples through the real chain. Never writes. This is a
+  // PREVIEW cache (lets samples be heard in the POC); it is NOT an offline playlist and must never be
+  // presented as OFFLINE READY.
+  ipcMain.handle(MVP_IPC.GET_MUSIC_BANK_PREVIEW_PATHS, async () => {
+    try {
+      const candidates = [
+        join(app.getAppPath(), ".poc-preview-cache"),
+        join(process.cwd(), ".poc-preview-cache"),
+        join(process.cwd(), "desktop", ".poc-preview-cache"),
+      ];
+      const base = candidates.find((c) => existsSync(join(c, "manifest.json")));
+      if (!base) return { available: false, reason: "no-manifest" };
+      const m = JSON.parse(readFileSync(join(base, "manifest.json"), "utf8"));
+      const assets = (m && typeof m === "object" ? m.assets : null) || {};
+      const tracks: { id: string; url: string }[] = [];
+      for (const [id, aRaw] of Object.entries(assets)) {
+        const a = aRaw as { status?: string; localPath?: string } | null;
+        if (!a || a.status !== "ready" || !a.localPath) continue;
+        const abs = join(base, a.localPath);
+        if (!existsSync(abs)) continue;
+        tracks.push({ id, url: abs });
+      }
+      return { available: tracks.length > 0, tracks };
+    } catch (e) {
+      return { available: false, reason: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
   ipcMain.handle(
     MVP_IPC.GET_LOCAL_AUDIO_TAGS,
     async (_e, filePath: unknown): Promise<GetLocalAudioTagsResult> => {

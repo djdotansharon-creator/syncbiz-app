@@ -70,6 +70,9 @@ const api: SyncBizDesktopMvp = {
   // POC-only, read-only: OFFLINE-READY POC playlist from the local manifest (absolute local paths).
   getOfflinePocPlaylist: (): Promise<{ available: boolean; title?: string; tracks?: { id: string; name: string; url: string }[]; reason?: string }> =>
     ipcRenderer.invoke(MVP_IPC.GET_OFFLINE_POC_PLAYLIST),
+  // POC-only, read-only: Royalty-Free Music sample assets from the SEPARATE preview cache (absolute paths).
+  getMusicBankPreviewPaths: (): Promise<{ available: boolean; tracks?: { id: string; url: string }[]; reason?: string }> =>
+    ipcRenderer.invoke(MVP_IPC.GET_MUSIC_BANK_PREVIEW_PATHS),
   /** Prefer over deprecated `File.path` for native paths from file inputs and drag/drop. */
   getPathForFile: (file: File): string => {
     try {

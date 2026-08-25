@@ -163,6 +163,8 @@ type SyncBizDesktopBridgePreload = {
   importLocalM3uPlaylist?: (absolutePath: string) => Promise<ImportLocalM3uPlaylistIpcResult>;
   /** POC-only, read-only: OFFLINE-READY POC playlist from the local manifest. Optional — legacy shells lack it. */
   getOfflinePocPlaylist?: () => Promise<{ available: boolean; title?: string; tracks?: { id: string; name: string; url: string }[]; reason?: string }>;
+  /** POC-only, read-only: Royalty-Free Music sample preview-cache paths. Optional — legacy shells lack it. */
+  getMusicBankPreviewPaths?: () => Promise<{ available: boolean; tracks?: { id: string; url: string }[]; reason?: string }>;
 };
 
 declare global {

@@ -58,6 +58,9 @@ export const MVP_IPC = {
   GET_LOCAL_AUDIO_TAGS: "mvp:get-local-audio-tags",
   // POC-only, read-only: return the OFFLINE-READY POC playlist from the local manifest (absolute paths).
   GET_OFFLINE_POC_PLAYLIST: "mvp:get-offline-poc-playlist",
+  // POC-only, read-only: resolve Royalty-Free Music sample assets from the SEPARATE preview cache
+  // (NOT the offline playlist) → { id → absolute local path } for playback. Never writes.
+  GET_MUSIC_BANK_PREVIEW_PATHS: "mvp:get-music-bank-preview-paths",
   /** Dev-only inspector: return raw common.* values and log once in main. */
   INSPECT_LOCAL_AUDIO_TAGS_RAW: "mvp:inspect-local-audio-tags-raw",
   /** Stage 4C: search local collection snapshot JSON in main only (metadata; no disk walk). */

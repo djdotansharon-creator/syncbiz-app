@@ -48,6 +48,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# POC-only offline media cache (downloaded audio + local manifest — never commit)
+desktop/.poc-cache/
+
+# POC-only Royalty-Free Music sample PREVIEW cache (downloaded sample audio — never commit)
+desktop/.poc-preview-cache/
+
 # env files (can opt-in for committing if needed)
 .env*
 # Exception: production WS URL baked into the desktop installer. Public value,

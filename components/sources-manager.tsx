@@ -14,6 +14,7 @@ import {
 import {
   useCenterModule,
   isJinglesModule,
+  isRoyaltyFreeMusicModule,
   isMyMusicLibraryModule,
   isMusicLibraryMetadataModule,
   isDjCreatorHubModule,
@@ -22,6 +23,7 @@ import {
   isDjCreatorAssistantModule,
 } from "@/lib/center-module-context";
 import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
+import { RoyaltyFreeMusicWorkspacePanel } from "@/components/royalty-free-music-workspace-panel";
 import { MyMusicLibraryWorkspacePanel } from "@/components/my-music-library-workspace-panel";
 import { MusicLibraryMetadataWorkspacePanel } from "@/components/music-library-metadata-workspace-panel";
 import { EditCurrentWorkspacePanel } from "@/components/edit-current-workspace-panel";
@@ -2730,6 +2732,8 @@ function SourcesManagerInner({
             </div>
           ) : isJinglesModule(activeCenterModule) ? (
             <JinglesWorkspacePanel onClose={() => setActiveCenterModule(null)} />
+          ) : isRoyaltyFreeMusicModule(activeCenterModule) ? (
+            <RoyaltyFreeMusicWorkspacePanel onClose={() => setActiveCenterModule(null)} />
           ) : isMyMusicLibraryModule(activeCenterModule) ? (
             <MyMusicLibraryWorkspacePanel
               onClose={() => setActiveCenterModule(null)}
