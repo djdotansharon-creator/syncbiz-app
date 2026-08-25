@@ -10,6 +10,7 @@
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { existsSync, rmSync } from "node:fs";
 import { loadDriveConfig, listChildren, FOLDER_MIME } from "./drive.mjs";
 import {
   cacheDirs, sweepPartials, assetIdFor, downloadVerifyAtomic,
@@ -69,12 +70,15 @@ async function sync() {
 
   let ready = 0, failed = 0, totalAudio = 0;
   const seenGenreIds = new Set();
+  const currentAssetIds = new Set(); // assetIds actually present in Drive right now (for prune)
+  const currentGenreIds = new Set(); // genreIds actually present in Drive right now (for prune)
 
   for (const gf of genreFolders) {
     const displayName = displayNameFromFolder(gf.name);
     let genreId = slugify(displayName);
     while (seenGenreIds.has(genreId) && m.genres[genreId]?.folderId !== gf.id) genreId += "-x";
     seenGenreIds.add(genreId);
+    currentGenreIds.add(genreId);
     m.genres[genreId] = { folderId: gf.id, folderName: gf.name, displayName };
 
     const kids = await listChildren(token, gf.id);
@@ -85,6 +89,7 @@ async function sync() {
     for (const raw of audio) {
       const f = { id: raw.id, name: raw.name, size: raw.size, md5: raw.md5Checksum, modifiedTime: raw.modifiedTime };
       const assetId = assetIdFor(f.id);
+      currentAssetIds.add(assetId);
       const prev = m.assets[assetId];
       const stale = prev && prev.contentHash !== f.md5;
       if (prev && !stale && assetReady(dirs, m, assetId)) {
@@ -114,6 +119,19 @@ async function sync() {
       saveManifest(dirs, m);
     }
   }
+
+  // ── PRUNE: drop cache files + manifest entries no longer present in Drive (reorg/removed samples) ──
+  let prunedAssets = 0, prunedGenres = 0;
+  for (const [assetId, a] of Object.entries(m.assets)) {
+    if (currentAssetIds.has(assetId)) continue;
+    if (a?.localPath) { try { rmSync(join(dirs.base, a.localPath), { force: true }); } catch { /* ignore */ } }
+    delete m.assets[assetId];
+    prunedAssets++;
+  }
+  for (const genreId of Object.keys(m.genres)) {
+    if (!currentGenreIds.has(genreId)) { delete m.genres[genreId]; prunedGenres++; }
+  }
+  if (prunedAssets || prunedGenres) console.log(`\npruned ${prunedAssets} stale sample(s), ${prunedGenres} stale genre(s) not in Drive`);
 
   m.updatedAt = new Date().toISOString();
   saveManifest(dirs, m);
