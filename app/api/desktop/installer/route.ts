@@ -2,14 +2,18 @@ import { createReadStream, statSync, existsSync } from "fs";
 import { Readable } from "node:stream";
 import path from "path";
 import { NextResponse } from "next/server";
+import { resolveLatestWindowsInstaller } from "@/lib/desktop-installer-resolve";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
- * Streams the Windows installer .exe from `DESKTOP_INSTALLER_BUNDLE_PATH` (absolute path
- * on the server). Use with GET `/api/desktop/download` which returns
- * `url: <origin>/api/desktop/installer` and matching fileName/version.
+ * SyncBiz-owned download entry for the Windows installer .exe. Behavior:
+ *   1. If `DESKTOP_INSTALLER_BUNDLE_PATH` points at a readable .exe → stream it (attachment).
+ *   2. Otherwise → 307-redirect to the latest published GitHub release .exe asset (which serves
+ *      with its own attachment disposition, so the browser downloads it directly).
+ *   3. If neither is available → 404 JSON.
+ * Either way the browser gets an .exe download and never sees the GitHub Releases UI.
  */
 function resolveInstallerPath(): string | null {
   const raw = process.env.DESKTOP_INSTALLER_BUNDLE_PATH?.trim();
@@ -20,10 +24,14 @@ function resolveInstallerPath(): string | null {
   return abs;
 }
 
-export async function GET(req: Request) {
+export async function GET(_req: Request) {
   const p = resolveInstallerPath();
   if (!p) {
-    return NextResponse.json({ error: "Installer bundle is not configured or file missing" }, { status: 404 });
+    // No local bundle on this server → hand off to the latest GitHub release .exe (SyncBiz stays
+    // the public URL; the client never sees a GitHub page).
+    const latest = await resolveLatestWindowsInstaller();
+    if (latest) return NextResponse.redirect(latest.url, 307);
+    return NextResponse.json({ error: "No Windows installer is available yet." }, { status: 404 });
   }
   const fileName = process.env.DESKTOP_WIN_INSTALLER_FILE_NAME?.trim() || path.basename(p);
   let size: number;

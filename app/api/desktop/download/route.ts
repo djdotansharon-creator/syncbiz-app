@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "fs";
 import path from "path";
 import { NextResponse } from "next/server";
+import { resolveLatestWindowsInstaller } from "@/lib/desktop-installer-resolve";
 
 /**
  * Returns JSON with a direct `url` to the Windows installer (.exe) when available.
@@ -302,6 +303,25 @@ export async function GET(req: Request) {
   const envPayload = fromEnvForWin();
   if (envPayload) {
     return successJson(platform, releasesUrl, envPayload);
+  }
+
+  // Windows: advertise the LATEST published .exe behind the SyncBiz-owned installer URL. Not pinned
+  // to desktop/package.json — pinning made Download dead-end on the GitHub page when the package
+  // version ran ahead of the published release. `/api/desktop/installer` 302s to the actual asset.
+  if (platform === "win" || platform === "unknown") {
+    const latest = await resolveLatestWindowsInstaller();
+    if (latest) {
+      return successJson(platform, releasesUrl, {
+        version: latest.version,
+        releasedAt: latest.publishedAt,
+        url: "/api/desktop/installer",
+        fileName: latest.fileName,
+        sizeBytes: latest.sizeBytes,
+        downloads: [{ name: latest.fileName, url: "/api/desktop/installer", sizeBytes: latest.sizeBytes }],
+        source: "github",
+      });
+    }
+    // else fall through — the block below produces the proper "no build published" JSON.
   }
 
   try {
