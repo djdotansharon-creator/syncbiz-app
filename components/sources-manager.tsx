@@ -24,6 +24,7 @@ import {
 } from "@/lib/center-module-context";
 import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
 import { RoyaltyFreeMusicWorkspacePanel } from "@/components/royalty-free-music-workspace-panel";
+import { RFM_CATALOG_ENABLED } from "@/lib/feature-flags";
 import { MyMusicLibraryWorkspacePanel } from "@/components/my-music-library-workspace-panel";
 import { MusicLibraryMetadataWorkspacePanel } from "@/components/music-library-metadata-workspace-panel";
 import { EditCurrentWorkspacePanel } from "@/components/edit-current-workspace-panel";
@@ -2732,7 +2733,7 @@ function SourcesManagerInner({
             </div>
           ) : isJinglesModule(activeCenterModule) ? (
             <JinglesWorkspacePanel onClose={() => setActiveCenterModule(null)} />
-          ) : isRoyaltyFreeMusicModule(activeCenterModule) ? (
+          ) : RFM_CATALOG_ENABLED && isRoyaltyFreeMusicModule(activeCenterModule) ? (
             <RoyaltyFreeMusicWorkspacePanel onClose={() => setActiveCenterModule(null)} />
           ) : isMyMusicLibraryModule(activeCenterModule) ? (
             <MyMusicLibraryWorkspacePanel

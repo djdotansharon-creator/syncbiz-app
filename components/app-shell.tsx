@@ -32,6 +32,7 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
 import { DesktopUpdatePill } from "@/components/desktop-update-pill";
 import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule, isRoyaltyFreeMusicModule, isGuestsModule } from "@/lib/center-module-context";
+import { RFM_CATALOG_ENABLED } from "@/lib/feature-flags";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { useTopNavPins } from "@/lib/use-top-nav-pins";
 import {
@@ -1622,13 +1623,19 @@ export function AppShell({ children }: { children: ReactNode }) {
                             activeTone: "border-[#0a84ff]/40 bg-[#0a84ff]/12 text-[#7db8ff]",
                             dot: "bg-sky-400",
                           },
-                          {
-                            key: "royalty-free-music" as const,
-                            title: "Royalty-Free Music",
-                            tone: "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.07] hover:text-[#f5f5f7]",
-                            activeTone: "border-[#0a84ff]/40 bg-[#0a84ff]/12 text-[#7db8ff]",
-                            dot: "bg-emerald-400",
-                          },
+                          // Royalty-Free Music PAD — gated. Absent entirely in production (flag off);
+                          // no disabled pad, no "Soon", no trace. Visible only when the flag is on (dev).
+                          ...(RFM_CATALOG_ENABLED
+                            ? [
+                                {
+                                  key: "royalty-free-music" as const,
+                                  title: "Royalty-Free Music",
+                                  tone: "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.07] hover:text-[#f5f5f7]",
+                                  activeTone: "border-[#0a84ff]/40 bg-[#0a84ff]/12 text-[#7db8ff]",
+                                  dot: "bg-emerald-400",
+                                },
+                              ]
+                            : []),
                           {
                             key: "my-music-library" as const,
                             title: "My Music",
@@ -1657,7 +1664,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                             activeTone: "",
                             dot: "bg-[#48484d]",
                           },
-                        ] as const
+                        ] as Array<{ key: string | null; title: string; tone: string; activeTone: string; dot: string }>
                       ).map((group) => {
                         const isMusicPad = group.key === "my-music-library";
                         const isJinglesPad = group.key === "jingles";
