@@ -67,6 +67,9 @@ const api: SyncBizDesktopMvp = {
     ipcRenderer.invoke(MVP_IPC.MPV_SEEK_TO, seconds),
   scanLocalAudioFolder: (dir: string): Promise<ScanLocalAudioFolderResult> =>
     ipcRenderer.invoke(MVP_IPC.SCAN_LOCAL_AUDIO_FOLDER, dir),
+  // POC-only, read-only: OFFLINE-READY POC playlist from the local manifest (absolute local paths).
+  getOfflinePocPlaylist: (): Promise<{ available: boolean; title?: string; tracks?: { id: string; name: string; url: string }[]; reason?: string }> =>
+    ipcRenderer.invoke(MVP_IPC.GET_OFFLINE_POC_PLAYLIST),
   /** Prefer over deprecated `File.path` for native paths from file inputs and drag/drop. */
   getPathForFile: (file: File): string => {
     try {

@@ -10,6 +10,7 @@ import { ScheduleEngineProvider } from "@/lib/schedule-engine-context";
 import { ScheduleAutoPlayer } from "@/components/schedule-auto-player";
 import { JingleScheduleAutoPlayer } from "@/components/jingles-control/JingleScheduleAutoPlayer";
 import { HarnessPlaybackProbe } from "@/components/harness-playback-probe";
+import { PocOfflineLauncher } from "@/components/poc-offline/poc-offline-launcher";
 
 /**
  * Single client boundary for all app providers.
@@ -29,6 +30,8 @@ export function AppProviders({ children }: { children: ReactNode }) {
                 <JingleScheduleAutoPlayer />
                 {/* Read-only diagnostic probe for the P1.1 playback harness (dev-only, renders null). */}
                 <HarnessPlaybackProbe />
+                {/* POC-only offline launcher (Stage 2b) — desktop-gated, renders null, registers a manual trigger. */}
+                <PocOfflineLauncher />
               </DevicePlayerProvider>
             </MobileRoleProvider>
           </LibraryThemeProvider>

@@ -1,4 +1,6 @@
 import { BrowserWindow, ipcMain, app, dialog } from "electron";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type {
   AddAdditionalMusicFolderResult,
   AutoStartState,
@@ -650,6 +652,36 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       }
     },
   );
+
+  // POC-ONLY, read-only: return the OFFLINE-READY POC playlist from the local manifest as ABSOLUTE
+  // local paths. Never writes. Returns { available:false, reason } if missing or not fully ready.
+  ipcMain.handle(MVP_IPC.GET_OFFLINE_POC_PLAYLIST, async () => {
+    try {
+      const candidates = [
+        join(app.getAppPath(), ".poc-cache"),
+        join(process.cwd(), ".poc-cache"),
+        join(process.cwd(), "desktop", ".poc-cache"),
+      ];
+      const base = candidates.find((c) => existsSync(join(c, "manifest.json")));
+      if (!base) return { available: false, reason: "no-manifest" };
+      const m = JSON.parse(readFileSync(join(base, "manifest.json"), "utf8"));
+      const pl = m?.playlists?.["poc-samples"];
+      if (!pl || !Array.isArray(pl.assetIds) || pl.assetIds.length === 0) {
+        return { available: false, reason: "no-playlist" };
+      }
+      const tracks: { id: string; name: string; url: string }[] = [];
+      for (const assetId of pl.assetIds) {
+        const a = m.assets?.[assetId];
+        if (!a || a.status !== "ready" || !a.localPath) return { available: false, reason: "not-ready" };
+        const abs = join(base, a.localPath);
+        if (!existsSync(abs)) return { available: false, reason: "missing-file" };
+        tracks.push({ id: assetId, name: a.name || assetId, url: abs });
+      }
+      return { available: true, title: pl.title || "Offline POC", tracks };
+    } catch (e) {
+      return { available: false, reason: e instanceof Error ? e.message : String(e) };
+    }
+  });
 
   ipcMain.handle(
     MVP_IPC.GET_LOCAL_AUDIO_TAGS,

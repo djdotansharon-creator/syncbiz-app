@@ -119,4 +119,6 @@ export type SyncBizDesktopMvp = {
   addAdditionalMusicFolder: () => Promise<AddAdditionalMusicFolderResult>;
   removeAdditionalMusicFolder: (folderPath: string) => Promise<RemoveAdditionalMusicFolderResult>;
   scanMusicLibrary: () => Promise<ScanMusicLibraryResult>;
+  /** POC-only, read-only: OFFLINE-READY POC playlist from the local manifest (absolute local paths). */
+  getOfflinePocPlaylist: () => Promise<{ available: boolean; title?: string; tracks?: { id: string; name: string; url: string }[]; reason?: string }>;
 };

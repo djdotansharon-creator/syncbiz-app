@@ -56,6 +56,8 @@ export const MVP_IPC = {
   GET_LOCAL_AUDIO_COVER: "mvp:get-local-audio-cover",
   /** Common tags + duration from an audio file (main process only). */
   GET_LOCAL_AUDIO_TAGS: "mvp:get-local-audio-tags",
+  // POC-only, read-only: return the OFFLINE-READY POC playlist from the local manifest (absolute paths).
+  GET_OFFLINE_POC_PLAYLIST: "mvp:get-offline-poc-playlist",
   /** Dev-only inspector: return raw common.* values and log once in main. */
   INSPECT_LOCAL_AUDIO_TAGS_RAW: "mvp:inspect-local-audio-tags-raw",
   /** Stage 4C: search local collection snapshot JSON in main only (metadata; no disk walk). */

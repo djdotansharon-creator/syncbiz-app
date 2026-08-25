@@ -161,6 +161,8 @@ type SyncBizDesktopBridgePreload = {
   searchLocalCollectionSnapshot?: (query: string, limit?: number) => Promise<SearchLocalCollectionSnapshotIpcResult>;
   /** Stage 5B: M3U/M3U8 → resolved paths under Music Folder (+ snapshot refresh in main). */
   importLocalM3uPlaylist?: (absolutePath: string) => Promise<ImportLocalM3uPlaylistIpcResult>;
+  /** POC-only, read-only: OFFLINE-READY POC playlist from the local manifest. Optional — legacy shells lack it. */
+  getOfflinePocPlaylist?: () => Promise<{ available: boolean; title?: string; tracks?: { id: string; name: string; url: string }[]; reason?: string }>;
 };
 
 declare global {
