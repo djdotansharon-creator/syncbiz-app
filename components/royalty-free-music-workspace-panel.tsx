@@ -7,7 +7,7 @@
  *
  *   Header        → title + dynamic horizontal Genre navigation (All | <genre> | …).
  *   All (home)    → grid of Genre Pack cards + a prominent Complete Music Bank bundle band.
- *   Genre detail  → artwork header + Play Samples / Listen to 15-Min Demo + dense sample list.
+ *   Genre detail  → artwork header + a single "Listen to Samples" action + dense sample list.
  *
  * Genres are DYNAMIC (from the generated catalog descriptor; no hardcoded list). Samples play through
  * the EXISTING chain: ephemeral local playlist → RAW playSource → AudioPlayer → PlaybackOrchestrator →
@@ -28,9 +28,6 @@ import { POC_MUSIC_BANK_CATALOG } from "@/lib/music-bank/poc-catalog";
 import type { MusicBankGenrePack, MusicBankSampleTrack } from "@/lib/music-bank/catalog-types";
 import { GENRE_PRICE_LABEL, FULL_BANK_PRICE_LABEL } from "@/lib/music-bank/pricing";
 
-const DEMO_TARGET_SECONDS = 15 * 60;
-const DEMO_FALLBACK_TRACK_COUNT = 4;
-
 type PreviewPathMap = Map<string, string>;
 type ActiveView = "all" | string; // "all" or a genre id
 
@@ -38,19 +35,6 @@ function totalDuration(tracks: MusicBankSampleTrack[]): number | null {
   const known = tracks.filter((t) => typeof t.durationSeconds === "number");
   if (known.length === 0) return null;
   return known.reduce((sum, t) => sum + (t.durationSeconds ?? 0), 0);
-}
-
-function pickDemoTracks(tracks: MusicBankSampleTrack[]): MusicBankSampleTrack[] {
-  const haveDurations = tracks.some((t) => typeof t.durationSeconds === "number");
-  if (!haveDurations) return tracks.slice(0, DEMO_FALLBACK_TRACK_COUNT);
-  const out: MusicBankSampleTrack[] = [];
-  let acc = 0;
-  for (const t of tracks) {
-    out.push(t);
-    acc += t.durationSeconds ?? 0;
-    if (acc >= DEMO_TARGET_SECONDS) break;
-  }
-  return out;
 }
 
 function PlayIcon({ className }: { className?: string }) {
@@ -104,7 +88,7 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   );
 
   const buildSource = useCallback(
-    (genre: MusicBankGenrePack, tracks: MusicBankSampleTrack[], suffix: string): { source: UnifiedSource; playable: MusicBankSampleTrack[] } | null => {
+    (genre: MusicBankGenrePack, tracks: MusicBankSampleTrack[]): { source: UnifiedSource; playable: MusicBankSampleTrack[] } | null => {
       const playable = tracks.filter((t) => previewPaths.has(t.id));
       if (playable.length === 0) return null;
       const plTracks: PlaylistTrack[] = playable.map((t) => ({
@@ -115,8 +99,8 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
       }));
       const first = plTracks[0].url;
       const playlist: Playlist = {
-        id: `${EPHEMERAL_LOCAL_PLAYLIST_PREFIX}musicbank-${genre.id}-${suffix}`,
-        name: `${genre.name} — ${suffix === "demo" ? "15-Min Demo" : "Samples"}`,
+        id: `${EPHEMERAL_LOCAL_PLAYLIST_PREFIX}musicbank-${genre.id}-samples`,
+        name: `${genre.name} — Samples`,
         genre: genre.name,
         type: "local",
         url: first,
@@ -133,17 +117,7 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
 
   const playGenreSamples = useCallback(
     (genre: MusicBankGenrePack) => {
-      const built = buildSource(genre, genre.tracks, "samples");
-      if (!built) return;
-      playSource(built.source, 0);
-      setNowPlaying({ genreId: genre.id, trackId: built.playable[0]?.id ?? null });
-    },
-    [buildSource, playSource],
-  );
-
-  const playGenreDemo = useCallback(
-    (genre: MusicBankGenrePack) => {
-      const built = buildSource(genre, pickDemoTracks(genre.tracks), "demo");
+      const built = buildSource(genre, genre.tracks);
       if (!built) return;
       playSource(built.source, 0);
       setNowPlaying({ genreId: genre.id, trackId: built.playable[0]?.id ?? null });
@@ -153,7 +127,7 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
 
   const playTrack = useCallback(
     (genre: MusicBankGenrePack, track: MusicBankSampleTrack) => {
-      const built = buildSource(genre, genre.tracks, "samples");
+      const built = buildSource(genre, genre.tracks);
       if (!built) return;
       const idx = built.playable.findIndex((t) => t.id === track.id);
       playSource(built.source, idx >= 0 ? idx : 0);
@@ -198,7 +172,6 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
             previewPaths={previewPaths}
             nowPlaying={nowPlaying}
             onPlaySamples={() => playGenreSamples(selectedGenre)}
-            onPlayDemo={() => playGenreDemo(selectedGenre)}
             onPlayTrack={(t) => playTrack(selectedGenre, t)}
             onBack={() => setView("all")}
             notPlayableHint={notPlayableHint}
@@ -254,7 +227,7 @@ function CatalogHome({
                 <span className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/30 text-white opacity-0 backdrop-blur-sm transition group-hover:opacity-100"><PlayIcon className="h-3.5 w-3.5" /></span>
               </button>
               <div className="flex items-center justify-between gap-2 px-3.5 py-2.5">
-                <button type="button" onClick={() => onOpen(genre.id)} className="text-xs font-medium text-[#0a84ff] transition hover:text-[#7db8ff]">Listen to demo →</button>
+                <button type="button" onClick={() => onOpen(genre.id)} className="text-xs font-medium text-[#0a84ff] transition hover:text-[#7db8ff]">Listen to samples →</button>
                 <span className="flex items-center gap-2">
                   <span className="text-sm font-semibold tabular-nums text-[#f5f5f7]">{GENRE_PRICE_LABEL}</span>
                   <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-md border border-white/[0.1] px-2.5 py-1 text-[11px] font-semibold text-[#6b6b70]">Unlock</button>
@@ -293,7 +266,6 @@ function GenreDetail({
   previewPaths,
   nowPlaying,
   onPlaySamples,
-  onPlayDemo,
   onPlayTrack,
   onBack,
   notPlayableHint,
@@ -302,7 +274,6 @@ function GenreDetail({
   previewPaths: PreviewPathMap;
   nowPlaying: { genreId: string; trackId: string | null } | null;
   onPlaySamples: () => void;
-  onPlayDemo: () => void;
   onPlayTrack: (t: MusicBankSampleTrack) => void;
   onBack: () => void;
   notPlayableHint: string | null;
@@ -323,13 +294,10 @@ function GenreDetail({
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-white/85">{genre.description}</p>
           <p className="mt-1.5 text-[11px] font-medium text-white/75">{genre.tracks.length} samples{total != null ? ` · ${formatDuration(total)}` : ""}</p>
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            {/* 15-Min Demo is the primary CTA — the way a business owner grasps the style. */}
-            <button type="button" disabled={!genrePlayable} onClick={onPlayDemo} className="inline-flex items-center gap-1.5 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-[#101014] transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/30 disabled:text-white/60">
+            {/* Single CTA — plays the genre's FULL sample set through the existing playlist queue. */}
+            <button type="button" disabled={!genrePlayable} onClick={onPlaySamples} className="inline-flex items-center gap-1.5 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-[#101014] transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/30 disabled:text-white/60">
               <PlayIcon className="h-3.5 w-3.5" />
-              Listen to 15-Min Demo
-            </button>
-            <button type="button" disabled={!genrePlayable} onClick={onPlaySamples} className="inline-flex items-center gap-1.5 rounded-lg border border-white/40 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:border-white/20 disabled:text-white/50">
-              Play Samples
+              Listen to Samples
             </button>
             <span className="ms-auto flex items-center gap-2">
               <span className="text-lg font-bold tabular-nums text-white">{GENRE_PRICE_LABEL}</span>
