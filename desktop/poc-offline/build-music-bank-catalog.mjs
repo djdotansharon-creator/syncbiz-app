@@ -1,11 +1,11 @@
 // POC-ONLY generator: build lib/music-bank/poc-catalog.ts from the preview-cache manifest.
-// Groups the downloaded samples into the four genre packs and writes the committed catalog metadata.
-// Genre PRESENTATION (name/description/gradient) is authored here and preserved across regenerations;
-// only the track lists are derived from real Drive data. Run AFTER preview-sync.mjs.
+// FULLY DYNAMIC — genres come from the manifest's discovered Drive subfolders, not a hardcoded list.
+// Add a folder in Drive → run preview-sync → run this → it appears. No code change required.
 //   node desktop/poc-offline/build-music-bank-catalog.mjs
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..");
@@ -13,46 +13,31 @@ const CACHE_ROOT = process.env.POC_PREVIEW_CACHE_ROOT || join(REPO, "desktop", "
 const MANIFEST = join(CACHE_ROOT, "manifest.json");
 const OUT = join(REPO, "lib", "music-bank", "poc-catalog.ts");
 
-// Ordered: first matching genre wins. `match` runs against the lowercased Drive folder path.
-const GENRES = [
-  {
-    id: "soul-rnb",
-    name: "Soul & RNB",
-    description: "Warm, soulful grooves that make a room feel effortless and premium.",
-    gradient: ["#4a1f3d", "#b4603a"],
-    match: (f) => /soul|r\s*&?\s*n\s*&?\s*b|rnb/.test(f),
-  },
-  {
-    id: "lounge-chillout",
-    name: "Lounge & Chillout",
-    description: "Relaxed, atmospheric textures for calm, unhurried spaces.",
-    gradient: ["#123244", "#2f7d86"],
-    match: (f) => /lounge|chill/.test(f),
-  },
-  {
-    id: "soft-pop-rock",
-    name: "Soft Pop & Rock",
-    description: "Familiar, easy-going pop and rock that keeps the energy friendly.",
-    gradient: ["#2a2340", "#7a5f92"],
-    match: (f) => /pop|rock/.test(f),
-  },
-  {
-    id: "dance",
-    name: "Dance",
-    description: "Upbeat, driving rhythms to lift the room and move the day forward.",
-    gradient: ["#1b2a6b", "#7a2f8c"],
-    match: (f) => /dance|edm|electro|house/.test(f),
-  },
+// Deterministic dark two-stop gradient palette (no neon). Chosen per-genre by a stable hash.
+const GRADIENTS = [
+  ["#4a1f3d", "#b4603a"], ["#123244", "#2f7d86"], ["#2a2340", "#7a5f92"], ["#1b2a6b", "#7a2f8c"],
+  ["#1f3a2e", "#4f9e6a"], ["#3a2140", "#8a4a7a"], ["#243447", "#4a6b8a"], ["#402a1f", "#a06a3a"],
+  ["#2a1f40", "#5a4a9a"], ["#1f4040", "#3a8a8a"], ["#40241f", "#a0503a"], ["#2f2a1f", "#8a7a4a"],
 ];
-
-function titleFromName(name) {
-  return String(name || "").replace(/\.[a-z0-9]+$/i, "").replace(/_/g, " ").trim() || "Untitled";
+function gradientFor(genreId) {
+  const h = parseInt(createHash("sha1").update(genreId).digest("hex").slice(0, 6), 16);
+  return GRADIENTS[h % GRADIENTS.length];
 }
-
-function classify(folder) {
-  const f = String(folder || "").toLowerCase();
-  for (const g of GENRES) if (g.match(f)) return g.id;
-  return null;
+// Optional flavor copy for known genres; unknown genres fall back to a generic business line.
+const FLAVOR = {
+  "soul-and-rnb": "Warm, soulful grooves that make a room feel effortless and premium.",
+  "lounge-and-chillout": "Relaxed, atmospheric textures for calm, unhurried spaces.",
+  "soft-pop-and-rock": "Familiar, easy-going pop and rock that keeps the energy friendly.",
+  "pop-and-rock": "Crowd-pleasing pop and rock that keeps the room upbeat.",
+  "dance": "Upbeat, driving rhythms to lift the room and move the day forward.",
+  "deep-house": "Deep, hypnotic house grooves for a modern, stylish atmosphere.",
+  "funk-groove": "Punchy funk grooves that bring warmth and movement to the floor.",
+  "jazz": "Smooth, timeless jazz for a refined, welcoming ambience.",
+  "latin": "Bright Latin rhythms full of warmth and easy energy.",
+  "reggaeton": "Bouncy reggaeton beats with a confident, contemporary edge.",
+};
+function descriptionFor(genreId, displayName) {
+  return FLAVOR[genreId] || `Professionally curated ${displayName.toLowerCase()} for your space.`;
 }
 
 function main() {
@@ -63,38 +48,41 @@ function main() {
   }
   const m = JSON.parse(readFileSync(MANIFEST, "utf8"));
   const assets = m.assets || {};
+  const genresMeta = m.genres || {};
 
-  const buckets = Object.fromEntries(GENRES.map((g) => [g.id, []]));
-  const folderByGenre = {};
-  let unmatched = 0;
-
+  // Group ready assets by their genreId.
+  const byGenre = {};
   for (const [id, a] of Object.entries(assets)) {
-    if (!a || a.status !== "ready" || !a.localPath) continue;
-    const gid = classify(a.folder);
-    if (!gid) { unmatched++; console.warn("  unmatched folder → skipped:", a.folder, "(" + a.name + ")"); continue; }
-    buckets[gid].push({
+    if (!a || a.status !== "ready" || !a.localPath || !a.genreId) continue;
+    (byGenre[a.genreId] ||= []).push({
       id,
-      title: titleFromName(a.name),
+      title: String(a.name || "").replace(/\.[a-z0-9]+$/i, "").replace(/_/g, " ").trim() || "Untitled",
       durationSeconds: typeof a.durationSeconds === "number" ? a.durationSeconds : null,
       ext: a.ext || ".mp3",
     });
-    if (!folderByGenre[gid]) folderByGenre[gid] = a.folder || "";
   }
 
-  for (const gid of Object.keys(buckets)) buckets[gid].sort((x, y) => x.title.localeCompare(y.title));
-  const totalTracks = Object.values(buckets).reduce((n, arr) => n + arr.length, 0);
+  // Emit every discovered genre folder that has at least one ready sample, ordered by display name.
+  const genreIds = Object.keys(genresMeta)
+    .filter((gid) => (byGenre[gid] || []).length > 0)
+    .sort((a, b) => String(genresMeta[a].displayName).localeCompare(String(genresMeta[b].displayName)));
 
-  const genreBlocks = GENRES.map((g) => {
-    const tracks = buckets[g.id];
+  let totalTracks = 0;
+  const genreBlocks = genreIds.map((gid) => {
+    const meta = genresMeta[gid];
+    const tracks = (byGenre[gid] || []).sort((x, y) => x.title.localeCompare(y.title));
+    totalTracks += tracks.length;
+    const [g0, g1] = gradientFor(gid);
     const trackLines = tracks
       .map((t) => `        { id: ${JSON.stringify(t.id)}, title: ${JSON.stringify(t.title)}, durationSeconds: ${t.durationSeconds == null ? "null" : t.durationSeconds}, ext: ${JSON.stringify(t.ext)} },`)
       .join("\n");
     return `    {
-      id: ${JSON.stringify(g.id)},
-      name: ${JSON.stringify(g.name)},
-      driveFolder: ${JSON.stringify(folderByGenre[g.id] || "")},
-      description: ${JSON.stringify(g.description)},
-      gradient: [${JSON.stringify(g.gradient[0])}, ${JSON.stringify(g.gradient[1])}],
+      id: ${JSON.stringify(gid)},
+      name: ${JSON.stringify(meta.displayName)},
+      driveFolder: ${JSON.stringify(meta.folderName || "")},
+      folderId: ${JSON.stringify(meta.folderId || "")},
+      description: ${JSON.stringify(descriptionFor(gid, meta.displayName))},
+      gradient: [${JSON.stringify(g0)}, ${JSON.stringify(g1)}],
       priceLabel: null,
       entitlement: null,
       tracks: [
@@ -106,12 +94,10 @@ ${trackLines}
   const out = `/**
  * Royalty-Free Music — POC catalog descriptor (GENERATED by desktop/poc-offline/build-music-bank-catalog.mjs).
  *
- * Track lists are derived from the real Drive sample folders (via the preview cache). Genre presentation
- * (name / description / gradient) is authored in the generator and preserved across regenerations.
- * Do not hand-edit track lists here — edit the generator and re-run it.
- *
- * Catalog metadata is a SEPARATE concern from the preview cache (playable bytes) and the offline manifest
- * (Keep-Offline / OFFLINE READY). See lib/music-bank/catalog-types.ts.
+ * FULLY DYNAMIC: genres are the direct Drive subfolders discovered by preview-sync (no hardcoded list).
+ * Track lists + durations come from the real samples via the preview cache. Do not hand-edit — edit the
+ * generator and re-run it. Catalog metadata is a SEPARATE concern from the preview cache (playable bytes)
+ * and the offline manifest (Keep-Offline / OFFLINE READY). See lib/music-bank/catalog-types.ts.
  */
 import type { MusicBankPocCatalog } from "./catalog-types";
 
@@ -127,8 +113,8 @@ ${genreBlocks}
 
   writeFileSync(OUT, out);
   console.log("wrote " + OUT);
-  for (const g of GENRES) console.log(`  ${g.name}: ${buckets[g.id].length} samples`);
-  console.log(`  total: ${totalTracks} samples${unmatched ? `, ${unmatched} unmatched (skipped)` : ""}`);
+  for (const gid of genreIds) console.log(`  ${genresMeta[gid].displayName} (${gid}): ${(byGenre[gid] || []).length} samples`);
+  console.log(`  ${genreIds.length} genres, ${totalTracks} samples total`);
 }
 
 main();

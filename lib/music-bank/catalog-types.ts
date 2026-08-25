@@ -28,6 +28,8 @@ export type MusicBankGenrePack = {
   name: string;
   /** Provenance: the Drive folder these samples came from (POC only). */
   driveFolder: string;
+  /** Stable Drive folder id for this genre (provenance / future differential sync). */
+  folderId: string;
   /** Short, business-oriented atmosphere line. */
   description: string;
   /** Two-stop gradient [from, to] for the section artwork. */

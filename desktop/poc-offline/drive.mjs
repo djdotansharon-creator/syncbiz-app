@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 
 const API = "https://www.googleapis.com/drive/v3/files";
-const FOLDER_MIME = "application/vnd.google-apps.folder";
+export const FOLDER_MIME = "application/vnd.google-apps.folder";
 
 export function loadDriveConfig(envPath) {
   const t = readFileSync(envPath, "utf8");
@@ -15,7 +15,7 @@ export function loadDriveConfig(envPath) {
   return { token, folderId };
 }
 
-async function listChildren(token, parentId) {
+export async function listChildren(token, parentId) {
   const u = new URL(API);
   u.searchParams.set("q", `'${parentId}' in parents and trashed=false`);
   u.searchParams.set("fields", "files(id,name,size,md5Checksum,modifiedTime,mimeType)");
