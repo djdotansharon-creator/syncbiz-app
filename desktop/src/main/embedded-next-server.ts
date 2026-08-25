@@ -138,6 +138,28 @@ export async function startEmbeddedNextServer(standaloneRoot: string): Promise<E
   const { bin: nodeBin, asElectronNode } = nodeBinary();
   const envVars = loadDotEnvVars(root);
 
+  // ── DEV SAFETY GUARD (hard fail) ─────────────────────────────────────────────────────────────
+  // The embedded Next server is DEV-ONLY (the packaged app loads the hosted URL and never reaches
+  // here). It must NEVER connect to a non-local database — a stray Production DATABASE_URL in a dev
+  // env file would let the dev shell read/write Production. Refuse to start on any non-local host.
+  // Production is unaffected: the packaged desktop uses the hosted web app, not this server.
+  {
+    const effectiveDbUrl = (process.env.DATABASE_URL ?? envVars.DATABASE_URL ?? "").trim();
+    const dbHost = (effectiveDbUrl.match(/@([^/:?]+)/) || [])[1] || "";
+    const isLocalDb = /^(localhost|127\.0\.0\.1|::1|host\.docker\.internal)$/i.test(dbHost);
+    if (!effectiveDbUrl || !isLocalDb) {
+      const shown = dbHost || "(no host / DATABASE_URL unset)";
+      const msg =
+        `[SyncBiz desktop] REFUSING to start the embedded dev server: DATABASE_URL host "${shown}" is not local.\n` +
+        `The dev embedded server may only use a LOCAL database (localhost / 127.0.0.1 / ::1 / host.docker.internal).\n` +
+        `Point DATABASE_URL at a local PostgreSQL in your dev env (root .env). Production is untouched — the packaged\n` +
+        `desktop loads the hosted web app and never runs this server.`;
+      fileLog("ERROR", "startEmbeddedNextServer: BLOCKED non-local DATABASE_URL", { dbHost: shown });
+      throw new Error(msg);
+    }
+    fileLog("INFO", "startEmbeddedNextServer: DATABASE_URL host is local ✓", { dbHost });
+  }
+
   fileLog("INFO", "startEmbeddedNextServer: spawning embedded Next server", {
     nodeBin,
     asElectronNode,
