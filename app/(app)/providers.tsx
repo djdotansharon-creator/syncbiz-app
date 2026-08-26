@@ -11,6 +11,7 @@ import { ScheduleAutoPlayer } from "@/components/schedule-auto-player";
 import { JingleScheduleAutoPlayer } from "@/components/jingles-control/JingleScheduleAutoPlayer";
 import { HarnessPlaybackProbe } from "@/components/harness-playback-probe";
 import { PocOfflineLauncher } from "@/components/poc-offline/poc-offline-launcher";
+import { MasterMediaSession } from "@/components/master-media-session";
 
 /**
  * Single client boundary for all app providers.
@@ -32,6 +33,8 @@ export function AppProviders({ children }: { children: ReactNode }) {
                 <HarnessPlaybackProbe />
                 {/* POC-only offline launcher (Stage 2b) — desktop-gated, renders null, registers a manual trigger. */}
                 <PocOfflineLauncher />
+                {/* Stage A.1 — MASTER acquires + refreshes its own Media Session Token (renders null). */}
+                <MasterMediaSession />
               </DevicePlayerProvider>
             </MobileRoleProvider>
           </LibraryThemeProvider>

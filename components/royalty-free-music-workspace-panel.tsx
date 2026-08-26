@@ -18,7 +18,7 @@
  * disabled "Coming soon" until a payment layer exists.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePlayback } from "@/lib/playback-provider";
 import { EPHEMERAL_LOCAL_PLAYLIST_PREFIX } from "@/lib/local-playlist-artwork";
 import { formatDuration } from "@/lib/format-utils";
@@ -27,12 +27,12 @@ import type { UnifiedSource } from "@/lib/source-types";
 import { POC_MUSIC_BANK_CATALOG } from "@/lib/music-bank/poc-catalog";
 import type { MusicBankGenrePack, MusicBankSampleTrack } from "@/lib/music-bank/catalog-types";
 import { GENRE_PRICE_LABEL, FULL_BANK_PRICE_LABEL } from "@/lib/music-bank/pricing";
-import { setMediaSessionToken, clearMediaSessionToken, mediaTokenRemainingSec } from "@/lib/media/media-session";
+import { subscribeMediaSession, hasMediaSessionToken } from "@/lib/media/media-session";
+import { useDevicePlayer } from "@/lib/device-player-context";
 
 type PreviewPathMap = Map<string, string>;
 type ActiveView = "all" | string; // "all" or a genre id
 type PlaybackMode = "stream" | "local"; // Stage A: "stream" = token-free /api/media/<id> via SyncBiz; "local" = preview-cache path
-const TOKEN_REFRESH_THRESHOLD_SEC = 8 * 60; // refresh while ≥ this remains → an active track (~2–6 min) never expires mid-play
 
 function totalDuration(tracks: MusicBankSampleTrack[]): number | null {
   const known = tracks.filter((t) => typeof t.durationSeconds === "number");
@@ -45,15 +45,23 @@ function PlayIcon({ className }: { className?: string }) {
 }
 
 export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => void }) {
-  const { playSource } = usePlayback(); // RAW playSource — desktop-local, never routed over WS.
+  const { playSource } = usePlayback(); // RAW playSource — used ONLY for local-preview mode (desktop-local).
+  const dp = useDevicePlayer(); // routed play + device role for Stream mode (CONTROL→MASTER).
+  const deviceMode = dp?.deviceMode;
+  const playSourceOrSend = dp?.playSourceOrSend ?? playSource;
   const [previewPaths, setPreviewPaths] = useState<PreviewPathMap>(() => new Map());
   const [bridgeChecked, setBridgeChecked] = useState(false);
   const [view, setView] = useState<ActiveView>("all");
   const [nowPlaying, setNowPlaying] = useState<{ genreId: string; trackId: string | null } | null>(null);
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("stream");
-  const [streamReady, setStreamReady] = useState(false);
-  const [streamError, setStreamError] = useState<string | null>(null);
-  const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Streaming readiness: the MASTER holds the media token (via <MasterMediaSession/>). A CONTROL never
+  // holds a token — it just routes the token-free source to the MASTER, which plays with ITS token.
+  const [hasMasterToken, setHasMasterToken] = useState(false);
+  useEffect(() => {
+    setHasMasterToken(hasMediaSessionToken());
+    return subscribeMediaSession(() => setHasMasterToken(hasMediaSessionToken()));
+  }, []);
+  const streamReady = deviceMode === "CONTROL" ? true : hasMasterToken;
 
   const catalog = POC_MUSIC_BANK_CATALOG;
   const genres = catalog.genres;
@@ -86,42 +94,6 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
       });
     return () => {
       cancelled = true;
-    };
-  }, []);
-
-  // Streaming authorization (Stage A): mint a scoped, memory-only Media Session Token and keep it
-  // fresh in the background. The token is NEVER stored on a track/WS — it is appended to the media
-  // URL only at playback time by getPlayUrl on the MASTER. Refresh runs while enough TTL remains so
-  // an in-flight track can never expire mid-playback.
-  useEffect(() => {
-    let cancelled = false;
-    const authorize = async (): Promise<boolean> => {
-      try {
-        const res = await fetch("/api/music-bank/authorize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ deviceId: "rfm-preview" }),
-        });
-        const raw = await res.text();
-        let j: { ok?: boolean; token?: string; exp?: number; error?: string } = {};
-        if (raw) { try { j = JSON.parse(raw); } catch { j = {}; } }
-        if (!res.ok || !j.ok || !j.token || !j.exp) throw new Error(j.error ?? `authorize failed (HTTP ${res.status})`);
-        setMediaSessionToken(j.token, j.exp);
-        if (!cancelled) { setStreamReady(true); setStreamError(null); }
-        return true;
-      } catch (e) {
-        if (!cancelled) setStreamError(e instanceof Error ? e.message : "authorize failed");
-        return false;
-      }
-    };
-    void authorize();
-    refreshTimer.current = setInterval(() => {
-      if (mediaTokenRemainingSec() < TOKEN_REFRESH_THRESHOLD_SEC) void authorize();
-    }, 60 * 1000);
-    return () => {
-      cancelled = true;
-      if (refreshTimer.current) { clearInterval(refreshTimer.current); refreshTimer.current = null; }
-      clearMediaSessionToken();
     };
   }, []);
 
@@ -182,14 +154,17 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
     [playbackMode, streamReady, previewPaths],
   );
 
+  // Stream mode routes over WS (CONTROL→MASTER) with a token-free URL; Local mode is raw desktop-local.
+  const playFn = playbackMode === "stream" ? playSourceOrSend : playSource;
+
   const playGenreSamples = useCallback(
     (genre: MusicBankGenrePack) => {
       const built = buildSource(genre, genre.tracks);
       if (!built) return;
-      playSource(built.source, 0);
+      playFn(built.source, 0);
       setNowPlaying({ genreId: genre.id, trackId: built.playable[0]?.id ?? null });
     },
-    [buildSource, playSource],
+    [buildSource, playFn],
   );
 
   const playTrack = useCallback(
@@ -197,19 +172,17 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
       const built = buildSource(genre, genre.tracks);
       if (!built) return;
       const idx = built.playable.findIndex((t) => t.id === track.id);
-      playSource(built.source, idx >= 0 ? idx : 0);
+      playFn(built.source, idx >= 0 ? idx : 0);
       setNowPlaying({ genreId: genre.id, trackId: track.id });
     },
-    [buildSource, playSource],
+    [buildSource, playFn],
   );
 
   const notPlayableHint =
     playbackMode === "stream"
       ? streamReady
         ? null
-        : streamError
-          ? `Streaming unavailable: ${streamError}`
-          : "Authorizing streaming…"
+        : "Preparing streaming…"
       : bridgeChecked && !isDesktop
         ? "Open this catalog in the SyncBiz desktop player to preview the local samples."
         : bridgeChecked && isDesktop && previewPaths.size === 0

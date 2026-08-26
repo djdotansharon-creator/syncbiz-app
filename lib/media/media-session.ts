@@ -9,15 +9,33 @@
 
 let currentToken: string | null = null;
 let currentExpEpoch = 0; // unix seconds
+const listeners = new Set<() => void>();
 
+function notify(): void {
+  for (const l of listeners) { try { l(); } catch { /* ignore */ } }
+}
+
+/** Subscribe to token changes (set/clear). Returns an unsubscribe fn. Lets the UI react to readiness. */
+export function subscribeMediaSession(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => { listeners.delete(cb); };
+}
+
+/** Atomic replace — the previous token stays live until this single assignment completes. */
 export function setMediaSessionToken(token: string, expEpochSeconds: number): void {
   currentToken = token || null;
   currentExpEpoch = Number.isFinite(expEpochSeconds) ? expEpochSeconds : 0;
+  notify();
 }
 
 export function clearMediaSessionToken(): void {
   currentToken = null;
   currentExpEpoch = 0;
+  notify();
+}
+
+export function hasMediaSessionToken(): boolean {
+  return !!currentToken;
 }
 
 export function getMediaSessionToken(): string | null {

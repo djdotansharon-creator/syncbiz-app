@@ -62,6 +62,8 @@ async function handle(req: NextRequest, assetId: string, isHead: boolean): Promi
     "Content-Type": asset.mimeType,
     "Accept-Ranges": "bytes",
     "Cache-Control": "private, no-store",
+    // Do not leak the tokenized URL via Referer (relevant only to the browser <audio> path; MPV sends none).
+    "Referrer-Policy": "no-referrer",
   };
 
   const range = parseRange(req.headers.get("range"), size);
