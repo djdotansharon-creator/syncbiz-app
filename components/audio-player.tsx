@@ -450,7 +450,7 @@ export function AudioPlayer() {
 
   // ── Desktop mode: MPV Orchestrator is the single source of truth for display ──
   // The React playback state drives commands (intent). MPV state drives what the UI shows (truth).
-  type DesktopMpvSnap = { status: "idle" | "playing" | "paused" | "stopped"; volume: number; position: number; duration: number; catalogCount: number; engineReady: boolean; lastError: string | null };
+  type DesktopMpvSnap = { status: "idle" | "playing" | "paused" | "stopped"; volume: number; position: number; duration: number; catalogCount: number; engineReady: boolean; lastError: string | null; attemptId: number };
   const [desktopMpvSnap, setDesktopMpvSnap] = useState<DesktopMpvSnap | null>(null);
   // Ref always holds the latest snap so timeout callbacks (stall detection) can read it
   // without stale-closure issues and without being in the effect dependency array.
@@ -458,6 +458,19 @@ export function AudioPlayer() {
   /** Wall-clock when desktop snap position last changed — for interpolation + stale-playing guard. */
   const desktopSnapPositionAtRef = useRef(0);
   const desktopSnapLastPosRef = useRef<number | null>(null);
+  // ── P0 CONTROL→MASTER playback-truth (desktop MPV) — declared here (above the desktop-status
+  //    effects that use them). Threaded through the desktop pipeline as a real attempt identity. ──
+  // INV1 — monotonic id bumped on every real loadfile dispatch AND on manual NEXT; passed down to the
+  // orchestrator and echoed back on each status, so an anonymous/late MPV event for a SUPERSEDED
+  // attempt (incl. the outgoing deck during a crossfade) is filtered out and powerless.
+  const playbackAttemptGenRef = useRef(0);
+  // INV3 — set true only once the CURRENT attempt shows REAL decode (a matching-attempt snapshot with
+  // MPV "playing" + position/duration > 0). Gates the authoritative "playing" published to CONTROL and
+  // gates natural-EOF auto-next (a stale/unconfirmed idle can't advance).
+  const attemptConfirmedRef = useRef(false);
+  // INV2 + single owner — a failed attempt is recovered by SKIPPING FORWARD once (the still-playing
+  // previous track bridges via crossfade; no same-URL reload storm, no silence). Keyed by generation.
+  const attemptSkippedGenRef = useRef(-1);
   useEffect(() => { desktopMpvSnapRef.current = desktopMpvSnap; }, [desktopMpvSnap]);
   useEffect(() => {
     if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
@@ -479,11 +492,20 @@ export function AudioPlayer() {
         catalogCount: typeof s.branchCatalogCount === "number" ? s.branchCatalogCount : 0,
         engineReady: Boolean(s.mpvEngineReady),
         lastError: typeof s.mpvLastError === "string" ? s.mpvLastError : null,
+        // Attempt id the orchestrator echoes for the CURRENT music attempt. A snapshot whose
+        // attemptId != our current generation belongs to a superseded attempt → powerless.
+        attemptId: typeof s.mpvAttemptId === "number" ? s.mpvAttemptId : 0,
       };
       desktopMpvSnapRef.current = snap;
-      // INV3 — the current attempt is CONFIRMED playing only on REAL decode evidence
-      // (MPV claims "playing" even on start-file for a file that later fails to decode).
-      if (snap.status === "playing" && (snap.position > 0 || snap.duration > 0)) {
+      // INV3 + crossfade safety — CONFIRM the current attempt ONLY from a snapshot that (a) belongs to
+      // THIS attempt (attemptId === current generation) and (b) shows REAL decode (MPV claims "playing"
+      // even on start-file for a file that fails to decode). This is what stops the outgoing deck A from
+      // falsely confirming the incoming attempt B during a crossfade.
+      if (
+        snap.attemptId === playbackAttemptGenRef.current &&
+        snap.status === "playing" &&
+        (snap.position > 0 || snap.duration > 0)
+      ) {
         attemptConfirmedRef.current = true;
       }
       setDesktopMpvSnap(snap);
@@ -507,20 +529,24 @@ export function AudioPlayer() {
     if (!isDesktopMode || !desktopMpvSnap) return;
     if (!deviceCtx?.isBranchConnected || deviceCtx.deviceMode !== "MASTER") return;
     const { position, duration } = desktopMpvSnap;
-    // INV3 — publish MASTER-AUTHORITATIVE status derived from the ACTUAL MPV state, not
-    // the optimistic reducer. CONTROL must never see "playing" before MPV really plays:
-    // MPV reports "playing" optimistically on start-file, so we treat it as playing ONLY
-    // with real decode evidence (position/duration > 0); otherwise it is not-yet-playing
-    // ("idle"). A failed/loading/errored track therefore shows as not-playing on CONTROL,
-    // and its timer does not tick — the reducer stays optimistic only for local UI.
-    const confirmed = desktopMpvSnap.status === "playing" && (position > 0 || duration > 0);
-    const authStatus: PlaybackStatus = confirmed
-      ? "playing"
-      : desktopMpvSnap.status === "playing"
-        ? "idle" // MPV claims playing but no decode yet → not authoritative playback
-        : desktopMpvSnap.status;
-    const pos = Number.isFinite(position) ? position : 0;
-    const dur = Number.isFinite(duration) ? duration : 0;
+    // INV3 + crossfade — publish MASTER-AUTHORITATIVE status from the ACTUAL MPV state, bound to the
+    // CURRENT attempt. CONTROL must never see "playing" before MPV really plays THIS track: a snapshot
+    // from a superseded attempt (the outgoing deck during a crossfade, or a late event) can NEVER
+    // publish "playing"; and even the current attempt is "playing" ONLY with real decode evidence
+    // (position/duration > 0 — MPV claims "playing" on start-file for files that then fail). The reducer
+    // stays optimistic only for local UI.
+    const isCurrentAttempt = desktopMpvSnap.attemptId === playbackAttemptGenRef.current;
+    const confirmed = isCurrentAttempt && desktopMpvSnap.status === "playing" && (position > 0 || duration > 0);
+    let authStatus: PlaybackStatus;
+    if (confirmed) authStatus = "playing";
+    else if (isCurrentAttempt && desktopMpvSnap.status === "paused") authStatus = "paused";
+    else if (isCurrentAttempt && desktopMpvSnap.status === "stopped") authStatus = "stopped";
+    else authStatus = "idle"; // loading / unconfirmed-playing / superseded snapshot → not playing
+    // Advance the CONTROL clock only with a truthful current-attempt position (playing/paused);
+    // otherwise 0, so CONTROL never shows a ticking timer while the MASTER is loading/failed/not-playing.
+    const showClock = isCurrentAttempt && (confirmed || desktopMpvSnap.status === "paused");
+    const pos = showClock && Number.isFinite(position) ? position : 0;
+    const dur = showClock && Number.isFinite(duration) ? duration : 0;
     deviceCtx.reportPosition(pos, dur, authStatus);
   }, [desktopMpvSnap, isDesktopMode, deviceCtx]);
 
@@ -3365,21 +3391,6 @@ export function AudioPlayer() {
   const mpvFrozenAttemptsRef = useRef(0);
   const mpvFrozenSkippedForUrlRef = useRef<string | null>(null);
   const mpvRecoveredReportedForUrlRef = useRef<string | null>(null);
-  // ── P0 CONTROL→MASTER playback-truth (desktop MPV) ─────────────────────────
-  // INVARIANT 1 — monotonic id bumped on every real loadfile dispatch AND on manual
-  // NEXT. A stale end-file/idle callback for a superseded URL is powerless: any timer
-  // it scheduled re-checks the generation and aborts if it changed.
-  const playbackAttemptGenRef = useRef(0);
-  // INVARIANT 3 — true only once the CURRENT attempt shows REAL decode (MPV "playing"
-  // + position/duration > 0). Gates the authoritative "playing" published to CONTROL,
-  // and gates natural-EOF auto-next (a stale EOF for an unconfirmed attempt is ignored).
-  const attemptConfirmedRef = useRef(false);
-  // INVARIANT 2 + single owner — bounded load-error recovery for the current failing
-  // URL: a few re-loadfiles, then skip ONCE. Never an unbounded same-URL reload storm.
-  const loadRecoverForUrlRef = useRef<string | null>(null);
-  const loadRecoverAttemptsRef = useRef(0);
-  const loadRecoverSkippedForUrlRef = useRef<string | null>(null);
-  const MAX_LOAD_RECOVERY = 2; // initial load + this many re-loadfiles, then skip once
   // Real wall-clock of the last actual dispatch to MPV (routing effect OR
   // self-heal re-send). Surfaced in the diagnostic so re-sends of the same URL
   // are visible (the URL string itself doesn't change on a re-dispatch).
@@ -3426,92 +3437,65 @@ export function AudioPlayer() {
       const next: string = s.mockPlaybackStatus ?? "idle";
       mpvChAStatusRef.current = next;
 
-      if (prev !== "idle" && next === "idle" &&
-          statusRef.current === "playing" && currentPlayUrlRef.current) {
-        // Ch-A went idle while we still intend to play. MPV's end-file event is
-        // ANONYMOUS (no URL/id), so we bind it to the CURRENT attempt via the generation
-        // captured here + the decode-confirmation flag. A stale idle belonging to a
-        // superseded URL is powerless (INV1); a genuine load error is separated from a
-        // natural end (INV2) and driven through a single bounded recovery owner.
-        const cur = currentPlayUrlRef.current;
+      // INV1 — only the CURRENT attempt's status can move playback. A snapshot whose attemptId
+      // differs from our generation belongs to a SUPERSEDED attempt (e.g. the outgoing deck A
+      // during a crossfade, or a late event after NEXT) and is powerless for every decision below.
+      const isCurrentAttempt = (typeof s.mpvAttemptId === "number" ? s.mpvAttemptId : 0) === playbackAttemptGenRef.current;
+      const snap = desktopMpvSnapRef.current;
+      const intendPlaying = statusRef.current === "playing" && !!currentPlayUrlRef.current;
+
+      // ── Load/decode FAILURE of the current attempt → SKIP FORWARD once (single owner) ──────
+      // The orchestrator surfaces ANY current-attempt load failure as `lastError` with status
+      // "idle" — including a crossfade-standby failure that never produced a status transition.
+      // `engineReady !== false` keeps us from skipping on a transient engine drop (the watchdog
+      // respawns that). The previous track keeps playing and bridges via crossfade → never silent.
+      if (isCurrentAttempt && intendPlaying && next === "idle" && snap?.lastError && snap.engineReady !== false) {
+        const genNow = playbackAttemptGenRef.current;
+        if (attemptSkippedGenRef.current !== genNow) {
+          attemptSkippedGenRef.current = genNow;
+          attemptConfirmedRef.current = false;
+          if (mpvRecoverTimerRef.current) { clearTimeout(mpvRecoverTimerRef.current); mpvRecoverTimerRef.current = null; }
+          console.warn("[SyncBiz:mpv-load-error] attempt failed — skipping forward once", {
+            url: currentPlayUrlRef.current?.slice(0, 100) ?? null, attemptId: genNow, lastError: snap.lastError,
+          });
+          try { nextRef.current({ auditTransportCase: "ended_auto" }); }
+          catch (err) { console.warn("[SyncBiz:mpv-load-error] skip next() threw", err); }
+        }
+        return;
+      }
+
+      // ── Natural END of the CONFIRMED current attempt → advance once ───────────────────────
+      // Requires the playing→idle transition, no error, AND prior decode confirmation. An
+      // unconfirmed/stale idle can't advance — this is what stops the NEXT-vs-late-EOF race.
+      if (isCurrentAttempt && intendPlaying && prev !== "idle" && next === "idle" &&
+          !snap?.lastError && attemptConfirmedRef.current) {
+        attemptConfirmedRef.current = false; // consumed — a 2nd idle can't re-advance
+        const cur = currentPlayUrlRef.current!;
         const genAtIdle = playbackAttemptGenRef.current;
-        const snap = desktopMpvSnapRef.current;
-        // INV2 — MPV sets a non-null lastError ONLY on end-file reason=error; a natural
-        // EOF leaves it null (and start-file clears it, so a stale error can't linger).
-        const isLoadError = !!snap?.lastError;
-        if (mpvRecoverTimerRef.current) clearTimeout(mpvRecoverTimerRef.current);
-        mpvRecoverTimerRef.current = null;
-
-        if (!isLoadError) {
-          // ── Natural end-of-track → advance once ──────────────────────────────
-          // INV1 — only a CONFIRMED attempt can legitimately reach a natural EOF. A
-          // stale EOF arriving after we've switched to an as-yet-unconfirmed attempt is
-          // ignored — this is what stops the manual-NEXT vs late-EOF double-advance race.
-          if (!attemptConfirmedRef.current) return;
-          attemptConfirmedRef.current = false; // consumed — a 2nd idle can't re-advance
-          const urlBeforeNext = cur;
-          try {
-            nextRef.current({ auditTransportCase: "ended_auto" });
-          } catch (err) {
-            console.warn("[SyncBiz:mpv-natural-end] next() threw", err);
-          }
-          // Single-track session restart guard (local only): if next() kept the same
-          // URL, the routing effect won't re-fire — push a fresh loadfile so it replays.
-          if (isValidLocalFilePlaybackPath(cur)) {
-            mpvRecoverTimerRef.current = setTimeout(() => {
-              mpvRecoverTimerRef.current = null;
-              if (playbackAttemptGenRef.current !== genAtIdle) return; // superseded
-              if (statusRef.current === "playing" &&
-                  currentPlayUrlRef.current === urlBeforeNext &&
-                  mpvChAStatusRef.current === "idle") {
-                mpvLastUrlRef.current = null;
-                void desktop.mpvPlayUrl(urlBeforeNext);
-              }
-            }, 80);
-          }
-          return;
-        }
-
-        // ── MPV load ERROR → bounded recovery, then skip ONCE (single owner) ─────
-        // Never an unbounded same-URL reload storm. This owner handles the idle/error
-        // case; the freeze-watchdog owns the disjoint "playing-but-frozen" case (they
-        // key on opposite MPV statuses, so they never act on the same snapshot).
-        if (loadRecoverForUrlRef.current !== cur) {
-          loadRecoverForUrlRef.current = cur;
-          loadRecoverAttemptsRef.current = 0;
-          loadRecoverSkippedForUrlRef.current = null;
-        }
-        if (loadRecoverAttemptsRef.current < MAX_LOAD_RECOVERY) {
-          loadRecoverAttemptsRef.current += 1;
-          const attempt = loadRecoverAttemptsRef.current;
+        if (mpvRecoverTimerRef.current) { clearTimeout(mpvRecoverTimerRef.current); mpvRecoverTimerRef.current = null; }
+        try { nextRef.current({ auditTransportCase: "ended_auto" }); }
+        catch (err) { console.warn("[SyncBiz:mpv-natural-end] next() threw", err); }
+        // Single-track LOCAL session restart: if next() kept the same URL, force a fresh loadfile
+        // (as a NEW attempt so its events attribute correctly) so the file replays from 0.
+        if (isValidLocalFilePlaybackPath(cur)) {
           mpvRecoverTimerRef.current = setTimeout(() => {
             mpvRecoverTimerRef.current = null;
-            if (playbackAttemptGenRef.current !== genAtIdle) return; // INV1 superseded
-            if (statusRef.current !== "playing") return;             // no longer intend to play
-            if (currentPlayUrlRef.current !== cur) return;           // moved on
-            if (mpvChAStatusRef.current !== "idle") return;          // recovered on its own
-            console.warn("[SyncBiz:mpv-load-error] bounded recovery re-loadfile", {
-              attempt, max: MAX_LOAD_RECOVERY, url: cur.slice(0, 100),
-            });
-            mpvLastUrlRef.current = null;              // force a fresh loadfile (same attempt)
-            mpvLastDispatchAtRef.current = Date.now();
-            void desktop.mpvPlayUrl(cur);
-          }, 1200);
-        } else if (loadRecoverSkippedForUrlRef.current !== cur) {
-          // Budget exhausted → skip forward ONCE for this failed URL to keep audio alive.
-          loadRecoverSkippedForUrlRef.current = cur;
-          attemptConfirmedRef.current = false;
-          console.warn("[SyncBiz:mpv-load-error] recovery exhausted — skipping forward once", {
-            url: cur.slice(0, 100),
-          });
-          try {
-            nextRef.current({ auditTransportCase: "ended_auto" });
-          } catch (err) {
-            console.warn("[SyncBiz:mpv-load-error] skip next() threw", err);
-          }
+            if (playbackAttemptGenRef.current !== genAtIdle) return; // superseded by a real NEXT
+            if (statusRef.current === "playing" &&
+                currentPlayUrlRef.current === cur &&
+                mpvChAStatusRef.current === "idle") {
+              playbackAttemptGenRef.current += 1; // replay = a fresh attempt
+              attemptConfirmedRef.current = false;
+              mpvLastUrlRef.current = null;
+              void desktop.mpvPlayUrl(cur, playbackAttemptGenRef.current);
+            }
+          }, 80);
         }
-      } else if (next !== "idle" && mpvRecoverTimerRef.current) {
-        // Ch-A is active again — loadfile replace transition settled; cancel reload
+        return;
+      }
+
+      // Deck became active again before a pending restart fired — cancel it.
+      if (next !== "idle" && mpvRecoverTimerRef.current) {
         clearTimeout(mpvRecoverTimerRef.current);
         mpvRecoverTimerRef.current = null;
       }
@@ -3556,17 +3540,12 @@ export function AudioPlayer() {
           if (latest === mpvLastUrlRef.current) return;
           const prevMpv = mpvLastUrlRef.current;
           mpvLastUrlRef.current = latest;
-          // New attempt: stale callbacks for the previous URL become powerless (INV1),
-          // reset decode confirmation (INV3), and reset the load-error budget for this
-          // URL (INV2). A self-heal re-dispatch of the SAME url does NOT pass here, so
-          // its recovery budget is preserved.
+          // New attempt: bump the generation so stale callbacks for the previous URL become
+          // powerless (INV1) and decode-confirmation resets (INV3). The id is passed down to the
+          // orchestrator and echoed back on every status so events can be filtered by attempt.
           playbackAttemptGenRef.current += 1;
           attemptConfirmedRef.current = false;
-          if (loadRecoverForUrlRef.current !== latest) {
-            loadRecoverForUrlRef.current = latest;
-            loadRecoverAttemptsRef.current = 0;
-            loadRecoverSkippedForUrlRef.current = null;
-          }
+          const attemptId = playbackAttemptGenRef.current;
           const fadeSec = getMixDuration();
           const mpvPlaying = mpvChAStatusRef.current === "playing";
           const intentPlaying = statusRef.current === "playing";
@@ -3578,20 +3557,24 @@ export function AudioPlayer() {
             mpvPlaying,
             intentPlaying,
             useCrossfade,
+            attemptId,
           });
           if (useCrossfade) {
-            void desktop.mpvPlayUrlCrossfade(latest, fadeSec);
+            void desktop.mpvPlayUrlCrossfade(latest, fadeSec, attemptId);
           } else {
-            void desktop.mpvPlayUrl(latest);
+            void desktop.mpvPlayUrl(latest, attemptId);
           }
           mpvLastDispatchAtRef.current = Date.now();
 
-          // Stall detection: if Ch-A hasn't reported "playing" within 4 s, the file
-          // or engine has a problem. Reset the fake-playing state and surface the error.
+          // Stall backstop: the incoming track must report "playing" within the window (longer for a
+          // crossfade — the incoming deck resolves via yt-dlp up to ~12 s). A hard load failure is
+          // usually surfaced sooner by the orchestrator (error → skip); this only catches a silent stall.
+          const stallMs = useCrossfade ? 13000 : 4000;
           if (mpvStallTimerRef.current) clearTimeout(mpvStallTimerRef.current);
           mpvStallTimerRef.current = setTimeout(() => {
             mpvStallTimerRef.current = null;
             if (
+              playbackAttemptGenRef.current === attemptId &&
               statusRef.current === "playing" &&
               currentPlayUrlRef.current === latest &&
               mpvChAStatusRef.current !== "playing"
@@ -3661,6 +3644,7 @@ export function AudioPlayer() {
       if (statusRef.current !== "playing") return; // we must intend to play
       const snap = desktopMpvSnapRef.current;
       if (!snap || snap.status !== "playing") return; // MPV must claim it's playing
+      if (snap.attemptId !== playbackAttemptGenRef.current) return; // INV1 — only the current attempt
       // NOTE: intentionally do NOT require duration>0. A stuck YouTube resolve
       // sits at duration:0 / pos:0 while MPV still reports "playing" (seen in the
       // field). Keying only on "position not advancing" covers BOTH that and the
@@ -3722,7 +3706,9 @@ export function AudioPlayer() {
         mpvLastUrlRef.current = url; // keep the routing effect in sync
         mpvLastDispatchAtRef.current = Date.now(); // record the actual re-send
         desktopSnapPositionAtRef.current = Date.now(); // fresh window for this retry
-        void desktop.mpvPlayUrl(url); // force a fresh loadfile (== manual refresh)
+        playbackAttemptGenRef.current += 1; // re-dispatch = a fresh attempt (its own identity)
+        attemptConfirmedRef.current = false;
+        void desktop.mpvPlayUrl(url, playbackAttemptGenRef.current); // force a fresh loadfile (== manual refresh)
         return;
       }
 

@@ -67,6 +67,12 @@ export type MpvStatus = {
    * Cleared on successful start-file or successful IPC reconnect handshake.
    */
   lastError: string | null;
+  /**
+   * Internal playback-attempt id for the currently-loaded file on THIS deck. Set by `play(url, attemptId)`
+   * and carried on every status push, so an anonymous MPV event (start-file/end-file/property-change) can be
+   * bound back to the exact attempt that produced it. Desktop-internal only — never sent over WS / to CONTROL.
+   */
+  attemptId: number;
 };
 
 export function createInitialMpvStatus(): MpvStatus {
@@ -77,6 +83,7 @@ export function createInitialMpvStatus(): MpvStatus {
     volume: 80,
     engineReady: false,
     lastError: null,
+    attemptId: 0,
   };
 }
 
@@ -546,10 +553,15 @@ export class MpvManager {
 
   // ─── Public playback API ─────────────────────────────────────────────────────
 
-  /** Load and immediately play a URL or local file path. */
-  play(url: string): void {
+  /** Load and immediately play a URL or local file path. `attemptId` binds this load to the renderer's
+   *  playback attempt so late/anonymous MPV events for a superseded attempt can be ignored. */
+  play(url: string, attemptId = 0): void {
     const u = url.trim();
     if (!u) return;
+    // Stamp the attempt id up front so EVERY status this load produces (start-file/end-file/
+    // property-change) carries it — including the transient end-file(reason=replace) for the file
+    // being replaced (which is harmless: it maps to idle with no error).
+    this.st.attemptId = attemptId;
     if (!this.child) {
       this.st.lastError = "play(): mpv is not running (binary missing, process exiting, or watchdog restarting)";
       this.st.status = "idle";

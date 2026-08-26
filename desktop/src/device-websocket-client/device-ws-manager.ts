@@ -158,6 +158,7 @@ export class DeviceWsManager {
       mpvDuration: st.duration ?? 0,
       mpvEngineReady: orchState?.music.engineReady ?? false,
       mpvLastError: orchState?.music.lastError ?? st.mpvEngineError ?? null,
+      mpvAttemptId: orchState?.music.attemptId ?? 0,
     };
   }
 

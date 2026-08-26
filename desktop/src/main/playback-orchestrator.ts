@@ -77,6 +77,19 @@ export class PlaybackOrchestrator {
   private interruptSt: MpvStatus = createInitialMpvStatus();
   /** Which music deck currently owns the audible track. */
   private activeMusicDeck: MusicDeckId = "A";
+  /** Deck holding the CURRENT playback attempt: the standby (incoming) deck while a crossfade is
+   *  pending/ramping, otherwise the active deck. getState() reports THIS deck so the renderer/CONTROL
+   *  always see the CURRENT attempt's truth — never the outgoing track's status during a crossfade,
+   *  which would let A masquerade as confirmation of B. */
+  private currentAttemptDeck: MusicDeckId = "A";
+  /** Renderer-allocated id of the current attempt, echoed back on status so the renderer can ignore
+   *  stale/anonymous MPV events belonging to a superseded attempt. */
+  private currentAttemptId = 0;
+  /** Non-null when the CURRENT attempt failed to load/decode (crossfade decode-fail or start timeout).
+   *  Surfaced as the reported music `lastError` (with status "idle") so the renderer treats the attempt
+   *  as failed and advances the queue — while the outgoing track keeps playing (never-stop). Cleared on
+   *  the next play. */
+  private currentAttemptError: string | null = null;
 
   private masterVolume = 80;
   private duckPercent = DUCK_PERCENT_DEFAULT;
@@ -172,6 +185,11 @@ export class PlaybackOrchestrator {
     return this.activeMusicDeck === "A" ? this.musicStA : this.musicStB;
   }
 
+  /** Status of the deck holding the CURRENT attempt (what getState reports). */
+  private currentAttemptSt(): MpvStatus {
+    return this.currentAttemptDeck === "A" ? this.musicStA : this.musicStB;
+  }
+
   /** The volume music should sit at right now (duck-aware). */
   private currentMusicTarget(): number {
     return this.isDucked
@@ -237,14 +255,21 @@ export class PlaybackOrchestrator {
   }
 
   getState(): OrchestratorState {
-    const active = this.activeSt();
+    // Report the CURRENT-ATTEMPT deck (incoming during a crossfade), NOT the outgoing active deck,
+    // so the renderer/CONTROL see the current attempt's real status + attemptId. A failed incoming
+    // attempt is surfaced via `currentAttemptError` (status forced to "idle" + the error), which the
+    // renderer treats as a load failure and skips — while the outgoing track keeps playing.
+    const cur = this.currentAttemptSt();
     return {
       music: {
-        ...active,
+        ...cur,
+        status: this.currentAttemptError ? "idle" : cur.status,
+        lastError: this.currentAttemptError ?? cur.lastError,
+        attemptId: this.currentAttemptId,
         /* Display-stable volume: mid-crossfade the deck volumes ramp internally,
            but the operator's fader must not slide on its own. Duck stays visible
            (that dip is a product feature the operator expects to see). */
-        volume: this.isDucked ? active.volume : this.masterVolume,
+        volume: this.isDucked ? cur.volume : this.masterVolume,
       },
       interrupt: { ...this.interruptSt },
       isDucked: this.isDucked,
@@ -272,13 +297,17 @@ export class PlaybackOrchestrator {
     return this.crossfadeSec;
   }
 
-  playMusic(url: string): void {
+  playMusic(url: string, attemptId = 0): void {
     const u = url.trim();
     if (!u) return;
-    console.log(ORCH, "playMusic (→ active deck loadfile/replace)", { preview: redactMediaToken(u).slice(0, 200), deck: this.activeMusicDeck });
+    console.log(ORCH, "playMusic (→ active deck loadfile/replace)", { preview: redactMediaToken(u).slice(0, 200), deck: this.activeMusicDeck, attemptId });
     this.abortXfade("cold_play_request");
+    // Cold play: the current attempt lives on the ACTIVE deck. Clear any prior failure.
+    this.currentAttemptId = attemptId;
+    this.currentAttemptDeck = this.activeMusicDeck;
+    this.currentAttemptError = null;
     this.activeMpv().setVolume(this.currentMusicTarget());
-    this.activeMpv().play(u);
+    this.activeMpv().play(u, attemptId);
   }
 
   /**
@@ -287,15 +316,15 @@ export class PlaybackOrchestrator {
    * `fadeSec`, then the decks swap and the old one stops. If the incoming track
    * never starts, the current track keeps playing untouched.
    */
-  playMusicCrossfade(url: string, fadeSec: number): void {
+  playMusicCrossfade(url: string, fadeSec: number, attemptId = 0): void {
     const u = url.trim();
     if (!u) return;
 
     const activeStatus = this.activeSt().status;
     if (activeStatus !== "playing" && activeStatus !== "paused") {
       // Nothing audible to fade from — clean start, no dip.
-      console.log(ORCH, "playMusicCrossfade → cold start (active deck idle)", { preview: redactMediaToken(u).slice(0, 120) });
-      this.playMusic(u);
+      console.log(ORCH, "playMusicCrossfade → cold start (active deck idle)", { preview: redactMediaToken(u).slice(0, 120), attemptId });
+      this.playMusic(u, attemptId);
       return;
     }
 
@@ -309,11 +338,17 @@ export class PlaybackOrchestrator {
       fadeSec,
       activeDeck: this.activeMusicDeck,
       standbyDeck: this.standbyDeckId(),
+      attemptId,
     });
+    // Incoming attempt lives on the STANDBY deck until the ramp swaps it in — report IT as the
+    // current attempt so a failure there is seen as this attempt's failure (not the outgoing track's).
+    this.currentAttemptId = attemptId;
+    this.currentAttemptDeck = this.standbyDeckId();
+    this.currentAttemptError = null;
     this.xfadePending = { fadeSec };
     this.xfadeStandbySawPlaying = false;
     standby.setVolume(0);
-    standby.play(u);
+    standby.play(u, attemptId);
     this.xfadeStartTimeoutId = setTimeout(() => {
       // Incoming track never started (bad URL / yt-dlp failure): keep the
       // business audio alive on the current track — never fade into silence.
@@ -353,6 +388,8 @@ export class PlaybackOrchestrator {
   private finishXfadeSwap(): void {
     const oldDeck = this.activeMpv();
     this.activeMusicDeck = this.standbyDeckId();
+    // The incoming attempt is now the audible active deck — keep the current-attempt pointer on it.
+    this.currentAttemptDeck = this.activeMusicDeck;
     oldDeck.stop();
     console.log(ORCH, "crossfade complete — decks swapped", { activeDeck: this.activeMusicDeck });
     this.push();
@@ -380,6 +417,15 @@ export class PlaybackOrchestrator {
     this.standbyMpv().stop();
     // Restore the active deck to its proper level in case the ramp had begun.
     this.activeMpv().setVolume(this.currentMusicTarget());
+    // Incoming-attempt FAILURE (decode-fail / never-started timeout): mark the CURRENT attempt failed so
+    // the renderer advances the queue. The outgoing (active) track keeps playing — audio never drops.
+    // Benign aborts (cold_play_request / pause_command / new_crossfade_request) do NOT flag a failure.
+    if (reason === "standby_decode_failed" || reason === "standby_load_timeout") {
+      this.currentAttemptError =
+        reason === "standby_load_timeout"
+          ? "incoming track failed to start (load timeout)"
+          : "incoming track failed to decode";
+    }
     console.log(ORCH, "crossfade aborted", { reason });
     this.push();
   }

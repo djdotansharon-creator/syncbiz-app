@@ -32,4 +32,5 @@ export const DESKTOP_IDLE_STATUS_SNAPSHOT: MvpStatusSnapshot = {
   mpvDuration: 0,
   mpvEngineReady: false,
   mpvLastError: null,
+  mpvAttemptId: 0,
 };

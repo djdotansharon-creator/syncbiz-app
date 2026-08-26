@@ -53,10 +53,10 @@ const api: SyncBizDesktopMvp = {
     ipcRenderer.invoke(MVP_IPC.LOCAL_MOCK_TRANSPORT, payload),
   signInWithPassword: (email: string, password: string): Promise<DesktopSignInResult> =>
     ipcRenderer.invoke(MVP_IPC.DESKTOP_SIGN_IN, { email, password }),
-  mpvPlayUrl: (url: string): Promise<void> =>
-    ipcRenderer.invoke(MVP_IPC.MPV_PLAY_URL, url),
-  mpvPlayUrlCrossfade: (url: string, fadeSec: number): Promise<void> =>
-    ipcRenderer.invoke(MVP_IPC.MPV_PLAY_URL_CROSSFADE, { url, fadeSec }),
+  mpvPlayUrl: (url: string, attemptId?: number): Promise<void> =>
+    ipcRenderer.invoke(MVP_IPC.MPV_PLAY_URL, url, attemptId),
+  mpvPlayUrlCrossfade: (url: string, fadeSec: number, attemptId?: number): Promise<void> =>
+    ipcRenderer.invoke(MVP_IPC.MPV_PLAY_URL_CROSSFADE, { url, fadeSec, attemptId }),
   setMixDuration: (seconds: number): Promise<void> =>
     ipcRenderer.invoke(MVP_IPC.SET_MIX_DURATION, seconds),
   mpvPlayInterrupt: (url: string): Promise<void> =>

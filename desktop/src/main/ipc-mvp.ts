@@ -284,11 +284,12 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     },
   );
 
-  ipcMain.handle(MVP_IPC.MPV_PLAY_URL, (_e, url: string): void => {
+  ipcMain.handle(MVP_IPC.MPV_PLAY_URL, (_e, url: string, attemptId?: number): void => {
     const u = typeof url === "string" ? url.trim() : "";
     if (!u) return;
-    console.log("[SyncBiz:desktop-mpv:ipc] MPV_PLAY_URL → playMusic", { preview: redactMediaToken(u).slice(0, 160) });
-    orchestratorInstance?.playMusic(u);
+    const aid = typeof attemptId === "number" && Number.isFinite(attemptId) ? attemptId : 0;
+    console.log("[SyncBiz:desktop-mpv:ipc] MPV_PLAY_URL → playMusic", { preview: redactMediaToken(u).slice(0, 160), attemptId: aid });
+    orchestratorInstance?.playMusic(u, aid);
     // Immediately push state snapshot so the renderer's desktopMpvSnap reflects any
     // synchronous failures (binary missing, null child) as well as engine-ready status.
     // play() calls push() synchronously on failure, so manager.snapshot() already
@@ -304,18 +305,20 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
 
   ipcMain.handle(
     MVP_IPC.MPV_PLAY_URL_CROSSFADE,
-    (_e, payload: { url?: string; fadeSec?: number }): void => {
+    (_e, payload: { url?: string; fadeSec?: number; attemptId?: number }): void => {
       const u = typeof payload?.url === "string" ? payload.url.trim() : "";
       if (!u) return;
       const fadeSec =
         typeof payload?.fadeSec === "number" && Number.isFinite(payload.fadeSec)
           ? Math.max(1, Math.min(30, payload.fadeSec))
           : (orchestratorInstance?.getCrossfadeSec() ?? 6);
+      const aid = typeof payload?.attemptId === "number" && Number.isFinite(payload.attemptId) ? payload.attemptId : 0;
       console.log("[SyncBiz:desktop-mpv:ipc] MPV_PLAY_URL_CROSSFADE", {
         preview: redactMediaToken(u).slice(0, 160),
         fadeSec,
+        attemptId: aid,
       });
-      orchestratorInstance?.playMusicCrossfade(u, fadeSec);
+      orchestratorInstance?.playMusicCrossfade(u, fadeSec, aid);
       broadcast(getWindow(), manager ? manager.snapshot() : fallbackSnapshot());
     },
   );
@@ -804,5 +807,6 @@ function fallbackSnapshotFromConfig(c: DesktopRuntimeConfig): MvpStatusSnapshot 
     mpvDuration: 0,
     mpvEngineReady: false,
     mpvLastError: null,
+    mpvAttemptId: 0,
   };
 }

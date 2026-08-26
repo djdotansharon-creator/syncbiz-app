@@ -45,8 +45,8 @@ export type SyncBizDesktopMvp = {
   signInWithPassword: (email: string, password: string) => Promise<DesktopSignInResult>;
   onStatus: (callback: (status: MvpStatusSnapshot) => void) => () => void;
   /** Dev-only: load and play a URL or local file path on the music channel (no WS required). */
-  mpvPlayUrl: (url: string) => Promise<void>;
-  mpvPlayUrlCrossfade: (url: string, fadeSec: number) => Promise<void>;
+  mpvPlayUrl: (url: string, attemptId?: number) => Promise<void>;
+  mpvPlayUrlCrossfade: (url: string, fadeSec: number, attemptId?: number) => Promise<void>;
   /** Push Settings mix duration to main-process orchestrator (desktop WS / MPV paths). */
   setMixDuration: (seconds: number) => Promise<void>;
   /** Dev-only: send a URL to the interrupt channel (triggers ducking). */

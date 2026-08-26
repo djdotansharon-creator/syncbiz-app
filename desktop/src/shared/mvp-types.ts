@@ -326,6 +326,21 @@ export type LocalAudioTagFields = {
   rating: number | null;
   /** Tag&Rename track # when present in XLSX import. */
   trackNumber?: string | null;
+  // ── Local Library Metadata Sync (additive; all optional for backward-compat) ──
+  /** Every artist as a separate string (music-metadata `common.artists`). */
+  artists?: string[] | null;
+  /** Every genre as a separate string (music-metadata `common.genre` is string[]). */
+  genres?: string[] | null;
+  /** First ISRC from `common.isrc` (string[]); null when absent. */
+  isrc?: string | null;
+  /** Selected custom/native TXXX tags, keyed by descriptor (e.g. { MOOD: "…", ENERGY: "…" }). */
+  customTags?: Record<string, string> | null;
+  /** EVERY user comment frame, preserved separately + exactly (technical iTunes frames filtered out). */
+  originalComments?: string[];
+  /** Display-only join of originalComments — never a source of truth. */
+  displayComment?: string | null;
+  /** Diagnostics from the central comment-frame classifier (for batch reporting). */
+  commentExtraction?: { accepted: number; technicalIgnored: number; unknownDescriptors: string[] };
 };
 
 export type GetLocalAudioTagsResult =
@@ -533,6 +548,10 @@ export type MvpStatusSnapshot = {
   mpvEngineReady: boolean;
   /** Last engine issue for the music channel (load, binary, IPC, process) — not optimistic. */
   mpvLastError: string | null;
+  /** Attempt id of the CURRENT music attempt, echoed from the orchestrator, so the renderer can ignore
+   *  status/events belonging to a SUPERSEDED playback attempt (stale end-file/idle/playing/position).
+   *  Desktop-internal only — never sent over WS / to CONTROL. */
+  mpvAttemptId: number;
 };
 
 export type MvpConfigPatch = Partial<Omit<DesktopRuntimeConfig, "deviceId">> & {
