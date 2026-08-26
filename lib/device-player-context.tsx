@@ -12,7 +12,7 @@ import {
 } from "react";
 import { usePathname } from "next/navigation";
 import { getDeviceId, initDeviceId } from "@/lib/device-id";
-import { usePlayback } from "@/lib/playback-provider";
+import { usePlayback, type PlaybackStatus } from "@/lib/playback-provider";
 import { useRemoteControlWs } from "@/lib/remote-control/ws-client";
 import { SecondaryDesktopModal } from "@/components/secondary-desktop-modal";
 import { GuestRecommendationModal } from "@/components/guest-recommendation-modal";
@@ -43,8 +43,10 @@ type DevicePlayerContextValue = {
   masterState: StationPlaybackState | null;
   masterConfirmOpen: boolean;
   setMasterConfirmOpen: (open: boolean) => void;
-  /** Report position/duration from MASTER AudioPlayer for sync to CONTROL. */
-  reportPosition: (position: number, duration: number) => void;
+  /** Report position/duration (+ optional MASTER-authoritative status) from the MASTER
+   *  AudioPlayer for sync to CONTROL. Desktop MPV passes the true status so CONTROL never
+   *  shows "playing" before MPV actually plays; browser engines omit it. */
+  reportPosition: (position: number, duration: number, authoritativeStatus?: PlaybackStatus) => void;
   sendSetMaster: () => void;
   sendSetControl: () => void;
   /** Send command to master (when in CONTROL mode). */
@@ -308,11 +310,15 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const lastConnectedModeRef = useRef<DeviceMode | null>(null);
   const prevEffectiveModeRef = useRef<DeviceMode>("MASTER");
   const pendingMasterAdoptionRef = useRef(false);
-  const reportedPositionRef = useRef<{ position: number; duration: number } | null>(null);
+  const reportedPositionRef = useRef<{ position: number; duration: number; authoritativeStatus?: PlaybackStatus } | null>(null);
 
-  const reportPosition = useCallback((position: number, duration: number) => {
+  // Optional `authoritativeStatus`: when the reporting engine knows the TRUE playback
+  // status (desktop MPV MASTER), it passes it so the state published to CONTROL reflects
+  // reality instead of the optimistic reducer status. Browser engines omit it → the
+  // publisher falls back to the reducer `playStatus` (unchanged behavior).
+  const reportPosition = useCallback((position: number, duration: number, authoritativeStatus?: PlaybackStatus) => {
     if (Number.isFinite(position) && Number.isFinite(duration)) {
-      reportedPositionRef.current = { position, duration };
+      reportedPositionRef.current = { position, duration, authoritativeStatus };
     }
   }, []);
 
@@ -846,8 +852,11 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isActive || status !== "connected" || deviceMode !== "MASTER" || !sendState) return;
     const pd = reportedPositionRef.current;
+    // INV3 — publish the MASTER-authoritative status when the engine supplied one
+    // (desktop MPV); otherwise fall back to the optimistic reducer status (browser).
+    const publishedStatus = pd?.authoritativeStatus ?? playStatus;
     const state = playbackToStationState(
-      playStatus,
+      publishedStatus,
       currentSource,
       currentTrackIndex,
       queue,
@@ -867,8 +876,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     if (!isActive || status !== "connected" || deviceMode !== "MASTER" || playStatus !== "playing" || !sendState) return;
     const id = setInterval(() => {
       const pd = reportedPositionRef.current;
+      const publishedStatus = pd?.authoritativeStatus ?? playStatus;
       const state = playbackToStationState(
-        playStatus,
+        publishedStatus,
         currentSource,
         currentTrackIndex,
         queue,
