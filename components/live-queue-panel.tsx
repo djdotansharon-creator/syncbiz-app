@@ -6,6 +6,7 @@ import { getPlaylistTracks } from "@/lib/playlist-types";
 import { getPlaylistSessionTracks, usePlayback } from "@/lib/playback-provider";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import type { SessionTrackMirror } from "@/lib/remote-control/types";
+import { urlToUnifiedSource } from "@/lib/remote-control/url-to-source";
 import { isPlayNextSourceId } from "@/lib/play-next";
 import { resolveMyMusicLibraryDropFromDataTransfer } from "@/lib/music-library-drag";
 import {
@@ -409,7 +410,12 @@ export function LiveQueuePanel() {
           firstTitles: fromSyncbiz.sources.slice(0, 4).map((s) => s.title),
           unsupported: fromSyncbiz.unsupported,
         });
-        addPlayNextSources(fromSyncbiz.sources);
+        // Route to the MASTER on a CONTROL device: queueNextOrSend → QUEUE_NEXT → the MASTER's OWN
+        // playNextQueue (which its next() consumes). On a MASTER it stays local. This is what makes
+        // "Drop Next" from a CONTROL actually change what the MASTER plays next.
+        const queueNext = deviceCtx?.queueNextOrSend;
+        if (queueNext) fromSyncbiz.sources.forEach((s) => queueNext(s));
+        else addPlayNextSources(fromSyncbiz.sources);
         return true;
       }
 
@@ -435,8 +441,14 @@ export function LiveQueuePanel() {
         urls,
       });
       const dedupedPaths = dedupe(paths);
+      // Local files stay local — a CONTROL can't hand its own filesystem paths to a remote MASTER.
       if (dedupedPaths.length > 0) addPlayNextFromPaths(dedupedPaths);
-      if (urls.length > 0) addPlayNextFromUrls(urls);
+      if (urls.length > 0) {
+        // Remote URLs (YouTube/http) route to the MASTER on a CONTROL so ITS Play-Next queue gets them.
+        const queueNext = deviceCtx?.queueNextOrSend;
+        if (queueNext && isControlMirror) for (const u of urls) queueNext(urlToUnifiedSource(u));
+        else addPlayNextFromUrls(urls);
+      }
       if (dedupedPaths.length === 0 && urls.length === 0) {
         if (sawImageOnly || hadImageFiles) {
           showHint("That's an image. Drop the page link (e.g. youtube.com/watch...), not a .jpg.");
@@ -451,7 +463,7 @@ export function LiveQueuePanel() {
       }
       return true;
     },
-    [addPlayNextFromPaths, addPlayNextFromUrls, addPlayNextSources, showHint],
+    [addPlayNextFromPaths, addPlayNextFromUrls, addPlayNextSources, showHint, deviceCtx?.queueNextOrSend, isControlMirror],
   );
 
   const ingestDrop = useCallback(
@@ -817,6 +829,28 @@ export function LiveQueuePanel() {
       if (!src && isControlMirror && masterState?.currentSource?.id && currentSource?.id === masterState.currentSource.id) {
         src = currentSource;
       }
+      // CONTROL mirror: the panel nulls its local source, so reconstruct a minimal UnifiedSource that
+      // carries the MASTER's current source id + the mirrored tracks. playSourceOrSend routes it as
+      // PLAY_SOURCE{trackIndex}; the MASTER matches the id and jumps on its OWN full source (local file
+      // paths are stripped on the wire), so remote AND local sessions jump to the clicked track instead
+      // of the click being a local no-op.
+      if (!src && isControlMirror && masterState?.currentSource?.id) {
+        const ms = masterState.currentSource;
+        src = {
+          id: ms.id,
+          title: ms.title ?? masterState.sessionTitle ?? "Session",
+          genre: "Mixed",
+          cover: ms.cover ?? null,
+          type: "youtube",
+          url: "",
+          origin: "playlist",
+          playlist: {
+            id: masterState.sessionPlaylistId ?? ms.id,
+            name: masterState.sessionTitle ?? ms.title ?? "Session",
+            tracks: sessionTracks,
+          },
+        } as unknown as UnifiedSource;
+      }
       if (!src) return;
 
       const pl = onPlaylist;
@@ -832,9 +866,9 @@ export function LiveQueuePanel() {
     [
       playSessionTrack,
       sessionForList.currentSource,
-      sessionTracks.length,
+      sessionTracks,
       isControlMirror,
-      masterState?.currentSource?.id,
+      masterState,
       currentSource,
       onPlaylist,
     ],

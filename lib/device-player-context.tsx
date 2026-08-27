@@ -330,6 +330,11 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     return onRepeatModeChanged((m) => setRepeatModeState(m));
   }, []);
 
+  // Freshest current source for the command handler — onCommand's deps intentionally exclude
+  // currentSource, so it would otherwise capture a stale value (mirrors the playStatusRef pattern).
+  const currentSourceRef = useRef(currentSource);
+  useEffect(() => { currentSourceRef.current = currentSource; }, [currentSource]);
+
   const onCommand = useCallback(
     (cmd: {
       command: string;
@@ -395,12 +400,19 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       } else if (command === "PLAY_SOURCE" && cmd.payload?.source) {
         const payload = cmd.payload.source as PlaySourcePayload;
         const trackIdx = typeof cmd.payload.trackIndex === "number" ? cmd.payload.trackIndex : 0;
-        // Play immediately from the payload for zero-latency start.
-        // The payload carries id/url/title/type — sufficient to begin playback and
-        // emit an immediate loading/playing STATE_UPDATE to the CONTROL.
-        // Removed the blocking fetchUnifiedSourcesWithFallback() call that caused
-        // 15+ second delays on Railway before the first track could start.
-        playSource(payloadToUnifiedSource(payload), trackIdx);
+        // Same-source track jump: a CONTROL asked to jump to a track INDEX of the source the MASTER is
+        // ALREADY playing (e.g. clicking a row in the live queue). Use the MASTER's OWN full source —
+        // a CONTROL's payload is mirror-sanitized (local file paths are stripped on the wire), so
+        // re-playing it would break local playlists. Matching by id keeps BOTH local and remote jumps
+        // correct. A genuinely different source (id mismatch) plays from the payload as before.
+        const own = currentSourceRef.current;
+        if (own && payload?.id && own.id === payload.id) {
+          playSource(own, trackIdx);
+        } else {
+          // Play immediately from the payload for zero-latency start (id/url/title/type suffice; no
+          // blocking source refetch, which used to add 15+ s latency on Railway).
+          playSource(payloadToUnifiedSource(payload), trackIdx);
+        }
       } else if (command === "QUEUE_NEXT" && cmd.payload?.source) {
         // A CONTROL added a song to the MASTER's Play-Next queue. Reuse the same
         // payload→source reconstruction as PLAY_SOURCE, but enqueue instead of
