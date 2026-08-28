@@ -3,6 +3,8 @@ import { createReadStream, statSync } from "node:fs";
 import { Readable } from "node:stream";
 import { verifyMediaSessionToken } from "@/lib/media/media-token";
 import { getMediaAsset, resolveLocalPreviewPath } from "@/lib/media/media-assets";
+import { getMediaAssetFromDb, isObjectStorageProvider } from "@/lib/media/media-asset-db";
+import { getR2Config, presignGet, r2PresignTtlSec } from "@/lib/media/r2-presign";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -42,10 +44,51 @@ function parseRange(header: string | null, size: number): ParsedRange | null | "
 }
 
 async function handle(req: NextRequest, assetId: string, isHead: boolean): Promise<Response> {
+  // Fail closed on server misconfig: a missing/short media secret is a 503 (never an unclear 500,
+  // never a 401 that reads as a client problem).
+  const secret = process.env.SYNCBIZ_MEDIA_SECRET;
+  if (!secret || secret.length < 16) {
+    return NextResponse.json({ error: "media transport not configured" }, { status: 503 });
+  }
+
   const token = req.nextUrl.searchParams.get("mt") ?? "";
   const claims = verifyMediaSessionToken(token);
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  // ── Production path: the DB MediaAsset is the source of truth. Provider/bucket/objectKey come from
+  //    HERE (server-authoritative) — NEVER from client input. Only a READY asset is ever served. ──
+  const dbAsset = await getMediaAssetFromDb(assetId);
+  if (dbAsset) {
+    if (dbAsset.status !== "READY") {
+      return NextResponse.json({ error: "not found" }, { status: 404 }); // non-READY: 404 hides state
+    }
+    if (!dbAsset.genreId || !claims.allowedGenres.includes(dbAsset.genreId)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+    if (isObjectStorageProvider(dbAsset.provider)) {
+      const noStore = { "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" };
+      if (isHead) {
+        // HEAD → metadata only, no signed URL minted.
+        return new NextResponse(null, { status: 200, headers: {
+          ...noStore, "Content-Type": dbAsset.mimeType, "Accept-Ranges": "bytes", "Content-Length": String(dbAsset.sizeBytes),
+        } });
+      }
+      const cfg = getR2Config();
+      if (!cfg) return NextResponse.json({ error: "storage not configured" }, { status: 503 }); // no creds → fail closed
+      let signed: string;
+      try {
+        signed = presignGet(cfg, dbAsset.bucket, dbAsset.objectKey, r2PresignTtlSec());
+      } catch {
+        return NextResponse.json({ error: "storage unavailable" }, { status: 503 }); // presign fault → fail closed, never insecure
+      }
+      // 302 → short-lived signed R2 URL. MPV follows the redirect internally and streams Range/206 from
+      // the edge. CONTROL never sees this URL; it never enters WS / PlaylistTrack / our logs (redacted).
+      return new NextResponse(null, { status: 302, headers: { ...noStore, Location: signed } });
+    }
+    // LOCAL_PREVIEW in DB → fall through to the local streaming path below.
+  }
+
+  // ── POC / dev fallback: in-memory preview-cache manifest (unchanged, streams local bytes) ──
   const asset = getMediaAsset(assetId);
   if (!asset) return NextResponse.json({ error: "not found" }, { status: 404 });
 

@@ -69,8 +69,15 @@ export function appendMediaToken(url: string | null | undefined): string | null 
   return `${url}${url.includes("?") ? "&" : "?"}mt=${encodeURIComponent(t)}`;
 }
 
-/** Redact the `mt=` media token from any URL for safe logging. */
+/**
+ * Redact secrets from any URL before logging: the SyncBiz media token (`mt=`) AND the R2/S3 presigned
+ * signature material (`X-Amz-Signature` / `X-Amz-Credential`). A signed storage URL only reaches the
+ * MASTER via the /api/media 302; masking the signature neutralizes it if it ever lands in a log line.
+ */
 export function redactMediaToken(url: string | null | undefined): string {
   if (url == null) return String(url);
-  return String(url).replace(/([?&]mt=)[^&\s"']*/gi, "$1[REDACTED]");
+  return String(url)
+    .replace(/([?&]mt=)[^&\s"']*/gi, "$1[REDACTED]")
+    .replace(/([?&]X-Amz-Signature=)[^&\s"']*/gi, "$1[REDACTED]")
+    .replace(/([?&]X-Amz-Credential=)[^&\s"']*/gi, "$1[REDACTED]");
 }

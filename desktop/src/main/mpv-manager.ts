@@ -214,7 +214,8 @@ export class MpvManager {
 
     this.child.stderr?.on("data", (d: Buffer) => {
       const msg = d.toString("utf-8").trim();
-      if (msg) console.log("[MpvManager]", this.pipePath, "mpv:", msg.slice(0, 400));
+      // Redact: mpv stderr can echo the URL it is streaming, including a followed 302 → signed R2 URL.
+      if (msg) console.log("[MpvManager]", this.pipePath, "mpv:", redactMediaToken(msg).slice(0, 400));
     });
 
     this.child.on("error", (err) => {
