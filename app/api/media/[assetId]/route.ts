@@ -18,6 +18,18 @@ export const runtime = "nodejs";
  * Streaming only — never buffers the whole file. Multi-range not supported (single range only).
  */
 
+/**
+ * The in-memory preview-cache streaming path is a DEV/TEST convenience only. In production the DB
+ * MediaAsset is the ONE source of playable media — an unknown / non-READY / non-object-storage asset
+ * must fail closed, never serve local bytes. Hard off when NODE_ENV=production (no env can re-enable
+ * it in prod); in dev it is on unless explicitly disabled. This makes the invariant explicit rather
+ * than relying on the cache directory happening to be absent from a deploy.
+ */
+function pocMediaFallbackAllowed(): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  return process.env.SYNCBIZ_MEDIA_POC_FALLBACK !== "0";
+}
+
 type ParsedRange = { start: number; end: number };
 
 function parseRange(header: string | null, size: number): ParsedRange | null | "invalid" {
@@ -55,6 +67,8 @@ async function handle(req: NextRequest, assetId: string, isHead: boolean): Promi
   const claims = verifyMediaSessionToken(token);
   if (!claims) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  const allowPoc = pocMediaFallbackAllowed();
+
   // ── Production path: the DB MediaAsset is the source of truth. Provider/bucket/objectKey come from
   //    HERE (server-authoritative) — NEVER from client input. Only a READY asset is ever served. ──
   const dbAsset = await getMediaAssetFromDb(assetId);
@@ -85,10 +99,16 @@ async function handle(req: NextRequest, assetId: string, isHead: boolean): Promi
       // the edge. CONTROL never sees this URL; it never enters WS / PlaylistTrack / our logs (redacted).
       return new NextResponse(null, { status: 302, headers: { ...noStore, Location: signed } });
     }
-    // LOCAL_PREVIEW in DB → fall through to the local streaming path below.
+    // READY but a non-object-storage provider (LOCAL_PREVIEW): servable ONLY via the dev/test POC path.
+    // In production there are no local bytes to serve → fail closed, never fall through.
+    if (!allowPoc) return NextResponse.json({ error: "not found" }, { status: 404 });
+  } else if (!allowPoc) {
+    // Not a MediaAsset at all. In production the DB is authoritative — never consult the POC cache.
+    return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  // ── POC / dev fallback: in-memory preview-cache manifest (unchanged, streams local bytes) ──
+  // ── POC / dev-test fallback: in-memory preview-cache manifest (unchanged, streams local bytes).
+  //    Unreachable in production (gated above); reaching here means allowPoc === true. ──
   const asset = getMediaAsset(assetId);
   if (!asset) return NextResponse.json({ error: "not found" }, { status: 404 });
 
