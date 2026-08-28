@@ -657,6 +657,10 @@ model CatalogItem {
   /// Virtual back-relation only (the FK column lives on UniversalTrack); adding
   /// this NEVER alters or migrates existing CatalogItem rows.
   universalTrack         UniversalTrack?          @relation("CatalogItemUniversalTrack")
+  /// Playable media objects in SyncBiz-owned storage (Music Bank / RFM) for this catalog item.
+  /// Virtual back-relation only (the FK column lives on MediaAsset); adding this NEVER alters
+  /// or migrates existing CatalogItem rows.
+  mediaAssets            MediaAsset[]
 
   @@index([videoId])
   @@index([archivedAt])
@@ -2077,4 +2081,80 @@ model SourceLocator {
   @@index([provider, stableExternalId])
   @@index([status])
   @@index([contentHash])
+}
+
+// ── Music Bank / Royalty-Free Music — playable media storage ─────────────────────────────────
+// MediaAsset is the source of truth for a PLAYABLE media object OWNED by SyncBiz (distinct from
+// SourceLocator, which is a USER's track in their connected external source). It carries only the
+// storage POINTER + integrity + lifecycle — never storage credentials, never signed URLs (those are
+// minted at play time from env-held creds). The storage backend is an implementation detail; the
+// public `id` is provider-agnostic (used in /api/media/<id> + the media-token scope), so moving
+// R2 → S3/B2 is a per-row data update, not a catalog migration.
+
+/// Where the bytes physically live. Implementation detail — swappable without touching the catalog.
+enum MediaProvider {
+  R2
+  S3
+  B2
+  LOCAL_PREVIEW // dev / POC preview cache only
+}
+
+/// Lifecycle. Only READY is ever served. PENDING guards against a partial ingest becoming playable;
+/// RETIRED is a soft-delete/replace (the row is kept so history/analytics survive) — never a hard delete.
+enum MediaAssetStatus {
+  PENDING
+  READY
+  RETIRED
+  FAILED
+}
+
+model MediaAsset {
+  /// Provider-AGNOSTIC public id — this is the `<assetId>` in /api/media/<assetId> and the token scope.
+  /// Never a storage key, never provider-specific, so R2 → S3/B2 needs no change to catalog or URLs.
+  id       String @id @default(uuid())
+
+  /// The sellable/browsable catalog entity this asset plays for. Nullable so ingest can register the
+  /// asset independently of catalog publication order. SetNull keeps the asset if the item is removed.
+  catalogItemId String?
+  /// Coarse Music-Bank genre-pack key used for media-token scoping (allowedGenres). Fine-grained genre
+  /// lives on CatalogItem (genres[] / taxonomyLinks); this is the pack grouping only.
+  genreId       String?
+
+  // ── storage pointer (no credentials, no URLs) ──
+  provider  MediaProvider @default(R2)
+  bucket    String
+  /// Object key within the bucket. Content-addressed (e.g. "assets/<sha256>.<ext>") → a replace is a
+  /// NEW immutable key and dedup is automatic. NEVER a signed URL.
+  objectKey String
+
+  // ── media metadata ──
+  mimeType        String
+  sizeBytes       BigInt
+  durationSeconds Float?
+
+  // ── integrity / dedup ──
+  contentHash          String
+  /// Algorithm that produced contentHash (never compare hashes across algorithms).
+  contentHashAlgorithm String @default("sha256")
+
+  status MediaAssetStatus @default(PENDING)
+
+  // ── ingest provenance (for idempotent future Drive → R2 sync; nullable) ──
+  ingestSource     String? // e.g. "google_drive"
+  ingestExternalId String? // e.g. the Drive fileId — stable id at the ingest source
+  lastVerifiedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  catalogItem CatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+
+  /// One row per physical object.
+  @@unique([provider, bucket, objectKey])
+  @@index([catalogItemId])
+  @@index([genreId])
+  @@index([status])
+  @@index([contentHash]) // dedup lookups
+  @@index([provider, status])
+  @@index([ingestSource, ingestExternalId]) // idempotent ingest diffing
 }
