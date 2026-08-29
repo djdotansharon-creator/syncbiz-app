@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createReadStream, statSync } from "node:fs";
 import { Readable } from "node:stream";
 import { verifyMediaSessionToken } from "@/lib/media/media-token";
-import { getMediaAsset, resolveLocalPreviewPath } from "@/lib/media/media-assets";
+import { getMediaAsset, resolveLocalPreviewPath, pocMediaFallbackAllowed } from "@/lib/media/media-assets";
 import { getMediaAssetFromDb, isObjectStorageProvider } from "@/lib/media/media-asset-db";
 import { getR2Config, presignGet, r2PresignTtlSec } from "@/lib/media/r2-presign";
 
@@ -17,18 +17,6 @@ export const runtime = "nodejs";
  *   4. stream bytes with HTTP Range (POC provider = local preview cache; drive/r2/s3 plug in later).
  * Streaming only — never buffers the whole file. Multi-range not supported (single range only).
  */
-
-/**
- * The in-memory preview-cache streaming path is a DEV/TEST convenience only. In production the DB
- * MediaAsset is the ONE source of playable media — an unknown / non-READY / non-object-storage asset
- * must fail closed, never serve local bytes. Hard off when NODE_ENV=production (no env can re-enable
- * it in prod); in dev it is on unless explicitly disabled. This makes the invariant explicit rather
- * than relying on the cache directory happening to be absent from a deploy.
- */
-function pocMediaFallbackAllowed(): boolean {
-  if (process.env.NODE_ENV === "production") return false;
-  return process.env.SYNCBIZ_MEDIA_POC_FALLBACK !== "0";
-}
 
 type ParsedRange = { start: number; end: number };
 

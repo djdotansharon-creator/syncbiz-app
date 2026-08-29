@@ -90,6 +90,18 @@ function loadIfNeeded(): typeof cache {
   return cache;
 }
 
+/**
+ * Whether the in-memory preview-cache (POC) path may serve bytes / define token scope. This is a
+ * DEV/TEST convenience only: hard OFF when NODE_ENV=production (no env re-enables it in prod), on in
+ * dev unless SYNCBIZ_MEDIA_POC_FALLBACK=0. In production the DB MediaAsset is the ONE source of
+ * playable media and the ONLY source of token scope. Single source of truth for this policy (used by
+ * the /api/media route and the Music Bank authorize route).
+ */
+export function pocMediaFallbackAllowed(): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  return process.env.SYNCBIZ_MEDIA_POC_FALLBACK !== "0";
+}
+
 /** Look up an asset by opaque id. Returns null if unknown (→ endpoint 404). In-memory, no DB. */
 export function getMediaAsset(assetId: string): MediaAsset | null {
   const c = loadIfNeeded();

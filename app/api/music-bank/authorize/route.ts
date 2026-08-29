@@ -1,16 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { mintMediaSessionToken, mediaTokenDefaultTtlSec } from "@/lib/media/media-token";
-import { allPreviewGenreIds } from "@/lib/media/media-assets";
+import { allPreviewGenreIds, pocMediaFallbackAllowed } from "@/lib/media/media-assets";
+import { getReadyMediaAssetGenreIds } from "@/lib/media/media-asset-db";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
- * Stage A — mint a scoped, short-lived Media Session Token for Music Bank PREVIEW streaming.
- * Requires an authenticated SyncBiz session (cookie). The scope (allowed genres) is server-authoritative,
- * derived from the preview asset map — the client can never widen it. The token is returned to the
- * client to hold IN MEMORY only and append to `/api/media/<assetId>` at playback time.
+ * Stage A/A.1 — mint a scoped, short-lived Media Session Token for Music Bank streaming.
+ * Requires an authenticated SyncBiz session (cookie). The scope (allowed genres) is server-authoritative
+ * — the client can never widen it.
+ *
+ * Scope source of truth:
+ *   - PRODUCTION: genres that have at least one READY MediaAsset (real, playable, DB-backed) — NEVER the
+ *     POC preview-cache manifest (which does not exist in prod).
+ *   - DEV/TEST: the READY-MediaAsset genres UNIONED with the POC preview-cache genres, so the local POC
+ *     A/B mode keeps working. The POC contribution is gated by pocMediaFallbackAllowed() (off in prod).
+ * The token is returned to the client to hold IN MEMORY only and append to `/api/media/<logicalId>` at
+ * playback time.
  */
 export async function POST(req: NextRequest) {
   const user = await getCurrentUserFromCookies();
@@ -19,9 +27,11 @@ export async function POST(req: NextRequest) {
   let body: { deviceId?: string } = {};
   try { body = await req.json(); } catch { /* body is optional */ }
 
-  const allowedGenres = allPreviewGenreIds();
+  const dbGenres = await getReadyMediaAssetGenreIds();
+  const pocGenres = pocMediaFallbackAllowed() ? allPreviewGenreIds() : [];
+  const allowedGenres = [...new Set([...dbGenres, ...pocGenres])];
   if (allowedGenres.length === 0) {
-    return NextResponse.json({ error: "No preview catalog is available on this server." }, { status: 503 });
+    return NextResponse.json({ error: "No media catalog is available on this server." }, { status: 503 });
   }
 
   const deviceId =

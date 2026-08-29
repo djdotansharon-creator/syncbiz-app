@@ -2109,9 +2109,19 @@ enum MediaAssetStatus {
 }
 
 model MediaAsset {
-  /// Provider-AGNOSTIC public id — this is the `<assetId>` in /api/media/<assetId> and the token scope.
-  /// Never a storage key, never provider-specific, so R2 → S3/B2 needs no change to catalog or URLs.
+  /// PHYSICAL version row id (internal). One row = one immutable stored object (one version of the
+  /// bytes). A content replacement creates a NEW row with a NEW id; the old row is kept (RETIRED) for
+  /// history. NEVER appears in a public URL — see `logicalId` for the stable public identity.
   id       String @id @default(uuid())
+
+  /// LOGICAL asset id — the STABLE, provider-agnostic public identity that appears in
+  /// /api/media/<logicalId> and in the media-token genre scope. Equals the catalog/preview sample id
+  /// (`a_<sha1(driveFileId)>`). Stable across content replacement: many physical versions may share a
+  /// logicalId over time, but at most ONE is READY at a time (enforced by a partial-unique index).
+  /// The route resolves a request by (logicalId, status=READY) → the current physical version, so a
+  /// replacement never changes the URL, playlist, or catalog. Nullable: a raw ingest may register an
+  /// object before a catalog binding exists (such rows are not served by logical id until set).
+  logicalId String?
 
   /// The sellable/browsable catalog entity this asset plays for. Nullable so ingest can register the
   /// asset independently of catalog publication order. SetNull keeps the asset if the item is removed.
@@ -2153,6 +2163,8 @@ model MediaAsset {
   @@unique([provider, bucket, objectKey])
   @@index([catalogItemId])
   @@index([genreId])
+  @@index([logicalId]) // resolve /api/media/<logicalId>
+  @@index([logicalId, status]) // fast (logicalId, READY) lookup — the playback hot path
   @@index([status])
   @@index([contentHash]) // dedup lookups
   @@index([provider, status])
