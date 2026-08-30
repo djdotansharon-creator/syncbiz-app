@@ -26,7 +26,7 @@ import type { Playlist, PlaylistTrack } from "@/lib/playlist-types";
 import type { UnifiedSource } from "@/lib/source-types";
 import { POC_MUSIC_BANK_CATALOG } from "@/lib/music-bank/poc-catalog";
 import type { MusicBankGenrePack, MusicBankSampleTrack } from "@/lib/music-bank/catalog-types";
-import { GENRE_PRICE_LABEL, FULL_BANK_PRICE_LABEL } from "@/lib/music-bank/pricing";
+import { GENRE_PRICE_LABEL, CHOICE3_PRICE_LABEL, FULL_BANK_PRICE_LABEL, CHOICE3_PACK_COUNT } from "@/lib/music-bank/pricing";
 import { subscribeMediaSession, hasMediaSessionToken } from "@/lib/media/media-session";
 import { useDevicePlayer } from "@/lib/device-player-context";
 
@@ -198,7 +198,7 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[#0a84ff]/15 text-[#7db8ff]"><PlayIcon className="h-3 w-3" /></span>
           <h2 className="text-sm font-semibold tracking-tight">Royalty-Free Music</h2>
-          <span className="hidden text-xs text-[#6b6b70] sm:inline">· {genres.length} genres · {totalSamples} samples</span>
+          <span className="hidden text-xs text-[#6b6b70] sm:inline">· {genres.length} Genre Packs · {totalSamples} samples</span>
         </div>
         <div className="flex items-center gap-2">
           {/* Stage A A/B toggle (dev): Stream = SyncBiz HTTPS media transport; Local = preview-cache path. */}
@@ -260,6 +260,24 @@ function GenreNavPill({ label, active, onClick }: { label: string; active: boole
   );
 }
 
+/**
+ * Cinematic layered cover for a Genre Pack — NOT a flat colour block. Genre gradient base + a soft
+ * stage-light spotlight + a diagonal sheen + a bottom scrim (text legibility) + fine film grain.
+ * The same treatment across every pack makes the set read as one premium family. A photographic
+ * cover image can later drop straight into this slot.
+ */
+function GenreCover({ genre }: { genre: MusicBankGenrePack }) {
+  return (
+    <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
+      <div className="absolute inset-0" style={{ backgroundImage: `linear-gradient(140deg, ${genre.gradient[0]} 0%, ${genre.gradient[1]} 100%)` }} />
+      <div className="absolute inset-0" style={{ background: "radial-gradient(130% 90% at 78% 10%, rgba(255,255,255,0.30), rgba(255,255,255,0) 55%)" }} />
+      <div className="absolute inset-0" style={{ background: "linear-gradient(205deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0) 32%)" }} />
+      <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.68) 0%, rgba(0,0,0,0.20) 46%, rgba(0,0,0,0) 72%)" }} />
+      <div className="absolute inset-0 opacity-[0.10] mix-blend-overlay" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>\")" }} />
+    </div>
+  );
+}
+
 function CatalogHome({
   genres,
   totalSamples,
@@ -273,26 +291,28 @@ function CatalogHome({
 }) {
   return (
     <>
+      {/* Genre Packs */}
       <div className="grid grid-cols-1 gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-3">
         {genres.map((genre) => {
           const total = totalDuration(genre.tracks);
           return (
-            <div key={genre.id} className="group flex flex-col overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.015] transition hover:border-white/20">
-              <button type="button" onClick={() => onOpen(genre.id)} className="relative flex aspect-[16/10] items-end p-3.5 text-left" style={{ backgroundImage: `linear-gradient(140deg, ${genre.gradient[0]} 0%, ${genre.gradient[1]} 100%)` }}>
-                <div className="absolute inset-0 bg-black/15 transition group-hover:bg-black/5" />
+            <div key={genre.id} className="group flex flex-col overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.015] transition hover:border-white/20 hover:shadow-[0_16px_40px_-24px_rgba(0,0,0,0.85)]">
+              <button type="button" onClick={() => onOpen(genre.id)} className="relative flex aspect-[16/10] items-end p-3.5 text-left">
+                <GenreCover genre={genre} />
+                <span className="absolute left-3 top-3 rounded-full bg-black/35 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/85 backdrop-blur-sm">Genre Pack</span>
+                <span className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/35 text-white opacity-0 backdrop-blur-sm transition group-hover:opacity-100"><PlayIcon className="h-3.5 w-3.5" /></span>
                 <div className="relative">
                   <h3 className="text-lg font-semibold leading-tight tracking-tight text-white drop-shadow">{genre.name}</h3>
-                  <p className="mt-0.5 text-[11px] font-medium text-white/80">
+                  <p className="mt-0.5 text-[11px] font-medium text-white/85">
                     {genre.tracks.length} samples{total != null ? ` · ${formatDuration(total)}` : ""}
                   </p>
                 </div>
-                <span className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/30 text-white opacity-0 backdrop-blur-sm transition group-hover:opacity-100"><PlayIcon className="h-3.5 w-3.5" /></span>
               </button>
               <div className="flex items-center justify-between gap-2 px-3.5 py-2.5">
                 <button type="button" onClick={() => onOpen(genre.id)} className="text-xs font-medium text-[#0a84ff] transition hover:text-[#7db8ff]">Listen to samples →</button>
-                <span className="flex items-center gap-2">
+                <span className="flex items-baseline gap-2">
                   <span className="text-sm font-semibold tabular-nums text-[#f5f5f7]">{GENRE_PRICE_LABEL}</span>
-                  <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-md border border-white/[0.1] px-2.5 py-1 text-[11px] font-semibold text-[#6b6b70]">Unlock</button>
+                  <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-md border border-white/[0.12] px-2.5 py-1 text-[11px] font-semibold text-[#8a8a8f]">Unlock</button>
                 </span>
               </div>
             </div>
@@ -300,23 +320,37 @@ function CatalogHome({
         })}
       </div>
 
-      {/* Complete Music Bank — the headline deal */}
-      <section className="mx-4 mb-5 overflow-hidden rounded-xl border border-[#0a84ff]/30 bg-gradient-to-br from-[#0a84ff]/[0.10] to-[#7a2f8c]/[0.10] px-5 py-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[#7db8ff]">Best value</p>
-            <h3 className="mt-1 text-lg font-semibold tracking-tight text-[#f5f5f7]">Complete Music Bank</h3>
-            <p className="mt-1 text-sm text-[#a1a1a6]">All {genres.length} genre packs · {totalSamples} samples · one bundle.</p>
+      {/* Subscription bundles: build-your-own 3, or the Full Music Bank (best value). */}
+      <section className="mx-4 mb-2 grid gap-3 sm:grid-cols-5">
+        {/* CHOICE 1 — Choose 3 Genre Packs */}
+        <div className="flex flex-col justify-between rounded-xl border border-white/[0.1] bg-white/[0.02] p-5 sm:col-span-2">
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[#a1a1a6]">Build your bundle</p>
+            <h3 className="mt-1 text-lg font-semibold tracking-tight text-[#f5f5f7]">Choose {CHOICE3_PACK_COUNT} Genre Packs</h3>
+            <p className="mt-1 text-sm text-[#a1a1a6]">Any {CHOICE3_PACK_COUNT} packs — your pick.</p>
           </div>
-          <div className="flex shrink-0 items-center gap-3">
-            <span className="text-2xl font-bold tabular-nums text-[#f5f5f7]">{FULL_BANK_PRICE_LABEL}</span>
-            <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg border border-[#0a84ff]/40 bg-[#0a84ff]/20 px-4 py-2 text-sm font-semibold text-[#7db8ff]">Unlock Full Music Bank</button>
+          <div className="mt-5 flex items-baseline justify-between gap-3">
+            <span className="text-xl font-bold tabular-nums text-[#f5f5f7]">{CHOICE3_PRICE_LABEL}</span>
+            <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg border border-white/25 px-4 py-2 text-sm font-semibold text-[#c7c7cc]">Unlock</button>
           </div>
         </div>
-        <p className="mt-3 border-t border-white/[0.06] pt-3 text-[11px] text-[#8a8a8f]">
-          {genres.length} packs at {GENRE_PRICE_LABEL} each — the full bank is {FULL_BANK_PRICE_LABEL}. Payments &amp; entitlements coming soon; samples preview from the local cache and are not marked Offline Ready.
-        </p>
+
+        {/* CHOICE 2 — Full Music Bank, BEST VALUE (hero treatment) */}
+        <div className="relative flex flex-col justify-between overflow-hidden rounded-xl border-2 border-[#0a84ff]/55 bg-gradient-to-br from-[#0a84ff]/[0.18] via-[#4a2b8c]/[0.12] to-[#7a2f8c]/[0.18] p-5 shadow-[0_0_0_1px_rgba(10,132,255,0.25),0_28px_60px_-28px_rgba(10,132,255,0.65)] sm:col-span-3">
+          <div className="absolute inset-0 opacity-[0.35]" style={{ background: "radial-gradient(120% 80% at 88% 0%, rgba(10,132,255,0.40), transparent 60%)" }} aria-hidden="true" />
+          <span className="absolute right-4 top-4 rounded-full bg-[#0a84ff] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white shadow">Best value</span>
+          <div className="relative min-w-0">
+            <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[#7db8ff]">Everything, one subscription</p>
+            <h3 className="mt-1 text-xl font-semibold tracking-tight text-[#f5f5f7]">Full Music Bank</h3>
+            <p className="mt-1 text-sm text-[#c7c7cc]">All {genres.length} Genre Packs · {totalSamples} samples.</p>
+          </div>
+          <div className="relative mt-5 flex items-center justify-between gap-3">
+            <span className="text-3xl font-bold tabular-nums text-white">{FULL_BANK_PRICE_LABEL}</span>
+            <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg bg-[#0a84ff] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-[#0a84ff]/30">Unlock Full Music Bank</button>
+          </div>
+        </div>
       </section>
+      <p className="mx-4 mb-5 text-[11px] text-[#8a8a8f]">Proposed monthly pricing for the demo. Payments &amp; entitlements coming soon; samples preview now and are not marked Offline Ready.</p>
 
       {notPlayableHint ? <p className="px-5 pb-5 text-[11px] text-[#6b6b70]">{notPlayableHint}</p> : null}
     </>
@@ -345,25 +379,27 @@ function GenreDetail({
   return (
     <>
       {/* Genre header */}
-      <section className="relative overflow-hidden px-5 py-5" style={{ backgroundImage: `linear-gradient(140deg, ${genre.gradient[0]} 0%, ${genre.gradient[1]} 100%)` }}>
-        <div className="absolute inset-0 bg-black/25" />
+      <section className="relative overflow-hidden px-5 py-5">
+        <GenreCover genre={genre} />
+        <div className="absolute inset-0 bg-black/25" aria-hidden="true" />
         <div className="relative">
           <button type="button" onClick={onBack} className="mb-3 inline-flex items-center gap-1 rounded-md border border-white/25 px-2.5 py-1 text-xs text-white/90 transition hover:bg-white/10">
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
             All genres
           </button>
-          <h1 className="text-2xl font-semibold leading-tight tracking-tight text-white drop-shadow">{genre.name}</h1>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/80">Genre Pack</p>
+          <h1 className="mt-0.5 text-2xl font-semibold leading-tight tracking-tight text-white drop-shadow">{genre.name}</h1>
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-white/85">{genre.description}</p>
           <p className="mt-1.5 text-[11px] font-medium text-white/75">{genre.tracks.length} samples{total != null ? ` · ${formatDuration(total)}` : ""}</p>
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            {/* Single CTA — plays the genre's FULL sample set through the existing playlist queue. */}
+            {/* Single CTA — plays the pack's FULL sample set through the existing playlist queue. */}
             <button type="button" disabled={!genrePlayable} onClick={onPlaySamples} className="inline-flex items-center gap-1.5 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-[#101014] transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/30 disabled:text-white/60">
               <PlayIcon className="h-3.5 w-3.5" />
               Listen to Samples
             </button>
             <span className="ms-auto flex items-center gap-2">
               <span className="text-lg font-bold tabular-nums text-white">{GENRE_PRICE_LABEL}</span>
-              <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg border border-white/30 px-3 py-1.5 text-xs font-semibold text-white/70">Unlock Genre</button>
+              <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg border border-white/30 px-3 py-1.5 text-xs font-semibold text-white/85">Unlock Genre Pack</button>
             </span>
           </div>
         </div>
