@@ -155,18 +155,38 @@ function Motif({ motif, accent }: { motif: MotifKey; accent: string }) {
   }
 }
 
-/** Full cinematic cover for a Genre Pack. Fills its (relative/absolute) parent. */
+/** Packs that ship a photographic cover under /public/music-bank/covers/<id>.webp. */
+const PHOTO_COVERS = new Set(Object.keys(GENRE_ART));
+
+/**
+ * Full cinematic cover for a Genre Pack. Fills its (relative/absolute) parent.
+ * Primary: a premium photographic hero image graded dark for white-text overlay. The pack's colour
+ * grade is kept as a subtle brand tint over the photo so the 7 covers still read as one family, and
+ * the bottom scrim + grain preserve legibility. Falls back to the SVG motif for any pack without a
+ * photo (unknown id / new pack).
+ */
 export function GenrePackArt({ id }: { id: string }) {
   const a = genreArt(id);
+  const hasPhoto = PHOTO_COVERS.has(id);
   return (
     <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
-      <div className="absolute inset-0" style={{ backgroundImage: `linear-gradient(140deg, ${a.from} 0%, ${a.via} 52%, ${a.to} 100%)` }} />
-      <svg viewBox="0 0 400 250" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full">
-        <Motif motif={a.motif} accent={a.accent} />
-      </svg>
-      <div className="absolute inset-0" style={{ background: "radial-gradient(120% 85% at 80% 6%, rgba(255,255,255,0.26), rgba(255,255,255,0) 55%)" }} />
-      <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.26) 44%, rgba(0,0,0,0) 72%)" }} />
-      <div className="absolute inset-0 opacity-[0.09] mix-blend-overlay" style={{ backgroundImage: NOISE }} />
+      {hasPhoto ? (
+        // eslint-disable-next-line @next/next/no-img-element -- pre-optimized static WebP; no runtime optimizer needed
+        <img src={`/music-bank/covers/${id}.webp`} alt="" className="absolute inset-0 h-full w-full object-cover" loading="lazy" decoding="async" />
+      ) : (
+        <>
+          <div className="absolute inset-0" style={{ backgroundImage: `linear-gradient(140deg, ${a.from} 0%, ${a.via} 52%, ${a.to} 100%)` }} />
+          <svg viewBox="0 0 400 250" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full">
+            <Motif motif={a.motif} accent={a.accent} />
+          </svg>
+          <div className="absolute inset-0" style={{ background: "radial-gradient(120% 85% at 80% 6%, rgba(255,255,255,0.26), rgba(255,255,255,0) 55%)" }} />
+        </>
+      )}
+      {hasPhoto ? (
+        <div className="absolute inset-0 opacity-30 mix-blend-soft-light" style={{ background: `linear-gradient(150deg, ${a.from} 0%, transparent 58%)` }} />
+      ) : null}
+      <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.30) 42%, rgba(0,0,0,0) 70%)" }} />
+      <div className="absolute inset-0 opacity-[0.07] mix-blend-overlay" style={{ backgroundImage: NOISE }} />
     </div>
   );
 }
