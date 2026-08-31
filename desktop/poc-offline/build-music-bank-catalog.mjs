@@ -6,12 +6,28 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { PrismaClient } from "@prisma/client";
+import { resolveOrCreateLogicalId } from "../../scripts/music-bank/logical-identity.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..");
 const CACHE_ROOT = process.env.POC_PREVIEW_CACHE_ROOT || join(REPO, "desktop", ".poc-preview-cache");
 const MANIFEST = join(CACHE_ROOT, "manifest.json");
-const OUT = join(REPO, "lib", "music-bank", "poc-catalog.ts");
+const OUT = process.env.POC_CATALOG_OUT || join(REPO, "lib", "music-bank", "poc-catalog.ts");
+const SOURCE = "google_drive";
+
+// Load DATABASE_URL (+ friends) from the repo .env — Prisma Client does not auto-load it at runtime.
+{
+  const envPath = join(REPO, ".env");
+  if (existsSync(envPath)) {
+    for (const raw of readFileSync(envPath, "utf8").split(/\r?\n/)) {
+      const l = raw.trim(); if (!l || l.startsWith("#")) continue; const i = l.indexOf("="); if (i < 0) continue;
+      const k = l.slice(0, i).trim(); let v = l.slice(i + 1).trim();
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+      if (process.env[k] === undefined) process.env[k] = v;
+    }
+  }
+}
 
 // Deterministic dark two-stop gradient palette (no neon). Chosen per-genre by a stable hash.
 const GRADIENTS = [
@@ -40,7 +56,7 @@ function descriptionFor(genreId, displayName) {
   return FLAVOR[genreId] || `Professionally curated ${displayName.toLowerCase()} for your space.`;
 }
 
-function main() {
+async function main() {
   if (!existsSync(MANIFEST)) {
     console.error("no preview manifest at " + MANIFEST + " — run preview-sync.mjs first");
     process.exitCode = 1;
@@ -50,17 +66,24 @@ function main() {
   const assets = m.assets || {};
   const genresMeta = m.genres || {};
 
-  // Group ready assets by their genreId.
-  const byGenre = {};
-  for (const [id, a] of Object.entries(assets)) {
-    if (!a || a.status !== "ready" || !a.localPath || !a.genreId) continue;
-    (byGenre[a.genreId] ||= []).push({
-      id,
-      title: String(a.name || "").replace(/\.[a-z0-9]+$/i, "").replace(/_/g, " ").trim() || "Untitled",
-      durationSeconds: typeof a.durationSeconds === "number" ? a.durationSeconds : null,
-      ext: a.ext || ".mp3",
-    });
-  }
+  const db = new PrismaClient();
+  try {
+    // Group ready assets by their genreId. The track id is the STABLE SyncBiz logicalId resolved from
+    // the LogicalAssetSource mapping BY DRIVE fileId — NOT the manifest key (which is only a cache
+    // filename derived from the fileId). So a re-uploaded file with a new fileId (mapped to the existing
+    // logicalId) keeps its catalog id; a truly-new file mints a fresh opaque logicalId (persisted, so
+    // subsequent rebuilds are stable). Drive fileId never regenerates public catalog identity.
+    const byGenre = {};
+    for (const [, a] of Object.entries(assets)) {
+      if (!a || a.status !== "ready" || !a.localPath || !a.genreId || !a.driveFileId) continue;
+      const { logicalId } = await resolveOrCreateLogicalId(db, { source: SOURCE, externalId: a.driveFileId });
+      (byGenre[a.genreId] ||= []).push({
+        id: logicalId,
+        title: String(a.name || "").replace(/\.[a-z0-9]+$/i, "").replace(/_/g, " ").trim() || "Untitled",
+        durationSeconds: typeof a.durationSeconds === "number" ? a.durationSeconds : null,
+        ext: a.ext || ".mp3",
+      });
+    }
 
   // Emit every discovered genre folder that has at least one ready sample, ordered by display name.
   const genreIds = Object.keys(genresMeta)
@@ -111,10 +134,13 @@ ${genreBlocks}
 };
 `;
 
-  writeFileSync(OUT, out);
-  console.log("wrote " + OUT);
-  for (const gid of genreIds) console.log(`  ${genresMeta[gid].displayName} (${gid}): ${(byGenre[gid] || []).length} samples`);
-  console.log(`  ${genreIds.length} genres, ${totalTracks} samples total`);
+    writeFileSync(OUT, out);
+    console.log("wrote " + OUT);
+    for (const gid of genreIds) console.log(`  ${genresMeta[gid].displayName} (${gid}): ${(byGenre[gid] || []).length} samples`);
+    console.log(`  ${genreIds.length} genres, ${totalTracks} samples total`);
+  } finally {
+    await db.$disconnect();
+  }
 }
 
-main();
+main().catch((e) => { console.error(e); process.exit(1); });
