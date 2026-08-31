@@ -152,6 +152,7 @@ import {
   resetLocalPlaybackTime,
 } from "@/lib/playback-time-store";
 import { getMixDuration, getAutoMix, setAutoMix as persistAutoMix, onMixDurationChanged, onAutoMixChanged } from "@/lib/mix-preferences";
+import { redactMediaToken } from "@/lib/media/media-session";
 import {
   PRELOAD_LEAD_SEC,
   STANDBY_READY_TIMEOUT_MS,
@@ -229,7 +230,7 @@ function runAbDeckCrossfade(
   const readyDeadlineMs = callbacks.readyDeadlineMs ?? STANDBY_READY_TIMEOUT_MS;
   const runStartTs = typeof performance !== "undefined" ? performance.now() : 0;
   const sinceRun = () => (typeof performance !== "undefined" ? Math.round(performance.now() - runStartTs) : null);
-  xfadeLog("run_start", { nextUrl: nextUrl.slice(0, 60), mixSec: mixDurationSec });
+  xfadeLog("run_start", { nextUrl: redactMediaToken(nextUrl).slice(0,60), mixSec: mixDurationSec });
   sbStall("xfade_run_start", { standbyTimeoutMs: STANDBY_READY_TIMEOUT_MS, mixSec: mixDurationSec, standby: sbDeckSnap(standbyAudio) });
 
   let completed = false;
@@ -273,7 +274,7 @@ function runAbDeckCrossfade(
 
   const onStandbyError = () => {
     sbStall("xfade_standby_error", { sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) });
-    xfadeLog("standby_error", { nextUrl: nextUrl.slice(0, 50) });
+    xfadeLog("standby_error", { nextUrl: redactMediaToken(nextUrl).slice(0,50) });
     finish(false);
   };
   // Passive readiness observer — records that canplaythrough (readyState 4) arrived; changes nothing.
@@ -1119,7 +1120,7 @@ export function AudioPlayer() {
     });
     if (isYouTube && !isEmbedded) {
       console.warn("[SyncBiz Audit] YT embed mismatch — isYouTube true but isEmbedded false", {
-        currentUrl: currentPlayUrl?.slice(0, 120) ?? null,
+        currentUrl: redactMediaToken(currentPlayUrl).slice(0,120) ?? null,
         videoId: vid,
         playlistId: ytPlaylistId,
       });
@@ -2095,7 +2096,7 @@ export function AudioPlayer() {
       p0XfadeDebug("currentPlayUrl_changed_embed_reset", { vid: vidFromUrl });
     }
     urlTimingMark("audio_player_source", {
-      currentPlayUrl: currentPlayUrl?.slice(0, 120) ?? null,
+      currentPlayUrl: redactMediaToken(currentPlayUrl).slice(0,120) ?? null,
       currentSourceId: currentSource?.id ?? null,
       isYouTube,
       videoId: vidFromUrl,
@@ -2275,7 +2276,7 @@ export function AudioPlayer() {
       }
       p0XfadeDebug("loadStreamOnDeck_src_set", {
         deck,
-        url: url.slice(0, 120),
+        url: redactMediaToken(url).slice(0, 120),
         shouldPlay,
         status: statusRef.current,
       });
@@ -2298,11 +2299,11 @@ export function AudioPlayer() {
         p0XfadeDebug("transition_start", {
           via: lastPlayCommandViaRef.current,
           engine: "html_ab",
-          nextUrl: nextUrl.slice(0, 120),
+          nextUrl: redactMediaToken(nextUrl).slice(0,120),
           activeDeck: getActiveDeck(),
           standbyDeck: getStandbyDeck(),
           status: statusRef.current,
-          prevUrl: lastStreamUrlRef.current?.slice(0, 120) ?? null,
+          prevUrl: redactMediaToken(lastStreamUrlRef.current).slice(0,120) ?? null,
         });
         if (!deckTransitionLock.tryAcquire()) {
           deckTransitionLock.queueAfter(() => run());
@@ -2339,7 +2340,7 @@ export function AudioPlayer() {
         crossfadeAbortRef.current = true;
 
         if (useHls || !standby) {
-          xfadeLog("hls_fade_fallback", { nextUrl: nextUrl.slice(0, 60) });
+          xfadeLog("hls_fade_fallback", { nextUrl: redactMediaToken(nextUrl).slice(0,60) });
           const fadeOut = runVolumeFade(active, targetVol, 0, mixSec, {
             onComplete: () => {
               active.pause();
@@ -2371,9 +2372,9 @@ export function AudioPlayer() {
               standbyPreloadedUrlRef.current = null;
               streamTransitionAbortRef.current = null;
               deckTransitionLock.release();
-              xfadeLog("manual_handoff_complete", { nextUrl: nextUrl.slice(0, 60) });
+              xfadeLog("manual_handoff_complete", { nextUrl: redactMediaToken(nextUrl).slice(0,60) });
               p0XfadeDebug("transition_complete", {
-                nextUrl: nextUrl.slice(0, 80),
+                nextUrl: redactMediaToken(nextUrl).slice(0,80),
                 via: lastPlayCommandViaRef.current,
                 engine: "html_ab",
                 suppressedReload: true,
@@ -2717,7 +2718,7 @@ export function AudioPlayer() {
     const isDesktopApp = typeof window !== "undefined" && "syncbizDesktop" in window;
     if (isHtmlAudio && currentPlayUrl && !isDesktopApp && isValidLocalFilePlaybackPath(currentPlayUrl)) {
       console.warn("[SyncBiz Audit] local_file_browser_blocked", {
-        url: currentPlayUrl.slice(0, 120),
+        url: redactMediaToken(currentPlayUrl).slice(0,120),
         note: "Browser cannot load local filesystem paths. Use the SyncBiz Desktop app to play local files.",
       });
       setLastMessage("Local files require the SyncBiz desktop app");
@@ -2759,18 +2760,18 @@ export function AudioPlayer() {
     if (shouldCrossfade) {
       xfadeLog("url_change_transition", {
         from: prevUrl.slice(0, 60),
-        to: currentPlayUrl.slice(0, 60),
+        to: redactMediaToken(currentPlayUrl).slice(0,60),
       });
       p0XfadeDebug("html_routing_crossfade", {
         from: prevUrl.slice(0, 80),
-        to: currentPlayUrl.slice(0, 80),
+        to: redactMediaToken(currentPlayUrl).slice(0,80),
       });
       beginStreamUrlTransition(currentPlayUrl);
       return;
     }
 
     p0XfadeDebug("html_routing_cold_load", {
-      url: currentPlayUrl.slice(0, 80),
+      url: redactMediaToken(currentPlayUrl).slice(0,80),
       prevUrl: prevUrl?.slice(0, 80) ?? null,
       status: statusRef.current,
     });
@@ -2804,7 +2805,7 @@ export function AudioPlayer() {
     const isLocalPath = currentPlayUrl ? isValidLocalFilePlaybackPath(currentPlayUrl) : false;
     console.log("[SyncBiz Audit] AudioPlayer engine_selection", {
       engine: engineName,
-      url: currentPlayUrl?.slice(0, 120) ?? null,
+      url: redactMediaToken(currentPlayUrl).slice(0,120) ?? null,
       videoId: isYouTube && currentPlayUrl ? getYouTubeVideoId(currentPlayUrl) : null,
       playlistId: isYouTube && currentPlayUrl ? getYouTubePlaylistId(currentPlayUrl) : null,
       isEmbedded,
@@ -2822,7 +2823,7 @@ export function AudioPlayer() {
       note: isLocalPath && !isDesktop ? "LOCAL_PATH_IN_BROWSER: will be blocked by stream routing guard" : null,
     });
     p0XfadeDebug("currentPlayUrl_changed", {
-      url: currentPlayUrl?.slice(0, 120) ?? null,
+      url: redactMediaToken(currentPlayUrl).slice(0,120) ?? null,
       isHtmlAudio,
       isYouTube,
       isSoundCloud,
@@ -2831,7 +2832,7 @@ export function AudioPlayer() {
       deviceMode: deviceCtx?.deviceMode ?? null,
       status,
       trackType: currentTrack?.type ?? null,
-      lastStreamUrl: lastStreamUrlRef.current?.slice(0, 120) ?? null,
+      lastStreamUrl: redactMediaToken(lastStreamUrlRef.current).slice(0,120) ?? null,
       lock: deckTransitionLock.isLocked(),
       canonical: ytCanonicalActiveVidRef.current,
       suppress: ytSuppressColdLoadVidRef.current,
@@ -2858,12 +2859,12 @@ export function AudioPlayer() {
       streamTransitionAbortRef.current
     ) {
       p0XfadeDebug("url_reset_skipped_transition_active", {
-        url: currentPlayUrl?.slice(0, 80) ?? null,
+        url: redactMediaToken(currentPlayUrl).slice(0,80) ?? null,
       });
       endedHandledRef.current = false;
       return;
     }
-    p0XfadeDebug("url_reset_crossfade_state", { url: currentPlayUrl?.slice(0, 80) ?? null });
+    p0XfadeDebug("url_reset_crossfade_state", { url: redactMediaToken(currentPlayUrl).slice(0,80) ?? null });
     endedHandledRef.current = false;
     crossfadeStartedRef.current = false;
     crossfadeConsumedRef.current = false;
@@ -3050,7 +3051,7 @@ export function AudioPlayer() {
                   transport: "audio_player_yt_ended",
                   phase: "before_provider_next_ended_auto",
                   auditTransportCase: "ended_auto",
-                  currentPlayUrlSnapshot: currentPlayUrl?.slice(0, 200) ?? null,
+                  currentPlayUrlSnapshot: redactMediaToken(currentPlayUrl).slice(0,200) ?? null,
                   currentSourceId: currentSource?.id ?? null,
                   currentTrackIndex,
                   queueLength: queue.length,
@@ -3149,8 +3150,8 @@ export function AudioPlayer() {
             const nextVid = nextEmbed?.type === "youtube" && nextIsSingleVideo ? nextEmbed.videoId : null;
             if (pos >= preloadThreshold && (nextEmbed || nextUrl)) {
               ytXfadeLog("automix_source_check", {
-                currentUrl: currentPlayUrl?.slice(0, 60),
-                nextUrl: nextUrl?.slice(0, 60),
+                currentUrl: redactMediaToken(currentPlayUrl).slice(0,60),
+                nextUrl: redactMediaToken(nextUrl).slice(0,60),
                 currentVid: vid ?? null,
                 nextVid: nextEmbed?.type === "youtube" ? nextEmbed.videoId : null,
                 isYouTubeMix,
@@ -3173,7 +3174,7 @@ export function AudioPlayer() {
               p0XfadeDebug("natural_preload_skipped_no_vid", {
                 pos,
                 dur,
-                nextUrl: nextUrl?.slice(0, 80) ?? null,
+                nextUrl: redactMediaToken(nextUrl).slice(0,80) ?? null,
                 sessionNext: true,
               });
             }
@@ -3224,7 +3225,7 @@ export function AudioPlayer() {
         updatePositionIfChanged(t);
         if (!Number.isFinite(d) || d <= 0) {
           if (!crossfadeDurNonFiniteLoggedRef.current) {
-            xfadeLog("duration_not_finite", { d, url: currentPlayUrl?.slice(0, 50), type: currentTrack?.type, origin: currentSource?.origin });
+            xfadeLog("duration_not_finite", { d, url: redactMediaToken(currentPlayUrl).slice(0,50), type: currentTrack?.type, origin: currentSource?.origin });
             crossfadeDurNonFiniteLoggedRef.current = true;
           }
         }
@@ -3257,7 +3258,7 @@ export function AudioPlayer() {
               standby.preload = "auto";
               standby.src = nextUrl;
               standby.load();
-              xfadeLog("standby_preload", { nextUrl: nextUrl.slice(0, 60), t, d, preloadAt });
+              xfadeLog("standby_preload", { nextUrl: redactMediaToken(nextUrl).slice(0,60), t, d, preloadAt });
             }
           }
 
@@ -3283,12 +3284,12 @@ export function AudioPlayer() {
           ) {
             const standby = getDeckAudio(getStandbyDeck());
             if (!standby) return;
-            xfadeLog("trigger", { t, d, mixSec, nextUrl: nextUrl.slice(0, 60) });
+            xfadeLog("trigger", { t, d, mixSec, nextUrl: redactMediaToken(nextUrl).slice(0,60) });
             p0XfadeDebug("natural_crossfade_trigger", {
               t,
               d,
               mixSec,
-              nextUrl: nextUrl.slice(0, 80),
+              nextUrl: redactMediaToken(nextUrl).slice(0,80),
               activeDeck: getActiveDeck(),
               standbyDeck: getStandbyDeck(),
             });
@@ -3338,7 +3339,7 @@ export function AudioPlayer() {
                   phase: "direct_audio_xfade_onComplete_before_provider_next_skipPlay",
                   auditTransportCase: "ended_auto",
                   skipPlay: true,
-                  nextUrlPreview: nextUrl?.slice(0, 120) ?? null,
+                  nextUrlPreview: redactMediaToken(nextUrl).slice(0,120) ?? null,
                 });
                 (nextRef.current as ((opts?: { skipPlay?: boolean; auditTransportCase?: "ended_auto" }) => void) | undefined)?.({
                   skipPlay: true,
@@ -3428,7 +3429,7 @@ export function AudioPlayer() {
         syncbizAuditTransportTransitionStart({
           phase: "html_audio_ended_failforward_before_provider_next_real_play",
           auditTransportCase: "ended_auto",
-          urlPreview: currentPlayUrl?.slice(0, 120) ?? null,
+          urlPreview: redactMediaToken(currentPlayUrl).slice(0,120) ?? null,
         });
         nextRef.current({ auditTransportCase: "ended_auto" });
         return;
@@ -3449,7 +3450,7 @@ export function AudioPlayer() {
       syncbizAuditTransportTransitionStart({
         phase: "html_audio_element_ended_before_provider_next",
         auditTransportCase: "ended_auto",
-        urlPreview: currentPlayUrl?.slice(0, 120) ?? null,
+        urlPreview: redactMediaToken(currentPlayUrl).slice(0,120) ?? null,
       });
       sbStall("ended_next_call", { via: "ended_auto" });
       nextRef.current({ auditTransportCase: "ended_auto" });
@@ -3562,7 +3563,7 @@ export function AudioPlayer() {
       dur,
       mixSec,
       mixAt,
-      nextUrl: nextUrl.slice(0, 80),
+      nextUrl: redactMediaToken(nextUrl).slice(0,80),
     });
     nextRef.current({ skipPlay: true, auditTransportCase: "ended_auto" });
   }, [desktopMpvSnap, status, currentPlayUrl, getNextStreamUrl]);
@@ -4400,7 +4401,7 @@ export function AudioPlayer() {
           transport: "audio_player_manual_next",
           phase: "before_provider_next",
           auditTransportCase: null,
-          currentPlayUrlSnapshot: currentPlayUrl?.slice(0, 200) ?? null,
+          currentPlayUrlSnapshot: redactMediaToken(currentPlayUrl).slice(0,200) ?? null,
           currentSourceId: currentSource?.id ?? null,
           currentTrackIndex,
           queueLength: queue.length,

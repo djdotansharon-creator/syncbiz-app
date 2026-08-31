@@ -1926,7 +1926,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         queueLength: s.queue.length,
         currentTrackIndex: s.currentTrackIndex,
         queueIndex: s.queueIndex,
-        currentPlayUrl: currentPlayUrlSnapshot,
+        currentPlayUrl: currentPlayUrlSnapshot ? redactMediaToken(currentPlayUrlSnapshot) : null,
         nextTrackExistsFromQueue:
           s.queue.length > 1 && s.queueIndex >= 0 && s.queueIndex < s.queue.length - 1,
         nextTrackExistsFromCurrentPlaylist:
@@ -2133,7 +2133,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         const em = canEmbedInCard(unifiedToPlaybackTrack(t, 0).type);
         if (!em && u) {
           mvpLog("playback_get_next_stream", { scope: "play_next", nextId: t.id });
-          return u;
+          // Authorize the STANDBY the same way the active deck is (getPlayUrl → appendMediaToken):
+          // MASTER-only, in-memory token appended at read time; no-op off-MASTER (no token held), no-op
+          // for non-media (YouTube/local/HTTPS). The stored track URL stays token-free — mt never
+          // persists on the track and never travels over WS. Without this the MASTER standby 401s.
+          return appendMediaToken(u);
         }
         return null;
       }
@@ -2154,7 +2158,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         const track = sessionTracks[step.nextIndex];
         const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
         const embedded = track ? canEmbedInCard(track.type) : false;
-        const out = !embedded && url ? url : null;
+        // MASTER-only standby authorization — identical mechanism to the active deck (see play_next branch).
+        const out = !embedded && url ? appendMediaToken(url) : null;
         if (out) {
           mvpLog("playback_get_next_stream", {
             scope: "playlist",
@@ -2180,7 +2185,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const track = tracks[step.nextIndex];
       const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
       const embedded = track ? canEmbedInCard(track.type) : false;
-      return !embedded && url ? url : null;
+      // MASTER-only standby authorization — identical mechanism to the active deck (see play_next branch).
+      return !embedded && url ? appendMediaToken(url) : null;
     })();
   }, [getShuffledIndex]);
 
