@@ -14,7 +14,16 @@ export function cacheDirs(root) {
   return { base: root, tmp, manifestPath: join(root, "manifest.json") };
 }
 
-/** Stable logical asset id (constant even if the file's CONTENT later changes). */
+/**
+ * Local preview-cache FILENAME key derived from the Drive fileId.
+ *
+ * NOTE (logical identity): this is NO LONGER the authority for a track's SyncBiz logical identity.
+ * Production identity is owned by the LogicalAssetSource mapping (scripts/music-bank/logical-identity.mjs)
+ * and set at ingest — it is NEVER recomputed from a Drive fileId. The 176 legacy ids that historically
+ * equalled this value are frozen and preserved verbatim (backfilled into the mapping). NEW tracks get a
+ * minted opaque logicalId (mintLogicalId), not sha1(driveFileId). This function is retained only so the
+ * POC offline cache can name its local files deterministically.
+ */
 export function assetIdFor(driveFileId) {
   return "a_" + createHash("sha1").update(driveFileId).digest("hex").slice(0, 16);
 }

@@ -2170,3 +2170,35 @@ model MediaAsset {
   @@index([provider, status])
   @@index([ingestSource, ingestExternalId]) // idempotent ingest diffing
 }
+
+/// SyncBiz-owned logical identity ↔ external source (Drive) mapping.
+///
+/// The `logicalId` is a STABLE, SyncBiz-owned product id (the `a_…` in /api/media/<logicalId>). This
+/// table is the SOURCE OF TRUTH for "which external file belongs to which logicalId" — it DECOUPLES
+/// identity from the Drive fileId. A Drive fileId is provenance metadata only; it points at a
+/// logicalId, it never defines one.
+///
+/// Rules:
+///   - one (source, externalId) belongs to AT MOST one logicalId  → @@unique([source, externalId])
+///   - a logicalId may accumulate several HISTORICAL externalIds (re-uploads) → index([logicalId]);
+///     old rows are kept for history, `isCurrent=false`. At most ONE current source per logicalId is
+///     enforced by a partial-unique index (raw SQL in the migration: WHERE "isCurrent").
+///   - logicalId is a plain string, not a FK: the set of logicalIds is owned by the catalog, and the
+///     176 existing ids are preserved verbatim (never recomputed from Drive).
+model LogicalAssetSource {
+  id         String   @id @default(uuid())
+  /// Stable SyncBiz-owned public id (the `a_…` used in /api/media/<logicalId>).
+  logicalId  String
+  /// External source system, e.g. "google_drive".
+  source     String
+  /// The source-side handle (e.g. Drive fileId). Provenance only — changes on delete+re-upload.
+  externalId String
+  /// True for the active mapping of this logicalId; historical mappings are kept with false.
+  isCurrent  Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([source, externalId]) // a source file id belongs to at most one logicalId
+  @@index([logicalId])
+  @@index([logicalId, isCurrent])
+}
