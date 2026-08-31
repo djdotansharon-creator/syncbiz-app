@@ -80,6 +80,43 @@ function p0XfadeDebug(phase: string, data?: Record<string, unknown>) {
   console.log("[P0_XFADE_DEBUG]", phase, data ?? "");
 }
 
+/**
+ * READ-ONLY P0 stall instrumentation (Stage A). Pushes a timestamped event to a bounded ring buffer
+ * on `window.__sbStallTrace` and console. NO control-flow change — pure observation. The goal is to
+ * capture the exact natural-advance stall: crossfade started → standby not ready → active ended →
+ * `ended` fallback blocked by `crossfadeStartedRef` → no completion → silence. Remove after capture.
+ * Inspect live with `window.__sbStallTrace` or `copy(JSON.stringify(window.__sbStallTrace))`.
+ */
+function sbStall(event: string, data?: Record<string, unknown>) {
+  try {
+    const ts = typeof performance !== "undefined" ? performance.now() : 0;
+    const rec = { ts: Math.round(ts), event, ...(data ?? {}) };
+    if (typeof window !== "undefined") {
+      const w = window as unknown as { __sbStallTrace?: unknown[] };
+      (w.__sbStallTrace ||= []).push(rec);
+      if (w.__sbStallTrace.length > 800) w.__sbStallTrace.splice(0, w.__sbStallTrace.length - 800);
+    }
+    console.log("[SB_STALL]", event, rec);
+  } catch {
+    /* never let instrumentation affect playback */
+  }
+}
+/** Read-only snapshot of an <audio> deck for the stall trace. */
+function sbDeckSnap(a: HTMLMediaElement | null | undefined): Record<string, unknown> {
+  if (!a) return { present: false };
+  return {
+    present: true,
+    src: (a.currentSrc || a.src || "").match(/a_[a-f0-9]+/)?.[0] ?? (a.currentSrc || a.src || "").slice(0, 48),
+    readyState: a.readyState, // 0 HAVE_NOTHING … 4 HAVE_ENOUGH_DATA
+    networkState: a.networkState, // 0 EMPTY 1 IDLE 2 LOADING 3 NO_SOURCE
+    t: Math.round((a.currentTime || 0) * 100) / 100,
+    dur: Number.isFinite(a.duration) ? Math.round(a.duration) : a.duration,
+    paused: a.paused,
+    ended: a.ended,
+    vol: Math.round((a.volume ?? 0) * 100) / 100,
+  };
+}
+
 /** YouTube AutoMix diagnostics – key transitions only. States: -1=unstarted 0=ended 1=playing 2=paused 3=buffering 5=cued */
 function ytXfadeLog(phase: string, data?: Record<string, unknown>) {
   console.log("[SyncBiz YT-Xfade]", phase, data ?? "");
@@ -169,7 +206,10 @@ function runAbDeckCrossfade(
   callbacks: CrossfadeCallbacks,
 ): () => void {
   const { onComplete, onError, isAborted, getStatus } = callbacks;
+  const runStartTs = typeof performance !== "undefined" ? performance.now() : 0;
+  const sinceRun = () => (typeof performance !== "undefined" ? Math.round(performance.now() - runStartTs) : null);
   xfadeLog("run_start", { nextUrl: nextUrl.slice(0, 60), mixSec: mixDurationSec });
+  sbStall("xfade_run_start", { standbyTimeoutMs: STANDBY_READY_TIMEOUT_MS, mixSec: mixDurationSec, standby: sbDeckSnap(standbyAudio) });
 
   let completed = false;
   let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -181,12 +221,14 @@ function runAbDeckCrossfade(
       loadTimeoutId = null;
     }
     standbyAudio.removeEventListener("canplay", onStandbyCanPlay);
+    standbyAudio.removeEventListener("canplaythrough", onStandbyCanPlayThrough);
     standbyAudio.removeEventListener("error", onStandbyError);
   };
 
   const finish = (success: boolean) => {
     if (completed) return;
     completed = true;
+    sbStall("xfade_finish", { success, sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) });
     xfadeLog("finish", { success });
     crossfadeAbort?.();
     crossfadeAbort = null;
@@ -202,16 +244,21 @@ function runAbDeckCrossfade(
   };
 
   const onStandbyError = () => {
+    sbStall("xfade_standby_error", { sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) });
     xfadeLog("standby_error", { nextUrl: nextUrl.slice(0, 50) });
     finish(false);
   };
+  // Passive readiness observer — records that canplaythrough (readyState 4) arrived; changes nothing.
+  const onStandbyCanPlayThrough = () => sbStall("xfade_standby_canplaythrough", { sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) });
 
   const startCrossfade = () => {
     standbyAudio.removeEventListener("canplay", onStandbyCanPlay);
+    sbStall("xfade_start_fade", { sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) });
     xfadeLog("standby_canplay");
     standbyAudio.play().then(
-      () => xfadeLog("standby_play_ok"),
+      () => { sbStall("xfade_standby_play_ok", { sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) }); xfadeLog("standby_play_ok"); },
       () => {
+        sbStall("xfade_standby_play_fail", { sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) });
         xfadeLog("standby_play_fail");
         finish(false);
       },
@@ -235,7 +282,7 @@ function runAbDeckCrossfade(
     startCrossfade();
   };
 
-  const onStandbyCanPlay = () => startCrossfadeOnce();
+  const onStandbyCanPlay = () => { sbStall("xfade_standby_canplay", { sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) }); startCrossfadeOnce(); };
 
   standbyAudio.volume = 0;
   standbyAudio.preload = "auto";
@@ -244,6 +291,7 @@ function runAbDeckCrossfade(
     standbyAudio.load();
   }
   standbyAudio.addEventListener("canplay", onStandbyCanPlay);
+  standbyAudio.addEventListener("canplaythrough", onStandbyCanPlayThrough);
   standbyAudio.addEventListener("error", onStandbyError);
   if (standbyAudio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
     queueMicrotask(() => startCrossfadeOnce());
@@ -251,6 +299,7 @@ function runAbDeckCrossfade(
 
   loadTimeoutId = setTimeout(() => {
     if (!completed) {
+      sbStall("xfade_load_timeout_force_fade", { sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) });
       xfadeLog("load_timeout_start_fade");
       startCrossfadeOnce();
     }
@@ -626,6 +675,9 @@ export function AudioPlayer() {
   const endedHandledRef = useRef(false);
   const crossfadeStartedRef = useRef(false);
   const crossfadeAbortRef = useRef(false);
+  // READ-ONLY stall instrumentation (Stage A): ts of the last natural crossfade trigger, to measure
+  // "time since trigger" at the ended/onComplete/onError events. Not read by any control flow.
+  const xfadeTriggerTsRef = useRef<number | null>(null);
   const crossfadeCleanupRef = useRef<(() => void) | null>(null);
   const crossfadeInMixWindowRef = useRef(false);
   const crossfadeDurNonFiniteLoggedRef = useRef(false);
@@ -3198,17 +3250,31 @@ export function AudioPlayer() {
             });
             crossfadeStartedRef.current = true;
             crossfadeAbortRef.current = false;
+            xfadeTriggerTsRef.current = typeof performance !== "undefined" ? performance.now() : 0;
+            sbStall("xfade_trigger", {
+              mixSec,
+              lockLockedBefore: deckTransitionLock.isLocked(),
+              active: sbDeckSnap(a),
+              standby: sbDeckSnap(standby),
+            });
             crossfadeCleanupRef.current?.();
             if (!deckTransitionLock.tryAcquire()) {
               crossfadeStartedRef.current = false;
+              sbStall("xfade_trigger_lock_busy_reset", { crossfadeStartedNow: crossfadeStartedRef.current });
               return;
             }
             const abort = runAbDeckCrossfade(a, standby, nextUrl, volumeRef.current / 100, mixSec, {
               onComplete: () => {
+                sbStall("xfade_onComplete", {
+                  msSinceTrigger: xfadeTriggerTsRef.current != null && typeof performance !== "undefined" ? Math.round(performance.now() - xfadeTriggerTsRef.current) : null,
+                  active: sbDeckSnap(a),
+                  standby: sbDeckSnap(standby),
+                });
                 swapActiveDeck();
                 lastStreamUrlRef.current = nextUrl;
                 standbyPreloadedUrlRef.current = null;
                 deckTransitionLock.release();
+                sbStall("xfade_onComplete_next_call", { skipPlay: true });
                 xfadeLog("onComplete");
                 syncbizAuditTransportTransitionStart({
                   phase: "direct_audio_xfade_onComplete_before_provider_next_skipPlay",
@@ -3225,6 +3291,10 @@ export function AudioPlayer() {
               onError: () => {
                 deckTransitionLock.release();
                 crossfadeStartedRef.current = false;
+                sbStall("xfade_onError_reset", {
+                  msSinceTrigger: xfadeTriggerTsRef.current != null && typeof performance !== "undefined" ? Math.round(performance.now() - xfadeTriggerTsRef.current) : null,
+                  standby: sbDeckSnap(standby),
+                });
                 xfadeLog("onError");
               },
               isAborted: () => crossfadeAbortRef.current || statusRef.current !== "playing",
@@ -3245,8 +3315,24 @@ export function AudioPlayer() {
     if (!audio || !isHtmlAudio) return;
     const onEnded = () => {
       const d = lastKnownDurationRef.current;
-      if (!Number.isFinite(d) || d <= 0) return;
+      const msSinceTrigger = xfadeTriggerTsRef.current != null && typeof performance !== "undefined" ? Math.round(performance.now() - xfadeTriggerTsRef.current) : null;
+      if (!Number.isFinite(d) || d <= 0) {
+        // The natural-EOF advance is refused here when duration was never learned — a silent dead-end.
+        sbStall("ended_bail_no_duration", { d, active: sbDeckSnap(audio), standby: sbDeckSnap(getDeckAudio(getStandbyDeck())) });
+        return;
+      }
       if (endedHandledRef.current || crossfadeStartedRef.current) {
+        // ★ THE STALL PROOF: active reached natural end, but advance is blocked because a crossfade is
+        // still "in-flight" (crossfadeStartedRef=true) with the standby not ready → no completion → silence.
+        sbStall("ended_BLOCKED", {
+          reason: crossfadeStartedRef.current ? "crossfadeStarted_true" : "endedHandled_true",
+          endedHandled: endedHandledRef.current,
+          crossfadeStarted: crossfadeStartedRef.current,
+          lockLocked: deckTransitionLock.isLocked(),
+          msSinceTrigger,
+          active: sbDeckSnap(audio),
+          standby: sbDeckSnap(getDeckAudio(getStandbyDeck())),
+        });
         xfadeLog("ended_skipped", { endedHandled: endedHandledRef.current, crossfadeStarted: crossfadeStartedRef.current });
         console.log("[SyncBiz Audit] Audio ended_skipped", {
           duration: d,
@@ -3256,6 +3342,7 @@ export function AudioPlayer() {
         });
         return;
       }
+      sbStall("ended_advance", { msSinceTrigger, active: sbDeckSnap(audio), standby: sbDeckSnap(getDeckAudio(getStandbyDeck())) });
       xfadeLog("ended_advance");
       console.log("[SyncBiz Audit] Audio ended_advance", {
         duration: d,
@@ -3267,6 +3354,7 @@ export function AudioPlayer() {
         auditTransportCase: "ended_auto",
         urlPreview: currentPlayUrl?.slice(0, 120) ?? null,
       });
+      sbStall("ended_next_call", { via: "ended_auto" });
       nextRef.current({ auditTransportCase: "ended_auto" });
     };
     audio.addEventListener("ended", onEnded);
