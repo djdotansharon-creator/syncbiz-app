@@ -27,6 +27,7 @@ import type { UnifiedSource } from "@/lib/source-types";
 import { POC_MUSIC_BANK_CATALOG } from "@/lib/music-bank/poc-catalog";
 import type { MusicBankGenrePack, MusicBankSampleTrack } from "@/lib/music-bank/catalog-types";
 import { GENRE_PRICE_LABEL, CHOICE3_PRICE_LABEL, FULL_BANK_PRICE_LABEL, CHOICE3_PACK_COUNT } from "@/lib/music-bank/pricing";
+import { GenrePackArt } from "@/components/music-bank/genre-pack-art";
 import { subscribeMediaSession, hasMediaSessionToken } from "@/lib/media/media-session";
 import { useDevicePlayer } from "@/lib/device-player-context";
 
@@ -260,22 +261,9 @@ function GenreNavPill({ label, active, onClick }: { label: string; active: boole
   );
 }
 
-/**
- * Cinematic layered cover for a Genre Pack — NOT a flat colour block. Genre gradient base + a soft
- * stage-light spotlight + a diagonal sheen + a bottom scrim (text legibility) + fine film grain.
- * The same treatment across every pack makes the set read as one premium family. A photographic
- * cover image can later drop straight into this slot.
- */
+/** Cinematic per-pack hero art (thematic motif + colour grade + lighting). See genre-pack-art.tsx. */
 function GenreCover({ genre }: { genre: MusicBankGenrePack }) {
-  return (
-    <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
-      <div className="absolute inset-0" style={{ backgroundImage: `linear-gradient(140deg, ${genre.gradient[0]} 0%, ${genre.gradient[1]} 100%)` }} />
-      <div className="absolute inset-0" style={{ background: "radial-gradient(130% 90% at 78% 10%, rgba(255,255,255,0.30), rgba(255,255,255,0) 55%)" }} />
-      <div className="absolute inset-0" style={{ background: "linear-gradient(205deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0) 32%)" }} />
-      <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.68) 0%, rgba(0,0,0,0.20) 46%, rgba(0,0,0,0) 72%)" }} />
-      <div className="absolute inset-0 opacity-[0.10] mix-blend-overlay" style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>\")" }} />
-    </div>
-  );
+  return <GenrePackArt id={genre.id} />;
 }
 
 function CatalogHome({
