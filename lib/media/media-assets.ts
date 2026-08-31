@@ -45,17 +45,21 @@ function mimeFromName(name: string): string {
 function resolveCacheBase(): string | null {
   const cwd = process.cwd();
   const candidates = [
+    process.env.POC_PREVIEW_CACHE_ROOT, // explicit override (tests / non-default local layout)
     path.join(cwd, "desktop", ".poc-preview-cache"),
     path.join(cwd, ".poc-preview-cache"),
     path.resolve(cwd, "..", "..", "desktop", ".poc-preview-cache"), // embedded staged-web → repo root
     path.resolve(cwd, "..", "desktop", ".poc-preview-cache"),
-  ];
+  ].filter((c): c is string => !!c);
   return candidates.find((c) => existsSync(path.join(c, "manifest.json"))) ?? null;
 }
 
 type ManifestAsset = {
   name?: string; size?: number; contentHash?: string; genreId?: string;
   localPath?: string; durationSeconds?: number | null; status?: string; ext?: string;
+  /** SyncBiz public logicalId (stamped by the catalog builder). The map is keyed by THIS, not the
+   *  manifest key — so /api/media/<logicalId> resolves even after a re-upload changes the cache key. */
+  logicalId?: string;
 };
 
 let cache: { base: string; mtimeMs: number; map: Map<string, MediaAsset>; genres: Set<string> } | null = null;
@@ -74,8 +78,11 @@ function loadIfNeeded(): typeof cache {
   const genres = new Set<string>();
   for (const [assetId, a] of Object.entries(raw.assets ?? {})) {
     if (!a || a.status !== "ready" || !a.localPath || !a.genreId) continue;
-    map.set(assetId, {
-      assetId,
+    // Public lookup is by SyncBiz logicalId; the manifest KEY is only a cache filename handle. They
+    // coincide for the legacy 176 but diverge after a re-upload — so key by logicalId (fallback: key).
+    const publicId = a.logicalId || assetId;
+    map.set(publicId, {
+      assetId: publicId,
       genreId: a.genreId,
       provider: "local-preview",
       providerKey: a.localPath,

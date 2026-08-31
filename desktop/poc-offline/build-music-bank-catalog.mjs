@@ -8,6 +8,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { resolveOrCreateLogicalId } from "../../scripts/music-bank/logical-identity.mjs";
+import { ensureSafeDbTarget } from "../../scripts/music-bank/db-target.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..");
@@ -16,18 +17,9 @@ const MANIFEST = join(CACHE_ROOT, "manifest.json");
 const OUT = process.env.POC_CATALOG_OUT || join(REPO, "lib", "music-bank", "poc-catalog.ts");
 const SOURCE = "google_drive";
 
-// Load DATABASE_URL (+ friends) from the repo .env — Prisma Client does not auto-load it at runtime.
-{
-  const envPath = join(REPO, ".env");
-  if (existsSync(envPath)) {
-    for (const raw of readFileSync(envPath, "utf8").split(/\r?\n/)) {
-      const l = raw.trim(); if (!l || l.startsWith("#")) continue; const i = l.indexOf("="); if (i < 0) continue;
-      const k = l.slice(0, i).trim(); let v = l.slice(i + 1).trim();
-      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-      if (process.env[k] === undefined) process.env[k] = v;
-    }
-  }
-}
+// Resolve a SAFE DATABASE_URL (local by default; prod only via explicit SYNCBIZ_ALLOW_PROD_DB). The
+// builder can WRITE (mint mappings), so it must NEVER blindly trust a possibly-prod `.env`.
+ensureSafeDbTarget(REPO);
 
 // Deterministic dark two-stop gradient palette (no neon). Chosen per-genre by a stable hash.
 const GRADIENTS = [
@@ -74,9 +66,14 @@ async function main() {
     // logicalId) keeps its catalog id; a truly-new file mints a fresh opaque logicalId (persisted, so
     // subsequent rebuilds are stable). Drive fileId never regenerates public catalog identity.
     const byGenre = {};
+    let manifestTouched = false;
     for (const [, a] of Object.entries(assets)) {
       if (!a || a.status !== "ready" || !a.localPath || !a.genreId || !a.driveFileId) continue;
       const { logicalId } = await resolveOrCreateLogicalId(db, { source: SOURCE, externalId: a.driveFileId });
+      // Stamp the resolved PUBLIC logicalId onto the manifest asset so the local-preview lookup
+      // (lib/media/media-assets.ts) can find bytes BY logicalId even when the cache key (assetIdFor)
+      // diverges after a re-upload. The cache key stays internal; logicalId is the public handle.
+      if (a.logicalId !== logicalId) { a.logicalId = logicalId; manifestTouched = true; }
       (byGenre[a.genreId] ||= []).push({
         id: logicalId,
         title: String(a.name || "").replace(/\.[a-z0-9]+$/i, "").replace(/_/g, " ").trim() || "Untitled",
@@ -84,6 +81,7 @@ async function main() {
         ext: a.ext || ".mp3",
       });
     }
+    if (manifestTouched) writeFileSync(MANIFEST, JSON.stringify(m, null, 2) + "\n");
 
   // Emit every discovered genre folder that has at least one ready sample, ordered by display name.
   const genreIds = Object.keys(genresMeta)

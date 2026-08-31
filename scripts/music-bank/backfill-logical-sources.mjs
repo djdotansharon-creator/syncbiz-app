@@ -10,22 +10,11 @@
 import { readFileSync, existsSync } from "node:fs";
 import crypto from "node:crypto";
 import { PrismaClient } from "@prisma/client";
+import { ensureSafeDbTarget } from "./db-target.mjs";
 
 const ROOT = "D:/APP Project/syncbiz-app";
-for (const raw of readFileSync(`${ROOT}/.env`, "utf-8").split(/\r?\n/)) {
-  const l = raw.trim(); if (!l || l.startsWith("#")) continue; const i = l.indexOf("="); if (i < 0) continue;
-  const k = l.slice(0, i).trim(); let v = l.slice(i + 1).trim();
-  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-  if (process.env[k] === undefined) process.env[k] = v;
-}
-
-// safety: refuse a non-local DB unless explicitly allowed
-const host = (() => { try { return new URL(process.env.DATABASE_URL).hostname; } catch { return "?"; } })();
-const isLocal = host === "localhost" || host === "127.0.0.1";
-if (!isLocal && process.env.SYNCBIZ_ALLOW_PROD_DB !== "1") {
-  console.error(`REFUSED: DATABASE_URL host=${host} is not local. Set SYNCBIZ_ALLOW_PROD_DB=1 to target it on purpose.`);
-  process.exit(1);
-}
+// Local by default; a non-local DB requires an explicit, deliberate SYNCBIZ_ALLOW_PROD_DB=1 opt-in.
+ensureSafeDbTarget(ROOT);
 
 const manifestPath = process.argv[2] || `${ROOT}/desktop/.poc-preview-cache/manifest.json`;
 if (!existsSync(manifestPath)) { console.error("manifest not found:", manifestPath); process.exit(1); }
