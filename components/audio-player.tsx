@@ -88,6 +88,8 @@ function p0XfadeDebug(phase: string, data?: Record<string, unknown>) {
  * Inspect live with `window.__sbStallTrace` or `copy(JSON.stringify(window.__sbStallTrace))`.
  */
 function sbStall(event: string, data?: Record<string, unknown>) {
+  // DEV-only: hard no-op in production so the diagnostic never runs / never allocates on customers.
+  if (process.env.NODE_ENV === "production") return;
   try {
     const ts = typeof performance !== "undefined" ? performance.now() : 0;
     const rec = { ts: Math.round(ts), event, ...(data ?? {}) };
@@ -101,12 +103,20 @@ function sbStall(event: string, data?: Record<string, unknown>) {
     /* never let instrumentation affect playback */
   }
 }
-/** Read-only snapshot of an <audio> deck for the stall trace. */
+/**
+ * Read-only snapshot of an <audio> deck for the stall trace. HARD-REDACTED: `src` is reduced to the
+ * public asset id (a_<hex>) only — the query string is dropped entirely, so an `mt` media token, a
+ * signed R2 URL, or any `X-Amz-*` signature can never enter the trace. Non-media srcs collapse to a
+ * label, never a raw URL.
+ */
 function sbDeckSnap(a: HTMLMediaElement | null | undefined): Record<string, unknown> {
   if (!a) return { present: false };
+  const raw = a.currentSrc || a.src || "";
+  const id = raw.match(/\/media\/(a_[a-f0-9]+)/)?.[1] ?? raw.match(/(a_[a-f0-9]+)/)?.[1];
+  const src = id ? id : raw.startsWith("blob:") ? "blob" : raw ? "(non-media)" : "";
   return {
     present: true,
-    src: (a.currentSrc || a.src || "").match(/a_[a-f0-9]+/)?.[0] ?? (a.currentSrc || a.src || "").slice(0, 48),
+    src, // redacted: asset id or label only — NEVER a URL/query/token/signature
     readyState: a.readyState, // 0 HAVE_NOTHING … 4 HAVE_ENOUGH_DATA
     networkState: a.networkState, // 0 EMPTY 1 IDLE 2 LOADING 3 NO_SOURCE
     t: Math.round((a.currentTime || 0) * 100) / 100,
@@ -194,7 +204,17 @@ type CrossfadeCallbacks = {
   onError: () => void;
   isAborted: () => boolean;
   getStatus: () => string;
+  /** How long to wait for the standby to become decodable before failing the overlap (prefer a clean
+   *  cut over silence). Defaults to STANDBY_READY_TIMEOUT_MS to preserve non-natural callers. */
+  readyDeadlineMs?: number;
 };
+
+/** HTMLMediaElement.HAVE_FUTURE_DATA — the readyState at/above which the deck can actually play audio. */
+const DECK_PLAYABLE_READY_STATE = 3;
+/** True only when the standby deck can genuinely produce audio (never a false "playing"). */
+function standbyIsPlayable(a: HTMLMediaElement | null | undefined): boolean {
+  return !!a && !a.error && a.readyState >= DECK_PLAYABLE_READY_STATE;
+}
 
 /** A/B deck crossfade: fade out active deck, fade in standby deck, then swap. */
 function runAbDeckCrossfade(
@@ -206,6 +226,7 @@ function runAbDeckCrossfade(
   callbacks: CrossfadeCallbacks,
 ): () => void {
   const { onComplete, onError, isAborted, getStatus } = callbacks;
+  const readyDeadlineMs = callbacks.readyDeadlineMs ?? STANDBY_READY_TIMEOUT_MS;
   const runStartTs = typeof performance !== "undefined" ? performance.now() : 0;
   const sinceRun = () => (typeof performance !== "undefined" ? Math.round(performance.now() - runStartTs) : null);
   xfadeLog("run_start", { nextUrl: nextUrl.slice(0, 60), mixSec: mixDurationSec });
@@ -225,11 +246,18 @@ function runAbDeckCrossfade(
     standbyAudio.removeEventListener("error", onStandbyError);
   };
 
-  const finish = (success: boolean) => {
+  const finish = (rawSuccess: boolean) => {
     if (completed) return;
     completed = true;
-    sbStall("xfade_finish", { success, sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) });
-    xfadeLog("finish", { success });
+    // NEVER a false "playing": success requires the standby to be genuinely decodable/playing. A ramp
+    // that "finished" over a readyState-0 / errored standby is a FAILURE (→ caller fails forward), not
+    // a silent promotion of a dead deck.
+    const success = rawSuccess && standbyIsPlayable(standbyAudio);
+    if (rawSuccess && !success) {
+      sbStall("xfade_success_downgraded_standby_dead", { sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) });
+    }
+    sbStall("xfade_finish", { success, rawSuccess, sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) });
+    xfadeLog("finish", { success, rawSuccess });
     crossfadeAbort?.();
     crossfadeAbort = null;
     if (!success) {
@@ -298,12 +326,21 @@ function runAbDeckCrossfade(
   }
 
   loadTimeoutId = setTimeout(() => {
-    if (!completed) {
+    if (completed) return;
+    if (standbyIsPlayable(standbyAudio)) {
+      // Data is actually there (canplay may not have fired) → proceed with a real overlap.
       sbStall("xfade_load_timeout_force_fade", { sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) });
       xfadeLog("load_timeout_start_fade");
       startCrossfadeOnce();
+    } else {
+      // Standby still not decodable by the deadline → do NOT fake a fade over a dead deck (that is the
+      // silent-stall). Fail: this restores the active deck's volume so it plays out, then onEnded cuts
+      // forward to the next track. Overlap lost, but audio never stops.
+      sbStall("xfade_ready_deadline_fail", { sinceRunMs: sinceRun(), standby: sbDeckSnap(standbyAudio) });
+      xfadeLog("ready_deadline_fail");
+      finish(false);
     }
-  }, STANDBY_READY_TIMEOUT_MS);
+  }, readyDeadlineMs);
 
   return () => finish(false);
 }
@@ -675,6 +712,12 @@ export function AudioPlayer() {
   const endedHandledRef = useRef(false);
   const crossfadeStartedRef = useRef(false);
   const crossfadeAbortRef = useRef(false);
+  // NEVER-STOP single-owner guard for one HTMLAudio crossfade transition. Exactly one path may advance
+  // the queue for a given transition: either the crossfade's own onComplete (standby really playing) OR
+  // the onEnded fail-forward (active ended while the standby was NOT playable). Whoever gets there first
+  // sets this; the other becomes a no-op. Prevents double-next / double-swap / skipped tracks, including
+  // when a stalled async crossfade resolves late. Reset at each fresh trigger + on new-track load.
+  const crossfadeConsumedRef = useRef(false);
   // READ-ONLY stall instrumentation (Stage A): ts of the last natural crossfade trigger, to measure
   // "time since trigger" at the ended/onComplete/onError events. Not read by any control flow.
   const xfadeTriggerTsRef = useRef<number | null>(null);
@@ -2823,6 +2866,7 @@ export function AudioPlayer() {
     p0XfadeDebug("url_reset_crossfade_state", { url: currentPlayUrl?.slice(0, 80) ?? null });
     endedHandledRef.current = false;
     crossfadeStartedRef.current = false;
+    crossfadeConsumedRef.current = false;
     crossfadeAbortRef.current = false;
     crossfadeInMixWindowRef.current = false;
     crossfadeDurNonFiniteLoggedRef.current = false;
@@ -3250,6 +3294,7 @@ export function AudioPlayer() {
             });
             crossfadeStartedRef.current = true;
             crossfadeAbortRef.current = false;
+            crossfadeConsumedRef.current = false; // fresh transition — no path has advanced yet
             xfadeTriggerTsRef.current = typeof performance !== "undefined" ? performance.now() : 0;
             sbStall("xfade_trigger", {
               mixSec,
@@ -3263,8 +3308,21 @@ export function AudioPlayer() {
               sbStall("xfade_trigger_lock_busy_reset", { crossfadeStartedNow: crossfadeStartedRef.current });
               return;
             }
+            // Watchdog tied to the transition lifecycle. Give the standby roughly the active's remaining
+            // runway (≈ mixSec, since we trigger at mixAt) to become decodable — so a slow-but-progressing
+            // standby still yields a real crossfade — but never exceed the hard ceiling. If it is still not
+            // decodable by then we FAIL (not a fake fade over a dead deck): the active's volume is restored
+            // so it plays out, and onEnded cuts forward. Overlap may be skipped, but audio never stops.
+            const readyDeadlineMs = Math.min(STANDBY_READY_TIMEOUT_MS, Math.max(mixSec * 1000, 4000));
             const abort = runAbDeckCrossfade(a, standby, nextUrl, volumeRef.current / 100, mixSec, {
               onComplete: () => {
+                // Single-owner: if onEnded already failed-forward, this stale completion must NOT advance.
+                if (crossfadeConsumedRef.current) {
+                  sbStall("xfade_onComplete_ignored_consumed", {});
+                  xfadeLog("onComplete_ignored_consumed");
+                  return;
+                }
+                crossfadeConsumedRef.current = true;
                 sbStall("xfade_onComplete", {
                   msSinceTrigger: xfadeTriggerTsRef.current != null && typeof performance !== "undefined" ? Math.round(performance.now() - xfadeTriggerTsRef.current) : null,
                   active: sbDeckSnap(a),
@@ -3296,9 +3354,21 @@ export function AudioPlayer() {
                   standby: sbDeckSnap(standby),
                 });
                 xfadeLog("onError");
+                // If the active ALREADY reached its natural end while this (now-failed) overlap was in
+                // flight, its `ended` event has passed and will not re-fire → own the advance here. If the
+                // active is still playing, do nothing: its volume was restored and onEnded advances at the
+                // real end. The consumed guard prevents any double-advance.
+                if (!crossfadeConsumedRef.current && a.ended) {
+                  crossfadeConsumedRef.current = true;
+                  endedHandledRef.current = true;
+                  sbStall("xfade_onError_failforward", { activeEnded: true });
+                  xfadeLog("onError_failforward");
+                  nextRef.current?.({ auditTransportCase: "ended_auto" });
+                }
               },
               isAborted: () => crossfadeAbortRef.current || statusRef.current !== "playing",
               getStatus: () => statusRef.current,
+              readyDeadlineMs,
             });
             crossfadeCleanupRef.current = abort;
           }
@@ -3316,30 +3386,57 @@ export function AudioPlayer() {
     const onEnded = () => {
       const d = lastKnownDurationRef.current;
       const msSinceTrigger = xfadeTriggerTsRef.current != null && typeof performance !== "undefined" ? Math.round(performance.now() - xfadeTriggerTsRef.current) : null;
-      if (!Number.isFinite(d) || d <= 0) {
-        // The natural-EOF advance is refused here when duration was never learned — a silent dead-end.
-        sbStall("ended_bail_no_duration", { d, active: sbDeckSnap(audio), standby: sbDeckSnap(getDeckAudio(getStandbyDeck())) });
+      if (endedHandledRef.current) {
+        // This transition was already advanced (by the crossfade onComplete or a prior fail-forward).
+        sbStall("ended_skipped_already_handled", { msSinceTrigger });
+        xfadeLog("ended_skipped", { endedHandled: true, crossfadeStarted: crossfadeStartedRef.current });
         return;
       }
-      if (endedHandledRef.current || crossfadeStartedRef.current) {
-        // ★ THE STALL PROOF: active reached natural end, but advance is blocked because a crossfade is
-        // still "in-flight" (crossfadeStartedRef=true) with the standby not ready → no completion → silence.
-        sbStall("ended_BLOCKED", {
-          reason: crossfadeStartedRef.current ? "crossfadeStarted_true" : "endedHandled_true",
-          endedHandled: endedHandledRef.current,
-          crossfadeStarted: crossfadeStartedRef.current,
-          lockLocked: deckTransitionLock.isLocked(),
+      if (crossfadeStartedRef.current) {
+        const standby = getDeckAudio(getStandbyDeck());
+        if (standbyIsPlayable(standby)) {
+          // Healthy overlap in flight — its onComplete owns the advance. Normal crossfade, untouched.
+          sbStall("ended_defer_healthy_crossfade", { msSinceTrigger, standby: sbDeckSnap(standby) });
+          xfadeLog("ended_skipped", { endedHandled: false, crossfadeStarted: true, standbyPlayable: true });
+          return;
+        }
+        // ★ NEVER-STOP FAIL-FORWARD: active reached its natural end but the standby is NOT playable
+        // (readyState < HAVE_FUTURE_DATA / errored). The stalled overlap will never produce audio, and the
+        // `ended` event does not re-fire — so take ownership: cancel the failed overlap and advance for
+        // real (actual playback, NOT skipPlay). The single-owner guard prevents any double-advance.
+        if (crossfadeConsumedRef.current) {
+          sbStall("ended_failforward_skipped_consumed", { msSinceTrigger });
+          return;
+        }
+        crossfadeConsumedRef.current = true;
+        endedHandledRef.current = true;
+        sbStall("ended_FAILFORWARD", {
+          reason: "standby_not_playable",
           msSinceTrigger,
+          lockLocked: deckTransitionLock.isLocked(),
           active: sbDeckSnap(audio),
-          standby: sbDeckSnap(getDeckAudio(getStandbyDeck())),
+          standby: sbDeckSnap(standby),
         });
-        xfadeLog("ended_skipped", { endedHandled: endedHandledRef.current, crossfadeStarted: crossfadeStartedRef.current });
-        console.log("[SyncBiz Audit] Audio ended_skipped", {
-          duration: d,
-          endedHandled: endedHandledRef.current,
-          crossfadeStarted: crossfadeStartedRef.current,
-          url: currentPlayUrl,
+        xfadeLog("ended_failforward", { msSinceTrigger });
+        // Cancel the stalled overlap: aborts the ramp, restores the (already-ended) active's volume,
+        // cleans the standby, releases the deck lock, and resets crossfadeStartedRef (via its onError,
+        // which no-ops on advance because we already consumed above).
+        crossfadeAbortRef.current = true;
+        try { crossfadeCleanupRef.current?.(); } catch { /* ignore */ }
+        crossfadeCleanupRef.current = null;
+        crossfadeStartedRef.current = false;
+        syncbizAuditTransportTransitionStart({
+          phase: "html_audio_ended_failforward_before_provider_next_real_play",
+          auditTransportCase: "ended_auto",
+          urlPreview: currentPlayUrl?.slice(0, 120) ?? null,
         });
+        nextRef.current({ auditTransportCase: "ended_auto" });
+        return;
+      }
+      // No crossfade in flight: a plain natural end. Require a real duration to avoid advancing on a
+      // spurious `ended` from a failed/empty load (that has no bytes to have "ended").
+      if (!Number.isFinite(d) || d <= 0) {
+        sbStall("ended_bail_no_duration", { d, active: sbDeckSnap(audio), standby: sbDeckSnap(getDeckAudio(getStandbyDeck())) });
         return;
       }
       sbStall("ended_advance", { msSinceTrigger, active: sbDeckSnap(audio), standby: sbDeckSnap(getDeckAudio(getStandbyDeck())) });
