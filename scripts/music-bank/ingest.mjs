@@ -38,11 +38,18 @@ export async function ingestFile(cfg, db, { filePath, sourceId, name, genreId, p
   const ext = (name.split('.').pop()||'mp3').toLowerCase();
   const mime = MIME[ext] || 'audio/mpeg';
   const hash = crypto.createHash('sha256').update(bytes).digest('hex');
-  const objectKey = `assets/${hash}.${ext}`;                       // content-addressed → immutable
 
   // 1. Resolve SyncBiz logical identity FIRST (mapping is source of truth; never derived from fileId).
   const resolved = await resolveOrCreateLogicalId(db, { source, externalId: sourceId, logicalId });
   const lid = resolved.logicalId;
+
+  // Content-addressed key. If those exact bytes are ALREADY owned by a DIFFERENT logicalId (genuinely
+  // duplicate source tracks — the same audio published under two catalog entries), disambiguate so THIS
+  // logicalId gets its own object + MediaAsset and stays independently playable. Same-logicalId re-runs
+  // keep the plain key (true idempotency). Rare; costs one duplicated R2 object.
+  let objectKey = `assets/${hash}.${ext}`;                          // content-addressed → immutable
+  const keyClash = await db.mediaAsset.findUnique({ where: { provider_bucket_objectKey: { provider, bucket: cfg.bucket, objectKey } } });
+  if (keyClash && keyClash.logicalId !== lid) objectKey = `assets/${hash}__${lid}.${ext}`;
 
   const whereObj = { provider_bucket_objectKey: { provider, bucket: cfg.bucket, objectKey } };
   let row = await db.mediaAsset.findUnique({ where: whereObj });
