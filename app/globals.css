@@ -3387,3 +3387,82 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   letter-spacing: 0.1em !important;
   font-family: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", inherit;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CURTAIN LAYOUT (POC) — "focus follows task". The two workspace side rails
+   (col-start-1 / col-start-3 of the sources-manager grid) retract so the center
+   monitor breathes when the operator enters a full-focus channel (RFM). The deck
+   row [Queue | Player | Pads] is a SEPARATE container above — the player never
+   moves. Columns animate; rail CONTENT is a fixed-width inner clipped by an
+   overflow-hidden rail, so it slides under instead of reflowing (no squish/flash).
+   Only engages at lg+ (side columns exist); tablet-portrait/mobile keep the stack.
+   ───────────────────────────────────────────────────────────────────────────── */
+.sb-rail-handle { display: none; } /* handles + curtain engage at lg+ only */
+@media (min-width: 1024px) {
+  .sb-curtain-grid {
+    --sb-rail-l: 240px;   /* animated column width (collapses to 0) */
+    --sb-rail-r: 240px;
+    --sb-rail-w: 240px;   /* CONSTANT rail width — inner keeps this so content never reflows */
+    grid-template-columns: var(--sb-rail-l) minmax(0, 1fr) var(--sb-rail-r);
+    transition: grid-template-columns 380ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .sb-curtain-grid[data-left-collapsed="true"]  { --sb-rail-l: 0px; }
+  .sb-curtain-grid[data-right-collapsed="true"] { --sb-rail-r: 0px; }
+
+  /* Rail item shrinks to 0; overflow-x clips the fixed-width inner (leave overflow-y to the aside's
+     own scroll). The inner keeps a constant width, so it slides under the edge without reflowing. */
+  .sb-rail { overflow-x: hidden; min-width: 0; }
+  .sb-rail-inner {
+    width: calc(var(--sb-rail-w) - 12px); /* rail width minus the aside's p-1.5 (6px each side) */
+    transition: transform 380ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease;
+    will-change: transform, opacity;
+  }
+  .sb-curtain-grid[data-left-collapsed="true"]  .sb-rail--left  .sb-rail-inner { transform: translateX(-18px); opacity: 0; }
+  .sb-curtain-grid[data-right-collapsed="true"] .sb-rail--right .sb-rail-inner { transform: translateX(18px);  opacity: 0; }
+
+  /* Persistent edge handles — always present so a collapsed rail is discoverable
+     and re-openable (never a vanished-with-no-trace rail). Structured with a slot
+     for a future badge/indicator (collapse the surface, never the signal). */
+  .sb-rail-handle {
+    position: absolute;
+    top: 14px;
+    z-index: 40;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 46px;
+    width: 20px;
+    color: #9aa4b2;
+    background: rgba(15, 23, 42, 0.82);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.04), 0 2px 8px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(6px);
+    cursor: pointer;
+    transition: color 150ms ease, background 150ms ease, border-color 150ms ease, transform 150ms ease;
+  }
+  .sb-rail-handle:hover { color: #f5f5f7; background: rgba(30, 41, 59, 0.92); border-color: rgba(148, 163, 184, 0.4); }
+  .sb-rail-handle:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.6); }
+  .sb-rail-handle--left  { left: 0;  border-left: 0;  border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
+  .sb-rail-handle--right { right: 0; border-right: 0; border-top-left-radius: 10px;  border-bottom-left-radius: 10px; }
+  .sb-rail-handle svg { transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1); }
+  /* Chevron points toward the action: outward when collapsed (pull rail in), inward when open (push it away). */
+  .sb-curtain-grid[data-left-collapsed="false"]  .sb-rail-handle--left  svg { transform: rotate(180deg); }
+  .sb-curtain-grid[data-right-collapsed="false"] .sb-rail-handle--right svg { transform: rotate(180deg); }
+  /* Future badge slot: a small dot the handle can raise when a collapsed rail has a signal. */
+  .sb-rail-handle .sb-rail-handle-badge {
+    position: absolute; top: 4px; right: 3px; height: 7px; width: 7px; border-radius: 9999px;
+    background: #ff453a; box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.9); display: none;
+  }
+  .sb-rail-handle[data-has-signal="true"] .sb-rail-handle-badge { display: block; }
+}
+@media (min-width: 1280px) {
+  .sb-curtain-grid { --sb-rail-l: 260px; --sb-rail-r: 260px; --sb-rail-w: 260px; }
+}
+@media (min-width: 1536px) {
+  .sb-curtain-grid { --sb-rail-l: 280px; --sb-rail-r: 280px; --sb-rail-w: 280px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sb-curtain-grid { transition: none; }
+  .sb-rail-inner { transition: none; }
+  .sb-rail-handle svg { transition: none; }
+}

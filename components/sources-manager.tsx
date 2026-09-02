@@ -846,6 +846,23 @@ function SourcesManagerInner({
 
   const djHubRailActive = isDjCreatorHubModule(activeCenterModule);
 
+  // ── CURTAIN (POC): focus-follows-task rail collapse. Auto-collapse both workspace
+  //    side rails when a full-focus channel (RFM) is active; a manual toggle overrides
+  //    and is remembered for the current context; leaving the channel clears overrides
+  //    so the layout restores to its pre-entry (open) state. No visible "modes".
+  const rfmCurtainActive = RFM_CATALOG_ENABLED && isRoyaltyFreeMusicModule(activeCenterModule);
+  // null = follow auto (collapsed while a focus channel is active); true/false = explicit user choice.
+  const [manualLeftCollapsed, setManualLeftCollapsed] = useState<boolean | null>(null);
+  const [manualRightCollapsed, setManualRightCollapsed] = useState<boolean | null>(null);
+  // Entering/leaving a focus channel clears manual overrides → auto takes over (collapse on enter,
+  // restore-to-open on exit). Keyed on the boolean so it only fires on the actual transition.
+  useEffect(() => {
+    setManualLeftCollapsed(null);
+    setManualRightCollapsed(null);
+  }, [rfmCurtainActive]);
+  const leftRailCollapsed = manualLeftCollapsed ?? rfmCurtainActive;
+  const rightRailCollapsed = manualRightCollapsed ?? rfmCurtainActive;
+
   const selectionKeyForMyMusicDismissRef = useRef<string>(
     JSON.stringify({ type: "library_view", id: "all_library" } satisfies LibrarySelection),
   );
@@ -2381,12 +2398,38 @@ function SourcesManagerInner({
        * deck was still single-column at lg. Commit 21f97b7 activated the
        * 3-column deck at lg, so workspace rails now widen to match.
        */}
-      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:h-full lg:min-h-0 lg:grid-cols-[240px_minmax(0,1fr)_240px] lg:grid-rows-[minmax(0,1fr)_auto] lg:overflow-hidden xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)_260px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px]">
+      <div
+        className="sb-curtain-grid grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:relative lg:-mx-1 lg:h-full lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_auto] lg:overflow-hidden xl:-mx-1"
+        data-left-collapsed={leftRailCollapsed ? "true" : "false"}
+        data-right-collapsed={rightRailCollapsed ? "true" : "false"}
+      >
+        {/* Curtain edge handles — always present so a collapsed rail is discoverable + re-openable.
+            Manual toggle overrides the auto-collapse for the current channel (won't auto-close again). */}
+        <button
+          type="button"
+          className="sb-rail-handle sb-rail-handle--left"
+          onClick={() => setManualLeftCollapsed(!leftRailCollapsed)}
+          aria-label={leftRailCollapsed ? "Show left tools" : "Hide left tools"}
+          aria-pressed={!leftRailCollapsed}
+        >
+          <span className="sb-rail-handle-badge" aria-hidden="true" />
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+        </button>
+        <button
+          type="button"
+          className="sb-rail-handle sb-rail-handle--right"
+          onClick={() => setManualRightCollapsed(!rightRailCollapsed)}
+          aria-label={rightRailCollapsed ? "Show right tools" : "Hide right tools"}
+          aria-pressed={!rightRailCollapsed}
+        >
+          <span className="sb-rail-handle-badge" aria-hidden="true" />
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+        </button>
         {/* Scheduling tiles only — Ready Playlists removed from here (redundant
             with the "Ready" filter chip under the search bar; the always-open
             list looked cluttered). Keeps the daypart tiles + their Add button. */}
-        <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch lg:max-h-[42vh] lg:overflow-y-auto">
-          <div>
+        <aside className="sb-rail sb-rail--left w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch lg:max-h-[42vh] lg:overflow-y-auto">
+          <div className="sb-rail-inner">
           <div className="space-y-4 pt-1">
             {false ? (
             <section>
@@ -3861,8 +3904,8 @@ function SourcesManagerInner({
           )}
         </div>
 
-        <aside className="row-start-1 w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-1 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-y-auto">
-          <div className="space-y-4">
+        <aside className="sb-rail sb-rail--left row-start-1 w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-1 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-y-auto">
+          <div className="sb-rail-inner space-y-4">
             <section>
               <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
                 Library
@@ -3951,8 +3994,8 @@ function SourcesManagerInner({
         </aside>
 
         {/* ── RIGHT rail — DJ Creator AI pinned; ONE scrollbar, on the playlist list only ── */}
-        <aside className="flex w-full min-w-0 flex-col self-start p-1.5 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-hidden">
-          <div className="flex min-h-0 flex-1 flex-col gap-4">
+        <aside className="sb-rail sb-rail--right flex w-full min-w-0 flex-col self-start p-1.5 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-hidden">
+          <div className="sb-rail-inner flex min-h-0 flex-1 flex-col gap-4">
             <div className="shrink-0">
               <DjCreatorAiShell
                 variant="launcher"
