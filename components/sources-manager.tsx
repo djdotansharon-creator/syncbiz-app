@@ -2429,6 +2429,25 @@ function SourcesManagerInner({
             with the "Ready" filter chip under the search bar; the always-open
             list looked cluttered). Keeps the daypart tiles + their Add button. */}
         <aside className="sb-rail sb-rail--left w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch lg:max-h-[42vh] lg:overflow-y-auto">
+          {/* MINI (collapsed): daypart playlist artwork squares — recognizable + click to expand. */}
+          <div className="sb-rail-mini">
+            {FIXED_DAYPART_PADS.map((pad) => {
+              const cover = containers.dayparts.find((d) => d.key === pad.key)?.cover ?? null;
+              return (
+                <button
+                  key={pad.key}
+                  type="button"
+                  className="sb-mini-tile"
+                  title={pad.label}
+                  aria-label={pad.label}
+                  onClick={() => setManualLeftCollapsed(false)}
+                >
+                  <span className="sb-mini-badge" aria-hidden="true" />
+                  {cover ? <HydrationSafeImage src={cover} alt="" /> : <span className="sb-mini-tile-fallback">{pad.label.slice(0, 1)}</span>}
+                </button>
+              );
+            })}
+          </div>
           <div className="sb-rail-inner">
           <div className="space-y-4 pt-1">
             {false ? (
@@ -3905,6 +3924,24 @@ function SourcesManagerInner({
         </div>
 
         <aside className="sb-rail sb-rail--left row-start-1 w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-1 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-y-auto">
+          {/* MINI (collapsed): library nav glyphs — orientation kept; click to expand. */}
+          <div className="sb-rail-mini">
+            <button type="button" className="sb-mini-expand" title="Expand tools" aria-label="Expand left tools" onClick={() => setManualLeftCollapsed(false)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+            </button>
+            {[{ k: "all_library", t: "All Library", g: "◎" }, { k: "scheduled", t: "Scheduled", g: "◷" }, { k: "dj_ai", t: "DJ AI", g: "AI" }].map((n) => (
+              <button
+                key={n.k}
+                type="button"
+                className="sb-mini-tile"
+                title={n.t}
+                aria-label={n.t}
+                onClick={() => setManualLeftCollapsed(false)}
+              >
+                <span className="sb-mini-tile-fallback">{n.g}</span>
+              </button>
+            ))}
+          </div>
           <div className="sb-rail-inner space-y-4">
             <section>
               <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
@@ -3995,6 +4032,36 @@ function SourcesManagerInner({
 
         {/* ── RIGHT rail — DJ Creator AI pinned; ONE scrollbar, on the playlist list only ── */}
         <aside className="sb-rail sb-rail--right flex w-full min-w-0 flex-col self-start p-1.5 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-hidden">
+          {/* MINI (collapsed): tool icons + Your Playlists artwork; badge-capable; click to expand. */}
+          <div className="sb-rail-mini">
+            <button type="button" className="sb-mini-expand" title="Expand tools" aria-label="Expand right tools" onClick={() => setManualRightCollapsed(false)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+            </button>
+            <button
+              type="button"
+              className="sb-mini-tile"
+              title="DJ Creator AI"
+              aria-label="DJ Creator AI"
+              onClick={() => setManualRightCollapsed(false)}
+            >
+              <span className="sb-mini-badge" aria-hidden="true" />
+              <span className="sb-mini-tile-fallback">AI</span>
+            </button>
+            {userPlaylistContainers.length > 0 ? <div className="sb-mini-sep" /> : null}
+            {userPlaylistContainers.slice(0, 14).map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                className="sb-mini-tile"
+                title={p.label}
+                aria-label={p.label}
+                onClick={() => setManualRightCollapsed(false)}
+              >
+                <span className="sb-mini-badge" aria-hidden="true" />
+                {p.cover ? <HydrationSafeImage src={p.cover} alt="" /> : <span className="sb-mini-tile-fallback">{(p.label || "•").slice(0, 1)}</span>}
+              </button>
+            ))}
+          </div>
           <div className="sb-rail-inner flex min-h-0 flex-1 flex-col gap-4">
             <div className="shrink-0">
               <DjCreatorAiShell

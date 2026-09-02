@@ -3406,19 +3406,95 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
     grid-template-columns: var(--sb-rail-l) minmax(0, 1fr) var(--sb-rail-r);
     transition: grid-template-columns 380ms cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .sb-curtain-grid[data-left-collapsed="true"]  { --sb-rail-l: 0px; }
-  .sb-curtain-grid[data-right-collapsed="true"] { --sb-rail-r: 0px; }
+  /* Collapsed = MINI (not 0): the rail folds into a compact strip that keeps artwork/tool icons +
+     orientation (Spotify-style), never a vanished side. Left keeps room for cover squares; right for
+     tool icons. Widths are constant (don't scale with the breakpoint). */
+  .sb-curtain-grid[data-left-collapsed="true"]  { --sb-rail-l: 76px; }
+  .sb-curtain-grid[data-right-collapsed="true"] { --sb-rail-r: 62px; }
 
-  /* Rail item shrinks to 0; overflow-x clips the fixed-width inner (leave overflow-y to the aside's
-     own scroll). The inner keeps a constant width, so it slides under the edge without reflowing. */
-  .sb-rail { overflow-x: hidden; min-width: 0; }
+  /* Rail column animates to the mini width; overflow-x clips the fixed-width FULL inner (leave
+     overflow-y to the aside's own scroll). Position:relative anchors the absolute mini overlay. */
+  .sb-rail { overflow-x: hidden; min-width: 0; position: relative; }
   .sb-rail-inner {
     width: calc(var(--sb-rail-w) - 12px); /* rail width minus the aside's p-1.5 (6px each side) */
-    transition: transform 380ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease;
+    transition: transform 380ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease;
     will-change: transform, opacity;
   }
-  .sb-curtain-grid[data-left-collapsed="true"]  .sb-rail--left  .sb-rail-inner { transform: translateX(-18px); opacity: 0; }
-  .sb-curtain-grid[data-right-collapsed="true"] .sb-rail--right .sb-rail-inner { transform: translateX(18px);  opacity: 0; }
+  /* Full content folds in slightly + fades out (does not slide off-screen); the mini fades in after. */
+  .sb-curtain-grid[data-left-collapsed="true"]  .sb-rail--left  .sb-rail-inner { transform: translateX(-6px); opacity: 0; pointer-events: none; }
+  .sb-curtain-grid[data-right-collapsed="true"] .sb-rail--right .sb-rail-inner { transform: translateX(6px);  opacity: 0; pointer-events: none; }
+
+  /* MINI content — an absolute overlay filling the collapsed rail. Hidden (and non-interactive) when
+     the rail is expanded; cross-fades in (slight delay) when collapsed so there is no double-exposure. */
+  .sb-rail-mini {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 0 12px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 200ms ease 120ms;
+    scrollbar-width: none;
+  }
+  .sb-rail-mini::-webkit-scrollbar { display: none; }
+  .sb-curtain-grid[data-left-collapsed="true"]  .sb-rail--left  .sb-rail-mini,
+  .sb-curtain-grid[data-right-collapsed="true"] .sb-rail--right .sb-rail-mini { opacity: 1; pointer-events: auto; }
+
+  .sb-mini-tile {
+    position: relative;
+    flex-shrink: 0;
+    height: 52px;
+    width: 52px;
+    border-radius: 13px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: linear-gradient(150deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9));
+    color: #cbd5e1;
+    cursor: pointer;
+    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease, box-shadow 160ms ease;
+  }
+  .sb-rail--right .sb-mini-tile { height: 44px; width: 44px; border-radius: 12px; }
+  .sb-mini-tile:hover { transform: scale(1.06); border-color: rgba(148, 163, 184, 0.45); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); }
+  .sb-mini-tile:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.65); }
+  .sb-mini-tile img { height: 100%; width: 100%; object-fit: cover; }
+  .sb-mini-tile-fallback { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; color: #e2e8f0; }
+  /* Future signal indicator — mini tiles can raise a dot when their collapsed rail has an alert/request. */
+  .sb-mini-badge {
+    position: absolute; top: -3px; right: -3px; height: 10px; width: 10px; border-radius: 9999px;
+    background: #ff453a; box-shadow: 0 0 0 2px rgba(2, 6, 23, 0.95); display: none;
+  }
+  .sb-mini-tile[data-has-signal="true"] .sb-mini-badge { display: block; }
+  .sb-mini-sep { height: 1px; width: 34px; background: rgba(148, 163, 184, 0.16); flex-shrink: 0; margin: 2px 0; }
+
+  /* When a rail is collapsed, the mini rail owns re-expansion → hide that side's edge handle (no overlap).
+     The edge handle remains as the COLLAPSE control while the rail is expanded. */
+  .sb-curtain-grid[data-left-collapsed="true"]  .sb-rail-handle--left  { display: none; }
+  .sb-curtain-grid[data-right-collapsed="true"] .sb-rail-handle--right { display: none; }
+  .sb-mini-expand {
+    flex-shrink: 0;
+    height: 26px;
+    width: 42px;
+    border-radius: 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #9aa4b2;
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    cursor: pointer;
+    margin-bottom: 2px;
+    transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+  }
+  .sb-mini-expand:hover { color: #f5f5f7; background: rgba(30, 41, 59, 0.9); border-color: rgba(148, 163, 184, 0.4); }
+  .sb-mini-expand:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.6); }
 
   /* Persistent edge handles — always present so a collapsed rail is discoverable
      and re-openable (never a vanished-with-no-trace rail). Structured with a slot
