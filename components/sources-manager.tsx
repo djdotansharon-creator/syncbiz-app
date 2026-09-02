@@ -4032,6 +4032,17 @@ function SourcesManagerInner({
               <span className="sb-mini-badge" aria-hidden="true" />
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" /></svg>
             </button>
+            <button
+              type="button"
+              className="sb-mini-tile sb-mini-tile--tool"
+              title="Guest"
+              aria-label="Open Guest inbox"
+              onClick={() => setActiveCenterModule("guests")}
+            >
+              {/* Badge-ready: a future guest request / alert can raise this dot even while the rail is mini. */}
+              <span className="sb-mini-badge" aria-hidden="true" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z" /></svg>
+            </button>
             {userPlaylistContainers.length > 0 ? <div className="sb-mini-sep" /> : null}
             {userPlaylistContainers.slice(0, 14).map((p) => (
               <button

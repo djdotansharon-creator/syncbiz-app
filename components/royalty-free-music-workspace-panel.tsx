@@ -68,6 +68,20 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   const genres = catalog.genres;
   const selectedGenre = useMemo(() => (view === "all" ? null : genres.find((g) => g.id === view) ?? null), [genres, view]);
 
+  // Ownership is entitlement-driven. The billing/entitlement backend is Coming Soon, so this resolves to
+  // NONE today; the presentation is STATE-READY for none / partial / full and a real entitlement source
+  // drops in here with no redesign. A dev-only ?rfm_owned=full|partial preview reviews the states now.
+  const [ownedGenreIds, setOwnedGenreIds] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("rfm_owned");
+    if (p === "full") setOwnedGenreIds(new Set(genres.map((g) => g.id)));
+    else if (p === "partial") setOwnedGenreIds(new Set(genres.slice(0, 3).map((g) => g.id)));
+    else setOwnedGenreIds(new Set());
+  }, [genres]);
+  const ownedCount = ownedGenreIds.size;
+  const totalPacks = genres.length;
+  const ownershipState: "none" | "partial" | "full" = ownedCount === 0 ? "none" : ownedCount >= totalPacks ? "full" : "partial";
+
   useEffect(() => {
     let cancelled = false;
     const desktop = (
@@ -194,34 +208,38 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
 
   return (
     <div className="sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-col overflow-hidden text-[#f5f5f7]">
-      {/* Header */}
-      <header className="flex items-center justify-between gap-3 border-b border-white/[0.06] px-5 py-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[#0a84ff]/15 text-[#7db8ff]"><PlayIcon className="h-3 w-3" /></span>
-          <h2 className="text-sm font-semibold tracking-tight">Royalty-Free Music</h2>
-          <span className="hidden text-xs text-[#6b6b70] sm:inline">· {genres.length} Genre Packs · {totalSamples} samples</span>
+      {/* Header — integrated into the canvas: light weight, no frame, counts secondary. */}
+      <header className="flex items-center justify-between gap-3 px-5 pb-1.5 pt-3.5">
+        <div className="flex min-w-0 items-baseline gap-2.5">
+          <h2 className="text-[15px] font-semibold tracking-tight text-white">Royalty-Free Music</h2>
+          <span className="hidden truncate text-[11px] text-[#77777c] sm:inline">{genres.length} packs · {totalSamples} samples</span>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Stage A A/B toggle (dev): Stream = SyncBiz HTTPS media transport; Local = preview-cache path. */}
-          <div className="inline-flex overflow-hidden rounded-md border border-white/[0.1] text-[11px]">
+        <div className="flex items-center gap-1.5">
+          {/* Stream/Local A/B (dev) — quiet segmented control, no hard frame. */}
+          <div className="inline-flex overflow-hidden rounded-full bg-white/[0.045] p-0.5 text-[11px]">
             {(["stream", "local"] as PlaybackMode[]).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setPlaybackMode(m)}
-                className={`px-2.5 py-1 font-medium transition ${playbackMode === m ? "bg-[#0a84ff] text-white" : "text-[#a1a1a6] hover:text-[#f5f5f7]"}`}
+                className={`rounded-full px-2.5 py-0.5 font-medium transition ${playbackMode === m ? "bg-[#0a84ff] text-white" : "text-[#9a9a9f] hover:text-[#f5f5f7]"}`}
                 title={m === "stream" ? "SyncBiz HTTPS media streaming" : "Local preview cache (POC)"}
               >
                 {m === "stream" ? "Stream" : "Local"}
               </button>
             ))}
           </div>
-          <button type="button" onClick={onClose} className="rounded-md border border-white/[0.08] px-2.5 py-1 text-xs text-[#a1a1a6] transition hover:border-white/20 hover:text-[#f5f5f7]">Close</button>
+          <button type="button" onClick={onClose} aria-label="Close" title="Close" className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#8a8a8f] transition hover:bg-white/[0.06] hover:text-[#f5f5f7]">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
         </div>
       </header>
 
-      {/* Genre navigation — dynamic, horizontal scroll */}
-      <nav className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-white/[0.06] px-4 py-2 [scrollbar-width:thin]">
+      {/* Ownership / plans — compact, near the top, state-aware (none / partial / full). */}
+      <OwnershipBar state={ownershipState} ownedCount={ownedCount} totalPacks={totalPacks} />
+
+      {/* Genre navigation — quiet pills, separated by space, not a frame. */}
+      <nav className="flex shrink-0 items-center gap-1.5 overflow-x-auto px-5 pb-2.5 pt-1 [scrollbar-width:thin]">
         <GenreNavPill label="All" active={view === "all"} onClick={() => setView("all")} />
         {genres.map((g) => (
           <GenreNavPill key={g.id} label={g.name} active={view === g.id} onClick={() => setView(g.id)} />
@@ -234,13 +252,14 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
             genre={selectedGenre}
             trackPlayable={trackPlayable}
             nowPlaying={nowPlaying}
+            owned={ownedGenreIds.has(selectedGenre.id)}
             onPlaySamples={() => playGenreSamples(selectedGenre)}
             onPlayTrack={(t) => playTrack(selectedGenre, t)}
             onBack={() => setView("all")}
             notPlayableHint={notPlayableHint}
           />
         ) : (
-          <CatalogHome genres={genres} totalSamples={totalSamples} onOpen={(id) => setView(id)} notPlayableHint={notPlayableHint} />
+          <CatalogHome genres={genres} totalSamples={totalSamples} ownedGenreIds={ownedGenreIds} ownershipState={ownershipState} onOpen={(id) => setView(id)} notPlayableHint={notPlayableHint} />
         )}
       </div>
     </div>
@@ -253,11 +272,63 @@ function GenreNavPill({ label, active, onClick }: { label: string; active: boole
       type="button"
       onClick={onClick}
       className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition ${
-        active ? "bg-[#0a84ff] text-white" : "border border-white/[0.08] text-[#a1a1a6] hover:border-white/20 hover:text-[#f5f5f7]"
+        active ? "bg-[#0a84ff] text-white" : "text-[#9a9a9f] hover:bg-white/[0.05] hover:text-[#f5f5f7]"
       }`}
     >
       {label}
     </button>
+  );
+}
+
+/** Calm, flat plan chip — accent as a subtle tint/ring, never a glow. */
+function PlanChip({ label, price, best }: { label: string; price: string; best?: boolean }) {
+  return (
+    <span
+      title="Plans — Coming soon"
+      className={`inline-flex items-baseline gap-1.5 rounded-full px-2.5 py-1 text-[12px] ${
+        best ? "bg-[#0a84ff]/[0.12] text-[#cfe4ff] ring-1 ring-inset ring-[#0a84ff]/25" : "bg-white/[0.05] text-[#c7c7cc]"
+      }`}
+    >
+      <span className="font-medium">{label}</span>
+      <span className="font-semibold tabular-nums text-[#f5f5f7]">{price}</span>
+      {best ? <span className="text-[9px] font-bold uppercase tracking-wider text-[#7db8ff]">Best</span> : null}
+    </span>
+  );
+}
+
+/** Ownership / plans strip — compact, state-aware. Selling stops once the bank is owned. */
+function OwnershipBar({ state, ownedCount, totalPacks }: { state: "none" | "partial" | "full"; ownedCount: number; totalPacks: number }) {
+  if (state === "full") {
+    return (
+      <div className="mx-5 mb-0.5 flex items-center gap-2 rounded-xl bg-white/[0.03] px-3.5 py-2">
+        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#0a84ff]/15 text-[#7db8ff]">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
+        </span>
+        <span className="text-[13px] font-semibold text-[#f5f5f7]">Full Music Bank</span>
+        <span className="text-[12px] text-[#8a8a8f]">{totalPacks}/{totalPacks} Genre Packs unlocked</span>
+      </div>
+    );
+  }
+  if (state === "partial") {
+    return (
+      <div className="mx-5 mb-0.5 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white/[0.03] px-3.5 py-2">
+        <span className="text-[13px] font-semibold text-[#f5f5f7]">{ownedCount}/{totalPacks} Genre Packs unlocked</span>
+        <span className="flex items-center gap-2 text-[12px] text-[#9a9a9f]">
+          <span className="hidden sm:inline">Complete the bank</span>
+          <PlanChip label="Full Music Bank" price={FULL_BANK_PRICE_LABEL} best />
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="mx-5 mb-0.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-white/[0.03] px-3.5 py-2">
+      <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-[#8a8a8f]">Your Music Bank</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <PlanChip label="1 Genre Pack" price={GENRE_PRICE_LABEL} />
+        <PlanChip label={`Choose ${CHOICE3_PACK_COUNT}`} price={CHOICE3_PRICE_LABEL} />
+        <PlanChip label="Full Music Bank" price={FULL_BANK_PRICE_LABEL} best />
+      </div>
+    </div>
   );
 }
 
@@ -269,26 +340,38 @@ function GenreCover({ genre }: { genre: MusicBankGenrePack }) {
 function CatalogHome({
   genres,
   totalSamples,
+  ownedGenreIds,
+  ownershipState,
   onOpen,
   notPlayableHint,
 }: {
   genres: MusicBankGenrePack[];
   totalSamples: number;
+  ownedGenreIds: Set<string>;
+  ownershipState: "none" | "partial" | "full";
   onOpen: (id: string) => void;
   notPlayableHint: string | null;
 }) {
   return (
     <>
-      {/* Genre Packs */}
-      <div className="grid grid-cols-1 gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Genre Packs — the hero. Cards are content objects on an open canvas (space, not chrome, around them). */}
+      <div className="grid grid-cols-1 gap-4 px-5 py-3 sm:grid-cols-2 lg:grid-cols-3">
         {genres.map((genre) => {
           const total = totalDuration(genre.tracks);
+          const owned = ownedGenreIds.has(genre.id);
           return (
-            <div key={genre.id} className="group flex flex-col overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.015] transition hover:border-white/20 hover:shadow-[0_16px_40px_-24px_rgba(0,0,0,0.85)]">
+            <div key={genre.id} className="group flex flex-col overflow-hidden rounded-2xl bg-white/[0.02] ring-1 ring-inset ring-white/[0.05] transition duration-200 hover:ring-white/[0.14] hover:shadow-[0_18px_44px_-26px_rgba(0,0,0,0.9)]">
               <button type="button" onClick={() => onOpen(genre.id)} className="relative flex aspect-[16/10] items-end p-3.5 text-left">
                 <GenreCover genre={genre} />
                 <span className="absolute left-3 top-3 rounded-full bg-black/35 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/85 backdrop-blur-sm">Genre Pack</span>
-                <span className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/35 text-white opacity-0 backdrop-blur-sm transition group-hover:opacity-100"><PlayIcon className="h-3.5 w-3.5" /></span>
+                {owned ? (
+                  <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-[#0a84ff]/85 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
+                    Unlocked
+                  </span>
+                ) : (
+                  <span className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/35 text-white opacity-0 backdrop-blur-sm transition group-hover:opacity-100"><PlayIcon className="h-3.5 w-3.5" /></span>
+                )}
                 <div className="relative">
                   <h3 className="text-lg font-semibold leading-tight tracking-tight text-white drop-shadow">{genre.name}</h3>
                   <p className="mt-0.5 text-[11px] font-medium text-white/85">
@@ -297,48 +380,28 @@ function CatalogHome({
                 </div>
               </button>
               <div className="flex items-center justify-between gap-2 px-3.5 py-2.5">
-                <button type="button" onClick={() => onOpen(genre.id)} className="text-xs font-medium text-[#0a84ff] transition hover:text-[#7db8ff]">Listen to samples →</button>
-                <span className="flex items-baseline gap-2">
-                  <span className="text-sm font-semibold tabular-nums text-[#f5f5f7]">{GENRE_PRICE_LABEL}</span>
-                  <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-md border border-white/[0.12] px-2.5 py-1 text-[11px] font-semibold text-[#8a8a8f]">Unlock</button>
-                </span>
+                <button type="button" onClick={() => onOpen(genre.id)} className="text-xs font-medium text-[#68b0ff] transition hover:text-[#9cccff]">Listen to samples →</button>
+                {owned ? (
+                  <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#7db8ff]">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
+                    Owned
+                  </span>
+                ) : (
+                  <span className="flex items-baseline gap-2">
+                    <span className="text-sm font-semibold tabular-nums text-[#f5f5f7]">{GENRE_PRICE_LABEL}</span>
+                    <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-md px-2.5 py-1 text-[11px] font-semibold text-[#8a8a8f] ring-1 ring-inset ring-white/[0.1]">Unlock</button>
+                  </span>
+                )}
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Subscription bundles: build-your-own 3, or the Full Music Bank (best value). */}
-      <section className="mx-4 mb-2 grid gap-3 sm:grid-cols-5">
-        {/* CHOICE 1 — Choose 3 Genre Packs */}
-        <div className="flex flex-col justify-between rounded-xl border border-white/[0.1] bg-white/[0.02] p-5 sm:col-span-2">
-          <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[#a1a1a6]">Build your bundle</p>
-            <h3 className="mt-1 text-lg font-semibold tracking-tight text-[#f5f5f7]">Choose {CHOICE3_PACK_COUNT} Genre Packs</h3>
-            <p className="mt-1 text-sm text-[#a1a1a6]">Any {CHOICE3_PACK_COUNT} packs — your pick.</p>
-          </div>
-          <div className="mt-5 flex items-baseline justify-between gap-3">
-            <span className="text-xl font-bold tabular-nums text-[#f5f5f7]">{CHOICE3_PRICE_LABEL}</span>
-            <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg border border-white/25 px-4 py-2 text-sm font-semibold text-[#c7c7cc]">Unlock</button>
-          </div>
-        </div>
-
-        {/* CHOICE 2 — Full Music Bank, BEST VALUE (hero treatment) */}
-        <div className="relative flex flex-col justify-between overflow-hidden rounded-xl border-2 border-[#0a84ff]/55 bg-gradient-to-br from-[#0a84ff]/[0.18] via-[#4a2b8c]/[0.12] to-[#7a2f8c]/[0.18] p-5 shadow-[0_0_0_1px_rgba(10,132,255,0.25),0_28px_60px_-28px_rgba(10,132,255,0.65)] sm:col-span-3">
-          <div className="absolute inset-0 opacity-[0.35]" style={{ background: "radial-gradient(120% 80% at 88% 0%, rgba(10,132,255,0.40), transparent 60%)" }} aria-hidden="true" />
-          <span className="absolute right-4 top-4 rounded-full bg-[#0a84ff] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white shadow">Best value</span>
-          <div className="relative min-w-0">
-            <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[#7db8ff]">Everything, one subscription</p>
-            <h3 className="mt-1 text-xl font-semibold tracking-tight text-[#f5f5f7]">Full Music Bank</h3>
-            <p className="mt-1 text-sm text-[#c7c7cc]">All {genres.length} Genre Packs · {totalSamples} samples.</p>
-          </div>
-          <div className="relative mt-5 flex items-center justify-between gap-3">
-            <span className="text-3xl font-bold tabular-nums text-white">{FULL_BANK_PRICE_LABEL}</span>
-            <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg bg-[#0a84ff] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-[#0a84ff]/30">Unlock Full Music Bank</button>
-          </div>
-        </div>
-      </section>
-      <p className="mx-4 mb-5 text-[11px] text-[#8a8a8f]">Proposed monthly pricing for the demo. Payments &amp; entitlements coming soon; samples preview now and are not marked Offline Ready.</p>
+      {/* Pricing lives in the top ownership strip, not a wall of sales boxes down here. Just a quiet footnote. */}
+      {ownershipState !== "full" ? (
+        <p className="px-5 pb-4 pt-1 text-[11px] text-[#77777c]">Proposed monthly pricing — payments &amp; entitlements coming soon. Samples preview now (not Offline Ready).</p>
+      ) : null}
 
       {notPlayableHint ? <p className="px-5 pb-5 text-[11px] text-[#6b6b70]">{notPlayableHint}</p> : null}
     </>
@@ -349,6 +412,7 @@ function GenreDetail({
   genre,
   trackPlayable,
   nowPlaying,
+  owned,
   onPlaySamples,
   onPlayTrack,
   onBack,
@@ -357,6 +421,7 @@ function GenreDetail({
   genre: MusicBankGenrePack;
   trackPlayable: (id: string) => boolean;
   nowPlaying: { genreId: string; trackId: string | null } | null;
+  owned: boolean;
   onPlaySamples: () => void;
   onPlayTrack: (t: MusicBankSampleTrack) => void;
   onBack: () => void;
@@ -385,10 +450,17 @@ function GenreDetail({
               <PlayIcon className="h-3.5 w-3.5" />
               Listen to Samples
             </button>
-            <span className="ms-auto flex items-center gap-2">
-              <span className="text-lg font-bold tabular-nums text-white">{GENRE_PRICE_LABEL}</span>
-              <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg border border-white/30 px-3 py-1.5 text-xs font-semibold text-white/85">Unlock Genre Pack</button>
-            </span>
+            {owned ? (
+              <span className="ms-auto inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
+                Owned
+              </span>
+            ) : (
+              <span className="ms-auto flex items-center gap-2">
+                <span className="text-lg font-bold tabular-nums text-white">{GENRE_PRICE_LABEL}</span>
+                <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg px-3 py-1.5 text-xs font-semibold text-white/85 ring-1 ring-inset ring-white/25">Unlock Genre Pack</button>
+              </span>
+            )}
           </div>
         </div>
       </section>
