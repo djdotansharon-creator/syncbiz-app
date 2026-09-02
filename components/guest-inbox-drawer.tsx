@@ -569,7 +569,7 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
         type="button"
         onClick={() => void connectWa()}
         disabled={waBusy}
-        className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-3 py-2 text-[13px] font-semibold text-[#409cff] transition active:scale-[0.99] disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-[color:var(--sb-accent-soft)] px-3 py-2 text-[13px] font-semibold text-[#409cff] transition hover:bg-[color:var(--sb-accent-soft)]/80 active:scale-[0.99] disabled:opacity-50"
       >
         {waIcon}
         {waBusy ? "…" : t.waConnect}
@@ -582,7 +582,7 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
       <button
         type="button"
         onClick={() => void openDesktopDownload()}
-        className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-3 py-2 text-[13px] font-semibold text-[#409cff] transition active:scale-[0.99]"
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-[color:var(--sb-accent-soft)] px-3 py-2 text-[13px] font-semibold text-[#409cff] transition hover:bg-[color:var(--sb-accent-soft)]/80 active:scale-[0.99]"
       >
         {waIcon}
         Connect WhatsApp — get the desktop app
@@ -597,7 +597,7 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
   return (
     <div
       dir={dir}
-      className="sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101014]"
+      className="sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-1 flex-col overflow-hidden text-[#f5f5f7]"
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">

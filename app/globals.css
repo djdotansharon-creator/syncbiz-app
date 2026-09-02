@@ -3484,23 +3484,40 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
      The edge handle remains as the COLLAPSE control while the rail is expanded. */
   .sb-curtain-grid[data-left-collapsed="true"]  .sb-rail-handle--left  { display: none; }
   .sb-curtain-grid[data-right-collapsed="true"] .sb-rail-handle--right { display: none; }
+  /* Curtain-handle affordance: no box — just a faint edge tick + chevron. Generous invisible hit target;
+     obvious when you look for it, almost invisible when you don't. Brightens on hover. */
   .sb-mini-expand {
     flex-shrink: 0;
-    height: 26px;
-    width: 42px;
-    border-radius: 9px;
+    position: relative;
+    height: 30px;              /* generous hit target */
+    width: 34px;
+    padding: 0;
+    border: 0;
+    background: transparent;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: #9aa4b2;
-    background: rgba(15, 23, 42, 0.7);
-    border: 1px solid rgba(148, 163, 184, 0.2);
+    color: #5d6472;            /* quiet by default */
     cursor: pointer;
-    margin-bottom: 2px;
-    transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+    margin-bottom: 1px;
+    transition: color 150ms ease;
   }
-  .sb-mini-expand:hover { color: #f5f5f7; background: rgba(30, 41, 59, 0.9); border-color: rgba(148, 163, 184, 0.4); }
-  .sb-mini-expand:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.6); }
+  /* the subtle vertical "handle" edge next to the chevron */
+  .sb-mini-expand::before {
+    content: "";
+    position: absolute;
+    height: 14px;
+    width: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    opacity: 0.35;
+    margin-inline-end: 13px;   /* sit just to the chevron's leading side */
+    transition: opacity 150ms ease;
+  }
+  .sb-mini-expand:hover { color: #cbd5e1; }
+  .sb-mini-expand:hover::before { opacity: 0.7; }
+  .sb-mini-expand:focus-visible { outline: none; color: #cbd5e1; border-radius: 8px; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.5); }
+  .sb-mini-expand svg { height: 12px; width: 12px; }
 
   /* Persistent edge handles — always present so a collapsed rail is discoverable
      and re-openable (never a vanished-with-no-trace rail). Structured with a slot
