@@ -81,6 +81,8 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   const ownedCount = ownedGenreIds.size;
   const totalPacks = genres.length;
   const ownershipState: "none" | "partial" | "full" = ownedCount === 0 ? "none" : ownedCount >= totalPacks ? "full" : "partial";
+  // Plans are on-demand (a quiet header action + popover), not an always-on strip.
+  const [showPlans, setShowPlans] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -208,13 +210,25 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
 
   return (
     <div className="sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-col overflow-hidden text-[#f5f5f7]">
-      {/* Header — integrated into the canvas: light weight, no frame, counts secondary. */}
-      <header className="flex items-center justify-between gap-3 px-5 pb-1.5 pt-3.5">
+      {/* Header — minimal: title + a quiet Plans/ownership action + transport toggle + close. Pricing is
+          on-demand (popover), never an always-on strip → the music starts higher on the screen. */}
+      <header className="relative flex items-center justify-between gap-3 px-5 pb-2 pt-3.5">
         <div className="flex min-w-0 items-baseline gap-2.5">
           <h2 className="text-[15px] font-semibold tracking-tight text-white">Royalty-Free Music</h2>
-          <span className="hidden truncate text-[11px] text-[#77777c] sm:inline">{genres.length} packs · {totalSamples} samples</span>
+          <span className="hidden truncate text-[11px] text-[#6b6b70] md:inline">{totalPacks} packs</span>
         </div>
         <div className="flex items-center gap-1.5">
+          {ownershipState === "full" ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-2.5 py-1 text-[11px] font-medium text-[#c7c7cc]">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#7db8ff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
+              {totalPacks}/{totalPacks} unlocked
+            </span>
+          ) : (
+            <button type="button" onClick={() => setShowPlans((v) => !v)} title="Music Bank plans" aria-expanded={showPlans} className="inline-flex items-center gap-1 rounded-full bg-white/[0.05] px-2.5 py-1 text-[11px] font-medium text-[#c7c7cc] transition hover:bg-white/[0.09] hover:text-[#f5f5f7]">
+              {ownershipState === "partial" ? `${ownedCount}/${totalPacks} unlocked` : "Plans"}
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={`transition-transform ${showPlans ? "rotate-180" : ""}`}><path d="M6 9l6 6 6-6" /></svg>
+            </button>
+          )}
           {/* Stream/Local A/B (dev) — quiet segmented control, no hard frame. */}
           <div className="inline-flex overflow-hidden rounded-full bg-white/[0.045] p-0.5 text-[11px]">
             {(["stream", "local"] as PlaybackMode[]).map((m) => (
@@ -233,13 +247,25 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
           </button>
         </div>
+
+        {/* Plans popover — on-demand, anchored to the header; a full-screen invisible backdrop closes it. */}
+        {showPlans && ownershipState !== "full" ? (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setShowPlans(false)} aria-hidden="true" />
+            <div className="absolute right-5 top-[calc(100%-4px)] z-50 w-64 overflow-hidden rounded-xl bg-[#15151a] shadow-[0_18px_50px_-16px_rgba(0,0,0,0.8)] ring-1 ring-inset ring-white/[0.08]">
+              <p className="px-3.5 pb-1 pt-3 text-[10px] font-medium uppercase tracking-[0.14em] text-[#77777c]">Your Music Bank</p>
+              {ownershipState === "partial" ? <p className="px-3.5 pb-1 text-[11px] text-[#9a9a9f]">{ownedCount}/{totalPacks} unlocked — complete the bank:</p> : null}
+              <PlanRow label="1 Genre Pack" price={GENRE_PRICE_LABEL} />
+              <PlanRow label={`Choose ${CHOICE3_PACK_COUNT} Genre Packs`} price={CHOICE3_PRICE_LABEL} />
+              <PlanRow label="Full Music Bank" price={FULL_BANK_PRICE_LABEL} best />
+              <p className="px-3.5 pb-3 pt-1.5 text-[10px] text-[#6b6b70]">Payments &amp; entitlements coming soon.</p>
+            </div>
+          </>
+        ) : null}
       </header>
 
-      {/* Ownership / plans — compact, near the top, state-aware (none / partial / full). */}
-      <OwnershipBar state={ownershipState} ownedCount={ownedCount} totalPacks={totalPacks} />
-
       {/* Genre navigation — quiet pills, separated by space, not a frame. */}
-      <nav className="flex shrink-0 items-center gap-1.5 overflow-x-auto px-5 pb-2.5 pt-1 [scrollbar-width:thin]">
+      <nav className="flex shrink-0 items-center gap-1.5 overflow-x-auto px-5 pb-2.5 pt-0.5 [scrollbar-width:thin]">
         <GenreNavPill label="All" active={view === "all"} onClick={() => setView("all")} />
         {genres.map((g) => (
           <GenreNavPill key={g.id} label={g.name} active={view === g.id} onClick={() => setView(g.id)} />
@@ -280,54 +306,18 @@ function GenreNavPill({ label, active, onClick }: { label: string; active: boole
   );
 }
 
-/** Calm, flat plan chip — accent as a subtle tint/ring, never a glow. */
-function PlanChip({ label, price, best }: { label: string; price: string; best?: boolean }) {
+/** A single plan row inside the on-demand Plans popover — calm, flat; accent only as a subtle tint. */
+function PlanRow({ label, price, best }: { label: string; price: string; best?: boolean }) {
   return (
-    <span
-      title="Plans — Coming soon"
-      className={`inline-flex items-baseline gap-1.5 rounded-full px-2.5 py-1 text-[12px] ${
-        best ? "bg-[#0a84ff]/[0.12] text-[#cfe4ff] ring-1 ring-inset ring-[#0a84ff]/25" : "bg-white/[0.05] text-[#c7c7cc]"
-      }`}
-    >
-      <span className="font-medium">{label}</span>
-      <span className="font-semibold tabular-nums text-[#f5f5f7]">{price}</span>
-      {best ? <span className="text-[9px] font-bold uppercase tracking-wider text-[#7db8ff]">Best</span> : null}
-    </span>
-  );
-}
-
-/** Ownership / plans strip — compact, state-aware. Selling stops once the bank is owned. */
-function OwnershipBar({ state, ownedCount, totalPacks }: { state: "none" | "partial" | "full"; ownedCount: number; totalPacks: number }) {
-  if (state === "full") {
-    return (
-      <div className="mx-5 mb-0.5 flex items-center gap-2 rounded-xl bg-white/[0.03] px-3.5 py-2">
-        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#0a84ff]/15 text-[#7db8ff]">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
-        </span>
-        <span className="text-[13px] font-semibold text-[#f5f5f7]">Full Music Bank</span>
-        <span className="text-[12px] text-[#8a8a8f]">{totalPacks}/{totalPacks} Genre Packs unlocked</span>
-      </div>
-    );
-  }
-  if (state === "partial") {
-    return (
-      <div className="mx-5 mb-0.5 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white/[0.03] px-3.5 py-2">
-        <span className="text-[13px] font-semibold text-[#f5f5f7]">{ownedCount}/{totalPacks} Genre Packs unlocked</span>
-        <span className="flex items-center gap-2 text-[12px] text-[#9a9a9f]">
-          <span className="hidden sm:inline">Complete the bank</span>
-          <PlanChip label="Full Music Bank" price={FULL_BANK_PRICE_LABEL} best />
-        </span>
-      </div>
-    );
-  }
-  return (
-    <div className="mx-5 mb-0.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-white/[0.03] px-3.5 py-2">
-      <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-[#8a8a8f]">Your Music Bank</span>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <PlanChip label="1 Genre Pack" price={GENRE_PRICE_LABEL} />
-        <PlanChip label={`Choose ${CHOICE3_PACK_COUNT}`} price={CHOICE3_PRICE_LABEL} />
-        <PlanChip label="Full Music Bank" price={FULL_BANK_PRICE_LABEL} best />
-      </div>
+    <div className={`flex items-center justify-between gap-3 px-3.5 py-2 ${best ? "bg-[#0a84ff]/[0.08]" : ""}`}>
+      <span className="flex items-center gap-1.5 text-[13px] text-[#e2e8f0]">
+        {label}
+        {best ? <span className="text-[9px] font-bold uppercase tracking-wider text-[#7db8ff]">Best</span> : null}
+      </span>
+      <span className="flex items-center gap-2">
+        <span className="text-[13px] font-semibold tabular-nums text-white">{price}</span>
+        <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-md px-2 py-0.5 text-[10px] font-semibold text-[#8a8a8f] ring-1 ring-inset ring-white/[0.1]">Unlock</button>
+      </span>
     </div>
   );
 }
@@ -354,8 +344,8 @@ function CatalogHome({
 }) {
   return (
     <>
-      {/* Genre Packs — the hero. Cards are content objects on an open canvas (space, not chrome, around them). */}
-      <div className="grid grid-cols-1 gap-4 px-5 py-3 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Genre Packs — the hero. 4-across on wide desktop, degrading gracefully (never forced too narrow). */}
+      <div className="grid grid-cols-1 gap-3 px-5 py-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {genres.map((genre) => {
           const total = totalDuration(genre.tracks);
           const owned = ownedGenreIds.has(genre.id);
