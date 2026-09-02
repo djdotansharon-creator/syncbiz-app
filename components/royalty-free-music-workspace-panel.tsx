@@ -193,7 +193,7 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   const totalSamples = catalog.totalTracks;
 
   return (
-    <div className="sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0c0c0f] text-[#f5f5f7]">
+    <div className="sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-col overflow-hidden text-[#f5f5f7]">
       {/* Header */}
       <header className="flex items-center justify-between gap-3 border-b border-white/[0.06] px-5 py-3">
         <div className="flex min-w-0 items-center gap-2.5">

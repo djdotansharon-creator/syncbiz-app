@@ -846,22 +846,23 @@ function SourcesManagerInner({
 
   const djHubRailActive = isDjCreatorHubModule(activeCenterModule);
 
-  // ── CURTAIN (POC): focus-follows-task rail collapse. Auto-collapse both workspace
-  //    side rails when a full-focus channel (RFM) is active; a manual toggle overrides
-  //    and is remembered for the current context; leaving the channel clears overrides
-  //    so the layout restores to its pre-entry (open) state. No visible "modes".
+  // ── CURTAIN (POC): focus-follows-task rail collapse, STICKY. Entering a full-focus channel (RFM)
+  //    auto-collapses both workspace rails into mini rails. The collapse then PERSISTS across center
+  //    navigation — clicking a mini-rail item routes the CENTER but keeps the rails mini; a rail only
+  //    expands when the user explicitly asks (the chevron / edge handle). No visible "modes".
   const rfmCurtainActive = RFM_CATALOG_ENABLED && isRoyaltyFreeMusicModule(activeCenterModule);
-  // null = follow auto (collapsed while a focus channel is active); true/false = explicit user choice.
-  const [manualLeftCollapsed, setManualLeftCollapsed] = useState<boolean | null>(null);
-  const [manualRightCollapsed, setManualRightCollapsed] = useState<boolean | null>(null);
-  // Entering/leaving a focus channel clears manual overrides → auto takes over (collapse on enter,
-  // restore-to-open on exit). Keyed on the boolean so it only fires on the actual transition.
+  const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
+  const [rightRailCollapsed, setRightRailCollapsed] = useState(false);
+  // Auto-collapse ONCE on the transition INTO RFM; on exit we leave the rails as they are (sticky) so
+  // mini-rail navigation doesn't bounce the layout back open.
+  const prevRfmCurtainActiveRef = useRef(false);
   useEffect(() => {
-    setManualLeftCollapsed(null);
-    setManualRightCollapsed(null);
+    if (rfmCurtainActive && !prevRfmCurtainActiveRef.current) {
+      setLeftRailCollapsed(true);
+      setRightRailCollapsed(true);
+    }
+    prevRfmCurtainActiveRef.current = rfmCurtainActive;
   }, [rfmCurtainActive]);
-  const leftRailCollapsed = manualLeftCollapsed ?? rfmCurtainActive;
-  const rightRailCollapsed = manualRightCollapsed ?? rfmCurtainActive;
 
   const selectionKeyForMyMusicDismissRef = useRef<string>(
     JSON.stringify({ type: "library_view", id: "all_library" } satisfies LibrarySelection),
@@ -2408,7 +2409,7 @@ function SourcesManagerInner({
         <button
           type="button"
           className="sb-rail-handle sb-rail-handle--left"
-          onClick={() => setManualLeftCollapsed(!leftRailCollapsed)}
+          onClick={() => setLeftRailCollapsed(!leftRailCollapsed)}
           aria-label={leftRailCollapsed ? "Show left tools" : "Hide left tools"}
           aria-pressed={!leftRailCollapsed}
         >
@@ -2418,7 +2419,7 @@ function SourcesManagerInner({
         <button
           type="button"
           className="sb-rail-handle sb-rail-handle--right"
-          onClick={() => setManualRightCollapsed(!rightRailCollapsed)}
+          onClick={() => setRightRailCollapsed(!rightRailCollapsed)}
           aria-label={rightRailCollapsed ? "Show right tools" : "Hide right tools"}
           aria-pressed={!rightRailCollapsed}
         >
@@ -2429,25 +2430,6 @@ function SourcesManagerInner({
             with the "Ready" filter chip under the search bar; the always-open
             list looked cluttered). Keeps the daypart tiles + their Add button. */}
         <aside className="sb-rail sb-rail--left w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch lg:max-h-[42vh] lg:overflow-y-auto">
-          {/* MINI (collapsed): daypart playlist artwork squares — recognizable + click to expand. */}
-          <div className="sb-rail-mini">
-            {FIXED_DAYPART_PADS.map((pad) => {
-              const cover = containers.dayparts.find((d) => d.key === pad.key)?.cover ?? null;
-              return (
-                <button
-                  key={pad.key}
-                  type="button"
-                  className="sb-mini-tile"
-                  title={pad.label}
-                  aria-label={pad.label}
-                  onClick={() => setManualLeftCollapsed(false)}
-                >
-                  <span className="sb-mini-badge" aria-hidden="true" />
-                  {cover ? <HydrationSafeImage src={cover} alt="" /> : <span className="sb-mini-tile-fallback">{pad.label.slice(0, 1)}</span>}
-                </button>
-              );
-            })}
-          </div>
           <div className="sb-rail-inner">
           <div className="space-y-4 pt-1">
             {false ? (
@@ -3924,23 +3906,25 @@ function SourcesManagerInner({
         </div>
 
         <aside className="sb-rail sb-rail--left row-start-1 w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-1 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-y-auto">
-          {/* MINI (collapsed): library nav glyphs — orientation kept; click to expand. */}
+          {/* MINI (collapsed): navigation shortcuts. A click opens that content in the CENTER workspace
+              (it does NOT expand the rail); only the chevron expands the full rail. Real icons, no letters. */}
           <div className="sb-rail-mini">
-            <button type="button" className="sb-mini-expand" title="Expand tools" aria-label="Expand left tools" onClick={() => setManualLeftCollapsed(false)}>
+            <button type="button" className="sb-mini-expand" title="Expand tools" aria-label="Expand left tools" onClick={() => setLeftRailCollapsed(false)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
             </button>
-            {[{ k: "all_library", t: "All Library", g: "◎" }, { k: "scheduled", t: "Scheduled", g: "◷" }, { k: "dj_ai", t: "DJ AI", g: "AI" }].map((n) => (
-              <button
-                key={n.k}
-                type="button"
-                className="sb-mini-tile"
-                title={n.t}
-                aria-label={n.t}
-                onClick={() => setManualLeftCollapsed(false)}
-              >
-                <span className="sb-mini-tile-fallback">{n.g}</span>
-              </button>
-            ))}
+            <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="Library" aria-label="Open Library"
+              onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "all_library" }); }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 10v4M7.5 7v10M12 4v16M16.5 7v10M21 10v4" /></svg>
+            </button>
+            <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="Scheduled" aria-label="Open Scheduled Playlists"
+              onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "scheduled_playlists" }); }}>
+              <span className="sb-mini-badge" aria-hidden="true" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" /></svg>
+            </button>
+            <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="DJ AI" aria-label="Open DJ AI"
+              onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "dj_ai" }); }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" /></svg>
+            </button>
           </div>
           <div className="sb-rail-inner space-y-4">
             <section>
@@ -4032,20 +4016,21 @@ function SourcesManagerInner({
 
         {/* ── RIGHT rail — DJ Creator AI pinned; ONE scrollbar, on the playlist list only ── */}
         <aside className="sb-rail sb-rail--right flex w-full min-w-0 flex-col self-start p-1.5 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-hidden">
-          {/* MINI (collapsed): tool icons + Your Playlists artwork; badge-capable; click to expand. */}
+          {/* MINI (collapsed): tool shortcut + Your Playlists artwork. A click OPENS that content in the
+              CENTER (does NOT expand the rail); only the chevron expands. Real covers, subtle icon fallback. */}
           <div className="sb-rail-mini">
-            <button type="button" className="sb-mini-expand" title="Expand tools" aria-label="Expand right tools" onClick={() => setManualRightCollapsed(false)}>
+            <button type="button" className="sb-mini-expand" title="Expand tools" aria-label="Expand right tools" onClick={() => setRightRailCollapsed(false)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
             </button>
             <button
               type="button"
-              className="sb-mini-tile"
+              className="sb-mini-tile sb-mini-tile--tool"
               title="DJ Creator AI"
-              aria-label="DJ Creator AI"
-              onClick={() => setManualRightCollapsed(false)}
+              aria-label="Open DJ Creator AI"
+              onClick={() => setActiveCenterModule("dj-creator-assistant")}
             >
               <span className="sb-mini-badge" aria-hidden="true" />
-              <span className="sb-mini-tile-fallback">AI</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" /></svg>
             </button>
             {userPlaylistContainers.length > 0 ? <div className="sb-mini-sep" /> : null}
             {userPlaylistContainers.slice(0, 14).map((p) => (
@@ -4054,11 +4039,15 @@ function SourcesManagerInner({
                 type="button"
                 className="sb-mini-tile"
                 title={p.label}
-                aria-label={p.label}
-                onClick={() => setManualRightCollapsed(false)}
+                aria-label={`Open ${p.label}`}
+                onClick={() => { setActiveCenterModule(null); setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: p.key }); }}
               >
                 <span className="sb-mini-badge" aria-hidden="true" />
-                {p.cover ? <HydrationSafeImage src={p.cover} alt="" /> : <span className="sb-mini-tile-fallback">{(p.label || "•").slice(0, 1)}</span>}
+                {p.cover ? (
+                  <HydrationSafeImage src={p.cover} alt="" />
+                ) : (
+                  <svg className="sb-mini-fallback-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 18V6l10-2v12" /><circle cx="6.5" cy="18" r="2.5" /><circle cx="16.5" cy="16" r="2.5" /></svg>
+                )}
               </button>
             ))}
           </div>

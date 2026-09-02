@@ -3465,6 +3465,12 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   .sb-mini-tile:hover { transform: scale(1.06); border-color: rgba(148, 163, 184, 0.45); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); }
   .sb-mini-tile:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.65); }
   .sb-mini-tile img { height: 100%; width: 100%; object-fit: cover; }
+  .sb-mini-tile svg { height: 20px; width: 20px; }
+  /* Tool shortcuts (nav / DJ AI) — icon on a subtle chip, distinct from artwork tiles. */
+  .sb-mini-tile--tool { color: #cbd5e1; background: linear-gradient(150deg, rgba(51, 65, 85, 0.5), rgba(30, 41, 59, 0.72)); }
+  .sb-mini-tile--tool:hover { color: #f1f5f9; }
+  /* Fallback for an artwork tile with no cover — a quiet, premium glyph (never a loud letter). */
+  .sb-mini-fallback-icon { color: #647084; }
   .sb-mini-tile-fallback { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; color: #e2e8f0; }
   /* Future signal indicator — mini tiles can raise a dot when their collapsed rail has an alert/request. */
   .sb-mini-badge {
