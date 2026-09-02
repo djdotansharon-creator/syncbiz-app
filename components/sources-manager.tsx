@@ -2404,28 +2404,10 @@ function SourcesManagerInner({
         data-left-collapsed={leftRailCollapsed ? "true" : "false"}
         data-right-collapsed={rightRailCollapsed ? "true" : "false"}
       >
-        {/* Curtain edge handles — always present so a collapsed rail is discoverable + re-openable.
-            Manual toggle overrides the auto-collapse for the current channel (won't auto-close again). */}
-        <button
-          type="button"
-          className="sb-rail-handle sb-rail-handle--left"
-          onClick={() => setLeftRailCollapsed(!leftRailCollapsed)}
-          aria-label={leftRailCollapsed ? "Show left tools" : "Hide left tools"}
-          aria-pressed={!leftRailCollapsed}
-        >
-          <span className="sb-rail-handle-badge" aria-hidden="true" />
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
-        </button>
-        <button
-          type="button"
-          className="sb-rail-handle sb-rail-handle--right"
-          onClick={() => setRightRailCollapsed(!rightRailCollapsed)}
-          aria-label={rightRailCollapsed ? "Show right tools" : "Hide right tools"}
-          aria-pressed={!rightRailCollapsed}
-        >
-          <span className="sb-rail-handle-badge" aria-hidden="true" />
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
-        </button>
+        {/* Collapse/expand controls live INSIDE each rail: the collapse chevron sits in the rail
+            HEADER while expanded (see .sb-rail-collapse below), and the expand chevron sits atop the
+            MINI rail while collapsed (.sb-mini-expand). One control per state, cross-faded by the
+            curtain — no floating edge-tab. */}
         {/* Scheduling tiles only — Ready Playlists removed from here (redundant
             with the "Ready" filter chip under the search bar; the always-open
             list looked cluttered). Keeps the daypart tiles + their Add button. */}
@@ -3928,9 +3910,20 @@ function SourcesManagerInner({
           </div>
           <div className="sb-rail-inner space-y-4">
             <section>
-              <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
-                Library
-              </p>
+              <div className="flex items-center justify-between px-2 pb-1">
+                <p className="library-section-title m-0 text-[10px] font-semibold uppercase tracking-[0.16em]">
+                  Library
+                </p>
+                <button
+                  type="button"
+                  className="sb-rail-collapse"
+                  onClick={() => setLeftRailCollapsed(true)}
+                  title="Collapse library"
+                  aria-label="Collapse library"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+                </button>
+              </div>
               <div className="space-y-0.5">
                 {(() => {
                   const navViewActive = (id: LibraryViewId) =>
@@ -4063,6 +4056,19 @@ function SourcesManagerInner({
             ))}
           </div>
           <div className="sb-rail-inner flex min-h-0 flex-1 flex-col gap-4">
+            {/* Collapse control in the right rail header — mirrors the left. Sits at the inner edge
+                (toward the center gutter), chevron points right to fold the rail away. */}
+            <div className="flex shrink-0 items-center justify-start px-1 pt-0.5">
+              <button
+                type="button"
+                className="sb-rail-collapse"
+                onClick={() => setRightRailCollapsed(true)}
+                title="Collapse tools"
+                aria-label="Collapse tools"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+              </button>
+            </div>
             <div className="shrink-0">
               <DjCreatorAiShell
                 variant="launcher"

@@ -3397,7 +3397,7 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
    overflow-hidden rail, so it slides under instead of reflowing (no squish/flash).
    Only engages at lg+ (side columns exist); tablet-portrait/mobile keep the stack.
    ───────────────────────────────────────────────────────────────────────────── */
-.sb-rail-handle { display: none; } /* handles + curtain engage at lg+ only */
+.sb-rail-collapse { display: none; } /* header collapse control + curtain engage at lg+ only */
 @media (min-width: 1024px) {
   .sb-curtain-grid {
     --sb-rail-l: 240px;   /* animated column width (collapses to 0) */
@@ -3480,10 +3480,30 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   .sb-mini-tile[data-has-signal="true"] .sb-mini-badge { display: block; }
   .sb-mini-sep { height: 1px; width: 34px; background: rgba(148, 163, 184, 0.16); flex-shrink: 0; margin: 2px 0; }
 
-  /* When a rail is collapsed, the mini rail owns re-expansion → hide that side's edge handle (no overlap).
-     The edge handle remains as the COLLAPSE control while the rail is expanded. */
-  .sb-curtain-grid[data-left-collapsed="true"]  .sb-rail-handle--left  { display: none; }
-  .sb-curtain-grid[data-right-collapsed="true"] .sb-rail-handle--right { display: none; }
+  /* EXPANDED-state collapse control — lives INSIDE the rail header (Spotify-like), not a floating tab.
+     Subtle, integrated with the section title; generous target; brightens on hover. It sits inside
+     .sb-rail-inner, so the curtain cross-fades it out as the mini (with .sb-mini-expand) fades in —
+     one control per state, no overlap. */
+  .sb-rail-collapse {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    width: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #6b7280;            /* quiet — reads as part of the header */
+    cursor: pointer;
+    transition: color 150ms ease, background 150ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .sb-rail-collapse:hover { color: #e5e7eb; background: rgba(148, 163, 184, 0.10); }
+  .sb-rail-collapse:focus-visible { outline: none; color: #e5e7eb; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.5); }
+  .sb-rail-collapse svg { height: 15px; width: 15px; }
+
   /* Curtain-handle affordance: no box — just a faint edge tick + chevron. Generous invisible hit target;
      obvious when you look for it, almost invisible when you don't. Brightens on hover. */
   .sb-mini-expand {
@@ -3519,40 +3539,6 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   .sb-mini-expand:focus-visible { outline: none; color: #cbd5e1; border-radius: 8px; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.5); }
   .sb-mini-expand svg { height: 12px; width: 12px; }
 
-  /* Persistent edge handles — always present so a collapsed rail is discoverable
-     and re-openable (never a vanished-with-no-trace rail). Structured with a slot
-     for a future badge/indicator (collapse the surface, never the signal). */
-  .sb-rail-handle {
-    position: absolute;
-    top: 14px;
-    z-index: 40;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 46px;
-    width: 20px;
-    color: #9aa4b2;
-    background: rgba(15, 23, 42, 0.82);
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.04), 0 2px 8px rgba(0, 0, 0, 0.35);
-    backdrop-filter: blur(6px);
-    cursor: pointer;
-    transition: color 150ms ease, background 150ms ease, border-color 150ms ease, transform 150ms ease;
-  }
-  .sb-rail-handle:hover { color: #f5f5f7; background: rgba(30, 41, 59, 0.92); border-color: rgba(148, 163, 184, 0.4); }
-  .sb-rail-handle:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.6); }
-  .sb-rail-handle--left  { left: 0;  border-left: 0;  border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
-  .sb-rail-handle--right { right: 0; border-right: 0; border-top-left-radius: 10px;  border-bottom-left-radius: 10px; }
-  .sb-rail-handle svg { transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1); }
-  /* Chevron points toward the action: outward when collapsed (pull rail in), inward when open (push it away). */
-  .sb-curtain-grid[data-left-collapsed="false"]  .sb-rail-handle--left  svg { transform: rotate(180deg); }
-  .sb-curtain-grid[data-right-collapsed="false"] .sb-rail-handle--right svg { transform: rotate(180deg); }
-  /* Future badge slot: a small dot the handle can raise when a collapsed rail has a signal. */
-  .sb-rail-handle .sb-rail-handle-badge {
-    position: absolute; top: 4px; right: 3px; height: 7px; width: 7px; border-radius: 9999px;
-    background: #ff453a; box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.9); display: none;
-  }
-  .sb-rail-handle[data-has-signal="true"] .sb-rail-handle-badge { display: block; }
 }
 @media (min-width: 1280px) {
   .sb-curtain-grid { --sb-rail-l: 260px; --sb-rail-r: 260px; --sb-rail-w: 260px; }
@@ -3563,5 +3549,4 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 @media (prefers-reduced-motion: reduce) {
   .sb-curtain-grid { transition: none; }
   .sb-rail-inner { transition: none; }
-  .sb-rail-handle svg { transition: none; }
 }
