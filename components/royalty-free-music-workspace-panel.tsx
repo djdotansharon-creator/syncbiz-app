@@ -83,17 +83,10 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   const ownedCount = ownedGenreIds.size;
   const totalPacks = genres.length;
   const ownershipState: "none" | "partial" | "full" = ownedCount === 0 ? "none" : ownedCount >= totalPacks ? "full" : "partial";
-  // Offline availability is PER Genre Pack (not a global header toggle). UI state/placement only — the
-  // real Offline engine/manifest is untouched; this records the per-pack intent until that wiring lands.
-  const [offlineGenreIds, setOfflineGenreIds] = useState<Set<string>>(() => new Set());
-  const toggleOffline = useCallback((id: string) => {
-    setOfflineGenreIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  // Offline availability is PER Genre Pack (the correct content-level placement), but the real pipeline
+  // (manifest → download → verified local → auto local playback) is NOT built yet — a separate audited
+  // task. So the per-pack Offline action is an HONEST, non-operative "Coming soon" affordance: no toggle,
+  // no check, no persisted state, nothing implying bytes were downloaded (see <OfflineAction/>).
   // Locked-pack upgrade is CONTEXTUAL: Unlock on a pack opens a focused modal. Subscription/plan
   // management is NOT in the catalog header — it lives under Settings → Billing & Plan.
   const [unlockTarget, setUnlockTarget] = useState<MusicBankGenrePack | null>(null);
@@ -260,8 +253,6 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
             trackPlayable={trackPlayable}
             nowPlaying={nowPlaying}
             owned={ownedGenreIds.has(selectedGenre.id)}
-            offline={offlineGenreIds.has(selectedGenre.id)}
-            onToggleOffline={() => toggleOffline(selectedGenre.id)}
             onUnlock={() => setUnlockTarget(selectedGenre)}
             onPlaySamples={() => playGenreSamples(selectedGenre)}
             onPlayTrack={(t) => playTrack(selectedGenre, t)}
@@ -273,8 +264,6 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
             genres={genres}
             totalSamples={totalSamples}
             ownedGenreIds={ownedGenreIds}
-            offlineGenreIds={offlineGenreIds}
-            onToggleOffline={toggleOffline}
             onUnlock={(g) => setUnlockTarget(g)}
             ownershipState={ownershipState}
             onOpen={(id) => setView(id)}
@@ -326,33 +315,27 @@ function GenreCover({ genre }: { genre: MusicBankGenrePack }) {
 }
 
 /**
- * Per-pack Offline control — a small, familiar action on the CONTENT itself (not the Music Bank header):
- * a download affordance → an "Available offline" check. UI PLACEMENT/STATE ONLY — the real Keep-Offline
- * engine/manifest is untouched; this records the operator's per-pack intent until that wiring lands.
- * `compact` = icon-only (narrow catalog cards); `onLight` = tuned for the dark artwork header.
+ * Per-pack Offline — the correct CONTENT-level placement (not the Music Bank header), but NOT yet
+ * operative. The real Genre-Pack offline pipeline (manifest → download → verified local availability →
+ * automatic local playback/fallback) is a separate, sensitive, audited task. Until then this is an
+ * HONEST, non-interactive "Coming soon" affordance: a plain <span> (no onClick), muted/disabled tone,
+ * a download glyph + "Offline · Coming soon". It NEVER toggles to "Available offline", shows a check,
+ * persists state, or implies bytes were downloaded. `compact` shortens the note for narrow cards;
+ * `onLight` tunes it for the dark artwork header.
  */
-function OfflineAction({ on, onToggle, compact, onLight }: { on: boolean; onToggle: () => void; compact?: boolean; onLight?: boolean }) {
-  const label = on ? "Available offline" : "Make available offline";
-  const icon = on ? (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
-  ) : (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v10" /><path d="M8 12l4 4 4-4" /><path d="M5 20h14" /></svg>
-  );
-  const tone = on
-    ? onLight ? "bg-white/10 text-white/90 hover:bg-white/15" : "text-[#7db8ff] hover:text-[#9cccff]"
-    : onLight ? "text-white/85 hover:bg-white/10 hover:text-white" : "text-[#c7c7cc] hover:bg-white/[0.06] hover:text-[#f5f5f7]";
-  if (compact) {
-    return (
-      <button type="button" onClick={onToggle} aria-pressed={on} title={label} className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition ${tone}`}>
-        {icon}
-      </button>
-    );
-  }
+function OfflineAction({ compact, onLight }: { compact?: boolean; onLight?: boolean }) {
+  const tone = onLight ? "text-white/45" : "text-[#77777c]";
+  const soonTone = onLight ? "text-white/35" : "text-[#5f5f65]";
   return (
-    <button type="button" onClick={onToggle} aria-pressed={on} title={label} className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-semibold transition ${tone}`}>
-      {icon}
-      {label}
-    </button>
+    <span
+      aria-disabled="true"
+      title="Make available offline — coming soon"
+      className={`inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-semibold ${tone}`}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v10" /><path d="M8 12l4 4 4-4" /><path d="M5 20h14" /></svg>
+      Offline
+      <span className={`font-medium ${soonTone}`}>· {compact ? "Soon" : "Coming soon"}</span>
+    </span>
   );
 }
 
@@ -392,8 +375,6 @@ function CatalogHome({
   genres,
   totalSamples,
   ownedGenreIds,
-  offlineGenreIds,
-  onToggleOffline,
   onUnlock,
   ownershipState,
   onOpen,
@@ -402,8 +383,6 @@ function CatalogHome({
   genres: MusicBankGenrePack[];
   totalSamples: number;
   ownedGenreIds: Set<string>;
-  offlineGenreIds: Set<string>;
-  onToggleOffline: (id: string) => void;
   onUnlock: (genre: MusicBankGenrePack) => void;
   ownershipState: "none" | "partial" | "full";
   onOpen: (id: string) => void;
@@ -439,8 +418,8 @@ function CatalogHome({
               <div className="flex items-center justify-between gap-2 px-3.5 py-2.5">
                 <button type="button" onClick={() => onOpen(genre.id)} className="text-xs font-medium text-[#68b0ff] transition hover:text-[#9cccff]">Listen to samples →</button>
                 {owned ? (
-                  /* UNLOCKED pack → normal music actions. Offline is per-pack (familiar download action). */
-                  <OfflineAction on={offlineGenreIds.has(genre.id)} onToggle={() => onToggleOffline(genre.id)} compact />
+                  /* UNLOCKED pack → per-pack Offline placement (honest "Coming soon" — not operative yet). */
+                  <OfflineAction compact />
                 ) : (
                   /* LOCKED pack → price + Unlock (contextual upgrade). */
                   <span className="flex items-baseline gap-2">
@@ -469,8 +448,6 @@ function GenreDetail({
   trackPlayable,
   nowPlaying,
   owned,
-  offline,
-  onToggleOffline,
   onUnlock,
   onPlaySamples,
   onPlayTrack,
@@ -481,8 +458,6 @@ function GenreDetail({
   trackPlayable: (id: string) => boolean;
   nowPlaying: { genreId: string; trackId: string | null } | null;
   owned: boolean;
-  offline: boolean;
-  onToggleOffline: () => void;
   onUnlock: () => void;
   onPlaySamples: () => void;
   onPlayTrack: (t: MusicBankSampleTrack) => void;
@@ -519,7 +494,7 @@ function GenreDetail({
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
                   Owned
                 </span>
-                <OfflineAction on={offline} onToggle={onToggleOffline} onLight />
+                <OfflineAction onLight />
               </span>
             ) : (
               /* LOCKED → price + Unlock (opens the contextual upgrade modal). */
