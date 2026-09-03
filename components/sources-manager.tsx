@@ -3928,7 +3928,8 @@ function SourcesManagerInner({
                  compact daypart thumbnails. Clicking a thumbnail opens that schedule in the CENTER. */
               <>
                 <button type="button" className="sb-mini-back" title="Back to tools" aria-label="Back to tools" onClick={() => setMiniScheduledOpen(false)}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 15l-6-6-6 6" /></svg>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+                  <span className="sb-mini-back-label">Back</span>
                 </button>
                 <button type="button" className="sb-mini-tile sb-mini-tile--tool sb-mini-tile--active" title="All scheduled" aria-label="Open all scheduled playlists"
                   onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "scheduled_playlists" }); }}>

@@ -3474,6 +3474,13 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   .sb-curtain-grid[data-left-collapsed="true"]  { --sb-rail-l: 88px; }
   .sb-curtain-grid[data-right-collapsed="true"] { --sb-rail-r: 76px; }
 
+  /* REAL left-edge clip fix (not "widen the rail"): the left aside carries `overflow-y-auto` for its
+     EXPANDED library nav. While the rail is COLLAPSED that nav is invisible-but-in-flow (tall) → the
+     aside grows a ~15px vertical SCROLLBAR that eats width from the absolute mini overlay (inset:0),
+     squeezing/left-shifting the artwork against the edge. When collapsed the mini owns its OWN scroll,
+     so the aside itself must not scroll — kill its overflow so the mini gets the full rail width. */
+  .sb-curtain-grid[data-left-collapsed="true"] .sb-rail--left { overflow: hidden; }
+
   /* Rail column animates to the mini width; overflow-x clips the fixed-width FULL inner (leave
      overflow-y to the aside's own scroll). Position:relative anchors the absolute mini overlay. */
   .sb-rail { overflow-x: hidden; min-width: 0; position: relative; }
@@ -3533,26 +3540,29 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   .sb-mini-tile--tool:hover { color: #f1f5f9; }
   /* Active context header (e.g. the Scheduled clock while the mini rail is in Scheduled context). */
   .sb-mini-tile--active { color: #7db8ff; border-color: rgba(10, 132, 255, 0.55); box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.35); }
-  /* Subtle "back to tools" affordance atop a mini-rail context — quiet, integrated (not a boxy button). */
+  /* "Back to tools" affordance atop a mini-rail context — a CLEAR control (subtle chip + back arrow),
+     visibly distinct from the artwork/tool tiles so the operator knows how to leave the context. */
   .sb-mini-back {
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 22px;
-    width: 40px;
+    gap: 3px;
+    height: 26px;
+    width: 52px;
     padding: 0;
     border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: #7f8896;
+    border-radius: 9px;
+    background: rgba(148, 163, 184, 0.12);
+    color: #c2cad6;
     cursor: pointer;
-    margin-bottom: 1px;
+    margin-bottom: 4px;
     transition: color 150ms ease, background 150ms ease;
   }
-  .sb-mini-back:hover { color: #f5f5f7; background: rgba(148, 163, 184, 0.14); }
+  .sb-mini-back:hover { color: #f5f5f7; background: rgba(148, 163, 184, 0.2); }
   .sb-mini-back:focus-visible { outline: none; color: #f5f5f7; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.5); }
   .sb-mini-back svg { height: 15px; width: 15px; }
+  .sb-mini-back-label { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
   /* Fallback for an artwork tile with no cover — a quiet, premium glyph (never a loud letter). */
   .sb-mini-fallback-icon { color: #647084; }
   .sb-mini-tile-fallback { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; color: #e2e8f0; }
