@@ -853,6 +853,16 @@ function SourcesManagerInner({
   const rfmCurtainActive = RFM_CATALOG_ENABLED && isRoyaltyFreeMusicModule(activeCenterModule);
   const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
   const [rightRailCollapsed, setRightRailCollapsed] = useState(false);
+  // Per-section "curtain" collapse in the center: collapsed shows a compact covers+time strip
+  // (names hidden via CSS on data-collapsed); expanded shows the full cards. Visual/density only.
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const toggleSectionCollapsed = (id: string) =>
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   // Auto-collapse ONCE on the transition INTO RFM; on exit we leave the rails as they are (sticky) so
   // mini-rail navigation doesn't bounce the layout back open.
   const prevRfmCurtainActiveRef = useRef(false);
@@ -3708,8 +3718,18 @@ function SourcesManagerInner({
                 const sectionItems = sectionBuckets[sectionId];
                 if (sectionItems.length === 0) return null;
                 return (
-                  <section key={sectionId} className="library-section space-y-5">
-                    <div className="library-section-header flex items-end gap-4 pb-3">
+                  <section key={sectionId} className="library-section space-y-5" data-collapsed={collapsedSections.has(sectionId) ? "true" : "false"}>
+                    <div className="library-section-header flex items-center gap-3 pb-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSectionCollapsed(sectionId)}
+                        className="library-section-toggle"
+                        aria-expanded={!collapsedSections.has(sectionId)}
+                        aria-label={collapsedSections.has(sectionId) ? "Expand section" : "Collapse section"}
+                        title={collapsedSections.has(sectionId) ? "Expand — show names" : "Collapse — covers only"}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                      </button>
                       <div className="min-w-0 flex-1">
                         <h2 className="library-section-title text-[11px] font-semibold uppercase tracking-[0.18em]">
                           {librarySectionLabel(t, sectionId)}

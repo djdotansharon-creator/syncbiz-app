@@ -1559,6 +1559,67 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   color: var(--lib-text-faint);
 }
 
+/* Section "curtain" toggle — collapse a section to a compact covers+time strip, expand to full cards.
+   Chevron points down when open, rotates to a right-facing ">" when collapsed. */
+.library-section-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  width: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--lib-text-faint);
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease;
+}
+.library-section-toggle:hover {
+  color: var(--lib-text-muted);
+  background: color-mix(in srgb, var(--lib-border-subtle) 45%, transparent);
+}
+.library-section-toggle:focus-visible {
+  outline: none;
+  color: var(--lib-text-muted);
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.5);
+}
+.library-section-toggle svg {
+  height: 16px;
+  width: 16px;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.library-section[data-collapsed="true"] .library-section-toggle svg {
+  transform: rotate(-90deg);
+}
+
+/* Curtain collapse — the NAME + genre/platform lines fade + collapse (smooth, not an instant snap),
+   leaving the cover art (with its duration pill overlay) and the meta footer time/count: a clean
+   "covers + times" strip. The max-height baselines are generous anchors so EXPANDED cards are never
+   clamped (titles sit far under 6rem); they exist only so the collapse can animate to 0. Additive. */
+.library-source-card .sb-lbc-title,
+.library-source-card .library-card-genre-line,
+.library-source-card .library-card-platform-line {
+  overflow: hidden;
+  transition: opacity 170ms ease, max-height 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.library-source-card .sb-lbc-title { max-height: 6rem; }
+.library-source-card .library-card-genre-line,
+.library-source-card .library-card-platform-line { max-height: 3rem; }
+.library-section[data-collapsed="true"] .sb-lbc-title,
+.library-section[data-collapsed="true"] .library-card-genre-line,
+.library-section[data-collapsed="true"] .library-card-platform-line {
+  opacity: 0;
+  max-height: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .library-source-card .sb-lbc-title,
+  .library-source-card .library-card-genre-line,
+  .library-source-card .library-card-platform-line { transition: none; }
+}
+
 .library-list-shell {
   border: 1px solid var(--lib-border-subtle);
   background: var(--lib-surface-list);
@@ -1579,14 +1640,15 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   box-shadow: var(--lib-shadow-thumb-inset);
 }
 
-/* Library canvas around the grouped sections (normalizes surface between cards/rows). */
+/* Library canvas around the grouped sections. Open-canvas: no boxy frame — the sections sit on
+   the center surface, separated by space + typography, not a nested bordered card. */
 .library-sections-canvas {
-  background: var(--lib-surface-rail);
-  border: 1px solid color-mix(in srgb, var(--lib-border-subtle) 60%, transparent);
-  border-radius: 1.25rem;
-  box-shadow: var(--lib-shadow-rail-inset);
-  overflow: hidden;
-  padding: 1.5rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+  padding: 0.25rem 0 0;
 }
 
 /*
@@ -3409,8 +3471,8 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   /* Collapsed = MINI (not 0): the rail folds into a compact strip that keeps artwork/tool icons +
      orientation (Spotify-style), never a vanished side. Left keeps room for cover squares; right for
      tool icons. Widths are constant (don't scale with the breakpoint). */
-  .sb-curtain-grid[data-left-collapsed="true"]  { --sb-rail-l: 76px; }
-  .sb-curtain-grid[data-right-collapsed="true"] { --sb-rail-r: 62px; }
+  .sb-curtain-grid[data-left-collapsed="true"]  { --sb-rail-l: 88px; }
+  .sb-curtain-grid[data-right-collapsed="true"] { --sb-rail-r: 76px; }
 
   /* Rail column animates to the mini width; overflow-x clips the fixed-width FULL inner (leave
      overflow-y to the aside's own scroll). Position:relative anchors the absolute mini overlay. */
@@ -3432,8 +3494,8 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
-    padding: 10px 0 12px;
+    gap: 7px;
+    padding: 8px 5px 14px;  /* horizontal room so tiles/affordance never touch the edge; extra bottom */
     overflow-y: auto;
     overflow-x: hidden;
     opacity: 0;
@@ -3448,9 +3510,9 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   .sb-mini-tile {
     position: relative;
     flex-shrink: 0;
-    height: 52px;
-    width: 52px;
-    border-radius: 13px;
+    height: 46px;
+    width: 46px;
+    border-radius: 12px;
     overflow: hidden;
     display: flex;
     align-items: center;
@@ -3462,7 +3524,7 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
     transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease, box-shadow 160ms ease;
   }
   .sb-rail--right .sb-mini-tile { height: 44px; width: 44px; border-radius: 12px; }
-  .sb-mini-tile:hover { transform: scale(1.06); border-color: rgba(148, 163, 184, 0.45); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); }
+  .sb-mini-tile:hover { transform: scale(1.03); border-color: rgba(148, 163, 184, 0.45); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35); }
   .sb-mini-tile:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.65); }
   .sb-mini-tile img { height: 100%; width: 100%; object-fit: cover; }
   .sb-mini-tile svg { height: 20px; width: 20px; }
@@ -3489,55 +3551,42 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
     flex-shrink: 0;
     align-items: center;
     justify-content: center;
-    height: 24px;
-    width: 24px;
+    height: 28px;
+    width: 28px;
     padding: 0;
     border: 0;
-    border-radius: 7px;
-    background: transparent;
-    color: #6b7280;            /* quiet — reads as part of the header */
+    border-radius: 8px;
+    background: transparent;                   /* integrated at rest — no floating box */
+    color: #9aa4b2;                            /* clearly visible on its own */
     cursor: pointer;
     transition: color 150ms ease, background 150ms ease;
     -webkit-tap-highlight-color: transparent;
   }
-  .sb-rail-collapse:hover { color: #e5e7eb; background: rgba(148, 163, 184, 0.10); }
-  .sb-rail-collapse:focus-visible { outline: none; color: #e5e7eb; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.5); }
-  .sb-rail-collapse svg { height: 15px; width: 15px; }
+  .sb-rail-collapse:hover { color: #f5f5f7; background: rgba(148, 163, 184, 0.12); }
+  .sb-rail-collapse:focus-visible { outline: none; color: #f5f5f7; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.5); }
+  .sb-rail-collapse svg { height: 18px; width: 18px; }
 
-  /* Curtain-handle affordance: no box — just a faint edge tick + chevron. Generous invisible hit target;
-     obvious when you look for it, almost invisible when you don't. Brightens on hover. */
+  /* Expand affordance atop the mini rail — a clear, tappable chevron button (subtle chip so it
+     reads as a control at a glance), mirroring the header collapse control. */
   .sb-mini-expand {
     flex-shrink: 0;
-    position: relative;
-    height: 30px;              /* generous hit target */
-    width: 34px;
+    height: 34px;
+    width: 40px;
     padding: 0;
     border: 0;
-    background: transparent;
+    border-radius: 10px;
+    background: transparent;    /* integrated at rest — no floating box */
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: #5d6472;            /* quiet by default */
+    color: #9aa4b2;             /* clearly visible chevron on its own */
     cursor: pointer;
-    margin-bottom: 1px;
-    transition: color 150ms ease;
+    margin-bottom: 2px;
+    transition: color 150ms ease, background 150ms ease;
   }
-  /* the subtle vertical "handle" edge next to the chevron */
-  .sb-mini-expand::before {
-    content: "";
-    position: absolute;
-    height: 14px;
-    width: 2px;
-    border-radius: 2px;
-    background: currentColor;
-    opacity: 0.35;
-    margin-inline-end: 13px;   /* sit just to the chevron's leading side */
-    transition: opacity 150ms ease;
-  }
-  .sb-mini-expand:hover { color: #cbd5e1; }
-  .sb-mini-expand:hover::before { opacity: 0.7; }
-  .sb-mini-expand:focus-visible { outline: none; color: #cbd5e1; border-radius: 8px; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.5); }
-  .sb-mini-expand svg { height: 12px; width: 12px; }
+  .sb-mini-expand:hover { color: #f5f5f7; background: rgba(148, 163, 184, 0.14); }
+  .sb-mini-expand:focus-visible { outline: none; color: #f5f5f7; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.5); }
+  .sb-mini-expand svg { height: 20px; width: 20px; }
 
 }
 @media (min-width: 1280px) {
