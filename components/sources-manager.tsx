@@ -853,6 +853,10 @@ function SourcesManagerInner({
   const rfmCurtainActive = RFM_CATALOG_ENABLED && isRoyaltyFreeMusicModule(activeCenterModule);
   const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
   const [rightRailCollapsed, setRightRailCollapsed] = useState(false);
+  // The MINI left rail can itself enter a "Scheduled" context (Spotify-collapsed-library style): the
+  // clock stays on top + compact daypart thumbnails below, without expanding the full rail. Reset when
+  // the rail expands so re-collapsing lands back on the normal tools.
+  const [miniScheduledOpen, setMiniScheduledOpen] = useState(false);
   // Per-section "curtain" collapse in the center: collapsed shows a compact covers+time strip
   // (names hidden via CSS on data-collapsed); expanded shows the full cards. Visual/density only.
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
@@ -873,6 +877,10 @@ function SourcesManagerInner({
     }
     prevRfmCurtainActiveRef.current = rfmCurtainActive;
   }, [rfmCurtainActive]);
+  // Leaving MINI (rail expanded) drops the Scheduled mini-context so re-collapsing shows normal tools.
+  useEffect(() => {
+    if (!leftRailCollapsed) setMiniScheduledOpen(false);
+  }, [leftRailCollapsed]);
 
   const selectionKeyForMyMusicDismissRef = useRef<string>(
     JSON.stringify({ type: "library_view", id: "all_library" } satisfies LibrarySelection),
@@ -3914,19 +3922,59 @@ function SourcesManagerInner({
             <button type="button" className="sb-mini-expand" title="Expand tools" aria-label="Expand left tools" onClick={() => setLeftRailCollapsed(false)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
             </button>
-            <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="Library" aria-label="Open Library"
-              onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "all_library" }); }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 10v4M7.5 7v10M12 4v16M16.5 7v10M21 10v4" /></svg>
-            </button>
-            <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="Scheduled" aria-label="Open Scheduled Playlists"
-              onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "scheduled_playlists" }); }}>
-              <span className="sb-mini-badge" aria-hidden="true" />
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" /></svg>
-            </button>
-            <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="DJ AI" aria-label="Open DJ AI"
-              onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "dj_ai" }); }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" /></svg>
-            </button>
+            {miniScheduledOpen ? (
+              /* SCHEDULED mini-context — the collapsed rail itself shows useful content (Spotify-like):
+                 a subtle back, the clock header (opens the full Scheduled view in the CENTER), then
+                 compact daypart thumbnails. Clicking a thumbnail opens that schedule in the CENTER. */
+              <>
+                <button type="button" className="sb-mini-back" title="Back to tools" aria-label="Back to tools" onClick={() => setMiniScheduledOpen(false)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 15l-6-6-6 6" /></svg>
+                </button>
+                <button type="button" className="sb-mini-tile sb-mini-tile--tool sb-mini-tile--active" title="All scheduled" aria-label="Open all scheduled playlists"
+                  onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "scheduled_playlists" }); }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" /></svg>
+                </button>
+                {FIXED_DAYPART_PADS.map((pad) => {
+                  const assignedPlaylistKey = daypartPlaylistAssignments[pad.key];
+                  const assignedPlaylist = assignedPlaylistKey ? playlistSourceByKey.get(assignedPlaylistKey) : undefined;
+                  const tileCover = assignedPlaylist?.cover ?? containers.dayparts.find((d) => d.key === pad.key)?.cover ?? null;
+                  return (
+                    <button
+                      key={`mini-daypart:${pad.key}`}
+                      type="button"
+                      className="sb-mini-tile"
+                      title={`${pad.label}${assignedPlaylist?.title ? ` · ${assignedPlaylist.title}` : ""}`}
+                      aria-label={`Open ${pad.label} schedule`}
+                      onClick={() => { setActiveCenterModule(null); openDaypartTile(pad.key); }}
+                    >
+                      {tileCover ? (
+                        <HydrationSafeImage src={tileCover} alt="" />
+                      ) : (
+                        <svg className="sb-mini-fallback-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" /></svg>
+                      )}
+                      <span className={`pointer-events-none absolute bottom-1 left-1 h-2 w-2 rounded-full ${pad.tone} ring-2 ring-black/50`} aria-hidden="true" />
+                    </button>
+                  );
+                })}
+              </>
+            ) : (
+              <>
+                <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="Library" aria-label="Open Library"
+                  onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "all_library" }); }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 10v4M7.5 7v10M12 4v16M16.5 7v10M21 10v4" /></svg>
+                </button>
+                {/* MINI Scheduled: enters the Scheduled context IN the mini rail (does NOT expand the rail). */}
+                <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="Scheduled" aria-label="Scheduled"
+                  onClick={() => setMiniScheduledOpen(true)}>
+                  <span className="sb-mini-badge" aria-hidden="true" />
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" /></svg>
+                </button>
+                <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="DJ AI" aria-label="Open DJ AI"
+                  onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "dj_ai" }); }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" /></svg>
+                </button>
+              </>
+            )}
           </div>
           <div className="sb-rail-inner space-y-4">
             <section>

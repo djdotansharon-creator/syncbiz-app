@@ -54,7 +54,9 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   const [bridgeChecked, setBridgeChecked] = useState(false);
   const [view, setView] = useState<ActiveView>("all");
   const [nowPlaying, setNowPlaying] = useState<{ genreId: string; trackId: string | null } | null>(null);
-  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("stream");
+  // Stream is the single playback path now (the dev Stream/Local header toggle was removed — per-pack
+  // Offline is the content-level control instead). Kept as state so the routing logic below is untouched.
+  const [playbackMode] = useState<PlaybackMode>("stream");
   // Streaming readiness: the MASTER holds the media token (via <MasterMediaSession/>). A CONTROL never
   // holds a token — it just routes the token-free source to the MASTER, which plays with ITS token.
   const [hasMasterToken, setHasMasterToken] = useState(false);
@@ -81,8 +83,20 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   const ownedCount = ownedGenreIds.size;
   const totalPacks = genres.length;
   const ownershipState: "none" | "partial" | "full" = ownedCount === 0 ? "none" : ownedCount >= totalPacks ? "full" : "partial";
-  // Plans are on-demand (a quiet header action + popover), not an always-on strip.
-  const [showPlans, setShowPlans] = useState(false);
+  // Offline availability is PER Genre Pack (not a global header toggle). UI state/placement only — the
+  // real Offline engine/manifest is untouched; this records the per-pack intent until that wiring lands.
+  const [offlineGenreIds, setOfflineGenreIds] = useState<Set<string>>(() => new Set());
+  const toggleOffline = useCallback((id: string) => {
+    setOfflineGenreIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  // Locked-pack upgrade is CONTEXTUAL: Unlock on a pack opens a focused modal. Subscription/plan
+  // management is NOT in the catalog header — it lives under Settings → Billing & Plan.
+  const [unlockTarget, setUnlockTarget] = useState<MusicBankGenrePack | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -210,58 +224,25 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
 
   return (
     <div className="sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-col overflow-hidden text-[#f5f5f7]">
-      {/* Header — minimal: title + a quiet Plans/ownership action + transport toggle + close. Pricing is
-          on-demand (popover), never an always-on strip → the music starts higher on the screen. */}
-      <header className="relative flex items-center justify-between gap-3 px-5 pb-2 pt-3.5">
+      {/* Header — CATALOG = MUSIC. Extremely simple: title + a very subtle ownership status + close.
+          NO Plans / NO Stream-Local / NO pricing strip. Plan management lives in Settings → Billing &
+          Plan; locked-pack upgrade is contextual (per-pack Unlock → focused modal). */}
+      <header className="relative flex items-center justify-between gap-3 px-5 pb-2.5 pt-3.5">
         <div className="flex min-w-0 items-baseline gap-2.5">
           <h2 className="text-[15px] font-semibold tracking-tight text-white">Royalty-Free Music</h2>
           <span className="hidden truncate text-[11px] text-[#6b6b70] md:inline">{totalPacks} packs</span>
         </div>
         <div className="flex items-center gap-1.5">
-          {ownershipState === "full" ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-2.5 py-1 text-[11px] font-medium text-[#c7c7cc]">
+          {ownedCount > 0 ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-2.5 py-1 text-[11px] font-medium text-[#c7c7cc]" title="Genre Packs unlocked">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#7db8ff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
-              {totalPacks}/{totalPacks} unlocked
+              {ownedCount}/{totalPacks} unlocked
             </span>
-          ) : (
-            <button type="button" onClick={() => setShowPlans((v) => !v)} title="Music Bank plans" aria-expanded={showPlans} className="inline-flex items-center gap-1 rounded-full bg-white/[0.05] px-2.5 py-1 text-[11px] font-medium text-[#c7c7cc] transition hover:bg-white/[0.09] hover:text-[#f5f5f7]">
-              {ownershipState === "partial" ? `${ownedCount}/${totalPacks} unlocked` : "Plans"}
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={`transition-transform ${showPlans ? "rotate-180" : ""}`}><path d="M6 9l6 6 6-6" /></svg>
-            </button>
-          )}
-          {/* Stream/Local A/B (dev) — quiet segmented control, no hard frame. */}
-          <div className="inline-flex overflow-hidden rounded-full bg-white/[0.045] p-0.5 text-[11px]">
-            {(["stream", "local"] as PlaybackMode[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setPlaybackMode(m)}
-                className={`rounded-full px-2.5 py-0.5 font-medium transition ${playbackMode === m ? "bg-[#0a84ff] text-white" : "text-[#9a9a9f] hover:text-[#f5f5f7]"}`}
-                title={m === "stream" ? "SyncBiz HTTPS media streaming" : "Local preview cache (POC)"}
-              >
-                {m === "stream" ? "Stream" : "Local"}
-              </button>
-            ))}
-          </div>
+          ) : null}
           <button type="button" onClick={onClose} aria-label="Close" title="Close" className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#8a8a8f] transition hover:bg-white/[0.06] hover:text-[#f5f5f7]">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
           </button>
         </div>
-
-        {/* Plans popover — on-demand, anchored to the header; a full-screen invisible backdrop closes it. */}
-        {showPlans && ownershipState !== "full" ? (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setShowPlans(false)} aria-hidden="true" />
-            <div className="absolute right-5 top-[calc(100%-4px)] z-50 w-64 overflow-hidden rounded-xl bg-[#15151a] shadow-[0_18px_50px_-16px_rgba(0,0,0,0.8)] ring-1 ring-inset ring-white/[0.08]">
-              <p className="px-3.5 pb-1 pt-3 text-[10px] font-medium uppercase tracking-[0.14em] text-[#77777c]">Your Music Bank</p>
-              {ownershipState === "partial" ? <p className="px-3.5 pb-1 text-[11px] text-[#9a9a9f]">{ownedCount}/{totalPacks} unlocked — complete the bank:</p> : null}
-              <PlanRow label="1 Genre Pack" price={GENRE_PRICE_LABEL} />
-              <PlanRow label={`Choose ${CHOICE3_PACK_COUNT} Genre Packs`} price={CHOICE3_PRICE_LABEL} />
-              <PlanRow label="Full Music Bank" price={FULL_BANK_PRICE_LABEL} best />
-              <p className="px-3.5 pb-3 pt-1.5 text-[10px] text-[#6b6b70]">Payments &amp; entitlements coming soon.</p>
-            </div>
-          </>
-        ) : null}
       </header>
 
       {/* Genre navigation — quiet pills, separated by space, not a frame. */}
@@ -279,15 +260,32 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
             trackPlayable={trackPlayable}
             nowPlaying={nowPlaying}
             owned={ownedGenreIds.has(selectedGenre.id)}
+            offline={offlineGenreIds.has(selectedGenre.id)}
+            onToggleOffline={() => toggleOffline(selectedGenre.id)}
+            onUnlock={() => setUnlockTarget(selectedGenre)}
             onPlaySamples={() => playGenreSamples(selectedGenre)}
             onPlayTrack={(t) => playTrack(selectedGenre, t)}
             onBack={() => setView("all")}
             notPlayableHint={notPlayableHint}
           />
         ) : (
-          <CatalogHome genres={genres} totalSamples={totalSamples} ownedGenreIds={ownedGenreIds} ownershipState={ownershipState} onOpen={(id) => setView(id)} notPlayableHint={notPlayableHint} />
+          <CatalogHome
+            genres={genres}
+            totalSamples={totalSamples}
+            ownedGenreIds={ownedGenreIds}
+            offlineGenreIds={offlineGenreIds}
+            onToggleOffline={toggleOffline}
+            onUnlock={(g) => setUnlockTarget(g)}
+            ownershipState={ownershipState}
+            onOpen={(id) => setView(id)}
+            notPlayableHint={notPlayableHint}
+          />
         )}
       </div>
+
+      {/* Contextual upgrade — a focused modal, opened only when a LOCKED pack's Unlock is clicked.
+          Subscription/plan management is NOT here (it lives under Settings → Billing & Plan). */}
+      {unlockTarget ? <UnlockModal genre={unlockTarget} onClose={() => setUnlockTarget(null)} /> : null}
     </div>
   );
 }
@@ -327,10 +325,76 @@ function GenreCover({ genre }: { genre: MusicBankGenrePack }) {
   return <GenrePackArt id={genre.id} />;
 }
 
+/**
+ * Per-pack Offline control — a small, familiar action on the CONTENT itself (not the Music Bank header):
+ * a download affordance → an "Available offline" check. UI PLACEMENT/STATE ONLY — the real Keep-Offline
+ * engine/manifest is untouched; this records the operator's per-pack intent until that wiring lands.
+ * `compact` = icon-only (narrow catalog cards); `onLight` = tuned for the dark artwork header.
+ */
+function OfflineAction({ on, onToggle, compact, onLight }: { on: boolean; onToggle: () => void; compact?: boolean; onLight?: boolean }) {
+  const label = on ? "Available offline" : "Make available offline";
+  const icon = on ? (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
+  ) : (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v10" /><path d="M8 12l4 4 4-4" /><path d="M5 20h14" /></svg>
+  );
+  const tone = on
+    ? onLight ? "bg-white/10 text-white/90 hover:bg-white/15" : "text-[#7db8ff] hover:text-[#9cccff]"
+    : onLight ? "text-white/85 hover:bg-white/10 hover:text-white" : "text-[#c7c7cc] hover:bg-white/[0.06] hover:text-[#f5f5f7]";
+  if (compact) {
+    return (
+      <button type="button" onClick={onToggle} aria-pressed={on} title={label} className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition ${tone}`}>
+        {icon}
+      </button>
+    );
+  }
+  return (
+    <button type="button" onClick={onToggle} aria-pressed={on} title={label} className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-semibold transition ${tone}`}>
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+/**
+ * Contextual upgrade — a focused modal opened ONLY from a LOCKED pack's Unlock. This is the in-catalog
+ * purchase entry point; full subscription/plan management lives under Settings → Billing & Plan. Payment
+ * is not built yet (rows are "coming soon"), so this locks the CONVENTION, not a transaction.
+ */
+function UnlockModal({ genre, onClose }: { genre: MusicBankGenrePack; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+      <div role="dialog" aria-modal="true" aria-label={`Unlock ${genre.name}`} className="sb-anim-rise relative z-10 w-full max-w-sm overflow-hidden rounded-2xl bg-[#15151a] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.85)] ring-1 ring-inset ring-white/[0.08]">
+        <div className="relative aspect-[16/7] overflow-hidden">
+          <GenrePackArt id={genre.id} />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#15151a] via-[#15151a]/30 to-transparent" aria-hidden="true" />
+          <button type="button" onClick={onClose} aria-label="Close" className="absolute right-2.5 top-2.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/40 text-white/90 backdrop-blur-sm transition hover:bg-black/60">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+          <div className="absolute bottom-3 left-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/70">Unlock Genre Pack</p>
+            <h3 className="text-xl font-semibold tracking-tight text-white drop-shadow">{genre.name}</h3>
+          </div>
+        </div>
+        <div className="px-2 pb-1 pt-2">
+          <PlanRow label="This Genre Pack" price={GENRE_PRICE_LABEL} />
+          <PlanRow label={`Choose ${CHOICE3_PACK_COUNT} Genre Packs`} price={CHOICE3_PRICE_LABEL} />
+          <PlanRow label="Full Music Bank" price={FULL_BANK_PRICE_LABEL} best />
+        </div>
+        <p className="px-4 pb-4 pt-1.5 text-[11px] leading-relaxed text-[#8a8a8f]">Payments &amp; entitlements are coming soon. Manage your plan any time in <span className="font-medium text-[#c7c7cc]">Settings → Billing &amp; Plan</span>.</p>
+      </div>
+    </div>
+  );
+}
+
 function CatalogHome({
   genres,
   totalSamples,
   ownedGenreIds,
+  offlineGenreIds,
+  onToggleOffline,
+  onUnlock,
   ownershipState,
   onOpen,
   notPlayableHint,
@@ -338,6 +402,9 @@ function CatalogHome({
   genres: MusicBankGenrePack[];
   totalSamples: number;
   ownedGenreIds: Set<string>;
+  offlineGenreIds: Set<string>;
+  onToggleOffline: (id: string) => void;
+  onUnlock: (genre: MusicBankGenrePack) => void;
   ownershipState: "none" | "partial" | "full";
   onOpen: (id: string) => void;
   notPlayableHint: string | null;
@@ -372,14 +439,13 @@ function CatalogHome({
               <div className="flex items-center justify-between gap-2 px-3.5 py-2.5">
                 <button type="button" onClick={() => onOpen(genre.id)} className="text-xs font-medium text-[#68b0ff] transition hover:text-[#9cccff]">Listen to samples →</button>
                 {owned ? (
-                  <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#7db8ff]">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
-                    Owned
-                  </span>
+                  /* UNLOCKED pack → normal music actions. Offline is per-pack (familiar download action). */
+                  <OfflineAction on={offlineGenreIds.has(genre.id)} onToggle={() => onToggleOffline(genre.id)} compact />
                 ) : (
+                  /* LOCKED pack → price + Unlock (contextual upgrade). */
                   <span className="flex items-baseline gap-2">
                     <span className="text-sm font-semibold tabular-nums text-[#f5f5f7]">{GENRE_PRICE_LABEL}</span>
-                    <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-md px-2.5 py-1 text-[11px] font-semibold text-[#8a8a8f] ring-1 ring-inset ring-white/[0.1]">Unlock</button>
+                    <button type="button" onClick={() => onUnlock(genre)} title={`Unlock ${genre.name}`} className="rounded-md bg-[#0a84ff] px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-[#0a84ff]/85">Unlock</button>
                   </span>
                 )}
               </div>
@@ -388,9 +454,9 @@ function CatalogHome({
         })}
       </div>
 
-      {/* Pricing lives in the top ownership strip, not a wall of sales boxes down here. Just a quiet footnote. */}
+      {/* Catalog = music. No sales boxes here; plan management lives in Settings → Billing & Plan. */}
       {ownershipState !== "full" ? (
-        <p className="px-5 pb-4 pt-1 text-[11px] text-[#77777c]">Proposed monthly pricing — payments &amp; entitlements coming soon. Samples preview now (not Offline Ready).</p>
+        <p className="px-5 pb-4 pt-1 text-[11px] text-[#77777c]">Samples preview now. Unlock a Genre Pack to add it to your library · manage your plan in Settings → Billing &amp; Plan.</p>
       ) : null}
 
       {notPlayableHint ? <p className="px-5 pb-5 text-[11px] text-[#6b6b70]">{notPlayableHint}</p> : null}
@@ -403,6 +469,9 @@ function GenreDetail({
   trackPlayable,
   nowPlaying,
   owned,
+  offline,
+  onToggleOffline,
+  onUnlock,
   onPlaySamples,
   onPlayTrack,
   onBack,
@@ -412,6 +481,9 @@ function GenreDetail({
   trackPlayable: (id: string) => boolean;
   nowPlaying: { genreId: string; trackId: string | null } | null;
   owned: boolean;
+  offline: boolean;
+  onToggleOffline: () => void;
+  onUnlock: () => void;
   onPlaySamples: () => void;
   onPlayTrack: (t: MusicBankSampleTrack) => void;
   onBack: () => void;
@@ -441,14 +513,19 @@ function GenreDetail({
               Listen to Samples
             </button>
             {owned ? (
-              <span className="ms-auto inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
-                Owned
+              /* UNLOCKED → normal music actions incl. per-pack Offline. */
+              <span className="ms-auto flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
+                  Owned
+                </span>
+                <OfflineAction on={offline} onToggle={onToggleOffline} onLight />
               </span>
             ) : (
+              /* LOCKED → price + Unlock (opens the contextual upgrade modal). */
               <span className="ms-auto flex items-center gap-2">
                 <span className="text-lg font-bold tabular-nums text-white">{GENRE_PRICE_LABEL}</span>
-                <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg px-3 py-1.5 text-xs font-semibold text-white/85 ring-1 ring-inset ring-white/25">Unlock Genre Pack</button>
+                <button type="button" onClick={onUnlock} title={`Unlock ${genre.name}`} className="rounded-lg bg-[#0a84ff] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0a84ff]/85">Unlock Genre Pack</button>
               </span>
             )}
           </div>
