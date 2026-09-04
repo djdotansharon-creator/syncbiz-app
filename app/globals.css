@@ -3471,8 +3471,10 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   /* Collapsed = MINI (not 0): the rail folds into a compact strip that keeps artwork/tool icons +
      orientation (Spotify-style), never a vanished side. Left keeps room for cover squares; right for
      tool icons. Widths are constant (don't scale with the breakpoint). */
+  /* Both mini rails share one width so the two edges relate symmetrically to the center canvas
+     (right no longer reads as a narrower, detached sidebar). */
   .sb-curtain-grid[data-left-collapsed="true"]  { --sb-rail-l: 88px; }
-  .sb-curtain-grid[data-right-collapsed="true"] { --sb-rail-r: 76px; }
+  .sb-curtain-grid[data-right-collapsed="true"] { --sb-rail-r: 88px; }
 
   /* REAL left-edge clip fix (not "widen the rail"): the left aside carries `overflow-y-auto` for its
      EXPANDED library nav. While the rail is COLLAPSED that nav is invisible-but-in-flow (tall) → the
@@ -3530,7 +3532,7 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
     cursor: pointer;
     transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease, box-shadow 160ms ease;
   }
-  .sb-rail--right .sb-mini-tile { height: 44px; width: 44px; border-radius: 12px; }
+  /* Right mini tiles share the left's sizing/radius — one visual language across both rails. */
   .sb-mini-tile:hover { transform: scale(1.03); border-color: rgba(148, 163, 184, 0.45); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35); }
   .sb-mini-tile:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.65); }
   .sb-mini-tile img { height: 100%; width: 100%; object-fit: cover; }

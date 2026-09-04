@@ -223,18 +223,16 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
       <header className="relative flex items-center justify-between gap-3 px-5 pb-2.5 pt-3.5">
         <div className="flex min-w-0 items-baseline gap-2.5">
           <h2 className="text-[15px] font-semibold tracking-tight text-white">Royalty-Free Music</h2>
-          <span className="hidden truncate text-[11px] text-[#6b6b70] md:inline">{totalPacks} packs</span>
         </div>
         <div className="flex items-center gap-1.5">
+          {/* No X close button — navigation controls the center module (click Music Bank again → Library).
+              Only a very subtle ownership status remains when the user owns packs. */}
           {ownedCount > 0 ? (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-2.5 py-1 text-[11px] font-medium text-[#c7c7cc]" title="Genre Packs unlocked">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#7db8ff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
               {ownedCount}/{totalPacks} unlocked
             </span>
           ) : null}
-          <button type="button" onClick={onClose} aria-label="Close" title="Close" className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#8a8a8f] transition hover:bg-white/[0.06] hover:text-[#f5f5f7]">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-          </button>
         </div>
       </header>
 
@@ -395,10 +393,15 @@ function CatalogHome({
         {genres.map((genre) => {
           const total = totalDuration(genre.tracks);
           const owned = ownedGenreIds.has(genre.id);
+          /* ONE continuous object: the artwork is dominant and its bottom gradient fades into the card's
+             own dark surface, so the action row reads as the lower part of the SAME card — not a separate
+             framed footer. No resting inner borders; hover strengthens the ring. */
           return (
-            <div key={genre.id} className="group flex flex-col overflow-hidden rounded-2xl bg-white/[0.02] ring-1 ring-inset ring-white/[0.05] transition duration-200 hover:ring-white/[0.14] hover:shadow-[0_18px_44px_-26px_rgba(0,0,0,0.9)]">
+            <div key={genre.id} className="group relative flex flex-col overflow-hidden rounded-2xl bg-[#0d0d11] ring-1 ring-inset ring-white/[0.05] transition duration-200 hover:ring-white/[0.18] hover:shadow-[0_18px_44px_-26px_rgba(0,0,0,0.95)]">
               <button type="button" onClick={() => onOpen(genre.id)} className="relative flex aspect-[16/10] items-end p-3.5 text-left">
                 <GenreCover genre={genre} />
+                {/* Dark gradient rising from the bottom — carries the title/count and blends into the footer. */}
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-3/4 bg-gradient-to-t from-[#0d0d11] via-[#0d0d11]/55 to-transparent" aria-hidden="true" />
                 <span className="absolute left-3 top-3 rounded-full bg-black/35 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/85 backdrop-blur-sm">Genre Pack</span>
                 {owned ? (
                   <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-[#0a84ff]/85 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
@@ -415,15 +418,17 @@ function CatalogHome({
                   </p>
                 </div>
               </button>
-              <div className="flex items-center justify-between gap-2 px-3.5 py-2.5">
-                <button type="button" onClick={() => onOpen(genre.id)} className="text-xs font-medium text-[#68b0ff] transition hover:text-[#9cccff]">Listen to samples →</button>
+              {/* Action row — on the SAME dark surface (no divider, no separate box). Offline lives here,
+                  per-pack, as an honest secondary "Coming soon". */}
+              <div className="flex items-center justify-between gap-2 px-3.5 pb-3 pt-1.5">
+                <button type="button" onClick={() => onOpen(genre.id)} className="text-xs font-medium text-[#8fc0ff] transition hover:text-white">Listen to samples →</button>
                 {owned ? (
-                  /* UNLOCKED pack → per-pack Offline placement (honest "Coming soon" — not operative yet). */
+                  /* UNLOCKED pack → per-pack Offline (honest "Coming soon" — not operative yet). */
                   <OfflineAction compact />
                 ) : (
                   /* LOCKED pack → price + Unlock (contextual upgrade). */
                   <span className="flex items-baseline gap-2">
-                    <span className="text-sm font-semibold tabular-nums text-[#f5f5f7]">{GENRE_PRICE_LABEL}</span>
+                    <span className="text-sm font-semibold tabular-nums text-white">{GENRE_PRICE_LABEL}</span>
                     <button type="button" onClick={() => onUnlock(genre)} title={`Unlock ${genre.name}`} className="rounded-md bg-[#0a84ff] px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-[#0a84ff]/85">Unlock</button>
                   </span>
                 )}

@@ -756,7 +756,7 @@ function SourcesManagerInner({
 }) {
   const router = useRouter();
   const pathname = usePathname() ?? "";
-  const { active: activeCenterModule, setActive: setActiveCenterModule } = useCenterModule();
+  const { active: activeCenterModule, setActive: setActiveCenterModule, toggle: toggleCenterModule } = useCenterModule();
   const searchParams = useSearchParams();
   const { locale } = useLocale();
   const { t } = useTranslations();
@@ -2927,7 +2927,7 @@ function SourcesManagerInner({
                     monitor (the right-rail launcher was removed). */}
                 <button
                   type="button"
-                  onClick={() => setActiveCenterModule("guests")}
+                  onClick={() => toggleCenterModule("guests")}
                   className={[guestLinkLedButtonClass, "h-10 shrink-0 justify-center px-3"].join(" ")}
                   title="Open Guest inbox"
                   aria-label="Open Guest inbox"
@@ -4052,7 +4052,7 @@ function SourcesManagerInner({
               className="sb-mini-tile sb-mini-tile--tool"
               title="DJ Creator AI"
               aria-label="Open DJ Creator AI"
-              onClick={() => setActiveCenterModule("dj-creator-assistant")}
+              onClick={() => toggleCenterModule("dj-creator-assistant")}
             >
               <span className="sb-mini-badge" aria-hidden="true" />
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" /></svg>
@@ -4106,7 +4106,7 @@ function SourcesManagerInner({
                 variant="launcher"
                 drawerOpen={false}
                 onDrawerOpenChange={() => {}}
-                onOpen={() => setActiveCenterModule("dj-creator-assistant")}
+                onOpen={() => toggleCenterModule("dj-creator-assistant")}
               />
             </div>
             <section className="flex min-h-0 flex-1 flex-col">

@@ -24,12 +24,29 @@ export type CenterModule =
 type CenterModuleCtx = {
   active: CenterModule;
   setActive: (m: CenterModule) => void;
+  /**
+   * Navigation convention (locked): tools/categories are the center's navigation — there are no X
+   * close buttons. `toggle(m)` opens module `m` in the center; calling it again with the SAME active
+   * module returns the center to the default Library view (null). Launchers should call this, not
+   * setActive, so "same-button → Library" is consistent everywhere.
+   */
+  toggle: (m: CenterModule) => void;
 };
 
 export const CenterModuleContext = createContext<CenterModuleCtx>({
   active: null,
   setActive: () => {},
+  toggle: () => {},
 });
+
+/** True when two CenterModule values point at the same module (handles the edit-current object case). */
+export function sameCenterModule(a: CenterModule, b: CenterModule): boolean {
+  if (a === b) return true;
+  if (isEditCurrentModule(a) && isEditCurrentModule(b)) {
+    return a.target.kind === b.target.kind && a.target.id === b.target.id;
+  }
+  return false;
+}
 
 export function useCenterModule(): CenterModuleCtx {
   return useContext(CenterModuleContext);

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -31,7 +31,7 @@ import { LanguageSelector } from "@/components/language-selector";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
 import { DesktopUpdatePill } from "@/components/desktop-update-pill";
-import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule, isRoyaltyFreeMusicModule, isGuestsModule } from "@/lib/center-module-context";
+import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule, isRoyaltyFreeMusicModule, isGuestsModule, sameCenterModule } from "@/lib/center-module-context";
 import { RFM_CATALOG_ENABLED } from "@/lib/feature-flags";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { useTopNavPins } from "@/lib/use-top-nav-pins";
@@ -560,6 +560,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { playSource, setQueue, setUrlPrepareActive, setLastMessage } = usePlayback();
   const [playerDropActive, setPlayerDropActive] = useState(false);
   const [activeCenterModule, setActiveCenterModule] = useState<CenterModule>(null);
+  // Central navigation convention: clicking a tool/category opens it in the center; clicking the SAME
+  // active one again returns to the default Library view; clicking another switches directly. No X.
+  const toggleCenterModule = useCallback(
+    (m: CenterModule) => setActiveCenterModule((cur) => (sameCenterModule(cur, m) ? null : m)),
+    [],
+  );
   // ─── Adaptive player size: full / compact / mini ──────────────────────────
   // Measured on the player cell container (ResizeObserver).
   // full ≥700px · compact 500–699px · mini <500px
@@ -1314,7 +1320,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <CenterModuleContext.Provider value={{ active: activeCenterModule, setActive: setActiveCenterModule }}>
+    <CenterModuleContext.Provider value={{ active: activeCenterModule, setActive: setActiveCenterModule, toggle: toggleCenterModule }}>
     <div
       ref={shellRef}
       className={`flex min-h-screen bg-slate-950 text-slate-50${
@@ -1696,19 +1702,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                             aria-pressed={!padDisabled && isTogglePad ? isActive : undefined}
                             onClick={
                               isJinglesPad
-                                ? () => setActiveCenterModule((v) => (isJinglesModule(v) ? null : "jingles"))
+                                ? () => toggleCenterModule("jingles")
                                 : isRfmPad
-                                  ? () =>
-                                      setActiveCenterModule((v) =>
-                                        isRoyaltyFreeMusicModule(v) ? null : "royalty-free-music",
-                                      )
+                                  ? () => toggleCenterModule("royalty-free-music")
                                   : isGuestPad
-                                    ? () => setActiveCenterModule((v) => (isGuestsModule(v) ? null : "guests"))
+                                    ? () => toggleCenterModule("guests")
                                     : isMusicPad && inDesktopApp
-                                      ? () =>
-                                          setActiveCenterModule((v) =>
-                                            isMyMusicLibraryModule(v) ? null : "my-music-library",
-                                          )
+                                      ? () => toggleCenterModule("my-music-library")
                                       : undefined
                             }
                           >

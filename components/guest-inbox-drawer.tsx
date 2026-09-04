@@ -632,16 +632,8 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
               {linkCopied ? t.linkCopied : t.copyLink}
             </button>
           ) : null}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t.close}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-200"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-              <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
-            </svg>
-          </button>
+          {/* No X close button — navigation controls the center module (click Guest again → Library).
+              Escape still closes (keyboard affordance), handled above. */}
         </div>
       </div>
 
