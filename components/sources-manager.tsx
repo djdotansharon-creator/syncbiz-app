@@ -113,7 +113,7 @@ import {
   shouldRenderLibraryLeafListMetadataStrip,
 } from "@/components/library-list-container-meta-strip";
 
-/** Left-rail section headers (Ready Playlists / Playlist Tiles) — shared visual language for shell actions. */
+/** Left-rail section header shell actions (e.g. Quick Schedule "Add tile") — shared visual language. */
 const LIBRARY_RAIL_SHELL_ACTION_BTN_CLASS =
   "library-nav-link inline-flex shrink-0 items-center rounded-lg px-2.5 py-1 text-[11px] font-medium leading-none tracking-wide transition-colors";
 
@@ -2507,20 +2507,33 @@ function SourcesManagerInner({
             </section>
             ) : null}
 
+            {/* QUICK SCHEDULE — the ONE daypart surface (consolidated; the duplicate simple list was
+                removed). Real playlist/daypart data + artwork. "View all" opens the Schedules workspace
+                in the CENTER; "Add tile" adds a custom daypart tile. */}
             <section>
-              <div className="mb-1 flex items-center justify-between px-1">
+              <div className="mb-1 flex items-center justify-between gap-2 px-1">
                 <p className="library-section-title text-[10px] font-semibold uppercase tracking-[0.16em]">
-                  Playlist Tiles
+                  Quick Schedule
                 </p>
-                <button
-                  type="button"
-                  onClick={handleAddPlaylistTile}
-                  className={LIBRARY_RAIL_SHELL_ACTION_BTN_CLASS}
-                  title={t.libraryShellAddPlaylistTileTitle}
-                  aria-label={t.libraryShellAddPlaylistTileTitle}
-                >
-                  {t.libraryShellAddPlaylistTile}
-                </button>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "scheduled_playlists" }); }}
+                    className="text-[11px] font-medium text-[#68b0ff] transition hover:text-[#9cccff]"
+                    title="Open the Schedules workspace"
+                  >
+                    View all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddPlaylistTile}
+                    className={LIBRARY_RAIL_SHELL_ACTION_BTN_CLASS}
+                    title={t.libraryShellAddPlaylistTileTitle}
+                    aria-label={t.libraryShellAddPlaylistTileTitle}
+                  >
+                    {t.libraryShellAddPlaylistTile}
+                  </button>
+                </div>
               </div>
               {playlistTileDropMessage ? (
                 <p className="mb-2 px-1 text-[10px] leading-snug text-[#6cb2ff]" role="status">
@@ -2560,7 +2573,7 @@ function SourcesManagerInner({
                     }}
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
-                    className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
+                    className="group rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
                     title={t.playlistTileDropBindPlaylistTitle}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -2606,7 +2619,7 @@ function SourcesManagerInner({
                         </button>
                         <button
                           type="button"
-                          className={LIBRARY_PLAYLIST_TILE_SIDE_ACTION_BTN_CLASS}
+                          className={`${LIBRARY_PLAYLIST_TILE_SIDE_ACTION_BTN_CLASS} opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus:opacity-100`}
                           title={t.removeScheduledPlaylistTitle}
                           aria-label={t.removeScheduledPlaylistTitle}
                           onClick={(e) => {
@@ -2658,7 +2671,7 @@ function SourcesManagerInner({
                     }}
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
-                    className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
+                    className="group rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
                     title={t.playlistTileDropBindPlaylistTitle}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -2704,7 +2717,7 @@ function SourcesManagerInner({
                         </button>
                         <button
                           type="button"
-                          className={LIBRARY_PLAYLIST_TILE_SIDE_ACTION_BTN_CLASS}
+                          className={`${LIBRARY_PLAYLIST_TILE_SIDE_ACTION_BTN_CLASS} opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus:opacity-100`}
                           title={t.removeScheduledPlaylistTitle}
                           aria-label={t.removeScheduledPlaylistTitle}
                           onClick={(e) => {
@@ -4020,48 +4033,6 @@ function SourcesManagerInner({
                     </>
                   );
                 })()}
-              </div>
-            </section>
-
-            {/* QUICK SCHEDULE — discoverability + direct daypart shortcuts. Beginner-friendly: the four
-                dayparts stay visible; "View all" opens the main Schedules workspace in the CENTER. All
-                open in the center and never auto-expand/collapse the rail. (Top-bar Schedules is only a
-                customizable shortcut — this section keeps Schedules reachable even if it's hidden up top.) */}
-            <section>
-              <div className="flex items-center justify-between px-2 pb-1">
-                <p className="library-section-title m-0 text-[10px] font-semibold uppercase tracking-[0.16em]">
-                  Quick Schedule
-                </p>
-                <button
-                  type="button"
-                  onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "scheduled_playlists" }); }}
-                  className="text-[11px] font-medium text-[#68b0ff] transition hover:text-[#9cccff]"
-                  title="Open the Schedules workspace"
-                >
-                  View all
-                </button>
-              </div>
-              <div className="space-y-0.5">
-                {FIXED_DAYPART_PADS.map((pad) => {
-                  const assignedPlaylistKey = daypartPlaylistAssignments[pad.key];
-                  const assignedPlaylist = assignedPlaylistKey ? playlistSourceByKey.get(assignedPlaylistKey) : undefined;
-                  const cover = assignedPlaylist?.cover ?? containers.dayparts.find((d) => d.key === pad.key)?.cover ?? null;
-                  return (
-                    <button
-                      key={`quick-daypart:${pad.key}`}
-                      type="button"
-                      onClick={() => { setActiveCenterModule(null); openDaypartTile(pad.key); }}
-                      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[#a1a1a6] transition-colors duration-150 hover:bg-white/[0.04] hover:text-white"
-                      title={`Open ${pad.label} schedule`}
-                    >
-                      <span className="relative h-7 w-7 shrink-0 overflow-hidden rounded-md bg-[color:var(--lib-surface-card-art)]">
-                        {cover ? <HydrationSafeImage src={cover} alt="" className="h-full w-full object-cover" /> : null}
-                        <span className={`pointer-events-none absolute bottom-0.5 left-0.5 h-1.5 w-1.5 rounded-full ${pad.tone}`} aria-hidden="true" />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-[14px] font-light tracking-wide">{pad.label}</span>
-                    </button>
-                  );
-                })}
               </div>
             </section>
 
