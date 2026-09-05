@@ -1405,14 +1405,8 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
           />
           <span className="jc-status-mini-label">Engine</span>
         </div>
-        <button
-          type="button"
-          className="jc-icon-btn"
-          onClick={onClose}
-          aria-label="Close Jingles Control"
-        >
-          ✕
-        </button>
+        {/* No X close button — center-module convention: navigation controls the center (click Jingles
+            again → Library). Nested dialogs keep their own close. */}
       </header>
 
       {/* ── Body ────────────────────────────────────────────────────────── */}

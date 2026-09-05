@@ -1460,13 +1460,18 @@ export function DjCreatorAiShell({
                       <circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1.4.9-1.4 1.7v.5" /><line x1="12" y1="17" x2="12" y2="17" />
                     </svg>
                   </button>
-                  <button
-                    type="button"
-                    onClick={closeDrawer}
-                    className="rounded-xl border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-[11px] font-medium text-slate-200 hover:bg-white/10"
-                  >
-                    {t.close}
-                  </button>
+                  {/* CENTER-module convention: no X/Close in center (variant="panel") — navigation
+                      controls it (click DJ Creator AI again → Library); Escape still closes. The close
+                      button is preserved for any non-panel (drawer/modal) mode where it IS needed. */}
+                  {variant !== "panel" ? (
+                    <button
+                      type="button"
+                      onClick={closeDrawer}
+                      className="rounded-xl border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-[11px] font-medium text-slate-200 hover:bg-white/10"
+                    >
+                      {t.close}
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </header>

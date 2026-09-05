@@ -978,18 +978,8 @@ export function MyMusicLibraryWorkspacePanel({
     <div className="sb-anim-rise flex h-full min-h-0 flex-col gap-4 bg-slate-950 p-4 sm:p-5">
       <div className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-800/70 pb-3">
         <h2 className="text-xl font-semibold tracking-tight text-slate-100 sm:text-2xl">My Music Library</h2>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          title="Close"
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-700/75 bg-slate-900 text-slate-400 transition hover:border-slate-600 hover:bg-slate-800 hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/35"
-        >
-          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+        {/* No X close button — center-module convention: navigation controls the center (click My Music
+            again → Library). */}
       </div>
 
       {webOnly ? (

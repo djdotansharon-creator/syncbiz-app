@@ -4062,7 +4062,7 @@ function SourcesManagerInner({
               className="sb-mini-tile sb-mini-tile--tool"
               title="Guest"
               aria-label="Open Guest inbox"
-              onClick={() => setActiveCenterModule("guests")}
+              onClick={() => toggleCenterModule("guests")}
             >
               {/* Badge-ready: a future guest request / alert can raise this dot even while the rail is mini. */}
               <span className="sb-mini-badge" aria-hidden="true" />
