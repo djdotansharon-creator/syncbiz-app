@@ -10,7 +10,6 @@ import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
 import { useLibraryTheme } from "@/lib/library-theme-context";
 import { AudioPlayer } from "@/components/audio-player";
-import { LiveQueuePanel } from "@/components/live-queue-panel";
 import { usePlayback } from "@/lib/playback-provider";
 import { canonicalYouTubeWatchUrlForPlayback, getYouTubeThumbnail, getYouTubeVideoId, inferPlaylistType } from "@/lib/playlist-utils";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
@@ -31,8 +30,7 @@ import { LanguageSelector } from "@/components/language-selector";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
 import { DesktopUpdatePill } from "@/components/desktop-update-pill";
-import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule, isRoyaltyFreeMusicModule, isGuestsModule, sameCenterModule } from "@/lib/center-module-context";
-import { RFM_CATALOG_ENABLED } from "@/lib/feature-flags";
+import { CenterModuleContext, type CenterModule, sameCenterModule } from "@/lib/center-module-context";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { useTopNavPins } from "@/lib/use-top-nav-pins";
 import {
@@ -643,7 +641,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // ────────────────────────────────────────────────────────────────────────
-  const [inDesktopApp, setInDesktopApp] = useState(false);
   const [mainMenuOpen, setMainMenuOpen] = useState(false);
   const [menuLogoutBusy, setMenuLogoutBusy] = useState(false);
   const mainMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
@@ -665,10 +662,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const shellRef = React.useRef<HTMLDivElement | null>(null);
   const [isControlRoomMode, setIsControlRoomMode] = useState(false);
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setInDesktopApp(Boolean(window.syncbizDesktop));
-  }, []);
   // Restore Control Room preference on mount. We deliberately do NOT auto-trigger
   // requestFullscreen here — browsers require a user gesture, and re-entering OS
   // fullscreen silently on every refresh would be surprising.
@@ -1574,11 +1567,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               }
             >
               {isMediaThemeRoute ? (
-                <aside className="library-deck-slot-aside relative z-[60] isolate hidden h-full min-h-0 overflow-hidden lg:block">
-                  <div className="flex h-full min-h-0 flex-col overflow-hidden p-2.5">
-                    <LiveQueuePanel />
-                  </div>
-                </aside>
+                /* Phase 2 Step 1: Queue moved to the LEFT curtain rail. This aside stays ONLY as an
+                   invisible structural spacer — it holds grid column 1 so the 1fr player cell (measured
+                   by ResizeObserver) keeps its exact width. No content, no chrome. Removed in Step 2. */
+                <aside className="library-deck-slot-aside hidden h-full lg:block" aria-hidden="true" />
               ) : null}
               <div
                 ref={isMediaThemeRoute ? playerCellRef : undefined}
@@ -1610,120 +1602,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <AudioPlayer />
               </div>
               {isMediaThemeRoute ? (
-                <aside className="library-deck-pads-aside relative z-[60] isolate hidden h-full overflow-hidden lg:block">
-                  <div className="flex h-full flex-col overflow-hidden p-2.5">
-                    <header className="pb-2">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500">
-                        Pads
-                      </p>
-                    </header>
-                    {/* PADS: 3 rows × 2 cols. Guest and Royalty-Free Music are real pads (Guest also has a
-                        rail launcher for now). Placeholder pads (key:null) stay "Soon". The grid can grow to
-                        more rows and scrolls only if it ever overflows the deck height — tiles are never cut. */}
-                    <div className="grid grid-cols-2 gap-1.5 min-h-0 flex-1 content-start overflow-y-auto">
-                      {(
-                        [
-                          {
-                            key: "jingles" as const,
-                            title: "Jingles",
-                            tone: "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.07] hover:text-[#f5f5f7]",
-                            activeTone: "border-[#0a84ff]/40 bg-[#0a84ff]/12 text-[#7db8ff]",
-                            dot: "bg-sky-400",
-                          },
-                          // Royalty-Free Music PAD — gated. Absent entirely in production (flag off);
-                          // no disabled pad, no "Soon", no trace. Visible only when the flag is on (dev).
-                          ...(RFM_CATALOG_ENABLED
-                            ? [
-                                {
-                                  key: "royalty-free-music" as const,
-                                  title: "Royalty-Free Music",
-                                  tone: "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.07] hover:text-[#f5f5f7]",
-                                  activeTone: "border-[#0a84ff]/40 bg-[#0a84ff]/12 text-[#7db8ff]",
-                                  dot: "bg-emerald-400",
-                                },
-                              ]
-                            : []),
-                          {
-                            key: "my-music-library" as const,
-                            title: "My Music",
-                            tone: "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.07] hover:text-[#f5f5f7]",
-                            activeTone: "border-[#0a84ff]/40 bg-[#0a84ff]/12 text-[#7db8ff]",
-                            dot: "bg-amber-400",
-                          },
-                          {
-                            key: "guests" as const,
-                            title: "Guest",
-                            tone: "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.07] hover:text-[#f5f5f7]",
-                            activeTone: "border-[#0a84ff]/40 bg-[#0a84ff]/12 text-[#7db8ff]",
-                            dot: "bg-violet-400",
-                          },
-                          {
-                            key: null,
-                            title: "Alerts",
-                            tone: "border-white/[0.05] bg-white/[0.02] text-[#48484d]",
-                            activeTone: "",
-                            dot: "bg-[#48484d]",
-                          },
-                          {
-                            key: null,
-                            title: "Future",
-                            tone: "border-white/[0.05] bg-white/[0.02] text-[#48484d]",
-                            activeTone: "",
-                            dot: "bg-[#48484d]",
-                          },
-                        ] as Array<{ key: string | null; title: string; tone: string; activeTone: string; dot: string }>
-                      ).map((group) => {
-                        const isMusicPad = group.key === "my-music-library";
-                        const isJinglesPad = group.key === "jingles";
-                        const isRfmPad = group.key === "royalty-free-music";
-                        const isGuestPad = group.key === "guests";
-                        const isActive =
-                          (isJinglesPad && isJinglesModule(activeCenterModule)) ||
-                          (isMusicPad && isMyMusicLibraryModule(activeCenterModule)) ||
-                          (isRfmPad && isRoyaltyFreeMusicModule(activeCenterModule)) ||
-                          (isGuestPad && isGuestsModule(activeCenterModule));
-                        const padDisabled = group.key === null || (isMusicPad && !inDesktopApp);
-                        const isTogglePad = isJinglesPad || isRfmPad || isGuestPad || (isMusicPad && inDesktopApp);
-                        let statusLabel: string;
-                        if (isMusicPad && !inDesktopApp) statusLabel = "Desktop only";
-                        else if (isMusicPad) statusLabel = isActive ? "Close panel" : "Open console";
-                        else if (isJinglesPad) statusLabel = isActive ? "Close console" : "Open console";
-                        else if (isRfmPad) statusLabel = isActive ? "Close catalog" : "Open catalog";
-                        else if (isGuestPad) statusLabel = isActive ? "Close inbox" : "Open inbox";
-                        else statusLabel = "Soon";
-                        return (
-                          <button
-                            key={group.title}
-                            type="button"
-                            className={`rounded-lg border px-2 py-2 text-left transition-[border-color,background-color,opacity,box-shadow] duration-150 ${
-                              isActive && group.activeTone ? group.activeTone : group.tone
-                            } ${padDisabled ? "opacity-45 cursor-default" : "hover:opacity-90 active:opacity-75"}`}
-                            disabled={padDisabled}
-                            aria-disabled={padDisabled}
-                            aria-pressed={!padDisabled && isTogglePad ? isActive : undefined}
-                            onClick={
-                              isJinglesPad
-                                ? () => toggleCenterModule("jingles")
-                                : isRfmPad
-                                  ? () => toggleCenterModule("royalty-free-music")
-                                  : isGuestPad
-                                    ? () => toggleCenterModule("guests")
-                                    : isMusicPad && inDesktopApp
-                                      ? () => toggleCenterModule("my-music-library")
-                                      : undefined
-                            }
-                          >
-                            <p className="text-xs font-semibold tracking-tight">{group.title}</p>
-                            <p className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] ${isMusicPad && !inDesktopApp ? "opacity-60" : "opacity-90"}`}>
-                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />
-                              {statusLabel}
-                            </p>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </aside>
+                /* Phase 2 Step 1: Pads/tools moved to the RIGHT curtain rail (TOOLS). This aside stays
+                   ONLY as an invisible structural spacer holding grid column 3, so the 1fr player cell
+                   keeps its measured width. No content, no chrome. Removed in Step 2. */
+                <aside className="library-deck-pads-aside hidden h-full lg:block" aria-hidden="true" />
               ) : null}
             </div>
             </div>
