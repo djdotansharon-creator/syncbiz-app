@@ -48,7 +48,6 @@ import { LibrarySourceItemActions } from "@/components/library-source-item-actio
 import { LibraryInputArea } from "@/components/library-input-area";
 import { PlaylistAiShellMenu } from "@/components/playlist-ai-shell-menu";
 import { DjCreatorAiShell } from "@/components/dj-creator-ai-shell";
-import { LiveQueuePanel } from "@/components/live-queue-panel";
 import { GuestInboxWorkspacePanel } from "@/components/guest-inbox-drawer";
 import { EditPlaylistForm } from "@/components/edit-playlist-form";
 import { EditSourceForm } from "@/components/edit-source-form";
@@ -517,17 +516,6 @@ const PLAYLIST_TILES_STORAGE_KEY = "syncbiz-custom-playlist-tiles";
 const PLAYLIST_ASSIGNMENTS_STORAGE_KEY = SYNC_PLAYLIST_ASSIGNMENTS_STORAGE_KEY;
 const DAYPART_PLAYLIST_ASSIGNMENTS_STORAGE_KEY = "syncbiz-daypart-playlist-assignments";
 
-/** Right-rail TOOLS row styling (business tools). active = the tool's center module is open. */
-function rightToolRowClass(active: boolean, disabled?: boolean): string {
-  return `flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] font-medium transition-colors duration-150 ${
-    disabled
-      ? "cursor-not-allowed text-[#5f5f65]"
-      : active
-        ? "bg-[#0a84ff]/12 text-[#7db8ff]"
-        : "text-[#a1a1a6] hover:bg-white/[0.04] hover:text-[#f5f5f7]"
-  }`;
-}
-
 const LIBRARY_CARD_GRID_CLASS = "library-source-card-grid";
 
 const LIBRARY_SOURCE_CARD_CELL_CLASS = "library-source-card-grid-cell";
@@ -865,11 +853,6 @@ function SourcesManagerInner({
   const rfmCurtainActive = RFM_CATALOG_ENABLED && isRoyaltyFreeMusicModule(activeCenterModule);
   const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
   const [rightRailCollapsed, setRightRailCollapsed] = useState(false);
-  // Desktop signal — gates the "My Music" tool (desktop-only), mirroring app-shell's inDesktopApp.
-  const [inDesktopApp, setInDesktopApp] = useState(false);
-  useEffect(() => {
-    setInDesktopApp(typeof window !== "undefined" && "syncbizDesktop" in window);
-  }, []);
   // Per-section "curtain" collapse in the center: collapsed shows a compact covers+time strip
   // (names hidden via CSS on data-collapsed); expanded shows the full cards. Visual/density only.
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
@@ -3944,28 +3927,23 @@ function SourcesManagerInner({
             <button type="button" className="sb-mini-expand" title="Expand tools" aria-label="Expand left tools" onClick={() => setLeftRailCollapsed(false)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
             </button>
-            {/* Queue signal — quiet Up-Next indicator; expands the rail to reveal the full queue. */}
-            <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="Queue / Up Next" aria-label="Show queue" onClick={() => setLeftRailCollapsed(false)}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 6h11M4 12h11M4 18h7" /><path d="M17 14l4 3-4 3z" fill="currentColor" stroke="none" /></svg>
-            </button>
             <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="Library" aria-label="Open Library"
               onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "all_library" }); }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 10v4M7.5 7v10M12 4v16M16.5 7v10M21 10v4" /></svg>
             </button>
-            {/* ONE clock — opens the main Schedules workspace in the CENTER. */}
+            {/* ONE clock — opens the main Schedules workspace in the CENTER. No nested mini-context, no
+                thumbnails-in-rail, no Back state. (Top-bar Schedules is a customizable shortcut; this is
+                always-available discoverability, so hiding it up top never loses access.) */}
             <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="Schedules" aria-label="Open Schedules"
               onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "scheduled_playlists" }); }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" /></svg>
             </button>
+            <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="DJ AI" aria-label="Open DJ AI"
+              onClick={() => { setActiveCenterModule(null); setSelection({ type: "library_view", id: "dj_ai" }); }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" /></svg>
+            </button>
           </div>
           <div className="sb-rail-inner space-y-4">
-            {/* QUEUE / Up Next — moved out of the top deck. Bounded height so Library + Quick Schedule
-                below stay reachable; LiveQueuePanel owns its header + internal scroll (queue logic unchanged). */}
-            <section className="shrink-0">
-              <div className="h-[38vh] min-h-0">
-                <LiveQueuePanel />
-              </div>
-            </section>
             <section>
               <div className="flex items-center justify-between px-2 pb-1">
                 <p className="library-section-title m-0 text-[10px] font-semibold uppercase tracking-[0.16em]">
@@ -4016,8 +3994,28 @@ function SourcesManagerInner({
                           <span className="text-[15px] font-light tabular-nums">{r.count}</span>
                         </button>
                       ))}
-                      {/* DJ AI removed from the LEFT rail — DJ Creator AI lives only in the RIGHT rail
-                          (TOOLS). LEFT = playback context / library / scheduling; RIGHT = business tools. */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          /* DJ AI = a NORMAL library view (operator direction) — same grid,
+                             chips and search stay visible; no takeover, no X. */
+                          setActiveCenterModule(null);
+                          setSelection({ type: "library_view", id: "dj_ai" });
+                        }}
+                        aria-label="DJ Creator playlists"
+                        title="DJ Creator — saved playlists from your catalog"
+                        className={`flex w-full items-center justify-between px-2 py-1.5 text-left text-[17px] font-light tracking-wide transition-colors duration-150 hover:text-white ${
+                          navViewActive("dj_ai") ? "text-white" : "text-[#a1a1a6]"
+                        }`}
+                      >
+                        <span className="flex min-w-0 items-center gap-2.5">
+                          <LibraryNavGlyph kind="dj_ai" />
+                          <span className="truncate">DJ AI</span>
+                        </span>
+                        <span className="text-[15px] font-light tabular-nums">
+                          {displaySources.filter((s) => isDjCreatorWorkspacePlaylistSource(s)).length}
+                        </span>
+                      </button>
                       {tailRows.map((r) => (
                         <button
                           key={r.id}
@@ -4049,29 +4047,27 @@ function SourcesManagerInner({
             <button type="button" className="sb-mini-expand" title="Expand tools" aria-label="Expand right tools" onClick={() => setRightRailCollapsed(false)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
             </button>
-            {/* TOOLS (mini) — one icon per business tool, same order as the expanded rail. */}
-            <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="Jingles" aria-label="Open Jingles" onClick={() => toggleCenterModule("jingles")}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
+            <button
+              type="button"
+              className="sb-mini-tile sb-mini-tile--tool"
+              title="DJ Creator AI"
+              aria-label="Open DJ Creator AI"
+              onClick={() => toggleCenterModule("dj-creator-assistant")}
+            >
+              <span className="sb-mini-badge" aria-hidden="true" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" /></svg>
             </button>
-            {RFM_CATALOG_ENABLED ? (
-              <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="Royalty-Free Music" aria-label="Open Royalty-Free Music" onClick={() => toggleCenterModule("royalty-free-music")}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
-              </button>
-            ) : null}
-            <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="Guest" aria-label="Open Guest inbox" onClick={() => toggleCenterModule("guests")}>
+            <button
+              type="button"
+              className="sb-mini-tile sb-mini-tile--tool"
+              title="Guest"
+              aria-label="Open Guest inbox"
+              onClick={() => toggleCenterModule("guests")}
+            >
+              {/* Badge-ready: a future guest request / alert can raise this dot even while the rail is mini. */}
               <span className="sb-mini-badge" aria-hidden="true" />
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z" /></svg>
             </button>
-            <button type="button" disabled={!inDesktopApp} className={`sb-mini-tile sb-mini-tile--tool ${!inDesktopApp ? "opacity-40" : ""}`} title={inDesktopApp ? "My Music" : "My Music — desktop app only"} aria-label="Open My Music" onClick={() => { if (inDesktopApp) toggleCenterModule("my-music-library"); }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 10v4M7.5 7v10M12 4v16M16.5 7v10M21 10v4" /></svg>
-            </button>
-            <button type="button" className="sb-mini-tile sb-mini-tile--tool" title="DJ Creator AI" aria-label="Open DJ Creator AI" onClick={() => toggleCenterModule("dj-creator-assistant")}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" /></svg>
-            </button>
-            {/* ZONE (mini) — reserved, muted, non-operative (no onClick, no fake mixer). */}
-            <span className="sb-mini-tile sb-mini-tile--tool opacity-40" title="Zone mixer · Coming soon" aria-disabled="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" /></svg>
-            </span>
             {userPlaylistContainers.length > 0 ? <div className="sb-mini-sep" /> : null}
             {userPlaylistContainers.slice(0, 14).map((p) => (
               <button
@@ -4105,45 +4101,14 @@ function SourcesManagerInner({
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
               </button>
             </div>
-            {/* TOOLS — business tools (moved out of the top deck). Uniform rows; each opens its center
-                module via the toggle convention (same tool again → Library). RFM is flag-gated; My Music
-                is desktop-only; ZONE is a reserved, non-operative "Coming soon" slot (no fake mixer). */}
-            <section className="shrink-0">
-              <p className="library-section-title m-0 px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
-                Tools
-              </p>
-              <div className="space-y-0.5">
-                <button type="button" onClick={() => toggleCenterModule("jingles")} className={rightToolRowClass(isJinglesModule(activeCenterModule))} title="Jingles">
-                  <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
-                  <span className="min-w-0 flex-1 truncate">Jingles</span>
-                </button>
-                {RFM_CATALOG_ENABLED ? (
-                  <button type="button" onClick={() => toggleCenterModule("royalty-free-music")} className={rightToolRowClass(isRoyaltyFreeMusicModule(activeCenterModule))} title="Royalty-Free Music">
-                    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
-                    <span className="min-w-0 flex-1 truncate">Royalty-Free Music</span>
-                  </button>
-                ) : null}
-                <button type="button" onClick={() => toggleCenterModule("guests")} className={rightToolRowClass(isGuestsModule(activeCenterModule))} title="Guest">
-                  <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z" /></svg>
-                  <span className="min-w-0 flex-1 truncate">Guest</span>
-                </button>
-                <button type="button" disabled={!inDesktopApp} onClick={() => { if (inDesktopApp) toggleCenterModule("my-music-library"); }} className={rightToolRowClass(isMyMusicLibraryModule(activeCenterModule), !inDesktopApp)} title={inDesktopApp ? "My Music" : "My Music — desktop app only"}>
-                  <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 10v4M7.5 7v10M12 4v16M16.5 7v10M21 10v4" /></svg>
-                  <span className="min-w-0 flex-1 truncate">My Music</span>
-                  {!inDesktopApp ? <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-[#5f5f65]">Desktop</span> : null}
-                </button>
-                <button type="button" onClick={() => toggleCenterModule("dj-creator-assistant")} className={rightToolRowClass(isDjCreatorAssistantModule(activeCenterModule))} title="DJ Creator AI">
-                  <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z" /></svg>
-                  <span className="min-w-0 flex-1 truncate">DJ Creator AI</span>
-                </button>
-                {/* ZONE — reserved product slot. Non-operative: no onClick, no fake mixer/volume/state. */}
-                <div className={rightToolRowClass(false, true)} title="Zone mixer · Coming soon" aria-disabled="true">
-                  <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" /></svg>
-                  <span className="min-w-0 flex-1 truncate">ZONE</span>
-                  <span className="shrink-0 text-[9px] font-medium text-[#5f5f65]">Coming soon</span>
-                </div>
-              </div>
-            </section>
+            <div className="shrink-0">
+              <DjCreatorAiShell
+                variant="launcher"
+                drawerOpen={false}
+                onDrawerOpenChange={() => {}}
+                onOpen={() => toggleCenterModule("dj-creator-assistant")}
+              />
+            </div>
             <section className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-center justify-between gap-2 px-2 pb-1 pt-1">
                 <p className="library-section-title m-0 text-[10px] font-semibold uppercase tracking-[0.16em]">
