@@ -1862,9 +1862,12 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 
 /* Card — token-driven surfaces (inherits from .library-source-card or .library-theme) */
 .library-source-card {
-  border: 1px solid var(--lib-border-subtle);
-  background: var(--lib-surface-card);
-  box-shadow: var(--lib-shadow-card);
+  /* A2 visual cleanup — REST = quiet: no resting shadow, softened border + fill so the
+     artwork carries the card. Card stays legible against the canvas (not flattened away);
+     :hover / :focus-within / selected below restore full definition. */
+  border: 1px solid color-mix(in srgb, var(--lib-border-subtle) 55%, transparent);
+  background: color-mix(in srgb, var(--lib-surface-card) 60%, transparent);
+  box-shadow: none;
   transition: transform var(--lib-duration) ease-out, box-shadow var(--lib-duration) ease-out,
     border-color var(--lib-duration) ease-out, background-color var(--lib-duration) ease-out;
 }
@@ -1894,8 +1897,10 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 }
 
 .library-card-footer {
-  border-top: 1px solid var(--lib-border-card-footer);
-  background: var(--lib-surface-card-footer);
+  /* A1 visual cleanup — footer reads as a natural continuation of the card, not a boxed
+     sub-panel: no divider line, no separate fill. Spacing carries the separation. */
+  border-top: none;
+  background: transparent;
 }
 
 .library-card-title {

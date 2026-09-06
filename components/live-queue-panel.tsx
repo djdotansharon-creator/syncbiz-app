@@ -968,7 +968,7 @@ export function LiveQueuePanel() {
                   }}
                   className={`queue-row group relative grid cursor-pointer select-none grid-cols-[3rem_minmax(0,1fr)_3.5rem_1.75rem] items-center gap-x-2.5 rounded-[7px] border border-transparent px-2 py-1.5 leading-snug transition-colors focus:outline-none focus:ring-1 focus:ring-white/15 ${
                     isCurrent
-                      ? "queue-row-current border-white/[0.08] bg-white/[0.05] text-slate-100"
+                      ? "queue-row-current bg-white/[0.05] text-slate-100"
                       : isNextInList
                         ? "text-slate-300 hover:border-white/[0.06] hover:bg-white/[0.04]"
                         : "text-slate-400 hover:border-white/[0.06] hover:bg-white/[0.03]"
