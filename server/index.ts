@@ -51,7 +51,14 @@ if (!WS_SECRET || WS_SECRET.length < 16) {
   process.exit(1);
 }
 
-const PORT = Number(process.env.PORT) || 3001;
+// Port resolution. WS_PORT wins if explicitly set; otherwise PORT (production services set their own);
+// otherwise 3001. LOCAL-DEV SAFETY: the Next.js dev server owns :3000, and a launcher that sets PORT=3000
+// for the web app leaks it into this process too (concurrently shares one env) — which made BOTH servers
+// try to bind :3000, so localhost became intermittently unreachable/hung. In a non-production shell we
+// therefore never bind :3000: fall back to 3001 (the client already expects ws://localhost:3001). In
+// production the WS runs as its OWN service with its OWN assigned PORT, so this guard never applies.
+const resolvedPort = Number(process.env.WS_PORT) || Number(process.env.PORT) || 3001;
+const PORT = process.env.NODE_ENV !== "production" && resolvedPort === 3000 ? 3001 : resolvedPort;
 const REGISTER_TIMEOUT_MS = 5000;
 
 /** Heartbeat: ping interval (ms). Default 30s. */
@@ -634,6 +641,20 @@ wss.on("connection", (ws) => {
   let deviceId: string | null = null;
   let role: "device" | "controller" | "owner_global" | null = null;
   let registered = false;
+
+  // CUSTOMER-SAFETY: a socket 'error' (ECONNRESET when a device/mobile drops abruptly, a network blip,
+  // a half-open connection) is emitted by ws on THIS socket. With no 'error' listener Node re-throws it
+  // as an uncaught exception → the ENTIRE server crashes and every branch loses its control channel at
+  // once. Isolate it to this one connection: log + terminate just this socket (the existing 'close'
+  // handler runs cleanup). One bad client can never take the server down.
+  ws.on("error", (err) => {
+    console.error("[SyncBiz WS] socket error (isolated):", (err as Error)?.message ?? err);
+    try {
+      ws.terminate();
+    } catch {
+      /* socket already gone */
+    }
+  });
 
   socketLastPongAt.set(ws, Date.now());
   ws.on("pong", () => {
@@ -1384,6 +1405,25 @@ function runHeartbeat() {
   toClose.forEach((ws) => ws.close(4006, "Heartbeat timeout"));
 }
 setInterval(runHeartbeat, Math.min(HEARTBEAT_PING_INTERVAL_MS, 15_000));
+
+// Listener-level nets: a WebSocketServer or httpServer 'error' with no handler also crashes the process.
+wss.on("error", (err) => {
+  console.error("[SyncBiz WS] WebSocketServer error:", (err as Error)?.message ?? err);
+});
+httpServer.on("error", (err) => {
+  console.error("[SyncBiz WS] HTTP server error:", (err as Error)?.message ?? err);
+});
+
+// Process-level last resort. This is a device-CONTROL server: dropping every connected branch at once
+// (a hard crash) is worse than continuing degraded, and the per-socket/listener handlers above already
+// cover the common vectors — so we LOG and stay alive rather than let one stray error/rejection kill
+// control for all customers. (A true fatal is still surfaced in logs, and the host can restart.)
+process.on("unhandledRejection", (reason) => {
+  console.error("[SyncBiz WS] unhandledRejection (kept alive):", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[SyncBiz WS] uncaughtException (kept alive):", err);
+});
 
 httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`[SyncBiz WS] Server listening on 0.0.0.0:${PORT} (MASTER_GRACE_MS=${MASTER_GRACE_MS}, HEARTBEAT=${HEARTBEAT_PING_INTERVAL_MS}ms ping / ${HEARTBEAT_PONG_TIMEOUT_MS}ms timeout)`);
