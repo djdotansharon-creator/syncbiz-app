@@ -4138,7 +4138,7 @@ function SourcesManagerInner({
                 {/* Compact rail list (cover · name · count · trash) — full view via the nav row */}
                 <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1 max-h-[60vh] lg:max-h-none">
                 {userPlaylistContainers.slice(0, 30).map((p) => (
-                  <div key={p.key} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors duration-150 hover:bg-white/[0.04]">
+                  <div key={p.key} className="sb-plrow flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors duration-150 hover:bg-white/[0.04]">
                     <button
                       type="button"
                       draggable
@@ -4201,7 +4201,7 @@ function SourcesManagerInner({
                     </button>
                     <button
                       type="button"
-                      className={LIBRARY_SIDE_ACTION_ICON_BTN_CLASS}
+                      className={`${LIBRARY_SIDE_ACTION_ICON_BTN_CLASS} sb-plrow-trash`}
                       onClick={() => setPlaylistContainerDeleteKey(p.key)}
                       title={t.deletePlaylist}
                       aria-label={t.deletePlaylist}

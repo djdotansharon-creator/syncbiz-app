@@ -3159,6 +3159,19 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
     opacity: 1;
     transform: none;
   }
+
+  /* Right-rail "Your Playlists" row: the destructive trash is a SECONDARY action, so it
+     recedes at rest and returns on row hover / keyboard focus. Same convention as card
+     actions — touch devices (no hover) keep it visible, so discoverability is preserved.
+     Primary tools/rows and DROP NEXT are untouched. */
+  .sb-plrow-trash {
+    opacity: 0;
+    transition: opacity 180ms ease-out;
+  }
+  .sb-plrow:hover .sb-plrow-trash,
+  .sb-plrow:focus-within .sb-plrow-trash {
+    opacity: 1;
+  }
 }
 
 /* ── Readability pass (operator: "big and clear, nothing faded") ─────────── */

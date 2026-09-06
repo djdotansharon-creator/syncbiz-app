@@ -970,8 +970,8 @@ export function LiveQueuePanel() {
                     isCurrent
                       ? "queue-row-current bg-white/[0.05] text-slate-100"
                       : isNextInList
-                        ? "text-slate-300 hover:border-white/[0.06] hover:bg-white/[0.04]"
-                        : "text-slate-400 hover:border-white/[0.06] hover:bg-white/[0.03]"
+                        ? "text-slate-300 hover:bg-white/[0.04]"
+                        : "text-slate-400 hover:bg-white/[0.03]"
                   }`}
                 >
                   {isCurrent ? (
