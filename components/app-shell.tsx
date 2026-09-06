@@ -1569,7 +1569,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                     // every iPad in landscape (iPad mini 1024 px, Air/standard 1080-1180 px,
                     // Pro 12.9" 1366 px). Portrait tablets (<1024 px) keep the single-column deck.
                     // h-[160px] is the fallback below lg so h-full children never collapse to 0.
-                    "grid min-w-0 h-[176px] lg:grid-cols-[270px_minmax(0,1fr)_210px] lg:h-[308px] xl:grid-cols-[290px_minmax(0,1fr)_220px] xl:h-[316px] 2xl:grid-cols-[310px_minmax(0,1fr)_230px] 2xl:h-[324px]"
+                    // Deck side columns SYMMETRIC so the player is mathematically centered. Widths are
+                    // the average of the old asymmetric pair — total side width preserved, so the 1fr
+                    // player cell (and data-player-size) is unchanged: lg 270+210=480→240|240,
+                    // xl 290+220=510→255|255, 2xl 310+230=540→270|270. No transforms, no moving components.
+                    "grid min-w-0 h-[176px] lg:grid-cols-[240px_minmax(0,1fr)_240px] lg:h-[308px] xl:grid-cols-[255px_minmax(0,1fr)_255px] xl:h-[316px] 2xl:grid-cols-[270px_minmax(0,1fr)_270px] 2xl:h-[324px]"
                   : "grid grid-cols-1"
               }
             >
