@@ -1552,26 +1552,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div
               ref={_deckGridRef}
               className={
+                // Phase 2 Step 2: PLAYER-ONLY band. No side columns — the player is centered at the
+                // container center (which equals the symmetric center-workspace axis below), so it does
+                // NOT shift when rails open/close. Heights preserved from the old deck. Queue/Pads now
+                // live in the curtain rails (Step 1), not here.
                 isMediaThemeRoute
-                  ? // Live Queue widened from 260/280 -> 300/320 to give the new Time column +
-                    // always-on trash icons enough breathing room without truncating titles.
-                    // Command Pads (right) keep their original width to avoid disturbing the
-                    // existing pad grid; only the left aside grew, balanced against the
-                    // flexible 1fr middle column.
-                    // lg: (1024 px) = minimum iPad landscape width → 3-column deck activates for
-                    // every iPad in landscape (iPad mini 1024 px, Air/standard 1080-1180 px,
-                    // Pro 12.9" 1366 px). Portrait tablets (<1024 px) keep the single-column deck.
-                    // h-[160px] is the fallback below lg so h-full children never collapse to 0.
-                    "grid min-w-0 h-[176px] lg:grid-cols-[270px_minmax(0,1fr)_210px] lg:h-[308px] xl:grid-cols-[290px_minmax(0,1fr)_220px] xl:h-[316px] 2xl:grid-cols-[310px_minmax(0,1fr)_230px] 2xl:h-[324px]"
+                  ? "flex justify-center min-w-0 h-[176px] lg:h-[308px] xl:h-[316px] 2xl:h-[324px]"
                   : "grid grid-cols-1"
               }
             >
-              {isMediaThemeRoute ? (
-                /* Phase 2 Step 1: Queue moved to the LEFT curtain rail. This aside stays ONLY as an
-                   invisible structural spacer — it holds grid column 1 so the 1fr player cell (measured
-                   by ResizeObserver) keeps its exact width. No content, no chrome. Removed in Step 2. */
-                <aside className="library-deck-slot-aside hidden h-full lg:block" aria-hidden="true" />
-              ) : null}
               <div
                 ref={isMediaThemeRoute ? playerCellRef : undefined}
                 data-player-size={isMediaThemeRoute ? playerSize : undefined}
@@ -1587,8 +1576,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                     }
                   : {})}
                 className={
+                  // Centered, deliberate max-width so the player keeps ~its useful width and its
+                  // center-axis matches the symmetric center-workspace below (justify-center on the band).
                   isMediaThemeRoute
-                    ? `library-deck-player-cell relative flex min-h-[160px] flex-col lg:h-full lg:min-h-0 min-w-0 overflow-hidden transition-colors ${
+                    ? `library-deck-player-cell relative flex min-h-[160px] flex-col lg:h-full lg:min-h-0 w-full max-w-[960px] min-w-0 overflow-hidden transition-colors ${
                         playerDropActive ? "ring-2 ring-inset ring-cyan-400/70" : ""
                       }`
                     : "relative min-w-0 w-full"
@@ -1601,12 +1592,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                 ) : null}
                 <AudioPlayer />
               </div>
-              {isMediaThemeRoute ? (
-                /* Phase 2 Step 1: Pads/tools moved to the RIGHT curtain rail (TOOLS). This aside stays
-                   ONLY as an invisible structural spacer holding grid column 3, so the 1fr player cell
-                   keeps its measured width. No content, no chrome. Removed in Step 2. */
-                <aside className="library-deck-pads-aside hidden h-full lg:block" aria-hidden="true" />
-              ) : null}
             </div>
             </div>
           </div>
