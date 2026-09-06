@@ -1669,13 +1669,28 @@ export function AppShell({ children }: { children: ReactNode }) {
                             dot: "bg-[#48484d]",
                           },
                           {
+                            // ZONE — reserved permanent product slot (multi-zone mixer). NOT implemented:
+                            // key stays null so it renders disabled/non-operative (no onClick, no
+                            // CenterModule, no device/backend logic). Honest "Coming soon" label + a
+                            // mixer/faders glyph so the slot reads as the real future area, nothing more.
                             key: null,
-                            title: "Future",
+                            title: "ZONE",
+                            status: "Coming soon",
+                            icon: (
+                              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                                <line x1="4" y1="7" x2="20" y2="7" />
+                                <circle cx="9" cy="7" r="2" fill="currentColor" stroke="none" />
+                                <line x1="4" y1="12" x2="20" y2="12" />
+                                <circle cx="15" cy="12" r="2" fill="currentColor" stroke="none" />
+                                <line x1="4" y1="17" x2="20" y2="17" />
+                                <circle cx="8" cy="17" r="2" fill="currentColor" stroke="none" />
+                              </svg>
+                            ),
                             tone: "border-white/[0.05] bg-white/[0.02] text-[#48484d]",
                             activeTone: "",
                             dot: "bg-[#48484d]",
                           },
-                        ] as Array<{ key: string | null; title: string; tone: string; activeTone: string; dot: string }>
+                        ] as Array<{ key: string | null; title: string; tone: string; activeTone: string; dot: string; status?: string; icon?: React.ReactNode }>
                       ).map((group) => {
                         const isMusicPad = group.key === "my-music-library";
                         const isJinglesPad = group.key === "jingles";
@@ -1694,7 +1709,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                         else if (isJinglesPad) statusLabel = isActive ? "Close console" : "Open console";
                         else if (isRfmPad) statusLabel = isActive ? "Close catalog" : "Open catalog";
                         else if (isGuestPad) statusLabel = isActive ? "Close inbox" : "Open inbox";
-                        else statusLabel = "Soon";
+                        else statusLabel = group.status ?? "Soon";
                         return (
                           <button
                             key={group.title}
@@ -1717,7 +1732,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                                       : undefined
                             }
                           >
-                            <p className="text-xs font-semibold tracking-tight">{group.title}</p>
+                            <p className="flex items-center gap-1.5 text-xs font-semibold tracking-tight">
+                              {group.icon ? <span className="shrink-0" aria-hidden="true">{group.icon}</span> : null}
+                              {group.title}
+                            </p>
                             <p className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] ${isMusicPad && !inDesktopApp ? "opacity-60" : "opacity-90"}`}>
                               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />
                               {statusLabel}
