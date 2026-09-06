@@ -1686,9 +1686,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                                 <circle cx="8" cy="17" r="2" fill="currentColor" stroke="none" />
                               </svg>
                             ),
-                            tone: "border-white/[0.05] bg-white/[0.02] text-[#48484d]",
+                            // Normal tool-card presence: same border/fill + bright title/icon as the
+                            // active tools. Only the "Coming soon" status line is muted (below). The
+                            // whole-tile opacity-45 that padDisabled applies is skipped for this slot.
+                            tone: "border-white/[0.08] bg-white/[0.04] text-[#f5f5f7]",
                             activeTone: "",
-                            dot: "bg-[#48484d]",
+                            dot: "bg-[#6e6e73]",
                           },
                         ] as Array<{ key: string | null; title: string; tone: string; activeTone: string; dot: string; status?: string; icon?: React.ReactNode }>
                       ).map((group) => {
@@ -1702,6 +1705,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                           (isRfmPad && isRoyaltyFreeMusicModule(activeCenterModule)) ||
                           (isGuestPad && isGuestsModule(activeCenterModule));
                         const padDisabled = group.key === null || (isMusicPad && !inDesktopApp);
+                        // Reserved-but-visible slot (e.g. ZONE): disabled/non-operative, yet presented as
+                        // a clear tool card — no whole-tile dim; only its status line is muted.
+                        const isReservedSlotPad = group.key === null && group.status != null;
                         const isTogglePad = isJinglesPad || isRfmPad || isGuestPad || (isMusicPad && inDesktopApp);
                         let statusLabel: string;
                         if (isMusicPad && !inDesktopApp) statusLabel = "Desktop only";
@@ -1716,7 +1722,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                             type="button"
                             className={`rounded-lg border px-2 py-2 text-left transition-[border-color,background-color,opacity,box-shadow] duration-150 ${
                               isActive && group.activeTone ? group.activeTone : group.tone
-                            } ${padDisabled ? "opacity-45 cursor-default" : "hover:opacity-90 active:opacity-75"}`}
+                            } ${padDisabled ? (isReservedSlotPad ? "cursor-default" : "opacity-45 cursor-default") : "hover:opacity-90 active:opacity-75"}`}
                             disabled={padDisabled}
                             aria-disabled={padDisabled}
                             aria-pressed={!padDisabled && isTogglePad ? isActive : undefined}
@@ -1736,7 +1742,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                               {group.icon ? <span className="shrink-0" aria-hidden="true">{group.icon}</span> : null}
                               {group.title}
                             </p>
-                            <p className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] ${isMusicPad && !inDesktopApp ? "opacity-60" : "opacity-90"}`}>
+                            <p className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] ${isMusicPad && !inDesktopApp ? "opacity-60" : "opacity-90"}${isReservedSlotPad ? " text-[#8e8e93]" : ""}`}>
                               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />
                               {statusLabel}
                             </p>
