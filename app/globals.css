@@ -1664,6 +1664,16 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   min-height: 100%;
   display: flex;
   flex-direction: column;
+  /* Phase 1: the player is the self-contained HERO surface now that the outer console card is gone.
+     Its own rail bg + inset/drop shadow give depth (no heavy border). Rounded corners + a small
+     HORIZONTAL-ONLY inset separate it from the (now open) Queue/Pads columns. Horizontal margin is safe:
+     width is auto so the surface shrinks within its cell. NO vertical margin — height is 100% of a
+     fixed-height, overflow-hidden cell, so vertical margin would overflow/clip. NO overflow added here
+     (the video bg is already inset + self-rounded, and this keeps player popovers unclipped). The player
+     CELL that ResizeObserver measures is the parent and is untouched → data-player-size is unchanged. */
+  border-radius: 14px;
+  margin-left: 6px;
+  margin-right: 6px;
 }
 
 /* Deep Blue deck: flat slate rail — same density as Paste/Drop card, no gradient drama */
@@ -1697,42 +1707,9 @@ input[type="range"]:not(.player-volume-slider):not(.syncbiz-mobile-range)::-moz-
   box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.64), inset 0 1px 0 rgba(255, 255, 255, 0.025);
 }
 
-/* Top segment only: soften double-edge read in the grid gap between player shell and Command Pads (card borders unchanged). */
-.library-theme.library-player-route-bridge[data-library-theme="deep-blue"] > .grid > aside.library-deck-pads-aside::before {
-  content: "";
-  position: absolute;
-  left: -0.75rem;
-  top: 0;
-  width: 0.75rem;
-  height: 2.75rem;
-  pointer-events: none;
-  z-index: 5;
-  background: linear-gradient(to right, transparent, rgba(0, 3, 8, 0.48) 50%, transparent);
-}
-
-.library-theme.library-player-route-bridge[data-library-theme="graphite-black"] > .grid > aside.library-deck-pads-aside::before {
-  content: "";
-  position: absolute;
-  left: -0.75rem;
-  top: 0;
-  width: 0.75rem;
-  height: 2.75rem;
-  pointer-events: none;
-  z-index: 5;
-  background: linear-gradient(to right, transparent, rgba(3, 3, 3, 0.5) 50%, transparent);
-}
-
-.library-theme.library-player-route-bridge[data-library-theme="pearl-light"] > .grid > aside.library-deck-pads-aside::before {
-  content: "";
-  position: absolute;
-  left: -0.75rem;
-  top: 0;
-  width: 0.75rem;
-  height: 2.75rem;
-  pointer-events: none;
-  z-index: 5;
-  background: linear-gradient(to right, transparent, rgba(248, 250, 252, 0.5) 50%, transparent);
-}
+/* Phase 1: the player↔Command-Pads seam gradient was removed — it existed to soften the shared-card
+   edge, but with the outer card and dividers gone it only reinforced the "one enclosure" read. The
+   player's own rounded surface + open Pads column now separate them with space, not a seam. */
 
 /* Main: no extra inset line under the deck (shell + header border handle separation). */
 main.library-main-below-deck[data-library-theme="deep-blue"],

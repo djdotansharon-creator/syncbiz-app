@@ -1550,9 +1550,10 @@ export function AppShell({ children }: { children: ReactNode }) {
              */}
             <div
               className={
-                isMediaThemeRoute
-                  ? "library-deck-unified overflow-hidden rounded-2xl border border-white/[0.06] bg-[#050914]/95 shadow-[0_6px_22px_rgba(0,0,0,0.28)]"
-                  : undefined
+                // Phase 1 (visual detach): NO outer console card around Queue+Player+Pads. Kept only as a
+                // transparent structural wrapper that still clips the deck band (overflow-hidden) — no
+                // border / bg / shadow / rounding, so the three stop reading as one enclosure.
+                isMediaThemeRoute ? "library-deck-unified overflow-hidden" : undefined
               }
             >
             <div
@@ -1573,7 +1574,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               }
             >
               {isMediaThemeRoute ? (
-                <aside className="library-deck-slot-aside relative z-[60] isolate hidden h-full min-h-0 overflow-hidden lg:block lg:border-e lg:border-slate-800/60">
+                <aside className="library-deck-slot-aside relative z-[60] isolate hidden h-full min-h-0 overflow-hidden lg:block">
                   <div className="flex h-full min-h-0 flex-col overflow-hidden p-2.5">
                     <LiveQueuePanel />
                   </div>
@@ -1609,7 +1610,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <AudioPlayer />
               </div>
               {isMediaThemeRoute ? (
-                <aside className="library-deck-pads-aside relative z-[60] isolate hidden h-full overflow-hidden lg:block lg:border-s lg:border-slate-800/60">
+                <aside className="library-deck-pads-aside relative z-[60] isolate hidden h-full overflow-hidden lg:block">
                   <div className="flex h-full flex-col overflow-hidden p-2.5">
                     <header className="pb-2">
                       <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500">
