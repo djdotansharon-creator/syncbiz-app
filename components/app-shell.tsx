@@ -1662,11 +1662,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                             dot: "bg-violet-400",
                           },
                           {
+                            // Visible future/non-operative pad — full tool-card presence per the
+                            // locked convention (see tileTone/dotTone below); only "Soon" is muted.
                             key: null,
                             title: "Alerts",
-                            tone: "border-white/[0.05] bg-white/[0.02] text-[#48484d]",
+                            tone: "border-white/[0.08] bg-white/[0.04] text-[#f5f5f7]",
                             activeTone: "",
-                            dot: "bg-[#48484d]",
+                            dot: "bg-[#6e6e73]",
                           },
                           {
                             // ZONE — reserved permanent product slot (multi-zone mixer). NOT implemented:
@@ -1705,9 +1707,21 @@ export function AppShell({ children }: { children: ReactNode }) {
                           (isRfmPad && isRoyaltyFreeMusicModule(activeCenterModule)) ||
                           (isGuestPad && isGuestsModule(activeCenterModule));
                         const padDisabled = group.key === null || (isMusicPad && !inDesktopApp);
-                        // Reserved-but-visible slot (e.g. ZONE): disabled/non-operative, yet presented as
-                        // a clear tool card — no whole-tile dim; only its status line is muted.
-                        const isReservedSlotPad = group.key === null && group.status != null;
+                        // LOCKED VISUAL CONVENTION — a visible future/non-operative pad (key:null: Alerts,
+                        // ZONE, any future slot) keeps FULL tool-card presence: bright icon + title and
+                        // normal border/fill, and the whole tile is NOT dimmed. Only the SOON / COMING SOON
+                        // status line is muted. Enforced centrally here so every such pad complies.
+                        // Behavior is unchanged — these pads stay disabled / non-operative (no onClick,
+                        // no module, no backend). (My Music "Desktop only" is a platform-gated real tool,
+                        // not a future pad, so it keeps its existing dimmed gating.)
+                        const isVisiblePlaceholderPad = group.key === null;
+                        const tileTone =
+                          isActive && group.activeTone
+                            ? group.activeTone
+                            : isVisiblePlaceholderPad
+                              ? "border-white/[0.08] bg-white/[0.04] text-[#f5f5f7]"
+                              : group.tone;
+                        const dotTone = isVisiblePlaceholderPad ? "bg-[#6e6e73]" : group.dot;
                         const isTogglePad = isJinglesPad || isRfmPad || isGuestPad || (isMusicPad && inDesktopApp);
                         let statusLabel: string;
                         if (isMusicPad && !inDesktopApp) statusLabel = "Desktop only";
@@ -1720,9 +1734,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                           <button
                             key={group.title}
                             type="button"
-                            className={`rounded-lg border px-2 py-2 text-left transition-[border-color,background-color,opacity,box-shadow] duration-150 ${
-                              isActive && group.activeTone ? group.activeTone : group.tone
-                            } ${padDisabled ? (isReservedSlotPad ? "cursor-default" : "opacity-45 cursor-default") : "hover:opacity-90 active:opacity-75"}`}
+                            className={`rounded-lg border px-2 py-2 text-left transition-[border-color,background-color,opacity,box-shadow] duration-150 ${tileTone} ${padDisabled ? (isVisiblePlaceholderPad ? "cursor-default" : "opacity-45 cursor-default") : "hover:opacity-90 active:opacity-75"}`}
                             disabled={padDisabled}
                             aria-disabled={padDisabled}
                             aria-pressed={!padDisabled && isTogglePad ? isActive : undefined}
@@ -1742,8 +1754,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                               {group.icon ? <span className="shrink-0" aria-hidden="true">{group.icon}</span> : null}
                               {group.title}
                             </p>
-                            <p className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] ${isMusicPad && !inDesktopApp ? "opacity-60" : "opacity-90"}${isReservedSlotPad ? " text-[#8e8e93]" : ""}`}>
-                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${group.dot}`} />
+                            <p className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] ${isMusicPad && !inDesktopApp ? "opacity-60" : "opacity-90"}${isVisiblePlaceholderPad ? " text-[#8e8e93]" : ""}`}>
+                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotTone}`} />
                               {statusLabel}
                             </p>
                           </button>
