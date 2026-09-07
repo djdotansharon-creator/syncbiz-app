@@ -909,7 +909,7 @@ export function LiveQueuePanel() {
        */}
       <header className="shrink-0 border-b border-white/[0.06] pb-1.5">
         <div className="flex items-baseline gap-2">
-          <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-600">QUEUE</span>
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-600">QUEUE</span>
           <p
             className={`min-w-0 flex-1 truncate ${sessionTracks.length === 0 ? "text-[10px] font-medium text-slate-600/60" : "text-[11px] font-medium text-slate-200"}`}
             title={plName}
@@ -992,17 +992,17 @@ export function LiveQueuePanel() {
                   <div className="min-w-0 overflow-hidden">
                     <div className="queue-row-title relative flex min-w-0 items-center overflow-hidden">
                       {isNextInList && !isCurrent ? (
-                        <span className="me-1.5 shrink-0 text-[9px] font-medium uppercase tracking-wide text-slate-500">Next</span>
+                        <span className="me-1.5 shrink-0 text-[10px] font-medium uppercase tracking-wide text-slate-500">Next</span>
                       ) : null}
                       <div className="min-w-0 flex-1 overflow-hidden">
                         <div className="queue-row-title-marquee flex w-max gap-12 whitespace-nowrap" title={title}>
-                          <span dir="auto" className="text-[14px] font-semibold leading-tight text-[#f5f5f7]">{title}</span>
-                          <span dir="auto" aria-hidden className="text-[14px] font-semibold leading-tight text-[#f5f5f7]">{title}</span>
+                          <span dir="auto" className="text-[13px] font-semibold leading-tight text-[#f5f5f7]">{title}</span>
+                          <span dir="auto" aria-hidden className="text-[13px] font-semibold leading-tight text-[#f5f5f7]">{title}</span>
                         </div>
                       </div>
                     </div>
                     {artistLine ? (
-                      <span dir="auto" className="mt-1 line-clamp-1 text-[12px] leading-snug text-[#a1a1a6]">{artistLine}</span>
+                      <span dir="auto" className="mt-1 line-clamp-1 text-[11px] leading-snug text-[#a1a1a6]">{artistLine}</span>
                     ) : null}
                     {/* USER suggestion (vertical slice: now-playing track only). Saved as PENDING; never edits the catalog/MP3. */}
                     {isCurrent ? (
@@ -1012,7 +1012,7 @@ export function LiveQueuePanel() {
                       </>
                     ) : null}
                   </div>
-                  <span className="shrink-0 text-right font-mono text-sm font-medium tabular-nums text-slate-500">
+                  <span className="shrink-0 text-right font-mono text-[11px] font-medium tabular-nums text-slate-500">
                     {formatClockRow(rowDurationSeconds)}
                   </span>
                   {isCurrent ? (
@@ -1066,8 +1066,8 @@ export function LiveQueuePanel() {
               <li key={it.id} className="group/pn flex items-center gap-1 pl-0.5">
                 <div className="min-w-0 flex-1 overflow-hidden">
                   <div className="queue-row-title-marquee flex w-max gap-12 whitespace-nowrap" title={it.title}>
-                    <span dir="auto" className="text-xs font-medium">{it.title}</span>
-                    <span dir="auto" aria-hidden className="text-xs font-medium">{it.title}</span>
+                    <span dir="auto" className="text-[11px] font-medium">{it.title}</span>
+                    <span dir="auto" aria-hidden className="text-[11px] font-medium">{it.title}</span>
                   </div>
                 </div>
                 <button

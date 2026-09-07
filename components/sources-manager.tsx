@@ -2573,7 +2573,7 @@ function SourcesManagerInner({
                     }}
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
-                    className="group rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
+                    className="group rounded-xl border border-transparent bg-white/[0.02] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.08] hover:bg-white/[0.05]"
                     title={t.playlistTileDropBindPlaylistTitle}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -2587,11 +2587,11 @@ function SourcesManagerInner({
                           {tileCover ? <HydrationSafeImage src={tileCover} alt="" className="h-full w-full object-cover" /> : null}
                         </span>
                         <span className="min-w-0">
-                          <span className="library-text-title flex items-center gap-1.5 text-sm font-semibold">
+                          <span className="library-text-title flex items-center gap-1.5 text-[13px] font-semibold">
                             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${pad.tone}`} aria-hidden />
                             <span className="truncate">{pad.label}</span>
                           </span>
-                          <span className="library-card-meta block truncate text-[10px]">
+                          <span className="library-card-meta block truncate text-[11px]">
                             {assignedPlaylist?.title ?? "Playlist"}
                           </span>
                         </span>
@@ -2671,7 +2671,7 @@ function SourcesManagerInner({
                     }}
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
-                    className="group rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
+                    className="group rounded-xl border border-transparent bg-white/[0.02] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.08] hover:bg-white/[0.05]"
                     title={t.playlistTileDropBindPlaylistTitle}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -2685,11 +2685,11 @@ function SourcesManagerInner({
                           {tileCover ? <HydrationSafeImage src={tileCover} alt="" className="h-full w-full object-cover" /> : null}
                         </span>
                         <span className="min-w-0">
-                          <span className="library-text-title flex items-center gap-1.5 text-sm font-semibold">
+                          <span className="library-text-title flex items-center gap-1.5 text-[13px] font-semibold">
                             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" aria-hidden />
                             <span className="truncate">{pad.label}</span>
                           </span>
-                          <span className="library-card-meta block truncate text-[10px]">
+                          <span className="library-card-meta block truncate text-[11px]">
                             {assignedPlaylist?.title ?? "Playlist"}
                           </span>
                         </span>
@@ -4121,7 +4121,7 @@ function SourcesManagerInner({
                     setNewPlaylistName("");
                     setCreatePlaylistOpen(true);
                   }}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-full border border-white/[0.1] bg-white/[0.05] px-2.5 py-1 text-[10px] font-semibold text-[#a1a1a6] transition-colors duration-150 hover:border-white/[0.18] hover:bg-white/[0.09] hover:text-[#f5f5f7]"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full border border-transparent px-2.5 py-1 text-[10px] font-semibold text-[#8e8e93] transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-[#f5f5f7]"
                 >
                   <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
                     <path d="M12 5v14M5 12h14" />
