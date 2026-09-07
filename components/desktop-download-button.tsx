@@ -53,7 +53,7 @@ type ButtonView =
     }
   | { kind: "fallback"; href: string; version?: string; title: string; external: true };
 
-type Payload = { view: ButtonView; data: DownloadInfo };
+export type Payload = { view: ButtonView; data: DownloadInfo };
 
 function formatMB(bytes: number | null | undefined): string | null {
   if (bytes == null || !Number.isFinite(bytes)) return null;
@@ -83,7 +83,7 @@ function subExpected(tpl: string, expected: string): string {
   return tpl.replaceAll("{expected}", expected);
 }
 
-function buildPayload(data: DownloadInfo, tr: Record<string, string | undefined>): Payload {
+export function buildPayload(data: DownloadInfo, tr: Record<string, string | undefined>): Payload {
   const releases =
     typeof data.releasesPageUrl === "string" && data.releasesPageUrl.startsWith("https://")
       ? data.releasesPageUrl
@@ -169,7 +169,7 @@ type DesktopDownloadModalProps = {
   payload: Payload;
 };
 
-function DesktopDownloadModal({ onClose, payload }: DesktopDownloadModalProps) {
+export function DesktopDownloadModal({ onClose, payload }: DesktopDownloadModalProps) {
   const { t, locale } = useTranslations();
   const id = useId();
   const titleId = `${id}-title`;

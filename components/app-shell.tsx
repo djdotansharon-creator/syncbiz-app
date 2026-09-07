@@ -29,7 +29,7 @@ import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { HeaderDeviceIndicators } from "@/components/header-device-indicators";
 import { LanguageSelector } from "@/components/language-selector";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
-import { DesktopDownloadButton } from "@/components/desktop-download-button";
+import { DesktopDownloadButton, DesktopDownloadModal, buildPayload, type DownloadInfo, type Payload } from "@/components/desktop-download-button";
 import { DesktopUpdatePill } from "@/components/desktop-update-pill";
 import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule, isRoyaltyFreeMusicModule, isGuestsModule, sameCenterModule } from "@/lib/center-module-context";
 import { RFM_CATALOG_ENABLED } from "@/lib/feature-flags";
@@ -644,6 +644,28 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // ────────────────────────────────────────────────────────────────────────
   const [inDesktopApp, setInDesktopApp] = useState(false);
+  // My Music runs only in the desktop app. On the web the pad stays a normal, clearly
+  // visible tool; clicking it opens the honest desktop-download prompt (reusing the same
+  // modal as the header "Download" button) instead of a fake or empty screen.
+  const [desktopPromptOpen, setDesktopPromptOpen] = useState(false);
+  const [desktopPromptPayload, setDesktopPromptPayload] = useState<Payload | null>(null);
+  const openDesktopPrompt = useCallback(async () => {
+    setDesktopPromptOpen(true);
+    if (desktopPromptPayload) return;
+    const tr = t as unknown as Record<string, string | undefined>;
+    try {
+      const resp = await fetch("/api/desktop/download", { cache: "no-store" });
+      const data = (await resp.json().catch(() => ({}))) as DownloadInfo;
+      setDesktopPromptPayload(buildPayload(data, tr));
+    } catch {
+      setDesktopPromptPayload(
+        buildPayload(
+          { url: null, releasesPageUrl: "https://github.com/djdotansharon-creator/syncbiz-app/releases" },
+          tr,
+        ),
+      );
+    }
+  }, [desktopPromptPayload, t]);
   const [mainMenuOpen, setMainMenuOpen] = useState(false);
   const [menuLogoutBusy, setMenuLogoutBusy] = useState(false);
   const mainMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
@@ -1536,6 +1558,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
               {/* Desktop download + update — pinned at the far right edge of the header */}
               <DesktopDownloadButton compact />
+              {desktopPromptOpen && desktopPromptPayload ? (
+                <DesktopDownloadModal onClose={() => setDesktopPromptOpen(false)} payload={desktopPromptPayload} />
+              ) : null}
               <DesktopUpdatePill />
             </div>
           </div>
@@ -1706,7 +1731,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                           (isMusicPad && isMyMusicLibraryModule(activeCenterModule)) ||
                           (isRfmPad && isRoyaltyFreeMusicModule(activeCenterModule)) ||
                           (isGuestPad && isGuestsModule(activeCenterModule));
-                        const padDisabled = group.key === null || (isMusicPad && !inDesktopApp);
+                        // My Music on the web is NOT disabled — it's a clear, clickable tool that
+                        // opens the desktop-download prompt. Only true placeholder pads (key:null) are
+                        // disabled/non-operative.
+                        const padDisabled = group.key === null;
                         // LOCKED VISUAL CONVENTION — a visible future/non-operative pad (key:null: Alerts,
                         // ZONE, any future slot) keeps FULL tool-card presence: bright icon + title and
                         // normal border/fill, and the whole tile is NOT dimmed. Only the SOON / COMING SOON
@@ -1747,14 +1775,16 @@ export function AppShell({ children }: { children: ReactNode }) {
                                     ? () => toggleCenterModule("guests")
                                     : isMusicPad && inDesktopApp
                                       ? () => toggleCenterModule("my-music-library")
-                                      : undefined
+                                      : isMusicPad && !inDesktopApp
+                                        ? () => { void openDesktopPrompt(); }
+                                        : undefined
                             }
                           >
                             <p className="flex items-center gap-1.5 text-xs font-semibold tracking-tight">
                               {group.icon ? <span className="shrink-0" aria-hidden="true">{group.icon}</span> : null}
                               {group.title}
                             </p>
-                            <p className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] ${isMusicPad && !inDesktopApp ? "opacity-60" : "opacity-90"}${isVisiblePlaceholderPad ? " text-[#8e8e93]" : ""}`}>
+                            <p className={`mt-1 flex flex-wrap items-center gap-1 text-[10px] opacity-90${isVisiblePlaceholderPad ? " text-[#8e8e93]" : ""}`}>
                               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotTone}`} />
                               {statusLabel}
                             </p>
