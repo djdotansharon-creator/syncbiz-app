@@ -1,0 +1,13 @@
+# Android / Gradle build outputs — never commit these.
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
