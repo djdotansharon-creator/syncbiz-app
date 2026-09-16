@@ -41,39 +41,79 @@ duplicate the WebSocket client, or change MASTER/CONTROL.
 - `applicationId` / package: `com.vono.streamer`. `minSdk 21`, `targetSdk 34`.
 - Start-on-boot is an **optional, best-effort** setting (default OFF) — see "Appliance behavior (v0.2)" and "Start on boot — limitations" below.
 
-## Building (requires a machine with the Android toolchain)
+## Building — CI does it, no local Android tooling needed
 
-> Not built here — the dev machine has no JDK / Android SDK / Gradle. Nothing in
-> this module is compiled or verified yet.
+You do **not** install Android Studio, Gradle, the SDK, or ADB. The APK is built
+by GitHub Actions: [`.github/workflows/streamer-tv.yml`](../.github/workflows/streamer-tv.yml).
 
-Prerequisites: **JDK 17**, **Android SDK** (platform API 34 + build-tools) or
-**Android Studio** (bundles everything). Then:
+- **Test build (debug APK):** Actions → *VONO Streamer (Android TV)* → **Run workflow**.
+  Produces `VONO-Streamer-debug.apk` as a downloadable build artifact. Debug APKs are
+  self-signed and installable immediately for testing.
+- **Customer build (signed release APK):** push a tag `streamer-v<version>`
+  (e.g. `streamer-v1.0.0`). CI builds the **signed** `VONO-Streamer-release.apk`
+  and attaches it to a GitHub Release. The in-app Downloads page serves that asset
+  automatically (see "Delivery" below). A manual run also builds the signed release
+  APK when the signing secrets are configured.
 
-1. Open `streamer-tv/` in Android Studio (it will generate the Gradle wrapper jar
-   and `local.properties` pointing at the SDK), **or** from a shell with the SDK:
-   ```
-   cd streamer-tv
-   gradle wrapper           # one-time: generates gradle/wrapper/gradle-wrapper.jar
-   ./gradlew assembleDebug  # → app/build/outputs/apk/debug/app-debug.apk
-   ```
-2. For a shippable build, configure signing and run `./gradlew assembleRelease`.
+### Signing material required (one-time, provided by the account owner)
 
-The Gradle **wrapper jar** is intentionally not committed (binary); Android Studio
-or `gradle wrapper` regenerates it. Plugin/SDK versions in `build.gradle` are a
-known-compatible set — adjust to the build machine if it flags a mismatch.
+Nothing secret is committed. To produce signed customer releases, add these as
+**GitHub repository secrets** (Settings → Secrets and variables → Actions):
 
-## Installing on the TV device
-1. On the device: enable **Developer options** → network/USB debugging + "install unknown apps".
-2. From the build machine on the same LAN: `adb connect <device-ip>:5555` then
-   `adb install app/build/outputs/apk/debug/app-debug.apk` (or sideload the APK).
-3. Launch **VONO Streamer** from the home row → it opens fullscreen → **log in once**
-   (the `/streamer` route is auth-protected; the session then persists) → it registers
-   as the branch MASTER exactly like the web streamer.
+| Secret | What it is |
+|---|---|
+| `VONO_KEYSTORE_BASE64` | base64 of the release keystore (`.jks`) |
+| `VONO_KEYSTORE_PASSWORD` | keystore password |
+| `VONO_KEY_ALIAS` | key alias |
+| `VONO_KEY_PASSWORD` | key password |
+
+Create the keystore once (on any machine with a JDK, or ask Claude to generate the
+exact `keytool` command), then base64-encode the `.jks` for the secret. Keep the
+`.jks` and passwords in a password manager — losing them means future updates can't
+be signed with the same identity. `signingConfigs.release` in `app/build.gradle`
+reads these from the environment; with no secrets the release APK is built unsigned
+and the debug APK still works.
+
+### Advanced / optional: build locally
+
+Only if you *want* to: with **JDK 17** + **Android SDK** (or Android Studio),
+`cd streamer-tv && gradle wrapper --gradle-version 8.9 && ./gradlew assembleDebug`.
+The Gradle wrapper jar is not committed (binary); `gradle wrapper` regenerates it.
+
+## Delivery — how the APK reaches a customer
+
+The signed release APK attached to a `streamer-v*` GitHub Release is served through
+our own site, so the customer never touches GitHub, ADB, or a terminal:
+
+- **Web:** the in-app **Downloads & Apps** page (`/downloads`, linked from Settings)
+  → **Download VONO Streamer**. That button hits `/api/streamer/apk/download`
+  (same-origin), which 302-redirects to the current signed APK.
+- **Resolution order** (`lib/streamer-apk-resolve.ts`): `STREAMER_APK_URL` env
+  override (a public https URL — Railway/R2/CDN) → latest `streamer-v*` GitHub
+  Release `.apk` → honest "release build in progress" state.
+
+## Customer install flow (non-technical, no ADB)
+1. On the TV device, open the browser, go to VONO → **Downloads** → **Download VONO Streamer**.
+2. If the TV asks to **allow installing apps from this source**, choose **Allow**
+   (a one-time system prompt), then open the downloaded file to install.
+3. Open **VONO Streamer** from the TV home screen, **sign in once**. It stays
+   signed in, opens full-screen, and registers as the branch MASTER — exactly like
+   the web streamer.
+
+### Removing the "allow from this source" step — Google Play (later)
+Sideloading shows that one-time "unknown source" prompt. Publishing to the **Google
+Play Store** (Android TV section) removes it: the customer just installs from Play.
+To publish later you need a **Google Play Developer account** (one-time US$25), a
+signed **App Bundle** (`.aab` — add an `assembleRelease`/`bundleRelease` variant),
+a privacy policy URL, store listing assets (icon, TV banner, screenshots), and to
+pass Android TV quality/content review. Play App Signing then manages the signing
+key. This module is Play-ready in structure; publishing is an account/approval step,
+not a code change.
 
 ## Caveats / needs on-device verification
 - **Target must actually be Android TV / Google TV.** Plain non-Android DVB boxes cannot run this APK.
 - **System WebView version** on older TV boxes may lag; verify the streamer loads and stays connected.
-- APK build + runtime are **unverified** until compiled on a real toolchain and run on a real device.
+- The APK is **built and signed in CI**; first-run behavior is verified on a real device (see below).
 
 ---
 
@@ -87,24 +127,18 @@ known-compatible set — adjust to the build machine if it flags a mismatch.
 ### Start on boot — limitations
 On **Android 14** and depending on the TV OEM, launching an Activity from `BOOT_COMPLETED` is subject to background-activity-launch limits and may be **blocked or delayed**. This shell does **not** use device-owner / kiosk / lock-task, so start-on-boot is a convenience, not a guarantee. If it does not launch on your device, open VONO Streamer manually (a device-owner/kiosk provisioning path can be added later if the pilot requires guaranteed boot-launch).
 
-## Build on Windows → install to GOtv Y (Android TV 14)
+## First validation on GOtv Y (Android TV 14) — from a CI build
 
-Prerequisites (none are currently installed on the dev machine):
-1. **JDK 17** (Temurin/OpenJDK 17). Set `JAVA_HOME`.
-2. **Android SDK** — easiest is **Android Studio** (bundles SDK, platform-tools/adb, and generates the Gradle wrapper). CLI alternative: Android command-line tools + `sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"` then `sdkmanager --licenses`.
-3. If not using Android Studio: **Gradle 8.9** (to generate the wrapper once).
-
-Build (from `streamer-tv/`):
-```
-gradle wrapper            # one-time (or open the folder in Android Studio, which does this)
-.\gradlew.bat assembleDebug
-# → app\build\outputs\apk\debug\app-debug.apk
-```
-
-Install to the connected GOtv Y:
-1. On the box: Settings → About → click **Build** 7× to enable Developer options → enable **USB/Network debugging**. Note the box IP (Settings → Network).
-2. From the build machine (same LAN): `adb connect <box-ip>:5555` then `adb install -r app\build\outputs\apk\debug\app-debug.apk`.
-3. Launch **VONO Streamer** from the Android TV home row → **log in once** → it registers as MASTER exactly like the web streamer. Open **Settings** (MENU / long-press BACK) to enable Start-on-boot and confirm Auto-resume.
+No local build machine. Get the APK from CI, then install once for validation:
+1. Run the **VONO Streamer (Android TV)** workflow (or push a `streamer-v*` tag),
+   then download the `vono-streamer-apk` artifact / Release asset.
+2. Fastest customer-style install on the box: open the browser on the GOtv Y →
+   the VONO **Downloads** page → **Download VONO Streamer** → allow the one-time
+   "unknown source" prompt → open the file to install. (A technician may instead
+   sideload with ADB, but customers never need to.)
+3. Launch **VONO Streamer** → **log in once** → it registers as MASTER exactly like
+   the web streamer. Open **Settings** (MENU / long-press BACK) to enable
+   Start-on-boot and confirm Auto-resume.
 
 ## On-device verification (after install)
 - App launches fullscreen into the streamer; logs in once; session persists across relaunch.

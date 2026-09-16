@@ -3,6 +3,14 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// Release signing is driven ENTIRELY by environment variables so no keystore or
+// password is ever committed. CI (see .github/workflows/streamer-tv.yml) decodes a
+// base64 keystore secret to a temp file and exports these vars. When they are absent
+// (e.g. a local `assembleDebug`, or `assembleRelease` with no secrets) the release
+// build simply stays unsigned — the debug APK always works for testing.
+def vonoKeystoreFile = System.getenv('VONO_KEYSTORE_FILE')
+def vonoHasSigning = vonoKeystoreFile != null && !vonoKeystoreFile.trim().isEmpty() && file(vonoKeystoreFile).exists()
+
 android {
     namespace 'com.vono.streamer'
     compileSdk 34
@@ -12,13 +20,29 @@ android {
         minSdk 21            // Android TV since Android 5.0 (Lollipop)
         targetSdk 34
         versionCode 1
-        versionName '0.1.0'
+        versionName '1.0.0'
+    }
+
+    signingConfigs {
+        release {
+            if (vonoHasSigning) {
+                storeFile file(vonoKeystoreFile)
+                storePassword System.getenv('VONO_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('VONO_KEY_ALIAS')
+                keyPassword System.getenv('VONO_KEY_PASSWORD')
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Signed only when the keystore secrets are present; otherwise the
+            // release APK is emitted unsigned (app-release-unsigned.apk).
+            if (vonoHasSigning) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 

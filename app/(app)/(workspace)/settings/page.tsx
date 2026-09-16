@@ -10,6 +10,7 @@ import { SettingsPreferencesControls } from "@/components/settings-preferences-c
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { POC_MUSIC_BANK_CATALOG } from "@/lib/music-bank/poc-catalog";
 import { GENRE_PRICE_LABEL, CHOICE3_PRICE_LABEL, FULL_BANK_PRICE_LABEL, CHOICE3_PACK_COUNT } from "@/lib/music-bank/pricing";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 function PlaceholderCard({
@@ -69,6 +70,23 @@ export default async function SettingsPage() {
           <span className="text-slate-300">Owner</span>.
         </p>
       </div>
+
+      <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-50">Apps &amp; Downloads</h2>
+            <p className="mt-0.5 text-xs text-slate-400">
+              Install VONO on Windows, Android TV / Google TV, and phones &amp; tablets.
+            </p>
+          </div>
+          <Link
+            href="/downloads"
+            className="shrink-0 rounded-lg bg-[#0a84ff] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0a84ff]/90"
+          >
+            Open Downloads
+          </Link>
+        </div>
+      </section>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <PlaceholderCard
