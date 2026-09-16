@@ -254,6 +254,49 @@ type Props = {
   workspaceRouteCenter?: ReactNode;
 };
 
+/** Small chevron used by the workspace rail collapse/expand controls. */
+function RailChevron({ dir }: { dir: "left" | "right" }) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      {dir === "left" ? <polyline points="15 18 9 12 15 6" /> : <polyline points="9 18 15 12 9 6" />}
+    </svg>
+  );
+}
+
+/** Collapse control shown at a rail's inner edge while it is OPEN (lg+ only). */
+function RailCollapseToggle({ side, onClick }: { side: "left" | "right"; onClick: () => void }) {
+  return (
+    <div className={`hidden lg:flex ${side === "left" ? "justify-end" : "justify-start"}`}>
+      <button
+        type="button"
+        onClick={onClick}
+        title="Collapse panel"
+        aria-label="Collapse panel"
+        className="flex h-6 w-6 items-center justify-center rounded-md text-[#8b93a7] transition-colors hover:bg-white/5 hover:text-white"
+      >
+        <RailChevron dir={side === "left" ? "left" : "right"} />
+      </button>
+    </div>
+  );
+}
+
+/** Minimal 40px handle shown while a rail is COLLAPSED (lg+ only). */
+function RailExpandHandle({ side, onClick }: { side: "left" | "right"; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Expand panel"
+      aria-label="Expand panel"
+      className="hidden w-full flex-1 items-start justify-center pt-1.5 text-[#8b93a7] transition-colors hover:text-white lg:flex"
+    >
+      <span className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-white/5">
+        <RailChevron dir={side === "left" ? "right" : "left"} />
+      </span>
+    </button>
+  );
+}
+
 export function SourcesManager({
   initialSources,
   pageTitle,
@@ -763,6 +806,33 @@ function SourcesManagerInner({
   const { libraryTheme } = useLibraryTheme();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [genreFilter, setGenreFilter] = useState("");
+  /* Workspace rail 3-state collapse (lg+). Both open by default; a collapsed rail becomes a
+     40px handle strip and the center monitor (minmax(0,1fr)) owns the remaining width. State
+     is global across every center module (this grid wraps them all) and persisted per device. */
+  const [leftRailOpen, setLeftRailOpen] = useState(true);
+  const [rightRailOpen, setRightRailOpen] = useState(true);
+  useEffect(() => {
+    try {
+      const l = localStorage.getItem("syncbiz-rail-left");
+      const r = localStorage.getItem("syncbiz-rail-right");
+      if (l !== null) setLeftRailOpen(l !== "collapsed");
+      if (r !== null) setRightRailOpen(r !== "collapsed");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const toggleLeftRail = () =>
+    setLeftRailOpen((v) => {
+      const next = !v;
+      try { localStorage.setItem("syncbiz-rail-left", next ? "open" : "collapsed"); } catch { /* ignore */ }
+      return next;
+    });
+  const toggleRightRail = () =>
+    setRightRailOpen((v) => {
+      const next = !v;
+      try { localStorage.setItem("syncbiz-rail-right", next ? "open" : "collapsed"); } catch { /* ignore */ }
+      return next;
+    });
   /* Saved-to-library confirmation toast (simplification pass — "where did it save?"). */
   const [savedToast, setSavedToast] = useState<{ title: string } | null>(null);
   const savedToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2381,12 +2451,16 @@ function SourcesManagerInner({
        * deck was still single-column at lg. Commit 21f97b7 activated the
        * 3-column deck at lg, so workspace rails now widen to match.
        */}
-      <div className="grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:h-full lg:min-h-0 lg:grid-cols-[240px_minmax(0,1fr)_240px] lg:grid-rows-[minmax(0,1fr)_auto] lg:overflow-hidden xl:-mx-1 xl:grid-cols-[260px_minmax(0,1fr)_260px] 2xl:grid-cols-[280px_minmax(0,1fr)_280px]">
+      <div
+        data-left-rail={leftRailOpen ? "open" : "collapsed"}
+        data-right-rail={rightRailOpen ? "open" : "collapsed"}
+        className="workspace-rail-grid grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:h-full lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_auto] lg:overflow-hidden xl:-mx-1"
+      >
         {/* Scheduling tiles only — Ready Playlists removed from here (redundant
             with the "Ready" filter chip under the search bar; the always-open
             list looked cluttered). Keeps the daypart tiles + their Add button. */}
         <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch lg:max-h-[42vh] lg:overflow-y-auto">
-          <div>
+          <div className={leftRailOpen ? "" : "lg:hidden"}>
           <div className="space-y-4 pt-1">
             {false ? (
             <section>
@@ -3862,7 +3936,8 @@ function SourcesManagerInner({
         </div>
 
         <aside className="row-start-1 w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-1 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-y-auto">
-          <div className="space-y-4">
+          <div className={leftRailOpen ? "space-y-4" : "space-y-4 lg:hidden"}>
+            {leftRailOpen ? <RailCollapseToggle side="left" onClick={toggleLeftRail} /> : null}
             <section>
               <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
                 Library
@@ -3948,11 +4023,14 @@ function SourcesManagerInner({
             </section>
 
           </div>
+          {!leftRailOpen ? <RailExpandHandle side="left" onClick={toggleLeftRail} /> : null}
         </aside>
 
         {/* ── RIGHT rail — DJ Creator AI pinned; ONE scrollbar, on the playlist list only ── */}
         <aside className="flex w-full min-w-0 flex-col self-start p-1.5 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-hidden">
-          <div className="flex min-h-0 flex-1 flex-col gap-4">
+          {rightRailOpen ? <RailCollapseToggle side="right" onClick={toggleRightRail} /> : null}
+          {!rightRailOpen ? <RailExpandHandle side="right" onClick={toggleRightRail} /> : null}
+          <div className={rightRailOpen ? "flex min-h-0 flex-1 flex-col gap-4" : "flex min-h-0 flex-1 flex-col gap-4 lg:hidden"}>
             <div className="shrink-0">
               <DjCreatorAiShell
                 variant="launcher"
