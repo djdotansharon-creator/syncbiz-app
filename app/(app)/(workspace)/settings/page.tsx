@@ -8,6 +8,9 @@ import { DeviceModeSettingsSwitch } from "@/components/device-mode-settings-swit
 import { MixDurationSetting } from "@/components/mix-duration-setting";
 import { SettingsPreferencesControls } from "@/components/settings-preferences-controls";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
+import { POC_MUSIC_BANK_CATALOG } from "@/lib/music-bank/poc-catalog";
+import { GENRE_PRICE_LABEL, CHOICE3_PRICE_LABEL, FULL_BANK_PRICE_LABEL, CHOICE3_PACK_COUNT } from "@/lib/music-bank/pricing";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 function PlaceholderCard({
@@ -28,9 +31,35 @@ function PlaceholderCard({
   );
 }
 
+/** One status tile inside Billing & Plan. */
+function BillingStatTile({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <div className="rounded-xl border border-slate-800/70 bg-slate-900/40 p-4">
+      <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-slate-100">{value}</p>
+      <p className="mt-0.5 text-xs text-slate-400">{note}</p>
+    </div>
+  );
+}
+
+/** One plan option inside Billing & Plan (presentation only — payments not built yet). */
+function PlanTile({ label, price, best }: { label: string; price: string; best?: boolean }) {
+  return (
+    <div className={`rounded-xl border p-3 ${best ? "border-[#0a84ff]/40 bg-[#0a84ff]/[0.07]" : "border-slate-800/70 bg-slate-900/40"}`}>
+      <div className="flex items-center gap-1.5">
+        <p className="text-xs font-semibold text-slate-100">{label}</p>
+        {best ? <span className="text-[9px] font-bold uppercase tracking-wider text-[#7db8ff]">Best</span> : null}
+      </div>
+      <p className="mt-1 text-sm font-semibold tabular-nums text-white">{price}</p>
+    </div>
+  );
+}
+
 export default async function SettingsPage() {
   const user = await getCurrentUserFromCookies();
   if (!user) redirect("/login?from=/settings");
+
+  const totalPacks = POC_MUSIC_BANK_CATALOG.genres.length;
 
   return (
     <div className="space-y-8">
@@ -41,6 +70,23 @@ export default async function SettingsPage() {
           <span className="text-slate-300">Owner</span>.
         </p>
       </div>
+
+      <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-50">Apps &amp; Downloads</h2>
+            <p className="mt-0.5 text-xs text-slate-400">
+              Install VONO on Windows, Android TV / Google TV, and phones &amp; tablets.
+            </p>
+          </div>
+          <Link
+            href="/downloads"
+            className="shrink-0 rounded-lg bg-[#0a84ff] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0a84ff]/90"
+          >
+            Open Downloads
+          </Link>
+        </div>
+      </section>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <PlaceholderCard
@@ -64,6 +110,47 @@ export default async function SettingsPage() {
           description="Additional controls will appear here in future releases."
         />
       </div>
+
+      {/* Billing & Plan — the ONE place subscription/plan management lives. The Royalty-Free Music
+          catalog stays music-only; unlocking a locked pack there opens a contextual modal that points
+          back here. Presentation only — no billing backend is wired yet. */}
+      <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-50">Billing &amp; Plan</h2>
+            <p className="mt-0.5 text-xs text-slate-400">
+              Your subscription, Music Bank access and Genre Packs — managed here, not in the catalog.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled
+            title="Coming soon"
+            className="shrink-0 cursor-not-allowed rounded-lg bg-[#0a84ff]/70 px-3 py-1.5 text-xs font-semibold text-white/90"
+          >
+            Change plan
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <BillingStatTile label="Current plan" value="Preview" note="Sample previews only — nothing unlocked yet." />
+          <BillingStatTile label="Genre Packs owned" value={`0 / ${totalPacks}`} note="Unlock from the Royalty-Free Music catalog." />
+          <BillingStatTile label="Full Music Bank" value="Locked" note={`Complete-bank access · ${FULL_BANK_PRICE_LABEL}`} />
+          <BillingStatTile label="Payment method" value="—" note="Added at checkout. Coming soon." />
+        </div>
+
+        <div className="mt-5 border-t border-slate-800/60 pt-5">
+          <h3 className="text-xs font-semibold text-slate-300">Plans</h3>
+          <p className="mt-0.5 text-[11px] text-slate-500">Upgrade or change plan. Payments &amp; entitlements coming soon.</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <PlanTile label="1 Genre Pack" price={GENRE_PRICE_LABEL} />
+            <PlanTile label={`${CHOICE3_PACK_COUNT} Genre Packs`} price={CHOICE3_PRICE_LABEL} />
+            <PlanTile label="Full Music Bank" price={FULL_BANK_PRICE_LABEL} best />
+          </div>
+        </div>
+
+        <p className="mt-4 text-[11px] text-slate-500">Billing history and payment methods will appear here once payments are enabled.</p>
+      </section>
 
       <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
         <h2 className="text-sm font-semibold text-slate-50">Remote player</h2>
