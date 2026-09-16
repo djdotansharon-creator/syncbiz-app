@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings overlay button background. Subtle by default; a clear cyan ring when
+     focused (D-pad) or pressed, so it's discoverable on a TV without a mouse. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="oval">
+            <solid android:color="#E60A0E1A" />
+            <stroke android:width="2dp" android:color="#22D3EE" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="oval">
+            <solid android:color="#E60A0E1A" />
+            <stroke android:width="2dp" android:color="#22D3EE" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#73000000" />
+            <stroke android:width="1dp" android:color="#3AFFFFFF" />
+        </shape>
+    </item>
+</selector>
