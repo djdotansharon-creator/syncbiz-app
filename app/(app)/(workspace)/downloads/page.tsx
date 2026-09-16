@@ -174,31 +174,30 @@ export default async function DownloadsPage() {
 
   // On Android TV → VONO Streamer is the primary card; Windows stays available but
   // secondary. Everywhere else → Windows primary. Mobile/Tablet is always secondary.
-  const primaryCard = tv ? streamerCard : windowsCard;
-  const secondaryCards = tv ? [windowsCard, mobileCard] : [streamerCard, mobileCard];
+  // Primary (recommended-for-this-device) card first; all three share ONE wide
+  // responsive grid. The primary stays visually stronger via its ring + badge.
+  const orderedCards = tv ? [streamerCard, windowsCard, mobileCard] : [windowsCard, streamerCard, mobileCard];
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-2 py-8 sm:py-12">
-      {/* Centered landing-style header */}
-      <header className="mx-auto max-w-2xl text-center">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-50 sm:text-3xl">Downloads &amp; Apps</h1>
-        <p className="mt-3 text-sm leading-relaxed text-slate-400">
+    <div className="w-full px-4 py-10 sm:py-14">
+      {/* Large centered heading across the full monitor width */}
+      <header className="text-center">
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-50 sm:text-4xl">Downloads &amp; Apps</h1>
+        <p className="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-slate-400 sm:text-base">
           Install VONO on your screens. One account works across every device — sign in once on each.
         </p>
       </header>
 
-      {/* Primary download for this device — prominent and centered */}
-      <div className="mx-auto mt-10 w-full max-w-2xl">{primaryCard}</div>
-
-      {/* Other apps — still available; auto-fit so cards never squash */}
+      {/* Wide responsive grid — 3 when space allows, 2 medium, 1 narrow; never squashes.
+          Fills the monitor width (no narrow max-width, no big dead margins). */}
       <div
-        className="mx-auto mt-6 grid w-full max-w-4xl gap-5"
-        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))" }}
+        className="mt-10 grid gap-6 sm:mt-14"
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 300px), 1fr))" }}
       >
-        {secondaryCards}
+        {orderedCards}
       </div>
 
-      <p className="mx-auto mt-10 max-w-2xl text-center text-[11px] leading-relaxed text-slate-500">
+      <p className="mx-auto mt-12 max-w-2xl text-center text-xs leading-relaxed text-slate-500">
         Every VONO app connects to the same VONO account and your location&rsquo;s controls. The player engine is identical
         across devices — the apps above are just the way each screen runs it.
       </p>
