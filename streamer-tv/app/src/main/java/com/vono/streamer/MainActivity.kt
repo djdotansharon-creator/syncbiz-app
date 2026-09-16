@@ -36,18 +36,29 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         /** The ONE streamer web engine. Only the hosted URL is wrapped. */
-        const val STREAMER_URL =
+        const val STREAMER_BASE_URL =
             "https://syncbiz-app-production.up.railway.app/streamer?device=streamer&mode=player"
         const val INITIAL_RETRY_MS = 2000L
         const val MAX_RETRY_MS = 30000L
+    }
 
-        // AUTO-RESUME is owned by the web engine. These are the engine's persistence
-        // keys (lib/playback-provider.tsx). The shell only CLEARS them when the user
-        // turns Auto-resume OFF — it never implements resume itself.
-        // [VERIFY] keep in sync with the web engine's STORAGE_KEY / RECOVERY_STORAGE_KEY.
-        private const val JS_CLEAR_RESUME =
-            "try{localStorage.removeItem('syncbiz-playback-recovery-v2');" +
-                "localStorage.removeItem('syncbiz-playback');}catch(e){}"
+    /**
+     * AUTO-RESUME is owned entirely by the web engine, which persists queue / track /
+     * position / volume to its own localStorage recovery and restores it on load.
+     *
+     * The shell NEVER touches that recovery state. It only tells the engine whether to
+     * auto-START playback after a restart, via a URL flag the engine already honors:
+     *   Auto-resume ON  → `autoresume=1` → engine restores AND resumes (if it was
+     *                     recently playing, per the engine's own window).
+     *   Auto-resume OFF → `autoresume=0` → engine still restores the full session
+     *                     (playlist, queue, current track, position) but does NOT
+     *                     auto-start; the user presses play, and all remote CONTROL
+     *                     commands work normally.
+     * See restoreAutoplaySuppressed() in lib/playback-provider.tsx.
+     */
+    private fun streamerUrl(): String {
+        val flag = if (Prefs.autoResume(this)) "1" else "0"
+        return "$STREAMER_BASE_URL&autoresume=$flag"
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -85,7 +96,7 @@ class MainActivity : ComponentActivity() {
         }
 
         applyImmersive()
-        if (savedInstanceState == null) webView.loadUrl(STREAMER_URL)
+        if (savedInstanceState == null) webView.loadUrl(streamerUrl())
     }
 
     private fun scheduleReload() {
@@ -95,7 +106,7 @@ class MainActivity : ComponentActivity() {
         retryDelayMs = (retryDelayMs * 2).coerceAtMost(MAX_RETRY_MS)
         handler.postDelayed({
             retryScheduled = false
-            webView.loadUrl(STREAMER_URL)
+            webView.loadUrl(streamerUrl())
         }, delay)
     }
 
@@ -118,11 +129,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
-        // Auto-resume OFF → clear the engine's recovery so the next launch starts
-        // fresh. (Best-effort: a hard power-cut before onPause may allow one resume.)
-        if (!Prefs.autoResume(this)) {
-            try { webView.evaluateJavascript(JS_CLEAR_RESUME, null) } catch (_: Exception) {}
-        }
+        // The shell never clears playback recovery. Auto-resume OFF only suppresses
+        // auto-START on the next load (via the autoresume=0 URL flag); the engine still
+        // preserves and restores the full session. See streamerUrl().
         webView.onPause()
         super.onPause()
     }

@@ -8,7 +8,7 @@
     <string name="setting_start_on_boot_note">Best-effort. Some Android TV devices restrict apps from launching automatically on boot; if it doesn’t start, open VONO manually.</string>
 
     <string name="setting_auto_resume">Auto resume playback</string>
-    <string name="setting_auto_resume_note">Resume is handled by the VONO player. When ON, playback resumes after a restart if it was recently playing. When OFF, VONO starts without resuming.</string>
+    <string name="setting_auto_resume_note">Resume is handled by the VONO player. When ON, playback resumes automatically after a restart if it was recently playing. When OFF, your playlist, queue, track and position are still restored — VONO just waits for you to press play instead of starting on its own. Your session is never cleared.</string>
 
     <string name="audio_output_title">Audio output</string>
     <string name="audio_none">No audio outputs detected.</string>

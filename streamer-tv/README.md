@@ -81,7 +81,7 @@ known-compatible set — adjust to the build machine if it flags a mismatch.
 
 - **Settings screen** (open from the player with the **MENU** button or a **long-press BACK**): Start-on-boot, Auto-resume, Audio output, Connection status, App version.
 - **Start on boot** (optional, default OFF): `BootReceiver` launches the player on `BOOT_COMPLETED`. **Best-effort only** — see limitations below.
-- **Auto-resume** (default ON): **owned entirely by the web engine.** On load the player restores its last queue/track/position from its own `localStorage` recovery (`syncbiz-playback-recovery-v2`, 24h TTL) and **auto-plays if it was playing within the last ~30 min** (`RECOVERY_AUTOPLAY_WINDOW_MS`). The shell adds no playback logic — it only keeps WebView storage across restarts and allows autoplay without a gesture. Turning Auto-resume OFF makes the shell clear those recovery keys on exit so the next launch starts fresh.
+- **Auto-resume** (default ON): **owned entirely by the web engine.** On load the player restores its last queue/track/position/volume from its own `localStorage` recovery (`syncbiz-playback-recovery-v2`, 24h TTL) and **auto-plays if it was playing within the last ~30 min** (`RECOVERY_AUTOPLAY_WINDOW_MS`). The shell adds no playback logic and **never clears recovery state.** It signals intent with a URL flag the engine honors: `autoresume=1` (ON) or `autoresume=0` (OFF). With **Auto-resume OFF** the engine still restores the full session (playlist, queue, current track, position) — it simply does **not** auto-start; the user presses play, and all remote CONTROL commands work normally. See `restoreAutoplaySuppressed()` in `lib/playback-provider.tsx`.
 - **Audio output**: the Settings screen **lists available outputs** (HDMI / Bluetooth / analog / speaker / USB) via `AudioManager.GET_DEVICES_OUTPUTS` and opens the OS **Sound**/**Bluetooth** settings. It does **not** force a route — on Android TV the OS owns route selection; the shell never fakes it.
 
 ### Start on boot — limitations
@@ -110,6 +110,7 @@ Install to the connected GOtv Y:
 - App launches fullscreen into the streamer; logs in once; session persists across relaunch.
 - Registers as MASTER; remote Play/Pause/Next/Volume from mobile CONTROL works (unchanged from web).
 - Screen stays awake during playback.
-- **Auto-resume:** play, reboot within ~30 min → playback resumes automatically. (Off > 30 min restores paused by design.)
+- **Auto-resume ON:** play, reboot within ~30 min → playback resumes automatically. (On, but > 30 min since last play → restores paused by design.)
+- **Auto-resume OFF:** play, reboot → the session (playlist/queue/track/position) is still restored, but playback does NOT start until you press play; recovery state is never cleared.
 - **Start on boot:** enable, reboot → app launches (verify on this OEM; may be blocked per limitations).
 - **Audio output:** Settings lists the real outputs; Sound/Bluetooth buttons open OS settings.

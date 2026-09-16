@@ -532,6 +532,24 @@ const RECOVERY_STORAGE_KEY = "syncbiz-playback-recovery-v2";
 const RECOVERY_TTL_MS = 1000 * 60 * 60 * 24;
 const RECOVERY_AUTOPLAY_WINDOW_MS = 1000 * 60 * 30;
 
+/**
+ * A thin platform shell (e.g. the Android TV streamer) can ask the engine to
+ * restore the previous session WITHOUT auto-starting playback, by loading the
+ * streamer URL with `?autoresume=0`. This suppresses ONLY the one-time restore
+ * autoplay: the queue / track / position / volume are still restored, and every
+ * normal playback afterwards (remote CONTROL commands, a user pressing play) is
+ * unaffected. It is stateless — it reads a URL flag and never writes, mutates,
+ * or clears any recovery state.
+ */
+function restoreAutoplaySuppressed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return new URLSearchParams(window.location.search).get("autoresume") === "0";
+  } catch {
+    return false;
+  }
+}
+
 type PersistedPlaybackV2 = {
   currentSourceId: string;
   queueIds: string[];
@@ -1435,7 +1453,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             status: "paused",
           }));
           const shouldAutoplay =
-            persistedV2.status === "playing" && Date.now() - persistedV2.updatedAt <= RECOVERY_AUTOPLAY_WINDOW_MS;
+            persistedV2.status === "playing" &&
+            Date.now() - persistedV2.updatedAt <= RECOVERY_AUTOPLAY_WINDOW_MS &&
+            !restoreAutoplaySuppressed();
           if (shouldAutoplay) {
             if (cancelled) return;
             queueMicrotask(() => {
