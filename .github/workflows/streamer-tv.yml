@@ -92,11 +92,29 @@ jobs:
         if: ${{ env.VONO_KEYSTORE_BASE64 == '' }}
         run: echo "::notice::No VONO_KEYSTORE_BASE64 secret set — built DEBUG apk only. Add signing secrets to produce a customer release APK."
 
-      - name: Upload APK artifact(s)
+      - name: Verify APK(s) — package id, version, signing, SHA-256
+        run: |
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/34.0.0 2>/dev/null || ls -d "$ANDROID_SDK_ROOT"/build-tools/34.0.0)"
+          VERIFY="$GITHUB_WORKSPACE/artifacts/verification.txt"
+          : > "$VERIFY"
+          for apk in "$GITHUB_WORKSPACE"/artifacts/*.apk; do
+            [ -e "$apk" ] || continue
+            echo "===== $(basename "$apk") =====" | tee -a "$VERIFY"
+            "$BT/aapt" dump badging "$apk" | grep -E "^package:|^application-label:|^launchable-activity:|sdkVersion|targetSdkVersion" | tee -a "$VERIFY"
+            echo "-- signing --" | tee -a "$VERIFY"
+            "$BT/apksigner" verify --print-certs "$apk" 2>&1 | tee -a "$VERIFY" || echo "apksigner: UNSIGNED or verify failed" | tee -a "$VERIFY"
+            echo "-- sha256 --" | tee -a "$VERIFY"
+            sha256sum "$apk" | tee -a "$VERIFY"
+            echo "" | tee -a "$VERIFY"
+          done
+          echo "----- verification.txt -----"
+          cat "$VERIFY"
+
+      - name: Upload APK artifact(s) + verification
         uses: actions/upload-artifact@v4
         with:
           name: vono-streamer-apk
-          path: artifacts/*.apk
+          path: artifacts/*
           if-no-files-found: error
           retention-days: 30
 
