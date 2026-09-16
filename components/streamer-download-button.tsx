@@ -74,7 +74,7 @@ export function StreamerDownloadButton() {
           className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-sky-600 via-blue-800 to-slate-950 px-4 py-3 text-center text-sm font-bold text-white shadow-[0_10px_32px_rgba(12,74,120,0.45)] ring-1 ring-sky-400/30 transition hover:from-sky-500 hover:via-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
         >
           <DownloadGlyph className="h-5 w-5 shrink-0" />
-          Download
+          Download VONO Streamer
           {info.version ? <span className="ml-1 tabular-nums opacity-90">(v{info.version})</span> : null}
         </a>
         <p className="text-center text-xs text-slate-500">
