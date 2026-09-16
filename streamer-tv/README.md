@@ -39,7 +39,7 @@ duplicate the WebSocket client, or change MASTER/CONTROL.
 ## Configuration
 - Hosted URL is `MainActivity.STREAMER_URL`. Change it there if the hosted origin changes.
 - `applicationId` / package: `com.vono.streamer`. `minSdk 21`, `targetSdk 34`.
-- Auto-start on boot is **intentionally NOT implemented** (audited; add later only after on-device testing).
+- Start-on-boot is an **optional, best-effort** setting (default OFF) — see "Appliance behavior (v0.2)" and "Start on boot — limitations" below.
 
 ## Building (requires a machine with the Android toolchain)
 
@@ -74,3 +74,42 @@ known-compatible set — adjust to the build machine if it flags a mismatch.
 - **Target must actually be Android TV / Google TV.** Plain non-Android DVB boxes cannot run this APK.
 - **System WebView version** on older TV boxes may lag; verify the streamer loads and stays connected.
 - APK build + runtime are **unverified** until compiled on a real toolchain and run on a real device.
+
+---
+
+## Appliance behavior (v0.2)
+
+- **Settings screen** (open from the player with the **MENU** button or a **long-press BACK**): Start-on-boot, Auto-resume, Audio output, Connection status, App version.
+- **Start on boot** (optional, default OFF): `BootReceiver` launches the player on `BOOT_COMPLETED`. **Best-effort only** — see limitations below.
+- **Auto-resume** (default ON): **owned entirely by the web engine.** On load the player restores its last queue/track/position from its own `localStorage` recovery (`syncbiz-playback-recovery-v2`, 24h TTL) and **auto-plays if it was playing within the last ~30 min** (`RECOVERY_AUTOPLAY_WINDOW_MS`). The shell adds no playback logic — it only keeps WebView storage across restarts and allows autoplay without a gesture. Turning Auto-resume OFF makes the shell clear those recovery keys on exit so the next launch starts fresh.
+- **Audio output**: the Settings screen **lists available outputs** (HDMI / Bluetooth / analog / speaker / USB) via `AudioManager.GET_DEVICES_OUTPUTS` and opens the OS **Sound**/**Bluetooth** settings. It does **not** force a route — on Android TV the OS owns route selection; the shell never fakes it.
+
+### Start on boot — limitations
+On **Android 14** and depending on the TV OEM, launching an Activity from `BOOT_COMPLETED` is subject to background-activity-launch limits and may be **blocked or delayed**. This shell does **not** use device-owner / kiosk / lock-task, so start-on-boot is a convenience, not a guarantee. If it does not launch on your device, open VONO Streamer manually (a device-owner/kiosk provisioning path can be added later if the pilot requires guaranteed boot-launch).
+
+## Build on Windows → install to GOtv Y (Android TV 14)
+
+Prerequisites (none are currently installed on the dev machine):
+1. **JDK 17** (Temurin/OpenJDK 17). Set `JAVA_HOME`.
+2. **Android SDK** — easiest is **Android Studio** (bundles SDK, platform-tools/adb, and generates the Gradle wrapper). CLI alternative: Android command-line tools + `sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"` then `sdkmanager --licenses`.
+3. If not using Android Studio: **Gradle 8.9** (to generate the wrapper once).
+
+Build (from `streamer-tv/`):
+```
+gradle wrapper            # one-time (or open the folder in Android Studio, which does this)
+.\gradlew.bat assembleDebug
+# → app\build\outputs\apk\debug\app-debug.apk
+```
+
+Install to the connected GOtv Y:
+1. On the box: Settings → About → click **Build** 7× to enable Developer options → enable **USB/Network debugging**. Note the box IP (Settings → Network).
+2. From the build machine (same LAN): `adb connect <box-ip>:5555` then `adb install -r app\build\outputs\apk\debug\app-debug.apk`.
+3. Launch **VONO Streamer** from the Android TV home row → **log in once** → it registers as MASTER exactly like the web streamer. Open **Settings** (MENU / long-press BACK) to enable Start-on-boot and confirm Auto-resume.
+
+## On-device verification (after install)
+- App launches fullscreen into the streamer; logs in once; session persists across relaunch.
+- Registers as MASTER; remote Play/Pause/Next/Volume from mobile CONTROL works (unchanged from web).
+- Screen stays awake during playback.
+- **Auto-resume:** play, reboot within ~30 min → playback resumes automatically. (Off > 30 min restores paused by design.)
+- **Start on boot:** enable, reboot → app launches (verify on this OEM; may be blocked per limitations).
+- **Audio output:** Settings lists the real outputs; Sound/Bluetooth buttons open OS settings.

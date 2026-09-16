@@ -1,4 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">VONO Streamer</string>
+
+    <string name="settings_title">VONO Streamer settings</string>
+
+    <string name="setting_start_on_boot">Start VONO when device starts</string>
+    <string name="setting_start_on_boot_note">Best-effort. Some Android TV devices restrict apps from launching automatically on boot; if it doesn’t start, open VONO manually.</string>
+
+    <string name="setting_auto_resume">Auto resume playback</string>
+    <string name="setting_auto_resume_note">Resume is handled by the VONO player. When ON, playback resumes after a restart if it was recently playing. When OFF, VONO starts without resuming.</string>
+
+    <string name="audio_output_title">Audio output</string>
+    <string name="audio_none">No audio outputs detected.</string>
+    <string name="audio_output_os_note">Available outputs are shown above. Output selection (HDMI / Bluetooth / analog / speaker) is handled by the device operating system.</string>
+    <string name="open_sound_settings">Open Sound settings</string>
+    <string name="open_bluetooth_settings">Open Bluetooth settings</string>
+
+    <string name="connection_title">Connection status</string>
+    <string name="connection_fmt">Player load: %1$s (at %2$s)</string>
+    <string name="connection_master_note">MASTER / CONTROL status is shown inside the player itself.</string>
+
+    <string name="app_version_fmt">VONO Streamer v%1$s</string>
 </resources>
