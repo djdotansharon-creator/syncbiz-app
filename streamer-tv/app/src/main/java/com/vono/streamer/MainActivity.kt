@@ -33,7 +33,8 @@ import androidx.core.view.WindowInsetsControllerCompat
  * WebSocket client, no MASTER/CONTROL logic — the web page does all of that.
  * The shell provides: fullscreen, keep-awake, persistent session, a VISIBLE
  * D-pad Settings button, autoplay-without-gesture, optional start-on-boot, and a
- * conservative startup-only reload.
+ * self-healing reload that fires ONLY on a genuine streamer main-document failure
+ * (any time, bounded backoff) — never on media/sub-resource/transient errors.
  */
 class MainActivity : ComponentActivity() {
 
@@ -42,9 +43,6 @@ class MainActivity : ComponentActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var retryScheduled = false
     private var retryDelayMs = INITIAL_RETRY_MS
-    // Once the streamer document has loaded successfully, we NEVER auto-reload again —
-    // a transient sub-resource/media error must not nuke a live, playing session.
-    private var hasLoadedStreamerOnce = false
 
     companion object {
         /** The ONE streamer web engine. Only the hosted URL is wrapped. */
@@ -101,7 +99,6 @@ class MainActivity : ComponentActivity() {
                 retryDelayMs = INITIAL_RETRY_MS
                 retryScheduled = false
                 if (isPlayerPage(url)) {
-                    hasLoadedStreamerOnce = true
                     // Player screen is display-only + remote-controlled → make the Settings
                     // button the sole focus target so D-pad + OK always reaches it.
                     webView.isFocusable = false
@@ -117,16 +114,18 @@ class MainActivity : ComponentActivity() {
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 val url = request.url?.toString() ?: ""
                 Log.w(TAG, "onReceivedError mainFrame=${request.isForMainFrame} code=${error.errorCode} desc=${error.description} url=$url")
-                // ONLY self-heal the STARTUP case: the streamer document itself failing to
-                // load before it ever came up. After a successful load, ignore all errors
-                // (incl. main-frame-tagged media/sub-resource errors on some OEM WebViews)
-                // so a live session is never reloaded out from under playback.
-                if (request.isForMainFrame && isStreamerDoc(url) && !hasLoadedStreamerOnce) {
-                    Log.w(TAG, "startup streamer-doc error → scheduleReload")
+                // Recover ONLY from a genuine failure of the streamer MAIN DOCUMENT itself —
+                // at any time, so this unattended 24/7 appliance still self-heals from a real
+                // later document/WebView failure (bounded backoff). Every other error is
+                // ignored: media/sub-resource/transient failures carry their own (non-document)
+                // URL, and audio/media playback errors don't come through here at all — so a
+                // live, playing session is never reloaded out from under playback.
+                if (request.isForMainFrame && isStreamerDoc(url)) {
+                    Log.w(TAG, "streamer MAIN-DOCUMENT error → scheduleReload (bounded backoff)")
                     Prefs.setLastLoad(this@MainActivity, "error")
                     scheduleReload()
                 } else {
-                    Log.d(TAG, "error ignored (not a startup main-doc failure) — session kept")
+                    Log.d(TAG, "error ignored (not the streamer main document) — session kept")
                 }
             }
 
