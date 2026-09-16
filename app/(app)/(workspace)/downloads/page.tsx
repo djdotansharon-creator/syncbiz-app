@@ -61,7 +61,7 @@ function AppCard({
 }) {
   return (
     <div
-      className={`flex h-full flex-col rounded-2xl border p-5 ${
+      className={`flex h-full flex-col rounded-2xl border p-6 ${
         primary
           ? "border-sky-500/50 bg-sky-500/[0.06] ring-2 ring-sky-500/40"
           : "border-slate-800/80 bg-slate-950/50"
@@ -178,22 +178,27 @@ export default async function DownloadsPage() {
   const secondaryCards = tv ? [windowsCard, mobileCard] : [streamerCard, mobileCard];
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-xl font-semibold text-slate-50">Downloads &amp; Apps</h1>
-        <p className="mt-0.5 text-xs text-slate-400">
+    <div className="mx-auto w-full max-w-6xl px-2 py-8 sm:py-12">
+      {/* Centered landing-style header */}
+      <header className="mx-auto max-w-2xl text-center">
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-50 sm:text-3xl">Downloads &amp; Apps</h1>
+        <p className="mt-3 text-sm leading-relaxed text-slate-400">
           Install VONO on your screens. One account works across every device — sign in once on each.
         </p>
+      </header>
+
+      {/* Primary download for this device — prominent and centered */}
+      <div className="mx-auto mt-10 w-full max-w-2xl">{primaryCard}</div>
+
+      {/* Other apps — still available; auto-fit so cards never squash */}
+      <div
+        className="mx-auto mt-6 grid w-full max-w-4xl gap-5"
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))" }}
+      >
+        {secondaryCards}
       </div>
 
-      <div className="space-y-4">
-        {/* Primary download for this device */}
-        <div className="max-w-xl">{primaryCard}</div>
-        {/* Other apps — still available */}
-        <div className="grid gap-4 sm:grid-cols-2">{secondaryCards}</div>
-      </div>
-
-      <p className="text-[11px] leading-relaxed text-slate-500">
+      <p className="mx-auto mt-10 max-w-2xl text-center text-[11px] leading-relaxed text-slate-500">
         Every VONO app connects to the same VONO account and your location&rsquo;s controls. The player engine is identical
         across devices — the apps above are just the way each screen runs it.
       </p>

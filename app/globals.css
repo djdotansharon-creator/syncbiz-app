@@ -3387,3 +3387,26 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   letter-spacing: 0.1em !important;
   font-family: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", inherit;
 }
+
+/* ── Workspace rail 3-state collapse (lg+ only; mobile stacks normally) ──
+   Two side rails + a center MONITOR. Each rail is OPEN (responsive width) or
+   COLLAPSED (a minimal 40px handle strip). The center is always minmax(0,1fr),
+   so it owns all remaining width and only ever takes 3 discrete widths:
+   both open · one open · both collapsed. Symmetric for left/right. */
+@media (min-width: 1024px) {
+  .workspace-rail-grid {
+    grid-template-columns: var(--rail-left, 240px) minmax(0, 1fr) var(--rail-right, 240px);
+  }
+  .workspace-rail-grid[data-left-rail="open"] { --rail-left: 240px; }
+  .workspace-rail-grid[data-left-rail="collapsed"] { --rail-left: 40px; }
+  .workspace-rail-grid[data-right-rail="open"] { --rail-right: 240px; }
+  .workspace-rail-grid[data-right-rail="collapsed"] { --rail-right: 40px; }
+}
+@media (min-width: 1280px) {
+  .workspace-rail-grid[data-left-rail="open"] { --rail-left: 260px; }
+  .workspace-rail-grid[data-right-rail="open"] { --rail-right: 260px; }
+}
+@media (min-width: 1536px) {
+  .workspace-rail-grid[data-left-rail="open"] { --rail-left: 280px; }
+  .workspace-rail-grid[data-right-rail="open"] { --rail-right: 280px; }
+}
