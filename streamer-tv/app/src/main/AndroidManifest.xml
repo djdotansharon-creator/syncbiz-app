@@ -10,6 +10,9 @@
          the background (bare startActivity from BOOT_COMPLETED is blocked on Android 12+/14). -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Native appliance foreground service (Phase 1 core; Phase 2 media playback). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <!-- Generic Android TV / Google TV. leanback NOT required so the same APK also
          installs on Android TV boxes/sticks and non-TV Android as a fallback. -->
@@ -46,6 +49,13 @@
             android:exported="false"
             android:label="@string/settings_title"
             android:theme="@style/Theme.VonoStreamer" />
+
+        <!-- Native appliance core service (Phase 1 shadow). Runs outside the Activity. -->
+        <service
+            android:name=".VonoStreamerService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <!-- Optional start-on-boot (best-effort; may be restricted on Android 14 / some OEMs). -->
         <receiver

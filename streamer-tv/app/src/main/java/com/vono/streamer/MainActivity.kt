@@ -177,6 +177,10 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "initial loadUrl ${streamerUrl()}")
             webView.loadUrl(streamerUrl())
         }
+
+        // Native appliance core (Phase 1, shadow). Independent of this Activity/WebView;
+        // BootReceiver also starts it after a reboot with no UI open.
+        VonoStreamerService.start(this)
     }
 
     private fun scheduleReload() {

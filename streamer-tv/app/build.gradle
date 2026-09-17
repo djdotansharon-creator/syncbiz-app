@@ -19,8 +19,8 @@ android {
         applicationId 'com.vono.streamer'
         minSdk 21            // Android TV since Android 5.0 (Lollipop)
         targetSdk 34
-        versionCode 4
-        versionName '1.0.3'
+        versionCode 5
+        versionName '1.1.0'
     }
 
     signingConfigs {
@@ -62,4 +62,9 @@ android {
 dependencies {
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.activity:activity-ktx:1.9.3'
+    implementation 'androidx.lifecycle:lifecycle-service:2.8.7'
+    // Native appliance core (Phase 1): WS/HTTP + persistent infrastructure store.
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'androidx.datastore:datastore-preferences:1.1.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
 }

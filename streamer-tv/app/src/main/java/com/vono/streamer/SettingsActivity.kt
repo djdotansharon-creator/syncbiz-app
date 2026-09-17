@@ -5,6 +5,8 @@ import android.content.Intent
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.widget.Button
 import android.widget.Switch
@@ -37,9 +39,40 @@ class SettingsActivity : ComponentActivity() {
         findViewById<Button>(R.id.btn_sound_settings).setOnClickListener { openSystemSetting(Settings.ACTION_SOUND_SETTINGS) }
         findViewById<Button>(R.id.btn_bluetooth_settings).setOnClickListener { openSystemSetting(Settings.ACTION_BLUETOOTH_SETTINGS) }
 
-        findViewById<TextView>(R.id.text_connection).text = connectionStatus()
         findViewById<TextView>(R.id.text_version).text =
             getString(R.string.app_version_fmt, BuildConfig.VERSION_NAME)
+    }
+
+    private val refresh = Handler(Looper.getMainLooper())
+    private val refreshTick = object : Runnable {
+        override fun run() {
+            findViewById<TextView>(R.id.text_connection)?.text = connectionStatus() + "\n\n" + nativeStatus()
+            refresh.postDelayed(this, 2000)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refresh.post(refreshTick)
+    }
+
+    override fun onPause() {
+        refresh.removeCallbacks(refreshTick)
+        super.onPause()
+    }
+
+    private fun nativeStatus(): String {
+        fun ago(ts: Long) = if (ts > 0) "${(System.currentTimeMillis() - ts) / 1000}s ago" else "—"
+        val sb = StringBuilder()
+        sb.append("VONO service (Phase 1 ").append(if (AppState.shadow) "shadow" else "master").append(")\n")
+        sb.append("• Connection: ").append(AppState.conn.name).append('\n')
+        sb.append("• Network: ").append(if (AppState.hasNetwork) "up" else "down").append('\n')
+        sb.append("• Last server msg: ").append(ago(AppState.lastServerMsgAt)).append('\n')
+        sb.append("• Connected: ").append(ago(AppState.lastConnectedAt)).append('\n')
+        sb.append("• Reconnect attempt: ").append(AppState.reconnectAttempt).append('\n')
+        sb.append("• Device id: ").append(AppState.deviceId)
+        if (AppState.lastError.isNotBlank()) sb.append("\n• Last error: ").append(AppState.lastError)
+        return sb.toString()
     }
 
     private fun describeAudioOutputs(): String {
