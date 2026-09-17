@@ -2402,9 +2402,11 @@ export function AudioPlayer() {
     ],
   );
 
-  /** Best-effort resume when tab/app returns — does not override user pause (status must still be playing). */
+  /** Best-effort resume — does not override user pause (status must still be playing).
+   *  Intentionally NOT gated on document.hidden: the background keep-alive calls this
+   *  while the tab is hidden/minimized to keep playback alive. A real user pause is still
+   *  respected because status must be "playing" below. */
   const nudgeResumePlayback = useCallback(() => {
-    if (typeof document !== "undefined" && document.hidden) return;
     if (isControlMirrorRef.current) return;
     if (statusRef.current !== "playing") return;
     playbackLifecycleLog("resume_media_attempt", {
@@ -2541,6 +2543,68 @@ export function AudioPlayer() {
       window.removeEventListener("blur", onBlur);
     };
   }, [nudgeResumePlayback, logProviderEngineTruthSnapshot]);
+
+  // Background keep-alive: while the tab is hidden/minimized/on another tab, browsers
+  // (and the YouTube iframe) can suspend media. The visibility handlers above only
+  // resume when the page returns to view; this interval re-nudges playback WHILE hidden
+  // so it keeps going instead of waiting for the operator to come back. Only when the
+  // MASTER is meant to be playing (status check inside nudgeResumePlayback respects a
+  // real user pause); never on a CONTROL mirror. Additive — no engine change.
+  useEffect(() => {
+    if (isControlMirror) return;
+    if (status !== "playing") return;
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) {
+        nudgeResumePlayback();
+      }
+    }, 15000);
+    return () => clearInterval(id);
+  }, [status, isControlMirror, nudgeResumePlayback]);
+
+  // MediaSession — declare OS-level now-playing + transport handlers. Helps browsers
+  // keep this tab's media alive in the background and exposes hardware/OS media keys.
+  // Only the MASTER declares it (a CONTROL mirror must not grab the OS session).
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+    if (isControlMirror) return;
+    const ms = navigator.mediaSession;
+    try {
+      if (currentTrack || currentSource) {
+        const title = currentTrack?.title ?? currentSource?.title ?? "VONO";
+        const artist = currentPlaylist?.name ?? "VONO";
+        const cover = currentSource?.cover ?? currentTrack?.cover ?? undefined;
+        ms.metadata = new MediaMetadata({
+          title,
+          artist,
+          album: "VONO",
+          artwork: cover ? [{ src: cover }] : [],
+        });
+      }
+      ms.playbackState = status === "playing" ? "playing" : status === "paused" ? "paused" : "none";
+    } catch {
+      /* MediaSession/MediaMetadata unsupported — ignore */
+    }
+  }, [currentTrack, currentSource, currentPlaylist, status, isControlMirror]);
+
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+    if (isControlMirror) return;
+    const ms = navigator.mediaSession;
+    const set = (action: MediaSessionAction, handler: (() => void) | null) => {
+      try {
+        ms.setActionHandler(action, handler);
+      } catch {
+        /* action unsupported on this browser — ignore */
+      }
+    };
+    set("play", () => play());
+    set("pause", () => pause());
+    set("previoustrack", () => prev());
+    set("nexttrack", () => next());
+    return () => {
+      (["play", "pause", "previoustrack", "nexttrack"] as MediaSessionAction[]).forEach((a) => set(a, null));
+    };
+  }, [play, pause, prev, next, isControlMirror]);
 
   // HTML5 audio play/pause – only call play() when paused to avoid redundant calls that can cause jumps
   useEffect(() => {
