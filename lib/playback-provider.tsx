@@ -532,6 +532,24 @@ const RECOVERY_STORAGE_KEY = "syncbiz-playback-recovery-v2";
 const RECOVERY_TTL_MS = 1000 * 60 * 60 * 24;
 const RECOVERY_AUTOPLAY_WINDOW_MS = 1000 * 60 * 30;
 
+/**
+ * Appliance auto-resume signal via the load URL (only the streamer/appliance sends it):
+ *   ?autoresume=1 → ALWAYS resume + play on load if the last session was playing,
+ *                   bypassing the 30-min window (a dedicated 24/7 player should just
+ *                   keep going after a power-cycle). Still bounded by RECOVERY_TTL_MS (24h).
+ *   ?autoresume=0 → never auto-start (restore state only; user presses play).
+ * A normal browser tab sends no param → the 30-min window applies as before.
+ */
+function autoresumeParam(): "1" | "0" | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const v = new URLSearchParams(window.location.search).get("autoresume");
+    return v === "1" ? "1" : v === "0" ? "0" : null;
+  } catch {
+    return null;
+  }
+}
+
 type PersistedPlaybackV2 = {
   currentSourceId: string;
   queueIds: string[];
@@ -1434,8 +1452,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             currentTrackIndex: persistedV2.trackIndex,
             status: "paused",
           }));
+          const autoresume = autoresumeParam();
           const shouldAutoplay =
-            persistedV2.status === "playing" && Date.now() - persistedV2.updatedAt <= RECOVERY_AUTOPLAY_WINDOW_MS;
+            autoresume !== "0" &&
+            persistedV2.status === "playing" &&
+            (autoresume === "1" || Date.now() - persistedV2.updatedAt <= RECOVERY_AUTOPLAY_WINDOW_MS);
           if (shouldAutoplay) {
             if (cancelled) return;
             queueMicrotask(() => {

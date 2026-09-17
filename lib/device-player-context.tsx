@@ -334,6 +334,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // currentSource, so it would otherwise capture a stale value (mirrors the playStatusRef pattern).
   const currentSourceRef = useRef(currentSource);
   useEffect(() => { currentSourceRef.current = currentSource; }, [currentSource]);
+  // On-Air jingle element for browser/streamer MASTERs (no desktop MPV bridge). One at a time.
+  const onAirJingleRef = useRef<HTMLAudioElement | null>(null);
 
   const onCommand = useCallback(
     (cmd: {
@@ -434,9 +436,50 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
           const absolute = raw.startsWith("/") ? `${window.location.origin}${raw}` : raw;
           void bridge.mpvPlayInterrupt(absolute);
         } else {
-          console.warn(
-            "[SyncBiz] PLAY_INTERRUPT ignored — no desktop MPV bridge on this runtime (browser/streamer On-Air is a later phase)",
-          );
+          // Browser / streamer MASTER On-Air (no desktop MPV bridge): play the jingle here
+          // via an HTMLAudioElement. Announcement-style — briefly pause the music, play an
+          // optional pre-roll bell + the jingle once, then resume. Additive; the music engine
+          // is untouched. A 60s guard guarantees the music never stays paused if it stalls.
+          const toAbs = (u: string) => (u.startsWith("/") ? `${window.location.origin}${u}` : u);
+          const jingleUrl = toAbs(cmd.payload.url);
+          const ip = cmd.payload as { preRoll?: boolean; bellStyle?: string };
+          const bellUrl =
+            ip.preRoll && ip.bellStyle && ip.bellStyle !== "off"
+              ? toAbs(`/api/jingles/bell/${ip.bellStyle}`)
+              : null;
+          const wasPlaying = playStatusRef.current === "playing";
+          if (onAirJingleRef.current) {
+            try { onAirJingleRef.current.pause(); } catch { /* ignore */ }
+            onAirJingleRef.current = null;
+          }
+          if (wasPlaying) { try { pause(); } catch { /* ignore */ } }
+          const restore = () => {
+            onAirJingleRef.current = null;
+            if (wasPlaying) { try { play(); } catch { /* ignore */ } }
+          };
+          const guard = window.setTimeout(() => {
+            if (onAirJingleRef.current) { try { onAirJingleRef.current.pause(); } catch { /* ignore */ } }
+            restore();
+          }, 60000);
+          const playOne = (src: string, onDone: () => void) => {
+            const a = new Audio(src);
+            onAirJingleRef.current = a;
+            const done = () => {
+              a.removeEventListener("ended", done);
+              a.removeEventListener("error", done);
+              onDone();
+            };
+            a.addEventListener("ended", done, { once: true });
+            a.addEventListener("error", done, { once: true });
+            void a.play().catch(() => done());
+          };
+          const finish = () => { window.clearTimeout(guard); restore(); };
+          if (bellUrl) {
+            playOne(bellUrl, () => playOne(jingleUrl, finish));
+          } else {
+            playOne(jingleUrl, finish);
+          }
+          console.log("[SyncBiz] On-Air jingle playing in browser/streamer MASTER", { jingleUrl, bell: !!bellUrl });
         }
       }
     },
