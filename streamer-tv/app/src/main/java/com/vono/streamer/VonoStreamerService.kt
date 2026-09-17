@@ -84,12 +84,11 @@ class VonoStreamerService : Service() {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-        ServiceCompat.startForeground(
-            this,
-            NOTIF_ID,
-            notif,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else 0,
-        )
+        // Phase 1 = specialUse (persistent connectivity, NO audio). The FGS type must match
+        // the real use case on Android 14; mediaPlayback is introduced only in Phase 2.
+        val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+        ServiceCompat.startForeground(this, NOTIF_ID, notif, fgsType)
     }
 
     private fun createChannel() {

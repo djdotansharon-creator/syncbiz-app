@@ -10,9 +10,10 @@
          the background (bare startActivity from BOOT_COMPLETED is blocked on Android 12+/14). -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Native appliance foreground service (Phase 1 core; Phase 2 media playback). -->
+    <!-- Native appliance foreground service. Phase 1 = specialUse (persistent connectivity,
+         NO audio). mediaPlayback is added only in Phase 2 when the service owns playback. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!-- Generic Android TV / Google TV. leanback NOT required so the same APK also
          installs on Android TV boxes/sticks and non-TV Android as a fallback. -->
@@ -50,12 +51,18 @@
             android:label="@string/settings_title"
             android:theme="@style/Theme.VonoStreamer" />
 
-        <!-- Native appliance core service (Phase 1 shadow). Runs outside the Activity. -->
+        <!-- Native appliance core service (Phase 1 shadow). Runs outside the Activity.
+             Phase 1 type = specialUse (persistent cloud/WS connectivity, no audio yet).
+             Phase 2 switches to mediaPlayback when the service actually owns playback. -->
         <service
             android:name=".VonoStreamerService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Maintains the persistent VONO Cloud control/WebSocket connection for an unattended branch streamer appliance (device presence, MASTER/CONTROL state, remote-command channel). No audio in this phase." />
+        </service>
 
         <!-- Optional start-on-boot (best-effort; may be restricted on Android 14 / some OEMs). -->
         <receiver
