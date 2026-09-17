@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Optional "Start on boot" (best-effort; see BootReceiver / README). -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Start-on-boot uses a full-screen-intent notification to surface the player from
+         the background (bare startActivity from BOOT_COMPLETED is blocked on Android 12+/14). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Generic Android TV / Google TV. leanback NOT required so the same APK also
          installs on Android TV boxes/sticks and non-TV Android as a fallback. -->
