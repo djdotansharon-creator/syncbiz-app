@@ -39,6 +39,13 @@ class SettingsActivity : ComponentActivity() {
         findViewById<Button>(R.id.btn_sound_settings).setOnClickListener { openSystemSetting(Settings.ACTION_SOUND_SETTINGS) }
         findViewById<Button>(R.id.btn_bluetooth_settings).setOnClickListener { openSystemSetting(Settings.ACTION_BLUETOOTH_SETTINGS) }
 
+        findViewById<Button>(R.id.btn_test_native).setOnClickListener {
+            VonoStreamerService.send(this, VonoStreamerService.ACTION_PLAY_TEST)
+        }
+        findViewById<Button>(R.id.btn_test_native_stop).setOnClickListener {
+            VonoStreamerService.send(this, VonoStreamerService.ACTION_STOP)
+        }
+
         findViewById<TextView>(R.id.text_version).text =
             getString(R.string.app_version_fmt, BuildConfig.VERSION_NAME)
     }
@@ -70,7 +77,9 @@ class SettingsActivity : ComponentActivity() {
         sb.append("• Last server msg: ").append(ago(AppState.lastServerMsgAt)).append('\n')
         sb.append("• Connected: ").append(ago(AppState.lastConnectedAt)).append('\n')
         sb.append("• Reconnect attempt: ").append(AppState.reconnectAttempt).append('\n')
-        sb.append("• Device id: ").append(AppState.deviceId)
+        sb.append("• Device id: ").append(AppState.deviceId).append('\n')
+        sb.append("• Playback: ").append(if (AppState.playing) "playing — ${AppState.playingTitle}" else "stopped").append('\n')
+        sb.append("• Position: ").append(AppState.positionMs / 1000).append("s / ").append(AppState.durationMs / 1000).append('s')
         if (AppState.lastError.isNotBlank()) sb.append("\n• Last error: ").append(AppState.lastError)
         return sb.toString()
     }

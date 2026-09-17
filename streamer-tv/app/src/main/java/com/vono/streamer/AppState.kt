@@ -16,6 +16,13 @@ object AppState {
     @Volatile var reconnectAttempt: Int = 0
     @Volatile var hasNetwork: Boolean = false
 
+    // Native playback (Phase 2A)
+    @Volatile var playing: Boolean = false
+    @Volatile var playingTitle: String = ""
+    @Volatile var positionMs: Long = 0L
+    @Volatile var durationMs: Long = 0L
+    @Volatile var volumePct: Int = 100
+
     private val listeners = mutableListOf<() -> Unit>()
 
     @Synchronized fun addListener(l: () -> Unit) { listeners.add(l) }

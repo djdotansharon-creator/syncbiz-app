@@ -14,6 +14,8 @@
          NO audio). mediaPlayback is added only in Phase 2 when the service owns playback. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Phase 2A: the service owns native audio → mediaPlayback while playing. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <!-- Generic Android TV / Google TV. leanback NOT required so the same APK also
          installs on Android TV boxes/sticks and non-TV Android as a fallback. -->
@@ -58,7 +60,7 @@
             android:name=".VonoStreamerService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="mediaPlayback|specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Maintains the persistent VONO Cloud control/WebSocket connection for an unattended branch streamer appliance (device presence, MASTER/CONTROL state, remote-command channel). No audio in this phase." />
