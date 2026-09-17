@@ -541,6 +541,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (p.startsWith("/sources")) return true;
     if (/^\/playlists\/[^/]+\/edit(\/|$)/.test(p)) return true;
     if (p === "/dashboard" || p === "/owner" || p === "/logs" || p === "/settings") return true;
+    if (p === "/downloads") return true;
     if (p === "/radio") return true;
     if (p.startsWith("/schedules")) return true;
     // Access Control + Architecture open inside the workspace (rails stay) — they
