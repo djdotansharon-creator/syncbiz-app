@@ -214,8 +214,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         Log.d(TAG, "onPause")
-        // The shell never clears playback recovery; the engine owns resume.
-        webView.onPause()
+        // Do NOT call webView.onPause() here — it suspends the WebView (incl. audio), which
+        // made the music stop the instant HOME was pressed or the Settings screen opened.
+        // For a background media appliance we keep the WebView (and its audio) running while
+        // backgrounded. (Full guaranteed background under memory pressure = a foreground media
+        // service; added only if needed.)
         super.onPause()
     }
 
