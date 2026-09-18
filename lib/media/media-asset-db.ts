@@ -59,6 +59,33 @@ export async function getReadyMediaAssetGenreIds(): Promise<string[]> {
   }
 }
 
+/**
+ * READY MediaAsset logical ids for a genre (or across all READY genres when genreId is null).
+ * Used by the native streamer's track resolver to build a playable queue of real, prod-ready
+ * tracks (titles are joined from the catalog by the caller). Returns [] on error. Never throws.
+ */
+export async function listReadyMediaAssetLogicalIds(
+  genreId: string | null,
+  limit = 100,
+): Promise<Array<{ logicalId: string; genreId: string }>> {
+  try {
+    const rows = await prisma.mediaAsset.findMany({
+      where: {
+        status: "READY",
+        logicalId: { not: null },
+        ...(genreId ? { genreId } : { genreId: { not: null } }),
+      },
+      orderBy: { updatedAt: "desc" },
+      take: Math.max(1, Math.min(limit, 500)),
+      select: { logicalId: true, genreId: true },
+    });
+    return rows
+      .filter((r): r is { logicalId: string; genreId: string } => !!r.logicalId && !!r.genreId);
+  } catch {
+    return [];
+  }
+}
+
 /** R2/S3/B2 are served via a presigned redirect; LOCAL_PREVIEW streams from disk (dev/POC). */
 export function isObjectStorageProvider(p: string): boolean {
   return p === "R2" || p === "S3" || p === "B2";
