@@ -15,6 +15,7 @@ object AppState {
     @Volatile var lastError: String = ""
     @Volatile var reconnectAttempt: Int = 0
     @Volatile var hasNetwork: Boolean = false
+    @Volatile var deviceMode: String = "—" // MASTER / CONTROL
 
     // Native playback (Phase 2A)
     @Volatile var playing: Boolean = false

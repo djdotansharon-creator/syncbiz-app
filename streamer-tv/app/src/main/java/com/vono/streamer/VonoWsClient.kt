@@ -12,6 +12,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
 import kotlin.random.Random
@@ -26,6 +27,8 @@ import kotlin.random.Random
 class VonoWsClient(
     private val auth: AuthProvider,
     private val deviceIdProvider: () -> String,
+    private val onCommand: (command: String, payload: JSONObject?) -> Unit = { _, _ -> },
+    private val onMode: (mode: String) -> Unit = {},
 ) {
     private val http = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)   // keep-warm + drop detection
@@ -47,6 +50,14 @@ class VonoWsClient(
     fun kick() {
         if (intentionalClose) return
         if (webSocket == null && !connecting) connect()
+    }
+
+    /** Re-claim MASTER (appliance priority) after being bumped to CONTROL. */
+    fun claimMaster() { webSocket?.send(VonoProtocol.buildSetMaster()) }
+
+    /** Publish the current playback state to CONTROL. Thread-safe (OkHttp send). */
+    fun sendStateUpdate(state: JSONObject) {
+        try { webSocket?.send(VonoProtocol.buildStateUpdate(state)) } catch (_: Exception) {}
     }
 
     fun stop() {
@@ -92,15 +103,32 @@ class VonoWsClient(
 
         override fun onMessage(ws: WebSocket, text: String) {
             AppState.lastServerMsgAt = System.currentTimeMillis()
-            when (val type = VonoProtocol.messageType(text)) {
+            when (VonoProtocol.messageType(text)) {
                 "REGISTERED" -> {
                     attempt = 0
                     setConn(AppState.Conn.REGISTERED)
-                    Log.d("VonoStreamer", "REGISTERED (shadow observer)")
+                    if (!VonoProtocol.SHADOW_MODE) {
+                        ws.send(VonoProtocol.buildSetMaster()) // claim MASTER (appliance is the player)
+                        Log.d("VonoStreamer", "REGISTERED → claim MASTER")
+                    } else {
+                        Log.d("VonoStreamer", "REGISTERED (shadow observer)")
+                    }
                 }
-                "SET_DEVICE_MODE" -> Log.d("VonoStreamer", "SET_DEVICE_MODE received (ignored in shadow): $text")
-                "COMMAND" -> Log.d("VonoStreamer", "COMMAND received (ignored in shadow): $text")
-                else -> Log.v("VonoStreamer", "msg: $type")
+                "SET_DEVICE_MODE" -> {
+                    val mode = try { JSONObject(text).optString("mode", "") } catch (_: Exception) { "" }
+                    if (mode.isNotBlank()) {
+                        AppState.deviceMode = mode; AppState.notifyChanged()
+                        onMode(mode)
+                    }
+                }
+                "COMMAND" -> {
+                    try {
+                        val o = JSONObject(text)
+                        val command = o.optString("command", "")
+                        val payload = o.optJSONObject("payload")
+                        if (command.isNotBlank()) onCommand(command, payload)
+                    } catch (e: Exception) { Log.w("VonoStreamer", "bad COMMAND: ${e.message}") }
+                }
             }
         }
 

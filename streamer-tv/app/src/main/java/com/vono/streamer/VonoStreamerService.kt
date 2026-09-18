@@ -53,6 +53,8 @@ class VonoStreamerService : Service() {
     @Volatile private var mediaToken: String? = null
     @Volatile private var mediaTokenExpSec: Long = 0
     @Volatile private var currentKind: String = "stream" // "stream" | "musicbank"
+    private var jingleMp: android.media.MediaPlayer? = null
+    private val reclaimTimes = ArrayDeque<Long>() // MASTER reclaim rate-limit
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -65,7 +67,12 @@ class VonoStreamerService : Service() {
         store = VonoStore(this)
         auth = AuthProvider()
         musicBank = MusicBank(auth)
-        ws = VonoWsClient(auth) { deviceId }
+        ws = VonoWsClient(
+            auth,
+            deviceIdProvider = { deviceId },
+            onCommand = { cmd, payload -> handleCommand(cmd, payload) },
+            onMode = { mode -> onDeviceMode(mode) },
+        )
         netMonitor = NetworkMonitor(this, onAvailable = { ws.kick() }, onLost = {})
         netMonitor?.start()
 
@@ -104,7 +111,7 @@ class VonoStreamerService : Service() {
         main.removeCallbacksAndMessages(null)
         netMonitor?.stop()
         if (this::ws.isInitialized) ws.stop()
-        main.post { player?.release() }
+        main.post { jingleMp?.release(); jingleMp = null; player?.release() }
         scope.cancel()
         super.onDestroy()
     }
@@ -168,6 +175,10 @@ class VonoStreamerService : Service() {
             }
         }.toString()
         scope.launch { runCatching { store.writePlaybackState(snap) } }
+        // Publish live playback state to CONTROL (phone/web mirror). Cutover only.
+        if (!VonoProtocol.SHADOW_MODE && this::ws.isInitialized) {
+            runCatching { ws.sendStateUpdate(buildState()) }
+        }
     }
 
     // ── Music Bank native queue (Phase 2A-2) ─────────────────────────────────────
@@ -216,6 +227,132 @@ class VonoStreamerService : Service() {
     }
     private fun queueNext() { if (currentKind == "musicbank" && queueIndex < queue.size - 1) { queueIndex++; playCurrentTrack() } }
     private fun queuePrev() { if (currentKind == "musicbank" && queueIndex > 0) { queueIndex--; playCurrentTrack() } }
+
+    // ── 2A-3 cutover: CONTROL commands + MASTER + STATE_UPDATE ────────────────────
+    private fun onDeviceMode(mode: String) {
+        Log.d(TAG, "device mode = $mode")
+        // Appliance priority: if bumped to CONTROL, re-claim MASTER (rate-limited so we never
+        // ping-pong forever — the WebView streamer yields via its own loop-breaker).
+        if (mode == "CONTROL") {
+            val now = System.currentTimeMillis()
+            while (reclaimTimes.isNotEmpty() && now - reclaimTimes.first() > 60_000) reclaimTimes.removeFirst()
+            if (reclaimTimes.size < 3) { reclaimTimes.addLast(now); ws.claimMaster(); Log.d(TAG, "re-claiming MASTER") }
+        }
+    }
+
+    private fun handleCommand(command: String, payload: JSONObject?) {
+        main.post {
+            when (command) {
+                "PLAY" -> player?.resume()
+                "PAUSE" -> player?.pause()
+                "STOP" -> { currentKind = "stream"; queue = emptyList(); player?.stop() }
+                "NEXT" -> queueNext()
+                "PREV" -> queuePrev()
+                "SEEK" -> { val s = payload?.optDouble("position", -1.0) ?: -1.0; if (s >= 0) player?.seekTo((s * 1000).toLong()) }
+                "SET_VOLUME" -> { val v = payload?.optInt("volume", -1) ?: -1; if (v in 0..100) player?.setVolume(v / 100f) }
+                "PLAY_SOURCE" -> routeSource(payload)
+                "PLAY_INTERRUPT" -> playJingle(payload)
+                else -> Log.d(TAG, "unhandled command: $command")
+            }
+            onPlaybackChanged()
+        }
+    }
+
+    /** Route a PLAY_SOURCE by type: native for URL/radio/Music Bank; YouTube = unsupported. */
+    private fun routeSource(payload: JSONObject?) {
+        val p = payload?.optJSONObject("source") ?: return
+        val url = p.optString("url", "")
+        val title = p.optString("title", "")
+        val id = p.optString("id", "")
+        val type = p.optString("type", "").lowercase()
+        val origin = p.optString("origin", "").lowercase()
+        val low = url.lowercase()
+        when {
+            low.contains("youtube.com") || low.contains("youtu.be") || type.contains("youtube") ->
+                reportUnsupported(id, title, "YouTube is not supported on the streamer appliance")
+            low.contains("/api/media/") -> playMusicBankUrl(url, title) // R2 (needs token)
+            url.startsWith("http") -> { currentKind = "stream"; queue = emptyList(); player?.play(url, title) } // direct audio / radio
+            else -> reportUnsupported(id, title, "Unsupported source type ($type/$origin) on the streamer")
+        }
+    }
+
+    /** Play an /api/media/<id> URL by appending a fresh media token. */
+    private fun playMusicBankUrl(baseUrl: String, title: String) {
+        scope.launch {
+            ensureTokenFresh()
+            val token = mediaToken
+            val full = if (token != null && !baseUrl.contains("mt=")) {
+                baseUrl + (if (baseUrl.contains("?")) "&" else "?") + "mt=" + java.net.URLEncoder.encode(token, "UTF-8")
+            } else baseUrl
+            withContext(Dispatchers.Main) { currentKind = "stream"; queue = emptyList(); player?.play(full, title) }
+        }
+    }
+
+    /**
+     * A source the streamer appliance cannot play natively (e.g. YouTube). Per the quality bar
+     * we do NOT silence whatever is currently playing — we keep audio alive and just report a
+     * clear "unsupported/deferred" marker to CONTROL. No native playback, no double audio.
+     */
+    private fun reportUnsupported(id: String, title: String, reason: String) {
+        Log.w(TAG, "unsupported source: $reason ($title)")
+        AppState.lastError = reason; AppState.notifyChanged()
+        val base = buildState() // preserves whatever is actually playing
+        base.put("unsupportedSource", JSONObject().put("id", id).put("title", title).put("reason", reason))
+        ws.sendStateUpdate(base)
+    }
+
+    private fun buildState(): JSONObject {
+        val p = player
+        val playing = p?.isPlaying() == true
+        val title = p?.currentTitle ?: ""
+        val hasTrack = title.isNotBlank() || (p?.currentUrl != null)
+        return JSONObject().apply {
+            put("status", if (playing) "playing" else if (hasTrack) "paused" else "idle")
+            if (hasTrack) {
+                put("currentTrack", JSONObject().put("title", title).put("cover", JSONObject.NULL))
+                put("currentSource", JSONObject().put("id", queue.getOrNull(queueIndex)?.id ?: "native").put("title", title).put("cover", JSONObject.NULL))
+            } else {
+                put("currentTrack", JSONObject.NULL); put("currentSource", JSONObject.NULL)
+            }
+            put("currentTrackIndex", queueIndex)
+            val arr = org.json.JSONArray()
+            for (t in queue) arr.put(JSONObject().put("id", t.id).put("title", t.title).put("cover", JSONObject.NULL))
+            put("queue", arr)
+            put("queueIndex", queueIndex)
+            put("position", (p?.positionMs() ?: 0L) / 1000.0)
+            put("duration", (p?.durationMs() ?: 0L) / 1000.0)
+            put("positionAt", System.currentTimeMillis())
+            put("volume", ((p?.volume() ?: 1f) * 100).toInt())
+        }
+    }
+
+    /** On-Air jingle: duck the main player, play the jingle once, restore. */
+    private fun playJingle(payload: JSONObject?) {
+        val raw = payload?.optString("url", "") ?: return
+        if (raw.isBlank()) return
+        val abs = if (raw.startsWith("/")) VonoProtocol.APP_ORIGIN + raw else raw
+        main.post {
+            val prevVol = player?.volume() ?: 1f
+            player?.setVolume(prevVol * 0.15f)
+            jingleMp?.release(); jingleMp = null
+            val mp = android.media.MediaPlayer()
+            jingleMp = mp
+            try {
+                mp.setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).build(),
+                )
+                mp.setDataSource(abs)
+                mp.setOnCompletionListener { player?.setVolume(prevVol); it.release(); if (jingleMp === it) jingleMp = null }
+                mp.setOnErrorListener { m, _, _ -> player?.setVolume(prevVol); m.release(); if (jingleMp === m) jingleMp = null; true }
+                mp.setOnPreparedListener { it.start() }
+                mp.prepareAsync()
+            } catch (e: Exception) {
+                player?.setVolume(prevVol); Log.w(TAG, "jingle failed: ${e.message}")
+            }
+        }
+    }
 
     /** Persist position every 5s while playing (survives a hard power-cut). */
     private fun startPositionPersist() {

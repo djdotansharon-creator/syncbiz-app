@@ -17,8 +17,9 @@ object VonoProtocol {
     const val APP_ORIGIN = "https://syncbiz-app-production.up.railway.app"
     const val WS_TOKEN_URL = "$APP_ORIGIN/api/auth/ws-token"
 
-    // Phase 1 = shadow observer. Do NOT change to "device" until native playback exists.
-    const val SHADOW_MODE = true
+    // Phase 2A-3 CUTOVER: native is now the real branch player. false = register as
+    // branch_streamer_station "device" and claim MASTER (native owns playback).
+    const val SHADOW_MODE = false
 
     fun buildRegister(authToken: String, deviceId: String): String {
         val intent = JSONObject().apply {
@@ -30,11 +31,14 @@ object VonoProtocol {
                 put("leaseRoleHint", "none")
                 put("contentScope", "branch")
             } else {
-                // Phase 2 cutover — dedicated branch streamer MASTER.
+                // Phase 2 cutover — dedicated branch streamer. Mirrors EXACTLY the web
+                // streamer's registrationIntentBranchStreamerDevice() (lib/syncbiz-device-model.ts):
+                // leaseRoleHint stays "none" (the server assigns the lease authoritatively by
+                // devicePurpose priority; the appliance then claims it with SET_MASTER).
                 put("platform", "web")
                 put("runtimeMode", "branch_playback")
                 put("devicePurpose", "branch_streamer_station")
-                put("leaseRoleHint", "MASTER")
+                put("leaseRoleHint", "none")
                 put("contentScope", "branch")
             }
         }
@@ -48,6 +52,12 @@ object VonoProtocol {
             if (!SHADOW_MODE) put("deviceId", deviceId)
         }.toString()
     }
+
+    fun buildSetMaster(): String = JSONObject().put("type", "SET_MASTER").toString()
+
+    /** Wrap a StationPlaybackState object as the client STATE_UPDATE message. */
+    fun buildStateUpdate(state: JSONObject): String =
+        JSONObject().put("type", "STATE_UPDATE").put("state", state).toString()
 
     /** Server message type, or "" if unparseable. */
     fun messageType(text: String): String =
