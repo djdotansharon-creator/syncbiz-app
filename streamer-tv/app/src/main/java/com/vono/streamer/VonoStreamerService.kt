@@ -46,6 +46,14 @@ class VonoStreamerService : Service() {
 
     @Volatile private var deviceId = "vono-streamer"
 
+    private lateinit var musicBank: MusicBank
+    @Volatile private var queue: List<MusicBank.Track> = emptyList()
+    @Volatile private var queueIndex = 0
+    @Volatile private var queueGenre: String? = null
+    @Volatile private var mediaToken: String? = null
+    @Volatile private var mediaTokenExpSec: Long = 0
+    @Volatile private var currentKind: String = "stream" // "stream" | "musicbank"
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -56,12 +64,13 @@ class VonoStreamerService : Service() {
 
         store = VonoStore(this)
         auth = AuthProvider()
+        musicBank = MusicBank(auth)
         ws = VonoWsClient(auth) { deviceId }
         netMonitor = NetworkMonitor(this, onAvailable = { ws.kick() }, onLost = {})
         netMonitor?.start()
 
-        // Native audio engine (created on the main thread).
-        player = NativePlayer(this) { onPlaybackChanged() }
+        // Native audio engine (created on the main thread). Auto-advances the queue on track end.
+        player = NativePlayer(this, onChanged = { onPlaybackChanged() }, onEnded = { advanceQueue() })
 
         scope.launch {
             deviceId = runCatching { store.getOrCreateDeviceId() }.getOrDefault(deviceId)
@@ -79,9 +88,13 @@ class VonoStreamerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_PLAY_TEST -> main.post {
+                currentKind = "stream"; queue = emptyList()
                 player?.play(TEST_STREAM_URL, "Native engine test stream")
             }
-            ACTION_STOP -> main.post { player?.stop() }
+            ACTION_PLAY_MUSICBANK -> playMusicBankTest()
+            ACTION_NEXT -> main.post { queueNext() }
+            ACTION_PREV -> main.post { queuePrev() }
+            ACTION_STOP -> main.post { currentKind = "stream"; queue = emptyList(); player?.stop() }
         }
         return START_STICKY
     }
@@ -99,15 +112,34 @@ class VonoStreamerService : Service() {
     private fun restore(json: String) {
         try {
             val o = JSONObject(json)
-            val url = o.optString("url", "")
+            val kind = o.optString("kind", "stream")
             val status = o.optString("status", "")
-            val title = o.optString("title", "")
             val pos = o.optLong("positionMs", 0L)
             val vol = o.optInt("volumePct", 100)
             player?.setVolume(vol / 100f)
-            if (url.isNotBlank() && status == "playing") {
-                Log.d(TAG, "boot restore → resume $title @${pos}ms")
-                player?.play(url, title, pos)
+            if (status != "playing") return
+            if (kind == "musicbank") {
+                val arr = o.optJSONArray("tracks") ?: return
+                val list = ArrayList<MusicBank.Track>(arr.length())
+                for (i in 0 until arr.length()) {
+                    val t = arr.optJSONObject(i) ?: continue
+                    val id = t.optString("id", ""); if (id.isBlank()) continue
+                    list.add(MusicBank.Track(id, t.optString("title", id), t.optString("genre", "")))
+                }
+                if (list.isEmpty()) return
+                queue = list
+                queueGenre = o.optString("genre", "")
+                queueIndex = o.optInt("index", 0).coerceIn(0, list.size - 1)
+                currentKind = "musicbank"
+                Log.d(TAG, "boot restore → Music Bank queue ${list.size}, index $queueIndex @${pos}ms")
+                playCurrentTrack(pos) // re-authorizes + resumes
+            } else {
+                val url = o.optString("url", ""); val title = o.optString("title", "")
+                if (url.isNotBlank()) {
+                    currentKind = "stream"
+                    Log.d(TAG, "boot restore → resume stream $title @${pos}ms")
+                    player?.play(url, title, pos)
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "restore failed: ${e.message}")
@@ -119,15 +151,71 @@ class VonoStreamerService : Service() {
         val p = player ?: return
         goForeground(playing = p.isPlaying() || p.currentUrl != null)
         val snap = JSONObject().apply {
-            put("url", p.currentUrl ?: "")
-            put("title", p.currentTitle)
+            put("kind", currentKind)
+            put("status", if (p.isPlaying()) "playing" else "paused")
             put("positionMs", p.positionMs())
             put("volumePct", (p.volume() * 100).toInt())
-            put("status", if (p.isPlaying()) "playing" else "paused")
             put("updatedAt", System.currentTimeMillis())
+            if (currentKind == "musicbank") {
+                put("genre", queueGenre ?: "")
+                put("index", queueIndex)
+                val arr = org.json.JSONArray()
+                for (t in queue) arr.put(JSONObject().put("id", t.id).put("title", t.title).put("genre", t.genre))
+                put("tracks", arr)
+            } else {
+                put("url", p.currentUrl ?: "")
+                put("title", p.currentTitle)
+            }
         }.toString()
         scope.launch { runCatching { store.writePlaybackState(snap) } }
     }
+
+    // ── Music Bank native queue (Phase 2A-2) ─────────────────────────────────────
+    private fun playMusicBankTest() {
+        scope.launch {
+            val authz = musicBank.authorize(deviceId)
+            if (authz == null) {
+                AppState.lastError = "Music Bank authorize failed — log in once in the app"; AppState.notifyChanged()
+                return@launch
+            }
+            mediaToken = authz.token; mediaTokenExpSec = authz.expEpochSec
+            val genre = authz.allowedGenres.firstOrNull()
+            val tracks = musicBank.resolveTracks(genre)
+            if (tracks.isEmpty()) {
+                AppState.lastError = "No READY Music Bank tracks for genre=$genre"; AppState.notifyChanged()
+                return@launch
+            }
+            queue = tracks; queueGenre = genre; queueIndex = 0; currentKind = "musicbank"
+            Log.d(TAG, "Music Bank queue: ${tracks.size} tracks, genre=$genre")
+            withContext(Dispatchers.Main) { playCurrentTrack() }
+        }
+    }
+
+    /** Re-authorize if the media token is missing or within 30s of expiry. Blocking; off-main. */
+    private fun ensureTokenFresh() {
+        val now = System.currentTimeMillis() / 1000
+        if (mediaToken == null || mediaTokenExpSec - now < 30) {
+            musicBank.authorize(deviceId)?.let { mediaToken = it.token; mediaTokenExpSec = it.expEpochSec }
+        }
+    }
+
+    /** Called on the main thread. Fetches a fresh token (IO) then plays the current queue track. */
+    private fun playCurrentTrack(positionMs: Long = 0L) {
+        val t = queue.getOrNull(queueIndex) ?: return
+        scope.launch {
+            ensureTokenFresh()
+            val token = mediaToken ?: return@launch
+            val url = musicBank.mediaUrl(t.id, token)
+            withContext(Dispatchers.Main) { player?.play(url, t.title, positionMs) }
+        }
+    }
+
+    private fun advanceQueue() {
+        if (currentKind != "musicbank") return
+        if (queueIndex < queue.size - 1) { queueIndex++; playCurrentTrack() }
+    }
+    private fun queueNext() { if (currentKind == "musicbank" && queueIndex < queue.size - 1) { queueIndex++; playCurrentTrack() } }
+    private fun queuePrev() { if (currentKind == "musicbank" && queueIndex > 0) { queueIndex--; playCurrentTrack() } }
 
     /** Persist position every 5s while playing (survives a hard power-cut). */
     private fun startPositionPersist() {
@@ -178,6 +266,9 @@ class VonoStreamerService : Service() {
         private const val CHANNEL_ID = "vono_streamer_service"
         private const val NOTIF_ID = 4301
         const val ACTION_PLAY_TEST = "com.vono.streamer.PLAY_TEST"
+        const val ACTION_PLAY_MUSICBANK = "com.vono.streamer.PLAY_MUSICBANK"
+        const val ACTION_NEXT = "com.vono.streamer.NEXT"
+        const val ACTION_PREV = "com.vono.streamer.PREV"
         const val ACTION_STOP = "com.vono.streamer.STOP"
         // 2A-1 engine test: a stable public MP3 radio stream (tokenless). Music Bank/R2 = 2A-2.
         const val TEST_STREAM_URL = "https://ice1.somafm.com/groovesalad-128-mp3"

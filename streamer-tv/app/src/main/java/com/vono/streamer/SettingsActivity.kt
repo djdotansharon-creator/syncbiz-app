@@ -45,6 +45,15 @@ class SettingsActivity : ComponentActivity() {
         findViewById<Button>(R.id.btn_test_native_stop).setOnClickListener {
             VonoStreamerService.send(this, VonoStreamerService.ACTION_STOP)
         }
+        findViewById<Button>(R.id.btn_test_musicbank).setOnClickListener {
+            VonoStreamerService.send(this, VonoStreamerService.ACTION_PLAY_MUSICBANK)
+        }
+        findViewById<Button>(R.id.btn_prev_track).setOnClickListener {
+            VonoStreamerService.send(this, VonoStreamerService.ACTION_PREV)
+        }
+        findViewById<Button>(R.id.btn_next_track).setOnClickListener {
+            VonoStreamerService.send(this, VonoStreamerService.ACTION_NEXT)
+        }
 
         findViewById<TextView>(R.id.text_version).text =
             getString(R.string.app_version_fmt, BuildConfig.VERSION_NAME)

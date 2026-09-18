@@ -21,6 +21,7 @@ import androidx.media3.exoplayer.ExoPlayer
 class NativePlayer(
     context: Context,
     private val onChanged: () -> Unit,
+    private val onEnded: () -> Unit = {},
 ) {
     private val exo: ExoPlayer = ExoPlayer.Builder(context).build().apply {
         setAudioAttributes(
@@ -33,7 +34,10 @@ class NativePlayer(
         setHandleAudioBecomingNoisy(true)
         addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { publish(); onChanged() }
-            override fun onPlaybackStateChanged(state: Int) { publish(); onChanged() }
+            override fun onPlaybackStateChanged(state: Int) {
+                publish(); onChanged()
+                if (state == Player.STATE_ENDED) onEnded()
+            }
             override fun onMediaItemTransition(item: MediaItem?, reason: Int) { publish(); onChanged() }
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 Log.w("VonoStreamer", "ExoPlayer error: ${error.errorCodeName}")
