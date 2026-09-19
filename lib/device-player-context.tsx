@@ -26,7 +26,7 @@ import type { UnifiedSource } from "@/lib/source-types";
 import { deviceModeAllowsLocalPlayback } from "@/lib/device-mode-guard";
 import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, setRepeatMode, onRepeatModeChanged, type RepeatMode } from "@/lib/mix-preferences";
 import { useMobileRole } from "@/lib/mobile-role-context";
-import { isStreamerDeviceMode } from "@/lib/streamer-device-mode";
+import { isNativeShellStreamerMode, isStreamerDeviceMode } from "@/lib/streamer-device-mode";
 
 type DevicePlayerContextValue = {
   /** True when this tab registers as a branch WS device (see `resolveDeviceRoleActive`). */
@@ -173,7 +173,19 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const { mobileRole } = useMobileRole();
   const isMobileLocalPlayback =
     (pathname === "/mobile" || pathname?.startsWith("/mobile/")) && mobileRole === "player";
-  const isStreamerDevice = isStreamerDeviceMode(pathname);
+  /**
+   * VONO Android native shell WebView on `/streamer?device=streamer&mode=player`.
+   * When true, the NATIVE ExoPlayer service is the sole branch_streamer_station MASTER,
+   * so this WebView must be a controller/mirror only: no streamer-device registration,
+   * no local branch audio, no MASTER reclaim. Read once at first client render (the shell
+   * URL never client-navigates); false during SSR so hydration stays stable.
+   */
+  const [isNativeShellStreamer] = useState<boolean>(() =>
+    typeof window === "undefined" ? false : isNativeShellStreamerMode(pathname),
+  );
+  // The native shell is a controller, NOT a branch_streamer_station device: this also
+  // disables the streamer MASTER auto-claim below (guarded on isStreamerDevice).
+  const isStreamerDevice = isStreamerDeviceMode(pathname) && !isNativeShellStreamer;
   /** Server: unknown. Client: read immediately so Electron is not treated as `null` until after first paint (that hid Settings branch UI). */
   const [isElectronShell, setIsElectronShell] = useState<boolean | null>(() =>
     typeof window === "undefined" ? null : readSyncBizElectronRenderer(),
@@ -526,6 +538,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       console.log("[SyncBiz Audit] Device mode change", {
         mode,
       });
+      // VONO native shell: controller/mirror only — never reclaim MASTER and never own
+      // local audio. The native ExoPlayer service is the sole branch_streamer_station MASTER.
+      if (isNativeShellStreamer) return;
       if (mode === "MASTER") {
         setMasterReclaim(false);
         return;
@@ -563,7 +578,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         stopForControlHandoff();
       }
     },
-    [stopForControlHandoff, isMobileLocalPlayback, setMasterReclaim],
+    [stopForControlHandoff, isMobileLocalPlayback, setMasterReclaim, isNativeShellStreamer],
   );
 
   const onMasterClaimDenied = useCallback(
@@ -634,7 +649,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     sendApproveGuestRecommend,
     sendRejectGuestRecommend,
   } = useRemoteControlWs(
-    "device",
+    // VONO native shell WebView registers as a CONTROLLER (UI/mirror), so the native
+    // ExoPlayer service is the sole branch_streamer_station device/MASTER for this branch.
+    isNativeShellStreamer ? "controller" : "device",
     deviceId,
     onCommand,
     onDeviceMode,
@@ -836,6 +853,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // controls-only for the SOCKET but a MASTER browser may keep playing on them (tab switches
   // while music is running must never gate playback).
   deviceModeAllowsLocalPlayback.current =
+    // VONO native shell: never own local WebView audio (even during the provisional
+    // pre-SET_DEVICE_MODE "MASTER" default) — the native ExoPlayer service owns audio.
+    !isNativeShellStreamer &&
     (isMobileLocalPlayback || !isActive || effectiveDeviceMode === "MASTER") &&
     (!isBrowserShell ||
       isEligibleBrowserPlayerRoute(pathname) ||
@@ -958,7 +978,10 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     [masterDeviceId, sendCommand]
   );
 
-  const useLocalDeviceTransport = effectiveDeviceMode === "MASTER" || isMobileLocalPlayback;
+  // VONO native shell never runs local transport (playSource); every source is sent to the
+  // MASTER (the native ExoPlayer service), even during the provisional pre-mode "MASTER" window.
+  const useLocalDeviceTransport =
+    (effectiveDeviceMode === "MASTER" && !isNativeShellStreamer) || isMobileLocalPlayback;
 
   const playSourceOrSend = useCallback(
     (source: UnifiedSource, trackIndex = 0) => {
