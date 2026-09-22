@@ -13,7 +13,7 @@ import {
 import { usePathname } from "next/navigation";
 import { getDeviceId, initDeviceId } from "@/lib/device-id";
 import { usePlayback, type PlaybackStatus } from "@/lib/playback-provider";
-import { useRemoteControlWs } from "@/lib/remote-control/ws-client";
+import { useRemoteControlWs, type DeviceInfo } from "@/lib/remote-control/ws-client";
 import { SecondaryDesktopModal } from "@/components/secondary-desktop-modal";
 import { GuestRecommendationModal } from "@/components/guest-recommendation-modal";
 import { urlToUnifiedSource } from "@/lib/remote-control/url-to-source";
@@ -37,6 +37,10 @@ type DevicePlayerContextValue = {
   status: "connecting" | "connected" | "disconnected" | "error";
   deviceMode: DeviceMode;
   masterDeviceId: string | null;
+  /** Compact type label of the current MASTER device (STREAMER/DESKTOP/WEB/TABLET), status UI only. */
+  masterDeviceLabel: string | null;
+  /** Short human-ish name/id of the current MASTER device, status UI only. */
+  masterDeviceName: string | null;
   /** True when this device opened as CONTROL because another MASTER already exists. */
   hasExistingMaster: boolean;
   /** Remote state from master (for CONTROL mode display). */
@@ -148,6 +152,32 @@ function isBrowserBranchUiDeviceRoute(pathname: string): boolean {
 
 function readSyncBizElectronRenderer(): boolean {
   return typeof window !== "undefined" && Boolean((window as Window & { syncbizDesktop?: unknown }).syncbizDesktop);
+}
+
+/**
+ * Compact device-type label for the MASTER indicator (status UI only — never affects election).
+ * Derived from the device's registrationIntent. Mobile devices can never be MASTER (the server
+ * rejects mobile SET_MASTER), so the realistic MASTER labels are STREAMER / DESKTOP / WEB.
+ */
+function deviceTypeLabel(info: DeviceInfo | null | undefined): string | null {
+  const intent = info?.registrationIntent;
+  if (!intent) return info ? "DEVICE" : null;
+  switch (intent.devicePurpose) {
+    case "branch_streamer_station":
+      return "STREAMER";
+    case "branch_desktop_station":
+      return "DESKTOP";
+    case "branch_web_station":
+      return intent.platform === "mobile" ? "TABLET" : "WEB";
+    default:
+      return "DEVICE";
+  }
+}
+
+/** Short, human-ish name for a device id (status UI only). */
+function shortDeviceName(id: string | null | undefined): string | null {
+  if (!id) return null;
+  return id.length > 14 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
 }
 
 /**
@@ -645,6 +675,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     sendCommand,
     masterDeviceId,
     hasExistingMaster,
+    devices,
     sessionCode,
     sendApproveGuestRecommend,
     sendRejectGuestRecommend,
@@ -695,6 +726,12 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       : (lastConnectedModeRef.current ?? "MASTER");
 
   const isBranchConnected = isActive && authLoaded && !!effectiveUserId && status === "connected";
+
+  // MASTER indicator (status UI only): resolve the current MASTER device's type + short name
+  // from the branch roster. Never affects election.
+  const masterInfo = devices.find((d) => d.id === masterDeviceId) ?? null;
+  const masterDeviceLabel = deviceTypeLabel(masterInfo);
+  const masterDeviceName = shortDeviceName(masterInfo?.id ?? masterDeviceId);
 
   // ─── Diagnostic: log whenever role/connectivity changes ─────────────────
   const _diagCtxRef = useRef({ status: "init", deviceMode: "init", isBranchConnected: false, isActive: false, pathname: "init" });
@@ -1076,6 +1113,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       status,
       deviceMode: effectiveDeviceMode,
       masterDeviceId,
+      masterDeviceLabel,
+      masterDeviceName,
       hasExistingMaster: hasExistingMaster ?? false,
       masterState,
       masterConfirmOpen,
@@ -1108,6 +1147,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       status,
       effectiveDeviceMode,
       masterDeviceId,
+      masterDeviceLabel,
+      masterDeviceName,
       hasExistingMaster,
       masterState,
       masterConfirmOpen,

@@ -64,6 +64,9 @@ export function useRemoteControlWs(
   const [modeAssigned, setModeAssigned] = useState(false);
   const [masterDeviceId, setMasterDeviceId] = useState<string | null>(null);
   const [hasExistingMaster, setHasExistingMaster] = useState(false);
+  // Branch device roster (from DEVICE_LIST) — used only to label the current MASTER's device
+  // type/name in status UI. Does not affect election or playback.
+  const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const [sessionCode, setSessionCode] = useState<string | null>(null);
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
@@ -186,6 +189,7 @@ export function useRemoteControlWs(
           if (data.sessionCode) setSessionCode(data.sessionCode);
         } else if (data.type === "DEVICE_LIST") {
           if (data.sessionCode) setSessionCode(data.sessionCode);
+          if ("devices" in data && Array.isArray(data.devices)) setDevices(data.devices);
           if ("masterDeviceId" in data) {
             setMasterDeviceId(data.masterDeviceId ?? null);
             if (deviceModeRef.current === "CONTROL") {
@@ -335,6 +339,7 @@ export function useRemoteControlWs(
     sendSetControl,
     masterDeviceId,
     hasExistingMaster,
+    devices,
     sendCommand,
     sessionCode,
     sendApproveGuestRecommend,
