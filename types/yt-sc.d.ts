@@ -36,8 +36,8 @@ declare global {
           // Optional: YouTube playlist-only URLs (list= with no v=) init the player
           // with playerVars.list and no videoId.
           videoId?: string;
-          width?: number;
-          height?: number;
+          width?: number | string;
+          height?: number | string;
           playerVars?: Record<string, unknown>;
           events?: {
             onReady?: (e: { target: YTPlayerTarget }) => void;

@@ -21,15 +21,25 @@
  *   - Completely inert in a normal browser (no `window.VonoBridge`) → renders nothing,
  *     loads no script, adds no listeners.
  *
- * The native MASTER stays authoritative: this component only REPORTS YouTube state back
- * over the same channel; the native service folds it into the branch STATE_UPDATE.
+ * QUEUE / NAVIGATION:
+ *   - A YouTube playlist/mix arriving as a single URL with a `list=` id is played via
+ *     YouTube's NATIVE playlist support (playerVars.list) and navigated with
+ *     nextVideo()/previousVideo() — YouTube expands and advances the list itself.
+ *   - An expanded set of track URLs is played as an explicit queue (loadVideoById).
+ *   - On EVERY actual track change the current video (videoId + title + playlist
+ *     index/count) is read fresh from the player and reported to native — never stale.
+ *
+ * The native MASTER stays authoritative: this component only REPORTS state back over the
+ * same channel; the native service folds it into the branch STATE_UPDATE.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { getYouTubeVideoId } from "@/lib/playlist-utils";
+import { getYouTubeVideoId, getYouTubePlaylistId } from "@/lib/playlist-utils";
 import {
   isYtPlayerReady,
   safeLoadVideoById,
+  safeNextVideo,
+  safePreviousVideo,
   safePlayVideo,
   safePauseVideo,
   safeStopVideo,
@@ -38,6 +48,9 @@ import {
   safeGetCurrentTime,
   safeGetDuration,
   safeGetVideoData,
+  safeGetPlaylist,
+  safeGetPlaylistIndex,
+  safeDestroyYtPlayer,
   type YTPlayerAPI,
 } from "@/lib/yt-player-utils";
 
@@ -66,20 +79,25 @@ type NativeMsg =
   | { t: "seek"; position?: number }
   | { t: "volume"; volume?: number };
 
+/** A YouTube list id we can hand to the native player (mixes RD…, playlists PL…/UU…/OLAK…). */
+function playableListId(id: string | null): string | null {
+  if (!id) return null;
+  return /^(RD|PL|UU|OLAK|LL|FL)/.test(id) ? id : null;
+}
+
 export function StreamerYouTubeBridge() {
   const [active, setActive] = useState(false); // a YouTube session is loaded/visible
-  const bridgeRef = useRef<VonoBridgeJs | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YTPlayerAPI | null>(null);
-  const queueRef = useRef<string[]>([]); // video ids
-  const indexRef = useRef(0);
+  const queueRef = useRef<string[]>([]); // explicit-mode video ids
+  const indexRef = useRef(0); // explicit-mode index
+  const usingListRef = useRef(false); // YouTube-native playlist mode
+  const listIdRef = useRef<string | null>(null);
   const titleRef = useRef<string>("");
-  const pendingPlayRef = useRef(false); // play requested before the player was ready
 
   useEffect(() => {
     const bridge = getBridge();
     if (!bridge) return; // normal browser → fully inert
-    bridgeRef.current = bridge;
 
     const post = (obj: Record<string, unknown>) => {
       try {
@@ -89,18 +107,29 @@ export function StreamerYouTubeBridge() {
       }
     };
 
+    /** Read the REAL current video from the player and report it (never stale). */
     const reportState = (status: "playing" | "paused" | "ended" | "stopped" | "error") => {
       const p = playerRef.current;
-      const data = isYtPlayerReady(p) ? safeGetVideoData(p) : null;
+      const ready = isYtPlayerReady(p);
+      const data = ready ? safeGetVideoData(p) : null;
+      let index = indexRef.current;
+      let count = queueRef.current.length;
+      if (ready && usingListRef.current) {
+        const list = safeGetPlaylist(p);
+        if (list.length > 0) {
+          count = list.length;
+          index = safeGetPlaylistIndex(p);
+        }
+      }
       post({
         t: "yt",
         status,
         title: data?.title || titleRef.current || "YouTube",
         videoId: data?.video_id || queueRef.current[indexRef.current] || "",
-        position: isYtPlayerReady(p) ? safeGetCurrentTime(p) : 0,
-        duration: isYtPlayerReady(p) ? safeGetDuration(p) : 0,
-        index: indexRef.current,
-        count: queueRef.current.length,
+        position: ready ? safeGetCurrentTime(p) : 0,
+        duration: ready ? safeGetDuration(p) : 0,
+        index,
+        count,
       });
     };
 
@@ -114,6 +143,31 @@ export function StreamerYouTubeBridge() {
       return ids;
     };
 
+    const onStateChange = (evt: { data: number }) => {
+      const YT = window.YT;
+      if (!YT) return;
+      if (evt.data === YT.PlayerState.PLAYING) {
+        // Fires on the FIRST video and on EVERY subsequent track change → fresh metadata.
+        reportState("playing");
+      } else if (evt.data === YT.PlayerState.PAUSED) {
+        reportState("paused");
+      } else if (evt.data === YT.PlayerState.ENDED) {
+        const p = playerRef.current;
+        if (usingListRef.current) {
+          // YouTube auto-advances within a native playlist; only the LAST item's ENDED is final.
+          const list = safeGetPlaylist(p);
+          const idx = safeGetPlaylistIndex(p);
+          if (list.length === 0 || idx >= list.length - 1) reportState("ended");
+          // else: intermediate end — YouTube will play the next item (a new PLAYING fires).
+        } else if (indexRef.current < queueRef.current.length - 1) {
+          playIndex(indexRef.current + 1); // explicit queue advance
+        } else {
+          reportState("ended");
+        }
+      }
+    };
+
+    /** Explicit-queue navigation (non-list mode). */
     const playIndex = (i: number) => {
       const ids = queueRef.current;
       if (i < 0 || i >= ids.length) return;
@@ -122,64 +176,52 @@ export function StreamerYouTubeBridge() {
       if (isYtPlayerReady(p)) {
         safeLoadVideoById(p, ids[i]!);
         safePlayVideo(p);
-      } else {
-        pendingPlayRef.current = true;
-        ensurePlayer();
       }
     };
 
-    // ── the dedicated YouTube player (own instance; never AudioPlayer's) ──
-    const buildPlayer = () => {
-      if (!window.YT?.Player || !containerRef.current) return;
-      if (playerRef.current) return;
-      const first = queueRef.current[indexRef.current] ?? "";
-      new window.YT.Player(containerRef.current, {
-        videoId: first,
-        width: 640,
-        height: 360,
-        playerVars: {
-          enablejsapi: 1,
-          autoplay: pendingPlayRef.current ? 1 : 0,
-          origin: window.location.origin,
-        },
-        events: {
-          onReady(evt: { target: unknown }) {
-            const target = evt.target;
-            if (!isYtPlayerReady(target)) return;
-            playerRef.current = target;
-            if (pendingPlayRef.current) {
-              pendingPlayRef.current = false;
-              safePlayVideo(target);
-            }
-          },
-          onStateChange(evt: { data: number }) {
-            const YT = window.YT;
-            if (!YT) return;
-            if (evt.data === YT.PlayerState.PLAYING) reportState("playing");
-            else if (evt.data === YT.PlayerState.PAUSED) reportState("paused");
-            else if (evt.data === YT.PlayerState.ENDED) {
-              if (indexRef.current < queueRef.current.length - 1) playIndex(indexRef.current + 1);
-              else reportState("ended");
-            }
-          },
-          onError() {
-            reportState("error");
-          },
-        },
-      });
-    };
-
-    const ensurePlayer = () => {
+    /** (Re)create a fresh player for a NEW source. Destroys any prior instance for clean state. */
+    const startSession = (firstVideoId: string) => {
       setActive(true);
+      const build = () => {
+        if (!window.YT?.Player || !containerRef.current) return;
+        safeDestroyYtPlayer(playerRef.current);
+        playerRef.current = null;
+        const playerVars: Record<string, string | number> = {
+          enablejsapi: 1,
+          autoplay: 1,
+          origin: window.location.origin,
+        };
+        if (usingListRef.current && listIdRef.current) {
+          playerVars.list = listIdRef.current;
+          playerVars.listType = "playlist";
+        }
+        new window.YT.Player(containerRef.current, {
+          videoId: firstVideoId,
+          width: "100%",
+          height: "100%",
+          playerVars,
+          events: {
+            onReady(evt: { target: unknown }) {
+              const target = evt.target;
+              if (!isYtPlayerReady(target)) return;
+              playerRef.current = target;
+              safePlayVideo(target);
+            },
+            onStateChange,
+            onError() {
+              reportState("error");
+            },
+          },
+        });
+      };
       if (window.YT?.Player) {
-        buildPlayer();
+        build();
         return;
       }
-      // Load the IFrame API once; chain any existing ready hook.
       const prev = window.onYouTubeIframeAPIReady;
       window.onYouTubeIframeAPIReady = () => {
         prev?.();
-        buildPlayer();
+        build();
       };
       if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
         const tag = document.createElement("script");
@@ -198,15 +240,28 @@ export function StreamerYouTubeBridge() {
       }
       switch (m.t) {
         case "play": {
+          const listId = playableListId(getYouTubePlaylistId(m.url ?? ""));
           const ids = idsFromMsg(m);
-          if (ids.length === 0) {
+          if (!listId && ids.length === 0) {
             post({ t: "yt", status: "error", title: m.title || "YouTube", videoId: "", position: 0, duration: 0, index: 0, count: 0 });
             return;
           }
-          queueRef.current = ids;
-          indexRef.current = 0;
           titleRef.current = m.title || "YouTube";
-          playIndex(0);
+          if (listId) {
+            // YouTube-native playlist/mix: let the player expand + navigate the list itself.
+            usingListRef.current = true;
+            listIdRef.current = listId;
+            queueRef.current = ids; // may hold the anchor video id
+            indexRef.current = 0;
+            startSession(ids[0] ?? "");
+          } else {
+            // Explicit queue of track URLs.
+            usingListRef.current = false;
+            listIdRef.current = null;
+            queueRef.current = ids;
+            indexRef.current = 0;
+            startSession(ids[0]!);
+          }
           break;
         }
         case "resume":
@@ -219,14 +274,18 @@ export function StreamerYouTubeBridge() {
           if (isYtPlayerReady(playerRef.current)) safeStopVideo(playerRef.current);
           queueRef.current = [];
           indexRef.current = 0;
+          usingListRef.current = false;
+          listIdRef.current = null;
           setActive(false);
           reportState("stopped");
           break;
         case "next":
-          if (indexRef.current < queueRef.current.length - 1) playIndex(indexRef.current + 1);
+          if (usingListRef.current) safeNextVideo(playerRef.current);
+          else if (indexRef.current < queueRef.current.length - 1) playIndex(indexRef.current + 1);
           break;
         case "prev":
-          if (indexRef.current > 0) playIndex(indexRef.current - 1);
+          if (usingListRef.current) safePreviousVideo(playerRef.current);
+          else if (indexRef.current > 0) playIndex(indexRef.current - 1);
           break;
         case "seek":
           if (typeof m.position === "number" && isYtPlayerReady(playerRef.current)) safeSeekTo(playerRef.current, m.position, true);
@@ -242,9 +301,9 @@ export function StreamerYouTubeBridge() {
     if (bridge.addEventListener) bridge.addEventListener("message", listener);
     else bridge.onmessage = listener;
 
-    // LIFECYCLE RULE: announce READY on mount AND whenever the page becomes visible
-    // again (resume). The native side clears its reply-proxy on pause/reload/navigate and
-    // requires a fresh `ready` before it will forward any YouTube command.
+    // LIFECYCLE RULE: announce READY on mount AND whenever the page becomes visible again
+    // (resume). The native side clears its reply-proxy on pause/reload/navigate and requires a
+    // fresh `ready` before it forwards any YouTube command.
     const announceReady = () => post({ t: "ready" });
     announceReady();
     const onVisible = () => {
@@ -254,11 +313,19 @@ export function StreamerYouTubeBridge() {
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("pageshow", onPageShow);
 
-    // Position heartbeat while a session is loaded (native uses this for STATE_UPDATE position).
+    // Position heartbeat (native uses this for STATE_UPDATE position). Carries videoId too so a
+    // track change is never missed → native thumbnail/title stay fresh.
     const tick = window.setInterval(() => {
       const p = playerRef.current;
-      if (isYtPlayerReady(p) && queueRef.current.length > 0) {
-        post({ t: "yt_pos", position: safeGetCurrentTime(p), duration: safeGetDuration(p) });
+      if (isYtPlayerReady(p) && (queueRef.current.length > 0 || usingListRef.current)) {
+        const data = safeGetVideoData(p);
+        post({
+          t: "yt_pos",
+          position: safeGetCurrentTime(p),
+          duration: safeGetDuration(p),
+          videoId: data?.video_id || "",
+          title: data?.title || titleRef.current || "YouTube",
+        });
       }
     }, 1000);
 
@@ -268,29 +335,22 @@ export function StreamerYouTubeBridge() {
       window.removeEventListener("pageshow", onPageShow);
       if (bridge.removeEventListener) bridge.removeEventListener("message", listener);
       else if (bridge.onmessage === listener) bridge.onmessage = null;
-      const p = playerRef.current;
-      if (isYtPlayerReady(p)) safeStopVideo(p);
+      safeDestroyYtPlayer(playerRef.current);
+      playerRef.current = null;
     };
   }, []);
 
   // Inert in a normal browser (no native bridge) → render nothing at all.
   if (!getBridge()) return null;
 
+  // Visible + compliant (YouTube requires the player visible and ≥200×200). Presented as an
+  // intentional "video" card, shown only while a YouTube session is active.
   return (
-    <div
-      aria-hidden={!active}
-      style={{
-        // Kept mounted so the YT.Player node is stable; visible only while a YouTube
-        // session is active (YouTube throttles playback in hidden/zero-size frames).
-        position: active ? "static" : "absolute",
-        width: active ? "100%" : 1,
-        height: active ? "auto" : 1,
-        overflow: "hidden",
-        opacity: active ? 1 : 0,
-        pointerEvents: active ? "auto" : "none",
-      }}
-    >
-      <div ref={containerRef} className="aspect-video w-full max-w-3xl overflow-hidden rounded-xl bg-black" />
+    <div hidden={!active} className="mt-4">
+      <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-slate-500">YouTube</p>
+      <div className="mx-auto aspect-video w-full max-w-md overflow-hidden rounded-xl border border-slate-800/80 bg-black shadow-lg">
+        <div ref={containerRef} className="h-full w-full" />
+      </div>
     </div>
   );
 }
