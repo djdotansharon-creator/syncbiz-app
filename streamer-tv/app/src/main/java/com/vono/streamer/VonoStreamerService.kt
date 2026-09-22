@@ -54,6 +54,9 @@ class VonoStreamerService : Service() {
     @Volatile private var mediaTokenExpSec: Long = 0
     @Volatile private var currentKind: String = "stream" // "stream" | "musicbank" | "youtube_pending" | "youtube_webview"
     private var jingleMp: android.media.MediaPlayer? = null
+    // Jingle ducking state (captured once; restored once — overlap-safe).
+    @Volatile private var preDuckVolume: Float? = null // native ExoPlayer volume before ducking
+    @Volatile private var ytDucked: Boolean = false    // YouTube WebView player currently ducked
     private val reclaimTimes = ArrayDeque<Long>() // MASTER reclaim rate-limit
 
     // YouTube-in-WebView session (foreground compatibility path). Audio lives in the WebView,
@@ -539,15 +542,26 @@ class VonoStreamerService : Service() {
         }
     }
 
-    /** On-Air jingle: duck the main player, play the jingle once, restore. */
+    /**
+     * On-Air jingle (PLAY_INTERRUPT). The main music CONTINUES underneath at DUCK_FACTOR (20%)
+     * of its prior volume; the exact prior volume is restored when the jingle ends/errors.
+     * Works for native (Radio/URL/Music Bank) and foreground YouTube (ducked via the WebView
+     * bridge). The music is never stopped/paused (the jingle is a separate MediaPlayer stream;
+     * ExoPlayer keeps audio focus). Overlapping jingles keep the ORIGINAL pre-duck level (we
+     * duck once and restore once) and never corrupt restore state. A fail-safe guard restores
+     * after JINGLE_MAX_MS in case the jingle stalls.
+     */
     private fun playJingle(payload: JSONObject?) {
         val raw = payload?.optString("url", "") ?: return
         if (raw.isBlank()) return
         val abs = if (raw.startsWith("/")) VonoProtocol.APP_ORIGIN + raw else raw
         main.post {
-            val prevVol = player?.volume() ?: 1f
-            player?.setVolume(prevVol * 0.15f)
-            jingleMp?.release(); jingleMp = null
+            duckForJingle() // duck once; a second overlapping jingle won't re-capture/re-duck
+            // Replace any in-flight jingle WITHOUT disturbing the saved duck level (clear its
+            // listeners first so releasing the old player does not trigger a premature restore).
+            jingleMp?.let { it.setOnCompletionListener(null); it.setOnErrorListener(null); runCatching { it.release() } }
+            jingleMp = null
+            main.removeCallbacks(jingleGuard)
             val mp = android.media.MediaPlayer()
             jingleMp = mp
             try {
@@ -557,13 +571,47 @@ class VonoStreamerService : Service() {
                         .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).build(),
                 )
                 mp.setDataSource(abs)
-                mp.setOnCompletionListener { player?.setVolume(prevVol); it.release(); if (jingleMp === it) jingleMp = null }
-                mp.setOnErrorListener { m, _, _ -> player?.setVolume(prevVol); m.release(); if (jingleMp === m) jingleMp = null; true }
+                mp.setOnCompletionListener { m -> if (jingleMp === m) { runCatching { m.release() }; jingleMp = null; main.removeCallbacks(jingleGuard); restoreAfterJingle() } }
+                mp.setOnErrorListener { m, _, _ -> if (jingleMp === m) { runCatching { m.release() }; jingleMp = null; main.removeCallbacks(jingleGuard); restoreAfterJingle() }; true }
                 mp.setOnPreparedListener { it.start() }
                 mp.prepareAsync()
+                main.postDelayed(jingleGuard, JINGLE_MAX_MS) // fail-safe: never stay ducked forever
             } catch (e: Exception) {
-                player?.setVolume(prevVol); Log.w(TAG, "jingle failed: ${e.message}")
+                Log.w(TAG, "jingle failed: ${e.message}")
+                jingleMp = null
+                restoreAfterJingle()
             }
+        }
+    }
+
+    /** Fail-safe restore if a jingle never completes. */
+    private val jingleGuard = Runnable {
+        jingleMp?.let { it.setOnCompletionListener(null); it.setOnErrorListener(null); runCatching { it.release() } }
+        jingleMp = null
+        restoreAfterJingle()
+    }
+
+    /** Duck the CURRENT audio source to DUCK_FACTOR once (idempotent across overlapping jingles). */
+    private fun duckForJingle() {
+        if (currentKind == "youtube_webview" || currentKind == "youtube_pending") {
+            if (!ytDucked) {
+                ytDucked = true
+                WebViewBridge.sendToWeb(JSONObject().put("t", "duck").put("factor", DUCK_FACTOR.toDouble()).toString())
+            }
+        } else if (preDuckVolume == null) {
+            val v = player?.volume() ?: 1f
+            preDuckVolume = v
+            player?.setVolume(v * DUCK_FACTOR)
+        }
+    }
+
+    /** Restore the exact pre-duck volume (native) and/or un-duck the YouTube WebView player. */
+    private fun restoreAfterJingle() {
+        preDuckVolume?.let { player?.setVolume(it) }
+        preDuckVolume = null
+        if (ytDucked) {
+            ytDucked = false
+            WebViewBridge.sendToWeb(JSONObject().put("t", "unduck").toString())
         }
     }
 
@@ -712,6 +760,9 @@ class VonoStreamerService : Service() {
         // Boot/network recovery backoff bounds (native sources only).
         private const val RECOVERY_MIN_DELAY = 2000L
         private const val RECOVERY_MAX_DELAY = 30000L
+        // Jingle ducking: main music continues at 20% under a PLAY_INTERRUPT.
+        private const val DUCK_FACTOR = 0.2f
+        private const val JINGLE_MAX_MS = 60000L
 
         fun start(context: Context) {
             val i = Intent(context, VonoStreamerService::class.java)
