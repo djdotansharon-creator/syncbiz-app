@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { usePlaybackOptional } from "@/lib/playback-provider";
 import { persistStreamerDeviceFlag } from "@/lib/streamer-device-mode";
+import { StreamerYouTubeBridge } from "@/components/streamer-youtube-bridge";
 
 function statusLabel(status: string | undefined): string {
   if (status === "connected") return "Online";
@@ -101,6 +102,10 @@ export function StreamerPlayerPage() {
           <p className="mt-1 text-sm text-slate-400">Playlist: {playlistName}</p>
         ) : null}
         <p className="mt-3 text-sm text-slate-400">{playbackStatusLabel(playStatus)}</p>
+        {/* Dedicated YouTube-only foreground player. Inert unless the native shell's
+            origin-restricted bridge (window.VonoBridge) is present and the native MASTER
+            forwards a YouTube source. Never touches the normal playback machinery. */}
+        <StreamerYouTubeBridge />
       </section>
 
       <section className="rounded-xl border border-slate-800/80 bg-slate-900/45 px-4 py-3" aria-label="Queue">
