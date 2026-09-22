@@ -47,6 +47,7 @@ import {
   safeSetVolume,
   safeGetCurrentTime,
   safeGetDuration,
+  safeGetVolume,
   safeGetVideoData,
   safeGetPlaylist,
   safeGetPlaylistIndex,
@@ -77,7 +78,9 @@ type NativeMsg =
   | { t: "next" }
   | { t: "prev" }
   | { t: "seek"; position?: number }
-  | { t: "volume"; volume?: number };
+  | { t: "volume"; volume?: number }
+  | { t: "duck"; factor?: number }
+  | { t: "unduck" };
 
 /** A YouTube list id we can hand to the native player (mixes RD…, playlists PL…/UU…/OLAK…). */
 function playableListId(id: string | null): string | null {
@@ -94,6 +97,7 @@ export function StreamerYouTubeBridge() {
   const usingListRef = useRef(false); // YouTube-native playlist mode
   const listIdRef = useRef<string | null>(null);
   const titleRef = useRef<string>("");
+  const duckSavedVolRef = useRef<number | null>(null); // volume saved while a jingle ducks YouTube
 
   useEffect(() => {
     const bridge = getBridge();
@@ -293,6 +297,24 @@ export function StreamerYouTubeBridge() {
         case "volume":
           if (typeof m.volume === "number" && isYtPlayerReady(playerRef.current)) safeSetVolume(playerRef.current, Math.max(0, Math.min(100, m.volume)));
           break;
+        case "duck": {
+          // On-Air jingle: keep YouTube playing UNDER the jingle at `factor` of its volume.
+          // Save once (overlap-safe) so unduck restores the exact prior level.
+          const p = playerRef.current;
+          if (isYtPlayerReady(p) && duckSavedVolRef.current === null) {
+            const prev = safeGetVolume(p, 100);
+            duckSavedVolRef.current = prev;
+            const factor = typeof m.factor === "number" && m.factor > 0 && m.factor < 1 ? m.factor : 0.2;
+            safeSetVolume(p, Math.round(prev * factor));
+          }
+          break;
+        }
+        case "unduck": {
+          const p = playerRef.current;
+          if (isYtPlayerReady(p) && duckSavedVolRef.current !== null) safeSetVolume(p, duckSavedVolRef.current);
+          duckSavedVolRef.current = null;
+          break;
+        }
       }
     };
 

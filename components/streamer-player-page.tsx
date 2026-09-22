@@ -6,13 +6,6 @@ import { usePlaybackOptional } from "@/lib/playback-provider";
 import { persistStreamerDeviceFlag } from "@/lib/streamer-device-mode";
 import { StreamerYouTubeBridge } from "@/components/streamer-youtube-bridge";
 
-function statusLabel(status: string | undefined): string {
-  if (status === "connected") return "Online";
-  if (status === "connecting") return "Connecting…";
-  if (status === "error") return "Error";
-  return "Offline";
-}
-
 function playbackStatusLabel(status: string | undefined): string {
   if (status === "playing") return "Playing";
   if (status === "paused") return "Paused";
@@ -35,6 +28,14 @@ export function StreamerPlayerPage() {
   const wsStatus = deviceCtx?.status ?? "disconnected";
   const deviceMode = deviceCtx?.deviceMode ?? "CONTROL";
   const branchConnected = deviceCtx?.isBranchConnected ?? false;
+
+  // Avoid the false OFFLINE flash on app open: the WS status starts "disconnected" before the
+  // first connection attempt has even set "connecting". We only call it OFFLINE once we KNOW
+  // the connection failed — the hook reports "error" on a genuine failure/onerror. A plain
+  // "disconnected" (initial window, or a transient close before the reconnect) shows CONNECTING.
+  const connState: "online" | "connecting" | "offline" =
+    wsStatus === "connected" ? "online" : wsStatus === "error" ? "offline" : "connecting";
+  const connText = connState === "online" ? "Online" : connState === "connecting" ? "Connecting…" : "Offline";
 
   // Compact MASTER indicator (status only). MASTER: this device outputs audio; CONTROL: which
   // device is the branch MASTER (type + short name). Election is unchanged.
@@ -79,15 +80,15 @@ export function StreamerPlayerPage() {
           <p className="mt-1 flex items-center gap-2 text-lg font-semibold text-slate-100">
             <span
               className={`h-2.5 w-2.5 rounded-full ${
-                wsStatus === "connected"
+                connState === "online"
                   ? "bg-emerald-400 animate-pulse"
-                  : wsStatus === "connecting"
+                  : connState === "connecting"
                     ? "bg-amber-400 animate-pulse"
                     : "bg-slate-600"
               }`}
               aria-hidden
             />
-            {statusLabel(wsStatus)}
+            {connText}
           </p>
           <p className="mt-1 text-xs text-slate-500">
             {branchConnected ? "Registered as PLAYER_DEVICE" : "Waiting for auth / WebSocket…"}
