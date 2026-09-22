@@ -11,6 +11,8 @@ export interface YTPlayerAPI {
   pauseVideo: () => void;
   stopVideo: () => void;
   loadVideoById?: (videoId: string, startSeconds?: number) => void;
+  nextVideo?: () => void;
+  previousVideo?: () => void;
   destroy?: () => void;
   setVolume: (vol: number) => void;
   mute?: () => void;
@@ -101,6 +103,16 @@ export function safePlayVideo(player: unknown): void {
 /** Load a new video in an existing player (single-iframe sequential transition). */
 export function safeLoadVideoById(player: unknown, videoId: string, startSeconds = 0): void {
   safeYtCall(player, "loadVideoById", videoId, startSeconds);
+}
+
+/** Advance to the next item of a YouTube-native playlist (playerVars.list). No-op otherwise. */
+export function safeNextVideo(player: unknown): void {
+  safeYtCall(player, "nextVideo");
+}
+
+/** Go to the previous item of a YouTube-native playlist (playerVars.list). No-op otherwise. */
+export function safePreviousVideo(player: unknown): void {
+  safeYtCall(player, "previousVideo");
 }
 
 /** Wait until loadVideoById has activated the target video id. */
