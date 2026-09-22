@@ -22,6 +22,7 @@ class NativePlayer(
     context: Context,
     private val onChanged: () -> Unit,
     private val onEnded: () -> Unit = {},
+    private val onError: () -> Unit = {},
 ) {
     private val exo: ExoPlayer = ExoPlayer.Builder(context).build().apply {
         setAudioAttributes(
@@ -43,6 +44,10 @@ class NativePlayer(
                 Log.w("VonoStreamer", "ExoPlayer error: ${error.errorCodeName}")
                 AppState.lastError = "playback: ${error.errorCodeName}"
                 AppState.notifyChanged()
+                // A source/IO failure (e.g. network not ready at boot) drops us to STATE_IDLE
+                // with no source. Clear currentUrl so recovery re-issues, and notify the service.
+                currentUrl = null
+                onError()
             }
         })
     }
@@ -69,6 +74,9 @@ class NativePlayer(
     fun setVolume(fraction: Float) { exo.volume = fraction.coerceIn(0f, 1f); publish() }
 
     fun isPlaying(): Boolean = exo.isPlaying
+    /** True while a source is loaded and not idle (BUFFERING/READY/ENDED) — used to avoid
+     *  re-issuing play() over an in-progress load. Errors drop to STATE_IDLE → false. */
+    fun isActive(): Boolean = exo.playbackState != Player.STATE_IDLE && exo.currentMediaItem != null
     fun positionMs(): Long = exo.currentPosition.coerceAtLeast(0)
     fun durationMs(): Long = if (exo.duration == C.TIME_UNSET) 0 else exo.duration
     fun volume(): Float = exo.volume

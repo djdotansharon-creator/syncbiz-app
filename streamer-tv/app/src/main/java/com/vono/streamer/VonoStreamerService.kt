@@ -71,6 +71,14 @@ class VonoStreamerService : Service() {
     // Transient marker surfaced to CONTROL when a YouTube request can't run (kept native audio).
     @Volatile private var blockedReason: String? = null
 
+    // ── Boot / network recovery (native sources only; never YouTube) ──────────────
+    // The native source the appliance SHOULD be playing. Armed on restore + on every native
+    // play; cleared on manual PAUSE/STOP. Recovery waits for network and retries with backoff
+    // until it is playing again. Kept as a snapshot JSON (kind + url/title/pos or musicbank).
+    @Volatile private var desiredNative: JSONObject? = null
+    private var recoveryDelayMs = RECOVERY_MIN_DELAY
+    private var recoveryScheduled = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -88,14 +96,24 @@ class VonoStreamerService : Service() {
             onCommand = { cmd, payload -> handleCommand(cmd, payload) },
             onMode = { mode -> onDeviceMode(mode) },
         )
-        netMonitor = NetworkMonitor(this, onAvailable = { ws.kick() }, onLost = {})
+        netMonitor = NetworkMonitor(
+            this,
+            onAvailable = { ws.kick(); main.post { kickRecovery() } }, // network back → retry native recovery
+            onLost = {},
+        )
         netMonitor?.start()
 
         // Receive YouTube playback-state reports from the WebView (origin-restricted bridge).
         WebViewBridge.onYouTubeState = { obj -> onYouTubeStateFromWeb(obj) }
 
         // Native audio engine (created on the main thread). Auto-advances the queue on track end.
-        player = NativePlayer(this, onChanged = { onPlaybackChanged() }, onEnded = { advanceQueue() })
+        // onError → a native source failed (e.g. no network at boot) → kick the recovery loop.
+        player = NativePlayer(
+            this,
+            onChanged = { onPlaybackChanged() },
+            onEnded = { advanceQueue() },
+            onError = { main.post { kickRecovery() } },
+        )
 
         scope.launch {
             deviceId = runCatching { store.getOrCreateDeviceId() }.getOrDefault(deviceId)
@@ -119,7 +137,7 @@ class VonoStreamerService : Service() {
             ACTION_PLAY_MUSICBANK -> playMusicBankTest()
             ACTION_NEXT -> main.post { queueNext() }
             ACTION_PREV -> main.post { queuePrev() }
-            ACTION_STOP -> main.post { currentKind = "stream"; queue = emptyList(); player?.stop() }
+            ACTION_STOP -> main.post { cancelRecovery(); currentKind = "stream"; queue = emptyList(); player?.stop() }
         }
         return START_STICKY
     }
@@ -135,38 +153,26 @@ class VonoStreamerService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * Boot recovery. Restore ONLY a native source (stream/radio or Music Bank) whose persisted
+     * status was PLAYING. Never resurrect a paused/stopped session, and never YouTube (which is
+     * never persisted). Does NOT play immediately — it ARMS the recovery target, which waits for
+     * network and retries with backoff (see armRecovery). Prevents the cold-boot race where the
+     * URL is requested before Wi-Fi is up.
+     */
     private fun restore(json: String) {
         try {
             val o = JSONObject(json)
             val kind = o.optString("kind", "stream")
             val status = o.optString("status", "")
-            val pos = o.optLong("positionMs", 0L)
             val vol = o.optInt("volumePct", 100)
             player?.setVolume(vol / 100f)
-            if (status != "playing") return
-            if (kind == "musicbank") {
-                val arr = o.optJSONArray("tracks") ?: return
-                val list = ArrayList<MusicBank.Track>(arr.length())
-                for (i in 0 until arr.length()) {
-                    val t = arr.optJSONObject(i) ?: continue
-                    val id = t.optString("id", ""); if (id.isBlank()) continue
-                    list.add(MusicBank.Track(id, t.optString("title", id), t.optString("genre", "")))
-                }
-                if (list.isEmpty()) return
-                queue = list
-                queueGenre = o.optString("genre", "")
-                queueIndex = o.optInt("index", 0).coerceIn(0, list.size - 1)
-                currentKind = "musicbank"
-                Log.d(TAG, "boot restore → Music Bank queue ${list.size}, index $queueIndex @${pos}ms")
-                playCurrentTrack(pos) // re-authorizes + resumes
-            } else {
-                val url = o.optString("url", ""); val title = o.optString("title", "")
-                if (url.isNotBlank()) {
-                    currentKind = "stream"
-                    Log.d(TAG, "boot restore → resume stream $title @${pos}ms")
-                    player?.play(url, title, pos)
-                }
-            }
+            if (status != "playing") return                 // only resume a session that WAS playing
+            if (kind != "stream" && kind != "musicbank") return // native kinds only (never YouTube)
+            if (kind == "stream" && o.optString("url", "").isBlank()) return
+            if (kind == "musicbank" && (o.optJSONArray("tracks")?.length() ?: 0) == 0) return
+            Log.d(TAG, "boot restore → arming recovery (kind=$kind)")
+            armRecovery(o)
         } catch (e: Exception) {
             Log.w(TAG, "restore failed: ${e.message}")
         }
@@ -195,8 +201,14 @@ class VonoStreamerService : Service() {
                     put("url", p.currentUrl ?: "")
                     put("title", p.currentTitle)
                 }
-            }.toString()
-            scope.launch { runCatching { store.writePlaybackState(snap) } }
+            }
+            scope.launch { runCatching { store.writePlaybackState(snap.toString()) } }
+            // Keep the recovery target tracking the CURRENT native playing source (replaces any
+            // older target). Only while actually playing — a manual PAUSE clears it via cancelRecovery.
+            if (p.isPlaying() && (p.currentUrl != null || currentKind == "musicbank")) {
+                desiredNative = snap
+                recoveryDelayMs = RECOVERY_MIN_DELAY
+            }
         }
         // Publish live playback state to CONTROL (phone/web mirror). Cutover only.
         publishState()
@@ -282,8 +294,9 @@ class VonoStreamerService : Service() {
             }
             when (command) {
                 "PLAY" -> player?.resume()
-                "PAUSE" -> player?.pause()
-                "STOP" -> { currentKind = "stream"; queue = emptyList(); player?.stop() }
+                // Manual PAUSE/STOP cancels pending boot/network recovery so nothing auto-resurrects.
+                "PAUSE" -> { cancelRecovery(); player?.pause() }
+                "STOP" -> { cancelRecovery(); currentKind = "stream"; queue = emptyList(); player?.stop() }
                 "NEXT" -> queueNext()
                 "PREV" -> queuePrev()
                 "SEEK" -> { val s = payload?.optDouble("position", -1.0) ?: -1.0; if (s >= 0) player?.seekTo((s * 1000).toLong()) }
@@ -400,9 +413,11 @@ class VonoStreamerService : Service() {
                 when (status) {
                     "playing" -> {
                         // Confirmed YouTube audio → NOW stop native ExoPlayer (safe handoff, no gap).
+                        // Cancel native recovery: the user deliberately switched to YouTube, so a
+                        // network blip must NOT auto-resurrect the previous radio/URL under YouTube.
                         if (currentKind == "youtube_pending" || currentKind == "youtube_webview") {
                             currentKind = "youtube_webview"
-                            main.post { player?.stop() }
+                            main.post { cancelRecovery(); player?.stop() }
                         }
                         ytStatus = "playing"; blockedReason = null
                     }
@@ -562,6 +577,93 @@ class VonoStreamerService : Service() {
         }, 5000)
     }
 
+    // ── Boot / network recovery for native sources ────────────────────────────────
+    /** Live connectivity check (not just the cached flag) so boot recovery waits for the network. */
+    private fun hasNetworkNow(): Boolean {
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            val net = cm?.activeNetwork
+            val caps = if (cm != null && net != null) cm.getNetworkCapabilities(net) else null
+            caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        } catch (_: Exception) {
+            AppState.hasNetwork
+        }
+    }
+
+    /** Arm (or replace) the native recovery target and begin recovery. Native kinds only. */
+    private fun armRecovery(target: JSONObject) {
+        desiredNative = target
+        recoveryDelayMs = RECOVERY_MIN_DELAY
+        main.removeCallbacks(recoveryTick)
+        recoveryScheduled = false
+        recoveryTick.run() // immediate attempt (gated on network) + schedules backoff retries
+    }
+
+    /** Manual PAUSE/STOP cancels any pending recovery so we never auto-resurrect a source. */
+    private fun cancelRecovery() {
+        desiredNative = null
+        recoveryScheduled = false
+        recoveryDelayMs = RECOVERY_MIN_DELAY
+        main.removeCallbacks(recoveryTick)
+    }
+
+    /** Network returned / playback error → restart the retry loop promptly (if a target is armed). */
+    private fun kickRecovery() {
+        if (desiredNative == null || player?.isPlaying() == true) return
+        recoveryDelayMs = RECOVERY_MIN_DELAY
+        if (!recoveryScheduled) recoveryTick.run()
+    }
+
+    /** True when we must NOT (re)issue play() — already playing, or the same source is mid-load. */
+    private fun onTargetAlready(o: JSONObject): Boolean {
+        val p = player ?: return false
+        if (p.isPlaying()) return true
+        return if (o.optString("kind", "stream") == "musicbank") p.isActive() && currentKind == "musicbank"
+        else p.isActive() && p.currentUrl == o.optString("url", "") && !p.currentUrl.isNullOrBlank()
+    }
+
+    private val recoveryTick = object : Runnable {
+        override fun run() {
+            recoveryScheduled = false
+            val target = desiredNative ?: return          // cancelled by PAUSE/STOP
+            if (player?.isPlaying() == true) { recoveryDelayMs = RECOVERY_MIN_DELAY; return } // success → stop loop
+            if (hasNetworkNow() && !onTargetAlready(target)) playDesiredNative(target)
+            // Reschedule with backoff while we wait for network / buffering / a retry to take.
+            if (!recoveryScheduled && desiredNative != null) {
+                recoveryScheduled = true
+                main.postDelayed(this, recoveryDelayMs)
+                recoveryDelayMs = (recoveryDelayMs * 2).coerceAtMost(RECOVERY_MAX_DELAY)
+            }
+        }
+    }
+
+    /** Play the armed native target. ExoPlayer-native kinds only; never YouTube. */
+    private fun playDesiredNative(o: JSONObject) {
+        val kind = o.optString("kind", "stream")
+        val pos = o.optLong("positionMs", 0L)
+        if (kind == "musicbank") {
+            val arr = o.optJSONArray("tracks") ?: return
+            val list = ArrayList<MusicBank.Track>(arr.length())
+            for (i in 0 until arr.length()) {
+                val t = arr.optJSONObject(i) ?: continue
+                val id = t.optString("id", ""); if (id.isBlank()) continue
+                list.add(MusicBank.Track(id, t.optString("title", id), t.optString("genre", "")))
+            }
+            if (list.isEmpty()) return
+            queue = list
+            queueGenre = o.optString("genre", "")
+            queueIndex = o.optInt("index", 0).coerceIn(0, list.size - 1)
+            currentKind = "musicbank"
+            Log.d(TAG, "recovery → Music Bank queue ${list.size}, index $queueIndex @${pos}ms")
+            playCurrentTrack(pos) // re-authorizes a fresh media token
+        } else {
+            val url = o.optString("url", ""); if (url.isBlank()) return
+            currentKind = "stream"; queue = emptyList()
+            Log.d(TAG, "recovery → resume stream ${o.optString("title", "")} @${pos}ms")
+            player?.play(url, o.optString("title", ""), pos)
+        }
+    }
+
     private fun goForeground(playing: Boolean) {
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
@@ -607,6 +709,9 @@ class VonoStreamerService : Service() {
         const val ACTION_STOP = "com.vono.streamer.STOP"
         // 2A-1 engine test: a stable public MP3 radio stream (tokenless). Music Bank/R2 = 2A-2.
         const val TEST_STREAM_URL = "https://ice1.somafm.com/groovesalad-128-mp3"
+        // Boot/network recovery backoff bounds (native sources only).
+        private const val RECOVERY_MIN_DELAY = 2000L
+        private const val RECOVERY_MAX_DELAY = 30000L
 
         fun start(context: Context) {
             val i = Intent(context, VonoStreamerService::class.java)
