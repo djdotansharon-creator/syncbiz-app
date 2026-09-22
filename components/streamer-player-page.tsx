@@ -34,14 +34,23 @@ export function StreamerPlayerPage() {
   const wsStatus = deviceCtx?.status ?? "disconnected";
   const deviceMode = deviceCtx?.deviceMode ?? "CONTROL";
   const branchConnected = deviceCtx?.isBranchConnected ?? false;
-  const currentSource = playback?.currentSource;
-  const currentTrack = playback?.currentTrack;
-  const queueLength = playback?.queue?.length ?? 0;
-  const queueIndex = playback?.queueIndex ?? 0;
-  const playStatus = playback?.status;
+
+  // This surface is controller/UI-only: the authoritative playback state is the native
+  // MASTER's mirror (STATE_UPDATE → masterState), NOT this WebView's idle local
+  // PlaybackProvider. Prefer masterState; fall back to local only when there is no master
+  // mirror (e.g. a real browser tab that is itself MASTER playing locally — the server
+  // never echoes a device its own STATE_UPDATE, so masterState stays null there).
+  const ms = deviceCtx?.masterState;
+  const currentSource = ms?.currentSource ?? playback?.currentSource;
+  const currentTrack = ms?.currentTrack ?? playback?.currentTrack;
+  const queueLength = ms?.queue?.length ?? playback?.queue?.length ?? 0;
+  const queueIndex = ms?.queueIndex ?? playback?.queueIndex ?? 0;
+  const playStatus = ms?.status ?? playback?.status;
 
   const title = currentTrack?.title ?? currentSource?.title ?? "No track loaded";
-  const playlistName = currentSource?.playlist?.name ?? currentSource?.title ?? null;
+  // masterState.currentSource has no nested `playlist` object (unlike the local UnifiedSource),
+  // so fall back to the source title; the `!== title` guard below hides a redundant line.
+  const playlistName = currentSource?.title ?? null;
 
   return (
     <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-3xl flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
