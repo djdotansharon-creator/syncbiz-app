@@ -36,6 +36,16 @@ export function StreamerPlayerPage() {
   const deviceMode = deviceCtx?.deviceMode ?? "CONTROL";
   const branchConnected = deviceCtx?.isBranchConnected ?? false;
 
+  // Compact MASTER indicator (status only). MASTER: this device outputs audio; CONTROL: which
+  // device is the branch MASTER (type + short name). Election is unchanged.
+  const masterLabel = deviceCtx?.masterDeviceLabel ?? null;
+  const masterName = deviceCtx?.masterDeviceName ?? null;
+  const masterIndicator =
+    deviceMode === "MASTER"
+      ? `MASTER · ${masterLabel ?? "STREAMER"}`
+      : `CONTROL → MASTER: ${masterLabel ?? "—"}`;
+  const masterIndicatorName = masterName && masterName !== masterLabel ? masterName : null;
+
   // This surface is controller/UI-only: the authoritative playback state is the native
   // MASTER's mirror (STATE_UPDATE → masterState), NOT this WebView's idle local
   // PlaybackProvider. Prefer masterState; fall back to local only when there is no master
@@ -87,10 +97,15 @@ export function StreamerPlayerPage() {
         <div className="rounded-xl border border-slate-800/80 bg-slate-900/50 px-4 py-3">
           <p className="text-[11px] font-medium uppercase tracking-wider text-slate-500">Lease role</p>
           <p className="mt-1 text-lg font-semibold text-slate-100">{deviceMode}</p>
+          {/* Compact MASTER device indicator (type + short name) — status only. */}
+          <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs font-medium text-sky-300/90">
+            <span>{masterIndicator}</span>
+            {masterIndicatorName ? <span className="font-mono text-slate-500">· {masterIndicatorName}</span> : null}
+          </p>
           <p className="mt-1 text-xs text-slate-500">
             {deviceMode === "MASTER"
               ? "This device outputs branch audio."
-              : "Reclaiming MASTER… phones mirror this player when promoted."}
+              : "Native streamer is MASTER; this screen mirrors it."}
           </p>
         </div>
       </section>
