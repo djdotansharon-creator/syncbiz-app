@@ -2,6 +2,7 @@ package com.vono.streamer
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -25,6 +26,11 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.WebMessageCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import org.json.JSONObject
 
 /**
  * VONO Streamer — generic Android TV / Google TV thin shell.
@@ -91,6 +97,9 @@ class MainActivity : ComponentActivity() {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                 Log.d(TAG, "onPageStarted url=$url")
+                // Page (re)load / navigation invalidates the page-lifetime reply proxy. The new
+                // page must send a fresh `ready` before any YouTube command is forwarded.
+                WebViewBridge.clearProxy()
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
@@ -146,6 +155,14 @@ class MainActivity : ComponentActivity() {
                 return true
             }
         }
+
+        // ── YouTube compatibility bridge (origin-restricted) ─────────────────────────
+        // Registered BEFORE loadUrl (required), and allow-listed to the VONO origin ONLY.
+        // We deliberately do NOT use addJavascriptInterface: this WebView loads third-party
+        // YouTube iframes, and addJavascriptInterface is exposed to ALL frames with no
+        // caller-origin verification. WebMessageListener + allowedOriginRules injects
+        // `window.VonoBridge` only into the VONO main frame, and we re-check isMainFrame.
+        registerYouTubeBridge()
 
         // Root = WebView + a visible, D-pad-focusable Settings button overlay.
         val root = FrameLayout(this)
@@ -214,6 +231,9 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "onResume")
         applyImmersive()
         webView.onResume()
+        // Foreground → YouTube compatibility is eligible. The page re-announces `ready` on
+        // visibility so the reply proxy is re-bound fresh (never reused stale).
+        WebViewBridge.setForeground(true)
     }
 
     override fun onPause() {
@@ -223,7 +243,55 @@ class MainActivity : ComponentActivity() {
         // For a background media appliance we keep the WebView (and its audio) running while
         // backgrounded. (Full guaranteed background under memory pressure = a foreground media
         // service; added only if needed.)
+        // Background → YouTube is not eligible; clear the reply proxy (setForeground(false)).
+        // Native URL/Radio/Music Bank keep playing in the background (native ExoPlayer service).
+        WebViewBridge.setForeground(false)
         super.onPause()
+    }
+
+    /**
+     * Origin-restricted YouTube bridge. `window.VonoBridge` is injected ONLY into frames whose
+     * origin matches the allow-list (the VONO production origin), so third-party YouTube iframes
+     * never receive it. We additionally require isMainFrame. If the device's WebView is too old
+     * for WEB_MESSAGE_LISTENER, the YouTube path is simply unavailable (no insecure fallback).
+     */
+    private fun registerYouTubeBridge() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            Log.w(TAG, "WEB_MESSAGE_LISTENER unsupported — YouTube compatibility disabled")
+            return
+        }
+        val allowedOrigins = setOf(STREAMER_ORIGIN)
+        WebViewCompat.addWebMessageListener(
+            webView,
+            "VonoBridge",
+            allowedOrigins,
+            object : WebViewCompat.WebMessageListener {
+                override fun onPostMessage(
+                    view: WebView,
+                    message: WebMessageCompat,
+                    sourceOrigin: Uri,
+                    isMainFrame: Boolean,
+                    replyProxy: JavaScriptReplyProxy,
+                ) {
+                    if (!isMainFrame) return // defense in depth (allow-list already excludes iframes)
+                    val data = message.data ?: return
+                    handleWebMessage(data, replyProxy)
+                }
+            },
+        )
+        Log.d(TAG, "YouTube WebMessage bridge registered (origin-restricted: $STREAMER_ORIGIN)")
+    }
+
+    private fun handleWebMessage(data: String, replyProxy: JavaScriptReplyProxy) {
+        val obj = try { JSONObject(data) } catch (e: Exception) { return }
+        when (obj.optString("t")) {
+            // Fresh page ready → (re)bind the page-lifetime poster to THIS reply proxy.
+            "ready" -> WebViewBridge.bindReady { json ->
+                runOnUiThread { runCatching { replyProxy.postMessage(json) } }
+            }
+            // YouTube state / position reports → hand to the service for STATE_UPDATE.
+            "yt", "yt_pos" -> WebViewBridge.reportFromWeb(obj)
+        }
     }
 
     /**
