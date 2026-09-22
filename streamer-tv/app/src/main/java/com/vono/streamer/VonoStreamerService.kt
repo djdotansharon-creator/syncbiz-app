@@ -60,8 +60,14 @@ class VonoStreamerService : Service() {
     // not ExoPlayer; the service only forwards commands + mirrors the reported state.
     @Volatile private var ytStatus: String = "idle"   // playing | paused | ended | stopped | error | idle
     @Volatile private var ytTitle: String = ""
+    @Volatile private var ytVideoId: String = ""      // current video id (from web reports) → thumbnail
+    @Volatile private var ytCover: String? = null     // source cover from the original PLAY_SOURCE, if any
+    @Volatile private var ytIndex: Int = 0
+    @Volatile private var ytCount: Int = 0
     @Volatile private var ytPositionSec: Double = 0.0
     @Volatile private var ytDurationSec: Double = 0.0
+    // Queue mirror for CONTROL (title + cover) captured from the PLAY_SOURCE sessionTracks.
+    private var ytQueue: List<Pair<String, String?>> = emptyList()
     // Transient marker surfaced to CONTROL when a YouTube request can't run (kept native audio).
     @Volatile private var blockedReason: String? = null
 
@@ -321,20 +327,32 @@ class VonoStreamerService : Service() {
         val url = source.optString("url", "")
         val title = source.optString("title", "")
         val urls = org.json.JSONArray()
+        val queue = ArrayList<Pair<String, String?>>()
         source.optJSONArray("sessionTracks")?.let { st ->
             for (i in 0 until st.length()) {
-                val u = st.optJSONObject(i)?.optString("url", "") ?: ""
-                if (u.isNotBlank()) urls.put(u)
+                val t = st.optJSONObject(i) ?: continue
+                val u = t.optString("url", "")
+                if (u.isNotBlank()) {
+                    urls.put(u)
+                    val c = t.optString("cover", "")
+                    queue.add((t.optString("title", "").ifBlank { title }) to (c.ifBlank { null }))
+                }
             }
         }
         if (urls.length() == 0 && url.isNotBlank()) urls.put(url)
+        // Capture queue + source cover for the CONTROL mirror; reset per-track fields.
+        ytQueue = queue
+        ytCover = source.optString("cover", "").ifBlank { null }
+        ytIndex = 0
+        ytCount = if (queue.isNotEmpty()) queue.size else 1
+        ytVideoId = ""
         val msg = JSONObject().apply {
             put("t", "play"); put("url", url); put("title", title); put("urls", urls)
         }
         if (WebViewBridge.sendToWeb(msg.toString())) {
             currentKind = "youtube_pending"       // don't stop native audio until confirmed playing
             ytTitle = title; ytStatus = "loading"; blockedReason = null
-            Log.d(TAG, "YouTube forwarded to WebView: $title")
+            Log.d(TAG, "YouTube forwarded to WebView: $title (${ytCount} track(s))")
             publishState()
         } else {
             blockedReason = if (WebViewBridge.foreground) "BRIDGE_NOT_READY" else "YOUTUBE_REQUIRES_FOREGROUND"
@@ -365,11 +383,18 @@ class VonoStreamerService : Service() {
             "yt_pos" -> {
                 ytPositionSec = obj.optDouble("position", ytPositionSec)
                 ytDurationSec = obj.optDouble("duration", ytDurationSec)
+                // Heartbeat carries the live video id/title so a track change is never missed.
+                obj.optString("videoId", "").takeIf { it.isNotBlank() }?.let { ytVideoId = it }
+                obj.optString("title", "").takeIf { it.isNotBlank() }?.let { ytTitle = it }
                 if (currentKind == "youtube_webview") publishState()
             }
             "yt" -> {
                 val status = obj.optString("status", "")
                 ytTitle = obj.optString("title", ytTitle)
+                // Fresh per-track metadata (never stale): current video id + playlist index/count.
+                obj.optString("videoId", "").takeIf { it.isNotBlank() }?.let { ytVideoId = it }
+                if (obj.has("index")) ytIndex = obj.optInt("index", ytIndex).coerceAtLeast(0)
+                if (obj.has("count")) ytCount = obj.optInt("count", ytCount).coerceAtLeast(1)
                 ytPositionSec = obj.optDouble("position", ytPositionSec)
                 ytDurationSec = obj.optDouble("duration", ytDurationSec)
                 when (status) {
@@ -422,13 +447,41 @@ class VonoStreamerService : Service() {
         // YouTube-in-WebView session: audio + truth live in the WebView; mirror its reported state.
         if (currentKind == "youtube_webview" || currentKind == "youtube_pending") {
             val ytTitleSafe = ytTitle.ifBlank { "YouTube" }
+            // Thumbnail priority: (1) the source/track cover from the original PLAY_SOURCE,
+            // (2) derive from the current YouTube video id. Never keep a stale first-track cover.
+            val cover: Any = when {
+                !ytCover.isNullOrBlank() -> ytCover as String
+                ytVideoId.isNotBlank() -> "https://i.ytimg.com/vi/$ytVideoId/hqdefault.jpg"
+                else -> JSONObject.NULL
+            }
+            val idx = ytIndex.coerceIn(0, (if (ytCount > 0) ytCount - 1 else 0))
+            // Queue mirror for CONTROL: prefer the captured sessionTracks; else a minimal
+            // ytCount-long list so the controller shows a real queue + enables NEXT/PREV.
+            val queueArr = org.json.JSONArray()
+            if (ytQueue.isNotEmpty()) {
+                for ((i, t) in ytQueue.withIndex()) {
+                    val c: Any = t.second?.takeIf { it.isNotBlank() } ?: (if (i == idx) cover else JSONObject.NULL)
+                    queueArr.put(JSONObject().put("id", "yt_$i").put("title", t.first.ifBlank { ytTitleSafe }).put("cover", c))
+                }
+            } else if (ytCount > 1) {
+                for (i in 0 until ytCount) {
+                    val isCur = i == idx
+                    queueArr.put(
+                        JSONObject().put("id", "yt_$i")
+                            .put("title", if (isCur) ytTitleSafe else "YouTube")
+                            .put("cover", if (isCur) cover else JSONObject.NULL),
+                    )
+                }
+            } else {
+                queueArr.put(JSONObject().put("id", "yt_0").put("title", ytTitleSafe).put("cover", cover))
+            }
             return JSONObject().apply {
                 put("status", if (currentKind == "youtube_pending") "playing" else ytStatus.ifBlank { "playing" })
-                put("currentTrack", JSONObject().put("title", ytTitleSafe).put("cover", JSONObject.NULL))
-                put("currentSource", JSONObject().put("id", "youtube").put("title", ytTitleSafe).put("cover", JSONObject.NULL))
-                put("currentTrackIndex", 0)
-                put("queue", org.json.JSONArray())
-                put("queueIndex", 0)
+                put("currentTrack", JSONObject().put("title", ytTitleSafe).put("cover", cover))
+                put("currentSource", JSONObject().put("id", "youtube").put("title", ytTitleSafe).put("cover", cover))
+                put("currentTrackIndex", idx)
+                put("queue", queueArr)
+                put("queueIndex", idx)
                 put("position", ytPositionSec)
                 put("duration", ytDurationSec)
                 put("positionAt", System.currentTimeMillis())
