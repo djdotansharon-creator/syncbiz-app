@@ -15,6 +15,7 @@ export interface YTPlayerAPI {
   previousVideo?: () => void;
   destroy?: () => void;
   setVolume: (vol: number) => void;
+  getVolume?: () => number;
   mute?: () => void;
   unMute?: () => void;
   isMuted?: () => boolean;
@@ -83,6 +84,12 @@ export function safeGetPlayerState(player: unknown): number {
 /** Safe setVolume - no-op if not ready. */
 export function safeSetVolume(player: unknown, vol: number): void {
   safeYtCall(player, "setVolume", vol);
+}
+
+/** Safe getVolume (0–100). Returns the fallback if not ready/available. */
+export function safeGetVolume(player: unknown, fallback = 100): number {
+  const v = safeYtCall<number>(player, "getVolume");
+  return typeof v === "number" && v >= 0 ? v : fallback;
 }
 
 /** Safe mute - no-op if not ready or unavailable. */
