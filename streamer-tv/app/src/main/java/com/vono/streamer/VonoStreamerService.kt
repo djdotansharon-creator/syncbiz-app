@@ -52,7 +52,12 @@ class VonoStreamerService : Service() {
     @Volatile private var queueGenre: String? = null
     @Volatile private var mediaToken: String? = null
     @Volatile private var mediaTokenExpSec: Long = 0
-    @Volatile private var currentKind: String = "stream" // "stream" | "musicbank" | "youtube_pending" | "youtube_webview"
+    @Volatile private var currentKind: String = "stream" // "stream" | "musicbank" | "youtube_pending" | "youtube_webview" | "youtube_native"
+    // POC (2A-4): on-device YouTube → NewPipeExtractor resolves → ExoPlayer plays (no WebView).
+    // A native YouTube queue (videoId + metadata), resolved per-track on play; recovery re-resolves.
+    @Volatile private var ytQ: List<YouTubeResolver.YtItem> = emptyList()
+    @Volatile private var ytQIndex = 0
+    private val sharedHttp by lazy { okhttp3.OkHttpClient() } // for NewPipe resolution
     private var jingleMp: android.media.MediaPlayer? = null
     // Jingle ducking state (captured once; restored once — overlap-safe).
     @Volatile private var preDuckVolume: Float? = null // native ExoPlayer volume before ducking
@@ -138,9 +143,13 @@ class VonoStreamerService : Service() {
                 player?.play(TEST_STREAM_URL, "Native engine test stream")
             }
             ACTION_PLAY_MUSICBANK -> playMusicBankTest()
+            ACTION_PLAY_YT_POC -> main.post {
+                // Isolated on-device YouTube POC: resolve + play a real music video via NewPipe→ExoPlayer.
+                playYouTubeNative(JSONObject().put("url", POC_YT_TEST_URL).put("title", "YouTube POC test"))
+            }
             ACTION_NEXT -> main.post { queueNext() }
             ACTION_PREV -> main.post { queuePrev() }
-            ACTION_STOP -> main.post { cancelRecovery(); currentKind = "stream"; queue = emptyList(); player?.stop() }
+            ACTION_STOP -> main.post { cancelRecovery(); currentKind = "stream"; queue = emptyList(); ytQ = emptyList(); player?.stop() }
         }
         return START_STICKY
     }
@@ -171,9 +180,10 @@ class VonoStreamerService : Service() {
             val vol = o.optInt("volumePct", 100)
             player?.setVolume(vol / 100f)
             if (status != "playing") return                 // only resume a session that WAS playing
-            if (kind != "stream" && kind != "musicbank") return // native kinds only (never YouTube)
+            if (kind != "stream" && kind != "musicbank" && kind != "youtube_native") return // native kinds only
             if (kind == "stream" && o.optString("url", "").isBlank()) return
             if (kind == "musicbank" && (o.optJSONArray("tracks")?.length() ?: 0) == 0) return
+            if (kind == "youtube_native" && (o.optJSONArray("ytItems")?.length() ?: 0) == 0) return
             Log.d(TAG, "boot restore → arming recovery (kind=$kind)")
             armRecovery(o)
         } catch (e: Exception) {
@@ -200,6 +210,12 @@ class VonoStreamerService : Service() {
                     val arr = org.json.JSONArray()
                     for (t in queue) arr.put(JSONObject().put("id", t.id).put("title", t.title).put("genre", t.genre))
                     put("tracks", arr)
+                } else if (currentKind == "youtube_native") {
+                    // Persist videoIds (NOT the expiring googlevideo URL) — recovery re-resolves.
+                    put("index", ytQIndex)
+                    val arr = org.json.JSONArray()
+                    for (it in ytQ) arr.put(JSONObject().put("videoId", it.videoId).put("title", it.title).put("artwork", it.artwork ?: ""))
+                    put("ytItems", arr)
                 } else {
                     put("url", p.currentUrl ?: "")
                     put("title", p.currentTitle)
@@ -258,11 +274,67 @@ class VonoStreamerService : Service() {
     }
 
     private fun advanceQueue() {
+        if (currentKind == "youtube_native") { if (ytQIndex < ytQ.size - 1) { ytQIndex++; playCurrentYt() }; return }
         if (currentKind != "musicbank") return
         if (queueIndex < queue.size - 1) { queueIndex++; playCurrentTrack() }
     }
-    private fun queueNext() { if (currentKind == "musicbank" && queueIndex < queue.size - 1) { queueIndex++; playCurrentTrack() } }
-    private fun queuePrev() { if (currentKind == "musicbank" && queueIndex > 0) { queueIndex--; playCurrentTrack() } }
+    private fun queueNext() {
+        if (currentKind == "youtube_native") { if (ytQIndex < ytQ.size - 1) { ytQIndex++; playCurrentYt() }; return }
+        if (currentKind == "musicbank" && queueIndex < queue.size - 1) { queueIndex++; playCurrentTrack() }
+    }
+    private fun queuePrev() {
+        if (currentKind == "youtube_native") { if (ytQIndex > 0) { ytQIndex--; playCurrentYt() }; return }
+        if (currentKind == "musicbank" && queueIndex > 0) { queueIndex--; playCurrentTrack() }
+    }
+
+    // ── POC (2A-4): on-device YouTube → NewPipe → ExoPlayer (no WebView) ───────────
+    /** Resolve a YouTube PLAY_SOURCE (single video or playlist/mix) into a native queue and play. */
+    private fun playYouTubeNative(source: JSONObject) {
+        val url = source.optString("url", "")
+        val title = source.optString("title", "")
+        scope.launch {
+            YouTubeResolver.ensureInit(sharedHttp)
+            val listId = YouTubeResolver.playlistIdFromUrl(url)
+            val items: List<YouTubeResolver.YtItem> = when {
+                listId != null -> YouTubeResolver.resolvePlaylist(url)
+                else -> YouTubeResolver.videoIdFromUrl(url)?.let {
+                    listOf(YouTubeResolver.YtItem(it, title.ifBlank { "YouTube" }, null))
+                } ?: emptyList()
+            }
+            if (items.isEmpty()) {
+                AppState.lastError = "YouTube resolve failed (no playable audio)"; AppState.notifyChanged()
+                withContext(Dispatchers.Main) { blockedReason = "YOUTUBE_RESOLVE_FAILED"; publishState() }
+                return@launch
+            }
+            withContext(Dispatchers.Main) {
+                ytQ = items; ytQIndex = 0; currentKind = "youtube_native"
+                queue = emptyList()
+                Log.d(TAG, "YouTube native queue: ${items.size} item(s)")
+                playCurrentYt()
+            }
+        }
+    }
+
+    /** Resolve the current YouTube queue item's audio URL (IO) and play it via ExoPlayer. */
+    private fun playCurrentYt(positionMs: Long = 0L) {
+        val item = ytQ.getOrNull(ytQIndex) ?: return
+        // Reflect the selected track immediately (title/artwork) even before the URL resolves.
+        ytTitle = item.title; ytVideoId = item.videoId
+        scope.launch {
+            YouTubeResolver.ensureInit(sharedHttp)
+            val r = YouTubeResolver.resolveAudio(item.videoId)
+            if (r == null) {
+                AppState.lastError = "YouTube resolve failed: ${item.videoId}"; AppState.notifyChanged()
+                withContext(Dispatchers.Main) { blockedReason = "YOUTUBE_RESOLVE_FAILED"; publishState() }
+                return@launch
+            }
+            withContext(Dispatchers.Main) {
+                ytTitle = r.title
+                blockedReason = null
+                player?.play(r.audioUrl, r.title, positionMs)
+            }
+        }
+    }
 
     // ── 2A-3 cutover: CONTROL commands + MASTER + STATE_UPDATE ────────────────────
     private fun onDeviceMode(mode: String) {
@@ -299,7 +371,7 @@ class VonoStreamerService : Service() {
                 "PLAY" -> player?.resume()
                 // Manual PAUSE/STOP cancels pending boot/network recovery so nothing auto-resurrects.
                 "PAUSE" -> { cancelRecovery(); player?.pause() }
-                "STOP" -> { cancelRecovery(); currentKind = "stream"; queue = emptyList(); player?.stop() }
+                "STOP" -> { cancelRecovery(); currentKind = "stream"; queue = emptyList(); ytQ = emptyList(); player?.stop() }
                 "NEXT" -> queueNext()
                 "PREV" -> queuePrev()
                 "SEEK" -> { val s = payload?.optDouble("position", -1.0) ?: -1.0; if (s >= 0) player?.seekTo((s * 1000).toLong()) }
@@ -326,7 +398,8 @@ class VonoStreamerService : Service() {
         // FIRST (avoid double audio), then start native.
         if (!isYouTube) stopYtIfActive()
         when {
-            isYouTube -> playYouTubeForeground(p)
+            isYouTube && POC_NATIVE_YOUTUBE -> { blockedReason = null; playYouTubeNative(p) } // on-device NewPipe → ExoPlayer
+            isYouTube -> playYouTubeForeground(p) // legacy WebView fallback (kept, unused while POC on)
             low.contains("/api/media/") -> { blockedReason = null; playMusicBankUrl(url, title) } // R2 (needs token)
             url.startsWith("http") -> { blockedReason = null; currentKind = "stream"; queue = emptyList(); player?.play(url, title) } // direct audio / radio
             else -> reportUnsupported(id, title, "Unsupported source type ($type/$origin) on the streamer")
@@ -462,6 +535,37 @@ class VonoStreamerService : Service() {
     }
 
     private fun buildState(): JSONObject {
+        // POC on-device YouTube: audio IS ExoPlayer, but title/artwork/queue come from the native
+        // YouTube queue (artwork derived from the current videoId thumbnail).
+        if (currentKind == "youtube_native") {
+            val p = player
+            val cur = ytQ.getOrNull(ytQIndex)
+            val titleSafe = (cur?.title ?: ytTitle).ifBlank { "YouTube" }
+            val vid = cur?.videoId ?: ytVideoId
+            val cover: Any = cur?.artwork?.takeIf { it.isNotBlank() }
+                ?: if (vid.isNotBlank()) "https://i.ytimg.com/vi/$vid/hqdefault.jpg" else JSONObject.NULL
+            val arr = org.json.JSONArray()
+            for ((i, it) in ytQ.withIndex()) {
+                val c: Any = it.artwork?.takeIf { a -> a.isNotBlank() }
+                    ?: if (it.videoId.isNotBlank()) "https://i.ytimg.com/vi/${it.videoId}/hqdefault.jpg" else JSONObject.NULL
+                arr.put(JSONObject().put("id", it.videoId.ifBlank { "yt_$i" }).put("title", it.title.ifBlank { "YouTube" }).put("cover", c))
+            }
+            val playing = p?.isPlaying() == true
+            return JSONObject().apply {
+                put("status", if (playing) "playing" else "paused")
+                put("currentTrack", JSONObject().put("title", titleSafe).put("cover", cover))
+                put("currentSource", JSONObject().put("id", "youtube").put("title", titleSafe).put("cover", cover))
+                put("currentTrackIndex", ytQIndex)
+                put("queue", arr)
+                put("queueIndex", ytQIndex)
+                put("position", (p?.positionMs() ?: 0L) / 1000.0)
+                put("duration", (p?.durationMs() ?: 0L) / 1000.0)
+                put("positionAt", System.currentTimeMillis())
+                put("volume", ((p?.volume() ?: 1f) * 100).toInt())
+                put("playbackVia", "youtube_native")
+                blockedReason?.let { put("blockedReason", it) }
+            }
+        }
         // YouTube-in-WebView session: audio + truth live in the WebView; mirror its reported state.
         if (currentKind == "youtube_webview" || currentKind == "youtube_pending") {
             val ytTitleSafe = ytTitle.ifBlank { "YouTube" }
@@ -666,8 +770,11 @@ class VonoStreamerService : Service() {
     private fun onTargetAlready(o: JSONObject): Boolean {
         val p = player ?: return false
         if (p.isPlaying()) return true
-        return if (o.optString("kind", "stream") == "musicbank") p.isActive() && currentKind == "musicbank"
-        else p.isActive() && p.currentUrl == o.optString("url", "") && !p.currentUrl.isNullOrBlank()
+        return when (o.optString("kind", "stream")) {
+            "musicbank" -> p.isActive() && currentKind == "musicbank"
+            "youtube_native" -> p.isActive() && currentKind == "youtube_native" // buffering → don't re-resolve
+            else -> p.isActive() && p.currentUrl == o.optString("url", "") && !p.currentUrl.isNullOrBlank()
+        }
     }
 
     private val recoveryTick = object : Runnable {
@@ -685,10 +792,26 @@ class VonoStreamerService : Service() {
         }
     }
 
-    /** Play the armed native target. ExoPlayer-native kinds only; never YouTube. */
+    /** Play the armed native target: stream, Music Bank, or on-device YouTube (re-resolved). */
     private fun playDesiredNative(o: JSONObject) {
         val kind = o.optString("kind", "stream")
         val pos = o.optLong("positionMs", 0L)
+        if (kind == "youtube_native") {
+            val arr = o.optJSONArray("ytItems") ?: return
+            val list = ArrayList<YouTubeResolver.YtItem>(arr.length())
+            for (i in 0 until arr.length()) {
+                val t = arr.optJSONObject(i) ?: continue
+                val vid = t.optString("videoId", ""); if (vid.isBlank()) continue
+                list.add(YouTubeResolver.YtItem(vid, t.optString("title", "YouTube"), t.optString("artwork", "").ifBlank { null }))
+            }
+            if (list.isEmpty()) return
+            ytQ = list
+            ytQIndex = o.optInt("index", 0).coerceIn(0, list.size - 1)
+            currentKind = "youtube_native"; queue = emptyList()
+            Log.d(TAG, "recovery → YouTube native queue ${list.size}, index $ytQIndex @${pos}ms")
+            playCurrentYt(pos) // re-resolves a fresh audio URL on the device IP
+            return
+        }
         if (kind == "musicbank") {
             val arr = o.optJSONArray("tracks") ?: return
             val list = ArrayList<MusicBank.Track>(arr.length())
@@ -763,6 +886,12 @@ class VonoStreamerService : Service() {
         // Jingle ducking: main music continues at 20% under a PLAY_INTERRUPT.
         private const val DUCK_FACTOR = 0.2f
         private const val JINGLE_MAX_MS = 60000L
+        // POC (2A-4): route YouTube PLAY_SOURCE to the on-device NewPipe→ExoPlayer engine
+        // instead of the WebView. The WebView fallback code stays intact but unused while true.
+        const val POC_NATIVE_YOUTUBE = true
+        const val ACTION_PLAY_YT_POC = "com.vono.streamer.PLAY_YT_POC" // Settings test button
+        // A real music video + a playlist for the isolated POC test buttons.
+        const val POC_YT_TEST_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
         fun start(context: Context) {
             val i = Intent(context, VonoStreamerService::class.java)

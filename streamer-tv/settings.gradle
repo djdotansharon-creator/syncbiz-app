@@ -10,6 +10,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // NewPipeExtractor (on-device YouTube resolution) is published on JitPack.
+        maven { url 'https://jitpack.io' }
     }
 }
 

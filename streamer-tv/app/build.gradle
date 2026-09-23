@@ -19,8 +19,9 @@ android {
         applicationId 'com.vono.streamer'
         minSdk 21            // Android TV since Android 5.0 (Lollipop)
         targetSdk 34
-        versionCode 13
-        versionName '1.8.0'
+        versionCode 14
+        versionName '1.9.0-poc'
+        multiDexEnabled true // NewPipeExtractor + Rhino + media3 exceed the 64k method limit on minSdk 21
     }
 
     signingConfigs {
@@ -47,6 +48,8 @@ android {
     }
 
     compileOptions {
+        // NewPipeExtractor uses java.time and other Java 8+ APIs → desugar for minSdk 21.
+        coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
@@ -74,4 +77,9 @@ dependencies {
     // this WebView loads third-party YouTube iframes — addJavascriptInterface exposes to
     // ALL frames with no caller-origin verification.
     implementation 'androidx.webkit:webkit:1.11.0'
+    // On-device YouTube resolution (POC): resolve a YouTube video/playlist → direct audio
+    // stream URL on the DEVICE's IP, then play through the same ExoPlayer engine. Pinned to a
+    // recent release that carries the poToken / androidSdkless fixes for audio-only 403s.
+    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.5'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.2'
 }

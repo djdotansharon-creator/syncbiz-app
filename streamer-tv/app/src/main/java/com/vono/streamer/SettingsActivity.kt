@@ -48,6 +48,9 @@ class SettingsActivity : ComponentActivity() {
         findViewById<Button>(R.id.btn_test_musicbank).setOnClickListener {
             VonoStreamerService.send(this, VonoStreamerService.ACTION_PLAY_MUSICBANK)
         }
+        findViewById<Button>(R.id.btn_test_youtube).setOnClickListener {
+            VonoStreamerService.send(this, VonoStreamerService.ACTION_PLAY_YT_POC)
+        }
         findViewById<Button>(R.id.btn_prev_track).setOnClickListener {
             VonoStreamerService.send(this, VonoStreamerService.ACTION_PREV)
         }
