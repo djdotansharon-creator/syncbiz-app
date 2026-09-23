@@ -1086,10 +1086,15 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
   const devicePlayer = useDevicePlayer();
   const fireOnAir = useCallback(
     (url: string) => {
-      if (isDesktop) {
-        triggerPlayInterrupt(url); // Electron desktop → existing local MPV interrupt (unchanged)
+      // IRON RULE: only the branch MASTER executes playback. Run the LOCAL MPV interrupt ONLY when
+      // THIS desktop is itself the MASTER. When this device is CONTROL (e.g. the GOtv streamer is
+      // MASTER), the jingle MUST go over WS to the master device — never the local MPV — otherwise
+      // the desktop ducks/plays its own audio while the streamer stays untouched.
+      const isMaster = devicePlayer?.deviceMode === "MASTER";
+      if (isDesktop && isMaster) {
+        triggerPlayInterrupt(url); // desktop is the branch MASTER → local MPV interrupt
       } else {
-        devicePlayer?.sendCommandToMaster("PLAY_INTERRUPT", { url }); // Web → cloud WS → branch MASTER
+        devicePlayer?.sendCommandToMaster("PLAY_INTERRUPT", { url }); // CONTROL → cloud WS → branch MASTER
       }
     },
     [isDesktop, devicePlayer],
@@ -1657,7 +1662,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                             className="jc-btn jc-btn--small jc-btn--primary"
                             disabled={!a.url}
                             onClick={() =>
-                              isDesktop ? triggerPlayInterrupt(a.url) : preview.toggle(a.url)
+                              isDesktop ? fireOnAir(a.url) : preview.toggle(a.url)
                             }
                             title={isDesktop ? "Play On-Air" : "Preview in browser"}
                           >

@@ -23,6 +23,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import { useDevicePlayer } from "@/lib/device-player-context";
 import {
   JINGLE_SCHEDULE_EVENT,
   loadJingleSchedule,
@@ -62,19 +63,34 @@ function playInterrupt(url: string): void {
  * jingle URL. The bell is extremely short (<1 s) and MPV's interrupt channel
  * queues itself, so a small delay is sufficient.
  */
-function fireItem(item: MockScheduleItem): void {
+function fireItem(item: MockScheduleItem, fire: (url: string) => void): void {
   if (!item.url) return;
   const bell = item.preRoll ? bellUrl(item.bellStyle) : null;
   if (bell) {
-    playInterrupt(bell);
-    window.setTimeout(() => playInterrupt(item.url!), DEFAULT_BELL_MS);
+    fire(bell);
+    window.setTimeout(() => fire(item.url!), DEFAULT_BELL_MS);
   } else {
-    playInterrupt(item.url);
+    fire(item.url);
   }
 }
 
 export function JingleScheduleAutoPlayer(): null {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const devicePlayer = useDevicePlayer();
+
+  // IRON RULE: local MPV interrupt ONLY when THIS desktop is the branch MASTER. When CONTROL
+  // (e.g. the GOtv streamer is MASTER), a scheduled jingle goes over WS to the master device.
+  // Kept in a ref so the setTimeout closure (schedule effect runs once) always uses the latest
+  // mode; the ref is updated from an effect (never during render).
+  const fireRef = useRef<(url: string) => void>(() => {});
+  useEffect(() => {
+    fireRef.current = (url: string) => {
+      const isMaster = devicePlayer?.deviceMode === "MASTER";
+      const isDesktop = typeof window !== "undefined" && "syncbizDesktop" in window;
+      if (isDesktop && isMaster) playInterrupt(url);
+      else devicePlayer?.sendCommandToMaster("PLAY_INTERRUPT", { url });
+    };
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -109,7 +125,7 @@ export function JingleScheduleAutoPlayer(): null {
         const fresh = loadJingleSchedule();
         const target = fresh.find((x) => x.id === soonest!.item.id);
         if (target) {
-          fireItem(target);
+          fireItem(target, fireRef.current);
           if ((target.repeat ?? "once") === "once") {
             persistJingleSchedule(fresh.filter((x) => x.id !== target.id));
           }
