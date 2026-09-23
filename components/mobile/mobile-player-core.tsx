@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { useStationController } from "@/lib/station-controller-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { useLocalPlaybackTime } from "@/lib/playback-time-store";
+import { computeLivePosition } from "@/lib/remote-control/live-position";
 import {
   getAutoMix,
   setAutoMix as persistAutoMix,
@@ -82,35 +83,25 @@ export type MobilePlayerDerived = {
  */
 function useInterpolatedRemotePosition(
   remotePosition: number,
+  positionAt: number | undefined,
   duration: number,
   isPlaying: boolean,
   syncKey: string | null,
 ): number {
-  const [display, setDisplay] = useState(0);
-  const anchorPosRef = useRef(0);
-  const anchorAtRef = useRef(0);
-
-  // Re-anchor to the MASTER whenever it reports a new position, the track changes,
-  // or play/pause flips. Keeps the local clock honest instead of free-running.
-  useEffect(() => {
-    anchorPosRef.current = Number.isFinite(remotePosition) ? Math.max(0, remotePosition) : 0;
-    anchorAtRef.current = Date.now();
-    setDisplay(anchorPosRef.current);
-  }, [remotePosition, syncKey, isPlaying]);
-
-  // While playing, tick the displayed position forward between snapshots.
+  // Re-render on a 250ms tick while playing so the SHARED interpolation advances. The value
+  // itself comes from computeLivePosition (identical to the desktop/web AudioPlayer), anchored
+  // on the MASTER's positionAt — so phone and desktop use ONE implementation.
+  const [, force] = useState(0);
   useEffect(() => {
     if (!isPlaying) return;
-    const id = setInterval(() => {
-      const elapsed = (Date.now() - anchorAtRef.current) / 1000;
-      let next = anchorPosRef.current + elapsed;
-      if (duration > 0) next = Math.min(next, duration);
-      setDisplay(next);
-    }, 250);
+    const id = setInterval(() => force((n) => (n + 1) % 1_000_000), 250);
     return () => clearInterval(id);
-  }, [isPlaying, duration]);
-
-  return display;
+  }, [isPlaying, syncKey]);
+  const live = computeLivePosition(
+    { position: remotePosition, positionAt, duration, status: isPlaying ? "playing" : "paused" },
+    null,
+  );
+  return Number.isFinite(live) ? live : 0;
 }
 
 function useDerivedPlayer(): MobilePlayerDerived {
@@ -129,6 +120,7 @@ function useDerivedPlayer(): MobilePlayerDerived {
       : null;
   const controllerPosition = useInterpolatedRemotePosition(
     rsTop?.position ?? 0,
+    rsTop?.positionAt,
     rsTop?.duration ?? 0,
     rsPlaying,
     rsSyncKey,

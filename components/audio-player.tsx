@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource, type PlaybackStatus } from "@/lib/playback-provider";
 import { getPlaylistTracks } from "@/lib/playlist-types";
+import { computeLivePosition } from "@/lib/remote-control/live-position";
 import { isPlayNextSourceId } from "@/lib/play-next";
 import { useLocale, useTranslations, labels } from "@/lib/locale-context";
 import { TrackMetaChips } from "@/components/track-meta-chips";
@@ -4067,17 +4068,7 @@ export function AudioPlayer() {
         return Math.min(pos + ageMs / 1000, dur);
       })()
     : isControlMirror
-      ? (() => {
-          if (controlPendingSeek != null) return controlPendingSeek;
-          const pos = ms?.position;
-          const at = ms?.positionAt;
-          if (typeof pos !== "number" || !Number.isFinite(pos)) return Number.NaN;
-          if (ms?.status !== "playing" || typeof at !== "number" || !Number.isFinite(at)) return pos;
-          const dur = typeof ms?.duration === "number" && Number.isFinite(ms.duration) ? ms.duration : Infinity;
-          const ageMs = Date.now() - at;
-          if (ageMs > 1200) return pos;
-          return Math.min(pos + ageMs / 1000, dur);
-        })()
+      ? computeLivePosition(ms, controlPendingSeek) // SHARED with mobile — bar + text use this one value
       : position;
   const displayDuration = isDesktopMode
     ? desktopMpvSnap.duration
