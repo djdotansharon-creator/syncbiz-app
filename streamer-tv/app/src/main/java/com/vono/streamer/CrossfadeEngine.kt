@@ -251,6 +251,8 @@ class CrossfadeEngine(
     }
 
     fun isCrossfading(): Boolean = xfadeIncomingIdx >= 0
+    /** True while the current-attempt deck has a source loaded and is not idle (buffering/ready). */
+    fun isActive(): Boolean = decks[attemptIdx].playbackState != Player.STATE_IDLE && decks[attemptIdx].currentMediaItem != null
     fun isPlaying(): Boolean = decks[attemptIdx].isPlaying
     fun positionMs(): Long = decks[attemptIdx].currentPosition.coerceAtLeast(0)
     fun durationMs(): Long = decks[attemptIdx].duration.let { if (it == C.TIME_UNSET) 0 else it }
