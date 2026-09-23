@@ -19,8 +19,8 @@ android {
         applicationId 'com.vono.streamer'
         minSdk 21            // Android TV since Android 5.0 (Lollipop)
         targetSdk 34
-        versionCode 16
-        versionName '1.10.1'
+        versionCode 17
+        versionName '1.10.2'
         multiDexEnabled true // NewPipeExtractor + Rhino + media3 exceed the 64k method limit on minSdk 21
     }
 

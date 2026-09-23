@@ -1,6 +1,8 @@
 package com.vono.streamer
 
 import android.content.Context
+import android.media.AudioManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -38,6 +40,49 @@ class CrossfadeEngine(
     private var activeIdx = 0            // deck that owns the CURRENT (outgoing) audio
     private var attemptIdx = 0           // deck reported to CONTROL (incoming during a crossfade)
 
+    // ── Single audio-focus owner for the whole music engine ───────────────────────
+    private val audioManager = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var focusRequest: android.media.AudioFocusRequest? = null
+    private var hasFocus = false
+    private var pausedByFocusLoss = false
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        when (change) {
+            AudioManager.AUDIOFOCUS_LOSS -> { pausedByFocusLoss = false; pause() }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> { if (isPlaying()) { pausedByFocusLoss = true; pause() } }
+            AudioManager.AUDIOFOCUS_GAIN -> { if (pausedByFocusLoss) { pausedByFocusLoss = false; resume() } }
+        }
+    }
+    /** Request AUDIOFOCUS_GAIN once for the engine (idempotent). Both decks are focus-agnostic. */
+    private fun ensureFocus() {
+        if (hasFocus) return
+        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val attrs = android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).build()
+            val req = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(attrs)
+                .setWillPauseWhenDucked(false)
+                .setOnAudioFocusChangeListener(focusListener)
+                .build()
+            focusRequest = req
+            audioManager.requestAudioFocus(req)
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+        }
+        hasFocus = granted == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    }
+    private fun abandonFocus() {
+        if (!hasFocus) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+        } else {
+            @Suppress("DEPRECATION") audioManager.abandonAudioFocus(focusListener)
+        }
+        hasFocus = false
+        pausedByFocusLoss = false
+    }
+
     @Volatile var currentUrl: String? = null
         private set
     @Volatile var currentTitle: String = ""
@@ -57,11 +102,15 @@ class CrossfadeEngine(
     private fun effective(): Float = (masterVol * duckFactor).coerceIn(0f, 1f)
     private fun ramping(): Boolean = rampRunnable != null
 
+    // Both decks are focus-AGNOSTIC (handleAudioFocus=false): the engine owns ONE audio-focus
+    // request for the whole music engine, so A and B can overlap during a crossfade without
+    // competing with each other for focus (deck-owned focus made the incoming deck's request
+    // duck/pause the outgoing deck — breaking the overlap).
     private fun buildDeck(context: Context): ExoPlayer =
         ExoPlayer.Builder(context).build().apply {
             setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
-                /* handleAudioFocus = */ true,
+                /* handleAudioFocus = */ false,
             )
             setHandleAudioBecomingNoisy(true)
         }
@@ -104,6 +153,7 @@ class CrossfadeEngine(
 
     /** Hard cut on the active deck (first track, boot restore, recovery). Cancels any crossfade. */
     fun play(url: String, title: String, positionMs: Long = 0L) {
+        ensureFocus()
         cancelXfade(stopIncoming = true)
         currentUrl = url; currentTitle = title
         attemptIdx = activeIdx
@@ -122,6 +172,7 @@ class CrossfadeEngine(
      * playing, this is just a hard play(). If the incoming never starts, the current track is kept.
      */
     fun crossfadeTo(url: String, title: String, positionMs: Long = 0L) {
+        ensureFocus()
         val activePlaying = decks[activeIdx].isPlaying || decks[activeIdx].playbackState == Player.STATE_BUFFERING
         if (!activePlaying || crossfadeSec <= 0) { play(url, title, positionMs); return }
         cancelXfade(stopIncoming = true) // supersede any in-flight crossfade; keep the active deck
@@ -227,11 +278,12 @@ class CrossfadeEngine(
         attemptIdx = activeIdx
     }
 
-    fun resume() { decks[attemptIdx].playWhenReady = true }
+    fun resume() { ensureFocus(); decks[attemptIdx].playWhenReady = true }
     fun pause() { decks[activeIdx].playWhenReady = false; if (attemptIdx != activeIdx) decks[attemptIdx].playWhenReady = false }
     fun stop() {
         cancelXfade(stopIncoming = true)
         for (d in decks) { d.playWhenReady = false; d.stop(); d.clearMediaItems() }
+        abandonFocus()
         currentUrl = null
         publish(); onChanged()
     }
@@ -258,7 +310,7 @@ class CrossfadeEngine(
     fun durationMs(): Long = decks[attemptIdx].duration.let { if (it == C.TIME_UNSET) 0 else it }
     fun volume(): Float = masterVol
 
-    fun release() { cancelTimers(); for (d in decks) d.release() }
+    fun release() { cancelTimers(); abandonFocus(); for (d in decks) d.release() }
 
     private fun publish() {
         val d = decks[attemptIdx]
