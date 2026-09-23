@@ -52,7 +52,7 @@ class VonoStreamerService : Service() {
     @Volatile private var queueGenre: String? = null
     @Volatile private var mediaToken: String? = null
     @Volatile private var mediaTokenExpSec: Long = 0
-    @Volatile private var currentKind: String = "stream" // "stream" | "musicbank" | "youtube_pending" | "youtube_webview" | "youtube_native"
+    @Volatile private var currentKind: String = "stream" // "stream" | "session" | "musicbank" | "youtube_pending" | "youtube_webview" | "youtube_native"
     // POC (2A-4): on-device YouTube → NewPipeExtractor resolves → ExoPlayer plays (no WebView).
     // A native YouTube queue (videoId + metadata), resolved per-track on play; recovery re-resolves.
     @Volatile private var ytQ: List<YouTubeResolver.YtItem> = emptyList()
@@ -79,6 +79,19 @@ class VonoStreamerService : Service() {
     private var ytQueue: List<Pair<String, String?>> = emptyList()
     // Transient marker surfaced to CONTROL when a YouTube request can't run (kept native audio).
     @Volatile private var blockedReason: String? = null
+
+    // ── Generic multi-track NATIVE session (currentKind "session") ────────────────
+    // Rebuilt from a CONTROL PLAY_SOURCE `sessionTracks` payload so a Music Bank /api/media/
+    // playlist (or a list of direct URLs) plays as the FULL queue — never collapsed to one
+    // track. Each row keeps its BASE url (media token appended only at play time).
+    private data class SessionTrack(val id: String, val title: String, val cover: String?, val url: String, val durationSec: Long = 0)
+    @Volatile private var sessionQ: List<SessionTrack> = emptyList()
+    @Volatile private var sessionIndex = 0
+    // Session identity mirrored to CONTROL (shared by youtube_native + session kinds).
+    @Volatile private var sessionTitle: String? = null
+    @Volatile private var sessionPlaylistId: String? = null
+    // FIX: authoritative NewPipe duration for the ACTIVE youtube_native item (ExoPlayer wins when >0).
+    @Volatile private var ytActiveDurationSec: Long = 0
 
     // ── Boot / network recovery (native sources only; never YouTube) ──────────────
     // The native source the appliance SHOULD be playing. Armed on restore + on every native
@@ -151,7 +164,7 @@ class VonoStreamerService : Service() {
             }
             ACTION_NEXT -> main.post { queueNext() }
             ACTION_PREV -> main.post { queuePrev() }
-            ACTION_STOP -> main.post { cancelRecovery(); currentKind = "stream"; queue = emptyList(); ytQ = emptyList(); player?.stop() }
+            ACTION_STOP -> main.post { cancelRecovery(); currentKind = "stream"; queue = emptyList(); ytQ = emptyList(); sessionQ = emptyList(); player?.stop() }
         }
         return START_STICKY
     }
@@ -182,9 +195,10 @@ class VonoStreamerService : Service() {
             val vol = o.optInt("volumePct", 100)
             player?.setVolume(vol / 100f)
             if (status != "playing") return                 // only resume a session that WAS playing
-            if (kind != "stream" && kind != "musicbank" && kind != "youtube_native") return // native kinds only
+            if (kind != "stream" && kind != "musicbank" && kind != "session" && kind != "youtube_native") return // native kinds only
             if (kind == "stream" && o.optString("url", "").isBlank()) return
             if (kind == "musicbank" && (o.optJSONArray("tracks")?.length() ?: 0) == 0) return
+            if (kind == "session" && (o.optJSONArray("sessionRows")?.length() ?: 0) == 0) return
             if (kind == "youtube_native" && (o.optJSONArray("ytItems")?.length() ?: 0) == 0) return
             Log.d(TAG, "boot restore → arming recovery (kind=$kind)")
             armRecovery(o)
@@ -215,9 +229,19 @@ class VonoStreamerService : Service() {
                 } else if (currentKind == "youtube_native") {
                     // Persist videoIds (NOT the expiring googlevideo URL) — recovery re-resolves.
                     put("index", ytQIndex)
+                    sessionTitle?.let { put("sessionTitle", it) }
+                    sessionPlaylistId?.let { put("sessionPlaylistId", it) }
                     val arr = org.json.JSONArray()
-                    for (it in ytQ) arr.put(JSONObject().put("videoId", it.videoId).put("title", it.title).put("artwork", it.artwork ?: ""))
+                    for (it in ytQ) arr.put(JSONObject().put("videoId", it.videoId).put("title", it.title).put("artwork", it.artwork ?: "").put("durationSec", it.durationSec))
                     put("ytItems", arr)
+                } else if (currentKind == "session") {
+                    // Persist the full session (BASE urls — media token re-appended at play time).
+                    put("index", sessionIndex)
+                    sessionTitle?.let { put("sessionTitle", it) }
+                    sessionPlaylistId?.let { put("sessionPlaylistId", it) }
+                    val arr = org.json.JSONArray()
+                    for (t in sessionQ) arr.put(JSONObject().put("id", t.id).put("title", t.title).put("cover", t.cover ?: "").put("url", t.url).put("durationSec", t.durationSec))
+                    put("sessionRows", arr)
                 } else {
                     put("url", p.currentUrl ?: "")
                     put("title", p.currentTitle)
@@ -226,7 +250,7 @@ class VonoStreamerService : Service() {
             scope.launch { runCatching { store.writePlaybackState(snap.toString()) } }
             // Keep the recovery target tracking the CURRENT native playing source (replaces any
             // older target). Only while actually playing — a manual PAUSE clears it via cancelRecovery.
-            if (p.isPlaying() && (p.currentUrl != null || currentKind == "musicbank")) {
+            if (p.isPlaying() && (p.currentUrl != null || currentKind == "musicbank" || currentKind == "session")) {
                 desiredNative = snap
                 recoveryDelayMs = RECOVERY_MIN_DELAY
             }
@@ -280,28 +304,48 @@ class VonoStreamerService : Service() {
 
     private fun advanceQueue() {
         if (currentKind == "youtube_native") { if (ytQIndex < ytQ.size - 1) { ytQIndex++; playCurrentYt() }; return }
+        if (currentKind == "session") { if (sessionIndex < sessionQ.size - 1) { sessionIndex++; playCurrentSession() }; return }
         if (currentKind != "musicbank") return
         if (queueIndex < queue.size - 1) { queueIndex++; playCurrentTrack() }
     }
     private fun queueNext() {
         if (currentKind == "youtube_native") { if (ytQIndex < ytQ.size - 1) { ytQIndex++; playCurrentYt() }; return }
+        if (currentKind == "session") { if (sessionIndex < sessionQ.size - 1) { sessionIndex++; playCurrentSession() }; return }
         if (currentKind == "musicbank" && queueIndex < queue.size - 1) { queueIndex++; playCurrentTrack() }
     }
     private fun queuePrev() {
         if (currentKind == "youtube_native") { if (ytQIndex > 0) { ytQIndex--; playCurrentYt() }; return }
+        if (currentKind == "session") { if (sessionIndex > 0) { sessionIndex--; playCurrentSession() }; return }
         if (currentKind == "musicbank" && queueIndex > 0) { queueIndex--; playCurrentTrack() }
     }
 
     // ── POC (2A-4): on-device YouTube → NewPipe → ExoPlayer (no WebView) ───────────
-    /** Resolve a YouTube PLAY_SOURCE (single video or playlist/mix) into a native queue and play. */
-    private fun playYouTubeNative(source: JSONObject) {
+    /**
+     * Resolve a YouTube PLAY_SOURCE into a native queue and play. Priority:
+     *  1. `source.sessionTracks` → rebuild the FULL ordered queue from the CONTROL snapshot
+     *     (each row's url → videoId), starting at `startIndex` — NO network expand, NO collapse.
+     *  2. a playlist/mix url → NewPipe expands it on-device.
+     *  3. a single video url.
+     */
+    private fun playYouTubeNative(source: JSONObject, startIndex: Int = 0) {
         val url = source.optString("url", "")
         val title = source.optString("title", "")
+        val st = source.optJSONArray("sessionTracks")
         scope.launch {
             YouTubeResolver.ensureInit(sharedHttp)
-            val listId = YouTubeResolver.playlistIdFromUrl(url)
             val items: List<YouTubeResolver.YtItem> = when {
-                listId != null -> YouTubeResolver.resolvePlaylist(url)
+                st != null && st.length() > 0 -> {
+                    val list = ArrayList<YouTubeResolver.YtItem>(st.length())
+                    for (i in 0 until st.length()) {
+                        val t = st.optJSONObject(i) ?: continue
+                        val vid = YouTubeResolver.videoIdFromUrl(t.optString("url", "")) ?: continue
+                        val dur = t.optDouble("durationSeconds", 0.0).toLong().coerceAtLeast(0L)
+                        val art = t.optString("cover", "").ifBlank { null }
+                        list.add(YouTubeResolver.YtItem(vid, t.optString("title", "").ifBlank { "YouTube" }, art, dur))
+                    }
+                    list
+                }
+                YouTubeResolver.playlistIdFromUrl(url) != null -> YouTubeResolver.resolvePlaylist(url)
                 else -> YouTubeResolver.videoIdFromUrl(url)?.let {
                     listOf(YouTubeResolver.YtItem(it, title.ifBlank { "YouTube" }, null))
                 } ?: emptyList()
@@ -312,9 +356,9 @@ class VonoStreamerService : Service() {
                 return@launch
             }
             withContext(Dispatchers.Main) {
-                ytQ = items; ytQIndex = 0; currentKind = "youtube_native"
-                queue = emptyList()
-                Log.d(TAG, "YouTube native queue: ${items.size} item(s)")
+                ytQ = items; ytQIndex = startIndex.coerceIn(0, items.size - 1); currentKind = "youtube_native"
+                queue = emptyList(); sessionQ = emptyList()
+                Log.d(TAG, "YouTube native queue: ${items.size} item(s), start=$ytQIndex")
                 playCurrentYt()
             }
         }
@@ -323,13 +367,15 @@ class VonoStreamerService : Service() {
     /** Resolve the current YouTube queue item's audio URL (IO) and play it via ExoPlayer. */
     private fun playCurrentYt(positionMs: Long = 0L) {
         val item = ytQ.getOrNull(ytQIndex) ?: return
-        // Reflect the selected track immediately (title/artwork) even before the URL resolves.
+        // Reflect the selected track immediately (title/artwork/duration) even before the URL resolves.
         ytTitle = item.title; ytVideoId = item.videoId
+        ytActiveDurationSec = item.durationSec // best-effort until the authoritative resolve lands
         // Gap-free advance: use the pre-resolved next item if it matches (see prefetchNextYt).
         val cached = ytPrefetch?.takeIf { it.first == item.videoId }?.second
         if (cached != null) {
             ytPrefetch = null
             ytTitle = cached.title; blockedReason = null
+            if (cached.durationSec > 0) ytActiveDurationSec = cached.durationSec
             startYtAudio(cached.audioUrl, cached.title, positionMs)
             prefetchNextYt()
             return
@@ -344,6 +390,7 @@ class VonoStreamerService : Service() {
             }
             withContext(Dispatchers.Main) {
                 ytTitle = r.title; blockedReason = null
+                if (r.durationSec > 0) ytActiveDurationSec = r.durationSec // FIX: keep known YT duration
                 startYtAudio(r.audioUrl, r.title, positionMs)
                 prefetchNextYt()
             }
@@ -401,7 +448,7 @@ class VonoStreamerService : Service() {
                 "PLAY" -> player?.resume()
                 // Manual PAUSE/STOP cancels pending boot/network recovery so nothing auto-resurrects.
                 "PAUSE" -> { cancelRecovery(); player?.pause() }
-                "STOP" -> { cancelRecovery(); currentKind = "stream"; queue = emptyList(); ytQ = emptyList(); player?.stop() }
+                "STOP" -> { cancelRecovery(); currentKind = "stream"; queue = emptyList(); ytQ = emptyList(); sessionQ = emptyList(); player?.stop() }
                 "NEXT" -> queueNext()
                 "PREV" -> queuePrev()
                 "SEEK" -> { val s = payload?.optDouble("position", -1.0) ?: -1.0; if (s >= 0) player?.seekTo((s * 1000).toLong()) }
@@ -414,7 +461,12 @@ class VonoStreamerService : Service() {
         }
     }
 
-    /** Route a PLAY_SOURCE by type: native for URL/radio/Music Bank; YouTube = unsupported. */
+    /**
+     * Route a PLAY_SOURCE. The CONTROL payload carries the FULL session (`source.sessionTracks`)
+     * + the requested `trackIndex` + `playlistId`, so a playlist rebuilds the COMPLETE native
+     * queue (YouTube → native yt queue; Music Bank/direct → native session queue) rather than
+     * collapsing to a single track. A lone radio/direct source stays a single "stream".
+     */
     private fun routeSource(payload: JSONObject?) {
         val p = payload?.optJSONObject("source") ?: return
         val url = p.optString("url", "")
@@ -422,17 +474,79 @@ class VonoStreamerService : Service() {
         val id = p.optString("id", "")
         val type = p.optString("type", "").lowercase()
         val origin = p.optString("origin", "").lowercase()
+        val trackIndex = payload.optInt("trackIndex", 0)
+        val playlistId = p.optString("playlistId", "").ifBlank { null }
         val low = url.lowercase()
         val isYouTube = low.contains("youtube.com") || low.contains("youtu.be") || type.contains("youtube")
         // Any non-YouTube source takes over the native engine → stop a YouTube WebView session
         // FIRST (avoid double audio), then start native.
         if (!isYouTube) stopYtIfActive()
+        // Session identity mirrored to CONTROL (shared by youtube_native + session kinds).
+        sessionTitle = title.ifBlank { null }
+        sessionPlaylistId = playlistId
+        if (isYouTube) {
+            if (POC_NATIVE_YOUTUBE) { blockedReason = null; playYouTubeNative(p, trackIndex) } // on-device NewPipe → ExoPlayer
+            else playYouTubeForeground(p) // legacy WebView fallback (kept, unused while POC on)
+            return
+        }
+        // Non-YouTube: rebuild the FULL native session queue from sessionTracks when present.
+        val rows = buildSessionRows(p.optJSONArray("sessionTracks"))
         when {
-            isYouTube && POC_NATIVE_YOUTUBE -> { blockedReason = null; playYouTubeNative(p) } // on-device NewPipe → ExoPlayer
-            isYouTube -> playYouTubeForeground(p) // legacy WebView fallback (kept, unused while POC on)
-            low.contains("/api/media/") -> { blockedReason = null; playMusicBankUrl(url, title) } // R2 (needs token)
-            url.startsWith("http") -> { blockedReason = null; currentKind = "stream"; queue = emptyList(); ytQ = emptyList(); player?.crossfadeTo(url, title) } // direct audio / radio
+            rows.size > 1 || (rows.size == 1 && (playlistId != null || origin == "playlist")) ->
+                { blockedReason = null; playNativeSession(rows, trackIndex) }
+            low.contains("/api/media/") ->
+                { blockedReason = null; playNativeSession(listOf(SessionTrack(id.ifBlank { "mb" }, title, p.optString("cover", "").ifBlank { null }, url)), 0) } // R2 (needs token)
+            url.startsWith("http") ->
+                { blockedReason = null; currentKind = "stream"; queue = emptyList(); ytQ = emptyList(); sessionQ = emptyList(); player?.crossfadeTo(url, title) } // direct audio / radio
             else -> reportUnsupported(id, title, "Unsupported source type ($type/$origin) on the streamer")
+        }
+    }
+
+    /** Build native session rows from a CONTROL `sessionTracks` array: playable non-YouTube http urls only. */
+    private fun buildSessionRows(st: org.json.JSONArray?): List<SessionTrack> {
+        if (st == null) return emptyList()
+        val out = ArrayList<SessionTrack>(st.length())
+        for (i in 0 until st.length()) {
+            val t = st.optJSONObject(i) ?: continue
+            val u = t.optString("url", "")
+            if (u.isBlank() || !u.startsWith("http")) continue // local/omitted urls can't play remotely
+            val lu = u.lowercase()
+            if (lu.contains("youtube.com") || lu.contains("youtu.be")) continue // YouTube rows go through the yt path
+            val dur = t.optDouble("durationSeconds", 0.0).toLong().coerceAtLeast(0L)
+            out.add(SessionTrack(t.optString("id", "t$i"), t.optString("title", "").ifBlank { "Track" }, t.optString("cover", "").ifBlank { null }, u, dur))
+        }
+        return out
+    }
+
+    /** Start a multi-track native session at [startIndex] and play the current row (A/B crossfade). */
+    private fun playNativeSession(rows: List<SessionTrack>, startIndex: Int) {
+        if (rows.isEmpty()) return
+        sessionQ = rows
+        sessionIndex = startIndex.coerceIn(0, rows.size - 1)
+        currentKind = "session"
+        queue = emptyList(); ytQ = emptyList()
+        Log.d(TAG, "native session queue: ${rows.size} track(s), start=$sessionIndex")
+        playCurrentSession()
+    }
+
+    /** Play the current session row. /api/media/ urls get a fresh media token; others play as-is.
+     *  Resume (positionMs>0, boot/recovery) = hard play; advance/first/select = A/B crossfade. */
+    private fun playCurrentSession(positionMs: Long = 0L) {
+        val t = sessionQ.getOrNull(sessionIndex) ?: return
+        val raw = t.url
+        if (raw.contains("/api/media/")) {
+            scope.launch {
+                ensureTokenFresh()
+                val token = mediaToken
+                val full = if (token != null && !raw.contains("mt=")) {
+                    raw + (if (raw.contains("?")) "&" else "?") + "mt=" + java.net.URLEncoder.encode(token, "UTF-8")
+                } else raw
+                withContext(Dispatchers.Main) {
+                    if (positionMs > 0) player?.play(full, t.title, positionMs) else player?.crossfadeTo(full, t.title)
+                }
+            }
+        } else {
+            if (positionMs > 0) player?.play(raw, t.title, positionMs) else player?.crossfadeTo(raw, t.title)
         }
     }
 
@@ -564,6 +678,38 @@ class VonoStreamerService : Service() {
         ws.sendStateUpdate(base)
     }
 
+    private class MirrorRow(val id: String, val title: String, val cover: Any, val url: String?, val durationSec: Long)
+
+    /**
+     * Add the shared FULL-session mirror to a STATE_UPDATE object: `queue`, `queueIndex`,
+     * `currentTrackIndex`, `sessionTracks` (with url + durationSeconds so CONTROL round-trips the
+     * queue), `sessionTitle`, `sessionPlaylistId`, `nextSessionTrack`, `shuffle`, `autoMix`.
+     * CONTROL surfaces read these directly and never reconstruct the queue locally.
+     */
+    private fun applySessionMirror(state: JSONObject, rows: List<MirrorRow>, index: Int) {
+        val queueArr = org.json.JSONArray()
+        val sessArr = org.json.JSONArray()
+        for (r in rows) {
+            queueArr.put(JSONObject().put("id", r.id).put("title", r.title).put("cover", r.cover))
+            val s = JSONObject().put("id", r.id).put("title", r.title).put("cover", r.cover)
+            if (!r.url.isNullOrBlank()) s.put("url", r.url)
+            if (r.durationSec > 0) s.put("durationSeconds", r.durationSec)
+            sessArr.put(s)
+        }
+        state.put("queue", queueArr)
+        state.put("queueIndex", index)
+        state.put("currentTrackIndex", index)
+        if (rows.isNotEmpty()) state.put("sessionTracks", sessArr)
+        sessionTitle?.let { state.put("sessionTitle", it) }
+        sessionPlaylistId?.let { state.put("sessionPlaylistId", it) }
+        if (index in 0 until (rows.size - 1)) {
+            val n = rows[index + 1]
+            state.put("nextSessionTrack", JSONObject().put("title", n.title).put("cover", n.cover))
+        }
+        state.put("shuffle", false) // native session plays in order
+        state.put("autoMix", true)  // native engine always A/B crossfades
+    }
+
     private fun buildState(): JSONObject {
         // POC on-device YouTube: audio IS ExoPlayer, but title/artwork/queue come from the native
         // YouTube queue (artwork derived from the current videoId thumbnail).
@@ -572,27 +718,57 @@ class VonoStreamerService : Service() {
             val cur = ytQ.getOrNull(ytQIndex)
             val titleSafe = (cur?.title ?: ytTitle).ifBlank { "YouTube" }
             val vid = cur?.videoId ?: ytVideoId
-            val cover: Any = cur?.artwork?.takeIf { it.isNotBlank() }
-                ?: if (vid.isNotBlank()) "https://i.ytimg.com/vi/$vid/hqdefault.jpg" else JSONObject.NULL
-            val arr = org.json.JSONArray()
-            for ((i, it) in ytQ.withIndex()) {
-                val c: Any = it.artwork?.takeIf { a -> a.isNotBlank() }
-                    ?: if (it.videoId.isNotBlank()) "https://i.ytimg.com/vi/${it.videoId}/hqdefault.jpg" else JSONObject.NULL
-                arr.put(JSONObject().put("id", it.videoId.ifBlank { "yt_$i" }).put("title", it.title.ifBlank { "YouTube" }).put("cover", c))
+            fun ytCover(id: String, art: String?): Any = art?.takeIf { it.isNotBlank() }
+                ?: if (id.isNotBlank()) "https://i.ytimg.com/vi/$id/hqdefault.jpg" else JSONObject.NULL
+            val cover: Any = ytCover(vid, cur?.artwork)
+            val rows = ytQ.mapIndexed { i, it ->
+                MirrorRow(
+                    it.videoId.ifBlank { "yt_$i" },
+                    it.title.ifBlank { "YouTube" },
+                    ytCover(it.videoId, it.artwork),
+                    if (it.videoId.isNotBlank()) "https://www.youtube.com/watch?v=${it.videoId}" else null,
+                    it.durationSec,
+                )
             }
             val playing = p?.isPlaying() == true
+            // FIX: ExoPlayer duration wins when valid; else the authoritative NewPipe duration →
+            // the progress bar never sits at zero while seconds advance on a known-duration track.
+            val exo = p?.durationMs() ?: 0L
+            val durSec = if (exo > 0) exo / 1000.0 else ytActiveDurationSec.toDouble()
             return JSONObject().apply {
                 put("status", if (playing) "playing" else "paused")
                 put("currentTrack", JSONObject().put("title", titleSafe).put("cover", cover))
-                put("currentSource", JSONObject().put("id", "youtube").put("title", titleSafe).put("cover", cover))
-                put("currentTrackIndex", ytQIndex)
-                put("queue", arr)
-                put("queueIndex", ytQIndex)
+                put("currentSource", JSONObject().put("id", sessionPlaylistId ?: "youtube").put("title", sessionTitle ?: titleSafe).put("cover", cover))
+                put("position", (p?.positionMs() ?: 0L) / 1000.0)
+                put("duration", durSec)
+                put("positionAt", System.currentTimeMillis())
+                put("volume", ((p?.volume() ?: 1f) * 100).toInt())
+                put("playbackVia", "youtube_native")
+                applySessionMirror(this, rows, ytQIndex)
+                blockedReason?.let { put("blockedReason", it) }
+            }
+        }
+        // Generic multi-track NATIVE session (Music Bank /api/media/ + direct URLs): audio IS
+        // ExoPlayer and the full session/queue mirror comes from sessionQ.
+        if (currentKind == "session") {
+            val p = player
+            val cur = sessionQ.getOrNull(sessionIndex)
+            val titleSafe = (cur?.title ?: p?.currentTitle ?: "").ifBlank { "Track" }
+            val cover: Any = cur?.cover?.takeIf { it.isNotBlank() } ?: JSONObject.NULL
+            val rows = sessionQ.mapIndexed { i, t ->
+                MirrorRow(t.id.ifBlank { "t$i" }, t.title.ifBlank { "Track" }, (t.cover?.takeIf { it.isNotBlank() } ?: JSONObject.NULL), t.url, t.durationSec)
+            }
+            val playing = p?.isPlaying() == true
+            return JSONObject().apply {
+                put("status", if (playing) "playing" else if (p?.isActive() == true) "paused" else "idle")
+                put("currentTrack", JSONObject().put("title", titleSafe).put("cover", cover))
+                put("currentSource", JSONObject().put("id", sessionPlaylistId ?: (cur?.id ?: "session")).put("title", sessionTitle ?: titleSafe).put("cover", cover))
                 put("position", (p?.positionMs() ?: 0L) / 1000.0)
                 put("duration", (p?.durationMs() ?: 0L) / 1000.0)
                 put("positionAt", System.currentTimeMillis())
                 put("volume", ((p?.volume() ?: 1f) * 100).toInt())
-                put("playbackVia", "youtube_native")
+                put("playbackVia", "session")
+                applySessionMirror(this, rows, sessionIndex)
                 blockedReason?.let { put("blockedReason", it) }
             }
         }
@@ -763,13 +939,15 @@ class VonoStreamerService : Service() {
         if (p.isCrossfading() || !p.isPlaying()) return
         val hasNext = when (currentKind) {
             "musicbank" -> queueIndex < queue.size - 1
+            "session" -> sessionIndex < sessionQ.size - 1
             "youtube_native" -> ytQIndex < ytQ.size - 1
             else -> false // radio/direct URL: single stream, nothing to crossfade into
         }
         if (!hasNext) return
         val dur = p.durationMs(); if (dur <= 0) return
         val remaining = dur - p.positionMs()
-        val key = "$currentKind:${if (currentKind == "musicbank") queueIndex else ytQIndex}"
+        val idxForKey = when (currentKind) { "musicbank" -> queueIndex; "session" -> sessionIndex; else -> ytQIndex }
+        val key = "$currentKind:$idxForKey"
         if (remaining in 1..(DEFAULT_CROSSFADE_SEC * 1000L + 750L) && autoXfadeArmedKey != key) {
             autoXfadeArmedKey = key
             Log.d(TAG, "auto-crossfade → advancing before end ($key, ${remaining}ms left)")
@@ -830,6 +1008,7 @@ class VonoStreamerService : Service() {
         if (p.isPlaying()) return true
         return when (o.optString("kind", "stream")) {
             "musicbank" -> p.isActive() && currentKind == "musicbank"
+            "session" -> p.isActive() && currentKind == "session"
             "youtube_native" -> p.isActive() && currentKind == "youtube_native" // buffering → don't re-resolve
             else -> p.isActive() && p.currentUrl == o.optString("url", "") && !p.currentUrl.isNullOrBlank()
         }
@@ -860,14 +1039,34 @@ class VonoStreamerService : Service() {
             for (i in 0 until arr.length()) {
                 val t = arr.optJSONObject(i) ?: continue
                 val vid = t.optString("videoId", ""); if (vid.isBlank()) continue
-                list.add(YouTubeResolver.YtItem(vid, t.optString("title", "YouTube"), t.optString("artwork", "").ifBlank { null }))
+                list.add(YouTubeResolver.YtItem(vid, t.optString("title", "YouTube"), t.optString("artwork", "").ifBlank { null }, t.optLong("durationSec", 0L)))
             }
             if (list.isEmpty()) return
+            sessionTitle = o.optString("sessionTitle", "").ifBlank { null }
+            sessionPlaylistId = o.optString("sessionPlaylistId", "").ifBlank { null }
             ytQ = list
             ytQIndex = o.optInt("index", 0).coerceIn(0, list.size - 1)
-            currentKind = "youtube_native"; queue = emptyList()
+            currentKind = "youtube_native"; queue = emptyList(); sessionQ = emptyList()
             Log.d(TAG, "recovery → YouTube native queue ${list.size}, index $ytQIndex @${pos}ms")
             playCurrentYt(pos) // re-resolves a fresh audio URL on the device IP
+            return
+        }
+        if (kind == "session") {
+            val arr = o.optJSONArray("sessionRows") ?: return
+            val list = ArrayList<SessionTrack>(arr.length())
+            for (i in 0 until arr.length()) {
+                val t = arr.optJSONObject(i) ?: continue
+                val u = t.optString("url", ""); if (u.isBlank()) continue
+                list.add(SessionTrack(t.optString("id", "t$i"), t.optString("title", "Track"), t.optString("cover", "").ifBlank { null }, u, t.optLong("durationSec", 0L)))
+            }
+            if (list.isEmpty()) return
+            sessionTitle = o.optString("sessionTitle", "").ifBlank { null }
+            sessionPlaylistId = o.optString("sessionPlaylistId", "").ifBlank { null }
+            sessionQ = list
+            sessionIndex = o.optInt("index", 0).coerceIn(0, list.size - 1)
+            currentKind = "session"; queue = emptyList(); ytQ = emptyList()
+            Log.d(TAG, "recovery → native session ${list.size}, index $sessionIndex @${pos}ms")
+            playCurrentSession(pos) // re-appends a fresh media token for /api/media/ rows
             return
         }
         if (kind == "musicbank") {

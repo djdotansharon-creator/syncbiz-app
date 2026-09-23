@@ -30,7 +30,7 @@ object YouTubeResolver {
     }
 
     data class Resolved(val audioUrl: String, val title: String, val artwork: String?, val durationSec: Long)
-    data class YtItem(val videoId: String, val title: String, val artwork: String?)
+    data class YtItem(val videoId: String, val title: String, val artwork: String?, val durationSec: Long = 0)
 
     /** videoId → playable progressive audio URL (highest bitrate). Null if resolution failed. */
     fun resolveAudio(videoId: String): Resolved? {
@@ -54,7 +54,8 @@ object YouTubeResolver {
             val pinfo = PlaylistInfo.getInfo(ServiceList.YouTube, url)
             pinfo.relatedItems.orEmpty().mapNotNull { item ->
                 val vid = videoIdFromUrl(item.url) ?: return@mapNotNull null
-                YtItem(vid, item.name ?: "YouTube", item.thumbnails?.lastOrNull()?.url)
+                val dur = runCatching { item.duration }.getOrDefault(0L).coerceAtLeast(0L)
+                YtItem(vid, item.name ?: "YouTube", item.thumbnails?.lastOrNull()?.url, dur)
             }
         } catch (e: Exception) {
             Log.w(TAG, "YouTube resolvePlaylist failed for $url: ${e.message}")
