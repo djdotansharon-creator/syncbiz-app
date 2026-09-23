@@ -40,7 +40,7 @@ class VonoStreamerService : Service() {
     private lateinit var auth: AuthProvider
     private lateinit var ws: VonoWsClient
     private var netMonitor: NetworkMonitor? = null
-    private var player: NativePlayer? = null
+    private var player: CrossfadeEngine? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val main = Handler(Looper.getMainLooper())
 
@@ -57,11 +57,12 @@ class VonoStreamerService : Service() {
     // A native YouTube queue (videoId + metadata), resolved per-track on play; recovery re-resolves.
     @Volatile private var ytQ: List<YouTubeResolver.YtItem> = emptyList()
     @Volatile private var ytQIndex = 0
+    @Volatile private var ytPrefetch: Pair<String, YouTubeResolver.Resolved>? = null // pre-resolved NEXT item
     private val sharedHttp by lazy { okhttp3.OkHttpClient() } // for NewPipe resolution
     private var jingleMp: android.media.MediaPlayer? = null
-    // Jingle ducking state (captured once; restored once — overlap-safe).
-    @Volatile private var preDuckVolume: Float? = null // native ExoPlayer volume before ducking
-    @Volatile private var ytDucked: Boolean = false    // YouTube WebView player currently ducked
+    // Jingle ducking state. Native ducking is owned by CrossfadeEngine.setDuck (both decks);
+    // ytDucked only tracks the legacy WebView path (unused while POC native YouTube is on).
+    @Volatile private var ytDucked: Boolean = false
     private val reclaimTimes = ArrayDeque<Long>() // MASTER reclaim rate-limit
 
     // YouTube-in-WebView session (foreground compatibility path). Audio lives in the WebView,
@@ -116,12 +117,12 @@ class VonoStreamerService : Service() {
 
         // Native audio engine (created on the main thread). Auto-advances the queue on track end.
         // onError → a native source failed (e.g. no network at boot) → kick the recovery loop.
-        player = NativePlayer(
+        player = CrossfadeEngine(
             this,
             onChanged = { onPlaybackChanged() },
             onEnded = { advanceQueue() },
             onError = { main.post { kickRecovery() } },
-        )
+        ).also { it.setCrossfadeSec(DEFAULT_CROSSFADE_SEC) }
 
         scope.launch {
             deviceId = runCatching { store.getOrCreateDeviceId() }.getOrDefault(deviceId)
@@ -134,6 +135,7 @@ class VonoStreamerService : Service() {
         }
 
         startPositionPersist()
+        startCrossfadeWatcher()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -269,7 +271,10 @@ class VonoStreamerService : Service() {
             ensureTokenFresh()
             val token = mediaToken ?: return@launch
             val url = musicBank.mediaUrl(t.id, token)
-            withContext(Dispatchers.Main) { player?.play(url, t.title, positionMs) }
+            // Resume (positionMs>0, boot/recovery) = hard play; advance/first = A/B crossfade.
+            withContext(Dispatchers.Main) {
+                if (positionMs > 0) player?.play(url, t.title, positionMs) else player?.crossfadeTo(url, t.title)
+            }
         }
     }
 
@@ -320,6 +325,15 @@ class VonoStreamerService : Service() {
         val item = ytQ.getOrNull(ytQIndex) ?: return
         // Reflect the selected track immediately (title/artwork) even before the URL resolves.
         ytTitle = item.title; ytVideoId = item.videoId
+        // Gap-free advance: use the pre-resolved next item if it matches (see prefetchNextYt).
+        val cached = ytPrefetch?.takeIf { it.first == item.videoId }?.second
+        if (cached != null) {
+            ytPrefetch = null
+            ytTitle = cached.title; blockedReason = null
+            startYtAudio(cached.audioUrl, cached.title, positionMs)
+            prefetchNextYt()
+            return
+        }
         scope.launch {
             YouTubeResolver.ensureInit(sharedHttp)
             val r = YouTubeResolver.resolveAudio(item.videoId)
@@ -329,10 +343,26 @@ class VonoStreamerService : Service() {
                 return@launch
             }
             withContext(Dispatchers.Main) {
-                ytTitle = r.title
-                blockedReason = null
-                player?.play(r.audioUrl, r.title, positionMs)
+                ytTitle = r.title; blockedReason = null
+                startYtAudio(r.audioUrl, r.title, positionMs)
+                prefetchNextYt()
             }
+        }
+    }
+
+    /** Resume (positionMs>0) = hard play; advance/first = A/B crossfade. */
+    private fun startYtAudio(url: String, title: String, positionMs: Long) {
+        if (positionMs > 0) player?.play(url, title, positionMs) else player?.crossfadeTo(url, title)
+    }
+
+    /** Pre-resolve the NEXT YouTube item so the crossfade overlap is gap-free. Best-effort. */
+    private fun prefetchNextYt() {
+        val next = ytQ.getOrNull(ytQIndex + 1) ?: run { ytPrefetch = null; return }
+        if (ytPrefetch?.first == next.videoId) return
+        scope.launch {
+            YouTubeResolver.ensureInit(sharedHttp)
+            val r = YouTubeResolver.resolveAudio(next.videoId) ?: return@launch
+            ytPrefetch = next.videoId to r
         }
     }
 
@@ -401,7 +431,7 @@ class VonoStreamerService : Service() {
             isYouTube && POC_NATIVE_YOUTUBE -> { blockedReason = null; playYouTubeNative(p) } // on-device NewPipe → ExoPlayer
             isYouTube -> playYouTubeForeground(p) // legacy WebView fallback (kept, unused while POC on)
             low.contains("/api/media/") -> { blockedReason = null; playMusicBankUrl(url, title) } // R2 (needs token)
-            url.startsWith("http") -> { blockedReason = null; currentKind = "stream"; queue = emptyList(); player?.play(url, title) } // direct audio / radio
+            url.startsWith("http") -> { blockedReason = null; currentKind = "stream"; queue = emptyList(); ytQ = emptyList(); player?.crossfadeTo(url, title) } // direct audio / radio
             else -> reportUnsupported(id, title, "Unsupported source type ($type/$origin) on the streamer")
         }
     }
@@ -517,7 +547,7 @@ class VonoStreamerService : Service() {
             val full = if (token != null && !baseUrl.contains("mt=")) {
                 baseUrl + (if (baseUrl.contains("?")) "&" else "?") + "mt=" + java.net.URLEncoder.encode(token, "UTF-8")
             } else baseUrl
-            withContext(Dispatchers.Main) { currentKind = "stream"; queue = emptyList(); player?.play(full, title) }
+            withContext(Dispatchers.Main) { currentKind = "stream"; queue = emptyList(); ytQ = emptyList(); player?.crossfadeTo(full, title) }
         }
     }
 
@@ -695,27 +725,55 @@ class VonoStreamerService : Service() {
         restoreAfterJingle()
     }
 
-    /** Duck the CURRENT audio source to DUCK_FACTOR once (idempotent across overlapping jingles). */
+    /** Duck the CURRENT audio to DUCK_FACTOR. The engine applies it to BOTH decks and keeps it
+     *  in-envelope through crossfades; overlapping jingles keep the same duck (idempotent). */
     private fun duckForJingle() {
         if (currentKind == "youtube_webview" || currentKind == "youtube_pending") {
+            // Legacy WebView path (unused while POC_NATIVE_YOUTUBE routes YouTube to the native engine).
             if (!ytDucked) {
                 ytDucked = true
                 WebViewBridge.sendToWeb(JSONObject().put("t", "duck").put("factor", DUCK_FACTOR.toDouble()).toString())
             }
-        } else if (preDuckVolume == null) {
-            val v = player?.volume() ?: 1f
-            preDuckVolume = v
-            player?.setVolume(v * DUCK_FACTOR)
+        } else {
+            player?.setDuck(true, DUCK_FACTOR) // native (Radio/URL/Music Bank/YouTube) — both A/B decks
         }
     }
 
-    /** Restore the exact pre-duck volume (native) and/or un-duck the YouTube WebView player. */
+    /** Restore master volume (both decks) and/or un-duck the legacy WebView player. */
     private fun restoreAfterJingle() {
-        preDuckVolume?.let { player?.setVolume(it) }
-        preDuckVolume = null
+        player?.setDuck(false, 1f)
         if (ytDucked) {
             ytDucked = false
             WebViewBridge.sendToWeb(JSONObject().put("t", "unduck").toString())
+        }
+    }
+
+    // ── Auto-advance crossfade: start the overlap BEFORE the current track ends ────
+    @Volatile private var autoXfadeArmedKey: String? = null
+    private fun startCrossfadeWatcher() {
+        main.postDelayed(object : Runnable {
+            override fun run() {
+                maybeAutoCrossfade()
+                main.postDelayed(this, 1000)
+            }
+        }, 1000)
+    }
+    private fun maybeAutoCrossfade() {
+        val p = player ?: return
+        if (p.isCrossfading() || !p.isPlaying()) return
+        val hasNext = when (currentKind) {
+            "musicbank" -> queueIndex < queue.size - 1
+            "youtube_native" -> ytQIndex < ytQ.size - 1
+            else -> false // radio/direct URL: single stream, nothing to crossfade into
+        }
+        if (!hasNext) return
+        val dur = p.durationMs(); if (dur <= 0) return
+        val remaining = dur - p.positionMs()
+        val key = "$currentKind:${if (currentKind == "musicbank") queueIndex else ytQIndex}"
+        if (remaining in 1..(DEFAULT_CROSSFADE_SEC * 1000L + 750L) && autoXfadeArmedKey != key) {
+            autoXfadeArmedKey = key
+            Log.d(TAG, "auto-crossfade → advancing before end ($key, ${remaining}ms left)")
+            advanceQueue() // increments the index and crossfades into the next track
         }
     }
 
@@ -883,8 +941,8 @@ class VonoStreamerService : Service() {
         // Boot/network recovery backoff bounds (native sources only).
         private const val RECOVERY_MIN_DELAY = 2000L
         private const val RECOVERY_MAX_DELAY = 30000L
-        // Jingle ducking: main music continues at 20% under a PLAY_INTERRUPT.
-        private const val DUCK_FACTOR = 0.2f
+        // Jingle ducking: main music continues at 30% under a PLAY_INTERRUPT.
+        private const val DUCK_FACTOR = 0.3f
         private const val JINGLE_MAX_MS = 60000L
         // POC (2A-4): route YouTube PLAY_SOURCE to the on-device NewPipe→ExoPlayer engine
         // instead of the WebView. The WebView fallback code stays intact but unused while true.
@@ -892,6 +950,8 @@ class VonoStreamerService : Service() {
         const val ACTION_PLAY_YT_POC = "com.vono.streamer.PLAY_YT_POC" // Settings test button
         // A real music video + a playlist for the isolated POC test buttons.
         const val POC_YT_TEST_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        // A/B crossfade default (desktop parity). No local mix-duration setting yet → 6s.
+        private const val DEFAULT_CROSSFADE_SEC = 6
 
         fun start(context: Context) {
             val i = Intent(context, VonoStreamerService::class.java)
