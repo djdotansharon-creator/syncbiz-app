@@ -605,6 +605,14 @@ export function AudioPlayer() {
   // True once the first live MPV status push arrives — do not seed from getStatus()
   // (stale playing+position:0 snapshots caused fake PLAYING with frozen 0:00).
   const isDesktopMode = desktopMpvSnap !== null;
+  // IRON RULE — CONTROL WINS. When this Electron desktop is CONTROL of a remote MASTER (e.g. the
+  // GOtv streamer), BOTH isDesktopMode and isControlMirror are true. Every player-DATA derivation
+  // and every transport action must then mirror/route to the MASTER — never the stale local MPV.
+  // `isDesktopLocal` = "this desktop is the LOCAL player" (false whenever we're a control mirror),
+  // so the existing `isDesktopLocal ? <MPV> : isControlMirror ? <MASTER> : <browser>` chains resolve
+  // CONTROL-first. Desktop CHROME (the deck shell) stays keyed on isDesktopMode, so a CONTROL desktop
+  // is visually indistinguishable from a MASTER desktop — only the data source differs.
+  const isDesktopLocal = isDesktopMode && !isControlMirror;
 
   // Desktop MPV MASTER → CONTROL live progress. The desktop's authoritative position lives in
   // `desktopMpvSnap` (MPV IPC) but the browser-engine ticks that call `reportPosition` never run
@@ -4004,7 +4012,7 @@ export function AudioPlayer() {
   const isUrlPreparing =
     !isDesktopMode && !isControlMirror && urlPrepareActive;
 
-  const displayStatus = isDesktopMode
+  const displayStatus = isDesktopLocal
     ? (desktopStalePlayingZero ? "paused" : desktopMpvSnap.status)
     : isControlMirror
       ? (ms?.status ?? "idle")
@@ -4055,7 +4063,7 @@ export function AudioPlayer() {
   useEffect(() => () => { if (controlSeekTimeoutRef.current) clearTimeout(controlSeekTimeoutRef.current); }, []);
 
   // Interpolate CONTROL position between STATE_UPDATE snapshots using positionAt timestamp.
-  const displayPosition = isDesktopMode
+  const displayPosition = isDesktopLocal
     ? (() => {
         const pos = desktopMpvSnap.position;
         const dur = desktopMpvSnap.duration;
@@ -4070,12 +4078,12 @@ export function AudioPlayer() {
     : isControlMirror
       ? computeLivePosition(ms, controlPendingSeek) // SHARED with mobile — bar + text use this one value
       : position;
-  const displayDuration = isDesktopMode
+  const displayDuration = isDesktopLocal
     ? desktopMpvSnap.duration
     : isControlMirror
       ? (typeof ms?.duration === "number" && Number.isFinite(ms.duration) ? ms.duration : Number.NaN)
       : duration;
-  const displayVolume = isDesktopMode
+  const displayVolume = isDesktopLocal
     ? desktopMpvSnap.volume
     : isControlMirror
       ? (typeof ms?.volume === "number" && Number.isFinite(ms.volume) ? ms.volume : 80)
@@ -4207,13 +4215,13 @@ export function AudioPlayer() {
   // playlist of its own. Without this the Next button goes dead the moment a Play Next item
   // becomes the current source.
   const hasStagedPlayNext = (playNextQueue?.length ?? 0) > 0 || !!playNextBaseline;
-  const displayHasPrevNext = isDesktopMode
+  const displayHasPrevNext = isDesktopLocal
     // Desktop: catalog navigation — enabled when library has > 1 item, OR local playlist/queue also covers the case
     ? (desktopMpvSnap.catalogCount > 1 || (currentSource && queue.length > 1) || !!(currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1) || hasStagedPlayNext)
     : isControlMirror
       ? ((ms?.sessionTracks?.length ?? 0) > 1 || (ms?.queue?.length ?? 0) > 1)
       : (currentSource && queue.length > 1) || (currentSource?.playlist && (currentSource.playlist.tracks?.length ?? 0) > 1) || hasStagedPlayNext;
-  const displayCanSeek = isDesktopMode
+  const displayCanSeek = isDesktopLocal
     // Desktop: MPV reports duration when a file is loaded — that is the only condition needed.
     ? displayDuration > 0
     : isControlMirror
@@ -4290,7 +4298,7 @@ export function AudioPlayer() {
   const desktopHasProviderNav =
     isDesktopMode && (desktopSessionTrackCount > 1 || queue.length > 1);
 
-  const onPrev = isDesktopMode
+  const onPrev = isDesktopLocal
     ? () => {
         if (desktopHasProviderNav) {
           endedHandledRef.current = true;
@@ -4334,7 +4342,7 @@ export function AudioPlayer() {
           endedHandledRef.current = true;
           prev();
         };
-  const onNext = isDesktopMode
+  const onNext = isDesktopLocal
     ? () => {
         if (desktopHasProviderNav) {
           crossfadeAbortRef.current = true;
@@ -4500,7 +4508,7 @@ export function AudioPlayer() {
 
   const onSeekChange = useCallback(
     (pct: number) => {
-      if (isDesktopMode) {
+      if (isDesktopLocal) {
         if (displayDuration <= 0) return;
         void (window as any).syncbizDesktop.mpvSeekTo((pct / 100) * displayDuration);
       } else if (isControlMirror) {
@@ -4515,7 +4523,7 @@ export function AudioPlayer() {
         seekTo((pct / 100) * duration);
       }
     },
-    [isDesktopMode, isControlMirror, displayDuration, canSeek, duration, seekTo]
+    [isDesktopLocal, isControlMirror, displayDuration, canSeek, duration, seekTo]
   );
 
   // Commit a CONTROL seek: send exactly one authoritative SEEK, keep the pending value owning
@@ -5026,7 +5034,7 @@ export function AudioPlayer() {
       {/* DESKTOP player background — artwork (default) / video / static, per-device.
           Display-only; audio is always MPV. The clip appears only once MPV is
           actually progressing, and falls back to artwork on any trouble. */}
-      {isDesktopMode ? (
+      {isDesktopLocal ? (
         <DesktopPlayerBackground
           mode={desktopBgMode}
           cover={displayThumbnailCover ?? null}
@@ -5092,7 +5100,7 @@ export function AudioPlayer() {
         />
       )}
       <DesktopPlaybackDiagnostic
-        isDesktop={isDesktopMode}
+        isDesktop={isDesktopLocal}
         isControlMirror={isControlMirror}
         intentStatus={status}
         mpvStatus={desktopMpvSnap?.status ?? null}
