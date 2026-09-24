@@ -551,8 +551,16 @@ export function LiveQueuePanel() {
   }, [sessionForList.currentSource, sessionForList.currentPlaylist, isControlMirror]);
 
   const sessionTracks = useMemo(() => {
-    if (isControlMirror && masterState?.sessionTracks?.length) {
-      return mirrorTracksToPlaylistTracks(masterState.sessionTracks);
+    if (isControlMirror) {
+      // CONTROL mirrors the MASTER: the queue must come from masterState, never local provider state
+      // (which is empty on a CONTROL device). Prefer the rich `sessionTracks` (carries url + duration,
+      // sent by streamer v1.11.0+ and the desktop MASTER); fall back to `queue` — which EVERY MASTER
+      // sends, for every playback kind and every version (older streamer, radio/single-track, Music
+      // Bank). Same ordering + indexing as `sessionTracks`, so highlight/next still align. This is why
+      // the Live Queue stayed empty in CONTROL when the streamer sent only `queue`.
+      if (masterState?.sessionTracks?.length) return mirrorTracksToPlaylistTracks(masterState.sessionTracks);
+      if (masterState?.queue?.length) return mirrorTracksToPlaylistTracks(masterState.queue);
+      return [];
     }
     const fromProvider = getPlaylistSessionTracks({
       currentSource: sessionForList.currentSource,
@@ -563,7 +571,7 @@ export function LiveQueuePanel() {
     // (same source as the header name) still has tracks but provider reconciliation
     // returned empty for a tick.
     return onPlaylist ? getPlaylistTracks(onPlaylist) : [];
-  }, [isControlMirror, masterState?.sessionTracks, sessionForList.currentSource, sessionForList.currentPlaylist, onPlaylist]);
+  }, [isControlMirror, masterState?.sessionTracks, masterState?.queue, sessionForList.currentSource, sessionForList.currentPlaylist, onPlaylist]);
 
   const visiblePlayNextQueue = useMemo(() => {
     if (isControlMirror && masterState?.playNextQueue?.length) {
