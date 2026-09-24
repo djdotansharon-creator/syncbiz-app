@@ -100,6 +100,8 @@ class VonoStreamerService : Service() {
     @Volatile private var desiredNative: JSONObject? = null
     private var recoveryDelayMs = RECOVERY_MIN_DELAY
     private var recoveryScheduled = false
+    // Stall watchdog: when we first saw "target armed but NOT actually playing" (0 = playing/idle/paused).
+    @Volatile private var notPlayingSinceMs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -149,6 +151,7 @@ class VonoStreamerService : Service() {
 
         startPositionPersist()
         startCrossfadeWatcher()
+        startNativeStallWatchdog()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -965,6 +968,43 @@ class VonoStreamerService : Service() {
         }, 5000)
     }
 
+    /**
+     * Native "never stops" stall watchdog (backstop for the recovery loop). recoveryTick's
+     * onTargetAlready() treats a deck that still holds a media item (BUFFERING/stalled after a network
+     * blip) as "already on target", so it won't re-dispatch — and a silently-stalled stream never
+     * resumes even though the foreground service is alive (the exact case: unplug the network while
+     * playing, replug → service up, but the previous track doesn't come back on its own).
+     *
+     * Whenever a recovery target is ARMED but the engine is NOT actually playing (network up, not
+     * crossfading) for NATIVE_STALL_MS, this FORCES a fresh re-dispatch (hard play / token re-append /
+     * YouTube re-resolve), bypassing onTargetAlready to un-stick the stall. Guarded so it never fires
+     * on a healthy track (isPlaying), a manual/remote pause (desiredNative is cleared by cancelRecovery),
+     * an initial buffer shorter than the grace, or mid-crossfade; the timer resets after each force so
+     * it can never hammer.
+     */
+    private fun startNativeStallWatchdog() {
+        main.postDelayed(object : Runnable {
+            override fun run() {
+                val p = player
+                val target = desiredNative
+                if (p == null || target == null || p.isPlaying() || p.isCrossfading() || !hasNetworkNow()) {
+                    notPlayingSinceMs = 0L
+                } else {
+                    val now = System.currentTimeMillis()
+                    if (notPlayingSinceMs == 0L) {
+                        notPlayingSinceMs = now
+                    } else if (now - notPlayingSinceMs >= NATIVE_STALL_MS) {
+                        Log.w(TAG, "native stall watchdog → forcing re-dispatch (${now - notPlayingSinceMs}ms not playing)")
+                        notPlayingSinceMs = 0L
+                        recoveryDelayMs = RECOVERY_MIN_DELAY
+                        playDesiredNative(target) // FORCE: bypasses onTargetAlready to un-stick a stalled/lost stream
+                    }
+                }
+                main.postDelayed(this, STALL_WATCHDOG_INTERVAL_MS)
+            }
+        }, STALL_WATCHDOG_INTERVAL_MS)
+    }
+
     // ── Boot / network recovery for native sources ────────────────────────────────
     /** Live connectivity check (not just the cached flag) so boot recovery waits for the network. */
     private fun hasNetworkNow(): Boolean {
@@ -1140,6 +1180,10 @@ class VonoStreamerService : Service() {
         // Boot/network recovery backoff bounds (native sources only).
         private const val RECOVERY_MIN_DELAY = 2000L
         private const val RECOVERY_MAX_DELAY = 30000L
+        // Native stall watchdog: poll cadence + how long "armed but not actually playing" (network up)
+        // before we force a fresh re-dispatch. Long enough not to fight a legitimate initial buffer.
+        private const val STALL_WATCHDOG_INTERVAL_MS = 3000L
+        private const val NATIVE_STALL_MS = 8000L
         // Jingle ducking: main music continues at 30% under a PLAY_INTERRUPT.
         private const val DUCK_FACTOR = 0.3f
         private const val JINGLE_MAX_MS = 60000L
