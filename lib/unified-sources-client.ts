@@ -55,11 +55,21 @@ export type FetchUnifiedOptions = {
   scope?: ApiContentScope;
 };
 
+/** DIAGNOSTIC ONLY (temporary, log-only): outcome of the last unified fetch, for the sources-manager
+ *  refetch instrumentation. Does not change fetch behavior. */
+export type UnifiedFetchDiag = { at: number; ok: boolean; status: number | null; fallback: boolean };
+let lastUnifiedFetchDiag: UnifiedFetchDiag = { at: 0, ok: false, status: null, fallback: false };
+export function getLastUnifiedFetchDiag(): UnifiedFetchDiag {
+  return { ...lastUnifiedFetchDiag };
+}
+
 export async function fetchUnifiedSourcesWithFallback(options?: FetchUnifiedOptions): Promise<UnifiedSource[]> {
   const scope = options?.scope ?? "branch";
   const qs = scope === "owner_personal" ? "?scope=owner_personal" : "";
+  lastUnifiedFetchDiag = { at: Date.now(), ok: false, status: null, fallback: false }; // DIAG: fresh per call
   try {
     const res = await fetch(`/api/sources/unified${qs}`, { cache: "no-store", credentials: "include" });
+    lastUnifiedFetchDiag = { at: Date.now(), ok: res.ok, status: res.status, fallback: false }; // DIAG
     if (!res.ok) throw new Error("API error");
     const items = (await res.json()) as UnifiedSource[];
     if (!Array.isArray(items)) throw new Error("Invalid response");
@@ -75,8 +85,13 @@ export async function fetchUnifiedSourcesWithFallback(options?: FetchUnifiedOpti
       radio.forEach((s) => s.radio && addRadioStationLocal(s.radio));
     }
     // Important: if API succeeds (even with empty list), trust tenant-scoped server result.
+    // eslint-disable-next-line no-console
+    console.log("[SB-DIAG unified] fetch OK", { status: res.status, count: items.length }); // DIAG
     return dedupeById(await enrichDesktopLocalPlaylistCovers(items));
   } catch {
+    lastUnifiedFetchDiag = { at: Date.now(), ok: false, status: lastUnifiedFetchDiag.status, fallback: true }; // DIAG
+    // eslint-disable-next-line no-console
+    console.warn("[SB-DIAG unified] fetch FAILED → localStorage fallback", { status: lastUnifiedFetchDiag.status }); // DIAG
     const localPlaylists = getPlaylistsLocal().map(playlistToUnified);
     const localRadio = getRadioStationsLocal().map(radioToUnified);
     const merged = dedupeById([...localPlaylists, ...localRadio]);
