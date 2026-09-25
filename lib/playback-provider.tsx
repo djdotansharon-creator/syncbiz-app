@@ -925,8 +925,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, [persistRecoverySnapshot]);
 
   useEffect(() => {
+    // Cold start: the initial state is empty (currentSource=null), so persistRecoverySnapshot()
+    // would hit its clear branch and DELETE the recovery snapshot BEFORE the mount-time restore
+    // effect reads it → a station never auto-resumes after a reboot. isRestoring is seeded true
+    // whenever a valid snapshot exists (hasRecoverableSnapshot), so defer the first persist/clear
+    // until restore has run; afterwards this persists the restored/live state normally.
+    if (isRestoring) return;
     persistRecoverySnapshot();
-  }, [persistRecoverySnapshot]);
+  }, [persistRecoverySnapshot, isRestoring]);
 
   /**
    * Stop embeds (YT/SC/HLS) before a new local/source handoff. The previous fall-through
@@ -1453,10 +1459,18 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             status: "paused",
           }));
           const autoresume = autoresumeParam();
+          // A headless desktop STATION (MASTER) must ALWAYS resume what it was playing before a
+          // reboot — no 30-minute window. The window still guards a human browser tab reopened much
+          // later. (Restore only reached here because deviceModeAllowsLocalPlayback is true → MASTER.)
+          // NOTE: RECOVERY_TTL_MS (24h) still bounds how old the snapshot may be — tracked as a P0
+          // follow-up so a station can also recover after a shutdown longer than 24h.
+          const isDesktopStation = typeof window !== "undefined" && "syncbizDesktop" in window;
           const shouldAutoplay =
             autoresume !== "0" &&
             persistedV2.status === "playing" &&
-            (autoresume === "1" || Date.now() - persistedV2.updatedAt <= RECOVERY_AUTOPLAY_WINDOW_MS);
+            (autoresume === "1" ||
+              isDesktopStation ||
+              Date.now() - persistedV2.updatedAt <= RECOVERY_AUTOPLAY_WINDOW_MS);
           if (shouldAutoplay) {
             if (cancelled) return;
             queueMicrotask(() => {
