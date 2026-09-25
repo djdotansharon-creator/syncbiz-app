@@ -291,6 +291,10 @@ function applyDesktopZoom(win: BrowserWindow): void {
   fileLog("INFO", "applyDesktopZoom", { contentW, designWidth: designWidth(), zoom });
 }
 
+// DIAG/log-hygiene: the YouTube IFrame API floods postMessage origin-mismatch warnings
+// (~4/s per iframe). We rate-limit them in the LOG ONLY (never blocks postMessage / YT).
+let ytOriginWarnCount = 0;
+
 function attachWindowDiagnostics(win: BrowserWindow): void {
   // Fires when the navigation fails (network error, DNS, bad port, etc.)
   win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
@@ -314,11 +318,23 @@ function attachWindowDiagnostics(win: BrowserWindow): void {
 
   // Mirror renderer console errors / warnings to the log file
   win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-    if (level >= 2) {
-      // 2 = warning, 3 = error
-      const lvl = level === 3 ? "ERROR" : "WARN";
-      fileLog(lvl, `renderer console (${lvl.toLowerCase()})`, { message, line, sourceId });
+    if (level < 2) return; // 2 = warning, 3 = error
+    const lvl = level === 3 ? "ERROR" : "WARN";
+    // LOGGING ONLY: collapse the YouTube postMessage origin-mismatch flood so it can't write
+    // thousands of lines. This filters the LOG mirror only — it does NOT touch postMessage / YT.
+    const isYtOriginMismatch =
+      typeof message === "string" &&
+      message.includes("postMessage") &&
+      (message.includes("does not match the recipient window's origin") ||
+        message.includes("target origin provided"));
+    if (isYtOriginMismatch) {
+      ytOriginWarnCount++;
+      if (ytOriginWarnCount === 1 || ytOriginWarnCount % 200 === 0) {
+        fileLog("WARN", "yt postMessage origin-mismatch (rate-limited)", { count: ytOriginWarnCount, line, sourceId });
+      }
+      return;
     }
+    fileLog(lvl, `renderer console (${lvl.toLowerCase()})`, { message, line, sourceId });
   });
 
   // Log the IPC preload injection result
