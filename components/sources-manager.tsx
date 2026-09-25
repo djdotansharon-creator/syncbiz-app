@@ -53,7 +53,7 @@ import { EditPlaylistForm } from "@/components/edit-playlist-form";
 import { EditSourceForm } from "@/components/edit-source-form";
 import { guestLinkLedButtonClass } from "@/components/guest-link-button";
 import { getFavorites, addFavorite as addFav, removeFavorite as removeFav } from "@/lib/favorites-store";
-import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal, removePlaylistFromLocal, removeRadioFromLocal } from "@/lib/unified-sources-client";
+import { fetchUnifiedSourcesWithFallback, getLastUnifiedFetchDiag, savePlaylistToLocal, saveRadioToLocal, removePlaylistFromLocal, removeRadioFromLocal } from "@/lib/unified-sources-client";
 import { getPlaylistTracks, type Playlist, type ScheduleContributorBlock } from "@/lib/playlist-types";
 import {
   appendSourcesToPlaylistTracks,
@@ -297,6 +297,63 @@ function RailExpandHandle({ side, onClick }: { side: "left" | "right"; onClick: 
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DIAGNOSTIC ONLY (temporary, log-only). Traces every library-list overwrite to
+// catch the "source disappears ~1s after Play" bug (ALL source types). No behavior
+// change — no merge/preserve/fix. Remove once the root cause is captured on the Lenovo.
+// ─────────────────────────────────────────────────────────────────────────────
+type SbDiagSource = { id: string; origin: string; type: string };
+function sbDiagList(items: UnifiedSource[]): SbDiagSource[] {
+  return items.map((s) => ({ id: s.id, origin: String(s.origin ?? "?"), type: String((s as { type?: string }).type ?? "?") }));
+}
+/** Active/playing source id from the recovery snapshot (read-only; does NOT subscribe to playback,
+ *  so it never forces this large component to re-render on every position tick). */
+function sbReadActiveSourceId(): string | null {
+  try {
+    const raw = localStorage.getItem("syncbiz-playback-recovery-v2");
+    if (!raw) return null;
+    const p = JSON.parse(raw) as { currentSourceId?: string };
+    return p?.currentSourceId ?? null;
+  } catch {
+    return null;
+  }
+}
+function sbLogSourcesDiag(
+  trigger: string,
+  before: UnifiedSource[],
+  after: UnifiedSource[],
+  fetchDiag: { ok: boolean; status: number | null; fallback: boolean } | null,
+): void {
+  const beforeL = sbDiagList(before);
+  const afterL = sbDiagList(after);
+  const afterIds = new Set(afterL.map((s) => s.id));
+  const disappeared = beforeL.filter((s) => !afterIds.has(s.id));
+  const activeId = sbReadActiveSourceId();
+  const active = beforeL.find((s) => s.id === activeId) ?? (activeId ? { id: activeId, origin: "?", type: "?" } : null);
+  const activeMissingAfter = !!activeId && !afterIds.has(activeId);
+  // eslint-disable-next-line no-console
+  console.log("[SB-DIAG refetch]", {
+    trigger,
+    fetch: fetchDiag, // {ok,status,fallback} for fetch-driven triggers, else null
+    beforeCount: beforeL.length,
+    afterCount: afterL.length,
+    active,
+    activeMissingAfter,
+    disappearedCount: disappeared.length,
+    disappeared,
+    before: beforeL,
+    after: afterL,
+  });
+  for (const d of disappeared) {
+    // eslint-disable-next-line no-console
+    console.error("SOURCE_DISAPPEARED", { id: d.id, type: d.type, origin: d.origin, trigger, fetch: fetchDiag, wasActive: d.id === activeId });
+  }
+  if (activeMissingAfter && !disappeared.some((d) => d.id === activeId)) {
+    // eslint-disable-next-line no-console
+    console.error("SOURCE_DISAPPEARED", { id: activeId, type: active?.type ?? "?", origin: active?.origin ?? "?", trigger, fetch: fetchDiag, wasActive: true });
+  }
+}
+
 export function SourcesManager({
   initialSources,
   pageTitle,
@@ -306,10 +363,14 @@ export function SourcesManager({
 }: Props) {
   const [effectiveSources, setEffectiveSources] = useState<UnifiedSource[]>(initialSources);
   const prevIdsRef = useRef<string>("");
+  const effectiveSourcesRef = useRef<UnifiedSource[]>(initialSources); // DIAG: current on-screen list for async logging
+  effectiveSourcesRef.current = effectiveSources; // DIAG
 
-  const refetchSources = useCallback(() => {
+  const refetchSources = useCallback((trigger: string = "unknown") => {
     fetchUnifiedSourcesWithFallback().then((items) => {
+      const before = effectiveSourcesRef.current; // DIAG: list on screen at replace time
       const filtered = items.filter((s) => s.origin !== "radio");
+      sbLogSourcesDiag(trigger, before, filtered, getLastUnifiedFetchDiag()); // DIAG
       prevIdsRef.current = filtered.map((s) => s.id).join(",");
       setEffectiveSources(filtered);
     });
@@ -319,15 +380,16 @@ export function SourcesManager({
     if (initialSources.length > 0) {
       const ids = initialSources.map((s) => s.id).join(",");
       if (ids === prevIdsRef.current) return;
+      sbLogSourcesDiag("initialSources/remount", effectiveSourcesRef.current, initialSources, null); // DIAG
       prevIdsRef.current = ids;
       setEffectiveSources(initialSources);
     } else {
-      refetchSources();
+      refetchSources("initialSources(empty)/remount");
     }
   }, [initialSources, refetchSources]);
 
   useEffect(() => {
-    const handler = () => refetchSources();
+    const handler = () => refetchSources("library-updated");
     window.addEventListener("library-updated", handler);
     return () => window.removeEventListener("library-updated", handler);
   }, [refetchSources]);
