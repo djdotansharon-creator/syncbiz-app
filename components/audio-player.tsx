@@ -397,6 +397,72 @@ function SourceIcon({ type, origin, size = "md" }: { type: TrackSource; origin?:
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DIAGNOSTIC ONLY (temporary, log-only). Captures the desktop URL/YouTube "playing
+// but frozen → self-heal redispatch → skip" timeline as EVIDENCE. No playback
+// behavior change. Emitted as a single JSON STRING so it survives the desktop
+// console→main.log mirror intact (an object arg is flattened to "[object Object]").
+// PRIVACY: never logs a full URL / query params / tokens — only a non-reversible urlHash.
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * SHA-256 of the URL → first 12 hex chars, for comparing whether retry N and N+1 got the SAME
+ * stream URL — WITHOUT ever storing/logging the URL. Web Crypto's digest is async, so the URL is
+ * hashed once (in memory) and cached; sbUrlHash returns the cached prefix (retries land seconds
+ * apart, so the cache is warm by then). First-ever sight of a URL returns "pending" until the
+ * microtask resolves — never the URL itself.
+ */
+const sbHashCache = new Map<string, string>();
+function sbUrlHash(url: string | null | undefined): string {
+  const s = url ?? "";
+  if (!s) return "none";
+  const cached = sbHashCache.get(s);
+  if (cached) return cached;
+  try {
+    if (typeof crypto !== "undefined" && crypto.subtle) {
+      void crypto.subtle
+        .digest("SHA-256", new TextEncoder().encode(s))
+        .then((buf) => {
+          const hex = Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+          if (sbHashCache.size > 200) sbHashCache.clear(); // bound memory
+          sbHashCache.set(s, hex.slice(0, 12));
+        })
+        .catch(() => {});
+    }
+  } catch {
+    /* ignore */
+  }
+  return "pending";
+}
+/** Coarse, safe error CATEGORY from an engine error (no raw text, no leak risk). */
+function sbErrCategory(e: string | null | undefined): string {
+  if (!e) return "none";
+  const s = e.toLowerCase();
+  if (s.includes("timeout") || s.includes("timed out")) return "timeout";
+  if (s.includes("403") || s.includes("forbidden")) return "forbidden";
+  if (s.includes("404") || s.includes("not found")) return "not_found";
+  if (s.includes("refused") || s.includes("reset") || s.includes("network") || s.includes("connection")) return "network";
+  if (s.includes("decode") || s.includes("format") || s.includes("codec")) return "decode";
+  if (s.includes("open") || s.includes("load")) return "load_failed";
+  return "other";
+}
+/** Short, heavily-sanitized error text: strips URLs, query strings, and secret-looking key=values. */
+function sbSafeErr(e: string | null | undefined): string | null {
+  if (!e) return null;
+  return e
+    .replace(/https?:\/\/\S+/gi, "<url>")
+    .replace(/\b(token|key|secret|authorization|bearer|password|pwd|cookie|sig|signature|mt)\b\s*[=:]\s*\S+/gi, "$1=<redacted>")
+    .replace(/[?&]\S+/g, "")
+    .slice(0, 80);
+}
+function sbDiag(event: string, fields: Record<string, unknown>): void {
+  try {
+    // eslint-disable-next-line no-console
+    console.warn("[SB-DIAG] " + JSON.stringify({ event, ts: Date.now(), ...fields }));
+  } catch {
+    /* never throw from diagnostics */
+  }
+}
+
 export function AudioPlayer() {
   const pathname = usePathname();
   /**
@@ -594,6 +660,9 @@ export function AudioPlayer() {
         snap.status === "playing" &&
         (snap.position > 0 || snap.duration > 0)
       ) {
+        if (!attemptConfirmedRef.current) {
+          sbDiag("PLAYING_CONFIRMED", { attemptId: snap.attemptId, position: snap.position, duration: snap.duration }); // DIAG (once per attempt; correlate urlHash via PLAY_REQUEST)
+        }
         attemptConfirmedRef.current = true;
       }
       setDesktopMpvSnap(snap);
@@ -3650,6 +3719,7 @@ export function AudioPlayer() {
           attemptSkippedGenRef.current = genNow;
           attemptConfirmedRef.current = false;
           if (mpvRecoverTimerRef.current) { clearTimeout(mpvRecoverTimerRef.current); mpvRecoverTimerRef.current = null; }
+          sbDiag("SKIP_FORWARD", { reason: "load_error", attemptId: genNow, endFileHint: "error", errCategory: sbErrCategory(snap?.lastError), errText: sbSafeErr(snap?.lastError), sourceType: classifySource(currentPlayUrlRef.current), urlHash: sbUrlHash(currentPlayUrlRef.current) }); // DIAG
           console.warn("[SyncBiz:mpv-load-error] attempt failed — skipping forward once", {
             url: currentPlayUrlRef.current?.slice(0, 100) ?? null, attemptId: genNow, lastError: snap.lastError,
           });
@@ -3754,6 +3824,7 @@ export function AudioPlayer() {
             useCrossfade,
             attemptId,
           });
+          sbDiag("PLAY_REQUEST", { attemptId, sourceType: classifySource(latest), urlHash: sbUrlHash(latest), crossfade: useCrossfade }); // DIAG
           if (useCrossfade) {
             void desktop.mpvPlayUrlCrossfade(latest, fadeSec, attemptId);
           } else {
@@ -3886,6 +3957,9 @@ export function AudioPlayer() {
 
       if (mpvFrozenAttemptsRef.current < MAX_REDISPATCH) {
         mpvFrozenAttemptsRef.current += 1;
+        if (mpvFrozenAttemptsRef.current === 1) {
+          sbDiag("FREEZE_DETECTED", { attemptId: playbackAttemptGenRef.current, frozenMs, position: snap.position, duration: snap.duration, mpvStatus: snap.status, errCategory: sbErrCategory(snap.lastError), errText: sbSafeErr(snap.lastError), sourceType: classifySource(url), urlHash: sbUrlHash(url) }); // DIAG
+        }
         console.warn("[SyncBiz] desktop MPV frozen (playing, no progress) — self-heal re-dispatch", {
           attempt: mpvFrozenAttemptsRef.current,
           frozenMs,
@@ -3904,6 +3978,7 @@ export function AudioPlayer() {
         playbackAttemptGenRef.current += 1; // re-dispatch = a fresh attempt (its own identity)
         attemptConfirmedRef.current = false;
         void desktop.mpvPlayUrl(url, playbackAttemptGenRef.current); // force a fresh loadfile (== manual refresh)
+        sbDiag("REDISPATCH", { attempt: mpvFrozenAttemptsRef.current, attemptId: playbackAttemptGenRef.current, frozenMs, sourceType: classifySource(url), urlHash: sbUrlHash(url) }); // DIAG
         return;
       }
 
@@ -3911,6 +3986,7 @@ export function AudioPlayer() {
       // once for this stuck track.
       if (mpvFrozenSkippedForUrlRef.current !== url) {
         mpvFrozenSkippedForUrlRef.current = url;
+        sbDiag("SKIP_FORWARD", { reason: "freeze_max_redispatch", attemptId: playbackAttemptGenRef.current, frozenMs, sourceType: classifySource(url), urlHash: sbUrlHash(url) }); // DIAG
         console.warn("[SyncBiz] desktop MPV still frozen after retries — skipping forward to keep playback alive", {
           url: url.slice(0, 100),
         });

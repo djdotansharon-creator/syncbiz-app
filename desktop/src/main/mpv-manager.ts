@@ -17,6 +17,7 @@ import { existsSync } from "node:fs";
 import net from "node:net";
 import { normalizeMpvLoadTarget } from "./mpv-input-normalize";
 import { redactMediaToken } from "../shared/redact-media-token";
+import { fileLog } from "./file-logger";
 
 const PIPELINE = "[SyncBiz:desktop-mpv:bridge]";
 const WATCHDOG = "[SyncBiz:desktop-mpv:watchdog]";
@@ -525,12 +526,16 @@ export class MpvManager {
         this.st.position = 0;
         this.push();
         console.error(PIPELINE, "end-file error", { pipe: this.pipePath, file_error: this.st.lastError });
+        // DIAG (endFileReason evidence): reason + attemptId only — never the url / file_error (may embed a url).
+        fileLog("INFO", "MPV_ENDFILE", { reason: "error", attemptId: this.st.attemptId });
         return;
       }
       this.st.status = reason === "stop" ? "stopped" : "idle";
       this.st.lastError = null;
       this.st.position = 0;
       this.push();
+      // DIAG (endFileReason evidence).
+      fileLog("INFO", "MPV_ENDFILE", { reason: reason ?? "eof", attemptId: this.st.attemptId });
     }
   }
 
