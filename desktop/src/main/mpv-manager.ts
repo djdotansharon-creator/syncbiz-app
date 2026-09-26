@@ -561,6 +561,8 @@ export class MpvManager {
       }
       this.st.lastError = null;
       console.log(PIPELINE, "event start-file (decoding/playback line active)", { pipe: this.pipePath, attemptId: this.st.attemptId, entryId: typeof entryId === "number" ? entryId : null });
+      // DIAG (RC3 correlation, main-process → main.log): attemptId/entryId only — no url/token.
+      fileLog("INFO", "MPV_STARTFILE", { attemptId: this.st.attemptId, entryId: typeof entryId === "number" ? entryId : null });
       this.st.status = "playing";
       this.st.position = 0;
       this.push();
@@ -643,6 +645,8 @@ export class MpvManager {
     this.pendingLoadReqToAttempt.set(reqId, attemptId);
     capAttemptMap(this.pendingLoadReqToAttempt);
     console.log(PIPELINE, "loadfile request", { pipe: this.pipePath, kind, reqId, attemptId, preview: redactMediaToken(target).slice(0, 160) });
+    // DIAG (RC3 correlation, main-process → main.log): reqId/attemptId/kind only — never the url.
+    fileLog("INFO", "MPV_LOADFILE", { reqId, attemptId, kind });
     this.raw(JSON.stringify({ command: ["loadfile", target, "replace"], request_id: reqId }));
     // A freshly loaded track MUST play — never inherit a stale `pause=true` from a
     // prior pause() on this deck. Without this, loadfile-while-paused loaded the
