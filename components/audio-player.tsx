@@ -463,6 +463,13 @@ function sbDiag(event: string, fields: Record<string, unknown>): void {
   }
 }
 
+// Stream startup-phase tuning (RC1/RC2/RC3). Streams (URL/YouTube) get a bounded startup grace with
+// NO 6s freeze redispatch; they enter "playing" only after real position progress. Local files skip
+// this (they confirm instantly). See the self-heal watchdog + applySnap progress gate.
+const STREAM_STARTUP_TIMEOUT_MS = 30000; // grace per startup attempt before a bounded retry
+const STREAM_STARTUP_MAX_RETRIES = 1; // 1 retry of the SAME item → worst-case ~60s (30s + 30s) before SKIP_FORWARD (never-stop)
+const STREAM_MIN_PROGRESS_ADVANCES = 2; // real position advances required to enter "playing"
+
 export function AudioPlayer() {
   const pathname = usePathname();
   /**
@@ -625,6 +632,39 @@ export function AudioPlayer() {
   // INV2 + single owner — a failed attempt is recovered by SKIPPING FORWARD once (the still-playing
   // previous track bridges via crossfade; no same-URL reload storm, no silence). Keyed by generation.
   const attemptSkippedGenRef = useRef(-1);
+  // ── RC1/RC2/RC3 stream startup phase machine (streams only; local files bypass) ──
+  // "starting" = a fresh stream attempt that has NOT yet shown real decode progress. While starting,
+  //   the 6s freeze redispatch is SUPPRESSED and a bounded startup timeout governs instead (RC3/RC1).
+  // "playing"  = real progress observed (>= STREAM_MIN_PROGRESS_ADVANCES position advances of THIS
+  //   attempt); only then may the FREEZE_MS watchdog operate (RC1). Local files start here directly.
+  const streamPhaseRef = useRef<"starting" | "playing">("playing");
+  // Count of real position advances seen for the CURRENT attempt (reset on every new attempt) — RC2.
+  const attemptProgressCountRef = useRef(0);
+  // Wall-clock when the CURRENT attempt began (dispatch/redispatch) — governs the startup timeout.
+  const attemptStartAtRef = useRef(0);
+  // Bounded startup-retry budget for a stream that never starts, keyed by the item (RC1/RC2).
+  const streamStartupRetryRef = useRef(0);
+  const streamStartupItemRef = useRef<string | null>(null);
+  // RC2 — reset ALL freeze/progress/phase state for a brand-new attempt. Called on every fresh
+  // PLAY_REQUEST dispatch and on each startup retry so a new attempt never inherits the previous
+  // attempt's freeze clock or progress count. Local files go straight to the PLAYING regime (they
+  // confirm instantly and must keep their existing behavior — the 6s freeze watchdog stays armed).
+  const resetStreamAttempt = useCallback((url: string | null | undefined) => {
+    const u = (url ?? "").trim();
+    const isLocal = !!u && isValidLocalFilePlaybackPath(u);
+    attemptProgressCountRef.current = 0;
+    attemptStartAtRef.current = Date.now();
+    desktopSnapPositionAtRef.current = Date.now(); // fresh freeze clock for the new attempt
+    desktopSnapLastPosRef.current = null; // forget the prior attempt's last position
+    attemptConfirmedRef.current = false;
+    // Startup-retry budget is keyed by item: reset only when the item changed (so a retry of the SAME
+    // dead item keeps counting toward SKIP_FORWARD; a new item starts with a fresh budget).
+    if (streamStartupItemRef.current !== u) {
+      streamStartupItemRef.current = isLocal ? null : u;
+      streamStartupRetryRef.current = 0;
+    }
+    streamPhaseRef.current = isLocal ? "playing" : "starting";
+  }, []);
   useEffect(() => { desktopMpvSnapRef.current = desktopMpvSnap; }, [desktopMpvSnap]);
   useEffect(() => {
     if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
@@ -634,7 +674,9 @@ export function AudioPlayer() {
     const applySnap = (s: any) => {
       if (cancelled) return;
       const nextPos = typeof s.mpvPosition === "number" ? s.mpvPosition : 0;
-      if (desktopSnapLastPosRef.current === null || nextPos !== desktopSnapLastPosRef.current) {
+      const prevSnapPos = desktopSnapLastPosRef.current;
+      const posChanged = prevSnapPos === null || nextPos !== prevSnapPos;
+      if (posChanged) {
         desktopSnapLastPosRef.current = nextPos;
         desktopSnapPositionAtRef.current = Date.now();
       }
@@ -664,6 +706,26 @@ export function AudioPlayer() {
           sbDiag("PLAYING_CONFIRMED", { attemptId: snap.attemptId, position: snap.position, duration: snap.duration }); // DIAG (once per attempt; correlate urlHash via PLAY_REQUEST)
         }
         attemptConfirmedRef.current = true;
+      }
+      // RC1/RC4 — count REAL forward progress for the CURRENT attempt. A stream leaves the "starting"
+      // phase (and only THEN arms the FREEZE_MS watchdog) after STREAM_MIN_PROGRESS_ADVANCES advances.
+      // A stream stuck at 0:00 never advances → stays "starting" → the bounded startup timeout governs,
+      // NOT the 6s freeze loop (this is the RC1 fix for the freeze/redispatch thrash).
+      if (
+        streamPhaseRef.current === "starting" &&
+        posChanged &&
+        nextPos > 0 &&
+        snap.attemptId === playbackAttemptGenRef.current &&
+        snap.status === "playing"
+      ) {
+        attemptProgressCountRef.current += 1;
+        if (attemptProgressCountRef.current >= STREAM_MIN_PROGRESS_ADVANCES) {
+          streamPhaseRef.current = "playing";
+          desktopSnapPositionAtRef.current = Date.now(); // fresh freeze clock as PLAYING begins (RC1)
+          streamStartupItemRef.current = null; // startup succeeded → clear startup-retry state
+          streamStartupRetryRef.current = 0;
+          sbDiag("STREAM_PLAYING", { attemptId: snap.attemptId, advances: attemptProgressCountRef.current, position: snap.position }); // DIAG
+        }
       }
       setDesktopMpvSnap(snap);
     };
@@ -3811,6 +3873,7 @@ export function AudioPlayer() {
           playbackAttemptGenRef.current += 1;
           attemptConfirmedRef.current = false;
           const attemptId = playbackAttemptGenRef.current;
+          resetStreamAttempt(latest); // RC2 — fresh freeze/progress/phase for this attempt (starting for streams, playing for local)
           const fadeSec = getMixDuration();
           const mpvPlaying = mpvChAStatusRef.current === "playing";
           const intentPlaying = statusRef.current === "playing";
@@ -3832,35 +3895,38 @@ export function AudioPlayer() {
           }
           mpvLastDispatchAtRef.current = Date.now();
 
-          // Stall backstop: the incoming track must report "playing" within the window (longer for a
-          // crossfade — the incoming deck resolves via yt-dlp up to ~12 s). A hard load failure is
-          // usually surfaced sooner by the orchestrator (error → skip); this only catches a silent stall.
-          const stallMs = useCrossfade ? 13000 : 4000;
-          if (mpvStallTimerRef.current) clearTimeout(mpvStallTimerRef.current);
-          mpvStallTimerRef.current = setTimeout(() => {
-            mpvStallTimerRef.current = null;
-            if (
-              playbackAttemptGenRef.current === attemptId &&
-              statusRef.current === "playing" &&
-              currentPlayUrlRef.current === latest &&
-              mpvChAStatusRef.current !== "playing"
-            ) {
-              const snap = desktopMpvSnapRef.current;
-              const engineOk = snap?.engineReady !== false;
-              const errDetail = snap?.lastError ?? null;
-              const userMsg = !engineOk
-                ? (errDetail ?? "MPV player is not ready — check the desktop installation")
-                : (errDetail ?? "Desktop playback did not start — file may be missing or in an unsupported format");
-              console.warn("[SyncBiz Audit] Desktop MPV stall — no playing confirmation after 4 s", {
-                url: latest.slice(0, 100),
-                mpvChAStatus: mpvChAStatusRef.current,
-                engineReady: snap?.engineReady ?? null,
-                lastError: errDetail,
-              });
-              setLastMessage(userMsg);
-              stop();
-            }
-          }, 4000);
+          // Stall backstop — LOCAL FILES ONLY. A local file must report "playing" almost immediately;
+          // if it doesn't within 4s it's a genuine missing/unsupported file → surface + stop.
+          // STREAMS (direct URL / YouTube) are DELIBERATELY excluded here: their startup is owned solely
+          // by the STREAM_STARTING phase machine (bounded STREAM_STARTUP_TIMEOUT_MS grace → retry →
+          // SKIP_FORWARD, never-stop). No stall→stop() may fire for a stream during startup.
+          if (mpvStallTimerRef.current) { clearTimeout(mpvStallTimerRef.current); mpvStallTimerRef.current = null; }
+          if (isValidLocalFilePlaybackPath(latest)) {
+            mpvStallTimerRef.current = setTimeout(() => {
+              mpvStallTimerRef.current = null;
+              if (
+                playbackAttemptGenRef.current === attemptId &&
+                statusRef.current === "playing" &&
+                currentPlayUrlRef.current === latest &&
+                mpvChAStatusRef.current !== "playing"
+              ) {
+                const snap = desktopMpvSnapRef.current;
+                const engineOk = snap?.engineReady !== false;
+                const errDetail = snap?.lastError ?? null;
+                const userMsg = !engineOk
+                  ? (errDetail ?? "MPV player is not ready — check the desktop installation")
+                  : (errDetail ?? "Desktop playback did not start — file may be missing or in an unsupported format");
+                console.warn("[SyncBiz Audit] Desktop MPV stall — no playing confirmation after 4 s (local file)", {
+                  url: latest.slice(0, 100),
+                  mpvChAStatus: mpvChAStatusRef.current,
+                  engineReady: snap?.engineReady ?? null,
+                  lastError: errDetail,
+                });
+                setLastMessage(userMsg);
+                stop();
+              }
+            }, 4000);
+          }
         }, MPV_LOADFILE_COALESCE_MS);
       } else {
         // Same URL, resumed after pause — don't restart.
@@ -3908,6 +3974,39 @@ export function AudioPlayer() {
     const MAX_REDISPATCH = 3; // re-loadfile this many times before skipping forward
     const id = setInterval(() => {
       if (statusRef.current !== "playing") return; // we must intend to play
+      const url = currentPlayUrlRef.current;
+      if (!url) return;
+
+      // ── STREAM_STARTING — bounded startup timeout (RC1/RC3). A fresh STREAM attempt that has not yet
+      //    shown real progress stays in "starting"; here the 6s freeze redispatch is SUPPRESSED (fixes
+      //    the ~7s thrash loop). Instead a bounded startup grace applies: on timeout, retry the SAME
+      //    item a small number of times, then SKIP_FORWARD to keep audio alive (never-stop). Local files
+      //    never enter "starting" (resetStreamAttempt sets them "playing") so their behavior is unchanged.
+      if (streamPhaseRef.current === "starting") {
+        const startingMs = Date.now() - attemptStartAtRef.current;
+        if (startingMs < STREAM_STARTUP_TIMEOUT_MS) return; // still buffering within grace — no thrash
+        if (streamStartupRetryRef.current < STREAM_STARTUP_MAX_RETRIES) {
+          streamStartupRetryRef.current += 1;
+          const attemptNo = streamStartupRetryRef.current;
+          playbackAttemptGenRef.current += 1; // startup retry = a fresh attempt identity
+          mpvLastUrlRef.current = url; // keep the routing effect in sync
+          mpvLastDispatchAtRef.current = Date.now();
+          resetStreamAttempt(url); // fresh clock/progress + attemptStartAt=now; SAME item keeps the retry budget
+          void desktop.mpvPlayUrl(url, playbackAttemptGenRef.current); // fresh loadfile (== manual refresh)
+          sbDiag("REDISPATCH", { reason: "startup_timeout", attempt: attemptNo, attemptId: playbackAttemptGenRef.current, startingMs, sourceType: classifySource(url), urlHash: sbUrlHash(url) }); // DIAG
+        } else {
+          sbDiag("SKIP_FORWARD", { reason: "startup_timeout_exhausted", attemptId: playbackAttemptGenRef.current, startingMs, sourceType: classifySource(url), urlHash: sbUrlHash(url) }); // DIAG
+          console.warn("[SyncBiz] desktop MPV stream never started after startup retries — skipping forward to keep playback alive", { url: url.slice(0, 100) });
+          streamStartupItemRef.current = null;
+          streamStartupRetryRef.current = 0;
+          streamPhaseRef.current = "playing"; // prevent re-entry until the next attempt sets "starting"
+          attemptConfirmedRef.current = false;
+          nextRef.current?.({ auditTransportCase: "ended_auto" });
+        }
+        return;
+      }
+
+      // ── STREAM_PLAYING (or local file) — real progress observed; the FREEZE_MS self-heal may operate ──
       const snap = desktopMpvSnapRef.current;
       if (!snap || snap.status !== "playing") return; // MPV must claim it's playing
       if (snap.attemptId !== playbackAttemptGenRef.current) return; // INV1 — only the current attempt
@@ -3917,8 +4016,6 @@ export function AudioPlayer() {
       // duration-known freeze. A healthy live stream (duration 0) still advances
       // its position, so it is never mistaken for frozen.
       if (!(desktopSnapPositionAtRef.current > 0)) return; // have a real position clock
-      const url = currentPlayUrlRef.current;
-      if (!url) return;
       const frozenMs = Date.now() - desktopSnapPositionAtRef.current;
       const ctx = playerTelemetryRef.current;
       // Fire-and-forget owner telemetry — never blocks/throws (see the client lib).
@@ -3975,6 +4072,7 @@ export function AudioPlayer() {
         mpvLastUrlRef.current = url; // keep the routing effect in sync
         mpvLastDispatchAtRef.current = Date.now(); // record the actual re-send
         desktopSnapPositionAtRef.current = Date.now(); // fresh window for this retry
+        attemptProgressCountRef.current = 0; // RC2 — the re-dispatched attempt must re-earn progress
         playbackAttemptGenRef.current += 1; // re-dispatch = a fresh attempt (its own identity)
         attemptConfirmedRef.current = false;
         void desktop.mpvPlayUrl(url, playbackAttemptGenRef.current); // force a fresh loadfile (== manual refresh)

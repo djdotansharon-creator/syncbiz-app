@@ -38,6 +38,16 @@ function resolvePipePath(pipeName: string): string {
     : `/tmp/${pipeName}.sock`;
 }
 
+/** Defensive bound on the attempt-ownership maps: drop oldest entries if one ever fails to be
+ *  released (a reply/start-file/end-file that never arrives). Insertion order = eviction order. */
+function capAttemptMap(m: Map<number, number>, cap = 32): void {
+  while (m.size > cap) {
+    const oldest = m.keys().next().value;
+    if (oldest === undefined) break;
+    m.delete(oldest);
+  }
+}
+
 /**
  * Absolute binary paths provided by the runtime-binaries layer.
  * MpvManager does NOT look up binaries itself any more — the runtime-binaries
@@ -100,6 +110,18 @@ export class MpvManager {
   private cmdQueue: string[] = [];
 
   private st: MpvStatus = createInitialMpvStatus();
+  // ── Attempt ownership (RC3) — EXACT per-load correlation via MPV's playlist_entry_id ──
+  // A single "pending" id is NOT safe: play(N) then play(N+1) before N's start-file would let a late
+  // start-file of load N be stamped N+1. Instead every loadfile carries a request_id; MPV's reply
+  // returns that load's `playlist_entry_id`, and start-file/end-file echo the same id. We map
+  // entry_id → attemptId so each MPV event is attributed to the EXACT load that produced it — a
+  // start-file of a superseded load can never take a newer attemptId. (MPV >= 0.37 / shinchiro git
+  // builds emit playlist_entry_id everywhere; older OS-provided mpv on mac/linux may not, so we keep
+  // `pendingAttemptId` as a graceful fallback = the most-recently-requested attempt.)
+  private pendingAttemptId = 0;
+  private loadReqSeq = 1; // request_id sequence for loadfile (0 is MPV's default id for untracked cmds)
+  private pendingLoadReqToAttempt = new Map<number, number>(); // request_id → attemptId (until the reply lands)
+  private entryIdToAttempt = new Map<number, number>(); // playlist_entry_id → attemptId (until start/end-file)
   private disposed = false;
   private ipcReconnectAttempt = 0;
   private ipcReconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -471,6 +493,24 @@ export class MpvManager {
   private handleCommandResponseLine(msg: Record<string, unknown>, rawLine: string): void {
     if (msg["event"] !== undefined) return;
     const err = msg["error"];
+    // Correlate a tracked loadfile reply → bind its playlist_entry_id to the attempt (RC3). The reply
+    // always precedes this load's start-file (MPV replies when the entry is queued, emits start-file
+    // when it actually begins), so the map is ready in time.
+    const reqId = typeof msg["request_id"] === "number" ? (msg["request_id"] as number) : 0;
+    if (reqId !== 0 && this.pendingLoadReqToAttempt.has(reqId)) {
+      const attempt = this.pendingLoadReqToAttempt.get(reqId)!;
+      this.pendingLoadReqToAttempt.delete(reqId);
+      if (err === "success") {
+        const data = msg["data"];
+        const entryId = data && typeof data === "object" ? (data as Record<string, unknown>)["playlist_entry_id"] : undefined;
+        if (typeof entryId === "number") {
+          this.entryIdToAttempt.set(entryId, attempt);
+          capAttemptMap(this.entryIdToAttempt);
+        }
+      }
+      // A failed loadfile reply just drops the mapping — end-file(error) / the renderer startup timeout
+      // handle recovery, and start-file will fall back to pendingAttemptId if it ever fires.
+    }
     if (typeof err !== "string" || err === "success") return;
     this.st.lastError = `mpv IPC: ${err}`;
     this.push();
@@ -509,13 +549,30 @@ export class MpvManager {
           break;
       }
     } else if (ev === "start-file") {
+      // Promote the attempt bound to THIS load via its playlist_entry_id (RC3). A start-file of a
+      // SUPERSEDED load resolves to its own (older) attemptId — never the newest requested one. Only
+      // when the build omits the entry id do we fall back to pendingAttemptId (most-recent request).
+      const entryId = msg["playlist_entry_id"];
+      if (typeof entryId === "number" && this.entryIdToAttempt.has(entryId)) {
+        this.st.attemptId = this.entryIdToAttempt.get(entryId)!;
+        this.entryIdToAttempt.delete(entryId);
+      } else {
+        this.st.attemptId = this.pendingAttemptId;
+      }
       this.st.lastError = null;
-      console.log(PIPELINE, "event start-file (decoding/playback line active)", { pipe: this.pipePath });
+      console.log(PIPELINE, "event start-file (decoding/playback line active)", { pipe: this.pipePath, attemptId: this.st.attemptId, entryId: typeof entryId === "number" ? entryId : null });
       this.st.status = "playing";
       this.st.position = 0;
       this.push();
     } else if (ev === "end-file") {
       const reason = msg["reason"] as string | undefined;
+      // If this entry never produced a start-file (immediate failure, or replaced before it began),
+      // still attribute its terminal event to the correct attempt, then release the mapping (RC3).
+      const endEntryId = msg["playlist_entry_id"];
+      if (typeof endEntryId === "number" && this.entryIdToAttempt.has(endEntryId)) {
+        this.st.attemptId = this.entryIdToAttempt.get(endEntryId)!;
+        this.entryIdToAttempt.delete(endEntryId);
+      }
       if (reason === "error") {
         const fe =
           (typeof msg["file_error"] === "string" && msg["file_error"]) ||
@@ -564,10 +621,12 @@ export class MpvManager {
   play(url: string, attemptId = 0): void {
     const u = url.trim();
     if (!u) return;
-    // Stamp the attempt id up front so EVERY status this load produces (start-file/end-file/
-    // property-change) carries it — including the transient end-file(reason=replace) for the file
-    // being replaced (which is harmless: it maps to idle with no error).
-    this.st.attemptId = attemptId;
+    // Record the NEW attempt as PENDING only. It becomes event-facing (st.attemptId) on `start-file`
+    // of this load — NOT now — so late events of the previous attempt (the transient
+    // end-file(reason=replace), or a stale time-pos still in the pipe) keep the OLD attemptId and are
+    // correctly ignored as superseded by the renderer. (Was: `this.st.attemptId = attemptId` up front,
+    // which let a late old-stream time-pos falsely confirm the new attempt.)
+    this.pendingAttemptId = attemptId;
     if (!this.child) {
       this.st.lastError = "play(): mpv is not running (binary missing, process exiting, or watchdog restarting)";
       this.st.status = "idle";
@@ -578,8 +637,13 @@ export class MpvManager {
     const { target, kind } = normalizeMpvLoadTarget(u);
     if (!target) return;
     this.cmdQueue = [];
-    console.log(PIPELINE, "loadfile request", { pipe: this.pipePath, kind, preview: redactMediaToken(target).slice(0, 160) });
-    this.cmd(["loadfile", target, "replace"]);
+    // Tag THIS loadfile with a request_id so its reply (carrying playlist_entry_id) can be tied back
+    // to `attemptId`; the entry_id then owns every start-file/end-file of this exact load (RC3).
+    const reqId = this.loadReqSeq++;
+    this.pendingLoadReqToAttempt.set(reqId, attemptId);
+    capAttemptMap(this.pendingLoadReqToAttempt);
+    console.log(PIPELINE, "loadfile request", { pipe: this.pipePath, kind, reqId, attemptId, preview: redactMediaToken(target).slice(0, 160) });
+    this.raw(JSON.stringify({ command: ["loadfile", target, "replace"], request_id: reqId }));
     // A freshly loaded track MUST play — never inherit a stale `pause=true` from a
     // prior pause() on this deck. Without this, loadfile-while-paused loaded the
     // file but left it paused: position frozen at 0 while the cache filled, and
