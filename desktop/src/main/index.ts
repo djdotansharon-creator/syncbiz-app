@@ -4,6 +4,7 @@ import { app, BrowserWindow, screen, shell } from "electron";
 
 import { initFileLogger, fileLog, getLogFilePath } from "./file-logger";
 import { registerMvpIpc } from "./ipc-mvp";
+import { startHeartbeat, stopHeartbeat } from "./heartbeat-writer";
 import { startEmbeddedNextServer, type EmbeddedNextHandle } from "./embedded-next-server";
 import { flushLocalCollectionTagSnapshotWrites } from "./local-collection-snapshot";
 import { PlaybackOrchestrator } from "./playback-orchestrator";
@@ -474,6 +475,8 @@ app.whenReady().then(async () => {
   orchestrator = new PlaybackOrchestrator();
   orchestrator.start(binaries);
   registerMvpIpc(getMainWindow, orchestrator);
+  startHeartbeat({ appVersion: app.getVersion(), pid: process.pid });
+  fileLog("INFO", "app.whenReady: heartbeat started");
 
   void openMainWindow().catch((err) => {
     fileLog("ERROR", "app.whenReady: openMainWindow failed", {
@@ -506,6 +509,7 @@ app.on("before-quit", (e) => {
     void flushLocalCollectionTagSnapshotWrites()
       .catch(() => undefined)
       .finally(() => {
+        stopHeartbeat();
         orchestrator?.kill();
         shutdownEmbeddedNext();
         app.quit();
@@ -513,6 +517,7 @@ app.on("before-quit", (e) => {
     return;
   }
   fileLog("INFO", "before-quit: final quit");
+  stopHeartbeat();
   orchestrator?.kill();
   shutdownEmbeddedNext();
 });

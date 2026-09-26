@@ -35,6 +35,7 @@ import type {
 import { MVP_IPC } from "../shared/mvp-types";
 import { redactMediaToken } from "../shared/redact-media-token";
 import { WhatsAppWindow } from "./whatsapp-view";
+import { updateFromMpv } from "./heartbeat-writer";
 import {
   addAdditionalMusicFolder,
   listMusicLibrarySources,
@@ -166,6 +167,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   manager = new DeviceWsManager(cachedConfig, orchestratorInstance);
   manager.onStatus((s) => {
     broadcast(getWindow(), s);
+    updateFromMpv(s); // VONO heartbeat (main-process only; atomic write to C:\ProgramData\VONO)
   });
 
   ipcMain.handle(MVP_IPC.GET_CONFIG, (): DesktopRuntimeConfig => {
