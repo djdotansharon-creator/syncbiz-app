@@ -323,13 +323,18 @@ export class PlaybackOrchestrator {
     console.log(ORCH, "playMusic (→ active deck loadfile/replace)", { preview: redactMediaToken(u).slice(0, 200), deck: this.activeMusicDeck, attemptId });
     this.abortXfade("cold_play_request");
     // Cold play: the current attempt lives on the ACTIVE deck. Clear any prior failure.
+    // setVolume() mutates + pushes the MpvManager's INTERNAL status, so do it FIRST — while the OLD
+    // attempt still owns the id — so that push carries the old id (never the OLD deck state under the
+    // NEW id). Only then install the new attempt, reset the cached deck status, and push the
+    // authoritative id/mode. After that first NEW-id snapshot, no push before real start-file can report
+    // playing/pos>0/dur>0 from old deck state.
+    this.activeMpv().setVolume(this.currentMusicTarget());
     this.currentAttemptId = attemptId;
     this.currentAttemptDeck = this.activeMusicDeck;
     this.currentAttemptMode = "cold"; // authoritative: renderer owns the PR-24 startup timeout for cold
     this.currentAttemptError = null;
     this.resetCurrentAttemptDeckStatus();
     this.push(); // deliver authoritative attemptId+mode to the renderer BEFORE any MPV start-file event
-    this.activeMpv().setVolume(this.currentMusicTarget());
     this.activeMpv().play(u, attemptId);
   }
 
@@ -366,6 +371,10 @@ export class PlaybackOrchestrator {
     });
     // Incoming attempt lives on the STANDBY deck until the ramp swaps it in — report IT as the
     // current attempt so a failure there is seen as this attempt's failure (not the outgoing track's).
+    // Standby volume 0 FIRST — while the OLD attempt still owns the id — because setVolume() mutates +
+    // pushes the standby MpvManager's INTERNAL status; keeping it before the install keeps that push on
+    // the old id (never OLD deck state under the NEW id).
+    standby.setVolume(0);
     this.currentAttemptId = attemptId;
     this.currentAttemptDeck = this.standbyDeckId();
     this.currentAttemptMode = "crossfade"; // authoritative: orchestrator owns the startup timeout here
@@ -375,7 +384,6 @@ export class PlaybackOrchestrator {
                  // start-file — so the renderer defers its cold startup-timeout from t≈0, not at ~30s.
     this.xfadePending = { fadeSec };
     this.xfadeStandbySawPlaying = false;
-    standby.setVolume(0);
     standby.play(u, attemptId);
     // SOURCE-AWARE window: URLs (yt-dlp) get 30s; local files keep the fast 12s. Reuse the existing
     // normalizer's classification — no duplicate URL/local logic.
