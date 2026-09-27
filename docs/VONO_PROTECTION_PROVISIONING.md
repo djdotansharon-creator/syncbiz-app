@@ -30,7 +30,15 @@ playback changes here.**
     node.exe                            dedicated pinned Node runtime (NOT the Electron exe)
     watchdog.cjs                        esbuilt single-file watchdog (no external npm deps)
     NODE_LICENSE.txt                    Node's license/notice (shipped alongside the runtime)
+    launch-watchdog.ps1                 hidden foreground runner (node.exe watchdog.cjs) — no console
+    provision-vono-protection.ps1       registers/removes the "VONO Protection" task (installer runs it)
 ```
+
+**Zero-touch install:** the `.exe` installer itself provisions everything — **DOWNLOAD → INSTALL → DONE**.
+No PowerShell, no Scheduled-Task setup, no autostart edits, no hidden-console fix, no per-branch technician
+config. The NSIS `customInstall` hook ([`desktop/build/installer.nsh`](../desktop/build/installer.nsh))
+runs `provision-vono-protection.ps1` **silently** (`nsExec` + `-WindowStyle Hidden`); `customUnInstall`
+tears the task down.
 
 **Node runtime supply-chain:** pinned **v22.23.3 LTS / win-x64** from the official
 `https://nodejs.org/dist/`, `PINNED_SHA256 = 9c9245166b4a8e182e0b797da9c20136117ff24368eaff1fec8343a123c8db0e`.
@@ -48,22 +56,34 @@ Runtime state (created by the watchdog, LOCAL only): `C:\ProgramData\VONO\state\
 
 ## Scheduled Task ("VONO Protection")
 
-Template: [`desktop/scripts/provisioning/vono-protection.task.xml`](../desktop/scripts/provisioning/vono-protection.task.xml).
-Register/remove: `vono-protection.install.ps1` / `vono-protection.uninstall.ps1`.
+Registered/removed by [`desktop/scripts/provisioning/provision-vono-protection.ps1`](../desktop/scripts/provisioning/provision-vono-protection.ps1)
+(`-Action install|uninstall`), which the installer runs automatically and hidden. It uses the native
+`*-ScheduledTask*` cmdlets (no static XML) so the trigger/principal always bind to the **actual current
+station user** on the box being installed. Registration is idempotent (`Register-ScheduledTask -Force`) —
+exactly one "VONO Protection" survives an upgrade/reinstall.
 
 | Field | Value |
 |---|---|
-| Trigger | **At log on** of the dedicated station user (`<LogonTrigger><UserId>…`) |
-| Principal | station user, **InteractiveToken**, **LeastPrivilege** (NON-elevated) |
-| Program | `<install>\vono-watchdog\node.exe` (absolute) |
-| Arguments | `"<install>\vono-watchdog\watchdog.cjs"` (absolute) |
+| Trigger | **At log on** of the current station user (`New-ScheduledTaskTrigger -AtLogOn -User $env:USERDOMAIN\$env:USERNAME`) |
+| Principal | station user, **Interactive** (InteractiveToken), **Limited** (LeastPrivilege / NON-elevated) |
+| Program | `powershell.exe` **hidden** (`-WindowStyle Hidden -File launch-watchdog.ps1`) — **no visible console** |
+| Runner | `launch-watchdog.ps1` runs `<install>\vono-watchdog\node.exe watchdog.cjs` in the **foreground** so the task stays *Running* and restart-on-failure applies |
 | Working dir | `<install>\vono-watchdog` |
 | MultipleInstances | **IgnoreNew** |
 | Restart on failure | every **1 min**, max **3** |
 | Execution time limit | **PT0S** (no limit — runs 24/7) |
 | Start when available | **on** (run ASAP after a missed start) |
-| Allow on demand | **on** |
-| Batteries/network gating | disabled (`DisallowStartIfOnBatteries=false`, `RunOnlyIfNetworkAvailable=false`) |
+| Batteries | `AllowStartIfOnBatteries` / `DontStopIfGoingOnBatteries` |
+| Start behavior | started immediately when possible; else deterministically at next logon (AtLogOn) |
+
+**Hidden console:** the earlier direct `node.exe` action showed a console window. The task now launches
+`powershell.exe -WindowStyle Hidden` which runs the node watchdog with no window — the Lenovo-validated
+hidden-launch method, applied automatically by the installer (no manual task edit per branch).
+
+**Path-safety:** `launch-watchdog.ps1` resolves its siblings via `$PSScriptRoot` and `provision-*.ps1`
+uses cmdlet argument arrays / quoted paths — safe for install dirs with spaces (e.g.
+`C:\Users\YCD ATMOSPHERE\...`). Install **fails closed** (`$ErrorActionPreference=Stop` + throws if
+`node.exe`/`watchdog.cjs`/runner are missing) so a broken package surfaces a provisioning error.
 
 Elevation: NOT used. Same-user launch of the GUI and `taskkill` of same-user processes need no
 elevation; `HighestAvailable` can break desktop interaction. (Revisit only with an audited need.)
@@ -96,37 +116,50 @@ Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -ErrorAct
 # Was Electron OpenAtLogin previously enabled? (its Run value name is the app id)
 Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -ErrorAction SilentlyContinue | Select-Object * | Out-String -Stream | Select-String -Pattern 'SyncBiz|VONO'
 ```
-Reconcile: disable the VONO login-item toggle (Settings) and remove any leftover VONO Run/Startup/Task
-entry, so only **"VONO Protection"** launches VONO. The login-item feature is kept for non-station
-desktops. VONO's `requestSingleInstanceLock()` is the secondary net against duplicates.
+**Automatic legacy cleanup:** at install, `provision-vono-protection.ps1` removes **only** the known
+legacy VONO autostart Run value (`HKCU\…\Run` → `electron.app.SyncBiz Player`) so "VONO Protection"
+becomes the sole launcher. It **never** touches any unrelated / third-party (e.g. YCD) Run, Startup, or
+Task entry — those, if present, are reconciled by the physical runtime audit above. The login-item
+feature is kept for non-station desktops. VONO's `requestSingleInstanceLock()` is the secondary net
+against duplicates.
 
 Do NOT claim a Lenovo is currently clean until the runtime audit above has actually been run on it.
 
 Chain: `Windows logon → "VONO Protection" task → watchdog → VONO → MASTER → playback recovery`.
 
 ## Install / provision flow
-1. Install VONO (NSIS) → `<install>\` incl. `vono-watchdog\{node.exe,watchdog.cjs}`.
-2. Create a dedicated **local, non-admin** `vono-station` account.
+
+**App provisioning is fully automatic** — running the installer creates and starts the hidden
+"VONO Protection" task and removes the legacy Run value. The remaining steps are **station/OS prep**
+(one-time per box, outside the app):
+
+1. **Run the VONO installer** (`.exe`). It stages `vono-watchdog\{node.exe,watchdog.cjs,launch-watchdog.ps1,
+   provision-vono-protection.ps1}` **and** provisions + starts the hidden task for the current station user.
+   → nothing else to configure for VONO itself.
+2. Create a dedicated **local, non-admin** station account (the account the installer is run under / that
+   auto-logs in) — if not already the station user.
 3. Enable **auto-login** for it (Sysinternals **Autologon** → LSA secret; not plaintext registry).
 4. BIOS: **After AC Power Loss = Power On**; no boot-menu pause; TPM-only BitLocker (no boot PIN).
 5. Power: **Sleep OFF, Hibernate OFF** (display may turn off). Do NOT globally disable USB selective
    suspend unless Lenovo/audio testing proves it necessary.
 6. Windows Update: set **Active Hours** / maintenance window (the watchdog must NOT block updates).
-7. Register the task (as/for the station user):
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File vono-protection.install.ps1 `
-     -StationUser "<PC>\vono-station" -InstallDir "<install>"
-   Start-ScheduledTask -TaskName "VONO Protection"
-   ```
-8. Reboot; confirm zero-touch: box powers on → auto-login → task → watchdog → VONO → playback.
+7. Reboot; confirm zero-touch: box powers on → auto-login → **task (auto)** → watchdog → VONO → playback.
+
+> The task is registered for whichever user runs the installer (`$env:USERDOMAIN\$env:USERNAME`). Install
+> under (or as) the station user so the AtLogOn trigger fires on the station session.
+
+**Upgrade / reinstall:** just run the newer installer — `Register-ScheduledTask -Force` replaces the task
+in place (exactly one, correct user, hidden); no duplicates, no manual steps.
 
 ## Uninstall / rollback flow
-```powershell
-powershell -ExecutionPolicy Bypass -File vono-protection.uninstall.ps1        # stop+unregister task, drop stale lock
-powershell -ExecutionPolicy Bypass -File vono-protection.uninstall.ps1 -Purge # also remove watchdog-cache.json
-```
-Idempotent; never touches VONO or playback. To fully revert, also uninstall VONO via its NSIS
-uninstaller. Removing the task stops only *protection*; a running VONO keeps playing.
+
+The **NSIS uninstaller** removes protection automatically: `customUnInstall` ends + deletes the
+"VONO Protection" task (`schtasks /End` then `/Delete /F`) and drops the stale
+`%ProgramData%\VONO\state\watchdog.lock`. It never kills unrelated processes and never touches VONO
+playback; a running VONO keeps playing until closed.
+
+(Manual equivalent, if ever needed outside the uninstaller —
+`provision-vono-protection.ps1 -Action uninstall -InstallDir "<install>"`.)
 
 ## What to verify physically on the Lenovo BEFORE building an installer
 - BIOS "After Power Loss = Power On": `Get-CimInstance -Namespace root\wmi -ClassName Lenovo_BiosSetting | ? CurrentSetting -match 'Power'`.

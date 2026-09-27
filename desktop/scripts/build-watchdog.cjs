@@ -28,6 +28,16 @@ async function main() {
   });
   const bytes = fs.statSync(outfile).size;
   console.log(`[build-watchdog] wrote ${outfile} (${bytes} bytes)`);
+
+  // Stage the provisioning scripts alongside node.exe/watchdog.cjs so win.extraFiles ships them to
+  // <install>\vono-watchdog\, where the NSIS installer + the Scheduled Task action reference them.
+  const provDir = path.join(root, "scripts", "provisioning");
+  for (const f of ["launch-watchdog.ps1", "provision-vono-protection.ps1"]) {
+    const src = path.join(provDir, f);
+    const dst = path.join(outDir, f);
+    fs.copyFileSync(src, dst);
+    console.log(`[build-watchdog] staged ${f}`);
+  }
 }
 
 main().catch((e) => { console.error("[build-watchdog] failed:", e); process.exit(1); });
