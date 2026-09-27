@@ -814,5 +814,6 @@ function fallbackSnapshotFromConfig(c: DesktopRuntimeConfig): MvpStatusSnapshot 
     mpvEngineReady: false,
     mpvLastError: null,
     mpvAttemptId: 0,
+    mpvAttemptMode: "cold",
   };
 }

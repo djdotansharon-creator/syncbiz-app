@@ -159,6 +159,7 @@ export class DeviceWsManager {
       mpvEngineReady: orchState?.music.engineReady ?? false,
       mpvLastError: orchState?.music.lastError ?? st.mpvEngineError ?? null,
       mpvAttemptId: orchState?.music.attemptId ?? 0,
+      mpvAttemptMode: orchState?.music.attemptMode ?? "cold",
     };
   }
 

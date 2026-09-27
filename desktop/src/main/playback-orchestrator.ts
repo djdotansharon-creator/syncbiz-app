@@ -21,6 +21,7 @@
 
 import { MpvManager, type MpvBinaries, type MpvStatus, createInitialMpvStatus } from "./mpv-manager";
 import { redactMediaToken } from "../shared/redact-media-token";
+import { normalizeMpvLoadTarget } from "./mpv-input-normalize";
 
 const ORCH = "[SyncBiz:desktop-mpv:orchestrator] music";
 
@@ -36,15 +37,19 @@ const DUCK_STEP_MS = 30;
 // ─── Crossfade constants ──────────────────────────────────────────────────────
 /** Volume steps per second during an A/B crossfade ramp. */
 const XFADE_STEPS_PER_SEC = 10;
-/** Standby deck must reach "playing" within this window or the crossfade aborts
- *  (YouTube URLs resolve through yt-dlp and can take several seconds). */
-const XFADE_LOAD_TIMEOUT_MS = 12_000;
+/** Standby deck must reach "playing" within this window or the crossfade aborts (active track keeps
+ *  playing). SOURCE-AWARE: local files load instantly (12s is plenty; real local failures surface via
+ *  decode-fail sooner), but a URL resolves through yt-dlp and can take ~20–30s on real hardware — so a
+ *  stream gets the full 30s window (== renderer STREAM_STARTUP_TIMEOUT_MS). */
+const XFADE_LOAD_TIMEOUT_LOCAL_MS = 12_000;
+const XFADE_LOAD_TIMEOUT_URL_MS = 30_000;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type OrchestratorState = {
-  /** Music playback status (the ACTIVE deck; volume field is display-stable). */
-  music: MpvStatus;
+  /** Music playback status (the ACTIVE deck; volume field is display-stable) + the authoritative
+   *  current-attempt mode ("cold" | "crossfade") so the renderer never has to infer it. */
+  music: MpvStatus & { attemptMode: "cold" | "crossfade" };
   /** Channel B — interrupt channel status. */
   interrupt: MpvStatus;
   isDucked: boolean;
@@ -85,6 +90,11 @@ export class PlaybackOrchestrator {
   /** Renderer-allocated id of the current attempt, echoed back on status so the renderer can ignore
    *  stale/anonymous MPV events belonging to a superseded attempt. */
   private currentAttemptId = 0;
+  /** AUTHORITATIVE mode of the current attempt. "crossfade" = incoming loaded on the STANDBY deck
+   *  (orchestrator owns the startup timeout; active good track keeps playing). "cold" = loaded on the
+   *  ACTIVE deck (renderer owns the PR-24 startup timeout). Stays attached to this attempt until the
+   *  next attempt begins — so a post-abort timeout race can't flip it. */
+  private currentAttemptMode: "cold" | "crossfade" = "cold";
   /** Non-null when the CURRENT attempt failed to load/decode (crossfade decode-fail or start timeout).
    *  Surfaced as the reported music `lastError` (with status "idle") so the renderer treats the attempt
    *  as failed and advances the queue — while the outgoing track keeps playing (never-stop). Cleared on
@@ -266,6 +276,7 @@ export class PlaybackOrchestrator {
         status: this.currentAttemptError ? "idle" : cur.status,
         lastError: this.currentAttemptError ?? cur.lastError,
         attemptId: this.currentAttemptId,
+        attemptMode: this.currentAttemptMode, // authoritative cold|crossfade for the renderer
         /* Display-stable volume: mid-crossfade the deck volumes ramp internally,
            but the operator's fader must not slide on its own. Duck stays visible
            (that dip is a product feature the operator expects to see). */
@@ -305,6 +316,7 @@ export class PlaybackOrchestrator {
     // Cold play: the current attempt lives on the ACTIVE deck. Clear any prior failure.
     this.currentAttemptId = attemptId;
     this.currentAttemptDeck = this.activeMusicDeck;
+    this.currentAttemptMode = "cold"; // authoritative: renderer owns the PR-24 startup timeout for cold
     this.currentAttemptError = null;
     this.activeMpv().setVolume(this.currentMusicTarget());
     this.activeMpv().play(u, attemptId);
@@ -322,7 +334,8 @@ export class PlaybackOrchestrator {
 
     const activeStatus = this.activeSt().status;
     if (activeStatus !== "playing" && activeStatus !== "paused") {
-      // Nothing audible to fade from — clean start, no dip.
+      // Nothing audible to fade from — clean start, no dip. playMusic() sets currentAttemptMode="cold",
+      // so the snapshot correctly reports "cold" and the renderer retains PR-24 startup ownership.
       console.log(ORCH, "playMusicCrossfade → cold start (active deck idle)", { preview: redactMediaToken(u).slice(0, 120), attemptId });
       this.playMusic(u, attemptId);
       return;
@@ -344,17 +357,21 @@ export class PlaybackOrchestrator {
     // current attempt so a failure there is seen as this attempt's failure (not the outgoing track's).
     this.currentAttemptId = attemptId;
     this.currentAttemptDeck = this.standbyDeckId();
+    this.currentAttemptMode = "crossfade"; // authoritative: orchestrator owns the startup timeout here
     this.currentAttemptError = null;
     this.xfadePending = { fadeSec };
     this.xfadeStandbySawPlaying = false;
     standby.setVolume(0);
     standby.play(u, attemptId);
+    // SOURCE-AWARE window: URLs (yt-dlp) get 30s; local files keep the fast 12s. Reuse the existing
+    // normalizer's classification — no duplicate URL/local logic.
+    const loadTimeoutMs = normalizeMpvLoadTarget(u).kind === "url" ? XFADE_LOAD_TIMEOUT_URL_MS : XFADE_LOAD_TIMEOUT_LOCAL_MS;
     this.xfadeStartTimeoutId = setTimeout(() => {
-      // Incoming track never started (bad URL / yt-dlp failure): keep the
-      // business audio alive on the current track — never fade into silence.
-      console.warn(ORCH, "crossfade standby load timeout — keeping current track", { preview: redactMediaToken(u).slice(0, 120) });
+      // Incoming track never started (bad URL / yt-dlp failure): keep the business audio alive on the
+      // current track — never fade into silence. Aborts the STANDBY deck only; active deck untouched.
+      console.warn(ORCH, "crossfade standby load timeout — keeping current track", { preview: redactMediaToken(u).slice(0, 120), loadTimeoutMs });
       this.abortXfade("standby_load_timeout");
-    }, XFADE_LOAD_TIMEOUT_MS);
+    }, loadTimeoutMs);
   }
 
   /** Dual ramp: active target→0, standby 0→target, then swap decks. */

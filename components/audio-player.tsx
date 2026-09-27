@@ -611,7 +611,7 @@ export function AudioPlayer() {
 
   // ── Desktop mode: MPV Orchestrator is the single source of truth for display ──
   // The React playback state drives commands (intent). MPV state drives what the UI shows (truth).
-  type DesktopMpvSnap = { status: "idle" | "playing" | "paused" | "stopped"; volume: number; position: number; duration: number; catalogCount: number; engineReady: boolean; lastError: string | null; attemptId: number };
+  type DesktopMpvSnap = { status: "idle" | "playing" | "paused" | "stopped"; volume: number; position: number; duration: number; catalogCount: number; engineReady: boolean; lastError: string | null; attemptId: number; attemptMode: "cold" | "crossfade" };
   const [desktopMpvSnap, setDesktopMpvSnap] = useState<DesktopMpvSnap | null>(null);
   // Ref always holds the latest snap so timeout callbacks (stall detection) can read it
   // without stale-closure issues and without being in the effect dependency array.
@@ -691,6 +691,8 @@ export function AudioPlayer() {
         // Attempt id the orchestrator echoes for the CURRENT music attempt. A snapshot whose
         // attemptId != our current generation belongs to a superseded attempt → powerless.
         attemptId: typeof s.mpvAttemptId === "number" ? s.mpvAttemptId : 0,
+        // Authoritative attempt mode from the orchestrator (never inferred here).
+        attemptMode: s.mpvAttemptMode === "crossfade" ? "crossfade" : "cold",
       };
       desktopMpvSnapRef.current = snap;
       // INV3 + crossfade safety — CONFIRM the current attempt ONLY from a snapshot that (a) belongs to
@@ -3983,6 +3985,12 @@ export function AudioPlayer() {
       //    item a small number of times, then SKIP_FORWARD to keep audio alive (never-stop). Local files
       //    never enter "starting" (resetStreamAttempt sets them "playing") so their behavior is unchanged.
       if (streamPhaseRef.current === "starting") {
+        // SINGLE OWNER: if the orchestrator says THIS attempt is a crossfade, IT owns the startup
+        // timeout (incoming loads on the standby deck; the active good track keeps playing). The
+        // renderer must NOT cold-redispatch it here — a cold mpvPlayUrl would replace the good track on
+        // the ACTIVE deck. On failure the orchestrator aborts the standby only and surfaces
+        // currentAttemptError, which the load-error path advances once. Cold attempts keep PR-24 below.
+        if (desktopMpvSnapRef.current?.attemptMode === "crossfade") return;
         const startingMs = Date.now() - attemptStartAtRef.current;
         if (startingMs < STREAM_STARTUP_TIMEOUT_MS) return; // still buffering within grace — no thrash
         if (streamStartupRetryRef.current < STREAM_STARTUP_MAX_RETRIES) {

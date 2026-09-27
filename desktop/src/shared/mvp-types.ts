@@ -552,6 +552,11 @@ export type MvpStatusSnapshot = {
    *  status/events belonging to a SUPERSEDED playback attempt (stale end-file/idle/playing/position).
    *  Desktop-internal only — never sent over WS / to CONTROL. */
   mpvAttemptId: number;
+  /** AUTHORITATIVE mode of the CURRENT music attempt, from the orchestrator (NOT inferred by the
+   *  renderer): "crossfade" = incoming loads on the STANDBY deck (active good track keeps playing, the
+   *  orchestrator owns the startup timeout); "cold" = loaded on the ACTIVE deck (renderer owns the
+   *  PR-24 startup timeout). Desktop-internal only — never sent over WS / to CONTROL. */
+  mpvAttemptMode: "cold" | "crossfade";
 };
 
 export type MvpConfigPatch = Partial<Omit<DesktopRuntimeConfig, "deviceId">> & {
