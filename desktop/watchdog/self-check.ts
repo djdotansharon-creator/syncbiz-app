@@ -6,7 +6,7 @@
 import path from "node:path";
 import { deriveState, decide, initialMemory, initProgressTracker, observeProgress, observeMpvDown, recordAttempt } from "./state-machine";
 import { executeRecovery, killWithEscalation, type RecoveryDeps } from "./recovery";
-import { startObserver, isValidExe, effectivePidOf, verifyVonoPid } from "./observer";
+import { startObserver, isValidExe, effectivePidOf, verifyVonoPid, launchDetached } from "./observer";
 import { WD, VONO_HEARTBEAT_INTERVAL_MS, taskkillPath, tasklistPath, type VonoHeartbeat, type VonoControlState } from "./contract";
 
 /** Progress facts for a "healthy, well-progressed" attempt (past startup) — the default for the
@@ -152,17 +152,30 @@ const stateAt = (h: VonoHeartbeat, tr: ReturnType<typeof initProgressTracker>, n
 }
 
 // ── Recovery executor tests (G) — fake OS deps; no real spawn/kill ──────────────
-type FakeOpts = { diesOnGraceful?: boolean; diesOnForce?: boolean };
+type FakeOpts = {
+  diesOnGraceful?: boolean;
+  diesOnForce?: boolean;
+  killFails?: boolean; // killTree returns false and never flips alive (simulates taskkill failure)
+  isVonoSeq?: boolean[]; // scripted isVonoPid results per call (sticks to last) — for TOCTOU tests
+  isVonoConst?: boolean; // constant isVonoPid override
+};
 function fakeDeps(initialAlive: boolean, opts: FakeOpts = {}): RecoveryDeps & { calls: string[] } {
   const calls: string[] = [];
   let alive = initialAlive;
   let clock = 0;
+  let vonoCall = 0;
+  const isVono = (): boolean => {
+    if (opts.isVonoSeq) { const a = opts.isVonoSeq; const v = a[Math.min(vonoCall, a.length - 1)]; vonoCall++; return v; }
+    if (typeof opts.isVonoConst === "boolean") return opts.isVonoConst;
+    return alive; // default: a live pid is VONO
+  };
   const deps = {
     isValidExe: (_p: string) => true, // default valid; overridden per-test for I1
-    isVonoPid: (_pid: number) => alive, // default: a live pid is VONO; overridden for J (reused pid)
+    isVonoPid: (_pid: number) => isVono(),
     launch: (p: string) => { calls.push(`launch:${p}`); return true; },
     killTree: (pid: number, force: boolean) => {
       calls.push(`kill:${force ? "force" : "graceful"}:${pid}`);
+      if (opts.killFails) return false; // taskkill failed — process stays alive
       if (force && opts.diesOnForce !== false) alive = false;
       if (!force && opts.diesOnGraceful) alive = false;
       return true;
@@ -284,6 +297,44 @@ async function recoveryTests(): Promise<void> {
     const d = fakeDeps(true); d.isVonoPid = () => false;
     const r = await executeRecovery({ action: "launch_app", fromState: "APP_MISSING", pid: 5555, execPath: "VONO.exe" }, d);
     assert("J3 wrong-exe pid ⇒ not killed, launch allowed", r.ok && !d.calls.some((c) => c.startsWith("kill:")) && d.calls.some((c) => c.startsWith("launch:")), d.calls.join(","));
+  }
+  // K1: verified VONO at decision, but identity flips to non-VONO BEFORE the graceful kill ⇒ NO kill.
+  {
+    const d = fakeDeps(true, { isVonoSeq: [true, false] }); // executor check=true, pre-graceful check=false
+    const r = await executeRecovery({ action: "restart_app", fromState: "APP_MISSING", pid: 900, execPath: "VONO.exe" }, d);
+    assert("K1 identity flips before graceful ⇒ NO kill", r.ok && !d.calls.some((c) => c.startsWith("kill:")), d.calls.join(","));
+  }
+  // K2: graceful kill issued, our VONO dies, SAME pid becomes another process (still alive) ⇒ NO force kill.
+  {
+    const d = fakeDeps(true, { diesOnGraceful: false, isVonoSeq: [true, true, false] }); // flips after graceful
+    const r = await executeRecovery({ action: "restart_app", fromState: "APP_MISSING", pid: 901, execPath: "VONO.exe" }, d);
+    assert("K2 pid reused after graceful ⇒ NO force kill", d.calls.includes("kill:graceful:901") && !d.calls.some((c) => c.startsWith("kill:force")), d.calls.join(","));
+  }
+  // K3: identity stays VONO ⇒ graceful → force → confirm dead → launch.
+  {
+    const d = fakeDeps(true, { diesOnGraceful: false, diesOnForce: true, isVonoConst: true });
+    const r = await executeRecovery({ action: "restart_app", fromState: "MPV_DOWN", pid: 902, execPath: "VONO.exe" }, d);
+    const g = first(d.calls, (c) => c === "kill:graceful:902");
+    const f = first(d.calls, (c) => c === "kill:force:902");
+    const l = first(d.calls, (c) => c.startsWith("launch:"));
+    assert("K3 stays VONO ⇒ graceful→force→launch", r.ok && g >= 0 && f > g && l > f, d.calls.join(","));
+  }
+  // K4: VONO spawn emits error ⇒ recovery FAILED, watchdog survives (fake launch resolves false).
+  {
+    const d = fakeDeps(false); d.launch = () => Promise.resolve(false);
+    const r = await executeRecovery({ action: "launch_app", fromState: "APP_MISSING", pid: null, execPath: "VONO.exe" }, d);
+    assert("K4 spawn error ⇒ recovery FAILED (no throw)", !r.ok && r.detail === "spawn failed", r.detail);
+  }
+  // K4 (real): a bad exe path resolves false from the real launcher and never throws.
+  {
+    const ok = await launchDetached("C:\\nope\\does-not-exist\\SyncBiz Player.exe");
+    assert("K4 real: launchDetached bad path ⇒ false (no crash)", ok === false, `ok=${ok}`);
+  }
+  // K5: taskkill fails and the process never dies ⇒ NO launch (never blind-launch over a live VONO).
+  {
+    const d = fakeDeps(true, { killFails: true, isVonoConst: true });
+    const r = await executeRecovery({ action: "restart_app", fromState: "MPV_DOWN", pid: 903, execPath: "VONO.exe" }, d);
+    assert("K5 taskkill fails + alive ⇒ NO launch, survives", !r.ok && !d.calls.some((c) => c.startsWith("launch:")), d.calls.join(","));
   }
 }
 

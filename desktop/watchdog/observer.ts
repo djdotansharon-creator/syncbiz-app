@@ -173,31 +173,44 @@ function appendRestartHistory(entry: Record<string, unknown>): void {
 // command string. So an execPath/cache value (or a pid) can never be interpreted by a shell; there is
 // no command interpolation / injection surface.
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Launch a fresh detached VONO. Resolves true ONLY on a successful "spawn" event, false on "error"
+ * (e.g. ENOENT / not executable). The async "error" listener is ALWAYS attached, so a failed spawn can
+ * never surface as an unhandled EventEmitter 'error' that crashes the watchdog. Exported for tests.
+ */
+export function launchDetached(execPath: string): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const done = (v: boolean) => { if (!settled) { settled = true; resolve(v); } };
+    try {
+      // Detached + unref so the launched VONO is independent of the watchdog. shell:false ⇒ execPath
+      // is the executable, never a shell command line (no interpolation).
+      const child = spawn(execPath, [], { detached: true, stdio: "ignore", shell: false });
+      child.once("error", (e) => { log(`[RECOVERY] launch spawn error: ${(e as Error).message}`); done(false); });
+      child.once("spawn", () => { try { child.unref(); } catch { /* ignore */ } done(true); });
+    } catch (e) {
+      log(`[RECOVERY] launch threw synchronously: ${(e as Error).message}`);
+      done(false);
+    }
+  });
+}
+
 const realDeps: RecoveryDeps = {
   isValidExe,
   isVonoPid: verifyVonoPid,
-  launch: (execPath: string): boolean => {
-    try {
-      // Detached + unref so the launched VONO is independent of the watchdog's lifetime.
-      // shell:false ⇒ execPath is the executable, not a shell command line (no interpolation).
-      const child = spawn(execPath, [], { detached: true, stdio: "ignore", shell: false });
-      child.unref();
-      return true;
-    } catch (e) {
-      log(`[RECOVERY] launch spawn error: ${(e as Error).message}`);
-      return false;
-    }
-  },
+  launch: (execPath: string) => launchDetached(execPath),
   killTree: (pid: number, force: boolean): boolean => {
     try {
       if (process.platform === "win32") {
-        // Absolute System32\taskkill.exe (never PATH), ARGUMENT ARRAY (never an interpolated command
-        // string), shell:false.
+        // spawnSync (no async 'error' to leak) with the ABSOLUTE System32\taskkill.exe (never PATH),
+        // an ARGUMENT ARRAY (never an interpolated command string), shell:false.
         const args = force ? ["/PID", String(pid), "/T", "/F"] : ["/PID", String(pid), "/T"];
-        spawn(taskkillPath(), args, { stdio: "ignore", shell: false });
-      } else {
-        process.kill(pid, force ? "SIGKILL" : "SIGTERM"); // dev fallback (non-Windows): numeric pid + signal
+        const res = spawnSync(taskkillPath(), args, { stdio: "ignore", shell: false });
+        if (res.error) { log(`[RECOVERY] taskkill spawn error (force=${force}): ${res.error.message}`); return false; }
+        return true;
       }
+      process.kill(pid, force ? "SIGKILL" : "SIGTERM"); // dev fallback (non-Windows): numeric pid + signal
       return true;
     } catch (e) {
       log(`[RECOVERY] killTree error (force=${force}): ${(e as Error).message}`);

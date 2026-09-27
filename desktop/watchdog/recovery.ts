@@ -19,8 +19,9 @@ export interface RecoveryDeps {
   /** Validate execPath is safe to spawn: absolute, exists, regular file, allowlisted VONO basename.
    *  The executor refuses to launch/restart when this returns false — no arbitrary path is ever run. */
   isValidExe: (execPath: string) => boolean;
-  /** Spawn a fresh detached VONO from execPath. Returns true if spawn was issued. */
-  launch: (execPath: string) => boolean;
+  /** Spawn a fresh detached VONO from execPath. Resolves true only when the process actually spawned;
+   *  false on spawn error (the impl attaches an error handler so a failed spawn never crashes). */
+  launch: (execPath: string) => boolean | Promise<boolean>;
   /** Kill the process tree for pid. `force` = the /F (hard) variant. Returns true if the kill was issued. */
   killTree: (pid: number, force: boolean) => boolean;
   /** True if pid is still alive (signal-0 style probe). Used only to poll for exit AFTER identity is
@@ -47,27 +48,51 @@ export interface RecoveryResult {
   detail: string;
 }
 
-/** Graceful → force kill escalation. Returns true once the process is confirmed dead. */
+/**
+ * Graceful → force kill escalation, with an IDENTITY RE-CHECK before every kill and on every poll
+ * (TOCTOU / PID-reuse safety). We only ever kill a pid that is, AT THAT MOMENT, a live VONO. If the
+ * pid stops being a live VONO — it exited, or (Windows PID reuse) now belongs to another process — we
+ * stop immediately and never issue another kill. Returns true when OUR VONO is no longer at this pid
+ * (exited or the pid is now foreign), false only if a live VONO is still there after force.
+ */
 export async function killWithEscalation(pid: number, deps: RecoveryDeps): Promise<boolean> {
-  if (!deps.isAlive(pid)) return true; // already gone
+  // Re-verify RIGHT BEFORE the graceful kill (identity may have changed since decide()).
+  if (!deps.isVonoPid(pid)) {
+    deps.log(`[RECOVERY] pid ${pid} is not a live VONO at kill time — NOT killing`);
+    return true; // our VONO isn't here (dead or reused) → safe to proceed / launch fresh
+  }
 
   // 1) Non-force kill first (ask the process tree to terminate).
   deps.killTree(pid, false);
   const graceDeadline = deps.now() + WD.killGraceMs;
   while (deps.now() < graceDeadline) {
     await deps.sleep(WD.killPollMs);
-    if (!deps.isAlive(pid)) return true;
+    if (!deps.isAlive(pid)) return true; // exited
+    // Alive but identity changed ⇒ our VONO died and the PID was reused ⇒ do NOT force-kill a stranger.
+    if (!deps.isVonoPid(pid)) {
+      deps.log(`[RECOVERY] pid ${pid} alive but no longer VONO (PID reused) — NOT force-killing`);
+      return true;
+    }
   }
 
-  // 2) Still alive → force kill (/F).
+  // 2) Still a live VONO → re-verify IMMEDIATELY before force, then force (/F).
+  if (!deps.isVonoPid(pid)) {
+    deps.log(`[RECOVERY] pid ${pid} no longer VONO just before force — NOT force-killing`);
+    return true;
+  }
   deps.log(`[RECOVERY] pid ${pid} survived graceful kill after ${WD.killGraceMs}ms — escalating to force`);
   deps.killTree(pid, true);
   const forceDeadline = deps.now() + WD.killForceMs;
   while (deps.now() < forceDeadline) {
     await deps.sleep(WD.killPollMs);
-    if (!deps.isAlive(pid)) return true;
+    if (!deps.isAlive(pid)) return true; // exited
+    if (!deps.isVonoPid(pid)) {
+      deps.log(`[RECOVERY] pid ${pid} alive but no longer VONO during force — stopping`);
+      return true;
+    }
   }
-  return !deps.isAlive(pid);
+  // A live VONO is still here after force ⇒ report NOT dead (caller aborts the launch — no duplicate).
+  return !deps.isVonoPid(pid);
 }
 
 /** Execute a decided recovery action. The caller must already have checked it is NOT suppressed. */
@@ -99,7 +124,7 @@ export async function executeRecovery(ctx: RecoveryContext, deps: RecoveryDeps):
       deps.log(`[RECOVERY] launch_app REJECTED — execPath failed validation (not launching)`);
       return { action, ok: false, detail: "execPath rejected" };
     }
-    const ok = deps.launch(execPath);
+    const ok = await deps.launch(execPath);
     deps.log(`[RECOVERY] launch_app ${ok ? "issued" : "FAILED"} exe=${execPath}`);
     return { action, ok, detail: ok ? "launched" : "spawn failed" };
   }
@@ -126,7 +151,7 @@ export async function executeRecovery(ctx: RecoveryContext, deps: RecoveryDeps):
     } else if (pid != null) {
       deps.log(`[RECOVERY] restart_app — pid ${pid} is NOT a live VONO (stale/reused) — NOT killing; launching fresh`);
     }
-    const ok = deps.launch(execPath);
+    const ok = await deps.launch(execPath);
     deps.log(`[RECOVERY] restart_app ${ok ? "issued" : "FAILED"} (killed pid=${pid ?? "?"}) exe=${execPath}`);
     return { action, ok, detail: ok ? "restarted" : "spawn failed" };
   }
