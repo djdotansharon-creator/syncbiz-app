@@ -3877,9 +3877,16 @@ export function AudioPlayer() {
           const attemptId = playbackAttemptGenRef.current;
           resetStreamAttempt(latest); // RC2 — fresh freeze/progress/phase for this attempt (starting for streams, playing for local)
           const fadeSec = getMixDuration();
-          const mpvPlaying = mpvChAStatusRef.current === "playing";
-          const intentPlaying = statusRef.current === "playing";
-          const useCrossfade = !!(prevMpv && desktop.mpvPlayUrlCrossfade && (mpvPlaying || intentPlaying));
+          const mpvPlaying = mpvChAStatusRef.current === "playing"; // diagnostics only
+          const intentPlaying = statusRef.current === "playing";     // diagnostics only
+          // Route ANY subsequent dispatch (prevMpv exists) through the crossfade entrypoint and let the
+          // ORCHESTRATOR decide crossfade-vs-cold from the REAL active deck. The renderer must NOT infer
+          // audibility from the current-attempt snapshot: after a FAILED incoming crossfade the snapshot
+          // reads idle even though the OUTGOING active deck is still playing — inferring here would
+          // cold-replace (and silence) that good track. Orchestrator: active playing/paused → real
+          // standby crossfade; active idle → playMusicCrossfade() falls back to cold. (mpvPlaying/
+          // intentPlaying kept for the diagnostics below only.)
+          const useCrossfade = !!(prevMpv && desktop.mpvPlayUrlCrossfade);
           p0XfadeDebug("desktop_mpv_url_dispatch", {
             latest: latest.slice(0, 120),
             prevMpv: prevMpv?.slice(0, 120) ?? null,
