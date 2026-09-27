@@ -41,13 +41,20 @@ import { acquireLock, type LockDeps } from "./watchdog-lock";
 
 // ── Paths (mirror desktop/src/main/vono-paths.ts) ─────────────────────────────
 function vonoRoot(): string {
+  // VONO_STATE_ROOT override is for tests only (clean-machine bootstrap); production uses ProgramData.
+  if (process.env.VONO_STATE_ROOT) return process.env.VONO_STATE_ROOT;
   if (process.platform === "win32") return path.join(process.env.ProgramData || "C:\\ProgramData", "VONO");
   return path.join(os.tmpdir(), "VONO");
 }
-function stateDir(): string {
-  return path.join(vonoRoot(), "state");
+/** Returns …\VONO\state, CREATING it (recursive) — the watchdog may start on a clean machine before
+ *  VONO has ever run, so this must bootstrap C:\ProgramData\VONO\state itself (else wx lock ⇒ ENOENT). */
+export function stateDir(): string {
+  const d = path.join(vonoRoot(), "state");
+  try { mkdirSync(d, { recursive: true }); } catch { /* best effort */ }
+  return d;
 }
-function logsDir(): string {
+/** Returns …\VONO\logs, creating it (recursive) — independent of state dir. */
+export function logsDir(): string {
   const d = path.join(vonoRoot(), "logs");
   try { mkdirSync(d, { recursive: true }); } catch { /* best effort */ }
   return d;
@@ -361,9 +368,9 @@ export function startObserver(): ReturnType<typeof setInterval> {
 }
 
 /** Real single-watchdog lock deps: atomic wx create; per-instance ownerId; identity by FULL exec path
- *  (never basename alone); owner-matched release; never kills. */
-function realLockDeps(): LockDeps {
-  stateDir(); // ensure the directory exists before an exclusive create
+ *  (never basename alone); owner-matched release; never kills. Exported for the clean-bootstrap test. */
+export function realLockDeps(): LockDeps {
+  stateDir(); // CREATES …\VONO\state (recursive) before the exclusive create — clean-machine bootstrap
   return {
     lockPath: lockPath(),
     ownerId: randomUUID(),

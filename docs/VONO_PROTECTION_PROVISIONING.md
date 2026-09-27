@@ -2,11 +2,11 @@
 
 ## ⚠️ Tracked follow-ups (NOT blockers for the pilot PR-D)
 
-**FOLLOW-UP 1 — before the installer BUILD:** switch the bundled watchdog runtime to a supported
-**Node 22 LTS**. Pin the exact version + official SHA-256 (`PINNED_SHA256` in `fetch-node-runtime.cjs`);
-**no unverified runtime may be staged** (the fetch script already fails closed on a missing/mismatched
-hash). Rationale: the watchdog is local-only so Node 20's EOL is not a security blocker, but we must not
-ship an EOL runtime to fleet machines. Cost: one-line version + hash change.
+**FOLLOW-UP 1 — DONE (2026-09-27):** the bundled watchdog runtime is pinned to **Node v22.23.3 LTS
+("Jod"), win-x64**, with `PINNED_SHA256 = 9c9245166b4a8e182e0b797da9c20136117ff24368eaff1fec8343a123c8db0e`
+in `fetch-node-runtime.cjs`. The fetch verifies downloaded == official `SHASUMS256.txt` == pin and fails
+closed (no unverified runtime staged). Verified end-to-end: fetch+hash pass, and the staged node.exe
+runs the bundle. (Re-pin version + hash on a future Node 22.x bump.)
 
 **FOLLOW-UP 2 — before FLEET SCALE (100→300):** replace the stale-lock **blind-unlink** reclaim in
 `watchdog-lock.ts` with an **atomic rename/claim** (`rename(lock → lock.<ownerId>)`; only one contender
@@ -32,11 +32,11 @@ playback changes here.**
     NODE_LICENSE.txt                    Node's license/notice (shipped alongside the runtime)
 ```
 
-**Node runtime supply-chain:** pinned **v20.18.1 / win-x64** from the official `https://nodejs.org/dist/`.
+**Node runtime supply-chain:** pinned **v22.23.3 LTS / win-x64** from the official
+`https://nodejs.org/dist/`, `PINNED_SHA256 = 9c9245166b4a8e182e0b797da9c20136117ff24368eaff1fec8343a123c8db0e`.
 `fetch-node-runtime.cjs` SHA-256-verifies the downloaded `node.exe` against BOTH the official
-`SHASUMS256.txt` entry for `win-x64/node.exe` AND an in-repo `PINNED_SHA256` constant; the build **fails
-closed** on any mismatch or a missing pin (no silent fallback). `PINNED_SHA256` must be filled from the
-official `SHASUMS256.txt` on the build machine (discovery run: `ALLOW_UNPINNED_DISCOVERY=1` prints it).
+`SHASUMS256.txt` entry for `win-x64/node.exe` AND the in-repo `PINNED_SHA256`; the build **fails closed**
+on any mismatch (no silent fallback). Ships `NODE_LICENSE.txt`.
 
 Build-time staging (run by `npm run dist:win`):
 - `scripts/fetch-node-runtime.cjs` → `resources/vono-watchdog/node.exe` (pinned Node LTS win-x64).

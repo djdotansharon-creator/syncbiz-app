@@ -8,7 +8,9 @@ import { readFileSync } from "node:fs";
 import { deriveState, decide, initialMemory, initProgressTracker, observeProgress, observeMpvDown, recordAttempt } from "./state-machine";
 import { acquireLock, type LockDeps, type LockRecord } from "./watchdog-lock";
 import { executeRecovery, killWithEscalation, type RecoveryDeps } from "./recovery";
-import { startObserver, isValidExe, effectivePidOf, verifyVonoPid, launchDetached } from "./observer";
+import { existsSync, rmSync } from "node:fs";
+import os from "node:os";
+import { startObserver, isValidExe, effectivePidOf, verifyVonoPid, launchDetached, stateDir, logsDir, realLockDeps } from "./observer";
 import { WD, VONO_HEARTBEAT_INTERVAL_MS, taskkillPath, tasklistPath, type VonoHeartbeat, type VonoControlState } from "./contract";
 
 /** Progress facts for a "healthy, well-progressed" attempt (past startup) — the default for the
@@ -463,6 +465,29 @@ function lockInstance(vfs: Vfs, id: { ownerId: string; pid: number; nodePath?: s
   const missing = need.filter((s) => !xml.includes(s));
   assert("M task XML has required settings", missing.length === 0, missing.length ? `missing: ${missing.join(" | ")}` : "all present");
   assert("M task XML: non-elevated (no HighestAvailable)", !xml.includes("HighestAvailable"), "no HighestAvailable");
+}
+
+// ── P1: clean-machine bootstrap — no VONO/state dir exists yet ──────────────────────────────────
+{
+  const root = path.join(os.tmpdir(), `vono-clean-${process.pid}-${Date.now()}`);
+  const prev = process.env.VONO_STATE_ROOT;
+  process.env.VONO_STATE_ROOT = root;
+  try {
+    assert("P1 precondition: root does NOT exist", !existsSync(root), root);
+    // stateDir()/logsDir() must bootstrap their directories on a completely clean machine.
+    const sd = stateDir();
+    const ld = logsDir();
+    assert("P1 stateDir bootstraps (recursive mkdir)", existsSync(sd), sd);
+    assert("P1 logsDir bootstraps independently", existsSync(ld), ld);
+    // Lock acquisition must then succeed (wx no longer throws ENOENT).
+    const h = acquireLock(realLockDeps());
+    assert("P1 lock acquired on clean machine", h !== null, "acquired");
+    h?.release();
+    assert("P1 lock released", !existsSync(path.join(sd, "watchdog.lock")), "released");
+  } finally {
+    if (prev === undefined) delete process.env.VONO_STATE_ROOT; else process.env.VONO_STATE_ROOT = prev;
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
 }
 
 recoveryTests().then(() => {

@@ -19,11 +19,11 @@ const https = require("node:https");
 const crypto = require("node:crypto");
 
 // ── PINS (reproducibility) ──────────────────────────────────────────────────
-const NODE_VERSION = "v20.18.1"; // pinned LTS
+const NODE_VERSION = "v22.23.3"; // pinned supported Node 22 LTS ("Jod")
 const NODE_ARCH_DIR = "win-x64"; // pinned arch for the pilot
-// SHA-256 of https://nodejs.org/dist/v20.18.1/win-x64/node.exe — MUST be pinned from the official
-// SHASUMS256.txt before a real build. Left empty on purpose so an unverified build fails closed.
-const PINNED_SHA256 = ""; // <-- paste the official win-x64/node.exe sha256 here to enable staging
+// SHA-256 of https://nodejs.org/dist/v22.23.3/win-x64/node.exe, from the official SHASUMS256.txt.
+// The build verifies downloaded == official SHASUMS == this pin; any mismatch fails closed (no fallback).
+const PINNED_SHA256 = "9c9245166b4a8e182e0b797da9c20136117ff24368eaff1fec8343a123c8db0e";
 
 const DIST = `https://nodejs.org/dist/${NODE_VERSION}`;
 const NODE_URL = `${DIST}/${NODE_ARCH_DIR}/node.exe`;
