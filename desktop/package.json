@@ -18,7 +18,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "dist": "npm run build && electron-builder",
     "build-icons": "node scripts/build-icons.cjs",
-    "dist:win": "npm run build-icons && node scripts/fetch-mpv.cjs && npm run build && electron-builder --win",
+    "build:watchdog": "node scripts/build-watchdog.cjs",
+    "fetch:node-runtime": "node scripts/fetch-node-runtime.cjs",
+    "dist:win": "npm run build-icons && node scripts/fetch-mpv.cjs && node scripts/fetch-node-runtime.cjs && npm run build && npm run build:watchdog && electron-builder --win",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux",
     "dist:publish": "npm run build && electron-builder --publish always"
@@ -79,6 +81,12 @@
         {
           "from": "resources/mpv/mpv.exe",
           "to": "mpv.exe"
+        }
+      ],
+      "extraFiles": [
+        {
+          "from": "resources/vono-watchdog",
+          "to": "vono-watchdog"
         }
       ]
     },

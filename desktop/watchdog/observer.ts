@@ -9,8 +9,9 @@
  * Not bundled into the Electron app (desktop tsconfig compiles src/** only).
  */
 
-import { readFileSync, appendFileSync, writeFileSync, renameSync, existsSync, statSync, mkdirSync } from "node:fs";
+import { readFileSync, appendFileSync, writeFileSync, renameSync, existsSync, statSync, mkdirSync, openSync, writeSync, closeSync, unlinkSync, readlinkSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 
@@ -36,6 +37,7 @@ import {
   type Decision,
 } from "./state-machine";
 import { executeRecovery, type RecoveryDeps } from "./recovery";
+import { acquireLock, type LockDeps } from "./watchdog-lock";
 
 // ── Paths (mirror desktop/src/main/vono-paths.ts) ─────────────────────────────
 function vonoRoot(): string {
@@ -55,6 +57,7 @@ const controlPath = () => path.join(stateDir(), "control.json");
 const watchdogLogPath = () => path.join(logsDir(), "watchdog.log");
 const restartHistoryPath = () => path.join(logsDir(), "restart-history.json");
 const cachePath = () => path.join(stateDir(), "watchdog-cache.json"); // last-known execPath, LOCAL only
+const lockPath = () => path.join(stateDir(), "watchdog.lock"); // single-watchdog lock, LOCAL only
 
 // ── Safe readers (never throw; a missing/partial file just reads as null) ──────
 function readJson<T>(p: string): T | null {
@@ -126,7 +129,7 @@ export function effectivePidOf(hbPid: number | null | undefined, lastKnownPid: n
 /** Extract a process image basename for `pid` from the OS, or null if it can't be determined.
  *  Windows: absolute System32\tasklist.exe, args array, shell:false, CSV/no-header. Non-Windows (dev):
  *  `ps -p <pid> -o comm=`. Never a PATH lookup for tasklist. */
-function processImageName(pid: number): string | null {
+export function processImageName(pid: number): string | null {
   try {
     if (process.platform === "win32") {
       const res = spawnSync(tasklistPath(), ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], { encoding: "utf8", shell: false });
@@ -156,6 +159,43 @@ export function verifyVonoPid(pid: number | null | undefined): boolean {
   if (!image) return false; // unknown image ⇒ do NOT treat as VONO, do NOT kill
   return isExpectedVonoBasename(image);
 }
+
+// ── Full process identity (exec path + command line) — for the watchdog LOCK ownership check ────
+// Basename alone is insufficient (PID reuse + any node.exe). On Windows we read the FULL ExecutablePath
+// and CommandLine via absolute PowerShell + CIM (one call, memoized briefly). Non-Windows (dev): /proc.
+let procInfoMemo: { pid: number; at: number; exe: string | null; cmd: string | null } | null = null;
+function winPowershellPath(): string {
+  const sysRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+  return `${sysRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+}
+function queryProcessInfo(pid: number): { exe: string | null; cmd: string | null } {
+  if (procInfoMemo && procInfoMemo.pid === pid && Date.now() - procInfoMemo.at < 3000) {
+    return { exe: procInfoMemo.exe, cmd: procInfoMemo.cmd };
+  }
+  let exe: string | null = null;
+  let cmd: string | null = null;
+  try {
+    if (process.platform === "win32") {
+      const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; "$($p.ExecutablePath)|CMD|$($p.CommandLine)"`;
+      const res = spawnSync(winPowershellPath(), ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", shell: false });
+      const out = (res.stdout || "").trim();
+      if (out) {
+        const [e, c] = out.split("|CMD|");
+        exe = e && e.trim() ? e.trim() : null;
+        cmd = c && c.trim() ? c.trim() : null;
+      }
+    } else {
+      try { exe = readlinkSync(`/proc/${pid}/exe`); } catch { exe = null; }
+      try { cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ").trim() || null; } catch { cmd = null; }
+    }
+  } catch {
+    exe = null; cmd = null;
+  }
+  procInfoMemo = { pid, at: Date.now(), exe, cmd };
+  return { exe, cmd };
+}
+export function processExecPath(pid: number): string | null { return queryProcessInfo(pid).exe; }
+export function processCommandLine(pid: number): string | null { return queryProcessInfo(pid).cmd; }
 
 // ── Bounded restart-history ring (audit trail of executed actions) ────────────
 function appendRestartHistory(entry: Record<string, unknown>): void {
@@ -320,7 +360,42 @@ export function startObserver(): ReturnType<typeof setInterval> {
   return timer;
 }
 
+/** Real single-watchdog lock deps: atomic wx create; per-instance ownerId; identity by FULL exec path
+ *  (never basename alone); owner-matched release; never kills. */
+function realLockDeps(): LockDeps {
+  stateDir(); // ensure the directory exists before an exclusive create
+  return {
+    lockPath: lockPath(),
+    ownerId: randomUUID(),
+    pid: process.pid,
+    nodePath: process.execPath, // our bundled node.exe (full path)
+    entryPath: process.argv[1] || __filename, // watchdog.cjs (full path)
+    now: () => Date.now(),
+    log,
+    openExclusive: (p: string): number | null => {
+      try { return openSync(p, "wx"); } // atomic exclusive create — throws EEXIST if present
+      catch (e) { if ((e as NodeJS.ErrnoException).code === "EEXIST") return null; throw e; }
+    },
+    writeLock: (fd: number, data: string) => { writeSync(fd, data); },
+    closeFd: (fd: number) => { closeSync(fd); },
+    readLock: (p: string) => readJson<import("./watchdog-lock").LockRecord>(p),
+    unlink: (p: string) => { unlinkSync(p); },
+    isProcessAlive: (pid: number) => isProcessAlive(pid),
+    processExecPath: (pid: number) => processExecPath(pid),
+    processCommandLine: (pid: number) => processCommandLine(pid),
+  };
+}
+
 if (require.main === module) {
+  const lock = acquireLock(realLockDeps());
+  if (!lock) {
+    log(`[BOOT] another watchdog owns the lock — exiting cleanly`);
+    process.exit(0);
+  }
+  const release = () => { try { lock.release(); } catch { /* ignore */ } };
+  process.on("exit", release);
+  process.on("SIGINT", () => { release(); process.exit(0); });
+  process.on("SIGTERM", () => { release(); process.exit(0); });
   log(`[BOOT] VONO Watchdog observer + recovery (PR-C) tick=${WD.TICK_MS}ms root=${vonoRoot()}`);
   startObserver();
 }
