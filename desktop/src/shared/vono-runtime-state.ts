@@ -83,3 +83,27 @@ export interface VonoControlState {
   /** the boot the state was created in — voided after a reboot once a real bootId source exists. */
   bootId: number | null;
 }
+
+/**
+ * Health states derived by the external Watchdog from the heartbeat + control contract above. Declared
+ * HERE (the single contract) so the watchdog, the future Fleet Protect telemetry, and any UI all use
+ * ONE definition — no duplicate/drift. The watchdog owns the detection thresholds + recovery actions;
+ * this file owns only the shared vocabulary. Exactly the 7 canonical states.
+ */
+export type WatchdogState =
+  | "HEALTHY"
+  | "APP_MISSING"
+  | "RENDERER_STALE"
+  | "MPV_DOWN"
+  | "PLAYBACK_STALLED"
+  | "RECOVERING"
+  | "MAINTENANCE";
+
+/** Recovery actions a (future) active watchdog may take. In the READ-ONLY observer these are only
+ *  COMPUTED + logged as "would do", never executed. */
+export type RecoveryAction =
+  | "none"
+  | "launch_app"
+  | "reload_renderer"
+  | "restart_app"
+  | "await_recovery";
