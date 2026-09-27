@@ -226,14 +226,16 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * (e.g. ENOENT / not executable). The async "error" listener is ALWAYS attached, so a failed spawn can
  * never surface as an unhandled EventEmitter 'error' that crashes the watchdog. Exported for tests.
  */
-export function launchDetached(execPath: string): Promise<boolean> {
+export function launchDetached(execPath: string, spawnFn: typeof spawn = spawn): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     let settled = false;
     const done = (v: boolean) => { if (!settled) { settled = true; resolve(v); } };
     try {
-      // Detached + unref so the launched VONO is independent of the watchdog. shell:false ⇒ execPath
-      // is the executable, never a shell command line (no interpolation).
-      const child = spawn(execPath, [], { detached: true, stdio: "ignore", shell: false });
+      // cwd = the install dir (the directory holding execPath) so the launched VONO does NOT inherit the
+      // watchdog's cwd (<install>\vono-watchdog) — inheriting it breaks mpv/runtime-binary resolution and
+      // no mpv engines spawn (proven by A/B field test). Detached + unref keeps VONO independent of the
+      // watchdog; shell:false ⇒ execPath is the executable, never a shell command line (no interpolation).
+      const child = spawnFn(execPath, [], { cwd: path.dirname(execPath), detached: true, stdio: "ignore", shell: false });
       child.once("error", (e) => { log(`[RECOVERY] launch spawn error: ${(e as Error).message}`); done(false); });
       child.once("spawn", () => { try { child.unref(); } catch { /* ignore */ } done(true); });
     } catch (e) {
