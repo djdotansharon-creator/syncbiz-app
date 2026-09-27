@@ -629,6 +629,11 @@ export class MpvManager {
     // correctly ignored as superseded by the renderer. (Was: `this.st.attemptId = attemptId` up front,
     // which let a late old-stream time-pos falsely confirm the new attempt.)
     this.pendingAttemptId = attemptId;
+    // A brand-new load has NO position/duration yet. Reset both now so no push before this load's
+    // start-file (the no-process branch below, or a stale time-pos still queued in the pipe) can report
+    // the PREVIOUS track's position/duration — which would let a fresh attempt falsely look "confirmed".
+    this.st.position = 0;
+    this.st.duration = 0;
     if (!this.child) {
       this.st.lastError = "play(): mpv is not running (binary missing, process exiting, or watchdog restarting)";
       this.st.status = "idle";
