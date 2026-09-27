@@ -4,6 +4,7 @@
  * anti-loop behavior on synthetic heartbeats so the logic is reviewable without a live box.
  */
 import { deriveState, decide, initialMemory, initProgressTracker, observeProgress } from "./state-machine";
+import { startObserver } from "./observer";
 import { VONO_HEARTBEAT_INTERVAL_MS, type VonoHeartbeat, type VonoControlState } from "./contract";
 
 /** Progress facts for a "healthy, well-progressed" attempt (past startup) — the default for the
@@ -113,6 +114,19 @@ const stateAt = (h: VonoHeartbeat, tr: ReturnType<typeof initProgressTracker>, n
   stateAt(hb({ playback: { status: "playing", position: 0, duration: 200, positionAt: B, attemptId: 301 } }), tr, B); // first sight of new attempt
   const s = stateAt(hb({ playback: { status: "playing", position: 0, duration: 200, positionAt: B, attemptId: 301 } }), tr, B + 25_000);
   assert("C attemptId change resets stall history", s !== "PLAYBACK_STALLED", `→ ${s} (progressObserved reset)`);
+}
+
+// E. Process lifetime — the observe loop must keep the Node process alive 24/7 (NOT unref'd).
+//    hasRef()===true proves the active interval will hold the event loop open across every tick, so
+//    the observer survives past the first tick until an explicit shutdown. We clear it immediately
+//    (well before the first 2s tick) so this check itself performs zero file I/O and lets the test exit.
+{
+  const t = startObserver();
+  const refd = typeof (t as { hasRef?: () => boolean }).hasRef === "function"
+    ? (t as { hasRef: () => boolean }).hasRef()
+    : true;
+  assert("E observer loop keeps process alive (timer ref'd, not unref'd)", refd === true, `hasRef=${refd}`);
+  clearInterval(t);
 }
 
 // eslint-disable-next-line no-console

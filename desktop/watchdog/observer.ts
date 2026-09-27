@@ -101,9 +101,15 @@ export function tick(mem: WatchdogMemory, tracker: ProgressTracker, prevState: s
   return { decision, changed };
 }
 
-// ── Loop (only runs when invoked directly; import for tests without side effects) ──
-function main(): void {
-  log(`[BOOT] VONO Watchdog observer (READ-ONLY POC) tick=${WD.TICK_MS}ms root=${vonoRoot()}`);
+// ── Loop ───────────────────────────────────────────────────────────────────────
+/**
+ * Start the observe loop and return its timer handle. The timer is deliberately NOT `unref()`'d:
+ * this loop is the observer's whole reason to live, so the active interval keeps the Node process
+ * running 24/7. The process exits only on an explicit shutdown/termination (SIGINT/SIGTERM/kill), or
+ * when a caller `clearInterval()`s the returned handle. Importing this module runs nothing (the loop
+ * starts only under `require.main` or when a caller invokes `startObserver()`), so tests are side-effect free.
+ */
+export function startObserver(): ReturnType<typeof setInterval> {
   const mem = initialMemory();
   const tracker = initProgressTracker();
   let prevState: string | null = null;
@@ -111,9 +117,12 @@ function main(): void {
     const { decision } = tick(mem, tracker, prevState);
     prevState = decision.state;
   }, WD.TICK_MS);
-  if (typeof timer.unref === "function") timer.unref();
+  // NOTE: no timer.unref() — see the doc-comment above. An unref'd loop would let Node exit
+  // immediately when this is the only active handle, killing the watchdog after zero ticks.
+  return timer;
 }
 
 if (require.main === module) {
-  main();
+  log(`[BOOT] VONO Watchdog observer (READ-ONLY POC) tick=${WD.TICK_MS}ms root=${vonoRoot()}`);
+  startObserver();
 }

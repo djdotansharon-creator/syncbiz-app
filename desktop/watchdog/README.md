@@ -9,12 +9,17 @@ state machine, and logs what it *would* do. It executes **no** recovery and spaw
 `src/**`), does not touch playback code, and has no network dependency.
 
 ## Files
-- `contract.ts` — heartbeat / control types + thresholds (mirror of the shared contract from
-  heartbeat PR-A; unify once PR-A lands in main).
-- `state-machine.ts` — **pure** `deriveState()` (detection) + `decide()` (recovery/anti-loop). No I/O.
+- `contract.ts` — **re-exports** the single source-of-truth schema from
+  `desktop/src/shared/vono-runtime-state.ts` (heartbeat + control + `WatchdogState`/`RecoveryAction`,
+  landed by PR-A, now in main) and adds only the watchdog's operational thresholds (`WD`). No schema
+  copy, so there is zero drift between the writer (app) and the reader (watchdog).
+- `state-machine.ts` — **pure** `deriveState()` (detection) + `decide()` (recovery/anti-loop) + the
+  per-attempt `ProgressTracker` (`observeProgress`). No I/O.
 - `observer.ts` — read-only loop: reads `C:\ProgramData\VONO\state\{heartbeat,control}.json`, probes
-  the VONO PID (signal 0), logs transitions to `C:\ProgramData\VONO\logs\watchdog.log`.
-- `self-check.ts` — synthetic scenarios proving the 7 states + anti-loop, no live box needed.
+  the VONO PID (signal 0), logs transitions to `C:\ProgramData\VONO\logs\watchdog.log`. The loop timer
+  is **not** `unref()`'d, so the process stays alive 24/7 until an explicit shutdown.
+- `self-check.ts` — synthetic scenarios proving the 7 states + anti-loop + startup-safety (A–D) +
+  process-lifetime (E), no live box needed.
 - `tsconfig.json` — standalone typecheck (`tsc --noEmit -p desktop/watchdog/tsconfig.json`).
 
 ## Try it

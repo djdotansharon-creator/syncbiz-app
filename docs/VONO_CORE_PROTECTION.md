@@ -11,6 +11,36 @@ PR #21 was merged — **PR #21 is NOT in main** (see §A).
 
 ---
 
+## 0. Ownership & responsibility boundaries (decision)
+
+The VONO Watchdog is an **external local process**, but it is a **built-in part of the VONO product**
+(shipped in the installer, default ON) — not a separate tool and not an optional add-on.
+
+**Layered responsibilities — each layer owns exactly one job:**
+
+| Layer | Owns | Does NOT do |
+|---|---|---|
+| **Local Watchdog** (this design) | local protection + local health state: keep VONO alive, detect APP/RENDERER/MPV/PLAYBACK failure, recover/restart, report health | never selects, schedules, or plays content; never runs campaigns/ads/jingles; never touches the MASTER lease |
+| **VONO Cloud** (Fleet Protect / Control Room) | fleet visibility, telemetry aggregation, alerts, and **commands** (incl. campaign/ad/jingle scheduling + targeting) | never runs playback itself; never recovers a box directly (it asks; the box acts) |
+| **Branch MASTER** (existing app) | executes playback and `PLAY_INTERRUPT` (ads/jingles/campaigns) locally | not responsible for its own process resurrection (that's the Watchdog) |
+
+**Critical rule:** remote campaigns / ads / jingles are **NOT executed by the Watchdog**. They flow
+**Control Room → VONO Cloud → branch MASTER**, and the MASTER performs the actual playback /
+`PLAY_INTERRUPT`. The Watchdog only ensures the MASTER process is alive to receive them.
+
+**Future campaign design must support (documentation only — NOT in scope here):**
+- **Targeting hierarchy:** global / country / region / group / branch.
+- **Scheduled playback:** time-windowed ad/jingle campaigns.
+- **Pre-download to local cache:** a scheduled ad must still fire during an **internet outage** — the
+  MASTER plays it from local cache; the schedule is resolved locally once the campaign + assets have
+  been synced. (Aligns with the offline/Music-Bank keep-offline model.)
+
+Fleet Protect and Campaigns are **not implemented in PR #27** (read-only observer only). This section
+is the boundary of record so later PRs (PR-F fleet telemetry, and a separate Campaigns track) stay in
+their lane.
+
+---
+
 ## A. Current heartbeat audit (PR #21 vs current main)
 
 **Location of PR #21:** commit `4e95730` on branch `feat/desktop-heartbeat-writer` (also on origin).
@@ -125,7 +155,7 @@ Let `HB_INTERVAL = heartbeat.intervalMs` (5000).
 | **APP_MISSING** | heartbeat.json missing/stale (`now − writtenAt > 3×HB_INTERVAL = 15s`) OR VONO process not found | 15s stale, or PID gone | **launch/relaunch VONO** | 3 per 10-min window | 30s between attempts | after 3 fails → BACKOFF (5-min), alert `app_missing` |
 | **RENDERER_STALE** | `renderer.alive===false` OR `renderer.lastSeenAt` stale (`> 4×rendererPingMs`) while app.alive | 20s (once renderer ping exists; **reserved** until then) | soft: signal app to reload renderer; if unsupported → treat as APP restart | 2 | 30s | escalate to APP restart after 2 |
 | **MPV_DOWN** | `mpv.engineReady===false` for a sustained window while status intends play | 10s | rely on app's own mpv respawn first; if still down → app restart | 2 | 45s | escalate to APP restart; alert `mpv_down` |
-| **PLAYBACK_STALLED** | status=="playing" AND `now − playback.positionAt > STALL` AND duration!=live | `STALL = 12s` | rely on app self-heal first (renderer redispatch/skip already exists); if still stalled after grace → app restart | 2 | 60s | alert `playback_stalled`; never faster than the app's own 30s/60s startup machine |
+| **PLAYBACK_STALLED** | intends play AND **this attempt already proved real progress** AND **attempt age ≥ startup grace** AND `now − playback.positionAt > STALL` — **duration-agnostic** (`duration===0` live/radio counts, its position still advances while healthy) | `STALL = 12s`, `startup grace = 30s` | rely on app self-heal first (renderer redispatch/skip already exists); if still stalled after grace → app restart | 2 | 60s | alert `playback_stalled`; never faster than the app's own 30s/60s startup machine |
 | **RECOVERING** | a recovery action was issued and we await HEALTHY | wait `RECOVERY_CONFIRM = 20s` | none (observe) | — | — | if HEALTHY within window → RECOVERED (log); else next escalation step |
 | **MAINTENANCE** | valid `control.json`: `mode!="none"` AND `now < expiresAt` (+ bootId match once available) | — | **suppress ALL recovery** | — | — | log `maintenance_active(reason, expiresAt)`; auto-exit when expired |
 
@@ -195,7 +225,8 @@ shared file is on PR-B's base.
 | watchdog tick | 2000 ms | responsive without busy-spin |
 | APP stale | 3×HB = 15 s | tolerate GC/IO pauses; still fast |
 | MPV_DOWN grace | 10 s | let the app respawn mpv first |
-| PLAYBACK_STALL | 12 s | > app's 6s freeze watchdog, < user patience |
+| PLAYBACK_STALL | 12 s | > app's 6s freeze watchdog, < user patience (only AFTER proven progress) |
+| startup grace | 30 s | a fresh attempt is never STALLED until it proves progress AND is older than this — ≥ the app's stream-startup policy so the watchdog can't fight a 20–30s startup |
 | RENDERER stale | 20 s | reserved until renderer ping exists |
 | attempts / window | 3 per 10 min (APP), 2 (others) | prevent restart loops |
 | inter-attempt cooldown | 30–60 s per state | let a restart settle before judging |
