@@ -340,6 +340,35 @@ async function recoveryTests(): Promise<void> {
     const r = await executeRecovery({ action: "restart_app", fromState: "MPV_DOWN", pid: 903, execPath: "VONO.exe" }, d);
     assert("K5 taskkill fails + alive ⇒ NO launch, survives", !r.ok && !d.calls.some((c) => c.startsWith("launch:")), d.calls.join(","));
   }
+  // Q: launchDetached must spawn VONO with cwd = dirname(execPath) — NOT the watchdog's cwd — so the
+  //    launched app resolves mpv/runtime binaries correctly. Uses an injected fake spawn (no real proc).
+  function fakeSpawn() {
+    const rec: { cmd?: string; args?: unknown; opts?: Record<string, unknown>; unref: boolean } = { unref: false };
+    const handlers: Record<string, (arg?: unknown) => void> = {};
+    const child = { once: (ev: string, cb: (arg?: unknown) => void) => { handlers[ev] = cb; }, unref: () => { rec.unref = true; } };
+    const fn = ((cmd: string, args: unknown, opts: Record<string, unknown>) => { rec.cmd = cmd; rec.args = args; rec.opts = opts; return child; }) as unknown as typeof import("node:child_process").spawn;
+    return { fn, rec, handlers };
+  }
+  {
+    // Q1–Q4: success path — cwd = dirname (with SPACES), shell:false, detached:true, unref on spawn.
+    const exe = "C:\\Program Files\\VONO SyncBiz Player\\SyncBiz Player.exe";
+    const { fn, rec, handlers } = fakeSpawn();
+    const p = launchDetached(exe, fn);
+    handlers.spawn?.(); // simulate successful spawn
+    const ok = await p;
+    assert("Q1 launch cwd = dirname(execPath)", rec.opts?.cwd === path.dirname(exe), `cwd=${rec.opts?.cwd}`);
+    assert("Q2 spaces in install path preserved", rec.opts?.cwd === "C:\\Program Files\\VONO SyncBiz Player", `cwd=${rec.opts?.cwd}`);
+    assert("Q3 shell:false + argv-array (no interpolation)", rec.opts?.shell === false && Array.isArray(rec.args) && (rec.args as unknown[]).length === 0, `shell=${rec.opts?.shell} args=${JSON.stringify(rec.args)}`);
+    assert("Q4 detached + unref on spawn", rec.opts?.detached === true && rec.unref === true && ok === true, `detached=${rec.opts?.detached} unref=${rec.unref} ok=${ok}`);
+  }
+  {
+    // Q5: error path unchanged — resolves false, no unref, no throw.
+    const { fn, rec, handlers } = fakeSpawn();
+    const p = launchDetached("C:\\x\\SyncBiz Player.exe", fn);
+    handlers.error?.(new Error("ENOENT"));
+    const ok = await p;
+    assert("Q5 spawn error ⇒ false, no unref, no throw", ok === false && rec.unref === false, `ok=${ok} unref=${rec.unref}`);
+  }
 }
 
 // I1/I2 (real validation) + I5 (absolute taskkill) — sync checks on the real functions.
