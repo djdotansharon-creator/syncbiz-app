@@ -51,7 +51,7 @@ function sanitizeError(raw: string | null | undefined): string | null {
   return s.length ? s : "error";
 }
 
-type StartMeta = { appVersion: string; pid: number };
+type StartMeta = { appVersion: string; pid: number; execPath: string };
 
 let beatTimer: NodeJS.Timeout | null = null;
 let coalesceTimer: NodeJS.Timeout | null = null;
@@ -61,6 +61,7 @@ let lastWriteErrorLogAt = 0; // rate-limit gate for write-failure logging
 // Process metadata (set on start).
 let appVersion = "";
 let pid = 0;
+let execPath = ""; // process.execPath — LOCAL ONLY, for the watchdog to relaunch; never sent to cloud
 let sessionStartedAt = 0;
 
 // Latest observed fields (updated in-memory from MpvStatusSnapshot; a disk write is separate).
@@ -81,6 +82,7 @@ function buildHeartbeat(): VonoHeartbeat {
     intervalMs: VONO_HEARTBEAT_INTERVAL_MS,
     pid,
     appVersion,
+    ...(execPath ? { execPath } : {}),
     sessionStartedAt,
     bootId: null, // reserved — no reliable cross-process source in pure Node/Electron (see contract)
     branchId,
@@ -137,6 +139,7 @@ export function startHeartbeat(meta: StartMeta): void {
   if (beatTimer) return;
   appVersion = meta.appVersion;
   pid = meta.pid;
+  execPath = meta.execPath;
   sessionStartedAt = Date.now();
   positionAt = Date.now();
   writeNow();

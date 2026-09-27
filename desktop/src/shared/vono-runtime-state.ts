@@ -36,6 +36,12 @@ export interface VonoHeartbeat {
   intervalMs: number;
   pid: number;
   appVersion: string;
+  /**
+   * Absolute path to the VONO executable (`process.execPath`). LOCAL ONLY — used by the external
+   * Watchdog to relaunch/restart THIS install. It is NEVER sent to Fleet telemetry / Cloud (a path
+   * can leak the machine/user layout). Optional so older heartbeats without it still parse.
+   */
+  execPath?: string;
   /** epoch ms when THIS app process started (distinguishes a relaunch from a long-lived process). */
   sessionStartedAt: number;
   /**

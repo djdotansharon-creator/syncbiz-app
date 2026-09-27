@@ -39,4 +39,36 @@ export const WD = {
   otherAttemptsPerWindow: 2,
   attemptWindowMs: 10 * 60_000,
   hardRestartCeilingPerHour: 6, // beyond this ⇒ observe+alert only (SAFE_HOLD behavior)
+  // Recovery execution (PR-C):
+  killGraceMs: 5000, // wait after a NON-force taskkill before escalating to /F
+  killForceMs: 3000, // wait after a force taskkill /F before giving up
+  killPollMs: 500, // poll interval while waiting for the process to exit
+  restartHistoryMax: 200, // bounded restart-history.json ring
 } as const;
+
+/** Default install path used ONLY as a last-resort fallback when neither the heartbeat nor the cache
+ *  carries an execPath. Matches the NSIS per-user install (perMachine:false). */
+export function defaultVonoExePath(): string {
+  const localAppData = process.env.LOCALAPPDATA || "";
+  return `${localAppData}\\Programs\\SyncBiz Player\\SyncBiz Player.exe`;
+}
+
+/** Accepted VONO executable file names — current pilot name + the future VONO rename. The watchdog
+ *  will ONLY launch a file whose basename is in this allowlist (case-insensitive). */
+export const VONO_EXE_BASENAMES = ["SyncBiz Player.exe", "VONO.exe", "VONO Player.exe"] as const;
+export function isExpectedVonoBasename(basename: string): boolean {
+  const b = basename.trim().toLowerCase();
+  return VONO_EXE_BASENAMES.some((n) => n.toLowerCase() === b);
+}
+
+/** Absolute path to Windows taskkill (never rely on PATH resolution). */
+export function taskkillPath(): string {
+  const sysRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+  return `${sysRoot}\\System32\\taskkill.exe`;
+}
+
+/** Absolute path to Windows tasklist (never rely on PATH resolution). */
+export function tasklistPath(): string {
+  const sysRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+  return `${sysRoot}\\System32\\tasklist.exe`;
+}

@@ -416,8 +416,29 @@ async function openMainWindow(): Promise<void> {
   fileLog("INFO", "openMainWindow: mainWindow assigned");
 }
 
+// ─── Single-instance lock (safety net against a duplicate VONO MASTER) ─────────
+// A branch station must run exactly ONE VONO. The external Watchdog may (re)launch VONO, so this is
+// the guard against a second MASTER: the FIRST instance keeps the lock; any later instance quits
+// BEFORE app.whenReady() — i.e. before it opens a window, registers the WS MASTER, or starts
+// playback — so there are zero MASTER/playback side effects. Must be evaluated before whenReady().
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  fileLog("INFO", "single-instance: another VONO is already primary — quitting this duplicate");
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    // A second VONO launch was attempted — just surface the existing window. NEVER touch playback/MASTER.
+    const win = getMainWindow();
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+  });
+}
+
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return; // duplicate instance is quitting — do nothing
   // Initialize file logger first so every subsequent step is captured.
   initFileLogger();
 
@@ -475,7 +496,7 @@ app.whenReady().then(async () => {
   orchestrator = new PlaybackOrchestrator();
   orchestrator.start(binaries);
   registerMvpIpc(getMainWindow, orchestrator);
-  startHeartbeat({ appVersion: app.getVersion(), pid: process.pid });
+  startHeartbeat({ appVersion: app.getVersion(), pid: process.pid, execPath: process.execPath });
   fileLog("INFO", "app.whenReady: VONO heartbeat started");
 
   void openMainWindow().catch((err) => {
