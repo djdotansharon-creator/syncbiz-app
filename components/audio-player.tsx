@@ -3990,7 +3990,10 @@ export function AudioPlayer() {
         // renderer must NOT cold-redispatch it here — a cold mpvPlayUrl would replace the good track on
         // the ACTIVE deck. On failure the orchestrator aborts the standby only and surfaces
         // currentAttemptError, which the load-error path advances once. Cold attempts keep PR-24 below.
-        if (desktopMpvSnapRef.current?.attemptMode === "crossfade") return;
+        // Require the snapshot to belong to the CURRENT attempt (id match) — a STALE snapshot must never
+        // decide startup-timeout ownership.
+        const modeSnap = desktopMpvSnapRef.current;
+        if (modeSnap && modeSnap.attemptId === playbackAttemptGenRef.current && modeSnap.attemptMode === "crossfade") return;
         const startingMs = Date.now() - attemptStartAtRef.current;
         if (startingMs < STREAM_STARTUP_TIMEOUT_MS) return; // still buffering within grace — no thrash
         if (streamStartupRetryRef.current < STREAM_STARTUP_MAX_RETRIES) {

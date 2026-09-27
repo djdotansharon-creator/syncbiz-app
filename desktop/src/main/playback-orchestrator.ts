@@ -191,6 +191,15 @@ export class PlaybackOrchestrator {
     return this.musicDeck(this.standbyDeckId());
   }
 
+  /** Reset the CURRENT-attempt deck's cached status to a fresh baseline. Called at the start of a new
+   *  attempt so the immediate authoritative push() can't report a stale OUTGOING "playing"+position
+   *  under the NEW attempt id (which the renderer would otherwise false-confirm / spuriously advance on).
+   *  The deck's real start-file repopulates it moments later. */
+  private resetCurrentAttemptDeckStatus(): void {
+    if (this.currentAttemptDeck === "A") this.musicStA = createInitialMpvStatus();
+    else this.musicStB = createInitialMpvStatus();
+  }
+
   private activeSt(): MpvStatus {
     return this.activeMusicDeck === "A" ? this.musicStA : this.musicStB;
   }
@@ -318,6 +327,8 @@ export class PlaybackOrchestrator {
     this.currentAttemptDeck = this.activeMusicDeck;
     this.currentAttemptMode = "cold"; // authoritative: renderer owns the PR-24 startup timeout for cold
     this.currentAttemptError = null;
+    this.resetCurrentAttemptDeckStatus();
+    this.push(); // deliver authoritative attemptId+mode to the renderer BEFORE any MPV start-file event
     this.activeMpv().setVolume(this.currentMusicTarget());
     this.activeMpv().play(u, attemptId);
   }
@@ -359,6 +370,9 @@ export class PlaybackOrchestrator {
     this.currentAttemptDeck = this.standbyDeckId();
     this.currentAttemptMode = "crossfade"; // authoritative: orchestrator owns the startup timeout here
     this.currentAttemptError = null;
+    this.resetCurrentAttemptDeckStatus();
+    this.push(); // deliver authoritative attemptId+mode to the renderer NOW, before the (yt-dlp-delayed)
+                 // start-file — so the renderer defers its cold startup-timeout from t≈0, not at ~30s.
     this.xfadePending = { fadeSec };
     this.xfadeStandbySawPlaying = false;
     standby.setVolume(0);
