@@ -35,6 +35,7 @@ import type {
 import { MVP_IPC } from "../shared/mvp-types";
 import { redactMediaToken } from "../shared/redact-media-token";
 import { WhatsAppWindow } from "./whatsapp-view";
+import { updateFromMpv } from "./heartbeat-writer";
 import {
   addAdditionalMusicFolder,
   listMusicLibrarySources,
@@ -158,6 +159,11 @@ function broadcast(win: BrowserWindow | null, payload: MvpStatusSnapshot): void 
   if (win && !win.isDestroyed()) {
     win.webContents.send(MVP_IPC.STATUS, data);
   }
+  // VONO heartbeat — single chokepoint. EVERY status path funnels through broadcast(), so the
+  // heartbeat is fed regardless of which manager.onStatus registration produced the snapshot
+  // (avoids going stale after a config-patch manager re-creation). Main-process only; no-op until
+  // startHeartbeat() runs. No renderer/IPC/playback change.
+  updateFromMpv(data);
 }
 
 export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrator?: PlaybackOrchestrator): void {
