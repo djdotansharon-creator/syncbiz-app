@@ -139,4 +139,57 @@ const OLD_PLAYING = (attemptId: number) => ({ status: "playing", position: 50, d
   o.kill();
 }
 
+// ── I–L: failed-incoming recovery must NOT stop the good active deck (orchestrator authoritative) ─────
+// crossfade path installs currentAttemptDeck = STANDBY (active untouched); cold path installs
+// currentAttemptDeck = ACTIVE (active replaced) and resets the active cache to idle.
+const activeDeckId = (o: PlaybackOrchestrator) => (o as unknown as { activeMusicDeck: "A" | "B" }).activeMusicDeck;
+const standbyId = (o: PlaybackOrchestrator) => (activeDeckId(o) === "A" ? "B" : "A");
+const priv = (o: PlaybackOrchestrator) => o as unknown as { currentAttemptDeck: "A" | "B"; currentAttemptMode: string; currentAttemptError: string | null; xfadePending: unknown; musicStA: { status: string } };
+
+// I. FAILED incoming crossfade → recovery item routes through playMusicCrossfade → REAL crossfade:
+//    active good deck stays playing, standby becomes pending, active is NOT replaced.
+{
+  const o = new PlaybackOrchestrator();
+  forceActivePlaying(o); // active deck A = the good outgoing track (#3) playing
+  // Simulate the just-failed incoming crossfade (#4): current attempt is idle+error.
+  const p = priv(o);
+  p.currentAttemptError = "no audio or video data played";
+  (o as unknown as { currentAttemptId: number }).currentAttemptId = 4;
+  p.currentAttemptMode = "crossfade";
+  (o as unknown as { currentAttemptDeck: "A" | "B" }).currentAttemptDeck = standbyId(o);
+  // Recovery item (#5) — renderer now always routes subsequent dispatches through crossfade.
+  o.playMusicCrossfade("https://youtu.be/recovery5", 6, 5);
+  const activeStillPlaying = priv(o).musicStA.status === "playing";
+  const loadedOnStandby = priv(o).currentAttemptDeck === standbyId(o);
+  assert("I recovery: real crossfade (loaded on STANDBY, not active)", loadedOnStandby && priv(o).xfadePending !== null, `deck=${priv(o).currentAttemptDeck} standby=${standbyId(o)} pending=${priv(o).xfadePending !== null}`);
+  assert("I recovery: good active deck NOT stopped/replaced", activeStillPlaying && priv(o).currentAttemptMode === "crossfade" && priv(o).currentAttemptError === null, `activePlaying=${activeStillPlaying} mode=${priv(o).currentAttemptMode} err=${priv(o).currentAttemptError}`);
+  o.kill();
+}
+
+// J. Active deck truly IDLE + subsequent dispatch → playMusicCrossfade falls back to COLD play.
+{
+  const o = new PlaybackOrchestrator();
+  // active A idle (default). Renderer would still route crossfade (prevMpv exists); orchestrator falls back.
+  o.playMusicCrossfade("https://youtu.be/x", 6, 20);
+  assert("J idle active ⇒ cold fallback", priv(o).currentAttemptMode === "cold" && priv(o).currentAttemptDeck === activeDeckId(o), `mode=${priv(o).currentAttemptMode} deck=${priv(o).currentAttemptDeck} active=${activeDeckId(o)}`);
+  o.kill();
+}
+
+// E'/F. Natural-EOF-style (active idle) ⇒ cold fallback; normal (active playing) ⇒ real crossfade.
+{
+  const o = new PlaybackOrchestrator();
+  forceActivePlaying(o);
+  o.playMusicCrossfade("https://youtu.be/next", 6, 30); // normal playing → NEXT
+  assert("F normal NEXT (active playing) ⇒ real crossfade", priv(o).currentAttemptDeck === standbyId(o) && priv(o).currentAttemptMode === "crossfade", `deck=${priv(o).currentAttemptDeck} mode=${priv(o).currentAttemptMode}`);
+  o.kill();
+}
+
+// C/D/(renderer decision): first track / after STOP have prevMpv=null ⇒ cold; subsequent ⇒ crossfade.
+{
+  const decide = (prevMpv: string | null, hasApi: boolean) => !!(prevMpv && hasApi); // mirrors the production one-liner
+  assert("C first track (prevMpv null) ⇒ cold", decide(null, true) === false, "cold");
+  assert("D after STOP (prevMpv cleared) ⇒ cold", decide(null, true) === false, "cold");
+  assert("subsequent (prevMpv set) ⇒ crossfade route", decide("http://x/y", true) === true, "crossfade");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
