@@ -90,4 +90,53 @@ function newIdSnapshotsClean(snaps: Array<{ music: { attemptId: number; status: 
   o.kill();
 }
 
+// ── E–H: attemptId correlation — a LATE OLD-attempt deck event (installed new id, before new start-file)
+//        must be powerless (no false-confirm, no premature crossfade ramp), while the error path and a
+//        correctly-correlated standby event still work. ──────────────────────────────────────────────
+const OLD_PLAYING = (attemptId: number) => ({ status: "playing", position: 50, duration: 200, volume: 80, engineReady: true, lastError: null, attemptId });
+
+// E. COLD: late OLD deck-A status (playing+progress, OLD id) after a new cold attempt began.
+{
+  const o = new PlaybackOrchestrator();
+  o.playMusic("C:\\music\\e.mp3", 100); // new cold attempt id=100 (deck A never bound → cur.attemptId=old)
+  // Inject a late OLD event on deck A (id 5) into the orchestrator cache, then push.
+  (o as unknown as Record<string, unknown>).musicStA = OLD_PLAYING(5);
+  (o as unknown as { push: () => void }).push();
+  const m = o.getState().music;
+  assert("E cold: stale OLD deck event ⇒ non-confirming under new id",
+    m.attemptId === 100 && m.attemptMode === "cold" && m.status !== "playing" && m.position === 0 && m.duration === 0,
+    `id=${m.attemptId} status=${m.status} pos=${m.position} dur=${m.duration}`);
+  o.kill();
+}
+
+// F+G. CROSSFADE: late OLD standby event ⇒ NO ramp; then a correctly-correlated standby event ⇒ ramp.
+{
+  const o = new PlaybackOrchestrator();
+  forceActivePlaying(o);
+  o.playMusicCrossfade("https://youtu.be/xyz", 6, 200); // crossfade attempt id=200 on standby B
+  const priv = o as unknown as { onMusicDeckStatus: (d: string, s: unknown) => void; xfadeRampId: unknown; xfadePending: unknown; xfadeStandbySawPlaying: boolean };
+  // F: OLD standby status (id 777) — must be ignored (no ramp, still pending, never saw playing).
+  priv.onMusicDeckStatus("B", OLD_PLAYING(777));
+  assert("F crossfade: OLD standby event ⇒ no ramp / active untouched",
+    priv.xfadeRampId === null && priv.xfadePending !== null && priv.xfadeStandbySawPlaying === false,
+    `ramp=${priv.xfadeRampId} pending=${priv.xfadePending !== null} sawPlaying=${priv.xfadeStandbySawPlaying}`);
+  // G: correctly-correlated standby status (id 200, playing+progress) — ramp is now allowed.
+  priv.onMusicDeckStatus("B", { ...OLD_PLAYING(200), position: 5, duration: 120 });
+  assert("G crossfade: correlated standby event ⇒ ramp starts", priv.xfadeRampId !== null, `ramp=${priv.xfadeRampId !== null}`);
+  o.kill();
+}
+
+// H. ERROR path: currentAttemptError still surfaces under currentAttemptId (renderer one-time skip).
+{
+  const o = new PlaybackOrchestrator();
+  forceActivePlaying(o);
+  o.playMusicCrossfade("https://youtu.be/xyz", 6, 300);
+  (o as unknown as { abortXfade: (r: string) => void }).abortXfade("standby_load_timeout"); // simulate timeout
+  const m = o.getState().music;
+  assert("H error surfaces under current id (idle + lastError)",
+    m.attemptId === 300 && m.status === "idle" && !!m.lastError && /timeout/i.test(m.lastError),
+    `id=${m.attemptId} status=${m.status} err=${m.lastError}`);
+  o.kill();
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);

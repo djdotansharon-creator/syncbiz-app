@@ -222,6 +222,11 @@ export class PlaybackOrchestrator {
    *  standby falls back to idle/stopped after such a false start. */
   private onMusicDeckStatus(deck: MusicDeckId, s: MpvStatus): void {
     if (!this.xfadePending || deck !== this.standbyDeckId()) return;
+    // CORRELATION: a late/superseded standby event (from a previous load) must be POWERLESS — it must
+    // never mark the crossfade as playing, start the ramp, or trip decode-fail, which could fade away
+    // the good active track before the NEW URL truly started. MpvManager keeps the OLD attemptId until
+    // the new load's start-file binds, so this filters exactly those stale events.
+    if (s.attemptId !== this.currentAttemptId) return;
     if (s.status === "playing") {
       this.xfadeStandbySawPlaying = true;
       if (s.duration > 0 || s.position > 0) {
@@ -279,18 +284,23 @@ export class PlaybackOrchestrator {
     // attempt is surfaced via `currentAttemptError` (status forced to "idle" + the error), which the
     // renderer treats as a load failure and skips — while the outgoing track keeps playing.
     const cur = this.currentAttemptSt();
+    const displayVolume = this.isDucked ? cur.volume : this.masterVolume;
+    // CORRELATION: the deck keeps the OLD attemptId until the new load's start-file binds. Never relabel
+    // a stale OLD deck status as the NEW attempt.
+    //  1) currentAttemptError → surface it under currentAttemptId (status idle + error) so a timeout/
+    //     decode failure still triggers the renderer's one-time SKIP_FORWARD.
+    //  2) else if the deck hasn't bound the current attempt yet (cur.attemptId !== currentAttemptId) →
+    //     publish a NON-CONFIRMING pending snapshot (idle / pos 0 / dur 0 / no error) under the
+    //     authoritative id+mode, so a stale playing/pos/dur can't false-confirm the new attempt.
+    //  3) else (bound) → publish the real deck status.
+    const music: MpvStatus & { attemptMode: "cold" | "crossfade" } =
+      this.currentAttemptError
+        ? { ...cur, status: "idle", lastError: this.currentAttemptError, attemptId: this.currentAttemptId, attemptMode: this.currentAttemptMode, volume: displayVolume }
+        : cur.attemptId !== this.currentAttemptId
+          ? { ...cur, status: "idle", position: 0, duration: 0, lastError: null, attemptId: this.currentAttemptId, attemptMode: this.currentAttemptMode, volume: displayVolume }
+          : { ...cur, attemptId: this.currentAttemptId, attemptMode: this.currentAttemptMode, volume: displayVolume };
     return {
-      music: {
-        ...cur,
-        status: this.currentAttemptError ? "idle" : cur.status,
-        lastError: this.currentAttemptError ?? cur.lastError,
-        attemptId: this.currentAttemptId,
-        attemptMode: this.currentAttemptMode, // authoritative cold|crossfade for the renderer
-        /* Display-stable volume: mid-crossfade the deck volumes ramp internally,
-           but the operator's fader must not slide on its own. Duck stays visible
-           (that dip is a product feature the operator expects to see). */
-        volume: this.isDucked ? cur.volume : this.masterVolume,
-      },
+      music,
       interrupt: { ...this.interruptSt },
       isDucked: this.isDucked,
       masterVolume: this.masterVolume,
