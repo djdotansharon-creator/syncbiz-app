@@ -13,3 +13,6 @@ staged-web/
 # to work without a hand-placed binary).
 resources/mpv/
 resources/7zr.exe
+# VONO watchdog runtime + bundle are staged at build time (fetch-node-runtime + build-watchdog),
+# shipped via win.extraFiles → <install>\vono-watchdog\. Never committed.
+resources/vono-watchdog/

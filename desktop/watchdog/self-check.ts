@@ -4,9 +4,13 @@
  * anti-loop behavior on synthetic heartbeats so the logic is reviewable without a live box.
  */
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { deriveState, decide, initialMemory, initProgressTracker, observeProgress, observeMpvDown, recordAttempt } from "./state-machine";
+import { acquireLock, type LockDeps, type LockRecord } from "./watchdog-lock";
 import { executeRecovery, killWithEscalation, type RecoveryDeps } from "./recovery";
-import { startObserver, isValidExe, effectivePidOf, verifyVonoPid, launchDetached } from "./observer";
+import { existsSync, rmSync } from "node:fs";
+import os from "node:os";
+import { startObserver, isValidExe, effectivePidOf, verifyVonoPid, launchDetached, stateDir, logsDir, realLockDeps } from "./observer";
 import { WD, VONO_HEARTBEAT_INTERVAL_MS, taskkillPath, tasklistPath, type VonoHeartbeat, type VonoControlState } from "./contract";
 
 /** Progress facts for a "healthy, well-progressed" attempt (past startup) — the default for the
@@ -359,6 +363,131 @@ assert("J real: dead pid rejected", verifyVonoPid(2147483000) === false, "dead")
   const eff = effectivePidOf(undefined, null);
   const decided = decide(deriveState({ hb: null, control: null, appProcessAlive: false, now: T0, progress: PROGRESSED, mpvDownForMs: 0 }), initialMemory(), T0);
   assert("I4 hb missing + no live pid ⇒ launch_app", eff === null && decided.action === "launch_app", `eff=${eff} action=${decided.action}`);
+}
+
+// ── Single-watchdog lock (L/N) — atomic, owner-token, full-path identity; never kills ───────────
+const BUNDLED_NODE = "C:\\install\\vono-watchdog\\node.exe";
+type Vfs = { rec: LockRecord | null; unlinkNoop?: boolean };
+type World = { pidAlive?: (p: number) => boolean; execPath?: (p: number) => string | null; cmdLine?: (p: number) => string | null };
+function lockInstance(vfs: Vfs, id: { ownerId: string; pid: number; nodePath?: string; entryPath?: string }, world: World): { deps: LockDeps; calls: string[] } {
+  const calls: string[] = [];
+  const nodePath = id.nodePath ?? BUNDLED_NODE;
+  const entryPath = id.entryPath ?? "C:\\install\\vono-watchdog\\watchdog.cjs";
+  const deps: LockDeps = {
+    lockPath: "L", ownerId: id.ownerId, pid: id.pid, nodePath, entryPath, now: () => 1, log: () => { /* quiet */ },
+    openExclusive: () => {
+      if (vfs.rec) { calls.push("EEXIST"); return null; }
+      vfs.rec = { ownerId: id.ownerId, pid: id.pid, createdAt: 1, nodePath, entryPath };
+      calls.push("open:ok"); return 1;
+    },
+    writeLock: () => { /* rec already set by openExclusive in the fake */ },
+    closeFd: () => { /* noop */ },
+    readLock: () => vfs.rec,
+    unlink: () => { calls.push("unlink"); if (!vfs.unlinkNoop) vfs.rec = null; },
+    isProcessAlive: (p) => (world.pidAlive ? world.pidAlive(p) : false),
+    processExecPath: (p) => (world.execPath ? world.execPath(p) : null),
+    processCommandLine: (p) => (world.cmdLine ? world.cmdLine(p) : null),
+  };
+  return { deps, calls };
+}
+{
+  // Free ⇒ atomic acquire; owner release removes (N4).
+  const vfs: Vfs = { rec: null };
+  const a = lockInstance(vfs, { ownerId: "A", pid: 10 }, {});
+  const h = acquireLock(a.deps);
+  assert("L free ⇒ acquired (atomic)", h !== null && a.calls.includes("open:ok"), a.calls.join(","));
+  h?.release();
+  assert("N4 owner release ⇒ lock removed", vfs.rec === null && a.calls.includes("unlink"), a.calls.join(","));
+}
+{
+  // Dead-pid lock ⇒ reclaim then acquire.
+  const vfs: Vfs = { rec: { ownerId: "old", pid: 22, createdAt: 1, nodePath: BUNDLED_NODE, entryPath: "x" } };
+  const a = lockInstance(vfs, { ownerId: "A", pid: 10 }, { pidAlive: () => false });
+  const h = acquireLock(a.deps);
+  assert("L dead-pid ⇒ reclaim + acquire", h !== null && a.calls.includes("unlink") && a.calls.includes("open:ok"), a.calls.join(","));
+}
+{
+  // N1: lock pid alive but running node.exe from ANOTHER path ⇒ foreign/stale ⇒ reclaim, never active.
+  const vfs: Vfs = { rec: { ownerId: "old", pid: 700, createdAt: 1, nodePath: "C:\\Other\\node.exe", entryPath: "y" } };
+  const a = lockInstance(vfs, { ownerId: "A", pid: 10 }, { pidAlive: () => true, execPath: () => "C:\\Other\\node.exe", cmdLine: () => "node some-other-app.js" });
+  const h = acquireLock(a.deps);
+  assert("N1 reused node.exe from another path ⇒ reclaim (not active watchdog)", h !== null && a.calls.includes("unlink"), a.calls.join(","));
+}
+{
+  // N2: old loses ownership, new acquires; old.release() MUST NOT delete the new owner's lock.
+  const vfs: Vfs = { rec: null };
+  const world: World = { pidAlive: (p) => p === 10 /* only NEW is alive; OLD(10?)*/, execPath: () => BUNDLED_NODE, cmdLine: () => "node watchdog.cjs" };
+  const oldInst = lockInstance(vfs, { ownerId: "OLD", pid: 99 }, world);
+  const oldH = acquireLock(oldInst.deps); // OLD owns (vfs empty)
+  // OLD's pid becomes dead; NEW acquires (reclaims OLD's stale lock).
+  const newInst = lockInstance(vfs, { ownerId: "NEW", pid: 10 }, world);
+  const newH = acquireLock(newInst.deps);
+  const newOwns = vfs.rec?.ownerId === "NEW";
+  oldH?.release(); // OLD exits AFTER NEW owns — must be a no-op
+  assert("N2 old release ⇒ does NOT delete new owner's lock", newH !== null && newOwns && vfs.rec?.ownerId === "NEW", `rec=${vfs.rec?.ownerId}`);
+}
+{
+  // N3: two simultaneous acquirers on the same lock ⇒ exactly one owner.
+  const vfs: Vfs = { rec: null };
+  const world: World = { pidAlive: () => true, execPath: () => BUNDLED_NODE, cmdLine: () => "node watchdog.cjs" };
+  const A = lockInstance(vfs, { ownerId: "A", pid: 1 }, world);
+  const B = lockInstance(vfs, { ownerId: "B", pid: 2 }, world);
+  const ha = acquireLock(A.deps); // A wins the atomic create
+  const hb = acquireLock(B.deps); // B sees a LIVE own-watchdog lock ⇒ exits
+  const owners = [ha, hb].filter((h) => h !== null).length;
+  assert("N3 two simultaneous ⇒ exactly one owner", owners === 1 && ha !== null && hb === null && vfs.rec?.ownerId === "A", `owners=${owners}`);
+}
+{
+  // Unverifiable exec path (null) ⇒ conservative: treat as live watchdog, exit (no steal).
+  const vfs: Vfs = { rec: { ownerId: "old", pid: 800, createdAt: 1, nodePath: BUNDLED_NODE, entryPath: "z" } };
+  const a = lockInstance(vfs, { ownerId: "A", pid: 10 }, { pidAlive: () => true, execPath: () => null });
+  const h = acquireLock(a.deps);
+  assert("L unverifiable exec path ⇒ exit, no steal", h === null && !a.calls.includes("unlink"), a.calls.join(","));
+}
+{
+  // Bounded — if reclaim can't clear the lock, acquire returns null (no infinite loop).
+  const vfs: Vfs = { rec: { ownerId: "old", pid: 555, createdAt: 1, nodePath: BUNDLED_NODE, entryPath: "q" }, unlinkNoop: true };
+  const a = lockInstance(vfs, { ownerId: "A", pid: 10 }, { pidAlive: () => false });
+  const h = acquireLock(a.deps);
+  assert("L unclearable lock ⇒ bounded null (no loop)", h === null, a.calls.join(","));
+}
+
+// ── Scheduled Task XML sanity (M) — the exact required settings are present ─────────────────────
+{
+  const xml = readFileSync(path.join(__dirname, "..", "scripts", "provisioning", "vono-protection.task.xml"), "utf8");
+  const need = [
+    "<LogonTrigger>", "<UserId>{{STATION_USER}}</UserId>", "<LogonType>InteractiveToken</LogonType>",
+    "<RunLevel>LeastPrivilege</RunLevel>", "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
+    "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>", "<StartWhenAvailable>true</StartWhenAvailable>",
+    "<AllowStartOnDemand>true</AllowStartOnDemand>", "<Interval>PT1M</Interval>", "<Count>3</Count>",
+    "{{INSTALL_DIR}}\\vono-watchdog\\node.exe", "{{INSTALL_DIR}}\\vono-watchdog\\watchdog.cjs",
+  ];
+  const missing = need.filter((s) => !xml.includes(s));
+  assert("M task XML has required settings", missing.length === 0, missing.length ? `missing: ${missing.join(" | ")}` : "all present");
+  assert("M task XML: non-elevated (no HighestAvailable)", !xml.includes("HighestAvailable"), "no HighestAvailable");
+}
+
+// ── P1: clean-machine bootstrap — no VONO/state dir exists yet ──────────────────────────────────
+{
+  const root = path.join(os.tmpdir(), `vono-clean-${process.pid}-${Date.now()}`);
+  const prev = process.env.VONO_STATE_ROOT;
+  process.env.VONO_STATE_ROOT = root;
+  try {
+    assert("P1 precondition: root does NOT exist", !existsSync(root), root);
+    // stateDir()/logsDir() must bootstrap their directories on a completely clean machine.
+    const sd = stateDir();
+    const ld = logsDir();
+    assert("P1 stateDir bootstraps (recursive mkdir)", existsSync(sd), sd);
+    assert("P1 logsDir bootstraps independently", existsSync(ld), ld);
+    // Lock acquisition must then succeed (wx no longer throws ENOENT).
+    const h = acquireLock(realLockDeps());
+    assert("P1 lock acquired on clean machine", h !== null, "acquired");
+    h?.release();
+    assert("P1 lock released", !existsSync(path.join(sd, "watchdog.lock")), "released");
+  } finally {
+    if (prev === undefined) delete process.env.VONO_STATE_ROOT; else process.env.VONO_STATE_ROOT = prev;
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
 }
 
 recoveryTests().then(() => {
