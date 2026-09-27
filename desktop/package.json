@@ -97,7 +97,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "SyncBiz Player",
-      "uninstallDisplayName": "SyncBiz Player"
+      "uninstallDisplayName": "SyncBiz Player",
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": [

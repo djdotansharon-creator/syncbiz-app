@@ -481,19 +481,27 @@ function lockInstance(vfs: Vfs, id: { ownerId: string; pid: number; nodePath?: s
   assert("L unclearable lock ⇒ bounded null (no loop)", h === null, a.calls.join(","));
 }
 
-// ── Scheduled Task XML sanity (M) — the exact required settings are present ─────────────────────
+// ── Scheduled Task provisioning sanity (M) — required settings live in the installer-run script ──
+// The task is now registered by provision-vono-protection.ps1 (invoked by the NSIS installer), not a
+// static XML. Assert the equivalent required settings are present. (Full path/space/idempotency/
+// cleanup coverage is in scripts/verify-installer-provisioning.ts.)
 {
-  const xml = readFileSync(path.join(__dirname, "..", "scripts", "provisioning", "vono-protection.task.xml"), "utf8");
-  const need = [
-    "<LogonTrigger>", "<UserId>{{STATION_USER}}</UserId>", "<LogonType>InteractiveToken</LogonType>",
-    "<RunLevel>LeastPrivilege</RunLevel>", "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
-    "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>", "<StartWhenAvailable>true</StartWhenAvailable>",
-    "<AllowStartOnDemand>true</AllowStartOnDemand>", "<Interval>PT1M</Interval>", "<Count>3</Count>",
-    "{{INSTALL_DIR}}\\vono-watchdog\\node.exe", "{{INSTALL_DIR}}\\vono-watchdog\\watchdog.cjs",
+  const prov = readFileSync(path.join(__dirname, "..", "scripts", "provisioning", "provision-vono-protection.ps1"), "utf8");
+  const need: Array<[string, RegExp]> = [
+    ["AtLogOn trigger", /New-ScheduledTaskTrigger -AtLogOn/],
+    ["current station user", /\$env:USERDOMAIN\\\$env:USERNAME/],
+    ["InteractiveToken (LogonType Interactive)", /-LogonType Interactive/],
+    ["LeastPrivilege (RunLevel Limited)", /-RunLevel Limited/],
+    ["MultipleInstances IgnoreNew", /-MultipleInstances IgnoreNew/],
+    ["no execution time limit (PT0S)", /ExecutionTimeLimit = "PT0S"/],
+    ["StartWhenAvailable", /-StartWhenAvailable/],
+    ["restart 1min x3", /-RestartInterval \(New-TimeSpan -Minutes 1\)[\s\S]*-RestartCount 3/],
+    ["idempotent single task (-Force)", /Register-ScheduledTask[\s\S]*-Force/],
+    ["watchdog runner referenced", /launch-watchdog\.ps1/],
   ];
-  const missing = need.filter((s) => !xml.includes(s));
-  assert("M task XML has required settings", missing.length === 0, missing.length ? `missing: ${missing.join(" | ")}` : "all present");
-  assert("M task XML: non-elevated (no HighestAvailable)", !xml.includes("HighestAvailable"), "no HighestAvailable");
+  const missing = need.filter(([, re]) => !re.test(prov)).map(([n]) => n);
+  assert("M provisioning script has required settings", missing.length === 0, missing.length ? `missing: ${missing.join(" | ")}` : "all present");
+  assert("M provisioning: non-elevated (no RunLevel Highest)", !/-RunLevel Highest/.test(prov), "no Highest");
 }
 
 // ── P1: clean-machine bootstrap — no VONO/state dir exists yet ──────────────────────────────────
