@@ -24,6 +24,9 @@ export interface DeriveInput {
   /** Per-attempt progress facts (from ProgressTracker). Guards PLAYBACK_STALLED so a fresh
    *  stream attempt that hasn't advanced yet (legit 20–30s startup) is never called stalled. */
   progress: AttemptProgress;
+  /** How long MPV has continuously reported engineReady===false (0 if ready). Guards MPV_DOWN so a
+   *  transient engine blip the app self-heals is not escalated before WD.mpvDownGraceMs. */
+  mpvDownForMs: number;
 }
 
 /** What the observer knows about the CURRENT attempt's real progress (see ProgressTracker). */
@@ -43,10 +46,22 @@ export interface ProgressTracker {
   baselinePositionAt: number; // hb.playback.positionAt captured at first sight of this attempt
   lastPosition: number;
   progressObserved: boolean;
+  mpvDownSince: number; // epoch ms MPV first went engineReady=false continuously (0 = ready/unknown)
 }
 
 export function initProgressTracker(): ProgressTracker {
-  return { attemptId: null, attemptFirstSeenAt: 0, baselinePositionAt: 0, lastPosition: 0, progressObserved: false };
+  return { attemptId: null, attemptFirstSeenAt: 0, baselinePositionAt: 0, lastPosition: 0, progressObserved: false, mpvDownSince: 0 };
+}
+
+/** Track how long MPV has been continuously down (engineReady=false). Resets the moment it's ready
+ *  again. Returns the current continuous-down duration in ms (0 when ready or no heartbeat). */
+export function observeMpvDown(tr: ProgressTracker, hb: VonoHeartbeat | null, now: number): number {
+  if (!hb || hb.mpv.engineReady) {
+    tr.mpvDownSince = 0;
+    return 0;
+  }
+  if (tr.mpvDownSince === 0) tr.mpvDownSince = now; // first tick seeing it down
+  return now - tr.mpvDownSince;
 }
 
 /** Update the tracker from the latest heartbeat and return the current attempt's progress facts. */
@@ -73,6 +88,9 @@ export function observeProgress(tr: ProgressTracker, hb: VonoHeartbeat | null, n
 export interface DeriveResult {
   state: WatchdogState;
   reason: string;
+  /** Only set for APP_MISSING: whether the VONO process is still alive. Selects the recovery action —
+   *  alive (hung) ⇒ restart_app, dead ⇒ launch_app. */
+  appProcessAlive?: boolean;
 }
 
 /** True when a control state is a valid, non-expired maintenance/stop directive. */
@@ -94,20 +112,25 @@ export function deriveState(input: DeriveInput): DeriveResult {
     return { state: "MAINTENANCE", reason: `maintenance until ${control!.expiresAt} (${control!.reason})` };
   }
 
-  // APP: heartbeat missing/stale OR no process ⇒ the app can't help itself.
+  // APP: heartbeat missing/stale OR no process ⇒ the app can't help itself. Two sub-cases, resolved by
+  // the ACTION layer via appProcessAlive: process dead ⇒ launch; process ALIVE but heartbeat stale
+  // (a hung main process) ⇒ restart (kill the hung pid first, then launch) so case B is never stuck.
   const hbAgeMs = hb ? now - hb.writtenAt : Number.POSITIVE_INFINITY;
   const hbStale = !hb || hbAgeMs > WD.appStaleMs;
   if (hbStale || !appProcessAlive) {
-    const why = !appProcessAlive ? "process not found" : !hb ? "heartbeat missing" : `heartbeat stale ${hbAgeMs}ms`;
-    return { state: "APP_MISSING", reason: why };
+    const why = !appProcessAlive
+      ? "process not found"
+      : !hb ? "heartbeat missing (process alive)" : `heartbeat stale ${hbAgeMs}ms (process alive — hung)`;
+    return { state: "APP_MISSING", reason: why, appProcessAlive };
   }
 
   // From here hb is fresh and the app is alive.
   const intendsPlay = hb.playback.status === "playing";
 
-  // MPV engine down while we intend to play.
-  if (!hb.mpv.engineReady && intendsPlay) {
-    return { state: "MPV_DOWN", reason: `engineReady=false${hb.mpv.lastError ? " err=" + hb.mpv.lastError : ""}` };
+  // MPV engine down while we intend to play — but only AFTER a sustained grace, so the app's own
+  // internal MPV respawn gets first crack and the watchdog never fights it (requirement).
+  if (!hb.mpv.engineReady && intendsPlay && input.mpvDownForMs >= WD.mpvDownGraceMs) {
+    return { state: "MPV_DOWN", reason: `engineReady=false for ${input.mpvDownForMs}ms${hb.mpv.lastError ? " err=" + hb.mpv.lastError : ""}` };
   }
 
   // Playback stalled — STARTUP-SAFE, and duration-agnostic. Only after THIS attempt has (a) proven
@@ -156,11 +179,13 @@ export interface Decision {
   reason: string;
 }
 
-/** Map a derived (bad) state to its escalation action. */
-function actionFor(state: WatchdogState): RecoveryAction {
-  switch (state) {
+/** Map a derived (bad) state to its escalation action. APP_MISSING splits by appProcessAlive:
+ *  process ALIVE but heartbeat stale = a hung main process ⇒ restart_app (kill the hung pid, then
+ *  launch); process DEAD ⇒ launch_app. This is what stops case B (hung app) from staying stuck. */
+function actionFor(derived: DeriveResult): RecoveryAction {
+  switch (derived.state) {
     case "APP_MISSING":
-      return "launch_app";
+      return derived.appProcessAlive ? "restart_app" : "launch_app";
     case "RENDERER_STALE":
       return "reload_renderer";
     case "MPV_DOWN":
@@ -190,12 +215,14 @@ export function decide(derived: DeriveResult, mem: WatchdogMemory, now: number):
     return { state: "RECOVERING", action: "await_recovery", suppressed: true, reason: `awaiting HEALTHY (${mem.recoveryInFlightUntil - now}ms left)` };
   }
 
-  const action = actionFor(state);
+  const action = actionFor(derived);
 
-  // Hourly hard ceiling on full-app restarts ⇒ SAFE_HOLD behavior (observe + alert only).
+  // Hourly hard ceiling on full-app (re)starts ⇒ SAFE_HOLD (observe + alert only). Both launch_app and
+  // restart_app are full app starts (and both are counted by recordAttempt), so both hit the ceiling.
+  const isFullStart = action === "restart_app" || action === "launch_app";
   const restarts1h = mem.restartTimestamps.filter((t) => now - t < 60 * 60_000).length;
-  if (action === "restart_app" && restarts1h >= WD.hardRestartCeilingPerHour) {
-    return { state, action: "none", suppressed: true, reason: `SAFE_HOLD: ${restarts1h} restarts/1h ≥ ceiling — alert only` };
+  if (isFullStart && restarts1h >= WD.hardRestartCeilingPerHour) {
+    return { state, action: "none", suppressed: true, reason: `SAFE_HOLD: ${restarts1h} full-starts/1h ≥ ceiling — alert only` };
   }
 
   // Inter-attempt cooldown.
@@ -212,4 +239,29 @@ export function decide(derived: DeriveResult, mem: WatchdogMemory, now: number):
   }
 
   return { state, action, suppressed: false, reason };
+}
+
+/**
+ * Record that a recovery action was just EXECUTED. Advances the anti-loop bookkeeping so the next
+ * decide() correctly applies cooldown / per-window limit / hourly ceiling, and enters RECOVERING for
+ * WD.recoveryConfirmMs. Mutates `mem` in place (the observer calls this only when it actually acts).
+ * `launch_app` and `restart_app` count toward the hourly full-restart ceiling; `reload_renderer`
+ * (reserved) and non-actions do not.
+ */
+export function recordAttempt(mem: WatchdogMemory, action: RecoveryAction, now: number): void {
+  if (action === "none" || action === "await_recovery") return;
+  // Rolling attempt window.
+  if (!mem.windowStartedAt || now - mem.windowStartedAt >= WD.attemptWindowMs) {
+    mem.windowStartedAt = now;
+    mem.attemptsInWindow = 0;
+  }
+  mem.attemptsInWindow += 1;
+  mem.lastAttemptAt = now;
+  mem.recoveryInFlightUntil = now + WD.recoveryConfirmMs;
+  if (action === "launch_app" || action === "restart_app") {
+    mem.restartTimestamps.push(now);
+    // Prune to the last hour so the ceiling check stays bounded.
+    const cutoff = now - 60 * 60_000;
+    mem.restartTimestamps = mem.restartTimestamps.filter((t) => t >= cutoff);
+  }
 }
