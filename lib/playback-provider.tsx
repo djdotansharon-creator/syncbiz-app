@@ -53,6 +53,13 @@ import {
   createPlayNextFromUnifiedSource,
 } from "./play-next";
 import { fetchUnifiedSourcesWithFallback } from "./unified-sources-client";
+import {
+  type LocalRecovery,
+  captureLocalRecovery,
+  sanitizeLocalRecovery,
+  needsLocalReconstruction,
+  reconstructLocalSourceFromSnapshot,
+} from "./local-recovery";
 import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
 import { urlTimingMark } from "./url-startup-timing";
 
@@ -559,6 +566,13 @@ type PersistedPlaybackV2 = {
   volume: number;
   positionSeconds: number;
   updatedAt: number;
+  /**
+   * Device-only local resume identity (absolute file path(s) of what was playing). Present ONLY for
+   * LOCAL sessions; URL sessions omit it. Lives in localStorage, never crosses WebSocket. See
+   * lib/local-recovery.ts — this is what lets local playback auto-resume after a reboot the same way
+   * URL playback already does.
+   */
+  local?: LocalRecovery;
 };
 
 function loadPersistedPlayback(): { sourceId: string; trackIndex: number; status: PlaybackStatus; volume: number } | null {
@@ -614,6 +628,7 @@ function loadPersistedPlaybackV2(): PersistedPlaybackV2 | null {
       volume: typeof parsed.volume === "number" ? Math.max(0, Math.min(100, parsed.volume)) : 80,
       positionSeconds: typeof parsed.positionSeconds === "number" ? Math.max(0, parsed.positionSeconds) : 0,
       updatedAt,
+      local: sanitizeLocalRecovery(parsed.local),
     };
   } catch {
     return null;
@@ -903,6 +918,20 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     const pos = Number.isFinite(overridePositionSeconds)
       ? (overridePositionSeconds as number)
       : recoveryPositionRef.current;
+    // Device-only local resume identity: capture the concrete absolute file path(s) actually playing so
+    // a LOCAL session can auto-resume after a reboot (its id is device-local and unresolvable from the
+    // server — unlike a URL, whose identity the server rebuilds by id). `captureLocalRecovery` returns
+    // undefined for URL sessions, so this changes nothing for them. localStorage only — never WS.
+    const playlistTracks = src.playlist ? getPlaylistTracks(src.playlist) : [];
+    const local = captureLocalRecovery({
+      currentPlayUrl: getPlayUrl(src, state.currentTrackIndex),
+      queuePlayUrls:
+        playlistTracks.length > 0
+          ? playlistTracks.map((t) => t.url)
+          : state.queue.map((q) => getPlayUrl(q, 0)),
+      title: playlistTracks[state.currentTrackIndex]?.name ?? src.title,
+      cover: src.cover,
+    });
     savePersistedPlaybackV2({
       currentSourceId: src.id,
       queueIds: state.queue.map((q) => q.id),
@@ -912,8 +941,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       volume: state.volume,
       positionSeconds: Math.max(0, pos),
       updatedAt: Date.now(),
+      ...(local ? { local } : {}),
     });
-  }, [state.currentSource, state.queue, state.queueIndex, state.currentTrackIndex, state.status, state.volume]);
+  }, [state.currentSource, state.queue, state.queueIndex, state.currentTrackIndex, state.status, state.volume, getPlayUrl]);
 
   const reportRecoveryProgress = useCallback((seconds: number) => {
     if (!Number.isFinite(seconds)) return;
@@ -1438,24 +1468,63 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             restoredQueueLen: restoredQueue.length,
             foundSourceId: sourceRaw?.id ?? null,
           });
-          if (!sourceRaw) {
-            clearPersistedPlaybackV2();
-            done();
-            return;
+          // Resolve the playable source. URL/streaming/saved sources restore by id (server knows the
+          // url). A LOCAL session whose id can't yield the exact file that was playing — ephemeral /
+          // My-Music / a folder db-source that only persists its root path — is reconstructed from the
+          // DEVICE-ONLY local paths so local resumes exactly like URL does. This is the whole fix; every
+          // non-local path below is byte-for-byte the previous behavior.
+          let effectiveSource: UnifiedSource | null = null;
+          let effectiveTrackIndex = persistedV2.trackIndex;
+          let effectiveQueue: UnifiedSource[] = [];
+          if (sourceRaw) {
+            const resolved = await resolveSourceForRestore(sourceRaw);
+            if (cancelled) return;
+            if (needsLocalReconstruction(getPlayUrl(resolved, persistedV2.trackIndex), persistedV2.local)) {
+              const rc = reconstructLocalSourceFromSnapshot(persistedV2.local);
+              if (rc) {
+                effectiveSource = rc.source;
+                effectiveTrackIndex = rc.trackIndex;
+                effectiveQueue = [rc.source];
+                console.log("[SyncBiz Audit] local restore reconstruct", {
+                  phase: "id_found_no_local_file",
+                  trackIndex: rc.trackIndex,
+                  queueUrls: persistedV2.local?.queueUrls?.length ?? 0,
+                });
+              }
+            }
+            if (!effectiveSource) {
+              effectiveSource = resolved;
+              const merged = restoredQueue.map((q) => (q.id === resolved.id ? resolved : q));
+              effectiveQueue = merged.length > 0 ? merged : [resolved];
+            }
+          } else {
+            // id lookup missed entirely (a device-local id the server never knew) → reconstruct local.
+            const rc = reconstructLocalSourceFromSnapshot(persistedV2.local);
+            if (!rc) {
+              clearPersistedPlaybackV2();
+              done();
+              return;
+            }
+            effectiveSource = rc.source;
+            effectiveTrackIndex = rc.trackIndex;
+            effectiveQueue = [rc.source];
+            console.log("[SyncBiz Audit] local restore reconstruct", {
+              phase: "id_missing",
+              trackIndex: rc.trackIndex,
+              queueUrls: persistedV2.local?.queueUrls?.length ?? 0,
+            });
           }
-          const source = await resolveSourceForRestore(sourceRaw);
-          if (cancelled) return;
-          const restoredQueueMerged = restoredQueue.map((q) => (q.id === source.id ? source : q));
+          const source = effectiveSource as UnifiedSource; // non-null: every branch above assigns or returns
           recoveryPositionRef.current = persistedV2.positionSeconds;
           pendingSeekOnRestoreRef.current = persistedV2.positionSeconds;
           setState((s) => ({
             ...s,
             volume: persistedV2.volume,
-            queue: restoredQueueMerged.length > 0 ? restoredQueueMerged : [source],
-            queueIndex: restoredQueueMerged.findIndex((q) => q.id === source.id),
+            queue: effectiveQueue.length > 0 ? effectiveQueue : [source],
+            queueIndex: Math.max(0, effectiveQueue.findIndex((q) => q.id === source.id)),
             currentSource: source,
             currentPlaylist: source.playlist ?? null,
-            currentTrackIndex: persistedV2.trackIndex,
+            currentTrackIndex: effectiveTrackIndex,
             status: "paused",
           }));
           const autoresume = autoresumeParam();
@@ -1475,7 +1544,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             if (cancelled) return;
             queueMicrotask(() => {
               if (cancelled) return;
-              playSourceRef.current(source, persistedV2.trackIndex);
+              playSourceRef.current(source, effectiveTrackIndex);
               done();
               setTimeout(() => {
                 if (cancelled) return;
