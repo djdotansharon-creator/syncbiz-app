@@ -100,12 +100,13 @@ function loadEffectiveRuntimeConfig(): DesktopRuntimeConfig {
 }
 
 /**
- * The reconciled effective runtime config (durable MAIN deviceId already applied). For MAIN-process startup
- * wiring — e.g. seeding the heartbeat identity BEFORE any renderer/WS/playback activity. registerMvpIpc()
- * populates cachedConfig eagerly, so this returns the durable identity by the time the heartbeat starts.
+ * The reconciled effective runtime config (durable MAIN deviceId re-asserted from ProgramData). ALWAYS runs the
+ * full pipeline (raw → PlaylistPro normalize → reconcileDeviceIdentity → cachedConfig) — it must never return a
+ * possibly-poisoned cachedConfig without reconciliation, or a handler that poisoned cachedConfig could leak a
+ * drifted deviceId to a later consumer. ProgramData is re-asserted every time effective MAIN config is requested.
  */
 export function getEffectiveRuntimeConfig(): DesktopRuntimeConfig {
-  return cachedConfig ?? loadEffectiveRuntimeConfig();
+  return loadEffectiveRuntimeConfig();
 }
 
 function musicFolderSnapshotFromConfig(c: DesktopRuntimeConfig): MusicFolderSnapshot {
@@ -201,8 +202,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
 
   ipcMain.handle(MVP_IPC.GET_STATUS, (): MvpStatusSnapshot => {
     if (manager) return manager.snapshot();
-    const c = loadRuntimeConfig(getUserData());
-    return fallbackSnapshotFromConfig(c);
+    return fallbackSnapshot(); // reconciled durable deviceId, never raw config
   });
 
   ipcMain.handle(MVP_IPC.GET_APP_VERSION, (): string => app.getVersion());
@@ -379,7 +379,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     }
     const result = await scanLocalAudioFolder(dir);
     if (result.status === "ok" && result.files.length > 0) {
-      const cfg = loadRuntimeConfig(getUserData());
+      const cfg = loadEffectiveRuntimeConfig(); // device-scoped snapshot is keyed by cfg.deviceId → durable id
       void recordScanAudioFilesInSnapshot(getUserData(), cfg, result.files);
     }
     return result;
@@ -423,7 +423,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     const chosen = result.filePaths[0];
     const cur = loadRuntimeConfig(getUserData());
     const next = patchRuntimeConfig(getUserData(), cur, { musicFolderPath: chosen });
-    cachedConfig = ensurePlaylistProRuntimeConfig(getUserData(), next);
+    cachedConfig = reconcileDeviceIdentity(getUserData(), ensurePlaylistProRuntimeConfig(getUserData(), next));
     return { status: "ok", path: cachedConfig.musicFolderPath ?? chosen };
   });
 
@@ -431,7 +431,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     const cur = loadRuntimeConfig(getUserData());
     // Empty string clears in patchRuntimeConfig.
     const next = patchRuntimeConfig(getUserData(), cur, { musicFolderPath: "" });
-    cachedConfig = ensurePlaylistProRuntimeConfig(getUserData(), next);
+    cachedConfig = reconcileDeviceIdentity(getUserData(), ensurePlaylistProRuntimeConfig(getUserData(), next));
     return musicFolderSnapshotFromConfig(cachedConfig);
   });
 
@@ -603,7 +603,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       if (typeof filePath !== "string" || !filePath.trim()) {
         return { status: "error", message: "Empty playlist path." };
       }
-      const cfg = loadRuntimeConfig(getUserData());
+      const cfg = loadEffectiveRuntimeConfig(); // import keys the device snapshot by cfg.deviceId → durable id
       return importLocalM3uPlaylist(getUserData(), cfg, filePath.trim());
     },
   );
@@ -620,7 +620,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
         return { status: "ok", hits: [] };
       }
       try {
-        const cfg = loadRuntimeConfig(getUserData());
+        const cfg = loadEffectiveRuntimeConfig(); // snapshot lookup keyed by cfg.deviceId → durable id
         const deviceId = (cfg.deviceId ?? "").trim() || "unknown";
         const snap = loadLocalCollectionSnapshotCached(getUserData(), deviceId);
         const hits = searchLocalCollectionSnapshotInMemory(snap, q, limit);
@@ -644,7 +644,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
         return { status: "ok", candidates: [] };
       }
       try {
-        const cfg = loadRuntimeConfig(getUserData());
+        const cfg = loadEffectiveRuntimeConfig(); // snapshot lookup keyed by cfg.deviceId → durable id
         const deviceId = (cfg.deviceId ?? "").trim() || "unknown";
         const snap = loadLocalCollectionSnapshotCached(getUserData(), deviceId);
         const candidates = searchLocalForAiPlaylistInMemory(snap, q, limit);
@@ -758,7 +758,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       try {
         const trimmed = filePath.trim();
         const tags = await extractLocalAudioTagFields(trimmed);
-        const cfg = loadRuntimeConfig(getUserData());
+        const cfg = loadEffectiveRuntimeConfig(); // device-scoped snapshot keyed by cfg.deviceId → durable id
         void recordLocalAudioTagsInSnapshot(getUserData(), cfg, trimmed, tags);
         return { status: "ok", tags };
       } catch (e) {
@@ -804,8 +804,8 @@ function readAutoStartState(): AutoStartState {
 }
 
 function fallbackSnapshot(): MvpStatusSnapshot {
-  const c = cachedConfig ?? loadRuntimeConfig(getUserData());
-  return fallbackSnapshotFromConfig(c);
+  // Emits deviceId → must be the reconciled durable id, never a possibly-poisoned cachedConfig / raw config.
+  return fallbackSnapshotFromConfig(getEffectiveRuntimeConfig());
 }
 
 function fallbackSnapshotFromConfig(c: DesktopRuntimeConfig): MvpStatusSnapshot {
