@@ -14,7 +14,13 @@ import {
   sanitizeLocalRecovery,
   needsLocalReconstruction,
   reconstructLocalSourceFromSnapshot,
+  captureEphemeralSource,
+  sanitizeEphemeralSource,
+  reconstructEphemeralSource,
 } from "@/lib/local-recovery";
+import { EPHEMERAL_LOCAL_PLAYLIST_PREFIX } from "@/lib/local-playlist-artwork";
+import type { UnifiedSource } from "@/lib/source-types";
+import type { Playlist } from "@/lib/playlist-types";
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean, detail = ""): void {
@@ -125,6 +131,54 @@ assert("sanitize: file:// URL accepted", !!sanitizeLocalRecovery({ currentUrl: "
   // 4) Guard the inverse: a URL session (no local block) must NEVER reconstruct — URL restore unchanged.
   assert("transition: URL session (no local block) → no reconstruction (URL restore unchanged)",
     needsLocalReconstruction(URL_STREAM, urlSnapshotLocal) === false && reconstructLocalSourceFromSnapshot(urlSnapshotLocal) === null);
+}
+
+// ── ROYALTY-FREE / MUSIC BANK CATALOG reboot case (ephemeral id + /api/media HTTP tracks) ─────────
+// Real Lenovo: RFM track playing → reboot → silence. The catalog source has an ephemeral id the server
+// never knows, and its tracks are /api/media URLs (not local paths), so neither id-restore nor the local
+// block can rebuild it. These assert the ephemeral capture/reconstruct that fixes it.
+const MEDIA_A = "https://syncbiz-app-production.up.railway.app/api/media/asset-a";
+const MEDIA_B = "https://syncbiz-app-production.up.railway.app/api/media/asset-b";
+function rfmSource(mode: "stream" | "local" = "stream"): UnifiedSource {
+  const type = mode === "stream" ? "stream-url" : "local";
+  const t1 = mode === "stream" ? MEDIA_A : FILE_A;
+  const t2 = mode === "stream" ? MEDIA_B : FILE_B;
+  const playlist: Playlist = {
+    id: `${EPHEMERAL_LOCAL_PLAYLIST_PREFIX}musicbank-lofi-${mode}`,
+    name: "Lo-Fi — Samples", genre: "Lo-Fi", type: type as Playlist["type"], url: t1, thumbnail: "",
+    createdAt: new Date().toISOString(),
+    tracks: [{ id: "asset-a", name: "A", type: type as never, url: t1 }, { id: "asset-b", name: "B", type: type as never, url: t2 }],
+    order: ["asset-a", "asset-b"],
+  };
+  return { id: playlist.id, title: playlist.name, genre: "Lo-Fi", cover: null, type: type as never, url: t1, origin: "playlist", playlist };
+}
+{
+  const src = rfmSource("stream");
+  // 1) While RFM plays, the local block is NOT captured (tracks are /api/media, not local paths)…
+  assert("rfm: local block NOT captured for /api/media tracks", captureLocalRecovery({ currentPlayUrl: MEDIA_A, queuePlayUrls: [MEDIA_A, MEDIA_B] }) === undefined);
+  // …but the ephemeral source blob IS captured, preserving the /api/media track identities.
+  const eph = captureEphemeralSource(src);
+  assert("rfm: ephemeral blob captured (id + 2 media tracks)", !!eph && eph.sourceId === src.id && eph.tracks.length === 2 && eph.tracks[0].url === MEDIA_A && eph.type === "stream-url");
+
+  // 2) Non-ephemeral / URL sources must NOT produce an ephemeral blob (URL/saved restore unchanged).
+  assert("rfm: server playlist (pl-*) → no ephemeral blob", captureEphemeralSource({ id: "pl-123", title: "x", genre: "g", cover: null, type: "stream-url", url: MEDIA_A, origin: "playlist", playlist: { id: "pl-123", name: "x", genre: "g", type: "stream-url", url: MEDIA_A, thumbnail: "", createdAt: "", tracks: [{ id: "a", name: "A", type: "stream-url" as never, url: MEDIA_A }], order: ["a"] } }) === undefined);
+  assert("rfm: bare URL source (no playlist) → no ephemeral blob", captureEphemeralSource({ id: "u1", title: "u", genre: "g", cover: null, type: "stream-url", url: URL_STREAM, origin: "source" }) === undefined);
+
+  // 3) Reboot restore: id misses (ephemeral), local recon null → ephemeral recon rebuilds the catalog.
+  assert("rfm: local reconstruction is null (not a local session)", reconstructLocalSourceFromSnapshot(undefined) === null);
+  const rcE = reconstructEphemeralSource(eph, 1);
+  assert("rfm: ephemeral reconstruction rebuilds catalog source (origin playlist, 2 tracks)", !!rcE && rcE.source.origin === "playlist" && rcE.source.playlist?.tracks?.length === 2);
+  assert("rfm: reconstructed track urls preserved (/api/media)", rcE?.source.playlist?.tracks?.[0]?.url === MEDIA_A && rcE?.source.playlist?.tracks?.[1]?.url === MEDIA_B);
+  assert("rfm: reconstructed trackIndex clamped to requested (1)", rcE?.trackIndex === 1);
+  assert("rfm: reconstructed id === persisted ephemeral id", rcE?.source.id === src.id);
+
+  // 4) sanitize round-trip (localStorage persistence) preserves the catalog blob.
+  const round = sanitizeEphemeralSource(JSON.parse(JSON.stringify(eph)));
+  assert("rfm: capture→JSON→sanitize preserves sourceId + tracks", round?.sourceId === src.id && round?.tracks.length === 2);
+  assert("rfm: sanitize rejects blob with no tracks / no id", sanitizeEphemeralSource({ sourceId: "x" }) === undefined && sanitizeEphemeralSource({ tracks: [] }) === undefined);
+
+  // 5) Preserve: an intentional STOP (no snapshot / no ephemeral blob) does not resume.
+  assert("rfm: no ephemeral blob → no reconstruction (STOP stays stopped)", reconstructEphemeralSource(undefined, 0) === null);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

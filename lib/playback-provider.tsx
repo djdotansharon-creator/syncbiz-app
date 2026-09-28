@@ -44,7 +44,7 @@ import {
 } from "./syncbiz-transport-audit";
 import { isValidPlaybackUrl, isValidLocalFilePlaybackPath } from "./url-validation";
 import { EPHEMERAL_LOCAL_PLAYLIST_PREFIX } from "./local-playlist-artwork";
-import { appendMediaToken, redactMediaToken } from "./media/media-session";
+import { appendMediaToken, redactMediaToken, isSyncBizMediaUrl, awaitMediaSessionToken } from "./media/media-session";
 import {
   isPlayNextSourceId,
   playNextLog,
@@ -55,10 +55,14 @@ import {
 import { fetchUnifiedSourcesWithFallback } from "./unified-sources-client";
 import {
   type LocalRecovery,
+  type EphemeralSourceRecovery,
   captureLocalRecovery,
   sanitizeLocalRecovery,
   needsLocalReconstruction,
   reconstructLocalSourceFromSnapshot,
+  captureEphemeralSource,
+  sanitizeEphemeralSource,
+  reconstructEphemeralSource,
 } from "./local-recovery";
 import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
 import { urlTimingMark } from "./url-startup-timing";
@@ -573,6 +577,13 @@ type PersistedPlaybackV2 = {
    * URL playback already does.
    */
   local?: LocalRecovery;
+  /**
+   * Device-only reconstruction blob for an EPHEMERAL playlist source whose tracks are NOT local files
+   * (e.g. the Royalty-Free / Music Bank catalog — `/api/media/<id>` URLs, ephemeral id). Its id is never
+   * server-known, so restore can't rebuild it by id; this persists the source so it can. localStorage
+   * only, never WS. Captured only for non-local ephemeral sources (local ones use `local`).
+   */
+  ephemeral?: EphemeralSourceRecovery;
 };
 
 function loadPersistedPlayback(): { sourceId: string; trackIndex: number; status: PlaybackStatus; volume: number } | null {
@@ -629,6 +640,7 @@ function loadPersistedPlaybackV2(): PersistedPlaybackV2 | null {
       positionSeconds: typeof parsed.positionSeconds === "number" ? Math.max(0, parsed.positionSeconds) : 0,
       updatedAt,
       local: sanitizeLocalRecovery(parsed.local),
+      ephemeral: sanitizeEphemeralSource(parsed.ephemeral),
     };
   } catch {
     return null;
@@ -949,6 +961,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       title: playlistTracks[state.currentTrackIndex]?.name ?? src.title,
       cover: src.cover,
     });
+    // Ephemeral, non-local catalog sources (Royalty-Free / Music Bank: `/api/media/<id>` tracks under an
+    // `ephemeral-local-folder:musicbank-*` id) are ALSO unresolvable by id after a reboot, but the `local`
+    // block can't help (tracks aren't local paths). Persist the source itself (device-only) so restore can
+    // rebuild it. Captured ONLY when there is no local block, so the verified local-file path is untouched.
+    const ephemeral = local ? undefined : captureEphemeralSource(src);
     // READ-ONLY diagnostic (no behavior change): proves on the Lenovo whether a locally-playing source
     // is captured into the recovery snapshot. playUrlKind=local-* + localCaptured=true ⇒ capture works
     // (an earlier failure was stale renderer/timing); localCaptured=false while playing local ⇒ the
@@ -960,6 +977,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       status: state.status,
       playUrlKind: diagClassifyPlaybackUrl(cpu),
       localCaptured: !!local,
+      ephemeralCaptured: !!ephemeral,
+      ephemeralTracks: ephemeral?.tracks.length ?? 0,
       queueLen: state.queue.length,
     });
     savePersistedPlaybackV2({
@@ -972,6 +991,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       positionSeconds: Math.max(0, pos),
       updatedAt: Date.now(),
       ...(local ? { local } : {}),
+      ...(ephemeral ? { ephemeral } : {}),
     });
   }, [state.currentSource, state.queue, state.queueIndex, state.currentTrackIndex, state.status, state.volume, getPlayUrl]);
 
@@ -1516,6 +1536,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           let effectiveSource: UnifiedSource | null = null;
           let effectiveTrackIndex = persistedV2.trackIndex;
           let effectiveQueue: UnifiedSource[] = [];
+          const idExactMatch = !!byId.get(persistedV2.currentSourceId);
+          // Ephemeral catalog (RFM / Music Bank) reconstruction is engaged only when the persisted CURRENT
+          // source was that exact ephemeral id and it did NOT resolve on the server (its id is device-local).
+          // `ephemeral` is captured only when there was no `local` block, so this never overlaps the local path.
+          const ephemeralApplies =
+            !!persistedV2.ephemeral &&
+            !idExactMatch &&
+            persistedV2.ephemeral.sourceId === persistedV2.currentSourceId;
           if (sourceRaw) {
             const resolved = await resolveSourceForRestore(sourceRaw);
             if (cancelled) return;
@@ -1532,26 +1560,46 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
                 });
               }
             }
+            // The persisted current source was an ephemeral catalog id that didn't resolve; the id-lookup
+            // fell back to a stale queue source (e.g. a previous URL). Rebuild the catalog instead so we
+            // resume what was actually playing — not the fallback.
+            if (!effectiveSource && ephemeralApplies) {
+              const rcE = reconstructEphemeralSource(persistedV2.ephemeral, persistedV2.trackIndex);
+              if (rcE) {
+                effectiveSource = rcE.source;
+                effectiveTrackIndex = rcE.trackIndex;
+                effectiveQueue = [rcE.source];
+                console.log("[SyncBiz Audit] ephemeral restore reconstruct", {
+                  phase: "id_found_fallback",
+                  tracks: persistedV2.ephemeral?.tracks.length ?? 0,
+                  trackIndex: rcE.trackIndex,
+                });
+              }
+            }
             if (!effectiveSource) {
               effectiveSource = resolved;
               const merged = restoredQueue.map((q) => (q.id === resolved.id ? resolved : q));
               effectiveQueue = merged.length > 0 ? merged : [resolved];
             }
           } else {
-            // id lookup missed entirely (a device-local id the server never knew) → reconstruct local.
+            // id lookup missed entirely (a device-local id the server never knew) → reconstruct local, else
+            // the ephemeral catalog (RFM/Music Bank), else give up (nothing playable to resume).
             const rc = reconstructLocalSourceFromSnapshot(persistedV2.local);
-            if (!rc) {
+            const rcE = rc ? null : reconstructEphemeralSource(persistedV2.ephemeral, persistedV2.trackIndex);
+            const chosen = rc ?? rcE;
+            if (!chosen) {
               clearPersistedPlaybackV2();
               done();
               return;
             }
-            effectiveSource = rc.source;
-            effectiveTrackIndex = rc.trackIndex;
-            effectiveQueue = [rc.source];
-            console.log("[SyncBiz Audit] local restore reconstruct", {
+            effectiveSource = chosen.source;
+            effectiveTrackIndex = chosen.trackIndex;
+            effectiveQueue = [chosen.source];
+            console.log("[SyncBiz Audit] restore reconstruct", {
               phase: "id_missing",
-              trackIndex: rc.trackIndex,
-              queueUrls: persistedV2.local?.queueUrls?.length ?? 0,
+              kind: rc ? "local" : "ephemeral",
+              trackIndex: chosen.trackIndex,
+              tracks: rc ? (persistedV2.local?.queueUrls?.length ?? 1) : (persistedV2.ephemeral?.tracks.length ?? 0),
             });
           }
           const source = effectiveSource as UnifiedSource; // non-null: every branch above assigns or returns
@@ -1580,6 +1628,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             (autoresume === "1" ||
               isDesktopStation ||
               Date.now() - persistedV2.updatedAt <= RECOVERY_AUTOPLAY_WINDOW_MS);
+          // Music Bank (/api/media) sources need a live media token before dispatch, or /api/media 401s →
+          // silence. On cold restore the token is fetched async by master-media-session; wait (bounded) so
+          // getPlayUrl can append a valid `mt`. Non-media sources (URL / local / YouTube) skip instantly.
+          if (shouldAutoplay && isSyncBizMediaUrl(getPlayUrl(source, effectiveTrackIndex))) {
+            const gotToken = await awaitMediaSessionToken(6000);
+            if (cancelled) return;
+            console.log("[VONO LocalResume Diag] restore media-token", { gotToken });
+          }
           if (shouldAutoplay) {
             if (cancelled) return;
             queueMicrotask(() => {
