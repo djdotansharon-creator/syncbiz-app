@@ -54,12 +54,12 @@ function seedProgramDataId(id: string): void {
   assert("3. generated id persisted to ProgramData", readProgramDataDeviceId() === r.id);
 }
 
-// 4. Renderer localStorage cleared → same ProgramData id restored (ProgramData persists; config irrelevant).
+// 4. Config/userData wiped → same ProgramData id restored (ProgramData persists independently of config).
 {
   freshProgramData();
   seedProgramDataId("dsk-durable-444");
-  const r = resolveDurableDeviceId(""); // "" models a wiped renderer/config
-  assert("4. localStorage/config wiped → ProgramData id restored", r.id === "dsk-durable-444" && r.source === "programdata");
+  const r = resolveDurableDeviceId(""); // "" models a wiped config.deviceId (e.g. Electron userData loss)
+  assert("4. config/userData wiped → ProgramData id restored", r.id === "dsk-durable-444" && r.source === "programdata");
 }
 
 // 5. Restart → same id (resolve twice returns the same persisted id).

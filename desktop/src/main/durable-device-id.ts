@@ -3,9 +3,11 @@
  *
  * The authoritative deviceId for this physical machine lives in `C:\ProgramData\VONO\state\device-id.json`
  * (see vono-paths.ts). It is the identity the branch MASTER designation will later key on, so it must NOT
- * change across renderer localStorage clears, Electron userData loss, app restarts, or a normal reinstall.
+ * change across Electron userData loss, app restarts, or a normal reinstall. It is the MAIN (station) identity
+ * only; the renderer keeps its OWN separate localStorage id (see lib/device-id.ts) to avoid a dual-socket
+ * deviceId collision in the server's `devices` Map — unification is deferred to the designated-MASTER phase.
  *
- * Resolution precedence (MAIN owns it; the renderer localStorage id is only a MIRROR, set from here):
+ * Resolution precedence (MAIN owns it):
  *   A. ProgramData device-id.json holds a valid id  → USE IT (authoritative).
  *   B. else the caller's existing config deviceId is valid → MIGRATE that SAME value into ProgramData
  *      (the desktop's operative WS/heartbeat id is `config.deviceId`; preserving it keeps WS/lease identity).

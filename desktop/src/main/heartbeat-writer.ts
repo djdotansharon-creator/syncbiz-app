@@ -51,7 +51,16 @@ function sanitizeError(raw: string | null | undefined): string | null {
   return s.length ? s : "error";
 }
 
-type StartMeta = { appVersion: string; pid: number; execPath: string };
+type StartMeta = {
+  appVersion: string;
+  pid: number;
+  execPath: string;
+  /** Durable MAIN machine deviceId (ProgramData). Seeds heartbeat identity BEFORE any renderer/WS/playback
+   *  activity, so the first heartbeat already carries the durable id even if the UI never loads. */
+  deviceId?: string | null;
+  /** MAIN branchId from runtime config; seeds the first heartbeat (later snapshots may refresh it). */
+  branchId?: string | null;
+};
 
 let beatTimer: NodeJS.Timeout | null = null;
 let coalesceTimer: NodeJS.Timeout | null = null;
@@ -142,6 +151,10 @@ export function startHeartbeat(meta: StartMeta): void {
   execPath = meta.execPath;
   sessionStartedAt = Date.now();
   positionAt = Date.now();
+  // Seed the durable MAIN identity so the FIRST heartbeat write already carries deviceId/branchId — independent
+  // of renderer load, WS connect, or playback. Later updateFromMpv() may refresh these but never clears the id.
+  if (typeof meta.deviceId === "string" && meta.deviceId.trim()) deviceId = meta.deviceId.trim();
+  if (typeof meta.branchId === "string" && meta.branchId.trim()) branchId = meta.branchId.trim();
   writeNow();
   beatTimer = setInterval(writeNow, VONO_HEARTBEAT_INTERVAL_MS);
   if (typeof beatTimer.unref === "function") beatTimer.unref();
@@ -177,9 +190,11 @@ export function updateFromMpv(s: MvpStatusSnapshot): void {
   attemptId = s.mpvAttemptId;
   engineReady = s.mpvEngineReady;
   mpvLastError = sanitizeError(s.mpvLastError); // privacy: never persist a raw url/path/token
-  // Always reflect the CURRENT snapshot's identity so a stale value can't linger if it clears.
-  branchId = s.branchId || null;
-  deviceId = s.deviceId || null;
+  // Identity is seeded from the durable MAIN config at startHeartbeat(). A later snapshot may REFRESH it, but
+  // must never regress it to null (an empty snapshot identity would otherwise wipe the durable MAIN deviceId —
+  // Phase 0.1 invariant: the durable id is present independent of renderer/WS/playback).
+  if (s.branchId && s.branchId.trim()) branchId = s.branchId.trim();
+  if (s.deviceId && s.deviceId.trim()) deviceId = s.deviceId.trim();
 
   // Meaningful transition → write promptly (coalesced). Position-only changes ride the periodic beat.
   const transition =

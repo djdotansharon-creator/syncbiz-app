@@ -101,6 +101,15 @@ function loadEffectiveRuntimeConfig(): DesktopRuntimeConfig {
   return next;
 }
 
+/**
+ * The reconciled effective runtime config (durable MAIN deviceId already applied). For MAIN-process startup
+ * wiring — e.g. seeding the heartbeat identity BEFORE any renderer/WS/playback activity. registerMvpIpc()
+ * populates cachedConfig eagerly, so this returns the durable identity by the time the heartbeat starts.
+ */
+export function getEffectiveRuntimeConfig(): DesktopRuntimeConfig {
+  return cachedConfig ?? loadEffectiveRuntimeConfig();
+}
+
 function musicFolderSnapshotFromConfig(c: DesktopRuntimeConfig): MusicFolderSnapshot {
   const p = c.musicFolderPath?.trim() ? c.musicFolderPath.trim() : null;
   return {
