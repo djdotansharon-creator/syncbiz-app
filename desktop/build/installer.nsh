@@ -2,6 +2,22 @@
 ; The .exe installer itself provisions "VONO Protection" — no PowerShell/Scheduled-Task/autostart steps
 ; for the branch. All PowerShell here runs HIDDEN via nsExec (no console shown during install/uninstall).
 
+; ── ZERO-TOUCH UPGRADE: stop the OLD install BEFORE electron-builder replaces files ────────────────
+; `customCheckAppRunning` REPLACES the built-in app-running check (allowOnlyOneInstallerInstance.nsh) and
+; runs in the install Section AFTER InitPluginsDir but BEFORE uninstallOldVersion / installApplicationFiles.
+; The built-in only taskkills the app — it never stops VONO Protection first, so the still-running watchdog
+; relaunches VONO mid-update and the running app locks the files. We run an identity-safe teardown instead:
+; stop+disable the task, kill the watchdog, close VONO + its MPV (all scoped to $INSTDIR), then let the
+; installer replace files. The script is embedded in the installer and extracted to $PLUGINSDIR, so it does
+; NOT depend on the (old) installed copy — this works for the first upgrade over a build that lacks it.
+!macro customCheckAppRunning
+  DetailPrint "Preparing update (stopping VONO Protection + closing the player)..."
+  File "/oname=$PLUGINSDIR\stop-vono-for-upgrade.ps1" "${PROJECT_DIR}\scripts\provisioning\stop-vono-for-upgrade.ps1"
+  nsExec::Exec 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-vono-for-upgrade.ps1" -InstallDir "$INSTDIR"'
+  Pop $0
+  DetailPrint "Update pre-flight exit code: $0"
+!macroend
+
 !macro customInstall
   DetailPrint "Provisioning VONO Protection (auto-start watchdog)..."
   ; provision-vono-protection.ps1 registers the hidden, idempotent "VONO Protection" Scheduled Task for

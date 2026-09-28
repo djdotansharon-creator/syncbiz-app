@@ -32,6 +32,7 @@ playback changes here.**
     NODE_LICENSE.txt                    Node's license/notice (shipped alongside the runtime)
     launch-watchdog.ps1                 hidden foreground runner (node.exe watchdog.cjs) — no console
     provision-vono-protection.ps1       registers/removes the "VONO Protection" task (installer runs it)
+    stop-vono-for-upgrade.ps1           pre-upgrade teardown (installer runs it before replacing files)
 ```
 
 **Zero-touch install:** the `.exe` installer itself provisions everything — **DOWNLOAD → INSTALL → DONE**.
@@ -148,8 +149,30 @@ Chain: `Windows logon → "VONO Protection" task → watchdog → VONO → MASTE
 > The task is registered for whichever user runs the installer (`$env:USERDOMAIN\$env:USERNAME`). Install
 > under (or as) the station user so the AtLogOn trigger fires on the station session.
 
-**Upgrade / reinstall:** just run the newer installer — `Register-ScheduledTask -Force` replaces the task
-in place (exactly one, correct user, hidden); no duplicates, no manual steps.
+**Upgrade / reinstall (zero-touch, while VONO is playing):** just run the newer installer — no manual
+steps, no fighting the player. electron-builder's NSIS runs custom hooks in this order:
+`InitPluginsDir` → **`customCheckAppRunning`** → `uninstallOldVersion` (old uninstaller) →
+`installApplicationFiles` (file replacement) → **`customInstall`** (re-provision). The default
+`customCheckAppRunning` only taskkills the app — but the still-running **watchdog would relaunch VONO**
+and lock the files being replaced. So VONO **replaces** it (`build/installer.nsh`) with an embedded,
+hidden teardown (`stop-vono-for-upgrade.ps1`, extracted to `$PLUGINSDIR`, so it does not depend on the
+old install) that runs BEFORE file replacement:
+1. **Stop + DISABLE** the "VONO Protection" task (the watchdog can't relaunch VONO mid-update).
+2. Kill the **watchdog** first — the `node.exe` from this install + the powershell launcher for this
+   install (matched by command line).
+3. **Close VONO** gracefully (bounded), then force — scoped to this install's `SyncBiz Player.exe` path.
+4. Ensure VONO-owned **MPV** (`<install>\resources\mpv.exe`) is gone.
+
+Every kill matches an **exact `ExecutablePath` under `$INSTDIR`** (or the launcher's command line), so
+unrelated `mpv.exe` / `node.exe` / `powershell.exe` / Electron apps are never touched. The script is
+**fail-safe** (`SilentlyContinue`, `exit 0`) so it can never abort the installer, and **path-safe**
+(spaces OK). After files are replaced, `customInstall` re-provisions the task (`Register-ScheduledTask
+-Force` ⇒ exactly one, correct user, hidden, enabled) and starts it → the new VONO launches.
+
+**Playback resume across upgrade:** installer-initiated shutdown is **maintenance**, not a user STOP.
+The recovery snapshot + shuffle preference live in Electron **userData (outside `$INSTDIR`)** and
+`deleteAppDataOnUninstall` is unset (false), so file replacement / `uninstallOldVersion` never touch
+them — the new VONO auto-resumes what was playing, with shuffle intact. No playback-provider change.
 
 ## Uninstall / rollback flow
 
