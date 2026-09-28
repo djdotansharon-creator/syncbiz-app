@@ -32,9 +32,6 @@ import type {
 
 /** Preload `contextBridge` contract (renderer uses `window.syncbizDesktop`). */
 export type SyncBizDesktopMvp = {
-  /** Durable machine deviceId (Phase 0.1), read synchronously at preload time from ProgramData via MAIN.
-   *  The renderer mirrors this into localStorage so WS/getDeviceId use the SAME durable id. "" if unavailable. */
-  durableDeviceId: string;
   getConfig: () => Promise<DesktopRuntimeConfig>;
   getStatus: () => Promise<MvpStatusSnapshot>;
   /** Running desktop app SemVer (`app.getVersion()`), for the in-app update check. */
