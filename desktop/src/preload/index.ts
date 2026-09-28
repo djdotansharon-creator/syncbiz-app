@@ -38,7 +38,19 @@ import type { SyncBizDesktopMvp } from "../shared/mvp-desktop-api";
 
 console.log("[SyncBiz desktop] preload: loading");
 
+// Phase 0.1 — read the durable machine deviceId SYNCHRONOUSLY (before any renderer script), so the hosted
+// app's getDeviceId()/WS registration use the SAME durable id and a localStorage clear can't drift it.
+const durableDeviceId: string = (() => {
+  try {
+    const v = ipcRenderer.sendSync(MVP_IPC.GET_DEVICE_ID_SYNC);
+    return typeof v === "string" ? v : "";
+  } catch {
+    return "";
+  }
+})();
+
 const api: SyncBizDesktopMvp = {
+  durableDeviceId,
   getConfig: () => ipcRenderer.invoke(MVP_IPC.GET_CONFIG),
   getStatus: () => ipcRenderer.invoke(MVP_IPC.GET_STATUS),
   getAppVersion: (): Promise<string> => ipcRenderer.invoke(MVP_IPC.GET_APP_VERSION),

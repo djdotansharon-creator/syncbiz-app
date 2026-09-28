@@ -33,6 +33,28 @@ export function initDeviceId(): string {
   if (cachedDeviceId) {
     return cachedDeviceId;
   }
+  // DESKTOP (Phase 0.1): the durable MACHINE identity lives in ProgramData and is injected synchronously by
+  // the Electron preload as `syncbizDesktop.durableDeviceId`. It is authoritative — prefer it over
+  // localStorage and MIRROR it into localStorage, so WS registration + this id survive a localStorage clear
+  // and match the MAIN WS/heartbeat id. In a plain browser, `syncbizDesktop` is undefined → fall through to
+  // the existing localStorage behavior unchanged.
+  try {
+    const durable = (window as unknown as { syncbizDesktop?: { durableDeviceId?: unknown } }).syncbizDesktop
+      ?.durableDeviceId;
+    if (typeof durable === "string" && durable.trim().length >= 8) {
+      const id = durable.trim();
+      cachedDeviceId = id;
+      try {
+        if (localStorage.getItem(STORAGE_KEY) !== id) localStorage.setItem(STORAGE_KEY, id);
+      } catch {
+        /* mirror is best-effort; MAIN remains authoritative */
+      }
+      console.log("[SyncBiz] device_id (durable machine id):", id);
+      return id;
+    }
+  } catch {
+    /* no desktop bridge → browser path below */
+  }
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored && stored.trim().length > 0) {

@@ -37,3 +37,13 @@ export function vonoStateDir(): string {
 export function vonoHeartbeatPath(): string {
   return path.join(vonoStateDir(), "heartbeat.json");
 }
+
+/**
+ * Absolute path to the DURABLE MACHINE device-id file (`…\VONO\state\device-id.json`). This is the
+ * authoritative physical-machine identity: it lives in the shared machine state dir (same place as
+ * heartbeat.json, user-writable, survives renderer localStorage clears / Electron userData loss / a normal
+ * uninstall — the uninstaller only removes the Scheduled Task + watchdog.lock, never this file).
+ */
+export function vonoDeviceIdPath(): string {
+  return path.join(vonoStateDir(), "device-id.json");
+}

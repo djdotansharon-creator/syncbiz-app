@@ -57,7 +57,8 @@ import { DeviceWsManager } from "../device-websocket-client/device-ws-manager";
 import { fetchBranchLibrarySummary } from "./branch-library-fetch";
 import { ensurePlaylistProRuntimeConfig } from "./playlistpro-config";
 import { musicFolderDisplayLabel } from "../shared/playlistpro-paths";
-import { loadRuntimeConfig, patchRuntimeConfig } from "./runtime-config-service";
+import { loadRuntimeConfig, patchRuntimeConfig, saveRuntimeConfig } from "./runtime-config-service";
+import { resolveDurableDeviceId } from "./durable-device-id";
 import type { PlaybackOrchestrator } from "./playback-orchestrator";
 import { scanLocalAudioFolder } from "./scan-local-audio-folder";
 import { listMusicLibraryDir } from "./list-music-library-dir";
@@ -85,6 +86,16 @@ function getUserData(): string {
 function loadEffectiveRuntimeConfig(): DesktopRuntimeConfig {
   const raw = loadRuntimeConfig(getUserData());
   const next = ensurePlaylistProRuntimeConfig(getUserData(), raw);
+  // Phase 0.1 — DURABLE MACHINE IDENTITY. The authoritative deviceId is C:\ProgramData\VONO\state\
+  // device-id.json (survives renderer clears / userData loss / reinstall). Reconcile config.deviceId to it
+  // so the WS registration (DeviceWsManager uses config.deviceId) and heartbeat use the SAME durable id,
+  // and the renderer mirrors it via GET_DEVICE_ID_SYNC. Never regenerates a valid id; migrates the existing
+  // config id into ProgramData when ProgramData has none.
+  const durable = resolveDurableDeviceId(next.deviceId);
+  if (durable.id !== next.deviceId) {
+    next.deviceId = durable.id;
+    saveRuntimeConfig(getUserData(), next);
+  }
   cachedConfig = next;
   return next;
 }
@@ -187,6 +198,17 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   });
 
   ipcMain.handle(MVP_IPC.GET_APP_VERSION, (): string => app.getVersion());
+
+  // SYNCHRONOUS durable machine deviceId — preload reads this before renderer scripts run so the hosted
+  // app + WS + getDeviceId all use the SAME durable id (no race, no localStorage-clear drift). Phase 0.1.
+  ipcMain.on(MVP_IPC.GET_DEVICE_ID_SYNC, (e) => {
+    try {
+      const c = cachedConfig ?? loadEffectiveRuntimeConfig();
+      e.returnValue = (c.deviceId ?? "").trim();
+    } catch {
+      e.returnValue = "";
+    }
+  });
 
   // ── GUESTS × WhatsApp Web (desktop-only) ──
   const whatsapp = new WhatsAppWindow(

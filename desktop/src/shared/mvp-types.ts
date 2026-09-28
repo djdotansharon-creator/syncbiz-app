@@ -5,6 +5,9 @@
 export const MVP_IPC = {
   GET_CONFIG: "mvp:get-config",
   GET_STATUS: "mvp:get-status",
+  /** SYNCHRONOUS: the durable machine deviceId, so the renderer can read it before any WS/getDeviceId call
+   *  and mirror it into localStorage (Phase 0.1). Sync so identity is available at first render, no race. */
+  GET_DEVICE_ID_SYNC: "mvp:get-device-id-sync",
   SAVE_CONFIG: "mvp:save-config",
   WS_CONNECT: "mvp:ws-connect",
   WS_DISCONNECT: "mvp:ws-disconnect",
