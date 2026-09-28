@@ -612,7 +612,7 @@ export function AudioPlayer() {
 
   // ── Desktop mode: MPV Orchestrator is the single source of truth for display ──
   // The React playback state drives commands (intent). MPV state drives what the UI shows (truth).
-  type DesktopMpvSnap = { status: "idle" | "playing" | "paused" | "stopped"; volume: number; position: number; duration: number; catalogCount: number; engineReady: boolean; lastError: string | null; attemptId: number; attemptMode: "cold" | "crossfade" };
+  type DesktopMpvSnap = { status: "idle" | "playing" | "paused" | "stopped"; volume: number; position: number; duration: number; catalogCount: number; engineReady: boolean; lastError: string | null; attemptId: number; attemptMode: "cold" | "crossfade"; currentMediaKey: string | null };
   const [desktopMpvSnap, setDesktopMpvSnap] = useState<DesktopMpvSnap | null>(null);
   // Ref always holds the latest snap so timeout callbacks (stall detection) can read it
   // without stale-closure issues and without being in the effect dependency array.
@@ -694,6 +694,9 @@ export function AudioPlayer() {
         attemptId: typeof s.mpvAttemptId === "number" ? s.mpvAttemptId : 0,
         // Authoritative attempt mode from the orchestrator (never inferred here).
         attemptMode: s.mpvAttemptMode === "crossfade" ? "crossfade" : "cold",
+        // Live media identity (hash of the active attempt's URL) — used ONLY to prove a remount adoption
+        // is re-owning the SAME media. Absent on older desktop builds ⇒ adoption safely declines.
+        currentMediaKey: typeof s.mpvCurrentMediaKey === "string" ? s.mpvCurrentMediaKey : null,
       };
       desktopMpvSnapRef.current = snap;
       // INV3 + crossfade safety — CONFIRM the current attempt ONLY from a snapshot that (a) belongs to
@@ -3860,7 +3863,7 @@ export function AudioPlayer() {
       // (engine not ready / not playing / no attempt id / no URL) returns false → normal loadfile runs, so
       // adoption can never cause silence (worst case: the track re-dispatches).
       const snapNow = desktopMpvSnapRef.current;
-      if (shouldAdoptLiveMpv(mpvLastUrlRef.current === null, currentPlayUrl, snapNow)) {
+      if (shouldAdoptLiveMpv(mpvLastUrlRef.current === null, currentPlayUrl, snapNow, snapNow?.currentMediaKey)) {
         const liveAttemptId = snapNow && typeof snapNow.attemptId === "number" ? snapNow.attemptId : 0;
         mpvLastUrlRef.current = currentPlayUrl; // treat as already loaded → the loadfile below is skipped
         playbackAttemptGenRef.current = liveAttemptId; // align to the running attempt so EOF is "current"

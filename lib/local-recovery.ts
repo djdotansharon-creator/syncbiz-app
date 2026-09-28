@@ -276,6 +276,42 @@ export function sanitizeUrlSource(raw: unknown): UrlSourceRecovery | undefined {
   return rec;
 }
 
+/**
+ * Merge a reconstructed CURRENT source back into the recovered queue at its persisted position, keeping
+ * every still-recoverable neighbor (so natural EOF can advance to the real next track). Unresolvable
+ * neighbors (other ephemeral ids the server can't rebuild) are dropped; the current is placed where its
+ * id sat in the persisted `queueIds`. Falls back to a singleton only when there is genuinely no
+ * recoverable queue. Pure/testable. Used for single-source (ad-hoc URL) reconstruction — local/catalog
+ * reconstruct to a playlist source whose internal tracks already ARE the queue, so those stay singleton.
+ */
+export function mergeCurrentIntoRecoveredQueue(
+  queueIds: string[],
+  currentSourceId: string,
+  current: UnifiedSource,
+  resolve: (id: string) => UnifiedSource | undefined,
+): { queue: UnifiedSource[]; index: number } {
+  const rebuilt: UnifiedSource[] = [];
+  let index = -1;
+  for (const id of Array.isArray(queueIds) ? queueIds : []) {
+    if (id === currentSourceId && index < 0) {
+      index = rebuilt.length;
+      rebuilt.push(current);
+    } else if (id !== currentSourceId) {
+      const s = resolve(id);
+      if (s && s.id !== current.id) rebuilt.push(s);
+    }
+  }
+  if (index < 0) {
+    index = 0;
+    rebuilt.unshift(current); // current id wasn't in the persisted queue → lead with it
+  }
+  if (rebuilt.length === 0) {
+    rebuilt.push(current);
+    index = 0;
+  }
+  return { queue: rebuilt, index };
+}
+
 /** Rebuild a playable ad-hoc URL UnifiedSource from the blob. Returns null if unusable. */
 export function reconstructUrlSource(
   rec: UrlSourceRecovery | undefined,

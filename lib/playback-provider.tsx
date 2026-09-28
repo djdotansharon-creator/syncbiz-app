@@ -67,6 +67,7 @@ import {
   captureUrlSource,
   sanitizeUrlSource,
   reconstructUrlSource,
+  mergeCurrentIntoRecoveredQueue,
 } from "./local-recovery";
 import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
 import { urlTimingMark } from "./url-startup-timing";
@@ -1606,10 +1607,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             if (!effectiveSource && persistedV2.urlSource && !idExactMatch) {
               const rcU = reconstructUrlSource(persistedV2.urlSource);
               if (rcU) {
+                // Keep the recoverable queue: merge the rebuilt current URL back at its persisted slot so
+                // natural EOF advances to the real next track (singleton only if no queue survives).
+                const merged = mergeCurrentIntoRecoveredQueue(persistedV2.queueIds, persistedV2.currentSourceId, rcU.source, (id) => byId.get(id));
                 effectiveSource = rcU.source;
                 effectiveTrackIndex = rcU.trackIndex;
-                effectiveQueue = [rcU.source];
-                console.log("[SyncBiz Audit] url restore reconstruct", { phase: "id_found_fallback" });
+                effectiveQueue = merged.queue;
+                console.log("[SyncBiz Audit] url restore reconstruct", { phase: "id_found_fallback", queueLen: merged.queue.length, index: merged.index });
               }
             }
             if (!effectiveSource) {
@@ -1631,11 +1635,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             }
             effectiveSource = chosen.source;
             effectiveTrackIndex = chosen.trackIndex;
-            effectiveQueue = [chosen.source];
+            // URL (single-source) reconstruction preserves the recoverable queue; local/catalog reconstruct
+            // to a playlist source whose internal tracks already ARE the queue → keep them singleton.
+            if (rcU) {
+              const merged = mergeCurrentIntoRecoveredQueue(persistedV2.queueIds, persistedV2.currentSourceId, chosen.source, (id) => byId.get(id));
+              effectiveQueue = merged.queue;
+            } else {
+              effectiveQueue = [chosen.source];
+            }
             console.log("[SyncBiz Audit] restore reconstruct", {
               phase: "id_missing",
               kind: rc ? "local" : rcE ? "ephemeral" : "url",
               trackIndex: chosen.trackIndex,
+              queueLen: effectiveQueue.length,
               tracks: rc ? (persistedV2.local?.queueUrls?.length ?? 1) : rcE ? (persistedV2.ephemeral?.tracks.length ?? 0) : 1,
             });
           }

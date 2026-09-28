@@ -20,6 +20,7 @@ import {
   captureUrlSource,
   sanitizeUrlSource,
   reconstructUrlSource,
+  mergeCurrentIntoRecoveredQueue,
 } from "@/lib/local-recovery";
 import { EPHEMERAL_LOCAL_PLAYLIST_PREFIX } from "@/lib/local-playlist-artwork";
 import type { UnifiedSource } from "@/lib/source-types";
@@ -208,6 +209,40 @@ const YT_WATCH = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 
   // mutual exclusivity: an http play URL is never a local block, and a local path is never a url block.
   assert("url: http play URL is not captured as LOCAL", captureLocalRecovery({ currentPlayUrl: YT_WATCH }) === undefined);
+}
+
+// ── QUEUE PRESERVATION on remount (Gap 2) — merge reconstructed current into the recovered queue ──────
+const mkSrc = (id: string): UnifiedSource => ({ id, title: id, genre: "Mixed", cover: null, type: "youtube", url: `https://y/${id}`, origin: "source" });
+{
+  const current = reconstructUrlSource({ url: YT_WATCH })!.source; // fresh playnext-* id
+  const OLD = "playnext-old-current";
+  const serverA = mkSrc("pl-A"), serverB = mkSrc("pl-B");
+  const byId = new Map<string, UnifiedSource>([[serverA.id, serverA], [serverB.id, serverB]]);
+  const resolve = (id: string) => byId.get(id);
+
+  // C. current ad-hoc URL + two server-known queue items → queue keeps current + both, index at current.
+  const c = mergeCurrentIntoRecoveredQueue([OLD, "pl-A", "pl-B"], OLD, current, resolve);
+  assert("C: queue = [current, serverA, serverB], index 0",
+    c.queue.length === 3 && c.queue[0] === current && c.queue[1] === serverA && c.queue[2] === serverB && c.index === 0);
+
+  // D. EOF on adopted current → there IS a real next source to advance to.
+  assert("D: a real next source exists after the reconstructed current", c.queue[c.index + 1] === serverA);
+
+  // current in the MIDDLE → index tracks position, neighbors preserved on both sides.
+  const mid = mergeCurrentIntoRecoveredQueue(["pl-A", OLD, "pl-B"], OLD, current, resolve);
+  assert("C': current in middle → [serverA, current, serverB], index 1",
+    mid.queue.length === 3 && mid.queue[0] === serverA && mid.queue[1] === current && mid.index === 1);
+
+  // unresolvable neighbors (other ephemeral ids) are dropped; current still placed.
+  const withGhost = mergeCurrentIntoRecoveredQueue([OLD, "playnext-ghost", "pl-B"], OLD, current, resolve);
+  assert("merge: drops unresolvable neighbor, keeps recoverable → [current, serverB]",
+    withGhost.queue.length === 2 && withGhost.queue[0] === current && withGhost.queue[1] === serverB && withGhost.index === 0);
+
+  // E. singleton — no recoverable queue → just the current.
+  const singleton = mergeCurrentIntoRecoveredQueue([OLD], OLD, current, resolve);
+  assert("E: no queue → singleton [current], index 0", singleton.queue.length === 1 && singleton.queue[0] === current && singleton.index === 0);
+  const emptyIds = mergeCurrentIntoRecoveredQueue([], OLD, current, resolve);
+  assert("E': empty queueIds → singleton [current]", emptyIds.queue.length === 1 && emptyIds.queue[0] === current);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

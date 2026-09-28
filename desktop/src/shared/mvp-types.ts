@@ -557,6 +557,10 @@ export type MvpStatusSnapshot = {
    *  orchestrator owns the startup timeout); "cold" = loaded on the ACTIVE deck (renderer owns the
    *  PR-24 startup timeout). Desktop-internal only — never sent over WS / to CONTROL. */
   mpvAttemptMode: "cold" | "crossfade";
+  /** Hash of the CURRENT music attempt's URL (never the raw URL/path). Lets a renderer remount prove it is
+   *  re-owning the SAME live media before adopting the engine (suppressing the initial loadfile). Empty
+   *  when nothing is playing. Safe to include anywhere — it is a one-way hash. */
+  mpvCurrentMediaKey?: string;
 };
 
 export type MvpConfigPatch = Partial<Omit<DesktopRuntimeConfig, "deviceId">> & {
