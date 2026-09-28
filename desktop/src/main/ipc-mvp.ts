@@ -57,8 +57,8 @@ import { DeviceWsManager } from "../device-websocket-client/device-ws-manager";
 import { fetchBranchLibrarySummary } from "./branch-library-fetch";
 import { ensurePlaylistProRuntimeConfig } from "./playlistpro-config";
 import { musicFolderDisplayLabel } from "../shared/playlistpro-paths";
-import { loadRuntimeConfig, patchRuntimeConfig, saveRuntimeConfig } from "./runtime-config-service";
-import { resolveDurableDeviceId } from "./durable-device-id";
+import { loadRuntimeConfig, patchRuntimeConfig } from "./runtime-config-service";
+import { reconcileDeviceIdentity, stripDeviceIdFromPatch } from "./device-identity-reconcile";
 import type { PlaybackOrchestrator } from "./playback-orchestrator";
 import { scanLocalAudioFolder } from "./scan-local-audio-folder";
 import { listMusicLibraryDir } from "./list-music-library-dir";
@@ -83,20 +83,18 @@ function getUserData(): string {
   return app.getPath("userData");
 }
 
+/**
+ * Phase 0.1 — DURABLE MACHINE (STATION) IDENTITY. The authoritative MAIN deviceId is
+ * C:\ProgramData\VONO\state\device-id.json (survives userData loss / reinstall). ProgramData is the IMMUTABLE
+ * runtime authority: reconcileDeviceIdentity() forces config.deviceId back to the durable id whenever they
+ * differ, so the MAIN WS registration (DeviceWsManager uses config.deviceId) and the heartbeat can never drift
+ * from ProgramData — including after a manual/runtime config edit. NOTE: the renderer keeps its OWN localStorage
+ * id — unifying the two planes on one deviceId would collide in the server `devices` Map (see lib/device-id.ts).
+ */
 function loadEffectiveRuntimeConfig(): DesktopRuntimeConfig {
   const raw = loadRuntimeConfig(getUserData());
-  const next = ensurePlaylistProRuntimeConfig(getUserData(), raw);
-  // Phase 0.1 — DURABLE MACHINE (STATION) IDENTITY. The authoritative MAIN deviceId is
-  // C:\ProgramData\VONO\state\device-id.json (survives renderer clears / userData loss / reinstall).
-  // Reconcile config.deviceId to it so the MAIN WS registration (DeviceWsManager uses config.deviceId) and
-  // the heartbeat use the SAME durable id. Never regenerates a valid id; migrates the existing config id into
-  // ProgramData when ProgramData has none. NOTE: the renderer device socket keeps its OWN localStorage id —
-  // unifying the two planes on one deviceId would collide in the server `devices` Map (see lib/device-id.ts).
-  const durable = resolveDurableDeviceId(next.deviceId);
-  if (durable.id !== next.deviceId) {
-    next.deviceId = durable.id;
-    saveRuntimeConfig(getUserData(), next);
-  }
+  const withPro = ensurePlaylistProRuntimeConfig(getUserData(), raw);
+  const next = reconcileDeviceIdentity(getUserData(), withPro);
   cachedConfig = next;
   return next;
 }
@@ -165,11 +163,11 @@ async function desktopSignInWithPassword(
     return { ok: false, error: "Invalid response from server (no token)." };
   }
 
-  const next = patchRuntimeConfig(getUserData(), cur, {
+  const next = reconcileDeviceIdentity(getUserData(), patchRuntimeConfig(getUserData(), cur, {
     wsToken: rec.token.trim(),
     lastAuthEmail: trimmedEmail,
     desktopTokenExpiresAtIso: typeof rec.expiresAt === "string" ? rec.expiresAt : undefined,
-  });
+  }));
   if (manager) manager.setConfig(next);
   broadcast(getWindow(), manager ? manager.snapshot() : fallbackSnapshotFromConfig(next));
   return { ok: true, config: next };
@@ -243,8 +241,13 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   });
 
   ipcMain.handle(MVP_IPC.SAVE_CONFIG, (_e, patch: MvpConfigPatch): DesktopRuntimeConfig => {
+    // Phase 0.1: deviceId is NOT settable at runtime — ProgramData is the immutable authority. Drop any
+    // patch.deviceId, apply the rest, then reconcile back to the durable MAIN id so a manual/renderer patch
+    // can never drift config.deviceId (and thus DeviceWsManager REGISTER / heartbeat) away from ProgramData.
+    const safePatch = stripDeviceIdFromPatch(patch);
     const cur = loadRuntimeConfig(getUserData());
-    const next = patchRuntimeConfig(getUserData(), cur, patch);
+    const patched = patchRuntimeConfig(getUserData(), cur, safePatch);
+    const next = reconcileDeviceIdentity(getUserData(), patched);
     cachedConfig = next;
     if (manager) manager.setConfig(next);
     broadcast(getWindow(), manager!.snapshot());
@@ -252,7 +255,9 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   });
 
   ipcMain.handle(MVP_IPC.WS_CONNECT, (): MvpStatusSnapshot => {
-    cachedConfig = loadRuntimeConfig(getUserData());
+    // Use the RECONCILED effective config (durable ProgramData id applied) — never raw loadRuntimeConfig() —
+    // so REGISTER always uses the durable MAIN deviceId even if the raw config was manually changed.
+    cachedConfig = loadEffectiveRuntimeConfig();
     if (!manager) {
       manager = new DeviceWsManager(cachedConfig, orchestratorInstance);
       manager.onStatus((s) => broadcast(getWindow(), s));
@@ -269,7 +274,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   });
 
   ipcMain.handle(MVP_IPC.FETCH_BRANCH_LIBRARY, async (): Promise<BranchLibrarySummary> => {
-    const c = loadRuntimeConfig(getUserData());
+    const c = reconcileDeviceIdentity(getUserData(), loadRuntimeConfig(getUserData())); // durable id before feeding the manager
     const sum = await fetchBranchLibrarySummary(c);
     if (!manager) {
       manager = new DeviceWsManager(c, orchestratorInstance);
@@ -285,7 +290,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
 
   ipcMain.handle(MVP_IPC.SELECT_STATION_SOURCE, (_e, item: BranchLibraryItem): MvpStatusSnapshot => {
     if (!manager) {
-      manager = new DeviceWsManager(loadRuntimeConfig(getUserData()), orchestratorInstance);
+      manager = new DeviceWsManager(reconcileDeviceIdentity(getUserData(), loadRuntimeConfig(getUserData())), orchestratorInstance);
       manager.onStatus((s) => broadcast(getWindow(), s));
     }
     if (!item?.id?.trim() || !item.origin) {
@@ -297,7 +302,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
 
   ipcMain.handle(MVP_IPC.LOCAL_MOCK_TRANSPORT, (_e, payload: LocalMockTransportPayload): MvpStatusSnapshot => {
     if (!manager) {
-      manager = new DeviceWsManager(loadRuntimeConfig(getUserData()), orchestratorInstance);
+      manager = new DeviceWsManager(reconcileDeviceIdentity(getUserData(), loadRuntimeConfig(getUserData())), orchestratorInstance);
       manager.onStatus((s) => broadcast(getWindow(), s));
     }
     manager.applyLocalMockTransport(payload);
@@ -497,7 +502,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       const chosen = result.filePaths[0]!;
       const cur = loadRuntimeConfig(getUserData());
       setLocalMetadataBankFolder(getUserData(), cur, chosen);
-      cachedConfig = loadRuntimeConfig(getUserData());
+      cachedConfig = reconcileDeviceIdentity(getUserData(), loadRuntimeConfig(getUserData())); // keep cachedConfig on the durable id
       return { status: "ok", path: chosen };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

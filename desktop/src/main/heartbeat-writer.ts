@@ -190,11 +190,10 @@ export function updateFromMpv(s: MvpStatusSnapshot): void {
   attemptId = s.mpvAttemptId;
   engineReady = s.mpvEngineReady;
   mpvLastError = sanitizeError(s.mpvLastError); // privacy: never persist a raw url/path/token
-  // Identity is seeded from the durable MAIN config at startHeartbeat(). A later snapshot may REFRESH it, but
-  // must never regress it to null (an empty snapshot identity would otherwise wipe the durable MAIN deviceId —
-  // Phase 0.1 invariant: the durable id is present independent of renderer/WS/playback).
+  // Phase 0.1 invariant: deviceId is seeded from the durable MAIN id at startHeartbeat() and is FIXED for the
+  // process lifetime — a later snapshot must NEVER replace it (ProgramData is the immutable runtime authority).
+  // branchId MAY refresh from the snapshot (but never regress to null).
   if (s.branchId && s.branchId.trim()) branchId = s.branchId.trim();
-  if (s.deviceId && s.deviceId.trim()) deviceId = s.deviceId.trim();
 
   // Meaningful transition → write promptly (coalesced). Position-only changes ride the periodic beat.
   const transition =
