@@ -4282,6 +4282,18 @@ export function AudioPlayer() {
       : volume;
   const displayShuffle =
     isControlMirror ? (typeof ms?.shuffle === "boolean" ? ms?.shuffle : shuffle) : shuffle;
+  // READ-ONLY diagnostic (no behavior change): proves layer E on the Lenovo — whether the RANDOM button's
+  // shown state (displayShuffle) tracks the provider's persisted `shuffle` or diverges via a control-mirror
+  // path (isControlMirror true / masterState shuffle). Grep: [VONO Shuffle Diag]
+  useEffect(() => {
+    console.log("[VONO Shuffle Diag] ui", {
+      shuffle,
+      displayShuffle,
+      isControlMirror,
+      deviceMode: deviceCtx?.deviceMode ?? null,
+      msShuffle: typeof ms?.shuffle === "boolean" ? ms?.shuffle : null,
+    });
+  }, [shuffle, displayShuffle, isControlMirror, deviceCtx?.deviceMode, ms?.shuffle]);
   const displayAutoMix =
     isControlMirror ? (typeof ms?.autoMix === "boolean" ? ms?.autoMix : autoMix) : autoMix;
   const displayThumbnailCover = (() => {
