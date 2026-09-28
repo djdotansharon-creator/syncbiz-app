@@ -28,6 +28,32 @@ assert("nsh: customUnInstall deletes the single task + stale lock",
   /VONO\\state\\watchdog\.lock/.test(nsh));
 assert("nsh: no blanket/unrelated startup wipe", !/reg delete/i.test(nsh) && !/Startup/i.test(nsh));
 
+// ── ZERO-TOUCH UPGRADE: customCheckAppRunning teardown (runs before file replacement) ─────────────
+assert("nsh: customCheckAppRunning replaces built-in check",
+  /!macro\s+customCheckAppRunning/.test(nsh));
+assert("nsh: teardown script embedded to $PLUGINSDIR + run hidden with -InstallDir $INSTDIR",
+  /File "\/oname=\$PLUGINSDIR\\stop-vono-for-upgrade\.ps1"/.test(nsh) &&
+  /-WindowStyle Hidden -ExecutionPolicy Bypass -File "\$PLUGINSDIR\\stop-vono-for-upgrade\.ps1" -InstallDir "\$INSTDIR"/.test(nsh));
+
+// ── stop-vono-for-upgrade.ps1 (ordered, identity-safe, fail-safe teardown) ────────────────────────
+const stop = read("scripts/provisioning/stop-vono-for-upgrade.ps1");
+assert("stop: fail-safe (SilentlyContinue, exits 0 — never aborts the installer)",
+  /\$ErrorActionPreference = "SilentlyContinue"/.test(stop) && /exit 0/.test(stop));
+assert("stop: (1) stop + DISABLE the Protection task first",
+  /schtasks \/End \/TN \$TaskName/.test(stop) && /schtasks \/Change \/TN \$TaskName \/DISABLE/.test(stop));
+assert("stop: identity-safe — matches EXACT ExecutablePath under $InstallDir",
+  /ExecutablePath -ieq \$exePath/.test(stop) && /Join-Path \$InstallDir/.test(stop));
+assert("stop: kills watchdog node (this install) + launcher by command line (this install)",
+  /Get-ByPath \$nodeExe/.test(stop) && /CommandLine\.ToLower\(\)\.Contains\(\$runnerLc\)/.test(stop));
+assert("stop: closes VONO gracefully then force (CloseMainWindow + Stop-Process -Force)",
+  /CloseMainWindow/.test(stop) && /Stop-Process -Id \$p\.ProcessId -Force/.test(stop));
+assert("stop: MPV matched by this install's path OR spawned by this install's VONO (parent pid)",
+  /ExecutablePath -ieq \$mpvExe/.test(stop) && /\$parentPids -contains \[int\]\$_\.ParentProcessId/.test(stop) && /Get-VonoMpv \$vonoPids/.test(stop));
+assert("stop: does NOT blanket-kill unrelated procs (no image-name/-Name kills of mpv/node/powershell)",
+  !/Stop-Process\s+-Name/i.test(stop) && !/taskkill[^\n]*\/im\s+"?(mpv|node|powershell)/i.test(stop) && !/Get-Process\s+-Name\s+("?)(mpv|node|powershell)/i.test(stop));
+assert("stop: paths built with Join-Path (spaces-safe): app exe + resources\\mpv.exe",
+  /Join-Path \$InstallDir "SyncBiz Player\.exe"/.test(stop) && /Join-Path \$InstallDir "resources\\mpv\.exe"/.test(stop));
+
 // ── launch-watchdog.ps1 (hidden foreground runner) ───────────────────────────
 const launch = read("scripts/provisioning/launch-watchdog.ps1");
 assert("launcher: uses $PSScriptRoot (spaces-safe, no interpolation)", /\$PSScriptRoot/.test(launch));
@@ -63,8 +89,8 @@ assert("PR#32 intact: launch uses cwd: path.dirname(execPath)", /cwd: path\.dirn
 
 // ── build staged the provisioning scripts into resources/vono-watchdog (run build:watchdog first) ──
 const staged = (f: string) => existsSync(path.join(root, "resources", "vono-watchdog", f));
-assert("build staged launch-watchdog.ps1 + provision script into resources/vono-watchdog (run build:watchdog)",
-  staged("launch-watchdog.ps1") && staged("provision-vono-protection.ps1"),
+assert("build staged launch-watchdog.ps1 + provision + stop-for-upgrade into resources/vono-watchdog (run build:watchdog)",
+  staged("launch-watchdog.ps1") && staged("provision-vono-protection.ps1") && staged("stop-vono-for-upgrade.ps1"),
   "if FAIL: run `npm run build:watchdog` first");
 
 console.log(`\n${pass} passed, ${fail} failed`);

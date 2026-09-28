@@ -32,7 +32,7 @@ async function main() {
   // Stage the provisioning scripts alongside node.exe/watchdog.cjs so win.extraFiles ships them to
   // <install>\vono-watchdog\, where the NSIS installer + the Scheduled Task action reference them.
   const provDir = path.join(root, "scripts", "provisioning");
-  for (const f of ["launch-watchdog.ps1", "provision-vono-protection.ps1"]) {
+  for (const f of ["launch-watchdog.ps1", "provision-vono-protection.ps1", "stop-vono-for-upgrade.ps1"]) {
     const src = path.join(provDir, f);
     const dst = path.join(outDir, f);
     fs.copyFileSync(src, dst);
