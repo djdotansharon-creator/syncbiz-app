@@ -74,17 +74,34 @@ try {
   Stop-Procs $psRunners 0 "watchdog-launcher"
 } catch {}
 
-# 3) Close VONO gracefully (bounded), then force — only this install's exe path.
-Stop-Procs (Get-ByPath $appExe) 4000 "VONO"
+# Identity-safe MPV selection: mpv.exe that is EITHER this install's bundled exe path OR was spawned by
+# this install's VONO (ParentProcessId in $parentPids). Covers a cache-resolved mpv (a newer GitHub copy
+# lives outside $InstallDir) while never touching an unrelated mpv.exe. $parentPids is captured BEFORE
+# VONO is killed; a child's ParentProcessId is retained even after the parent exits.
+function Get-VonoMpv([int[]]$parentPids) {
+  try {
+    return @(Get-CimInstance Win32_Process -Filter "Name='mpv.exe'" -ErrorAction SilentlyContinue |
+      Where-Object {
+        ($_.ExecutablePath -and ($_.ExecutablePath -ieq $mpvExe)) -or
+        ($parentPids -and ($parentPids -contains [int]$_.ParentProcessId))
+      })
+  } catch { return @() }
+}
 
-# 4) Ensure VONO-owned MPV from THIS install is gone.
-Stop-Procs (Get-ByPath $mpvExe) 0 "MPV"
+# 3) Close VONO gracefully (bounded), then force — only this install's exe path. Capture pids first so
+#    VONO-owned MPV (even a cache-resolved copy) can be matched by parent after VONO exits.
+$vonoProcs = Get-ByPath $appExe
+$vonoPids  = @($vonoProcs | ForEach-Object { [int]$_.ProcessId })
+Stop-Procs $vonoProcs 4000 "VONO"
+
+# 4) Ensure VONO-owned MPV is gone (this install's path OR spawned by the VONO we just stopped).
+Stop-Procs (Get-VonoMpv $vonoPids) 0 "MPV"
 
 # 5) Bounded confirm the app/mpv are released (re-kill any late relaunch; watchdog is already dead).
 $deadline = (Get-Date).AddSeconds(6)
 while ((Get-Date) -lt $deadline) {
   $app = Get-ByPath $appExe
-  $mpv = Get-ByPath $mpvExe
+  $mpv = Get-VonoMpv $vonoPids
   if (@($app).Count -eq 0 -and @($mpv).Count -eq 0) { break }
   Stop-Procs $app 0 "VONO(retry)"
   Stop-Procs $mpv 0 "MPV(retry)"

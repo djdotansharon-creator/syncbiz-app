@@ -45,8 +45,10 @@ assert("stop: identity-safe — matches EXACT ExecutablePath under $InstallDir",
   /ExecutablePath -ieq \$exePath/.test(stop) && /Join-Path \$InstallDir/.test(stop));
 assert("stop: kills watchdog node (this install) + launcher by command line (this install)",
   /Get-ByPath \$nodeExe/.test(stop) && /CommandLine\.ToLower\(\)\.Contains\(\$runnerLc\)/.test(stop));
-assert("stop: closes VONO gracefully then force (CloseMainWindow + Stop-Process -Force), MPV by path",
-  /CloseMainWindow/.test(stop) && /Stop-Process -Id \$p\.ProcessId -Force/.test(stop) && /Get-ByPath \$mpvExe/.test(stop));
+assert("stop: closes VONO gracefully then force (CloseMainWindow + Stop-Process -Force)",
+  /CloseMainWindow/.test(stop) && /Stop-Process -Id \$p\.ProcessId -Force/.test(stop));
+assert("stop: MPV matched by this install's path OR spawned by this install's VONO (parent pid)",
+  /ExecutablePath -ieq \$mpvExe/.test(stop) && /\$parentPids -contains \[int\]\$_\.ParentProcessId/.test(stop) && /Get-VonoMpv \$vonoPids/.test(stop));
 assert("stop: does NOT blanket-kill unrelated procs (no image-name/-Name kills of mpv/node/powershell)",
   !/Stop-Process\s+-Name/i.test(stop) && !/taskkill[^\n]*\/im\s+"?(mpv|node|powershell)/i.test(stop) && !/Get-Process\s+-Name\s+("?)(mpv|node|powershell)/i.test(stop));
 assert("stop: paths built with Join-Path (spaces-safe): app exe + resources\\mpv.exe",
