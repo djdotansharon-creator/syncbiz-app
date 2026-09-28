@@ -11,8 +11,22 @@
 
 /** Trim, drop fragment, strip the volatile `mt` (media-session token) query param, lowercase. */
 export function canonicalMediaId(url: string | null | undefined): string {
-  let s = (url ?? "").trim();
-  if (!s) return "";
+  const raw = (url ?? "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const u = new URL(raw);
+      u.hash = ""; // drop fragment
+      u.searchParams.delete("mt"); // drop the volatile media-session token
+      // URL parsing lowercases protocol + host; pathname CASE and query VALUES are preserved verbatim, so
+      // case-sensitive media ids (e.g. a YouTube ?v=AbC123) keep their distinct identity.
+      return `${u.protocol}//${u.host}${u.pathname}${u.search}`;
+    } catch {
+      /* not a parseable URL — fall through to path handling */
+    }
+  }
+  // Local paths / non-URLs: Windows paths are case-INsensitive, so lowercasing is the intended identity.
+  let s = raw;
   const hashAt = s.indexOf("#");
   if (hashAt >= 0) s = s.slice(0, hashAt);
   s = s.replace(/([?&])mt=[^&]*/i, "$1").replace(/[?&]+$/, "");

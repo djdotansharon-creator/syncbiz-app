@@ -20,15 +20,25 @@ const B = "https://www.youtube.com/watch?v=BBB222";
 const livePlaying = { engineReady: true, status: "playing", attemptId: 6 };
 const KEY_A = mediaKey(A);
 
-// ── media key: canonical (strips volatile mt token + fragment) ────────────────────────────────────
-assert("key: mt token ignored", mediaKey("https://x/api/media/z?mt=TOKEN1") === mediaKey("https://x/api/media/z?mt=TOKEN2"));
-assert("key: fragment ignored", mediaKey(A + "#t=30") === KEY_A);
+// ── media key: canonical (strips volatile mt token + fragment; case-correct) ──────────────────────
+// 4. same URL, different mt token → SAME media key
+assert("key(4): mt token ignored → SAME", mediaKey("https://x/api/media/z?mt=TOKEN1") === mediaKey("https://x/api/media/z?mt=TOKEN2"));
+// 5. same URL, fragment difference → SAME media key
+assert("key(5): fragment ignored → SAME", mediaKey(A + "#t=30") === KEY_A);
+// 1. differ only in HOSTNAME case → SAME media key (host is case-insensitive)
+assert("key(1): hostname case only → SAME", mediaKey("https://YouTube.COM/watch?v=X") === mediaKey("https://youtube.com/watch?v=X"));
+// 2. differ only in PATHNAME case → DIFFERENT media key (path is case-sensitive)
+assert("key(2): pathname case → DIFFERENT", mediaKey("https://x/Path/Song") !== mediaKey("https://x/path/song"));
+// 3. YouTube video id differs only in case → DIFFERENT media key (query values are case-sensitive)
+assert("key(3): YouTube id case → DIFFERENT", mediaKey("https://youtube.com/watch?v=AbC123") !== mediaKey("https://youtube.com/watch?v=abc123"));
 assert("key: different media → different key", mediaKey(A) !== mediaKey(B));
 assert("key: empty → empty", mediaKey("") === "" && canonicalMediaId(null) === "");
+// Windows local path identity stays case-insensitive (Windows FS is case-insensitive).
+assert("key: local path case-insensitive → SAME", mediaKey("C:\\Music\\Song.mp3") === mediaKey("c:\\music\\song.mp3"));
 // DIVERGENCE GUARD: the desktop's src/main/live-media-key.ts MUST produce this exact key for this vector
 // (asserted identically in desktop/scripts/verify-attempt-mode.ts). If these drift, adoption breaks.
 assert("key: fixed vector matches shared constant (guards app↔desktop parity)",
-  mediaKey("https://www.youtube.com/watch?v=VEC777&mt=tok#frag") === "8074fdea");
+  mediaKey("https://www.youtube.com/watch?v=VEC777&mt=tok#frag") === "1f62bc4a");
 
 // ── A. IDENTITY MATCH → ADOPT ─────────────────────────────────────────────────────────────────────
 assert("A: live A + restored A + live key A + attemptId matches → ADOPT",

@@ -198,9 +198,13 @@ const priv = (o: PlaybackOrchestrator) => o as unknown as { currentAttemptDeck: 
   // DIVERGENCE GUARD: MUST equal the app's lib/live-mpv-adopt.ts mediaKey for this exact vector
   // (asserted identically in scripts/verify-live-mpv-adopt.ts). Drift here breaks remount adoption.
   assert("mediaKey: fixed vector matches shared constant (guards desktop↔app parity)",
-    mediaKey("https://www.youtube.com/watch?v=VEC777&mt=tok#frag") === "8074fdea", "8074fdea");
+    mediaKey("https://www.youtube.com/watch?v=VEC777&mt=tok#frag") === "1f62bc4a", "1f62bc4a");
   assert("mediaKey: mt token + fragment are canonicalized away",
     mediaKey("https://x/api/media/z?mt=A") === mediaKey("https://x/api/media/z?mt=B#frag"), "canonical");
+  assert("mediaKey: YouTube id case is PRESERVED (case-sensitive query value)",
+    mediaKey("https://youtube.com/watch?v=AbC123") !== mediaKey("https://youtube.com/watch?v=abc123"), "case-sensitive");
+  assert("mediaKey: hostname case ignored (case-insensitive host)",
+    mediaKey("https://YouTube.COM/watch?v=X") === mediaKey("https://youtube.com/watch?v=X"), "host-ci");
   // getState() exposes the CURRENT attempt's key (hash only) so the renderer can prove same-media on adopt.
   const o = new PlaybackOrchestrator();
   o.playMusic("https://stream.example/live.mp3", 11);
