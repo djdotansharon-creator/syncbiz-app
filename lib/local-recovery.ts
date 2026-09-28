@@ -23,6 +23,9 @@ import { createPlayNextLocalSource } from "@/lib/play-next";
 import { buildEphemeralLocalFolderPlaylist } from "@/lib/ephemeral-local-music-playback";
 import { isValidLocalFilePlaybackPath } from "@/lib/url-validation";
 import { unifiedPlaylistSourceId } from "@/lib/playlist-utils";
+import { EPHEMERAL_LOCAL_PLAYLIST_PREFIX } from "@/lib/local-playlist-artwork";
+import { getPlaylistTracks } from "@/lib/playlist-types";
+import type { Playlist, PlaylistTrack } from "@/lib/playlist-types";
 import type { UnifiedSource } from "@/lib/source-types";
 
 export type LocalRecovery = {
@@ -125,4 +128,105 @@ export function reconstructLocalSourceFromSnapshot(
   }
   const source = createPlayNextLocalSource(rec.currentUrl, rec.cover ?? null);
   return { source, trackIndex: 0 };
+}
+
+/**
+ * Device-only reconstruction blob for an EPHEMERAL playlist source whose tracks are NOT local files —
+ * e.g. the Royalty-Free / Music Bank catalog (tracks are `/api/media/<assetId>` HTTP URLs). Its id
+ * (`ephemeral-local-folder:musicbank-…`) is generated client-side and never known to the server, so it
+ * can't be rebuilt from `fetchUnifiedSourcesWithFallback()` after a reboot, and `local-recovery` above
+ * can't help because the tracks aren't local paths. Persisting the source itself (device-only,
+ * localStorage) lets restore rebuild the exact catalog session. Complements — never replaces — the
+ * `LocalRecovery` block above (which stays the sole owner of local-file resume).
+ */
+export type EphemeralTrack = { id: string; name: string; type: string; url: string; cover?: string };
+export type EphemeralSourceRecovery = {
+  sourceId: string; // the ephemeral UnifiedSource id (== its playlist id)
+  title: string;
+  genre: string;
+  type: string; // SourceProviderType, e.g. "stream-url" (Music Bank) or "local"
+  url: string;
+  cover: string | null;
+  tracks: EphemeralTrack[];
+};
+
+/** Capture an ephemeral playlist source for reboot resume. Returns undefined for anything that is not an
+ *  ephemeral playlist with reconstructable tracks (so non-ephemeral / server-known sources are untouched). */
+export function captureEphemeralSource(source: UnifiedSource | null | undefined): EphemeralSourceRecovery | undefined {
+  const pl = source?.playlist;
+  if (!source || !pl?.id || !pl.id.startsWith(EPHEMERAL_LOCAL_PLAYLIST_PREFIX)) return undefined;
+  const tracks: EphemeralTrack[] = getPlaylistTracks(pl)
+    .map((t) => ({ id: t.id, name: t.name, type: String(t.type), url: (t.url ?? "").trim(), ...(t.cover ? { cover: t.cover } : {}) }))
+    .filter((t) => !!t.url);
+  if (tracks.length === 0) return undefined;
+  return {
+    sourceId: source.id,
+    title: source.title,
+    genre: source.genre,
+    type: String(source.type),
+    url: (source.url ?? tracks[0]!.url).trim(),
+    cover: source.cover ?? null,
+    tracks,
+  };
+}
+
+/** Validate/normalize a persisted ephemeral blob from storage (untrusted JSON). */
+export function sanitizeEphemeralSource(raw: unknown): EphemeralSourceRecovery | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Partial<EphemeralSourceRecovery>;
+  if (typeof r.sourceId !== "string" || !r.sourceId || !Array.isArray(r.tracks)) return undefined;
+  const tracks = r.tracks
+    .filter((t): t is EphemeralTrack => !!t && typeof t === "object" && typeof (t as EphemeralTrack).url === "string")
+    .map((t) => ({ id: String(t.id ?? ""), name: String(t.name ?? ""), type: String(t.type ?? "stream-url"), url: t.url.trim(), ...(typeof t.cover === "string" && t.cover ? { cover: t.cover } : {}) }))
+    .filter((t) => !!t.url);
+  if (tracks.length === 0) return undefined;
+  return {
+    sourceId: r.sourceId,
+    title: typeof r.title === "string" ? r.title : "",
+    genre: typeof r.genre === "string" && r.genre ? r.genre : "Mixed",
+    type: typeof r.type === "string" && r.type ? r.type : "stream-url",
+    url: typeof r.url === "string" && r.url.trim() ? r.url.trim() : tracks[0]!.url,
+    cover: typeof r.cover === "string" && r.cover ? r.cover : null,
+    tracks,
+  };
+}
+
+/** Rebuild a playable UnifiedSource (+ ephemeral playlist) from the blob. Returns null if unusable. */
+export function reconstructEphemeralSource(
+  rec: EphemeralSourceRecovery | undefined,
+  preferredTrackIndex: number,
+): { source: UnifiedSource; trackIndex: number } | null {
+  if (!rec?.sourceId || !Array.isArray(rec.tracks) || rec.tracks.length === 0) return null;
+  const tracks: PlaylistTrack[] = rec.tracks.map((t) => ({
+    id: t.id,
+    name: t.name,
+    type: t.type as PlaylistTrack["type"],
+    url: t.url,
+    ...(t.cover ? { cover: t.cover } : {}),
+  }));
+  const thumb = (rec.cover ?? "").trim();
+  const playlist: Playlist = {
+    id: rec.sourceId, // ephemeral prefix preserved → playSource skips /api/playlists hydration
+    name: rec.title || "Samples",
+    genre: rec.genre || "Mixed",
+    type: rec.type as Playlist["type"],
+    url: rec.url,
+    thumbnail: thumb,
+    ...(thumb ? { cover: thumb } : {}),
+    createdAt: new Date().toISOString(),
+    tracks,
+    order: tracks.map((t) => t.id),
+  };
+  const source: UnifiedSource = {
+    id: rec.sourceId,
+    title: rec.title || playlist.name,
+    genre: rec.genre || "Mixed",
+    cover: rec.cover ?? null,
+    type: rec.type as UnifiedSource["type"],
+    url: rec.url,
+    origin: "playlist",
+    playlist,
+  };
+  const idx = Math.min(Math.max(0, preferredTrackIndex), tracks.length - 1);
+  return { source, trackIndex: idx };
 }

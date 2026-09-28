@@ -48,6 +48,28 @@ export function mediaTokenRemainingSec(): number {
   return Math.max(0, currentExpEpoch - Math.floor(Date.now() / 1000));
 }
 
+/**
+ * Resolve once a media session token is held (immediately if one already is), or `false` after
+ * `timeoutMs`. NO network — it only waits for master-media-session's async authorize to land. Used by
+ * cold-restore of a Music Bank (/api/media) source so getPlayUrl can append a valid `mt` before the
+ * first dispatch; otherwise /api/media 401s and the restored track is silent. Never rejects/hangs.
+ */
+export function awaitMediaSessionToken(timeoutMs = 6000): Promise<boolean> {
+  if (currentToken) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok: boolean): void => {
+      if (done) return;
+      done = true;
+      try { unsub(); } catch { /* ignore */ }
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const unsub = subscribeMediaSession(() => { if (currentToken) finish(true); });
+    const timer = setTimeout(() => finish(false), Math.max(0, timeoutMs));
+  });
+}
+
 /** True for a SyncBiz Music Bank media URL (`/api/media/<assetId>`), absolute or relative. */
 export function isSyncBizMediaUrl(url: string | null | undefined): boolean {
   return !!url && /\/api\/media\//.test(url);
