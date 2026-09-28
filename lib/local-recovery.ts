@@ -19,9 +19,9 @@
  * These are PURE functions (no DOM / MPV / DB / network) so the resume decision is deterministically
  * unit-testable without the desktop runtime.
  */
-import { createPlayNextLocalSource } from "@/lib/play-next";
+import { createPlayNextLocalSource, createPlayNextUrlSource } from "@/lib/play-next";
 import { buildEphemeralLocalFolderPlaylist } from "@/lib/ephemeral-local-music-playback";
-import { isValidLocalFilePlaybackPath } from "@/lib/url-validation";
+import { isValidLocalFilePlaybackPath, isValidPlaybackUrl } from "@/lib/url-validation";
 import { unifiedPlaylistSourceId } from "@/lib/playlist-utils";
 import { EPHEMERAL_LOCAL_PLAYLIST_PREFIX } from "@/lib/local-playlist-artwork";
 import { getPlaylistTracks } from "@/lib/playlist-types";
@@ -229,4 +229,100 @@ export function reconstructEphemeralSource(
   };
   const idx = Math.min(Math.max(0, preferredTrackIndex), tracks.length - 1);
   return { source, trackIndex: idx };
+}
+
+/**
+ * Device-only recovery for an ad-hoc / pasted **URL** source (e.g. a pasted YouTube link played via Play
+ * Next — `createPlayNextUrlSource`: a `playnext-*` id, `origin:"source"`, an http(s) `url`). Like local
+ * files and ephemeral catalog playlists, its id is device-local and unresolvable from the server, so a
+ * remount/cold-restart loses it unless we persist the URL itself (localStorage, never WS). Complements —
+ * never replaces — the `LocalRecovery` (local files) and `EphemeralSourceRecovery` (catalog) blocks; a
+ * play URL is either a local path (handled by LocalRecovery) or an http URL (handled here), so they are
+ * mutually exclusive.
+ */
+export type UrlSourceRecovery = {
+  url: string; // http(s) playback URL (YouTube / SoundCloud / direct stream)
+  sourceType?: string; // UnifiedSource provider type (youtube/stream-url/soundcloud/…)
+  title?: string;
+  cover?: string | null;
+};
+
+/** Capture an ad-hoc URL source. Returns undefined unless the play URL is a valid http(s) playback URL. */
+export function captureUrlSource(args: {
+  playUrl: string | null | undefined;
+  sourceType?: string | null;
+  title?: string | null;
+  cover?: string | null;
+}): UrlSourceRecovery | undefined {
+  const url = (args.playUrl ?? "").trim();
+  if (!isValidPlaybackUrl(url)) return undefined;
+  const rec: UrlSourceRecovery = { url };
+  if (typeof args.sourceType === "string" && args.sourceType) rec.sourceType = args.sourceType;
+  if (typeof args.title === "string" && args.title.trim()) rec.title = args.title.trim();
+  if (typeof args.cover === "string" && args.cover.trim()) rec.cover = args.cover.trim();
+  return rec;
+}
+
+/** Validate/normalize a persisted url-source blob from storage (untrusted JSON). */
+export function sanitizeUrlSource(raw: unknown): UrlSourceRecovery | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Partial<UrlSourceRecovery>;
+  const url = typeof r.url === "string" ? r.url.trim() : "";
+  if (!isValidPlaybackUrl(url)) return undefined;
+  const rec: UrlSourceRecovery = { url };
+  if (typeof r.sourceType === "string" && r.sourceType) rec.sourceType = r.sourceType;
+  if (typeof r.title === "string" && r.title.trim()) rec.title = r.title.trim();
+  if (typeof r.cover === "string" && r.cover.trim()) rec.cover = r.cover.trim();
+  return rec;
+}
+
+/**
+ * Merge a reconstructed CURRENT source back into the recovered queue at its persisted position, keeping
+ * every still-recoverable neighbor (so natural EOF can advance to the real next track). Unresolvable
+ * neighbors (other ephemeral ids the server can't rebuild) are dropped; the current is placed where its
+ * id sat in the persisted `queueIds`. Falls back to a singleton only when there is genuinely no
+ * recoverable queue. Pure/testable. Used for single-source (ad-hoc URL) reconstruction — local/catalog
+ * reconstruct to a playlist source whose internal tracks already ARE the queue, so those stay singleton.
+ */
+export function mergeCurrentIntoRecoveredQueue(
+  queueIds: string[],
+  currentSourceId: string,
+  current: UnifiedSource,
+  resolve: (id: string) => UnifiedSource | undefined,
+): { queue: UnifiedSource[]; index: number } {
+  const rebuilt: UnifiedSource[] = [];
+  let index = -1;
+  for (const id of Array.isArray(queueIds) ? queueIds : []) {
+    if (id === currentSourceId && index < 0) {
+      index = rebuilt.length;
+      rebuilt.push(current);
+    } else if (id !== currentSourceId) {
+      const s = resolve(id);
+      if (s && s.id !== current.id) rebuilt.push(s);
+    }
+  }
+  if (index < 0) {
+    index = 0;
+    rebuilt.unshift(current); // current id wasn't in the persisted queue → lead with it
+  }
+  if (rebuilt.length === 0) {
+    rebuilt.push(current);
+    index = 0;
+  }
+  return { queue: rebuilt, index };
+}
+
+/** Rebuild a playable ad-hoc URL UnifiedSource from the blob. Returns null if unusable. */
+export function reconstructUrlSource(
+  rec: UrlSourceRecovery | undefined,
+): { source: UnifiedSource; trackIndex: number } | null {
+  if (!rec?.url || !isValidPlaybackUrl(rec.url)) return null;
+  const base = createPlayNextUrlSource(rec.url); // fresh playnext-* id, inferred type/title/cover
+  const source: UnifiedSource = {
+    ...base,
+    ...(rec.sourceType ? { type: rec.sourceType as UnifiedSource["type"] } : {}),
+    ...(rec.title ? { title: rec.title } : {}),
+    ...(rec.cover !== undefined ? { cover: rec.cover } : {}),
+  };
+  return { source, trackIndex: 0 };
 }

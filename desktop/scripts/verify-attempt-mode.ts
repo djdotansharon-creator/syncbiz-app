@@ -7,6 +7,7 @@
  * Run: npx tsx desktop/scripts/verify-attempt-mode.ts
  */
 import { PlaybackOrchestrator } from "../src/main/playback-orchestrator";
+import { mediaKey } from "../src/main/live-media-key";
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean, detail: string): void {
@@ -190,6 +191,26 @@ const priv = (o: PlaybackOrchestrator) => o as unknown as { currentAttemptDeck: 
   assert("C first track (prevMpv null) ⇒ cold", decide(null, true) === false, "cold");
   assert("D after STOP (prevMpv cleared) ⇒ cold", decide(null, true) === false, "cold");
   assert("subsequent (prevMpv set) ⇒ crossfade route", decide("http://x/y", true) === true, "crossfade");
+}
+
+// ── Live media key (renderer remount adoption): desktop key parity + getState exposure ──────────────
+{
+  // DIVERGENCE GUARD: MUST equal the app's lib/live-mpv-adopt.ts mediaKey for this exact vector
+  // (asserted identically in scripts/verify-live-mpv-adopt.ts). Drift here breaks remount adoption.
+  assert("mediaKey: fixed vector matches shared constant (guards desktop↔app parity)",
+    mediaKey("https://www.youtube.com/watch?v=VEC777&mt=tok#frag") === "1f62bc4a", "1f62bc4a");
+  assert("mediaKey: mt token + fragment are canonicalized away",
+    mediaKey("https://x/api/media/z?mt=A") === mediaKey("https://x/api/media/z?mt=B#frag"), "canonical");
+  assert("mediaKey: YouTube id case is PRESERVED (case-sensitive query value)",
+    mediaKey("https://youtube.com/watch?v=AbC123") !== mediaKey("https://youtube.com/watch?v=abc123"), "case-sensitive");
+  assert("mediaKey: hostname case ignored (case-insensitive host)",
+    mediaKey("https://YouTube.COM/watch?v=X") === mediaKey("https://youtube.com/watch?v=X"), "host-ci");
+  // getState() exposes the CURRENT attempt's key (hash only) so the renderer can prove same-media on adopt.
+  const o = new PlaybackOrchestrator();
+  o.playMusic("https://stream.example/live.mp3", 11);
+  assert("getState.currentMediaKey === mediaKey(current attempt url)",
+    o.getState().currentMediaKey === mediaKey("https://stream.example/live.mp3"), o.getState().currentMediaKey);
+  o.kill();
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

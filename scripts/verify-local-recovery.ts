@@ -17,6 +17,10 @@ import {
   captureEphemeralSource,
   sanitizeEphemeralSource,
   reconstructEphemeralSource,
+  captureUrlSource,
+  sanitizeUrlSource,
+  reconstructUrlSource,
+  mergeCurrentIntoRecoveredQueue,
 } from "@/lib/local-recovery";
 import { EPHEMERAL_LOCAL_PLAYLIST_PREFIX } from "@/lib/local-playlist-artwork";
 import type { UnifiedSource } from "@/lib/source-types";
@@ -179,6 +183,66 @@ function rfmSource(mode: "stream" | "local" = "stream"): UnifiedSource {
 
   // 5) Preserve: an intentional STOP (no snapshot / no ephemeral blob) does not resume.
   assert("rfm: no ephemeral blob → no reconstruction (STOP stays stopped)", reconstructEphemeralSource(undefined, 0) === null);
+}
+
+// ── AD-HOC / PASTED URL source recovery (renderer remount re-ownership) ───────────────────────────
+// Incident: a pasted YouTube URL (playnext-* id, origin source) was playing via MPV; the renderer
+// remounted, currentSource became null, MPV kept playing orphaned, EOF couldn't advance. These assert
+// the URL-source capture/reconstruct that lets the remounted renderer re-own the pasted URL.
+const YT_WATCH = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+{
+  // capture: only for http(s) playback URLs; local paths / relative are rejected.
+  const rec = captureUrlSource({ playUrl: YT_WATCH, sourceType: "youtube", title: "Pasted Mix", cover: "c" });
+  assert("url: capture ad-hoc http URL → block with url+type+title", !!rec && rec.url === YT_WATCH && rec.sourceType === "youtube" && rec.title === "Pasted Mix");
+  assert("url: capture rejects a local path", captureUrlSource({ playUrl: FILE_A }) === undefined);
+  assert("url: capture rejects empty/relative", captureUrlSource({ playUrl: "" }) === undefined && captureUrlSource({ playUrl: "songs/a.mp3" }) === undefined);
+
+  // reconstruct: rebuild a playable ad-hoc URL source (fresh playnext id, origin source, url preserved).
+  const rcU = reconstructUrlSource(rec);
+  assert("url: reconstruct → source owns the pasted URL (origin source, type youtube)", !!rcU && rcU.source.url === YT_WATCH && rcU.source.origin === "source" && rcU.source.type === "youtube" && rcU.trackIndex === 0);
+  assert("url: reconstruct(undefined) → null (nothing to re-own)", reconstructUrlSource(undefined) === null);
+
+  // sanitize round-trip (localStorage persistence).
+  const round = sanitizeUrlSource(JSON.parse(JSON.stringify(rec)));
+  assert("url: capture→JSON→sanitize preserves url+type", round?.url === YT_WATCH && round?.sourceType === "youtube");
+  assert("url: sanitize rejects non-http / junk", sanitizeUrlSource({ url: "file:///x" }) === undefined && sanitizeUrlSource({ url: FILE_A }) === undefined && sanitizeUrlSource(null) === undefined);
+
+  // mutual exclusivity: an http play URL is never a local block, and a local path is never a url block.
+  assert("url: http play URL is not captured as LOCAL", captureLocalRecovery({ currentPlayUrl: YT_WATCH }) === undefined);
+}
+
+// ── QUEUE PRESERVATION on remount (Gap 2) — merge reconstructed current into the recovered queue ──────
+const mkSrc = (id: string): UnifiedSource => ({ id, title: id, genre: "Mixed", cover: null, type: "youtube", url: `https://y/${id}`, origin: "source" });
+{
+  const current = reconstructUrlSource({ url: YT_WATCH })!.source; // fresh playnext-* id
+  const OLD = "playnext-old-current";
+  const serverA = mkSrc("pl-A"), serverB = mkSrc("pl-B");
+  const byId = new Map<string, UnifiedSource>([[serverA.id, serverA], [serverB.id, serverB]]);
+  const resolve = (id: string) => byId.get(id);
+
+  // C. current ad-hoc URL + two server-known queue items → queue keeps current + both, index at current.
+  const c = mergeCurrentIntoRecoveredQueue([OLD, "pl-A", "pl-B"], OLD, current, resolve);
+  assert("C: queue = [current, serverA, serverB], index 0",
+    c.queue.length === 3 && c.queue[0] === current && c.queue[1] === serverA && c.queue[2] === serverB && c.index === 0);
+
+  // D. EOF on adopted current → there IS a real next source to advance to.
+  assert("D: a real next source exists after the reconstructed current", c.queue[c.index + 1] === serverA);
+
+  // current in the MIDDLE → index tracks position, neighbors preserved on both sides.
+  const mid = mergeCurrentIntoRecoveredQueue(["pl-A", OLD, "pl-B"], OLD, current, resolve);
+  assert("C': current in middle → [serverA, current, serverB], index 1",
+    mid.queue.length === 3 && mid.queue[0] === serverA && mid.queue[1] === current && mid.index === 1);
+
+  // unresolvable neighbors (other ephemeral ids) are dropped; current still placed.
+  const withGhost = mergeCurrentIntoRecoveredQueue([OLD, "playnext-ghost", "pl-B"], OLD, current, resolve);
+  assert("merge: drops unresolvable neighbor, keeps recoverable → [current, serverB]",
+    withGhost.queue.length === 2 && withGhost.queue[0] === current && withGhost.queue[1] === serverB && withGhost.index === 0);
+
+  // E. singleton — no recoverable queue → just the current.
+  const singleton = mergeCurrentIntoRecoveredQueue([OLD], OLD, current, resolve);
+  assert("E: no queue → singleton [current], index 0", singleton.queue.length === 1 && singleton.queue[0] === current && singleton.index === 0);
+  const emptyIds = mergeCurrentIntoRecoveredQueue([], OLD, current, resolve);
+  assert("E': empty queueIds → singleton [current]", emptyIds.queue.length === 1 && emptyIds.queue[0] === current);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -22,6 +22,7 @@
 import { MpvManager, type MpvBinaries, type MpvStatus, createInitialMpvStatus } from "./mpv-manager";
 import { redactMediaToken } from "../shared/redact-media-token";
 import { normalizeMpvLoadTarget } from "./mpv-input-normalize";
+import { mediaKey as liveMediaKey } from "./live-media-key";
 
 const ORCH = "[SyncBiz:desktop-mpv:orchestrator] music";
 
@@ -62,6 +63,9 @@ export type OrchestratorState = {
   interruptBusy: boolean;
   /** How many clips are waiting behind the current interrupt. */
   interruptQueueDepth: number;
+  /** Hash of the current music attempt's URL (never the raw URL). Lets a renderer remount prove it is
+   *  re-owning the SAME live media before adopting the engine. Empty when nothing is playing. */
+  currentMediaKey: string;
 };
 
 type StatusListener = (state: OrchestratorState) => void;
@@ -100,6 +104,9 @@ export class PlaybackOrchestrator {
    *  as failed and advances the queue — while the outgoing track keeps playing (never-stop). Cleared on
    *  the next play. */
   private currentAttemptError: string | null = null;
+  /** URL of the current attempt — exposed to the renderer ONLY as a hash (`currentMediaKey`) so a renderer
+   *  remount can prove it is re-owning the SAME live media before adopting it. Never exposed as a raw URL. */
+  private currentAttemptUrl = "";
 
   private masterVolume = 80;
   private duckPercent = DUCK_PERCENT_DEFAULT;
@@ -308,6 +315,7 @@ export class PlaybackOrchestrator {
       duckPercent: this.duckPercent,
       interruptBusy: this.interruptBusy,
       interruptQueueDepth: this.interruptQueue.length,
+      currentMediaKey: liveMediaKey(this.currentAttemptUrl),
     };
   }
 
@@ -340,6 +348,7 @@ export class PlaybackOrchestrator {
     // playing/pos>0/dur>0 from old deck state.
     this.activeMpv().setVolume(this.currentMusicTarget());
     this.currentAttemptId = attemptId;
+    this.currentAttemptUrl = u;
     this.currentAttemptDeck = this.activeMusicDeck;
     this.currentAttemptMode = "cold"; // authoritative: renderer owns the PR-24 startup timeout for cold
     this.currentAttemptError = null;
@@ -386,6 +395,7 @@ export class PlaybackOrchestrator {
     // the old id (never OLD deck state under the NEW id).
     standby.setVolume(0);
     this.currentAttemptId = attemptId;
+    this.currentAttemptUrl = u;
     this.currentAttemptDeck = this.standbyDeckId();
     this.currentAttemptMode = "crossfade"; // authoritative: orchestrator owns the startup timeout here
     this.currentAttemptError = null;

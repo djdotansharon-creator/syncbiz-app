@@ -584,7 +584,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   // ─── Diagnostic: log AppShell renders that change pathname ───────────────
   const _shellPathRef = React.useRef("");
   if (_shellPathRef.current !== pathname) {
-    console.warn("[SyncBiz DIAG] AppShell pathname change", { prev: _shellPathRef.current, next: pathname, ts: new Date().toISOString() });
+    // Single interpolated string (not an object arg) so the desktop console-capture never records it as
+    // "[object Object]". `remount=true` (prev empty) means AppShell/AppProviders were recreated — the
+    // exact signal needed to attribute a lost playback session to a full (app)-tree remount vs an
+    // in-app client navigation. See docs: playback session re-ownership.
+    console.warn(
+      `[SyncBiz DIAG] AppShell pathname change prev=${_shellPathRef.current || "(none)"} next=${pathname ?? "(none)"} remount=${_shellPathRef.current === ""} ts=${new Date().toISOString()}`,
+    );
     _shellPathRef.current = pathname ?? "";
   }
   // ─── Diagnostic: layout/responsive ResizeObserver ────────────────────────

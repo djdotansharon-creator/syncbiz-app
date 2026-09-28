@@ -160,6 +160,9 @@ export class DeviceWsManager {
       mpvLastError: orchState?.music.lastError ?? st.mpvEngineError ?? null,
       mpvAttemptId: orchState?.music.attemptId ?? 0,
       mpvAttemptMode: orchState?.music.attemptMode ?? "cold",
+      // Live media identity (hash only) — lets a renderer remount prove it re-owns the SAME media before
+      // adopting the running engine (no restart). Never a raw URL/path, so safe in any status payload.
+      mpvCurrentMediaKey: orchState?.currentMediaKey ?? "",
     };
   }
 
