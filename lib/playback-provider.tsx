@@ -774,6 +774,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const saved = getShuffle();
+    // READ-ONLY diagnostic (no behavior change): proves layer D (mount reads persisted shuffle) on the
+    // Lenovo. saved=true here ⇒ localStorage had "1" (write/persist OK) and state.shuffle is restored;
+    // saved=false while the user had shuffle ON ⇒ the write never happened (layer A/B). Grep: [VONO Shuffle Diag]
+    console.log("[VONO Shuffle Diag] restore-mount", { saved });
     setState((s) => (s.shuffle !== saved ? { ...s, shuffle: saved } : s));
   }, []);
 
@@ -2457,6 +2461,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const setShuffle = useCallback((value: boolean) => {
     setShufflePreference(value);
+    // READ-ONLY diagnostic: proves layer A/B (the write happened + persisted). readback reflects what
+    // getShuffle() will return on the next boot. Grep: [VONO Shuffle Diag]
+    console.log("[VONO Shuffle Diag] set", { via: "setShuffle", value, readback: getShuffle() });
     setState((s) => ({ ...s, shuffle: value }));
   }, []);
 
@@ -2464,6 +2471,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     setState((s) => {
       const next = !s.shuffle;
       setShufflePreference(next);
+      console.log("[VONO Shuffle Diag] set", { via: "toggleShuffle", value: next, readback: getShuffle() });
       return { ...s, shuffle: next };
     });
   }, []);
