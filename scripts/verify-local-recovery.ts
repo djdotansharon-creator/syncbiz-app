@@ -17,6 +17,9 @@ import {
   captureEphemeralSource,
   sanitizeEphemeralSource,
   reconstructEphemeralSource,
+  captureUrlSource,
+  sanitizeUrlSource,
+  reconstructUrlSource,
 } from "@/lib/local-recovery";
 import { EPHEMERAL_LOCAL_PLAYLIST_PREFIX } from "@/lib/local-playlist-artwork";
 import type { UnifiedSource } from "@/lib/source-types";
@@ -179,6 +182,32 @@ function rfmSource(mode: "stream" | "local" = "stream"): UnifiedSource {
 
   // 5) Preserve: an intentional STOP (no snapshot / no ephemeral blob) does not resume.
   assert("rfm: no ephemeral blob → no reconstruction (STOP stays stopped)", reconstructEphemeralSource(undefined, 0) === null);
+}
+
+// ── AD-HOC / PASTED URL source recovery (renderer remount re-ownership) ───────────────────────────
+// Incident: a pasted YouTube URL (playnext-* id, origin source) was playing via MPV; the renderer
+// remounted, currentSource became null, MPV kept playing orphaned, EOF couldn't advance. These assert
+// the URL-source capture/reconstruct that lets the remounted renderer re-own the pasted URL.
+const YT_WATCH = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+{
+  // capture: only for http(s) playback URLs; local paths / relative are rejected.
+  const rec = captureUrlSource({ playUrl: YT_WATCH, sourceType: "youtube", title: "Pasted Mix", cover: "c" });
+  assert("url: capture ad-hoc http URL → block with url+type+title", !!rec && rec.url === YT_WATCH && rec.sourceType === "youtube" && rec.title === "Pasted Mix");
+  assert("url: capture rejects a local path", captureUrlSource({ playUrl: FILE_A }) === undefined);
+  assert("url: capture rejects empty/relative", captureUrlSource({ playUrl: "" }) === undefined && captureUrlSource({ playUrl: "songs/a.mp3" }) === undefined);
+
+  // reconstruct: rebuild a playable ad-hoc URL source (fresh playnext id, origin source, url preserved).
+  const rcU = reconstructUrlSource(rec);
+  assert("url: reconstruct → source owns the pasted URL (origin source, type youtube)", !!rcU && rcU.source.url === YT_WATCH && rcU.source.origin === "source" && rcU.source.type === "youtube" && rcU.trackIndex === 0);
+  assert("url: reconstruct(undefined) → null (nothing to re-own)", reconstructUrlSource(undefined) === null);
+
+  // sanitize round-trip (localStorage persistence).
+  const round = sanitizeUrlSource(JSON.parse(JSON.stringify(rec)));
+  assert("url: capture→JSON→sanitize preserves url+type", round?.url === YT_WATCH && round?.sourceType === "youtube");
+  assert("url: sanitize rejects non-http / junk", sanitizeUrlSource({ url: "file:///x" }) === undefined && sanitizeUrlSource({ url: FILE_A }) === undefined && sanitizeUrlSource(null) === undefined);
+
+  // mutual exclusivity: an http play URL is never a local block, and a local path is never a url block.
+  assert("url: http play URL is not captured as LOCAL", captureLocalRecovery({ currentPlayUrl: YT_WATCH }) === undefined);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

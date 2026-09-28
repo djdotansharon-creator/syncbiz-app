@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource, type PlaybackStatus } from "@/lib/playback-provider";
+import { shouldAdoptLiveMpv } from "@/lib/live-mpv-adopt";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { computeLivePosition } from "@/lib/remote-control/live-position";
 import { isPlayNextSourceId } from "@/lib/play-next";
@@ -3851,6 +3852,24 @@ export function AudioPlayer() {
     };
 
     if (status === "playing" && currentPlayUrl) {
+      // RE-OWN a live MPV engine after a renderer remount instead of re-loading it (no restart, no double
+      // load). On the FIRST dispatch after this AudioPlayer mounted (mpvLastUrl still null), if the desktop
+      // reports a healthy, actively-PLAYING engine with a real attempt id, ADOPT it: claim the current URL
+      // as already-loaded (so the loadfile below is skipped) and align the attempt generation to the live
+      // attemptId so natural EOF advances. Fail-safe: `shouldAdoptLiveMpv` is strict — any uncertainty
+      // (engine not ready / not playing / no attempt id / no URL) returns false → normal loadfile runs, so
+      // adoption can never cause silence (worst case: the track re-dispatches).
+      const snapNow = desktopMpvSnapRef.current;
+      if (shouldAdoptLiveMpv(mpvLastUrlRef.current === null, currentPlayUrl, snapNow)) {
+        const liveAttemptId = snapNow && typeof snapNow.attemptId === "number" ? snapNow.attemptId : 0;
+        mpvLastUrlRef.current = currentPlayUrl; // treat as already loaded → the loadfile below is skipped
+        playbackAttemptGenRef.current = liveAttemptId; // align to the running attempt so EOF is "current"
+        attemptConfirmedRef.current = true; // engine is already decoding
+        streamPhaseRef.current = "playing";
+        mpvLastDispatchAtRef.current = Date.now();
+        sbDiag("ADOPT_LIVE_MPV", { attemptId: liveAttemptId, sourceType: classifySource(currentPlayUrl), urlHash: sbUrlHash(currentPlayUrl) }); // DIAG
+        return;
+      }
       if (currentPlayUrl !== mpvLastUrlRef.current) {
         // New URL — schedule/refresh a debounced loadfile. Any further URL
         // change within the coalesce window cancels and reschedules, so only

@@ -56,6 +56,7 @@ import { fetchUnifiedSourcesWithFallback } from "./unified-sources-client";
 import {
   type LocalRecovery,
   type EphemeralSourceRecovery,
+  type UrlSourceRecovery,
   captureLocalRecovery,
   sanitizeLocalRecovery,
   needsLocalReconstruction,
@@ -63,6 +64,9 @@ import {
   captureEphemeralSource,
   sanitizeEphemeralSource,
   reconstructEphemeralSource,
+  captureUrlSource,
+  sanitizeUrlSource,
+  reconstructUrlSource,
 } from "./local-recovery";
 import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
 import { urlTimingMark } from "./url-startup-timing";
@@ -584,6 +588,12 @@ type PersistedPlaybackV2 = {
    * only, never WS. Captured only for non-local ephemeral sources (local ones use `local`).
    */
   ephemeral?: EphemeralSourceRecovery;
+  /**
+   * Device-only recovery for an ad-hoc / pasted URL source (YouTube/SoundCloud/direct stream via Play
+   * Next — `playnext-*` id, unresolvable from the server). Lets a renderer remount / cold restart re-own
+   * the pasted URL so a live stream isn't orphaned. localStorage only, never WS. See lib/local-recovery.
+   */
+  urlSource?: UrlSourceRecovery;
 };
 
 function loadPersistedPlayback(): { sourceId: string; trackIndex: number; status: PlaybackStatus; volume: number } | null {
@@ -641,6 +651,7 @@ function loadPersistedPlaybackV2(): PersistedPlaybackV2 | null {
       updatedAt,
       local: sanitizeLocalRecovery(parsed.local),
       ephemeral: sanitizeEphemeralSource(parsed.ephemeral),
+      urlSource: sanitizeUrlSource(parsed.urlSource),
     };
   } catch {
     return null;
@@ -970,6 +981,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     // block can't help (tracks aren't local paths). Persist the source itself (device-only) so restore can
     // rebuild it. Captured ONLY when there is no local block, so the verified local-file path is untouched.
     const ephemeral = local ? undefined : captureEphemeralSource(src);
+    // Ad-hoc / pasted URL sources (Play Next: `playnext-*` id, http url — e.g. a pasted YouTube link) are
+    // ALSO unresolvable by id after a remount/reboot, and are neither local nor a catalog playlist. Persist
+    // the URL itself so the session can be re-owned. Only for ephemeral ids (server-known URL sources still
+    // restore by id) and only when neither local nor ephemeral applies (they're mutually exclusive).
+    const urlSource =
+      local || ephemeral || !isPlayNextSourceId(src.id)
+        ? undefined
+        : captureUrlSource({ playUrl: cpu, sourceType: src.type, title: src.title, cover: src.cover });
     // READ-ONLY diagnostic (no behavior change): proves on the Lenovo whether a locally-playing source
     // is captured into the recovery snapshot. playUrlKind=local-* + localCaptured=true ⇒ capture works
     // (an earlier failure was stale renderer/timing); localCaptured=false while playing local ⇒ the
@@ -982,6 +1001,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       playUrlKind: diagClassifyPlaybackUrl(cpu),
       localCaptured: !!local,
       ephemeralCaptured: !!ephemeral,
+      urlSourceCaptured: !!urlSource,
       ephemeralTracks: ephemeral?.tracks.length ?? 0,
       queueLen: state.queue.length,
     });
@@ -996,6 +1016,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       updatedAt: Date.now(),
       ...(local ? { local } : {}),
       ...(ephemeral ? { ephemeral } : {}),
+      ...(urlSource ? { urlSource } : {}),
     });
   }, [state.currentSource, state.queue, state.queueIndex, state.currentTrackIndex, state.status, state.volume, getPlayUrl]);
 
@@ -1580,6 +1601,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
                 });
               }
             }
+            // Ad-hoc / pasted URL source (playnext-* id) that didn't resolve → the id-lookup fell back to a
+            // stale queue source; rebuild the pasted URL instead so we re-own what was actually playing.
+            if (!effectiveSource && persistedV2.urlSource && !idExactMatch) {
+              const rcU = reconstructUrlSource(persistedV2.urlSource);
+              if (rcU) {
+                effectiveSource = rcU.source;
+                effectiveTrackIndex = rcU.trackIndex;
+                effectiveQueue = [rcU.source];
+                console.log("[SyncBiz Audit] url restore reconstruct", { phase: "id_found_fallback" });
+              }
+            }
             if (!effectiveSource) {
               effectiveSource = resolved;
               const merged = restoredQueue.map((q) => (q.id === resolved.id ? resolved : q));
@@ -1590,7 +1622,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             // the ephemeral catalog (RFM/Music Bank), else give up (nothing playable to resume).
             const rc = reconstructLocalSourceFromSnapshot(persistedV2.local);
             const rcE = rc ? null : reconstructEphemeralSource(persistedV2.ephemeral, persistedV2.trackIndex);
-            const chosen = rc ?? rcE;
+            const rcU = rc || rcE ? null : reconstructUrlSource(persistedV2.urlSource);
+            const chosen = rc ?? rcE ?? rcU;
             if (!chosen) {
               clearPersistedPlaybackV2();
               done();
@@ -1601,9 +1634,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             effectiveQueue = [chosen.source];
             console.log("[SyncBiz Audit] restore reconstruct", {
               phase: "id_missing",
-              kind: rc ? "local" : "ephemeral",
+              kind: rc ? "local" : rcE ? "ephemeral" : "url",
               trackIndex: chosen.trackIndex,
-              tracks: rc ? (persistedV2.local?.queueUrls?.length ?? 1) : (persistedV2.ephemeral?.tracks.length ?? 0),
+              tracks: rc ? (persistedV2.local?.queueUrls?.length ?? 1) : rcE ? (persistedV2.ephemeral?.tracks.length ?? 0) : 1,
             });
           }
           const source = effectiveSource as UnifiedSource; // non-null: every branch above assigns or returns
