@@ -692,6 +692,22 @@ function savePersistedPlaybackV2(payload: PersistedPlaybackV2) {
 }
 
 /**
+ * READ-ONLY diagnostic: classify a resolved play URL/path WITHOUT leaking the full path (privacy-safe).
+ * Used only by `[VONO LocalResume Diag]` logs to prove, on the pilot Lenovo, whether a locally-playing
+ * source is captured into the recovery snapshot. No behavior depends on this.
+ */
+function diagClassifyPlaybackUrl(u: string | null | undefined): string {
+  const s = (u ?? "").trim();
+  if (!s) return "empty";
+  if (s.startsWith("local://")) return "local-scheme";
+  if (s.toLowerCase().startsWith("file:")) return "file-uri";
+  if (/^[a-zA-Z]:[\\/]/.test(s) || s.startsWith("\\\\")) return "local-abs";
+  if (s.length > 1 && s.startsWith("/") && !s.startsWith("//")) return "local-posix";
+  if (/^https?:\/\//i.test(s)) return s.includes("/api/media/") ? "http-mediabank" : "http";
+  return "other";
+}
+
+/**
  * Synchronous pre-render probe: does a valid persisted snapshot exist?
  * Used to seed `isRestoring` so the provider starts out in "restoring" state
  * whenever the first paint might otherwise show transient non-restored content.
@@ -923,14 +939,28 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     // server — unlike a URL, whose identity the server rebuilds by id). `captureLocalRecovery` returns
     // undefined for URL sessions, so this changes nothing for them. localStorage only — never WS.
     const playlistTracks = src.playlist ? getPlaylistTracks(src.playlist) : [];
+    const cpu = getPlayUrl(src, state.currentTrackIndex);
     const local = captureLocalRecovery({
-      currentPlayUrl: getPlayUrl(src, state.currentTrackIndex),
+      currentPlayUrl: cpu,
       queuePlayUrls:
         playlistTracks.length > 0
           ? playlistTracks.map((t) => t.url)
           : state.queue.map((q) => getPlayUrl(q, 0)),
       title: playlistTracks[state.currentTrackIndex]?.name ?? src.title,
       cover: src.cover,
+    });
+    // READ-ONLY diagnostic (no behavior change): proves on the Lenovo whether a locally-playing source
+    // is captured into the recovery snapshot. playUrlKind=local-* + localCaptured=true ⇒ capture works
+    // (an earlier failure was stale renderer/timing); localCaptured=false while playing local ⇒ the
+    // play-URL isn't classified local at capture (the real gap to fix). Grep: [VONO LocalResume Diag]
+    console.log("[VONO LocalResume Diag] persist", {
+      currentSourceId: src.id,
+      origin: src.origin,
+      type: src.type,
+      status: state.status,
+      playUrlKind: diagClassifyPlaybackUrl(cpu),
+      localCaptured: !!local,
+      queueLen: state.queue.length,
     });
     savePersistedPlaybackV2({
       currentSourceId: src.id,
@@ -1456,6 +1486,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           idsSample: items.slice(0, 10).map((i) => i.id),
         });
         if (persistedV2) {
+          // READ-ONLY diagnostic: what was actually persisted at shutdown. hasLocalBlock=false while the
+          // user was playing local ⇒ the local session never captured (stale renderer, or play-URL not
+          // classified local). Pair with the "[VONO LocalResume Diag] persist" line. Grep the same tag.
+          console.log("[VONO LocalResume Diag] restore-load", {
+            currentSourceId: persistedV2.currentSourceId,
+            status: persistedV2.status,
+            hasLocalBlock: !!persistedV2.local,
+            localKind: diagClassifyPlaybackUrl(persistedV2.local?.currentUrl),
+            queueIdsLen: persistedV2.queueIds.length,
+          });
           const restoredQueue = persistedV2.queueIds.map((id) => byId.get(id)).filter((s): s is UnifiedSource => !!s);
           const sourceRaw =
             byId.get(persistedV2.currentSourceId) ??

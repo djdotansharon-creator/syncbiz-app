@@ -97,4 +97,34 @@ assert("sanitize: file:// URL accepted", !!sanitizeLocalRecovery({ currentUrl: "
   assert("round-trip: capture→JSON→sanitize preserves currentUrl+queue", round?.currentUrl === FILE_B && round?.queueUrls?.length === 2);
 }
 
+// ── EXACT FIELD TRANSITION: URL playing → switch to LOCAL → snapshot must reference LOCAL, and a
+//    reboot restore that finds URL A (queue fallback) must still dispatch LOCAL. Models the persist
+//    INPUT (what playback-provider captures from state) + the restore DECISION, without React. ─────
+{
+  // 1) URL A is playing → the snapshot the provider would write carries NO local block.
+  const urlSnapshotLocal = captureLocalRecovery({ currentPlayUrl: URL_STREAM, queuePlayUrls: [URL_STREAM] });
+  assert("transition: while URL A plays → snapshot has no local block", urlSnapshotLocal === undefined);
+
+  // 2) User switches to a LOCAL playlist; it becomes state.currentSource and plays via in-app MPV, so
+  //    getPlayUrl(currentSource) is the local file. The provider now captures a local block that
+  //    references LOCAL — NOT the previous URL A.
+  const localSnapshot = captureLocalRecovery({ currentPlayUrl: FILE_B, queuePlayUrls: [FILE_A, FILE_B, FILE_C], title: "Local Set" });
+  assert("transition: after switch to LOCAL → snapshot local block references LOCAL, not URL A",
+    !!localSnapshot && localSnapshot.currentUrl === FILE_B && !localSnapshot.currentUrl.startsWith("http"));
+
+  // 3) Reboot restore: even if the persisted queue still resolved URL A by id (queue fallback), the
+  //    presence of the local block forces reconstruction of LOCAL (music must never resume the wrong
+  //    source). Model the restore decision the provider makes.
+  const idResolvedPlayUrl = URL_STREAM; // sourceRaw fell back to URL A from the queue
+  assert("transition: restore with local block + id→URL A ⇒ needs reconstruction",
+    needsLocalReconstruction(idResolvedPlayUrl, localSnapshot) === true);
+  const rc = reconstructLocalSourceFromSnapshot(localSnapshot);
+  assert("transition: reboot restore dispatches LOCAL (reconstructed), not URL A",
+    !!rc && rc.source.type === "local" && (rc.source.playlist?.tracks?.[rc.trackIndex]?.url === FILE_B));
+
+  // 4) Guard the inverse: a URL session (no local block) must NEVER reconstruct — URL restore unchanged.
+  assert("transition: URL session (no local block) → no reconstruction (URL restore unchanged)",
+    needsLocalReconstruction(URL_STREAM, urlSnapshotLocal) === false && reconstructLocalSourceFromSnapshot(urlSnapshotLocal) === null);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
