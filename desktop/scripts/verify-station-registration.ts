@@ -16,6 +16,7 @@ import {
   registrationRelevantChanged,
   pickRegistrationRelevant,
   registrationSignature,
+  deviceIdFingerprint,
   StationDeviceRegistrar,
   RETRY_MAX,
   type RegistrationConfigView,
@@ -199,6 +200,98 @@ async function main(): Promise<void> {
     release();
     await p1;
   }
+
+  // ── Pending re-trigger (ISSUE 1): triggers during in-flight/backoff are not lost ─────────────────────────────
+  { // A. network backoff in progress → new-token sign-in → NEW token registers after the old sequence finishes
+    const h = makeHarness(cfg({ wsToken: "tok-OLD" }));
+    let mode: "offline" | "ok" = "offline";
+    h.setResponder(() => (mode === "offline" ? Promise.reject(new Error("offline")) : ok201()));
+    await h.registrar.runOnce("startup"); // attempt1 (old) fails → retry scheduled, inFlight
+    assert("A: only attempt1 so far", h.fetchCalls.length === 1);
+    h.setConfig(cfg({ wsToken: "tok-NEW" }));
+    await h.registrar.runOnce("signin"); // in-flight → pending, no new POST
+    assert("A: sign-in during backoff does not start a concurrent POST", h.fetchCalls.length === 1);
+    mode = "ok";
+    await h.drainTimers(); // old retry succeeds → finalize → pending re-run with NEW token
+    const usedNew = h.fetchCalls.some((c) => (c.init?.headers as Record<string, string>)?.Authorization === "Bearer tok-NEW");
+    assert("A: NEW token eventually registered after old sequence finished", usedNew);
+  }
+  { // B. backoff in progress → branchId change → new branch eventually registers
+    const h = makeHarness(cfg({ branchId: "A" }));
+    let mode: "offline" | "ok" = "offline";
+    h.setResponder(() => (mode === "offline" ? Promise.reject(new Error("offline")) : ok201()));
+    await h.registrar.runOnce("startup");
+    h.setConfig(cfg({ branchId: "B" }));
+    await h.registrar.runOnce("config-change"); // pending
+    mode = "ok";
+    await h.drainTimers();
+    const branchesPosted = h.fetchCalls.map((c) => JSON.parse(String(c.init?.body ?? "{}")).branchId);
+    assert("B: branch B eventually registered", branchesPosted.includes("B"), branchesPosted.join(","));
+  }
+  { // C. in-flight with SAME config → no unnecessary duplicate after success
+    const h = makeHarness(cfg());
+    let release!: () => void;
+    h.setResponder(() => new Promise<FetchResult>((r) => { release = () => r({ status: 201, json: async () => ({}) }); }));
+    const p1 = h.registrar.runOnce("startup");
+    await Promise.resolve();
+    await h.registrar.runOnce("startup"); // pending (same config)
+    release();
+    await p1;
+    await h.drainTimers(); // pending re-run → same signature == lastSuccess → dedupe → no POST
+    assert("C: pending same-config → no duplicate POST", h.fetchCalls.length === 1);
+  }
+  { // D. 401 on old token + pending new token → new token attempt runs after terminal 401
+    const h = makeHarness(cfg({ wsToken: "tok-OLD" }));
+    let mode: "hold" | "ok" = "hold";
+    let release!: () => void;
+    h.setResponder(() =>
+      mode === "hold"
+        ? new Promise<FetchResult>((r) => { release = () => r({ status: 401, json: async () => ({}) }); })
+        : ok201(),
+    );
+    const p1 = h.registrar.runOnce("startup"); // attempt1 (old) held
+    await Promise.resolve();
+    h.setConfig(cfg({ wsToken: "tok-NEW" }));
+    await h.registrar.runOnce("signin"); // pending
+    assert("D: no concurrent POST during held 401", h.fetchCalls.length === 1);
+    mode = "ok";
+    release();
+    await p1; // 401 terminal → finalize → pending re-run scheduled
+    await h.drainTimers();
+    const usedNew = h.fetchCalls.some((c) => (c.init?.headers as Record<string, string>)?.Authorization === "Bearer tok-NEW");
+    assert("D: new token attempt runs after terminal 401", usedNew);
+  }
+  { // E. still single-in-flight: two triggers during a held POST never start concurrent POSTs
+    const h = makeHarness(cfg());
+    let release!: () => void;
+    h.setResponder(() => new Promise<FetchResult>((r) => { release = () => r({ status: 201, json: async () => ({}) }); }));
+    const p1 = h.registrar.runOnce("startup");
+    await Promise.resolve();
+    await h.registrar.runOnce("signin");
+    await h.registrar.runOnce("config-change");
+    assert("E: never concurrent — one POST in flight", h.fetchCalls.length === 1);
+    release();
+    await p1;
+    await h.drainTimers(); // one collapsed pending re-run, same config → dedupe → still 1
+    assert("E: pending collapses to at most one re-run (dedupe)", h.fetchCalls.length === 1);
+  }
+
+  // ── Diagnostics redaction (ISSUE 2): never log the full durable id ────────────────────────────────────────────
+  {
+    const h = makeHarness(cfg({ deviceId: "abcdefgh" })); // 8-char legacy id (valid per Phase 0.1)
+    await h.registrar.runOnce("startup");
+    assert("8-char legacy id NOT present verbatim in logs", !JSON.stringify(h.logs).includes("abcdefgh"));
+  }
+  {
+    const full = "dsk-abcdef01-2222-4333-8444-555566667777";
+    const h = makeHarness(cfg({ deviceId: full }));
+    await h.registrar.runOnce("startup");
+    assert("dsk id NOT present verbatim in logs", !JSON.stringify(h.logs).includes(full));
+    assert("logs carry a deviceIdFingerprint field", h.logs.some((l) => typeof l.fields.deviceIdFingerprint === "string"));
+  }
+  assert("fingerprint stable for same id", deviceIdFingerprint("abcdefgh") === deviceIdFingerprint("abcdefgh"));
+  assert("fingerprint distinct for different ids", deviceIdFingerprint("abcdefgh") !== deviceIdFingerprint("abcdefgi"));
+  assert("fingerprint is 8 hex chars, not the id", /^[0-9a-f]{8}$/.test(deviceIdFingerprint("abcdefgh")) && deviceIdFingerprint("abcdefgh") !== "abcdefgh");
 
   // ── Static guards ─────────────────────────────────────────────────────────────────────────────────────────
   const regSrc = readFileSync(path.join(repoRoot, "desktop/src/main/station-device-registration.ts"), "utf-8");

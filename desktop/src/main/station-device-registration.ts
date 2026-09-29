@@ -114,9 +114,13 @@ export function registrationSignature(cfg: RegistrationConfigView, appVersion: s
   return [cfg.deviceId, cfg.branchId, normalizeApiBase(cfg.apiBaseUrl), appVersion, tokenId].join("\u0000");
 }
 
-/** Short, safe device-id prefix for logs (never the full durable id). */
-export function deviceIdPrefix(id: string): string {
-  return id.length <= 8 ? id : `${id.slice(0, 8)}…`;
+/**
+ * Safe, non-reversible fingerprint for logs. NEVER logs the raw durable id — Phase 0.1 accepts legacy ids as
+ * short as 8 chars, so a prefix could equal the whole secret; a sha256 slice never can (GAP 2 relies partly on
+ * durable-id secrecy). Stable for diagnostics (same id → same fingerprint).
+ */
+export function deviceIdFingerprint(id: string): string {
+  return createHash("sha256").update(id ?? "").digest("hex").slice(0, 8);
 }
 
 export type RegistrarDeps = {
@@ -140,6 +144,7 @@ export class StationDeviceRegistrar {
   private inFlight = false;
   private attempt = 0;
   private lastSuccessSignature: string | null = null;
+  private pendingReason: string | null = null; // a trigger that arrived while a sequence was in-flight/backing off
 
   constructor(private readonly deps: RegistrarDeps) {}
 
@@ -151,7 +156,10 @@ export class StationDeviceRegistrar {
   /** Awaitable core (for tests). Performs the first attempt; retries schedule themselves via setTimer. */
   async runOnce(reason: string): Promise<void> {
     if (this.inFlight) {
-      this.deps.log("station_registration_attempt", { reason, skipped: "in_flight" });
+      // Do NOT start a concurrent POST and do NOT lose the trigger: record it and re-run with FRESH config once
+      // the current sequence reaches any terminal finish (so a new token / branch / apiBaseUrl still registers).
+      this.pendingReason = reason;
+      this.deps.log("station_registration_attempt", { reason, skipped: "in_flight", pending: true });
       return;
     }
     let cfg: RegistrationConfigView;
@@ -174,13 +182,20 @@ export class StationDeviceRegistrar {
     await this.attemptOnce(reason, built, sig);
   }
 
-  private finish(): void {
+  /** Terminal end of a sequence (success or non-retryable/exhausted). Clears in-flight and, if a trigger arrived
+   *  meanwhile, re-runs with FRESH config (never the stale built request); normal signature dedupe still applies. */
+  private finalize(): void {
     this.inFlight = false;
     this.attempt = 0;
+    if (this.pendingReason !== null) {
+      const reason = this.pendingReason;
+      this.pendingReason = null;
+      this.deps.setTimer(() => this.runOnce(reason), 0); // sequential, not concurrent; unref'd by the real setTimer
+    }
   }
   private onSuccess(sig: string): void {
     this.lastSuccessSignature = sig;
-    this.finish();
+    this.finalize();
   }
 
   private async attemptOnce(reason: string, built: RegistrationRequest, sig: string): Promise<void> {
@@ -192,7 +207,7 @@ export class StationDeviceRegistrar {
       branchId: built.body.branchId,
       appVersion: built.body.appVersion,
       platform: built.body.platform,
-      deviceIdPrefix: deviceIdPrefix(built.body.durableDeviceId),
+      deviceIdFingerprint: deviceIdFingerprint(built.body.durableDeviceId),
     };
     this.deps.log("station_registration_attempt", safe);
 
@@ -231,15 +246,15 @@ export class StationDeviceRegistrar {
         this.deps.log("station_registration_refreshed", withStatus);
         return;
       case "unauthorized": // 401 — terminal, no retry, no mutation
-        this.finish();
+        this.finalize();
         this.deps.log("station_registration_unauthorized", withStatus);
         return;
       case "branch_forbidden": // 403 — terminal, no retry, no mutation
-        this.finish();
+        this.finalize();
         this.deps.log("station_registration_branch_forbidden", withStatus);
         return;
       case "conflict": // 409 — terminal, NEVER auto-rebind / reset id / change branch
-        this.finish();
+        this.finalize();
         this.deps.log("station_registration_conflict", { ...withStatus, serverError });
         return;
       case "server_error": // 5xx — bounded retry
@@ -247,7 +262,7 @@ export class StationDeviceRegistrar {
         this.scheduleRetry(reason, built, sig);
         return;
       default: // unexpected status — treat as terminal (no aggressive retry)
-        this.finish();
+        this.finalize();
         this.deps.log("station_registration_server_error", { ...withStatus, note: "unexpected_status" });
         return;
     }
@@ -256,7 +271,7 @@ export class StationDeviceRegistrar {
   private scheduleRetry(reason: string, built: RegistrationRequest, sig: string): void {
     if (this.attempt >= RETRY_MAX) {
       this.deps.log("station_registration_retry_exhausted", { reason, attempts: this.attempt });
-      this.finish();
+      this.finalize();
       return;
     }
     const delay = computeBackoffMs(this.attempt); // backoff after the just-failed attempt
