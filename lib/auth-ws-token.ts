@@ -124,12 +124,20 @@ export function verifyWsToken(token: string): string | null {
   return null;
 }
 
+/** Verified claims from a `desktop_access` token. `workspaceId` is the server-signed scope the token was minted
+ *  for (null if the token carries no workspace claim). */
+export type DesktopAccessClaims = {
+  userId: string;
+  workspaceId: string | null;
+  authorizedBranches: string[] | null;
+};
+
 /**
- * Verify a token and return userId ONLY when purpose === `desktop_access`. Rejects `ws_register` and every
- * other purpose. For desktop-MAIN-only endpoints (e.g. POST /api/devices/register) that must NOT accept a
- * browser session cookie or a short-lived ws_register token.
+ * Full verification for `desktop_access` ONLY (rejects ws_register and every other purpose). Returns the signed
+ * claims — including the token's `workspaceId` scope — or null. The signed workspaceId is authoritative: callers
+ * must scope to it and re-validate DB membership, NEVER resolve the user's primary/other workspace instead.
  */
-export function verifyDesktopAccessToken(token: string): string | null {
+function verifyDesktopAccessPayload(token: string): DesktopAccessClaims | null {
   const secret = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
   if (!secret || secret.length < 16) return null;
   if (!token || typeof token !== "string") return null;
@@ -138,7 +146,14 @@ export function verifyDesktopAccessToken(token: string): string | null {
   const [payloadB64, sigB64] = parts;
   const expectedSig = createHmac("sha256", secret).update(payloadB64).digest("base64url");
   if (expectedSig !== sigB64) return null;
-  let payload: { purpose?: string; userId?: string; iat?: number; exp?: number };
+  let payload: {
+    purpose?: string;
+    userId?: string;
+    iat?: number;
+    exp?: number;
+    workspaceId?: unknown;
+    authorizedBranches?: unknown;
+  };
   try {
     payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
   } catch {
@@ -151,5 +166,29 @@ export function verifyDesktopAccessToken(token: string): string | null {
   if (payload.exp - payload.iat > MAX_DESKTOP_TTL_SEC) return null;
   if (payload.exp > now + MAX_DESKTOP_TTL_SEC) return null;
   const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
-  return userId || null;
+  if (!userId) return null;
+  const workspaceId =
+    typeof payload.workspaceId === "string" && payload.workspaceId.trim() ? payload.workspaceId.trim() : null;
+  const authorizedBranches = Array.isArray(payload.authorizedBranches)
+    ? (payload.authorizedBranches as string[])
+    : null;
+  return { userId, workspaceId, authorizedBranches };
+}
+
+/**
+ * Verify a token and return userId ONLY when purpose === `desktop_access`. Rejects `ws_register` and every
+ * other purpose. Compatibility API for callers that only need the userId.
+ */
+export function verifyDesktopAccessToken(token: string): string | null {
+  return verifyDesktopAccessPayload(token)?.userId ?? null;
+}
+
+/**
+ * Verify a `desktop_access` token and return its signed { userId, workspaceId }. Use this for endpoints that
+ * must scope to the exact workspace the token was minted for (e.g. POST /api/devices/register) to prevent
+ * token-scope drift for multi-workspace users.
+ */
+export function verifyDesktopAccessTokenClaims(token: string): { userId: string; workspaceId: string | null } | null {
+  const c = verifyDesktopAccessPayload(token);
+  return c ? { userId: c.userId, workspaceId: c.workspaceId } : null;
 }

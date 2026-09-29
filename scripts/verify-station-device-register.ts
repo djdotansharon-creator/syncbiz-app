@@ -22,7 +22,9 @@ import { processStationDeviceRegister, type RegisterDeps } from "@/lib/station-d
 
 // Test secret MUST be set before minting/verifying tokens (getSecret reads env at call time).
 process.env.SYNCBIZ_WS_SECRET = "test-ws-secret-0123456789";
-import { createWsToken, createDesktopAccessToken, verifyDesktopAccessToken } from "@/lib/auth-ws-token";
+import { createWsToken, createDesktopAccessToken, verifyDesktopAccessToken, verifyDesktopAccessTokenClaims } from "@/lib/auth-ws-token";
+import { enforceTokenWorkspaceScope } from "@/lib/desktop-token-scope";
+import type { User } from "@/lib/user-types";
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean, detail = ""): void {
@@ -207,6 +209,27 @@ const body = (over: Record<string, unknown> = {}) => ({ durableDeviceId: "device
   assert("garbage token → null", verifyDesktopAccessToken("not.a.token.at.all") === null);
   // A cookie-issued session is NOT a bearer token at all → the route's getDesktopUserFromApiRequest never
   // reaches a verifier for it (asserted structurally below).
+
+  // Claims verifier carries the signed workspace scope.
+  const claimsA = verifyDesktopAccessTokenClaims(validDesktop);
+  assert("desktop_access claims → { userId, workspaceId=A }", claimsA?.userId === "u-desktop" && claimsA?.workspaceId === "ws-A");
+  const noWs = createDesktopAccessToken("u-desktop"); // minted WITHOUT a workspace claim
+  assert("desktop_access without workspaceId claim → workspaceId null", verifyDesktopAccessTokenClaims(noWs)?.workspaceId === null);
+  assert("ws_register → claims null", verifyDesktopAccessTokenClaims(wsRegister) === null);
+}
+
+// ── 3c. GAP (scope drift) — token workspace is authoritative; no silent fallback to primary/other ──────────────
+{
+  const mkUser = (tenantId: string): User => ({ id: "u1", email: "u@x", tenantId, createdAt: "" });
+  assert("token A + user resolved in A → accepted (scoped to A)",
+    enforceTokenWorkspaceScope({ workspaceId: "ws-A" }, mkUser("ws-A"))?.tenantId === "ws-A");
+  assert("multi-workspace user cannot drift: token A but resolved B → rejected",
+    enforceTokenWorkspaceScope({ workspaceId: "ws-A" }, mkUser("ws-B")) === null);
+  assert("token workspace not accessible (fallback to primary ≠ A) → rejected",
+    enforceTokenWorkspaceScope({ workspaceId: "ws-A" }, mkUser("ws-primary")) === null);
+  assert("missing workspaceId claim → rejected", enforceTokenWorkspaceScope({ workspaceId: null }, mkUser("ws-A")) === null);
+  assert("null user → rejected", enforceTokenWorkspaceScope({ workspaceId: "ws-A" }, null) === null);
+  assert("null claims → rejected", enforceTokenWorkspaceScope(null, mkUser("ws-A")) === null);
 }
 
 // ── 4. Static guards ─────────────────────────────────────────────────────────────────────────────────────────
@@ -240,7 +263,9 @@ const body = (over: Record<string, unknown> = {}) => ({ durableDeviceId: "device
   const helpers = readFileSync(path.join(repoRoot, "lib/auth-helpers.ts"), "utf-8");
   const fnStart = helpers.indexOf("export async function getDesktopUserFromApiRequest");
   const fnBody = helpers.slice(fnStart, helpers.indexOf("\n}", fnStart) + 2);
-  assert("getDesktopUserFromApiRequest verifies desktop_access only", /verifyDesktopAccessToken/.test(fnBody));
+  assert("getDesktopUserFromApiRequest verifies desktop_access CLAIMS", /verifyDesktopAccessTokenClaims/.test(fnBody));
+  assert("getDesktopUserFromApiRequest scopes getUserById to the token workspace", /getUserById\([^)]*activeWorkspaceId/.test(fnBody));
+  assert("getDesktopUserFromApiRequest hard-gates scope (no drift)", /enforceTokenWorkspaceScope/.test(fnBody));
   assert("getDesktopUserFromApiRequest has NO cookie fallback", !/getCurrentUserFromCookies|cookies\(/.test(fnBody));
 }
 {

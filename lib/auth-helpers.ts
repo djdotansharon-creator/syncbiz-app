@@ -6,7 +6,8 @@
 
 import { cookies } from "next/headers";
 import { parseSessionValue } from "@/lib/auth-session";
-import { verifyWsToken, verifyDesktopAccessToken } from "@/lib/auth-ws-token";
+import { verifyWsToken, verifyDesktopAccessTokenClaims } from "@/lib/auth-ws-token";
+import { enforceTokenWorkspaceScope } from "@/lib/desktop-token-scope";
 import {
   getUserByEmail,
   getOrCreateUserByEmail,
@@ -87,11 +88,19 @@ export async function getDesktopUserFromApiRequest(request: Request): Promise<Us
   if (!auth?.toLowerCase().startsWith("bearer ")) return null; // no cookie fallback by design
   const token = auth.slice(7).trim();
   if (!token) return null;
-  const userId = verifyDesktopAccessToken(token); // desktop_access ONLY; rejects ws_register
-  if (!userId) return null;
-  const user = await getUserById(userId);
+  const claims = verifyDesktopAccessTokenClaims(token); // desktop_access ONLY; rejects ws_register
+  if (!claims || !claims.workspaceId) return null; // must carry the signed workspace scope
+  // Resolve the user SPECIFICALLY in the token's workspace (membership validated by resolveActiveTenantScope),
+  // then hard-gate: reject any silent fallback to the user's primary/other workspace (no token-scope drift).
+  const resolved = await getUserById(claims.userId, { activeWorkspaceId: claims.workspaceId });
+  const user = enforceTokenWorkspaceScope(claims, resolved);
   if (user) {
-    logIdentity("session_resolve", { result: "user", userId: user.id, via: "bearer_desktop_access" });
+    logIdentity("session_resolve", {
+      result: "user",
+      userId: user.id,
+      workspaceId: claims.workspaceId,
+      via: "bearer_desktop_access",
+    });
   }
   return user;
 }
