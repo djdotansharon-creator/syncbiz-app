@@ -6,7 +6,7 @@
 
 import { cookies } from "next/headers";
 import { parseSessionValue } from "@/lib/auth-session";
-import { verifyWsToken } from "@/lib/auth-ws-token";
+import { verifyWsToken, verifyDesktopAccessToken } from "@/lib/auth-ws-token";
 import {
   getUserByEmail,
   getOrCreateUserByEmail,
@@ -72,6 +72,26 @@ export async function getCurrentUserFromApiRequest(request: Request): Promise<Us
   const user = await getUserById(userId);
   if (user) {
     logIdentity("session_resolve", { result: "user", userId: user.id, via: "bearer_ws_token" });
+  }
+  return user;
+}
+
+/**
+ * Desktop-MAIN-ONLY resolver: requires `Authorization: Bearer <desktop_access>`. Does NOT fall back to the
+ * session cookie and does NOT accept a `ws_register` token. For endpoints (e.g. POST /api/devices/register)
+ * that only the Electron desktop MAIN may call. Returns null (→ 401) for a missing/non-bearer header, an empty
+ * token, a ws_register token, or an invalid/expired desktop_access token.
+ */
+export async function getDesktopUserFromApiRequest(request: Request): Promise<User | null> {
+  const auth = request.headers.get("authorization");
+  if (!auth?.toLowerCase().startsWith("bearer ")) return null; // no cookie fallback by design
+  const token = auth.slice(7).trim();
+  if (!token) return null;
+  const userId = verifyDesktopAccessToken(token); // desktop_access ONLY; rejects ws_register
+  if (!userId) return null;
+  const user = await getUserById(userId);
+  if (user) {
+    logIdentity("session_resolve", { result: "user", userId: user.id, via: "bearer_desktop_access" });
   }
   return user;
 }

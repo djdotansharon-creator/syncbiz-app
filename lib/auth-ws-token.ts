@@ -123,3 +123,33 @@ export function verifyWsToken(token: string): string | null {
   }
   return null;
 }
+
+/**
+ * Verify a token and return userId ONLY when purpose === `desktop_access`. Rejects `ws_register` and every
+ * other purpose. For desktop-MAIN-only endpoints (e.g. POST /api/devices/register) that must NOT accept a
+ * browser session cookie or a short-lived ws_register token.
+ */
+export function verifyDesktopAccessToken(token: string): string | null {
+  const secret = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
+  if (!secret || secret.length < 16) return null;
+  if (!token || typeof token !== "string") return null;
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const [payloadB64, sigB64] = parts;
+  const expectedSig = createHmac("sha256", secret).update(payloadB64).digest("base64url");
+  if (expectedSig !== sigB64) return null;
+  let payload: { purpose?: string; userId?: string; iat?: number; exp?: number };
+  try {
+    payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
+  } catch {
+    return null;
+  }
+  if (payload.purpose !== PURPOSE_DESKTOP_ACCESS) return null; // ws_register / anything else → reject
+  const now = Math.floor(Date.now() / 1000);
+  if (typeof payload.exp !== "number" || payload.exp < now) return null;
+  if (typeof payload.iat !== "number" || payload.iat > now + 300) return null;
+  if (payload.exp - payload.iat > MAX_DESKTOP_TTL_SEC) return null;
+  if (payload.exp > now + MAX_DESKTOP_TTL_SEC) return null;
+  const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
+  return userId || null;
+}

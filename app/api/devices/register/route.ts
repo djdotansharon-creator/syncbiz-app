@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getCurrentUserFromApiRequest } from "@/lib/auth-helpers";
+import { getDesktopUserFromApiRequest } from "@/lib/auth-helpers";
 import { getAuthorizedBranchIds } from "@/lib/user-store";
 import { processStationDeviceRegister, type RegisterDeps } from "@/lib/station-device-register";
 import { registerStationDeviceWithPrisma } from "@/lib/station-device-prisma";
@@ -8,8 +8,9 @@ import { registerStationDeviceWithPrisma } from "@/lib/station-device-prisma";
  * Phase 0.2A — POST /api/devices/register
  *
  * Authenticated self-registration of the durable MAIN (station) device identity into the cloud, bound to the
- * caller's Workspace + an authorized Branch. Bearer `desktop_access` (or session cookie) required. workspaceId
- * is derived server-side from the token/user and is never accepted from the body. See lib/station-device-*.
+ * caller's Workspace + an authorized Branch. DESKTOP-MAIN ONLY: requires `Authorization: Bearer <desktop_access>`
+ * — no session-cookie fallback, and a `ws_register` token is rejected (→ 401). workspaceId is derived
+ * server-side from the token/user and is never accepted from the body. See lib/station-device-*.
  */
 const deps: RegisterDeps = {
   getAuthorizedBranches: (userId, workspaceId) => getAuthorizedBranchIds(userId, workspaceId),
@@ -17,7 +18,7 @@ const deps: RegisterDeps = {
 };
 
 export async function POST(request: NextRequest) {
-  const user = await getCurrentUserFromApiRequest(request);
+  const user = await getDesktopUserFromApiRequest(request);
   let body: unknown = null;
   try {
     body = await request.json();

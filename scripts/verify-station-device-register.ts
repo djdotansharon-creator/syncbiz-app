@@ -8,6 +8,7 @@
  * Run: npx tsx scripts/verify-station-device-register.ts
  */
 import { readFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
 import path from "node:path";
 import {
   isValidDurableDeviceId,
@@ -18,6 +19,10 @@ import {
   type RegisterResult,
 } from "@/lib/station-device-store";
 import { processStationDeviceRegister, type RegisterDeps } from "@/lib/station-device-register";
+
+// Test secret MUST be set before minting/verifying tokens (getSecret reads env at call time).
+process.env.SYNCBIZ_WS_SECRET = "test-ws-secret-0123456789";
+import { createWsToken, createDesktopAccessToken, verifyDesktopAccessToken } from "@/lib/auth-ws-token";
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean, detail = ""): void {
@@ -176,6 +181,34 @@ const body = (over: Record<string, unknown> = {}) => ({ durableDeviceId: "device
   assert("missing branchId defaults to 'default'", res.status === 201 && calls.register[0]?.branchId === "default");
 }
 
+// ── 3b. GAP 1 — desktop_access-ONLY auth (verifyDesktopAccessToken) ───────────────────────────────────────────
+{
+  const secret = process.env.SYNCBIZ_WS_SECRET!;
+  const now = Math.floor(Date.now() / 1000);
+  const craft = (payload: Record<string, unknown>) => {
+    const b64 = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
+    const sig = createHmac("sha256", secret).update(b64).digest("base64url");
+    return `${b64}.${sig}`;
+  };
+
+  const validDesktop = createDesktopAccessToken("u-desktop", { workspaceId: "ws-A", authorizedBranches: ["default"] });
+  assert("valid desktop_access token → userId", verifyDesktopAccessToken(validDesktop) === "u-desktop");
+
+  const wsRegister = createWsToken("u-desktop", { workspaceId: "ws-A", authorizedBranches: ["default"] });
+  assert("ws_register token → null (rejected)", verifyDesktopAccessToken(wsRegister) === null);
+
+  const expired = craft({ purpose: "desktop_access", userId: "u-desktop", iat: now - 100000, exp: now - 10 });
+  assert("expired desktop_access token → null", verifyDesktopAccessToken(expired) === null);
+
+  const tampered = validDesktop.slice(0, -2) + (validDesktop.endsWith("aa") ? "bb" : "aa");
+  assert("tampered signature → null", verifyDesktopAccessToken(tampered) === null);
+
+  assert("empty token → null", verifyDesktopAccessToken("") === null);
+  assert("garbage token → null", verifyDesktopAccessToken("not.a.token.at.all") === null);
+  // A cookie-issued session is NOT a bearer token at all → the route's getDesktopUserFromApiRequest never
+  // reaches a verifier for it (asserted structurally below).
+}
+
 // ── 4. Static guards ─────────────────────────────────────────────────────────────────────────────────────────
 {
   const mig = readFileSync(path.join(repoRoot, "prisma/migrations/20260929120000_add_station_device_registry/migration.sql"), "utf-8");
@@ -197,6 +230,18 @@ const body = (over: Record<string, unknown> = {}) => ({ durableDeviceId: "device
     !/StationDevice|durableDeviceId|designatedMaster/i.test(rowToBranch));
   assert("rowToDevice unchanged (no StationDevice/durable)",
     !/StationDevice|durableDeviceId/i.test(rowToDevice));
+}
+{
+  // GAP 1 — the route must use the desktop-only resolver, not the cookie-accepting one.
+  const route = readFileSync(path.join(repoRoot, "app/api/devices/register/route.ts"), "utf-8");
+  assert("route uses getDesktopUserFromApiRequest (bearer desktop_access only)", /getDesktopUserFromApiRequest/.test(route));
+  assert("route does NOT use getCurrentUserFromApiRequest (no cookie/ws_register)", !/getCurrentUserFromApiRequest/.test(route));
+
+  const helpers = readFileSync(path.join(repoRoot, "lib/auth-helpers.ts"), "utf-8");
+  const fnStart = helpers.indexOf("export async function getDesktopUserFromApiRequest");
+  const fnBody = helpers.slice(fnStart, helpers.indexOf("\n}", fnStart) + 2);
+  assert("getDesktopUserFromApiRequest verifies desktop_access only", /verifyDesktopAccessToken/.test(fnBody));
+  assert("getDesktopUserFromApiRequest has NO cookie fallback", !/getCurrentUserFromCookies|cookies\(/.test(fnBody));
 }
 {
   const schema = readFileSync(path.join(repoRoot, "prisma/schema.prisma"), "utf-8");
