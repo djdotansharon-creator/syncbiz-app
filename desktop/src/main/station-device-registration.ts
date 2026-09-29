@@ -144,6 +144,7 @@ export class StationDeviceRegistrar {
   private inFlight = false;
   private attempt = 0;
   private lastSuccessSignature: string | null = null;
+  private currentSig: string | null = null; // the signature the in-flight sequence is registering (re-anchored on change)
   private pendingReason: string | null = null; // a trigger that arrived while a sequence was in-flight/backing off
 
   constructor(private readonly deps: RegistrarDeps) {}
@@ -153,7 +154,7 @@ export class StationDeviceRegistrar {
     void this.runOnce(reason);
   }
 
-  /** Awaitable core (for tests). Performs the first attempt; retries schedule themselves via setTimer. */
+  /** Awaitable core (for tests). Claims the in-flight slot, then runs attempts that each re-read config. */
   async runOnce(reason: string): Promise<void> {
     if (this.inFlight) {
       // Do NOT start a concurrent POST and do NOT lose the trigger: record it and re-run with FRESH config once
@@ -162,6 +163,7 @@ export class StationDeviceRegistrar {
       this.deps.log("station_registration_attempt", { reason, skipped: "in_flight", pending: true });
       return;
     }
+    // Peek current config to decide whether there is anything to do before claiming the in-flight slot.
     let cfg: RegistrationConfigView;
     try {
       cfg = this.deps.getConfig();
@@ -179,14 +181,16 @@ export class StationDeviceRegistrar {
 
     this.inFlight = true;
     this.attempt = 0;
-    await this.attemptOnce(reason, built, sig);
+    this.currentSig = sig;
+    await this.runAttempt(reason);
   }
 
   /** Terminal end of a sequence (success or non-retryable/exhausted). Clears in-flight and, if a trigger arrived
-   *  meanwhile, re-runs with FRESH config (never the stale built request); normal signature dedupe still applies. */
+   *  meanwhile, re-runs with FRESH config (never a stale request); normal signature dedupe still applies. */
   private finalize(): void {
     this.inFlight = false;
     this.attempt = 0;
+    this.currentSig = null;
     if (this.pendingReason !== null) {
       const reason = this.pendingReason;
       this.pendingReason = null;
@@ -198,7 +202,41 @@ export class StationDeviceRegistrar {
     this.finalize();
   }
 
-  private async attemptOnce(reason: string, built: RegistrationRequest, sig: string): Promise<void> {
+  /**
+   * One attempt. ALWAYS re-reads the CURRENT effective config and rebuilds the request, so a mid-backoff change
+   * (branch / token / apiBaseUrl / durable id) is honored: a stale request is NEVER re-sent. If the signature
+   * changed since this sequence began, the old sequence is obsolete — re-anchor to the fresh signature and reset
+   * the attempt count (still single-in-flight), then POST the fresh request.
+   */
+  private async runAttempt(reason: string): Promise<void> {
+    let cfg: RegistrationConfigView;
+    try {
+      cfg = this.deps.getConfig();
+    } catch {
+      this.finalize();
+      return;
+    }
+    const built = buildRegistrationRequest(cfg, this.deps.appVersion, this.deps.platform, this.deps.now());
+    if ("skip" in built) {
+      // Config became unregisterable mid-sequence (e.g. token cleared/expired) → stop; do not send stale.
+      if (built.skip === "expired") this.deps.log("station_registration_unauthorized", { reason, skipped: "token_expired" });
+      else this.deps.log("station_registration_attempt", { reason, skipped: built.skip });
+      this.finalize();
+      return;
+    }
+    const freshSig = registrationSignature(cfg, this.deps.appVersion);
+    if (freshSig === this.lastSuccessSignature) {
+      // Already registered (e.g. an interleaved success) → nothing to do.
+      this.finalize();
+      return;
+    }
+    if (freshSig !== this.currentSig) {
+      // OBSOLETE: config changed since this sequence began. Never re-send the stale request — re-anchor + reset.
+      this.deps.log("station_registration_superseded", { reason, attempts: this.attempt });
+      this.currentSig = freshSig;
+      this.attempt = 0;
+    }
+
     this.attempt += 1;
     const attempt = this.attempt;
     const safe = {
@@ -211,7 +249,7 @@ export class StationDeviceRegistrar {
     };
     this.deps.log("station_registration_attempt", safe);
 
-    let status: number;
+    let statusCode: number;
     let serverError: string | undefined;
     try {
       const res = await this.deps.fetchImpl(built.url, {
@@ -219,8 +257,8 @@ export class StationDeviceRegistrar {
         headers: built.headers,
         body: JSON.stringify(built.body),
       });
-      status = res.status;
-      if (status === 409) {
+      statusCode = res.status;
+      if (statusCode === 409) {
         try {
           const j = (await res.json()) as { error?: unknown };
           if (typeof j?.error === "string") serverError = j.error;
@@ -230,19 +268,19 @@ export class StationDeviceRegistrar {
       }
     } catch (e) {
       this.deps.log("station_registration_network_error", { ...safe, err: e instanceof Error ? e.message : String(e) });
-      this.scheduleRetry(reason, built, sig);
+      this.scheduleRetry(reason);
       return;
     }
 
-    const outcome = classifyRegistrationStatus(status);
-    const withStatus = { ...safe, httpStatus: status };
+    const outcome = classifyRegistrationStatus(statusCode);
+    const withStatus = { ...safe, httpStatus: statusCode };
     switch (outcome) {
       case "created":
-        this.onSuccess(sig);
+        this.onSuccess(freshSig);
         this.deps.log("station_registration_created", withStatus);
         return;
       case "refreshed":
-        this.onSuccess(sig);
+        this.onSuccess(freshSig);
         this.deps.log("station_registration_refreshed", withStatus);
         return;
       case "unauthorized": // 401 — terminal, no retry, no mutation
@@ -259,7 +297,7 @@ export class StationDeviceRegistrar {
         return;
       case "server_error": // 5xx — bounded retry
         this.deps.log("station_registration_server_error", withStatus);
-        this.scheduleRetry(reason, built, sig);
+        this.scheduleRetry(reason);
         return;
       default: // unexpected status — treat as terminal (no aggressive retry)
         this.finalize();
@@ -268,14 +306,14 @@ export class StationDeviceRegistrar {
     }
   }
 
-  private scheduleRetry(reason: string, built: RegistrationRequest, sig: string): void {
+  /** Schedule the next attempt (which re-reads config). Bounded; stays in-flight during backoff. */
+  private scheduleRetry(reason: string): void {
     if (this.attempt >= RETRY_MAX) {
       this.deps.log("station_registration_retry_exhausted", { reason, attempts: this.attempt });
       this.finalize();
       return;
     }
     const delay = computeBackoffMs(this.attempt); // backoff after the just-failed attempt
-    // stays inFlight during backoff → preserves single-in-flight
-    this.deps.setTimer(() => this.attemptOnce(reason, built, sig), delay);
+    this.deps.setTimer(() => this.runAttempt(reason), delay);
   }
 }

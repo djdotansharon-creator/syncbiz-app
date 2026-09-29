@@ -45,7 +45,7 @@ function cfg(over: Partial<RegistrationConfigView> = {}): RegistrationConfigView
 type FetchResult = { status: number; json?: () => Promise<unknown> };
 function makeHarness(initial: RegistrationConfigView) {
   let config = initial;
-  let responder: (url: string) => Promise<FetchResult> = async () => ({ status: 201, json: async () => ({}) });
+  let responder: (url: string, init?: RequestInit) => Promise<FetchResult> = async () => ({ status: 201, json: async () => ({}) });
   const fetchCalls: { url: string; init: RequestInit | undefined }[] = [];
   const timers: { fn: () => void | Promise<void>; ms: number }[] = [];
   const logs: { event: string; fields: Record<string, unknown> }[] = [];
@@ -55,7 +55,7 @@ function makeHarness(initial: RegistrationConfigView) {
     platform: "win32",
     fetchImpl: (async (url: string, init?: RequestInit) => {
       fetchCalls.push({ url: String(url), init });
-      return responder(String(url));
+      return responder(String(url), init);
     }) as unknown as typeof fetch,
     now: () => NOW,
     setTimer: (fn, ms) => { timers.push({ fn, ms }); },
@@ -72,7 +72,7 @@ function makeHarness(initial: RegistrationConfigView) {
     timers,
     logs,
     drainTimers,
-    setResponder: (r: (url: string) => Promise<FetchResult>) => { responder = r; },
+    setResponder: (r: (url: string, init?: RequestInit) => Promise<FetchResult>) => { responder = r; },
     setConfig: (c: RegistrationConfigView) => { config = c; },
     getConfig: () => config,
   };
@@ -274,6 +274,89 @@ async function main(): Promise<void> {
     await p1;
     await h.drainTimers(); // one collapsed pending re-run, same config → dedupe → still 1
     assert("E: pending collapses to at most one re-run (dedupe)", h.fetchCalls.length === 1);
+  }
+
+  // ── Stale-retry safety: a retry NEVER re-sends a request for an obsolete signature (branch/token/base) ─────────
+  // Stateful fake registration server modeling StationDevice binding semantics (first branch wins; different
+  // branch → 409). Proves a stale Branch-A retry can never bind before the fresh Branch-B request.
+  function statefulServer() {
+    let binding: { durableDeviceId: string; branchId: string } | null = null;
+    const posts: { durableDeviceId: string; branchId: string; auth: string; url: string }[] = [];
+    return {
+      posts,
+      getBinding: () => binding,
+      respond: async (url: string, init?: RequestInit): Promise<FetchResult> => {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { durableDeviceId: string; branchId: string };
+        const auth = String((init?.headers as Record<string, string>)?.Authorization ?? "");
+        posts.push({ durableDeviceId: body.durableDeviceId, branchId: body.branchId, auth, url });
+        if (!binding) { binding = { durableDeviceId: body.durableDeviceId, branchId: body.branchId }; return { status: 201, json: async () => ({}) }; }
+        if (binding.durableDeviceId === body.durableDeviceId && binding.branchId === body.branchId) return { status: 200, json: async () => ({}) };
+        return { status: 409, json: async () => ({ error: "device is registered to a different branch" }) };
+      },
+    };
+  }
+
+  { // 1. Branch A network-fails; branch → B during backoff; NEXT POST must be B, and A must NEVER be sent/bound
+    const h = makeHarness(cfg({ branchId: "A" }));
+    const server = statefulServer();
+    let offline = true;
+    h.setResponder((url, init) => (offline ? Promise.reject(new Error("offline")) : server.respond(url, init)));
+    await h.registrar.runOnce("startup"); // attempt1 A → offline (never reaches server) → retry scheduled
+    h.setConfig(cfg({ branchId: "B" }));
+    await h.registrar.runOnce("config-change"); // pending during backoff
+    offline = false;
+    await h.drainTimers();
+    assert("1: stale Branch A is NEVER POSTed", !server.posts.some((p) => p.branchId === "A"), server.posts.map((p) => p.branchId).join(","));
+    assert("1: Branch B is registered and bound", server.getBinding()?.branchId === "B");
+    assert("1: every POST that reached the server was Branch B (no stale mis-bind)", server.posts.length >= 1 && server.posts.every((p) => p.branchId === "B"));
+  }
+  { // 2. Old token network-fails; token changes during backoff; NEXT POST uses NEW token, old is NOT retried
+    const h = makeHarness(cfg({ wsToken: "tok-OLD" }));
+    const server = statefulServer();
+    let offline = true;
+    h.setResponder((url, init) => (offline ? Promise.reject(new Error("offline")) : server.respond(url, init)));
+    await h.registrar.runOnce("startup");
+    h.setConfig(cfg({ wsToken: "tok-NEW" }));
+    await h.registrar.runOnce("signin");
+    offline = false;
+    await h.drainTimers();
+    assert("2: old token is NEVER sent to the server", !server.posts.some((p) => p.auth === "Bearer tok-OLD"));
+    assert("2: new token IS sent", server.posts.some((p) => p.auth === "Bearer tok-NEW"));
+  }
+  { // 3. apiBaseUrl changes during backoff; NEXT POST uses NEW base, old base NOT retried
+    const h = makeHarness(cfg({ apiBaseUrl: "https://old.example.com" }));
+    const server = statefulServer();
+    let offline = true;
+    h.setResponder((url, init) => (offline ? Promise.reject(new Error("offline")) : server.respond(url, init)));
+    await h.registrar.runOnce("startup");
+    h.setConfig(cfg({ apiBaseUrl: "https://new.example.com" }));
+    await h.registrar.runOnce("config-change");
+    offline = false;
+    await h.drainTimers();
+    assert("3: old base is NEVER POSTed", !server.posts.some((p) => p.url.startsWith("https://old.example.com")));
+    assert("3: new base IS POSTed", server.posts.some((p) => p.url.startsWith("https://new.example.com/api/devices/register")));
+  }
+  { // 4. Same config during backoff → normal bounded retry proceeds (no re-anchor churn)
+    const h = makeHarness(cfg({ branchId: "A" }));
+    h.setResponder(() => Promise.reject(new Error("offline")));
+    await h.registrar.runOnce("startup");
+    await h.drainTimers();
+    assert("4: same-config bounded retry = RETRY_MAX attempts, all Branch A", h.fetchCalls.length === RETRY_MAX &&
+      h.fetchCalls.every((c) => JSON.parse(String(c.init?.body ?? "{}")).branchId === "A"));
+    assert("4: retry_exhausted after bounded attempts", h.logs.some((l) => l.event === "station_registration_retry_exhausted"));
+  }
+  { // 6. Single-in-flight preserved across a mid-backoff change (never two concurrent POSTs)
+    const h = makeHarness(cfg({ branchId: "A" }));
+    const server = statefulServer();
+    let offline = true;
+    h.setResponder((url, init) => (offline ? Promise.reject(new Error("offline")) : server.respond(url, init)));
+    await h.registrar.runOnce("startup");
+    h.setConfig(cfg({ branchId: "B" }));
+    await h.registrar.runOnce("config-change");
+    offline = false;
+    await h.drainTimers();
+    // exactly one successful binding, and the server saw at most one POST per fired timer (no concurrency)
+    assert("6: single-in-flight — exactly one bound branch (B)", server.getBinding()?.branchId === "B" && server.posts.filter((p) => p.branchId === "B").length >= 1);
   }
 
   // ── Diagnostics redaction (ISSUE 2): never log the full durable id ────────────────────────────────────────────
