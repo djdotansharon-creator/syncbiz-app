@@ -449,6 +449,30 @@ model Device {
   @@index([token])
 }
 
+/// Phase 0.2A — cloud registry of the durable MAIN (station) device identity from Phase 0.1.
+/// `durableDeviceId` is the exact value persisted at C:\ProgramData\VONO\state\device-id.json (stored
+/// byte-for-byte; NOT required to use the `dsk-` prefix — legacy ids are valid). This table is the cloud
+/// binding of that identity to a Workspace + Branch; it is SEPARATE from the manually-curated `Device`
+/// inventory above (different lifecycle: self-registered by the desktop MAIN via an authenticated API).
+///
+/// `workspaceId` / `branchId` are FK-free plain strings (same convention as PlaybackIncident /
+/// UserBranchAssignment.branchId). `branchId` is in the CURRENT authorizedBranches / WS namespace (it MAY be
+/// the literal "default") and is only unambiguous as the pair (workspaceId, branchId) — it is NOT claimed to
+/// be a canonical Branch.id (see the per-tenant "default" collision; canonicalization is a later phase).
+model StationDevice {
+  id                String   @id @default(uuid())
+  durableDeviceId   String   @unique
+  workspaceId       String
+  branchId          String
+  platform          String
+  appVersion        String
+  firstRegisteredAt DateTime @default(now())
+  lastSeenAt        DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@index([workspaceId, branchId])
+}
+
 // ─────────────────────────────────────────────
 // MEDIA — WORKSPACE-SCOPED
 // ─────────────────────────────────────────────
