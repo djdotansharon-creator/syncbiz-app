@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { app, BrowserWindow, screen, shell } from "electron";
 
 import { initFileLogger, fileLog, getLogFilePath } from "./file-logger";
-import { registerMvpIpc } from "./ipc-mvp";
+import { registerMvpIpc, getEffectiveRuntimeConfig } from "./ipc-mvp";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat-writer";
 import { startEmbeddedNextServer, type EmbeddedNextHandle } from "./embedded-next-server";
 import { flushLocalCollectionTagSnapshotWrites } from "./local-collection-snapshot";
@@ -496,7 +496,16 @@ app.whenReady().then(async () => {
   orchestrator = new PlaybackOrchestrator();
   orchestrator.start(binaries);
   registerMvpIpc(getMainWindow, orchestrator);
-  startHeartbeat({ appVersion: app.getVersion(), pid: process.pid, execPath: process.execPath });
+  // Seed the heartbeat with the durable MAIN identity (ProgramData deviceId) up front, so the FIRST heartbeat
+  // already carries deviceId/branchId even if the renderer never loads / WS never connects / nothing plays.
+  const effectiveConfig = getEffectiveRuntimeConfig();
+  startHeartbeat({
+    appVersion: app.getVersion(),
+    pid: process.pid,
+    execPath: process.execPath,
+    deviceId: effectiveConfig.deviceId,
+    branchId: effectiveConfig.branchId,
+  });
   fileLog("INFO", "app.whenReady: VONO heartbeat started");
 
   void openMainWindow().catch((err) => {

@@ -33,6 +33,12 @@ export function initDeviceId(): string {
   if (cachedDeviceId) {
     return cachedDeviceId;
   }
+  // NOTE (Phase 0.1): the renderer device id is deliberately kept SEPARATE from the Electron MAIN durable
+  // machine id (C:\ProgramData\VONO\state\device-id.json). In the packaged desktop BOTH planes register as
+  // role:"device" (MAIN via DeviceWsManager, this renderer via useRemoteControlWs) — sharing one deviceId
+  // would collide in the server's `devices` Map (one socket orphaned). MAIN owns the durable station identity;
+  // this renderer keeps its own localStorage id. Unifying them is deferred to the designated-MASTER phase,
+  // where the renderer becomes CONTROL/mirror rather than a second competing station.
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored && stored.trim().length > 0) {
