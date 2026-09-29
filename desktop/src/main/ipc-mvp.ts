@@ -59,6 +59,13 @@ import { ensurePlaylistProRuntimeConfig } from "./playlistpro-config";
 import { musicFolderDisplayLabel } from "../shared/playlistpro-paths";
 import { loadRuntimeConfig, patchRuntimeConfig } from "./runtime-config-service";
 import { reconcileDeviceIdentity, stripDeviceIdFromPatch } from "./device-identity-reconcile";
+import { fileLog } from "./file-logger";
+import {
+  StationDeviceRegistrar,
+  pickRegistrationRelevant,
+  registrationRelevantChanged,
+  type RegistrationRelevant,
+} from "./station-device-registration";
 import type { PlaybackOrchestrator } from "./playback-orchestrator";
 import { scanLocalAudioFolder } from "./scan-local-audio-folder";
 import { listMusicLibraryDir } from "./list-music-library-dir";
@@ -107,6 +114,47 @@ function loadEffectiveRuntimeConfig(): DesktopRuntimeConfig {
  */
 export function getEffectiveRuntimeConfig(): DesktopRuntimeConfig {
   return loadEffectiveRuntimeConfig();
+}
+
+// Phase 0.2A — MAIN-only cloud station registration (HTTP; never touches WS/MASTER/Protection/config).
+let stationRegistrar: StationDeviceRegistrar | null = null;
+function getStationRegistrar(): StationDeviceRegistrar {
+  if (!stationRegistrar) {
+    stationRegistrar = new StationDeviceRegistrar({
+      getConfig: () => {
+        const c = getEffectiveRuntimeConfig(); // reconciled durable id; READ-ONLY (no mutation on responses)
+        return {
+          deviceId: c.deviceId,
+          branchId: c.branchId,
+          wsToken: c.wsToken,
+          apiBaseUrl: c.apiBaseUrl,
+          desktopTokenExpiresAtIso: c.desktopTokenExpiresAtIso,
+        };
+      },
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      fetchImpl: fetch,
+      now: () => Date.now(),
+      setTimer: (fn, ms) => {
+        const t = setTimeout(() => void fn(), ms);
+        if (typeof t.unref === "function") t.unref(); // never keep the app alive / interfere with shutdown
+      },
+      log: (event, fields) =>
+        fileLog(/error|conflict|forbidden|unauthorized|exhausted/.test(event) ? "WARN" : "INFO", event, fields),
+    });
+  }
+  return stationRegistrar;
+}
+
+/** Snapshot the registration-relevant config for change detection (SAVE_CONFIG trigger). */
+function registrationRelevantOf(c: DesktopRuntimeConfig | null): RegistrationRelevant | null {
+  if (!c) return null;
+  return pickRegistrationRelevant({
+    deviceId: c.deviceId,
+    branchId: c.branchId,
+    wsToken: c.wsToken,
+    apiBaseUrl: c.apiBaseUrl,
+  });
 }
 
 function musicFolderSnapshotFromConfig(c: DesktopRuntimeConfig): MusicFolderSnapshot {
@@ -170,6 +218,8 @@ async function desktopSignInWithPassword(
     desktopTokenExpiresAtIso: typeof rec.expiresAt === "string" ? rec.expiresAt : undefined,
   }));
   if (manager) manager.setConfig(next);
+  // Phase 0.2A trigger (B) — SIGN-IN: register under the freshly persisted+reconciled token scope. Fire-and-forget.
+  getStationRegistrar().trigger("signin");
   broadcast(getWindow(), manager ? manager.snapshot() : fallbackSnapshotFromConfig(next));
   return { ok: true, config: next };
 }
@@ -193,6 +243,10 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   manager.onStatus((s) => {
     broadcast(getWindow(), s);
   });
+
+  // Phase 0.2A trigger (A) — STARTUP: fire-and-forget cloud registration if a token is present. Never awaited,
+  // so it can never delay playback / window / WS startup. Skips silently when no token (returning-user path).
+  getStationRegistrar().trigger("startup");
 
   ipcMain.handle(MVP_IPC.GET_CONFIG, (): DesktopRuntimeConfig => {
     cachedConfig = loadEffectiveRuntimeConfig();
@@ -244,12 +298,19 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     // Phase 0.1: deviceId is NOT settable at runtime — ProgramData is the immutable authority. Drop any
     // patch.deviceId, apply the rest, then reconcile back to the durable MAIN id so a manual/renderer patch
     // can never drift config.deviceId (and thus DeviceWsManager REGISTER / heartbeat) away from ProgramData.
+    const beforeRelevant = registrationRelevantOf(cachedConfig); // effective config prior to this save
     const safePatch = stripDeviceIdFromPatch(patch);
     const cur = loadRuntimeConfig(getUserData());
     const patched = patchRuntimeConfig(getUserData(), cur, safePatch);
     const next = reconcileDeviceIdentity(getUserData(), patched);
     cachedConfig = next;
     if (manager) manager.setConfig(next);
+    // Phase 0.2A trigger (C) — CONFIG CHANGE: only when a registration-relevant value (branchId / apiBaseUrl /
+    // wsToken) actually changed, never for unrelated settings. A branch change may 409 server-side; the registrar
+    // logs the conflict and NEVER auto-rebinds or rewrites branchId. Fire-and-forget.
+    if (registrationRelevantChanged(beforeRelevant, registrationRelevantOf(next)!)) {
+      getStationRegistrar().trigger("config-change");
+    }
     broadcast(getWindow(), manager!.snapshot());
     return next;
   });
