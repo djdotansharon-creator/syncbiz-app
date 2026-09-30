@@ -175,12 +175,18 @@ export function getProtectionService(): ProtectionService {
       removeFile: (p) => { try { rmSync(p, { force: true }); } catch { /* ignore */ } },
       protectionStatePath: vonoProtectionStatePath,
       controlPath: vonoControlPath,
-      taskExists: () => {
-        const { status } = runPs([
+      taskStatus: () => {
+        // Tri-state, fail-CLOSED. Distinct exit codes so a query failure is NEVER read as "absent":
+        //   0 = task present, 3 = task absent, anything else / null (PS crash, non-interactive block) = unknown.
+        const { status, stderr } = runPs([
           "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
-          `if (Get-ScheduledTask -TaskName '${VONO_PROTECTION_TASK_NAME}' -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }`,
+          `try { if (Get-ScheduledTask -TaskName '${VONO_PROTECTION_TASK_NAME}' -ErrorAction Stop) { exit 0 } else { exit 3 } } ` +
+            `catch [Microsoft.Management.Infrastructure.CimException] { exit 3 } ` +
+            `catch { exit 1 }`,
         ]);
-        return status === 0;
+        if (status === 0) return { ok: true, present: true };
+        if (status === 3) return { ok: true, present: false };
+        return { ok: false, error: stderr || `task query exited ${status}` };
       },
       requiredWatchdogFilesPresent: () =>
         ["node.exe", "watchdog.cjs", "launch-watchdog.ps1", "provision-vono-protection.ps1"].every((f) =>
@@ -194,16 +200,21 @@ export function getProtectionService(): ProtectionService {
         return status === 0 ? { ok: true } : { ok: false, error: stderr || `provision ${action} exited ${status}` };
       },
       disableElectronAutostart: () => {
+        // Fail-CLOSED: the Scheduled Task must be the ONE start mechanism, so this ONLY reports ok when a
+        // successful read PROVES openAtLogin is false. A set failure, a verify-read failure, or a still-on
+        // read all return ok:false (never assume success).
         try {
           app.setLoginItemSettings({ openAtLogin: false });
-          // Verify: the Scheduled Task must be the ONE start mechanism, so a transition can't succeed while
-          // openAtLogin is still on. On platforms where it isn't supported, getLoginItemSettings reports false.
-          let still = false;
-          try { still = app.getLoginItemSettings().openAtLogin === true; } catch { still = false; }
-          return still ? { ok: false, error: "Could not disable the OS login-item auto-start." } : { ok: true };
         } catch (e) {
           return { ok: false, error: (e as Error)?.message || "setLoginItemSettings failed." };
         }
+        let openAtLogin: boolean;
+        try {
+          openAtLogin = app.getLoginItemSettings().openAtLogin === true;
+        } catch (e) {
+          return { ok: false, error: (e as Error)?.message || "Could not verify the OS login-item state." };
+        }
+        return openAtLogin ? { ok: false, error: "OS login-item auto-start is still enabled." } : { ok: true };
       },
       log: (event, fields) =>
         fileLog(/fail|missing|still_present/.test(event) ? "WARN" : "INFO", event, fields ?? {}),
@@ -531,19 +542,21 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     return res.state;
   });
   ipcMain.handle(MVP_IPC.EXIT_VONO, (): ExitVonoResult => {
-    // Explicit user exit. When Protection is ON we MUST persist+verify the intentional-stop marker BEFORE
-    // quitting — otherwise the watchdog would relaunch VONO. If the marker can't be written, do NOT quit and
-    // surface the error. When OFF there is no watchdog, so quit cleanly. (A crash / before-quit / update
-    // shutdown never writes the marker.)
+    // Explicit user exit, decided on LIVE recovery risk (desired-ON OR a live task present) — not just the
+    // persisted flag. requestExit() writes+verifies the intentional-stop marker when required and returns
+    // ok:false (with no quit) when the marker can't be written OR the task status is unknown. Only quit on ok.
     const svc = getProtectionService();
-    let enabled = false;
-    try { enabled = svc.getEffective().enabled; } catch { enabled = false; }
-    if (enabled) {
-      const res = svc.writeIntentionalStop("explicit user exit (Exit VONO)");
-      if (!res.ok) {
-        fileLog("WARN", "EXIT_VONO: marker write failed — NOT quitting", { err: res.error });
-        return { ok: false, error: res.error };
-      }
+    let decision: ExitVonoResult;
+    try {
+      decision = svc.requestExit();
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      fileLog("WARN", "EXIT_VONO: requestExit threw — NOT quitting", { err });
+      return { ok: false, error: "Could not determine a safe exit; VONO was not stopped." };
+    }
+    if (!decision.ok) {
+      fileLog("WARN", "EXIT_VONO: unsafe to quit — NOT quitting", { err: decision.error });
+      return { ok: false, error: decision.error };
     }
     // Defer the quit so this IPC reply flushes to the renderer first.
     setImmediate(() => app.quit());

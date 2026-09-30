@@ -5,9 +5,9 @@ import { useCallback, useEffect, useState } from "react";
 type ProtectionState = {
   enabled: boolean;
   supported: boolean;
-  taskPresent: boolean;
+  taskPresent: boolean | null;
   source: string;
-  drift: "none" | "task_missing" | "task_unexpected";
+  drift: "none" | "task_missing" | "task_unexpected" | "task_unknown";
   healthy: boolean;
   error?: string;
 };
@@ -170,13 +170,15 @@ export function DesktopStartupSettingsCard() {
             ? on
               ? "Protected · automatic startup and recovery enabled"
               : "Off · manual mode"
-            : protection?.drift === "task_missing"
-              ? "Enabled, but the watchdog task is missing — toggle Protection to repair."
-              : protection?.drift === "task_unexpected"
-                ? "Off, but a watchdog task is still active — toggle Protection to repair."
-                : on
-                  ? "Protected · automatic startup and recovery enabled"
-                  : "Off · manual mode"}
+            : protection?.drift === "task_unknown"
+              ? "Protection status could not be determined — try again."
+              : protection?.drift === "task_missing"
+                ? "Enabled, but the watchdog task is missing — toggle Protection to repair."
+                : protection?.drift === "task_unexpected"
+                  ? "Off, but a watchdog task is still active — toggle Protection to repair."
+                  : on
+                    ? "Protected · automatic startup and recovery enabled"
+                    : "Off · manual mode"}
         </p>
       ) : null}
 

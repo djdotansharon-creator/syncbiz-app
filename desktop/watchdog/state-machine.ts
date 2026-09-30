@@ -116,7 +116,14 @@ export function deriveState(input: DeriveInput): DeriveResult {
   const { hb, control, appProcessAlive, now } = input;
 
   if (isMaintenanceActive(control, now)) {
-    return { state: "MAINTENANCE", reason: `maintenance until ${control!.expiresAt} (${control!.reason})` };
+    // Same suppression state, two shapes of marker: a persistent intentional-stop (expiresAt === null) vs a
+    // bounded maintenance window (numeric expiresAt). Format the reason correctly for each so the log doesn't
+    // read "maintenance until null".
+    const reason =
+      control!.mode === "intentional_stop"
+        ? `intentional stop active (${control!.reason})`
+        : `maintenance until ${control!.expiresAt} (${control!.reason})`;
+    return { state: "MAINTENANCE", reason };
   }
 
   // APP: heartbeat missing/stale OR no process ⇒ the app can't help itself. Two sub-cases, resolved by

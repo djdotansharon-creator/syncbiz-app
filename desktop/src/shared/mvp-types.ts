@@ -225,13 +225,16 @@ export type ProtectionState = {
   enabled: boolean;
   /** False off-Windows (the Scheduled Task mechanism is Windows-only) → the switch is disabled. */
   supported: boolean;
-  /** Whether the "VONO Protection" Scheduled Task is actually present right now. */
-  taskPresent: boolean;
+  /** Live "VONO Protection" Scheduled Task presence: true/false, or null when the status can't be determined. */
+  taskPresent: boolean | null;
   /** How the current state was set: installer | app | migration | admin | default. */
   source: string;
-  /** Desired-vs-live mismatch: "task_missing" (on but no task) / "task_unexpected" (off but task present). */
-  drift: "none" | "task_missing" | "task_unexpected";
-  /** True only when supported AND drift === "none" (safe to show the green "Protected" affordance). */
+  /**
+   * Desired-vs-live mismatch: "task_missing" (on but no task) / "task_unexpected" (off but task present) /
+   * "task_unknown" (task status could not be determined — treated as unhealthy, never as absent).
+   */
+  drift: "none" | "task_missing" | "task_unexpected" | "task_unknown";
+  /** True only when supported AND drift === "none" AND the task status is known (safe to show "Protected"). */
   healthy: boolean;
   /** Present on drift OR when the last transition failed; `enabled` then reflects the UNCHANGED prior state. */
   error?: string;

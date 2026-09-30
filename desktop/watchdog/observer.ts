@@ -32,6 +32,7 @@ import {
   observeProgress,
   observeMpvDown,
   recordAttempt,
+  isMaintenanceActive,
   type WatchdogMemory,
   type ProgressTracker,
   type Decision,
@@ -359,6 +360,17 @@ export function startObserver(): ReturnType<typeof setInterval> {
     // ceiling / maintenance gating already happened in decide()), and no action is already running.
     const actionable = decision.action !== "none" && decision.action !== "await_recovery";
     if (!actionable || decision.suppressed || executing) return;
+
+    // EXECUTION-TIME control recheck (race window: control.json can flip to intentional_stop / maintenance
+    // between this tick's read and the execution below — e.g. the user hits "Exit VONO" right after decide()).
+    // Re-read the marker fresh and ABORT the recovery if suppression is now active, so we never relaunch VONO
+    // after an explicit Exit or during maintenance. decide() already gates on the tick-time control; this is
+    // the last-moment defense.
+    const freshControl = readJson<VonoControlState>(controlPath());
+    if (isMaintenanceActive(freshControl, Date.now())) {
+      log(`[RECOVERY] aborted before execute — control suppression active (${freshControl?.mode ?? "?"})`);
+      return;
+    }
 
     executing = true;
     const ctx = { action: decision.action, fromState: decision.state, pid: effectivePid, execPath };

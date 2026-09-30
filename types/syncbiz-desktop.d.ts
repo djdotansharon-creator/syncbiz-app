@@ -29,9 +29,9 @@ type DesktopAutoStartState = {
 type DesktopProtectionState = {
   enabled: boolean;
   supported: boolean;
-  taskPresent: boolean;
+  taskPresent: boolean | null;
   source: string;
-  drift: "none" | "task_missing" | "task_unexpected";
+  drift: "none" | "task_missing" | "task_unexpected" | "task_unknown";
   healthy: boolean;
   error?: string;
 };

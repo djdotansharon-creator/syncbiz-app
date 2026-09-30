@@ -2,11 +2,20 @@
  * Phase B1 regression — VONO Protection service (protection-service.ts) with injected fakes + temp state.
  * No real Scheduled Task, no Electron, no network. Plus watchdog control-suppression semantics + static guards.
  *
+ * Covers PR #45 round-2 safety blockers:
+ *   B1 watchdog↔Exit race (startup gate + observer execution-time recheck — static)
+ *   B2 SET fail-closed on task-status unknown (never substitute the desired target)
+ *   B3 GET/migration must not treat query failure as absent (taskPresent null / drift task_unknown)
+ *   B4 EXIT uses LIVE recovery risk (requestExit) not just persisted enabled
+ *   B5 autostart verify fail-closed (static guard on the real dep)
+ *   B6 verified clearIntentionalStop() → { ok, hadMarker, error }
+ *   Log cleanup: deriveState reason for intentional_stop
+ *
  * Run: npx tsx desktop/scripts/verify-protection-service.ts
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { createProtectionService, type ProtectionDeps } from "../src/main/protection-service";
+import { createProtectionService, type ProtectionDeps, type TaskStatus } from "../src/main/protection-service";
 import { isMaintenanceActive } from "../watchdog/state-machine";
 import type { VonoControlState } from "../src/shared/vono-runtime-state";
 
@@ -22,8 +31,11 @@ const C = "state/control.json";
 type Overrides = {
   platform?: NodeJS.Platform;
   taskPresent?: boolean;
+  taskUnknown?: boolean; // taskStatus() → { ok:false } (query failed)
+  taskThrows?: boolean;  // taskStatus() throws
   filesPresent?: boolean;
   autostartOk?: boolean;
+  removeFails?: boolean; // removeFile is a no-op so the verify read still sees the marker
   provision?: (action: "install" | "uninstall", state: { taskPresent: boolean }) => { ok: boolean; error?: string };
 };
 function harness(o: Overrides = {}) {
@@ -35,10 +47,14 @@ function harness(o: Overrides = {}) {
     platform: o.platform ?? "win32",
     readFile: (p) => (files.has(p) ? files.get(p)! : null),
     writeFile: (p, d) => { files.set(p, d); },
-    removeFile: (p) => { files.delete(p); },
+    removeFile: (p) => { if (!o.removeFails) files.delete(p); },
     protectionStatePath: () => P,
     controlPath: () => C,
-    taskExists: () => state.taskPresent,
+    taskStatus: (): TaskStatus => {
+      if (o.taskThrows) throw new Error("task query crashed");
+      if (o.taskUnknown) return { ok: false, error: "task query failed" };
+      return { ok: true, present: state.taskPresent };
+    },
     requiredWatchdogFilesPresent: () => o.filesPresent ?? true,
     provision: (action) => {
       calls.provision.push(action);
@@ -60,13 +76,13 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
 {
   const h = harness({ taskPresent: false });
   const eff = h.svc.getEffective();
-  assert("1. no state + no task → OFF, healthy", !eff.enabled && eff.supported && !eff.taskPresent && eff.healthy && eff.drift === "none");
+  assert("1. no state + no task → OFF, healthy", !eff.enabled && eff.supported && eff.taskPresent === false && eff.healthy && eff.drift === "none");
   assert("1. migration persisted enabled=false", readState(h.files)?.enabled === false && readState(h.files)?.source === "migration");
 }
 {
   const h = harness({ taskPresent: true });
   const eff = h.svc.getEffective();
-  assert("2. no state + existing task → migrate ON, healthy", eff.enabled && eff.taskPresent && eff.healthy);
+  assert("2. no state + existing task → migrate ON, healthy", eff.enabled && eff.taskPresent === true && eff.healthy);
   assert("2. migration persisted enabled=true", readState(h.files)?.enabled === true);
 }
 {
@@ -78,11 +94,33 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   assert("4. persisted OFF survives read", h2.svc.getEffective().enabled === false);
 }
 
+// ── B3: task status UNKNOWN must NOT be treated as absent ─────────────────────────────────────────────────────
+{
+  const h = harness({ taskUnknown: true });
+  const eff = h.svc.getEffective();
+  assert("B3.1 no state + task UNKNOWN → taskPresent null, drift task_unknown, not healthy, error",
+    eff.taskPresent === null && eff.drift === "task_unknown" && !eff.healthy && !!eff.error);
+  assert("B3.1 UNKNOWN migration NOT persisted (no false OFF)", readState(h.files) === null);
+}
+{
+  const h = harness({ taskThrows: true });
+  const eff = h.svc.getEffective();
+  assert("B3.2 taskStatus throwing is caught → task_unknown, not persisted",
+    eff.taskPresent === null && eff.drift === "task_unknown" && readState(h.files) === null);
+}
+{
+  const h = harness({ taskUnknown: true });
+  h.files.set(P, JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }));
+  const eff = h.svc.getEffective();
+  assert("B3.3 existing ON + task UNKNOWN → drift task_unknown, taskPresent null, not healthy",
+    eff.enabled && eff.taskPresent === null && eff.drift === "task_unknown" && !eff.healthy);
+}
+
 // ── OFF → ON / ON → OFF ───────────────────────────────────────────────────────────────────────────────────────
 {
   const h = harness({ taskPresent: false });
   const res = h.svc.setEnabled(true);
-  assert("5. OFF→ON ok, healthy", res.ok && res.state.enabled && res.state.taskPresent && res.state.healthy);
+  assert("5. OFF→ON ok, healthy", res.ok && res.state.enabled && res.state.taskPresent === true && res.state.healthy);
   assert("5. provision install called + autostart disabled", h.calls.provision.includes("install") && h.calls.disableAutostart === 1);
   assert("5. persisted ON", readState(h.files)?.enabled === true);
 }
@@ -100,7 +138,7 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
 {
   const h = harness({ taskPresent: true });
   const res = h.svc.setEnabled(false);
-  assert("7. ON→OFF ok", res.ok && !res.state.enabled && !res.state.taskPresent && res.state.healthy);
+  assert("7. ON→OFF ok", res.ok && !res.state.enabled && res.state.taskPresent === false && res.state.healthy);
   assert("7. provision uninstall called + autostart disabled", h.calls.provision.includes("uninstall") && h.calls.disableAutostart === 1);
 }
 {
@@ -109,7 +147,48 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   assert("8. failed OFF (task still present) → not ok, stays ON", !res.ok && res.state.enabled && !!res.state.error);
 }
 
-// ── BLOCKER 4: verifiable autostart disable ───────────────────────────────────────────────────────────────────
+// ── B2: SET must fail-CLOSED on task-status verification failure (never substitute the desired target) ────────
+{
+  const h = harness({ taskPresent: false, provision: (a, s) => { s.taskPresent = a === "install"; return { ok: true }; } });
+  // Force the post-provision verify to be UNKNOWN by swapping in a service whose taskStatus fails after install.
+  let installed = false;
+  const svc = createProtectionService({
+    now: () => NOW, platform: "win32",
+    readFile: (p) => (p === P && installed ? null : null), writeFile: () => {}, removeFile: () => {},
+    protectionStatePath: () => P, controlPath: () => C,
+    taskStatus: () => ({ ok: false, error: "verify failed" }),
+    requiredWatchdogFilesPresent: () => true,
+    provision: () => { installed = true; return { ok: true }; },
+    disableElectronAutostart: () => ({ ok: true }), log: () => {},
+  });
+  void h;
+  const res = svc.setEnabled(true);
+  assert("B2.1 SET ON + verify UNKNOWN → transition FAILS (no substituted ON)", !res.ok && !res.state.enabled && !!res.state.error);
+}
+{
+  // provision install "succeeds" but the task never actually registers (present stays false)
+  const h = harness({ taskPresent: false, provision: () => ({ ok: true }) });
+  const res = h.svc.setEnabled(true);
+  assert("B2.2 SET ON + task still absent after install → FAILS", !res.ok && !res.state.enabled);
+}
+{
+  // SET OFF but the post-uninstall status is UNKNOWN → must NOT report OFF/manual-mode
+  let uninstalled = false;
+  const svc = createProtectionService({
+    now: () => NOW, platform: "win32",
+    readFile: (p) => (p === P ? JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }) : null),
+    writeFile: () => {}, removeFile: () => {},
+    protectionStatePath: () => P, controlPath: () => C,
+    taskStatus: () => (uninstalled ? { ok: false, error: "verify failed" } : { ok: true, present: true }),
+    requiredWatchdogFilesPresent: () => true,
+    provision: () => { uninstalled = true; return { ok: true }; },
+    disableElectronAutostart: () => ({ ok: true }), log: () => {},
+  });
+  const res = svc.setEnabled(false);
+  assert("B2.3 SET OFF + verify UNKNOWN → FAILS, stays ON", !res.ok && res.state.enabled === true && !!res.state.error);
+}
+
+// ── autostart abort (before provisioning) ─────────────────────────────────────────────────────────────────────
 {
   const h = harness({ taskPresent: false, autostartOk: false });
   const res = h.svc.setEnabled(true);
@@ -124,9 +203,10 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   const h = harness({ platform: "darwin" });
   assert("10. non-Windows supported=false", h.svc.getEffective().supported === false);
   assert("10. non-Windows setEnabled rejected", !h.svc.setEnabled(true).ok);
+  assert("10. non-Windows requestExit ok (no watchdog task)", h.svc.requestExit().ok);
 }
 
-// ── BLOCKER 1 + 3: persistent intentional_stop, verified write ───────────────────────────────────────────────
+// ── persistent intentional_stop, verified write ──────────────────────────────────────────────────────────────
 {
   const h = harness({ taskPresent: true });
   h.files.set(P, JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }));
@@ -139,25 +219,65 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
 }
 {
   // verified-write failure → ok:false (caller must NOT quit)
-  const h = harness();
-  // make write a no-op so the verify read finds nothing
   const svc = createProtectionService({
     now: () => NOW, platform: "win32",
     readFile: () => null, writeFile: () => { /* dropped */ }, removeFile: () => {},
     protectionStatePath: () => P, controlPath: () => C,
-    taskExists: () => true, requiredWatchdogFilesPresent: () => true,
+    taskStatus: () => ({ ok: true, present: true }), requiredWatchdogFilesPresent: () => true,
     provision: () => ({ ok: true }), disableElectronAutostart: () => ({ ok: true }), log: () => {},
   });
-  void h;
   const res = svc.writeIntentionalStop("x");
-  assert("3. marker write that doesn't persist → ok:false (do NOT quit)", !res.ok && !!res.error);
+  assert("11b. marker write that doesn't persist → ok:false (do NOT quit)", !res.ok && !!res.error);
 }
 
-// ── Watchdog control-suppression semantics (BLOCKER 1) ───────────────────────────────────────────────────────
+// ── B4: requestExit uses LIVE risk (desired enabled OR live task present) ─────────────────────────────────────
+{
+  const h = harness({ taskPresent: true });
+  h.files.set(P, JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }));
+  const res = h.svc.requestExit();
+  assert("B4.1 ON + task present → marker written, ok", res.ok && h.files.has(C) && (JSON.parse(h.files.get(C)!) as VonoControlState).mode === "intentional_stop");
+}
+{
+  const h = harness({ taskPresent: true });
+  h.files.set(P, JSON.stringify({ schemaVersion: 1, enabled: false, updatedAt: 1, source: "app" }));
+  const res = h.svc.requestExit();
+  assert("B4.2 OFF but live task present (drift) → marker STILL written, ok", res.ok && h.files.has(C));
+}
+{
+  const h = harness({ taskPresent: false });
+  h.files.set(P, JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }));
+  const res = h.svc.requestExit();
+  assert("B4.3 ON + task missing → marker acceptable, ok", res.ok && h.files.has(C));
+}
+{
+  const h = harness({ taskPresent: false });
+  h.files.set(P, JSON.stringify({ schemaVersion: 1, enabled: false, updatedAt: 1, source: "app" }));
+  const res = h.svc.requestExit();
+  assert("B4.4 OFF + task absent → NO marker, ok (clean quit)", res.ok && !h.files.has(C));
+}
+{
+  const h = harness({ taskUnknown: true });
+  h.files.set(P, JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }));
+  const res = h.svc.requestExit();
+  assert("B4.5 task status UNKNOWN → do NOT quit (ok:false), NO marker", !res.ok && !!res.error && !h.files.has(C));
+}
+{
+  // required marker write fails → requestExit fails (do not quit)
+  const svc = createProtectionService({
+    now: () => NOW, platform: "win32",
+    readFile: (p) => (p === P ? JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }) : null),
+    writeFile: () => { /* dropped */ }, removeFile: () => {},
+    protectionStatePath: () => P, controlPath: () => C,
+    taskStatus: () => ({ ok: true, present: true }), requiredWatchdogFilesPresent: () => true,
+    provision: () => ({ ok: true }), disableElectronAutostart: () => ({ ok: true }), log: () => {},
+  });
+  assert("B4.6 required marker write fails → requestExit ok:false", !svc.requestExit().ok);
+}
+
+// ── Watchdog control-suppression semantics ───────────────────────────────────────────────────────────────────
 {
   const stop: VonoControlState = { schemaVersion: 1, mode: "intentional_stop", reason: "exit", source: "app", createdAt: NOW, expiresAt: null, bootId: null };
   assert("intentional_stop active now", isMaintenanceActive(stop, NOW));
-  assert("intentional_stop active after 1 day", isMaintenanceActive(stop, NOW + 86_400_000));
   assert("intentional_stop active after 30 days", isMaintenanceActive(stop, NOW + 30 * 86_400_000));
   assert("intentional_stop active at arbitrary far future", isMaintenanceActive(stop, NOW + 3650 * 86_400_000));
   const maint: VonoControlState = { schemaVersion: 1, mode: "maintenance", reason: "upgrade", source: "installer", createdAt: NOW, expiresAt: NOW + 60_000, bootId: null };
@@ -168,15 +288,47 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   assert("null control inactive", !isMaintenanceActive(null, NOW));
 }
 
-// ── clearIntentionalStop ─────────────────────────────────────────────────────────────────────────────────────
+// ── isIntentionalStopActive (startup gate helper) ────────────────────────────────────────────────────────────
+{
+  const h = harness();
+  assert("isIntentionalStopActive false when no marker", !h.svc.isIntentionalStopActive());
+  h.files.set(C, JSON.stringify({ mode: "intentional_stop", schemaVersion: 1 }));
+  assert("isIntentionalStopActive true for intentional_stop", h.svc.isIntentionalStopActive());
+  h.files.set(C, JSON.stringify({ mode: "maintenance", schemaVersion: 1 }));
+  assert("isIntentionalStopActive false for maintenance marker", !h.svc.isIntentionalStopActive());
+  h.files.set(C, "{ not json");
+  assert("isIntentionalStopActive false for corrupt marker", !h.svc.isIntentionalStopActive());
+}
+
+// ── B6: VERIFIED clearIntentionalStop → { ok, hadMarker, error } ──────────────────────────────────────────────
 {
   const h = harness();
   h.files.set(C, JSON.stringify({ mode: "intentional_stop", schemaVersion: 1 }));
-  h.svc.clearIntentionalStop();
-  assert("manual startup clears intentional_stop", !h.files.has(C));
+  const r = h.svc.clearIntentionalStop();
+  assert("B6.1 clears intentional_stop → ok + hadMarker, file gone", r.ok && r.hadMarker && !h.files.has(C));
+}
+{
+  const h = harness();
   h.files.set(C, JSON.stringify({ mode: "maintenance", schemaVersion: 1 }));
-  h.svc.clearIntentionalStop();
-  assert("maintenance marker left intact", h.files.has(C));
+  const r = h.svc.clearIntentionalStop();
+  assert("B6.2 maintenance marker left intact → ok, hadMarker=false", r.ok && !r.hadMarker && h.files.has(C));
+}
+{
+  const h = harness();
+  const r = h.svc.clearIntentionalStop();
+  assert("B6.3 no marker → ok, hadMarker=false", r.ok && !r.hadMarker);
+}
+{
+  const h = harness({ removeFails: true });
+  h.files.set(C, JSON.stringify({ mode: "intentional_stop", schemaVersion: 1 }));
+  const r = h.svc.clearIntentionalStop();
+  assert("B6.4 removal not verified (still present) → ok:false + hadMarker + error", !r.ok && r.hadMarker && !!r.error);
+}
+{
+  const h = harness();
+  h.files.set(C, "{ corrupt json");
+  const r = h.svc.clearIntentionalStop();
+  assert("B6.5 corrupt marker removed + verified → ok, hadMarker", r.ok && r.hadMarker && !h.files.has(C));
 }
 {
   const h = harness({ taskPresent: false });
@@ -184,13 +336,12 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   assert("12. crash/normal path never writes intentional_stop marker", !h.files.has(C));
 }
 
-// ── BLOCKER 5: drift surfacing ───────────────────────────────────────────────────────────────────────────────
+// ── drift surfacing ──────────────────────────────────────────────────────────────────────────────────────────
 {
   const h = harness({ taskPresent: false });
   h.files.set(P, JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }));
   const eff = h.svc.getEffective();
   assert("13. ON + task absent → drift task_missing, not healthy, error", eff.enabled && eff.drift === "task_missing" && !eff.healthy && !!eff.error);
-  // GET must NOT repair (no provision from GET)
   assert("13. GET did not provision", h.calls.provision.length === 0);
 }
 {
@@ -205,28 +356,49 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   const svcSrc = readFileSync(path.join(__dirname, "..", "src", "main", "protection-service.ts"), "utf-8");
   assert("guard: no 7-day / TTL constant remains", !/INTENTIONAL_STOP_TTL_MS|7 \* 24/.test(svcSrc));
   assert("guard: intentional_stop written with expiresAt null", /mode: "intentional_stop"[\s\S]*expiresAt: null/.test(svcSrc));
+  assert("guard: deps use taskStatus tri-state, not fail-open taskExists", /taskStatus: \(\) =>/.test(svcSrc) && !/taskExists/.test(svcSrc));
   assert("guard: protection-service has no identity/config/master coupling",
     !/from ["']\.\/(device-identity-reconcile|station-device-store|station-device-prisma|station-device-registration|durable-device-id|runtime-config-service)["']/.test(svcSrc) &&
     !/patchRuntimeConfig|saveRuntimeConfig|masterByBranch|\.branchId\b/.test(svcSrc));
 }
 {
   const idx = readFileSync(path.join(__dirname, "..", "src", "main", "index.ts"), "utf-8");
-  assert("14. index clears marker ONLY when launch source !== watchdog",
-    /VONO_LAUNCH_SOURCE !== "watchdog"[\s\S]*clearIntentionalStop\(\)/.test(idx));
+  // B1-B: watchdog-origin launch + active marker → quit; manual → clear. Gate runs BEFORE ensureRuntimeBinaries.
+  assert("14. startup gate: watchdog-origin + active intentional-stop → app.quit()",
+    /VONO_LAUNCH_SOURCE === "watchdog"[\s\S]*isIntentionalStopActive\(\)[\s\S]*app\.quit\(\)/.test(idx));
+  assert("14. startup gate: manual launch → clearIntentionalStop()", /clearIntentionalStop\(\)/.test(idx));
+  assert("14. startup gate runs BEFORE ensureRuntimeBinaries",
+    idx.indexOf("Protection startup gate") !== -1 &&
+      idx.indexOf("Protection startup gate") < idx.indexOf("await ensureRuntimeBinaries"));
   const obs = readFileSync(path.join(__dirname, "..", "watchdog", "observer.ts"), "utf-8");
   assert("14. watchdog launch tags VONO_LAUNCH_SOURCE=watchdog", /VONO_LAUNCH_SOURCE: "watchdog"/.test(obs));
+  // B1-A: execution-time control recheck immediately before executeRecovery.
+  assert("B1-A. observer re-reads control + aborts on suppression before executeRecovery",
+    /isMaintenanceActive\(freshControl[\s\S]*executeRecovery\(ctx/.test(obs) && /aborted before execute/.test(obs));
 }
 {
   const ipc = readFileSync(path.join(__dirname, "..", "src", "main", "ipc-mvp.ts"), "utf-8");
-  assert("EXIT_VONO returns error + does not quit on marker failure",
-    /return \{ ok: false, error: res\.error \}/.test(ipc) && /setImmediate\(\(\) => app\.quit\(\)\)/.test(ipc));
+  // B4: EXIT via requestExit + never quit on ok:false.
+  assert("B4. EXIT_VONO uses requestExit() + only quits on ok",
+    /svc\.requestExit\(\)/.test(ipc) && /if \(!decision\.ok\)[\s\S]*return \{ ok: false/.test(ipc) && /setImmediate\(\(\) => app\.quit\(\)\)/.test(ipc));
+  // B3: real task probe distinguishes present(0)/absent(3)/unknown.
+  assert("B3. real taskStatus dep maps exit 0=present / 3=absent / else=unknown",
+    /taskStatus: \(\) =>/.test(ipc) && /exit 0/.test(ipc) && /exit 3/.test(ipc) && /return \{ ok: false, error:/.test(ipc));
+  // B5: autostart verify fail-closed (verify-read failure and still-on both → ok:false).
+  assert("B5. disableElectronAutostart fail-closed on verify-read failure + still-on",
+    /getLoginItemSettings\(\)\.openAtLogin === true/.test(ipc) && /return openAtLogin \? \{ ok: false/.test(ipc));
+}
+{
+  const sm = readFileSync(path.join(__dirname, "..", "watchdog", "state-machine.ts"), "utf-8");
+  assert("log cleanup: intentional_stop reason is 'intentional stop active', not 'maintenance until null'",
+    /intentional stop active \(\$\{control!\.reason\}\)/.test(sm));
 }
 {
   const uiSrc = readFileSync(path.join(__dirname, "..", "..", "components", "desktop-settings-controls.tsx"), "utf-8");
   const body = uiSrc.slice(uiSrc.indexOf("export function DesktopStartupSettingsCard"), uiSrc.indexOf("export function DesktopLocalMusicSettingsCard"));
   assert("UI uses getProtectionState/setProtectionState, not autostart", /getProtectionState/.test(body) && /setProtectionState/.test(body) && !/getAutoStart|setAutoStart/.test(body));
   assert("UI handles exitVono result (ok:false surfaces error)", /res\.ok/.test(body) && /exitVono/.test(body));
-  assert("UI surfaces drift", /task_missing|drift/.test(body));
+  assert("UI surfaces drift incl. task_unknown", /task_unknown/.test(body) && /could not be determined/.test(body));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
