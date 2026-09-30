@@ -18,10 +18,12 @@ function assert(name: string, cond: boolean, detail = ""): void {
 
 // ── NSIS hooks ───────────────────────────────────────────────────────────────
 const nsh = read("build/installer.nsh");
-assert("nsh: customInstall runs provision (install), hidden, quoted $INSTDIR",
+assert("nsh: customInstall runs provision (ensure — B2 conditional), hidden, quoted $INSTDIR",
   /!macro\s+customInstall/.test(nsh) &&
   /-WindowStyle Hidden/.test(nsh) &&
-  /provision-vono-protection\.ps1" -Action install -InstallDir "\$INSTDIR"/.test(nsh));
+  // Phase B2: conditional `-Action ensure` (provisions only when protection.json enabled=true), NOT unconditional install.
+  /provision-vono-protection\.ps1" -Action ensure -InstallDir "\$INSTDIR"/.test(nsh) &&
+  !/-Action install -InstallDir "\$INSTDIR"/.test(nsh));
 assert("nsh: customUnInstall deletes the single task + stale lock",
   /!macro\s+customUnInstall/.test(nsh) &&
   /schtasks \/Delete \/TN "VONO Protection" \/F/.test(nsh) &&

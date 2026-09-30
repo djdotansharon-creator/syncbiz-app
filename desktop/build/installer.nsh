@@ -19,12 +19,16 @@
 !macroend
 
 !macro customInstall
-  DetailPrint "Provisioning VONO Protection (auto-start watchdog)..."
-  ; provision-vono-protection.ps1 registers the hidden, idempotent "VONO Protection" Scheduled Task for
-  ; the current station user and removes the legacy VONO Run entry. $INSTDIR is quoted (spaces-safe).
-  nsExec::Exec 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\vono-watchdog\provision-vono-protection.ps1" -Action install -InstallDir "$INSTDIR"'
+  DetailPrint "Applying VONO Protection preference..."
+  ; Phase B2 — protection.json (C:\ProgramData\VONO\state) is the authority. `-Action ensure` provisions the
+  ; task ONLY when the persisted preference is enabled=true (B1 ON, or a legacy machine seeded ON earlier in
+  ; customCheckAppRunning). A NEW install (no protection.json) stays OFF and gets a deterministic OFF record;
+  ; an OFF preference leaves the task absent; a malformed preference fails safe (no provisioning, non-zero code).
+  ; NOT an unconditional install. $INSTDIR is quoted (spaces-safe). No app force-run is performed here — when
+  ; Protection is ON, post-upgrade recovery is owned by the re-provisioned watchdog, which honors intentional_stop.
+  nsExec::Exec 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\vono-watchdog\provision-vono-protection.ps1" -Action ensure -InstallDir "$INSTDIR"'
   Pop $0
-  DetailPrint "VONO Protection provisioning exit code: $0"
+  DetailPrint "VONO Protection ensure exit code: $0"
 !macroend
 
 !macro customUnInstall
@@ -38,4 +42,7 @@
   ; Remove the stale single-watchdog lock so a later reinstall starts clean. Never touches unrelated procs.
   ExpandEnvStrings $1 "%ProgramData%"
   Delete "$1\VONO\state\watchdog.lock"
+  ; MACHINE-STICKY (Phase B2): do NOT delete protection.json (the operator's Protection preference) or
+  ; device-id.json (durable machine identity). A reinstall preserves the previous Protection choice. Also do
+  ; NOT touch control.json — a normal uninstall must never create/clear an intentional-stop marker.
 !macroend
