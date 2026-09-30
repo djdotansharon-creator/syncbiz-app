@@ -2,9 +2,10 @@
  * VONO runtime-state contract — the shared, versioned schema between the VONO desktop app (the
  * WRITER) and the future external VONO Watchdog (the READER).
  *
- * PHASE 1 implements the HEARTBEAT only (see heartbeat-writer.ts). `VonoControlState` is declared
- * here for the FUTURE maintenance / intentional-stop feature so the contract is stable — but there
- * is NO writer and NO consumer for it yet. Do not write control state in phase 1.
+ * The heartbeat (heartbeat-writer.ts) is the liveness signal. `VonoControlState` (control.json) is the
+ * recovery-suppression directive: as of Phase B1 the app WRITES `intentional_stop` on an explicit "Exit VONO"
+ * while Protection is ON (protection-service.ts), and the external Watchdog READS it. `maintenance` remains
+ * reserved for installer/update windows. See VonoControlState below for the two lifetimes.
  */
 
 export const VONO_HEARTBEAT_SCHEMA_VERSION = 1;
@@ -73,22 +74,49 @@ export interface VonoHeartbeat {
 }
 
 /**
- * FUTURE — NOT implemented in phase 1 (no writer, no consumer). Maintenance / intentional-stop
- * state, always bounded by `expiresAt` (+ `bootId` once available) so a stale value can never keep a
- * branch down after a reboot. Declared now only to keep the contract stable for the Watchdog.
+ * Control state (`control.json`) — read by the external Watchdog to suppress recovery.
+ *
+ * Two active modes, with DIFFERENT lifetimes (Phase B1):
+ *   - `maintenance`     — BOUNDED: active only while now < expiresAt (anti-stale so it can't keep a branch
+ *                         down forever). Used for installer/update windows.
+ *   - `intentional_stop`— PERSISTENT: `expiresAt: null`, active INDEFINITELY until the marker is explicitly
+ *                         cleared (a manual VONO start clears it). An explicit "Exit VONO" must keep VONO
+ *                         closed until the operator starts it again — it must NEVER wake itself on a timer.
+ * `none` means no active directive.
  */
 export type VonoControlMode = "none" | "maintenance" | "intentional_stop";
-export interface VonoControlState {
-  schemaVersion: number;
-  mode: VonoControlMode;
-  reason: string;
-  source: "installer" | "app" | "protect" | "admin";
-  createdAt: number;
-  /** epoch ms — the state is IGNORED once now >= expiresAt (anti-stale). */
-  expiresAt: number;
-  /** the boot the state was created in — voided after a reboot once a real bootId source exists. */
-  bootId: number | null;
-}
+export type VonoControlSource = "installer" | "app" | "protect" | "admin";
+
+export type VonoControlState =
+  | {
+      schemaVersion: number;
+      mode: "maintenance";
+      reason: string;
+      source: VonoControlSource;
+      createdAt: number;
+      /** epoch ms — the directive is IGNORED once now >= expiresAt (anti-stale). */
+      expiresAt: number;
+      bootId: number | null;
+    }
+  | {
+      schemaVersion: number;
+      mode: "intentional_stop";
+      reason: string;
+      source: VonoControlSource;
+      createdAt: number;
+      /** null — persistent until the marker is explicitly cleared (never expires on a timer). */
+      expiresAt: null;
+      bootId: number | null;
+    }
+  | {
+      schemaVersion: number;
+      mode: "none";
+      reason: string;
+      source: VonoControlSource;
+      createdAt: number;
+      expiresAt: number | null;
+      bootId: number | null;
+    };
 
 /**
  * Health states derived by the external Watchdog from the heartbeat + control contract above. Declared

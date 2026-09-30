@@ -221,17 +221,24 @@ export type AutoStartState = {
 
 /** Effective VONO Protection state for the UI (the real unattended-player control, not openAtLogin). */
 export type ProtectionState = {
-  /** True when the "VONO Protection" Scheduled Task/watchdog is the active start+recovery mechanism. */
+  /** Persisted DESIRED state (true when Protection is meant to be on). */
   enabled: boolean;
   /** False off-Windows (the Scheduled Task mechanism is Windows-only) → the switch is disabled. */
   supported: boolean;
-  /** Whether the "VONO Protection" Scheduled Task is currently present. */
+  /** Whether the "VONO Protection" Scheduled Task is actually present right now. */
   taskPresent: boolean;
   /** How the current state was set: installer | app | migration | admin | default. */
   source: string;
-  /** Present when the last transition failed; `enabled` then reflects the UNCHANGED prior state. */
+  /** Desired-vs-live mismatch: "task_missing" (on but no task) / "task_unexpected" (off but task present). */
+  drift: "none" | "task_missing" | "task_unexpected";
+  /** True only when supported AND drift === "none" (safe to show the green "Protected" affordance). */
+  healthy: boolean;
+  /** Present on drift OR when the last transition failed; `enabled` then reflects the UNCHANGED prior state. */
   error?: string;
 };
+
+/** Result of an explicit "Exit VONO" request. On failure the app did NOT quit. */
+export type ExitVonoResult = { ok: boolean; error?: string };
 
 /** Result of the native music-folder picker. */
 export type PickMusicFolderResult =

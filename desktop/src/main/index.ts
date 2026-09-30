@@ -496,11 +496,16 @@ app.whenReady().then(async () => {
   orchestrator = new PlaybackOrchestrator();
   orchestrator.start(binaries);
   registerMvpIpc(getMainWindow, orchestrator);
-  // Phase B1 — this process starting means VONO is (manually or watchdog-)launched and about to run, so clear any
-  // intentional-stop marker BEFORE heartbeat/recovery begins. A valid marker suppresses the watchdog, so the app
-  // only reaches here via a real launch → clearing lets Protection recovery resume. Never touches identity/MASTER.
-  try { getProtectionService().clearIntentionalStop(); } catch (err) {
-    fileLog("WARN", "app.whenReady: clearIntentionalStop failed (non-fatal)", { err: (err as Error)?.message });
+  // Phase B1 — clear an intentional-stop marker ONLY on a MANUAL launch, so Protection recovery resumes when the
+  // operator starts VONO again. A watchdog RECOVERY launch tags itself with VONO_LAUNCH_SOURCE=watchdog and must
+  // NOT erase an explicit user "Exit VONO" (race-safe: a launch decided just before the marker appeared can't
+  // undo the user's intent). Never touches identity/MASTER.
+  if (process.env.VONO_LAUNCH_SOURCE !== "watchdog") {
+    try { getProtectionService().clearIntentionalStop(); } catch (err) {
+      fileLog("WARN", "app.whenReady: clearIntentionalStop failed (non-fatal)", { err: (err as Error)?.message });
+    }
+  } else {
+    fileLog("INFO", "app.whenReady: watchdog-origin launch — preserving intentional-stop marker");
   }
   // Seed the heartbeat with the durable MAIN identity (ProgramData deviceId) up front, so the FIRST heartbeat
   // already carries deviceId/branchId even if the renderer never loads / WS never connects / nothing plays.

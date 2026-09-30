@@ -93,11 +93,18 @@ export interface DeriveResult {
   appProcessAlive?: boolean;
 }
 
-/** True when a control state is a valid, non-expired maintenance/stop directive. */
+/**
+ * True when a control directive should currently SUPPRESS recovery.
+ *   - none              → inactive
+ *   - maintenance       → active only while now < expiresAt (bounded / anti-stale)
+ *   - intentional_stop  → active INDEFINITELY (expiresAt === null) until the marker is explicitly cleared
+ */
 export function isMaintenanceActive(control: VonoControlState | null, now: number): boolean {
   if (!control) return false;
   if (control.mode === "none") return false;
-  return now < control.expiresAt; // self-expiring: a stale directive can never keep a branch down
+  if (control.mode === "intentional_stop") return true; // persistent until cleared — never times out
+  // maintenance: bounded
+  return typeof control.expiresAt === "number" && now < control.expiresAt;
 }
 
 /**

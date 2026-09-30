@@ -7,6 +7,8 @@ type ProtectionState = {
   supported: boolean;
   taskPresent: boolean;
   source: string;
+  drift: "none" | "task_missing" | "task_unexpected";
+  healthy: boolean;
   error?: string;
 };
 
@@ -94,13 +96,18 @@ export function DesktopStartupSettingsCard() {
     const api = window.syncbizDesktop;
     if (!api?.exitVono) return;
     setBusy(true);
+    setError(null);
     try {
-      await api.exitVono();
+      const res = await api.exitVono();
+      // ok:true → the app is quitting; ok:false → the Exit marker could not be written, so VONO stayed open.
+      if (!res.ok) {
+        setError(res.error || "Could not exit safely; VONO is still running to avoid an auto-restart.");
+        setBusy(false);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setBusy(false);
     }
-    // On success the app quits; no state update needed.
   }, []);
 
   if (load === "web-only") {
@@ -118,6 +125,10 @@ export function DesktopStartupSettingsCard() {
   const ready = protectionApiAvailable();
   const on = ready && Boolean(protection?.enabled);
   const supported = Boolean(protection?.supported);
+  const healthy = ready && Boolean(protection?.healthy);
+  // Drift (desired state ≠ live task) is surfaced from the effective state, plus any transition error.
+  const driftError = protection?.drift && protection.drift !== "none" ? protection.error : undefined;
+  const shownError = error ?? driftError ?? null;
 
   return (
     <div className="space-y-3">
@@ -154,8 +165,18 @@ export function DesktopStartupSettingsCard() {
       </div>
 
       {ready && supported ? (
-        <p className={`text-[11px] ${on ? "text-emerald-400/90" : "text-slate-500"}`}>
-          {on ? "Protected · automatic startup and recovery enabled" : "Off · manual mode"}
+        <p className={`text-[11px] ${healthy && on ? "text-emerald-400/90" : "text-slate-500"}`}>
+          {healthy
+            ? on
+              ? "Protected · automatic startup and recovery enabled"
+              : "Off · manual mode"
+            : protection?.drift === "task_missing"
+              ? "Enabled, but the watchdog task is missing — toggle Protection to repair."
+              : protection?.drift === "task_unexpected"
+                ? "Off, but a watchdog task is still active — toggle Protection to repair."
+                : on
+                  ? "Protected · automatic startup and recovery enabled"
+                  : "Off · manual mode"}
         </p>
       ) : null}
 
@@ -175,7 +196,7 @@ export function DesktopStartupSettingsCard() {
           Some controls are unavailable in this desktop build. Update the SyncBiz desktop app to use them.
         </p>
       ) : null}
-      {error ? <p className="text-[11px] text-rose-400">{error}</p> : null}
+      {shownError ? <p className="text-[11px] text-rose-400">{shownError}</p> : null}
     </div>
   );
 }

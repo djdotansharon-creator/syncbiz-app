@@ -6,6 +6,7 @@ import type {
   AddAdditionalMusicFolderResult,
   AutoStartState,
   ProtectionState,
+  ExitVonoResult,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
@@ -192,7 +193,18 @@ export function getProtectionService(): ProtectionService {
         ]);
         return status === 0 ? { ok: true } : { ok: false, error: stderr || `provision ${action} exited ${status}` };
       },
-      disableElectronAutostart: () => { try { app.setLoginItemSettings({ openAtLogin: false }); } catch { /* ignore */ } },
+      disableElectronAutostart: () => {
+        try {
+          app.setLoginItemSettings({ openAtLogin: false });
+          // Verify: the Scheduled Task must be the ONE start mechanism, so a transition can't succeed while
+          // openAtLogin is still on. On platforms where it isn't supported, getLoginItemSettings reports false.
+          let still = false;
+          try { still = app.getLoginItemSettings().openAtLogin === true; } catch { still = false; }
+          return still ? { ok: false, error: "Could not disable the OS login-item auto-start." } : { ok: true };
+        } catch (e) {
+          return { ok: false, error: (e as Error)?.message || "setLoginItemSettings failed." };
+        }
+      },
       log: (event, fields) =>
         fileLog(/fail|missing|still_present/.test(event) ? "WARN" : "INFO", event, fields ?? {}),
     });
@@ -518,16 +530,24 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     const res = getProtectionService().setEnabled(enabled === true, "app");
     return res.state;
   });
-  ipcMain.handle(MVP_IPC.EXIT_VONO, (): void => {
-    // Explicit user exit: only when Protection is ON do we write the intentional-stop marker (so the watchdog
-    // won't relaunch). A crash / generic before-quit / update shutdown never writes it.
-    try {
-      const eff = getProtectionService().getEffective();
-      if (eff.enabled) getProtectionService().writeIntentionalStop("explicit user exit (Exit VONO)");
-    } catch (err) {
-      fileLog("WARN", "EXIT_VONO: writeIntentionalStop failed (quitting anyway)", { err: (err as Error)?.message });
+  ipcMain.handle(MVP_IPC.EXIT_VONO, (): ExitVonoResult => {
+    // Explicit user exit. When Protection is ON we MUST persist+verify the intentional-stop marker BEFORE
+    // quitting — otherwise the watchdog would relaunch VONO. If the marker can't be written, do NOT quit and
+    // surface the error. When OFF there is no watchdog, so quit cleanly. (A crash / before-quit / update
+    // shutdown never writes the marker.)
+    const svc = getProtectionService();
+    let enabled = false;
+    try { enabled = svc.getEffective().enabled; } catch { enabled = false; }
+    if (enabled) {
+      const res = svc.writeIntentionalStop("explicit user exit (Exit VONO)");
+      if (!res.ok) {
+        fileLog("WARN", "EXIT_VONO: marker write failed — NOT quitting", { err: res.error });
+        return { ok: false, error: res.error };
+      }
     }
-    app.quit();
+    // Defer the quit so this IPC reply flushes to the renderer first.
+    setImmediate(() => app.quit());
+    return { ok: true };
   });
 
   ipcMain.handle(MVP_IPC.GET_MUSIC_FOLDER, (): MusicFolderSnapshot => {

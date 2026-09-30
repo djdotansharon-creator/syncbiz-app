@@ -2,6 +2,7 @@ import type {
   AddAdditionalMusicFolderResult,
   AutoStartState,
   ProtectionState,
+  ExitVonoResult,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
@@ -86,8 +87,9 @@ export type SyncBizDesktopMvp = {
   getProtectionState: () => Promise<ProtectionState>;
   /** Enable/disable VONO Protection (provision/deprovision the Scheduled Task). Returns the effective state. */
   setProtectionState: (enabled: boolean) => Promise<ProtectionState>;
-  /** Explicit "Exit VONO": writes an intentional-stop marker when Protection is ON, then quits cleanly. */
-  exitVono: () => Promise<void>;
+  /** Explicit "Exit VONO": when Protection ON, writes+verifies an intentional-stop marker, then quits. If the
+   *  marker can't be written it does NOT quit and returns { ok:false, error } so the watchdog can't relaunch. */
+  exitVono: () => Promise<ExitVonoResult>;
   /** Read the persisted music folder path (or null when unset). */
   getMusicFolder: () => Promise<MusicFolderSnapshot>;
   /** Open native folder picker; on confirm, persist + return chosen path. */

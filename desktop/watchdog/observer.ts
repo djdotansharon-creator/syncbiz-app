@@ -235,7 +235,15 @@ export function launchDetached(execPath: string, spawnFn: typeof spawn = spawn):
       // watchdog's cwd (<install>\vono-watchdog) — inheriting it breaks mpv/runtime-binary resolution and
       // no mpv engines spawn (proven by A/B field test). Detached + unref keeps VONO independent of the
       // watchdog; shell:false ⇒ execPath is the executable, never a shell command line (no interpolation).
-      const child = spawnFn(execPath, [], { cwd: path.dirname(execPath), detached: true, stdio: "ignore", shell: false });
+      // VONO_LAUNCH_SOURCE=watchdog tags this as a RECOVERY launch (not a manual start), so the launched VONO
+      // will NOT clear an explicit intentional_stop marker. Env inheritance + explicit override; no shell.
+      const child = spawnFn(execPath, [], {
+        cwd: path.dirname(execPath),
+        detached: true,
+        stdio: "ignore",
+        shell: false,
+        env: { ...process.env, VONO_LAUNCH_SOURCE: "watchdog" },
+      });
       child.once("error", (e) => { log(`[RECOVERY] launch spawn error: ${(e as Error).message}`); done(false); });
       child.once("spawn", () => { try { child.unref(); } catch { /* ignore */ } done(true); });
     } catch (e) {

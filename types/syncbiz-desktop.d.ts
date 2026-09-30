@@ -31,8 +31,11 @@ type DesktopProtectionState = {
   supported: boolean;
   taskPresent: boolean;
   source: string;
+  drift: "none" | "task_missing" | "task_unexpected";
+  healthy: boolean;
   error?: string;
 };
+type DesktopExitVonoResult = { ok: boolean; error?: string };
 
 type DesktopMusicFolderSnapshot = {
   path: string | null;
@@ -157,8 +160,9 @@ type SyncBizDesktopBridgePreload = {
   /** Optional: VONO Protection (Scheduled Task + watchdog) — the real unattended-player control. */
   getProtectionState?: () => Promise<DesktopProtectionState>;
   setProtectionState?: (enabled: boolean) => Promise<DesktopProtectionState>;
-  /** Optional: explicit "Exit VONO" (writes intentional-stop marker when Protection ON, then quits). */
-  exitVono?: () => Promise<void>;
+  /** Optional: explicit "Exit VONO" (writes+verifies intentional-stop marker when Protection ON, then quits;
+   *  returns { ok:false, error } WITHOUT quitting if the marker can't be written). */
+  exitVono?: () => Promise<DesktopExitVonoResult>;
   /** Optional: persisted music folder path. */
   getMusicFolder?: () => Promise<DesktopMusicFolderSnapshot>;
   pickMusicFolder?: () => Promise<DesktopPickMusicFolderResult>;
