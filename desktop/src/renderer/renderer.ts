@@ -6,6 +6,7 @@ import type {
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
+  MvpConfigPatch,
   MvpStatusSnapshot,
 } from "../shared/mvp-types";
 import type { SyncBizDesktopMvp } from "../shared/mvp-desktop-api";
@@ -195,11 +196,13 @@ function fillForm(c: DesktopRuntimeConfig): void {
     : "—";
 }
 
-function readPatchFromForm(): DesktopRuntimeConfig {
+// deviceId is intentionally NOT sent: it is the durable MAIN identity (C:\ProgramData\VONO\state\device-id.json),
+// owned by the Electron main process. The Device ID field is display-only (readonly); SAVE_CONFIG strips deviceId
+// and MAIN reconciles to ProgramData regardless, so the renderer never asserts identity.
+function readPatchFromForm(): MvpConfigPatch {
   return {
     workspaceLabel: el<HTMLInputElement>("workspaceLabel").value,
     branchId: el<HTMLInputElement>("branchId").value,
-    deviceId: el<HTMLInputElement>("deviceId").value,
     apiBaseUrl: el<HTMLInputElement>("apiBaseUrl").value,
     wsUrl: el<HTMLInputElement>("wsUrl").value,
     wsToken: el<HTMLTextAreaElement>("wsToken").value,
