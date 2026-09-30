@@ -85,8 +85,9 @@ function Ensure-FromState {
       New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
       $obj = [ordered]@{ schemaVersion = 1; enabled = $false; updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); source = "installer" }
       $tmp = "$protJson.tmp"
-      ($obj | ConvertTo-Json -Compress) | Set-Content -LiteralPath $tmp -Encoding UTF8
-      Move-Item -LiteralPath $tmp -Destination $protJson -Force
+      $enc = New-Object System.Text.UTF8Encoding($false)                 # UTF-8 WITHOUT BOM (Node app parses raw JSON)
+      [System.IO.File]::WriteAllText($tmp, ($obj | ConvertTo-Json -Compress), $enc)
+      Move-Item -LiteralPath $tmp -Destination $protJson -Force          # atomic (temp + rename)
     } catch {}
     Write-Output "[VONO Protection] new install - Protection OFF (no task provisioned)."
     exit 0

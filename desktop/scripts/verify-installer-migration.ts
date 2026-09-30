@@ -26,7 +26,6 @@ const PROVISION_PS = path.join(PROV_DIR, "provision-vono-protection.ps1");
 const NSH = path.join(__dirname, "..", "build", "installer.nsh");
 
 const isWin = process.platform === "win32";
-const stripBom = (s: string) => s.replace(/^﻿/, "");
 
 type Env = Record<string, string | undefined>;
 function runPs(script: string, args: string[], env: Env): { status: number | null; stdout: string; stderr: string } {
@@ -48,9 +47,20 @@ function tmpEnv() {
   mkdirSync(installDir, { recursive: true });
   return { root, programData, stateDir, protJson: path.join(stateDir, "protection.json"), installDir };
 }
+function readRaw(p: string): string | null {
+  return existsSync(p) ? readFileSync(p, "utf-8") : null;
+}
+// NOTE: no BOM stripping — the Node app parses protection.json with a plain JSON.parse, so these tests must
+// parse the raw bytes the same way. A BOM (or any leading garbage) makes this return null and the test fail.
 function readProt(p: string): { enabled?: unknown; source?: unknown } | null {
-  if (!existsSync(p)) return null;
-  try { return JSON.parse(stripBom(readFileSync(p, "utf-8"))); } catch { return null; }
+  const raw = readRaw(p);
+  if (raw === null) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+function isBomFreeJson(p: string): boolean {
+  const raw = readRaw(p);
+  if (raw === null) return false;
+  return raw.charCodeAt(0) === 0x7b /* '{' */ && (() => { try { JSON.parse(raw); return true; } catch { return false; } })();
 }
 
 // ── SEED matrix (stop-vono-for-upgrade.ps1) ──────────────────────────────────────────────────────────────────
@@ -64,12 +74,14 @@ if (!isWin) {
     assert("1. NEW (task absent, no old exe) → no seed, protection.json absent", readProt(t.protJson) === null);
     rmSync(t.root, { recursive: true, force: true });
   }
-  // S2 LEGACY ON: task present → seed enabled=true source=migration.
+  // S2 LEGACY ON: task present → seed enabled=true source=migration; seed success CONTINUES to teardown.
   {
     const t = tmpEnv();
-    runPs(STOP_PS, ["-InstallDir", t.installDir], { ProgramData: t.programData, VONO_TEST_NO_TASK_OPS: "1", VONO_TEST_TASK_STATE: "present" });
+    const r = runPs(STOP_PS, ["-InstallDir", t.installDir], { ProgramData: t.programData, VONO_TEST_NO_TASK_OPS: "1", VONO_TEST_TASK_STATE: "present" });
     const p = readProt(t.protJson);
     assert("2. LEGACY task present + no json → seed enabled=true, source=migration", !!p && p.enabled === true && p.source === "migration");
+    assert("2. seed protection.json is BOM-free (raw starts '{', native JSON.parse works)", isBomFreeJson(t.protJson));
+    assert("2. successful seed CONTINUES (exit 0, teardown reached)", r.status === 0 && /Pre-upgrade teardown complete/.test(r.stdout));
     rmSync(t.root, { recursive: true, force: true });
   }
   // S3 unknown + no old exe → do NOT seed (clean first install; probe glitch must not turn ON).
@@ -97,6 +109,31 @@ if (!isWin) {
     assert("7. existing preference NOT overwritten by seed (stays enabled=false, source=app)", !!p && p.enabled === false && p.source === "app");
     rmSync(t.root, { recursive: true, force: true });
   }
+  // FC1 FAIL-CLOSED: required ON seed WRITE failure → non-zero (87), teardown NOT reached.
+  {
+    const t = tmpEnv();
+    const r = runPs(STOP_PS, ["-InstallDir", t.installDir], { ProgramData: t.programData, VONO_TEST_NO_TASK_OPS: "1", VONO_TEST_TASK_STATE: "present", VONO_TEST_SEED_FAIL_WRITE: "1" });
+    assert("FC1. seed WRITE failure → exit 87, failure logged", r.status === 87 && /REQUIRED legacy Protection seed FAILED/.test(r.stdout));
+    assert("FC1. task teardown NOT reached on seed failure", !/Pre-upgrade teardown complete/.test(r.stdout) && !/skipping real schtasks/.test(r.stdout));
+    assert("FC1. no protection.json left behind on write failure", readProt(t.protJson) === null);
+    rmSync(t.root, { recursive: true, force: true });
+  }
+  // FC2 FAIL-CLOSED: required ON seed VERIFY failure → non-zero (87), teardown NOT reached.
+  {
+    const t = tmpEnv();
+    const r = runPs(STOP_PS, ["-InstallDir", t.installDir], { ProgramData: t.programData, VONO_TEST_NO_TASK_OPS: "1", VONO_TEST_TASK_STATE: "present", VONO_TEST_SEED_FAIL_VERIFY: "1" });
+    assert("FC2. seed VERIFY failure → exit 87, failure logged", r.status === 87 && /REQUIRED legacy Protection seed FAILED/.test(r.stdout));
+    assert("FC2. task teardown NOT reached on verify failure", !/Pre-upgrade teardown complete/.test(r.stdout));
+    rmSync(t.root, { recursive: true, force: true });
+  }
+  // FC3 fail-closed is scoped to the REQUIRED seed: a NEW install (no seed needed) with the same seams still exits 0.
+  {
+    const t = tmpEnv();
+    const r = runPs(STOP_PS, ["-InstallDir", t.installDir], { ProgramData: t.programData, VONO_TEST_NO_TASK_OPS: "1", VONO_TEST_TASK_STATE: "absent", VONO_TEST_SEED_FAIL_WRITE: "1" });
+    assert("FC3. no-seed path is never fatal (NEW install → exit 0, continues)", r.status === 0 && /Pre-upgrade teardown complete/.test(r.stdout));
+    rmSync(t.root, { recursive: true, force: true });
+  }
+
   // S6 seed run does NOT touch control.json / device-id.json / heartbeat.json.
   {
     const t = tmpEnv();
@@ -125,6 +162,7 @@ if (!isWin) {
     const p = readProt(t.protJson);
     assert("1b. NEW ensure → exit 0, protection.json enabled=false source=installer, no provision",
       r.status === 0 && !!p && p.enabled === false && p.source === "installer" && !/would install task/.test(r.stdout));
+    assert("1b. new-install protection.json is BOM-free (raw '{', native JSON.parse works)", isBomFreeJson(t.protJson));
     rmSync(t.root, { recursive: true, force: true });
   }
   // E2 enabled=true → provisions (test seam emits marker), exit 0.
@@ -169,6 +207,10 @@ if (!isWin) {
   assert("10c. uninstall still removes the watchdog.lock", /Delete\s+"[^"]*watchdog\.lock/i.test(un));
   assert("14. no direct post-install force-run added (no StartApp/quitAndInstall/--force-run)",
     !/StartApp|quitAndInstall|--force-run|isForceRun/i.test(nsh));
+  // Fail-closed: customCheckAppRunning aborts on migration code 87 (runs before uninstallOldVersion by NSIS order).
+  const cca = nsh.slice(nsh.indexOf("customCheckAppRunning"), nsh.indexOf("customInstall"));
+  assert("FC. customCheckAppRunning aborts the upgrade on migration failure (code 87)",
+    /\$0 == 87/.test(cca) && /Abort/.test(cca));
 }
 {
   const stop = readFileSync(STOP_PS, "utf-8");
@@ -184,6 +226,11 @@ if (!isWin) {
   assert("seed: absence positively observed (ObjectNotFound), not blanket unknown→present",
     /CategoryInfo\.Category -eq 'ObjectNotFound'/.test(stop) && /taskState -eq "unknown" -and \$existingInstall/.test(stop));
   assert("seed: has test seam that avoids real schtasks mutation", /VONO_TEST_NO_TASK_OPS/.test(stop) && /VONO_TEST_TASK_STATE/.test(stop));
+  assert("seed: BOM-free write (UTF8Encoding(false) + WriteAllText), not Set-Content -Encoding UTF8",
+    /UTF8Encoding\(\$false\)/.test(stop) && /WriteAllText/.test(stop) && !/Set-Content[^\n]*-Encoding UTF8/.test(stop));
+  assert("seed: fail-closed — required seed failure exits $MIGRATION_FAIL before teardown",
+    /\$MIGRATION_FAIL = 87/.test(stop) && /exit \$MIGRATION_FAIL/.test(stop));
+  assert("seed: verified (final file parses with enabled=true)", /\$back\.enabled -eq \$true/.test(stop));
 }
 {
   const prov = readFileSync(PROVISION_PS, "utf-8");
@@ -192,6 +239,8 @@ if (!isWin) {
   assert("provision: enabled=true → Install-Task; malformed → exit 2", /if \(\$enabled\) \{ Install-Task; exit 0 \}/.test(prov) && /exit 2/.test(prov));
   assert("provision: NEW writes deterministic enabled=false source=installer", /enabled = \$false[\s\S]*source = "installer"/.test(prov));
   assert("provision: task ops guarded by test seam (no real mutation in tests)", /VONO_TEST_NO_TASK_OPS -eq '1'/.test(prov));
+  assert("provision: new-install record BOM-free (UTF8Encoding(false)+WriteAllText, not Set-Content -Encoding UTF8)",
+    /UTF8Encoding\(\$false\)/.test(prov) && /WriteAllText/.test(prov) && !/Set-Content[^\n]*-Encoding UTF8/.test(prov));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

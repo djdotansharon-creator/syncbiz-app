@@ -16,6 +16,14 @@
   nsExec::Exec 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-vono-for-upgrade.ps1" -InstallDir "$INSTDIR"'
   Pop $0
   DetailPrint "Update pre-flight exit code: $0"
+  ; FAIL-CLOSED legacy migration: exit code 87 means a REQUIRED legacy Protection ON seed could not be
+  ; persisted+verified. Abort NOW — before uninstallOldVersion deletes the task — so a protected legacy station
+  ; is never silently left OFF. (Ordinary process-kill/cleanup failures return 0 and never abort.)
+  ${If} $0 == 87
+    DetailPrint "VONO Protection migration FAILED (code 87) - aborting update to keep this station protected."
+    SetErrorLevel 87
+    Abort "VONO Protection migration failed. The update was cancelled so this station stays protected. Please retry the update."
+  ${EndIf}
 !macroend
 
 !macro customInstall

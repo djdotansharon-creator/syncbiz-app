@@ -22,6 +22,9 @@
 param([Parameter(Mandatory = $true)][string]$InstallDir)
 $ErrorActionPreference = "SilentlyContinue"
 $TaskName = "VONO Protection"
+# Distinct exit code for a REQUIRED-but-failed legacy Protection migration. The installer aborts the whole
+# upgrade on this code (see installer.nsh customCheckAppRunning) rather than let a protected station go OFF.
+$MIGRATION_FAIL = 87
 
 $wd      = Join-Path $InstallDir "vono-watchdog"
 $nodeExe = Join-Path $wd "node.exe"
@@ -44,6 +47,28 @@ function Get-TaskState {
   }
 }
 
+# Atomically write + VERIFY the legacy ON seed. UTF-8 WITHOUT BOM (the Node app parses protection.json with a
+# plain JSON.parse, no BOM handling). Returns $true only when the final file exists, starts with '{', parses,
+# and has enabled=true. Test seams VONO_TEST_SEED_FAIL_WRITE / _VERIFY force the failure paths (no real fault).
+function Write-ProtectionSeedOn([string]$protJson, [string]$stateDir) {
+  try {
+    New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+    $obj = [ordered]@{ schemaVersion = 1; enabled = $true; updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); source = "migration" }
+    $json = ($obj | ConvertTo-Json -Compress)
+    $tmp = "$protJson.tmp"
+    if ($env:VONO_TEST_SEED_FAIL_WRITE -eq '1') { throw "test: forced seed write failure" }
+    $enc = New-Object System.Text.UTF8Encoding($false)                 # NO BOM
+    [System.IO.File]::WriteAllText($tmp, $json, $enc)
+    Move-Item -LiteralPath $tmp -Destination $protJson -Force          # atomic seed (temp + rename)
+    if ($env:VONO_TEST_SEED_FAIL_VERIFY -eq '1') { return $false }     # simulate a verify failure
+    if (-not (Test-Path -LiteralPath $protJson)) { return $false }
+    $raw = [System.IO.File]::ReadAllText($protJson)
+    if ([string]::IsNullOrEmpty($raw) -or $raw[0] -ne '{') { return $false }   # BOM/garbage guard
+    $back = $raw | ConvertFrom-Json
+    return ($back.enabled -eq $true)
+  } catch { return $false }
+}
+
 # -- Phase B2 LEGACY SEED - runs FIRST, BEFORE the task is stopped/disabled here or DELETED by the old
 #    uninstaller (uninstallOldVersion), which is the only moment the legacy task is still observable.
 #    protection.json is the long-term authority; the legacy task is migration EVIDENCE only when no
@@ -52,29 +77,29 @@ function Get-TaskState {
 #    Existing-install evidence used: the OLD app exe still present in $InstallDir at this pre-file-replacement
 #    stage (present on an upgrade; absent on a first install, since files are copied only later). Never
 #    touches device-id.json / control.json / heartbeat.json.
-try {
-  $stateDir = Join-Path $env:ProgramData "VONO\state"
-  $protJson = Join-Path $stateDir "protection.json"
-  if (Test-Path -LiteralPath $protJson) {
-    Log "protection.json already exists - preference preserved, no legacy seed."
-  } else {
-    $taskState = Get-TaskState
-    $existingInstall = Test-Path -LiteralPath $appExe   # old app files present => this is an upgrade, not a clean install
-    $seedOn = $false
-    if ($taskState -eq "present") { $seedOn = $true }                                  # legacy protected machine
-    elseif ($taskState -eq "unknown" -and $existingInstall) { $seedOn = $true }        # legacy upgrade; probe glitched but this IS an existing install
-    if ($seedOn) {
-      New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
-      $obj = [ordered]@{ schemaVersion = 1; enabled = $true; updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); source = "migration" }
-      $tmp = "$protJson.tmp"
-      ($obj | ConvertTo-Json -Compress) | Set-Content -LiteralPath $tmp -Encoding UTF8
-      Move-Item -LiteralPath $tmp -Destination $protJson -Force        # atomic seed (temp + rename)
-      Log "legacy seed: protection.json enabled=true (evidence task=$taskState existingInstall=$existingInstall)."
-    } else {
-      Log "no legacy seed (task=$taskState existingInstall=$existingInstall) - Protection stays OFF (new/absent)."
+#    FAIL-CLOSED: when the ON seed is REQUIRED but cannot be persisted+verified, exit non-zero ($MIGRATION_FAIL)
+#    HERE, before any task teardown — the installer then aborts before uninstallOldVersion, so a protected
+#    legacy station is never left OFF. (Only this required migration is fatal; ordinary cleanup is not.)
+$stateDir = Join-Path $env:ProgramData "VONO\state"
+$protJson = Join-Path $stateDir "protection.json"
+if (Test-Path -LiteralPath $protJson) {
+  Log "protection.json already exists - preference preserved, no legacy seed."
+} else {
+  $taskState = Get-TaskState
+  $existingInstall = Test-Path -LiteralPath $appExe   # old app files present => this is an upgrade, not a clean install
+  $seedOn = $false
+  if ($taskState -eq "present") { $seedOn = $true }                                  # legacy protected machine
+  elseif ($taskState -eq "unknown" -and $existingInstall) { $seedOn = $true }        # legacy upgrade; probe glitched but this IS an existing install
+  if ($seedOn) {
+    if (-not (Write-ProtectionSeedOn $protJson $stateDir)) {
+      Log "REQUIRED legacy Protection seed FAILED - aborting upgrade (fail-closed; task NOT torn down)."
+      exit $MIGRATION_FAIL
     }
+    Log "legacy seed: protection.json enabled=true (evidence task=$taskState existingInstall=$existingInstall)."
+  } else {
+    Log "no legacy seed (task=$taskState existingInstall=$existingInstall) - Protection stays OFF (new/absent)."
   }
-} catch { Log "legacy seed skipped (error: $($_.Exception.Message))." }
+}
 
 # 1) Stop + DISABLE the Scheduled Task (so the watchdog cannot relaunch VONO mid-update).
 if ($env:VONO_TEST_NO_TASK_OPS -eq '1') {
