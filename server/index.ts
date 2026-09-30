@@ -43,6 +43,13 @@ import type {
 } from "./ws-remote-control-types.js";
 import { sanitizeRegistrationIntent, type SyncBizRegistrationIntent } from "./syncbiz-device-model.js";
 import { loadLease, saveLease } from "./master-lease-store.js";
+import {
+  runtimeBranchKey,
+  workspaceScopeKey,
+  isBranchAllowed,
+  ownerReceivesBranch,
+  commandTargetInRoom,
+} from "./branch-room.js";
 import { verifyWsToken } from "./ws-token.js";
 
 const WS_SECRET = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
@@ -66,9 +73,8 @@ const MASTER_GRACE_MS = Number(process.env.MASTER_GRACE_MS) || 90_000;
 
 const DEFAULT_BRANCH_ID = "default";
 
-function branchKey(userId: string, branchId: string): string {
-  return `${userId}:${branchId}`;
-}
+// PR-0: the runtime room key (workspace-scoped) replaces the old `${userId}:${branchId}` key.
+// See runtimeBranchKey() / workspaceScopeKey() in ./branch-room.
 
 type DeviceConnection = {
   id: string;
@@ -79,30 +85,47 @@ type DeviceConnection = {
   mode: DeviceMode;
   isMobile?: boolean;
   userId?: string;
+  /** Signed workspace scope from the token (PR-0). null for legacy tokens without the claim. */
+  workspaceId?: string | null;
   branchId: string;
+  /** Runtime branch-room key = workspaceId:branch (or legacy:userId:branch). All room state/routing uses this. */
+  roomKey: string;
   /** Sanitized REGISTER hint from client (optional). */
   registrationIntent?: SyncBizRegistrationIntent;
 };
 
 const devices = new Map<string, DeviceConnection>();
-type ControllerEntry = { ws: import("ws").WebSocket; userId: string; branchId: string };
+type ControllerEntry = {
+  ws: import("ws").WebSocket;
+  userId: string;
+  workspaceId?: string | null;
+  branchId: string;
+  roomKey: string;
+};
 const controllers: ControllerEntry[] = [];
-type OwnerEntry = { ws: import("ws").WebSocket; userId: string; authorizedBranches: string[] | null };
+type OwnerEntry = {
+  ws: import("ws").WebSocket;
+  userId: string;
+  workspaceId?: string | null;
+  /** Owner-level workspace scope key (spans branches) for workspace-scoped broadcast fan-out. */
+  scopeKey: string;
+  authorizedBranches: string[] | null;
+};
 const owners: OwnerEntry[] = [];
 
 /** Per-socket heartbeat: last pong timestamp. Used to detect stale connections. */
 const socketLastPongAt = new Map<import("ws").WebSocket, number>();
 
-/** MASTER device ID per (userId, branchId). Key = branchKey(userId, branchId). Persisted to disk. */
+/** MASTER device ID per room. Key = runtimeBranchKey (workspace-scoped, or legacy per-user). Persisted to disk. */
 const masterByBranch = new Map<string, string>();
 
-/** When the designated MASTER disconnected (timestamp). Key = branchKey. Persisted to disk. */
+/** When the designated MASTER disconnected (timestamp). Key = room key. Persisted to disk. */
 const masterDisconnectedAt = new Map<string, number>();
 
-/** Designated primary MASTER per branch. Only this device can be MASTER. Persisted to disk. */
+/** Designated primary MASTER per room. Only this device can be MASTER. Persisted to disk. */
 const primaryMasterByBranch = new Map<string, string>();
 
-/** Load persisted lease on startup. Supports legacy masterByUserId format. */
+/** Load persisted lease on startup (v2 workspace-scoped; legacy formats are ignored by the store). */
 (function loadPersistedLease() {
   const snap = loadLease();
   Object.entries(snap.masterByBranch).forEach(([k, v]) => masterByBranch.set(k, v as string));
@@ -154,9 +177,8 @@ function inferSourceType(url: string): string {
   return "local";
 }
 
-/** Returns the currently connected primary MASTER device ID for a branch. Desktop-only; null if disconnected, mobile, or grace-expired. */
-function getMasterForBranch(userId: string, branchId: string): string | null {
-  const key = branchKey(userId, branchId);
+/** Returns the currently connected primary MASTER device ID for a room. Desktop-only; null if disconnected, mobile, or grace-expired. */
+function getMasterForRoom(key: string): string | null {
   const id = masterByBranch.get(key);
   if (!id) return null;
   const conn = devices.get(id);
@@ -171,37 +193,8 @@ function getMasterForBranch(userId: string, branchId: string): string | null {
   return id;
 }
 
-/** Returns the designated primary MASTER device ID (reserved) even if disconnected, if within grace period. Desktop-only. */
-function getReservedMasterForBranch(userId: string, branchId: string): string | null {
-  const key = branchKey(userId, branchId);
-  const id = masterByBranch.get(key);
-  if (!id) return null;
-  const conn = devices.get(id);
-  if (conn) {
-    if (conn.isMobile) {
-      masterByBranch.delete(key);
-      masterDisconnectedAt.delete(key);
-      primaryMasterByBranch.delete(key);
-      persistMasterLease();
-      return null;
-    }
-    if (conn.ws.readyState === 1) return id;
-  }
-  const disconnectedAt = masterDisconnectedAt.get(key);
-  if (!disconnectedAt) return null;
-  if (Date.now() - disconnectedAt > MASTER_GRACE_MS) {
-    masterByBranch.delete(key);
-    masterDisconnectedAt.delete(key);
-    primaryMasterByBranch.delete(key);
-    persistMasterLease();
-    return null;
-  }
-  return id;
-}
-
-/** Clear expired grace periods for a branch. */
-function clearExpiredGracePeriods(userId: string, branchId: string) {
-  const key = branchKey(userId, branchId);
+/** Clear expired grace periods for a room. */
+function clearExpiredGracePeriods(key: string) {
   const disconnectedAt = masterDisconnectedAt.get(key);
   if (!disconnectedAt) return;
   if (Date.now() - disconnectedAt > MASTER_GRACE_MS) {
@@ -212,9 +205,9 @@ function clearExpiredGracePeriods(userId: string, branchId: string) {
   }
 }
 
-function isEligibleConnectedPlaybackCandidate(d: DeviceConnection, userId: string, branchId: string): boolean {
+function isEligibleConnectedPlaybackCandidate(d: DeviceConnection, roomKey: string): boolean {
   if (d.role !== "device") return false;
-  if ((d.userId ?? "") !== userId || d.branchId !== branchId) return false;
+  if (d.roomKey !== roomKey) return false;
   if (d.ws.readyState !== 1) return false;
   if (d.isMobile) return false;
   const intent = d.registrationIntent;
@@ -246,9 +239,8 @@ function isDedicatedPlayerStation(d: DeviceConnection | null | undefined): boole
   return isStreamerStation(d) || isDesktopOnlyStation(d);
 }
 
-/** Connected streamer actively holding MASTER for this branch. */
-function getActiveStreamerMaster(userId: string, branchId: string): DeviceConnection | null {
-  const key = branchKey(userId, branchId);
+/** Connected streamer actively holding MASTER for this room. */
+function getActiveStreamerMaster(key: string): DeviceConnection | null {
   const masterId = masterByBranch.get(key);
   if (!masterId) return null;
   const conn = devices.get(masterId);
@@ -257,8 +249,7 @@ function getActiveStreamerMaster(userId: string, branchId: string): DeviceConnec
 }
 
 /** Primary device id still reserved within disconnect grace (blocks fallback desktop MASTER). */
-function primaryReservedInGrace(userId: string, branchId: string): string | null {
-  const key = branchKey(userId, branchId);
+function primaryReservedInGrace(key: string): string | null {
   const primaryId = primaryMasterByBranch.get(key);
   if (!primaryId) return null;
   if (devices.get(primaryId)?.ws.readyState === 1) return null;
@@ -269,9 +260,9 @@ function primaryReservedInGrace(userId: string, branchId: string): string | null
 }
 
 /** True when streamer priority blocks desktop/web from claiming MASTER. */
-function streamerBlocksFallbackMaster(userId: string, branchId: string, requesterDeviceId: string): boolean {
-  if (getActiveStreamerMaster(userId, branchId)) return true;
-  const reserved = primaryReservedInGrace(userId, branchId);
+function streamerBlocksFallbackMaster(key: string, requesterDeviceId: string): boolean {
+  if (getActiveStreamerMaster(key)) return true;
+  const reserved = primaryReservedInGrace(key);
   return !!reserved && reserved !== requesterDeviceId;
 }
 
@@ -280,10 +271,10 @@ function logLeaseEvent(event: string, data: Record<string, unknown>): void {
   console.log(`[SyncBiz WS][lease] ${event}`, JSON.stringify(data));
 }
 
-function demoteOtherMasters(userId: string, branchId: string, exceptDeviceId: string, newMasterId: string): void {
+function demoteOtherMasters(roomKey: string, exceptDeviceId: string, newMasterId: string): void {
   devices.forEach((d) => {
     if (d.id === exceptDeviceId) return;
-    if (!isEligibleConnectedPlaybackCandidate(d, userId, branchId)) return;
+    if (!isEligibleConnectedPlaybackCandidate(d, roomKey)) return;
     if (d.mode !== "MASTER") return;
     d.mode = "CONTROL";
     d.ws.send(
@@ -292,13 +283,13 @@ function demoteOtherMasters(userId: string, branchId: string, exceptDeviceId: st
   });
 }
 
-function tryPromoteConnectedControlOnMasterLoss(userId: string, branchId: string): string | null {
+function tryPromoteConnectedControlOnMasterLoss(roomKey: string): string | null {
   // Streamer priority: prefer streamer CONTROL, then desktop CONTROL, then web fallback.
   let streamerCandidate: DeviceConnection | null = null;
   let desktopCandidate: DeviceConnection | null = null;
   let webCandidate: DeviceConnection | null = null;
   devices.forEach((d) => {
-    if (!isEligibleConnectedPlaybackCandidate(d, userId, branchId)) return;
+    if (!isEligibleConnectedPlaybackCandidate(d, roomKey)) return;
     if (d.mode !== "CONTROL") return;
     if (isStreamerStation(d)) {
       if (!streamerCandidate || d.connectedAt < streamerCandidate.connectedAt) {
@@ -318,12 +309,11 @@ function tryPromoteConnectedControlOnMasterLoss(userId: string, branchId: string
   if (!pick) return null;
   const selected: DeviceConnection = pick as DeviceConnection;
 
-  const key = branchKey(userId, branchId);
+  const key = roomKey;
   devices.forEach((d) => {
     if (
       d.role === "device" &&
-      (d.userId ?? "") === userId &&
-      d.branchId === branchId &&
+      d.roomKey === roomKey &&
       d.id !== selected.id &&
       d.mode === "MASTER" &&
       d.ws.readyState === 1
@@ -353,8 +343,7 @@ function tryPromoteConnectedControlOnMasterLoss(userId: string, branchId: string
     selected.ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "MASTER" } as ServerMessage));
   }
   logLeaseEvent("promote", {
-    userId,
-    branchId,
+    roomKey,
     deviceId: selected.id,
     purpose: selected.registrationIntent?.devicePurpose ?? "unknown",
     triggeredBy: "tryPromoteConnectedControlOnMasterLoss",
@@ -374,15 +363,6 @@ function isTrueMasterLossCloseCode(code: number): boolean {
   return code === 1001 || code === 4006;
 }
 
-/** Backward compat: get master for default branch (single-branch mode). */
-function getMasterForUser(userId: string): string | null {
-  return getMasterForBranch(userId, DEFAULT_BRANCH_ID);
-}
-
-function getReservedMasterForUser(userId: string): string | null {
-  return getReservedMasterForBranch(userId, DEFAULT_BRANCH_ID);
-}
-
 /**
  * Playing-master hard lock.
  *
@@ -396,8 +376,7 @@ function getReservedMasterForUser(userId: string): string | null {
  * When this returns a non-null value, NO other device may claim MASTER.
  * Pass `requesterDeviceId` so the MASTER device's own reconnect is exempt.
  */
-function getMasterPlayingLockId(userId: string, branchId: string, requesterDeviceId: string): string | null {
-  const key = branchKey(userId, branchId);
+function getMasterPlayingLockId(key: string, requesterDeviceId: string): string | null {
   const masterId = masterByBranch.get(key);
   if (!masterId || masterId === requesterDeviceId) return null;
   const masterConn = devices.get(masterId);
@@ -428,11 +407,13 @@ function broadcastLibraryUpdated(
   });
 }
 
-function broadcastDeviceListForUserAndBranch(userId: string, branchId: string) {
+/** DEVICE_LIST for one workspace room. Roster + masterDeviceId are room-scoped; the guest sessionCode stays
+ *  per authenticated recipient (guest pairing remains user-scoped), so each recipient gets its own code. */
+function broadcastDeviceListForRoom(roomKey: string) {
   const now = Date.now();
   const list: DeviceInfo[] = [];
   devices.forEach((d) => {
-    if (d.role === "device" && (d.userId ?? "") === userId && d.branchId === branchId) {
+    if (d.role === "device" && d.roomKey === roomKey) {
       const lastSeenMs = d.lastSeen ? new Date(d.lastSeen).getTime() : now;
       const presence = now - lastSeenMs <= PRESENCE_ONLINE_THRESHOLD_MS ? "online" : "stale";
       list.push({
@@ -446,52 +427,50 @@ function broadcastDeviceListForUserAndBranch(userId: string, branchId: string) {
       });
     }
   });
-  const masterDeviceId = getMasterForBranch(userId, branchId);
-  const sessionCode = userId ? getOrCreateSessionCode(userId) : undefined;
-  const msg: ServerMessage = { type: "DEVICE_LIST", devices: list, masterDeviceId, sessionCode };
-  const raw = JSON.stringify(msg);
-  controllers.forEach((c) => {
-    if ((c.userId ?? "") === userId && c.branchId === branchId && c.ws.readyState === 1) c.ws.send(raw);
-  });
-  devices.forEach((d) => {
-    if (d.role === "device" && (d.userId ?? "") === userId && d.branchId === branchId && d.ws.readyState === 1) {
-      d.ws.send(raw);
-    }
-  });
+  const masterDeviceId = getMasterForRoom(roomKey);
+  const sendTo = (target: { ws: import("ws").WebSocket; userId?: string }) => {
+    if (target.ws.readyState !== 1) return;
+    const sessionCode = target.userId ? getOrCreateSessionCode(target.userId) : undefined;
+    target.ws.send(JSON.stringify({ type: "DEVICE_LIST", devices: list, masterDeviceId, sessionCode } as ServerMessage));
+  };
+  controllers.forEach((c) => { if (c.roomKey === roomKey) sendTo(c); });
+  devices.forEach((d) => { if (d.role === "device" && d.roomKey === roomKey) sendTo(d); });
 }
 
 function broadcastDeviceList() {
-  const pairs = new Set<string>();
-  controllers.forEach((c) => pairs.add(`${c.userId ?? ""}:${c.branchId}`));
-  devices.forEach((d) => {
-    if (d.role === "device") pairs.add(`${d.userId ?? ""}:${d.branchId}`);
-  });
-  pairs.forEach((p) => {
-    const [uid, bid] = p.split(":");
-    if (uid && bid) broadcastDeviceListForUserAndBranch(uid, bid);
-  });
+  const rooms = new Set<string>();
+  controllers.forEach((c) => rooms.add(c.roomKey));
+  devices.forEach((d) => { if (d.role === "device") rooms.add(d.roomKey); });
+  rooms.forEach((roomKey) => broadcastDeviceListForRoom(roomKey));
 }
 
-function broadcastStateUpdate(deviceId: string, state: StationPlaybackState, userId: string, branchId: string) {
+function broadcastStateUpdate(
+  deviceId: string,
+  state: StationPlaybackState,
+  roomKey: string,
+  scopeKey: string,
+  branchId: string,
+) {
   deviceState.set(deviceId, state);
   const msg: ServerMessage = { type: "STATE_UPDATE", deviceId, state };
   const raw = JSON.stringify(msg);
   controllers.forEach((c) => {
-    if ((c.userId ?? "") === userId && c.branchId === branchId && c.ws.readyState === 1) c.ws.send(raw);
+    if (c.roomKey === roomKey && c.ws.readyState === 1) c.ws.send(raw);
   });
   devices.forEach((d) => {
-    if (d.role === "device" && (d.userId ?? "") === userId && d.branchId === branchId && d.id !== deviceId && d.ws.readyState === 1) {
+    if (d.role === "device" && d.roomKey === roomKey && d.id !== deviceId && d.ws.readyState === 1) {
       d.ws.send(raw);
     }
   });
+  // Owner fan-out requires workspace scope AND per-user branch authorization (owner role is client-supplied).
   owners.forEach((o) => {
-    if ((o.userId ?? "") === userId && o.ws.readyState === 1) o.ws.send(raw);
+    if (o.ws.readyState === 1 && ownerReceivesBranch(o, { scopeKey, branchId })) o.ws.send(raw);
   });
 }
 
-function sendInitialStateToController(ws: import("ws").WebSocket, userId: string, branchId: string) {
+function sendInitialStateToController(ws: import("ws").WebSocket, roomKey: string) {
   devices.forEach((d) => {
-    if (d.role === "device" && (d.userId ?? "") === userId && d.branchId === branchId) {
+    if (d.role === "device" && d.roomKey === roomKey) {
       const state = deviceState.get(d.id);
       if (state) {
         const msg: ServerMessage = { type: "STATE_UPDATE", deviceId: d.id, state };
@@ -501,24 +480,25 @@ function sendInitialStateToController(ws: import("ws").WebSocket, userId: string
   });
 }
 
-/** Build branch list for owner: branches with connected desktop MASTER devices for this userId. */
-function getBranchListForOwner(userId: string): BranchSummary[] {
+/** Build branch list for an owner: branches with a connected MASTER device in the owner's WORKSPACE scope. */
+function getBranchListForOwner(owner: OwnerEntry): BranchSummary[] {
   const branches: BranchSummary[] = [];
   const seen = new Set<string>();
-  masterByBranch.forEach((deviceId, key) => {
-    if (!key.startsWith(userId + ":")) return;
-    const branchId = key.slice(userId.length + 1);
-    const conn = devices.get(deviceId);
-    if (!conn || conn.ws.readyState !== 1 || conn.mode !== "MASTER" || conn.isMobile) return;
+  devices.forEach((conn) => {
+    if (conn.role !== "device" || conn.mode !== "MASTER" || conn.isMobile) return;
+    if (conn.ws.readyState !== 1) return;
+    // Workspace scope AND per-user branch authorization (scope alone is not sufficient).
+    if (!ownerReceivesBranch(owner, { scopeKey: workspaceScopeKey(conn.workspaceId, conn.userId), branchId: conn.branchId })) return;
+    const branchId = conn.branchId;
     if (seen.has(branchId)) return;
     seen.add(branchId);
     let deviceCount = 0;
     devices.forEach((d) => {
-      if (d.role === "device" && (d.userId ?? "") === userId && d.branchId === branchId) deviceCount++;
+      if (d.role === "device" && d.roomKey === conn.roomKey) deviceCount++;
     });
     branches.push({
       branchId,
-      masterDeviceId: deviceId,
+      masterDeviceId: conn.id,
       connectedAt: conn.connectedAt,
       hasDevices: deviceCount > 0,
     });
@@ -526,8 +506,8 @@ function getBranchListForOwner(userId: string): BranchSummary[] {
   return branches;
 }
 
-function sendBranchListToOwner(ws: import("ws").WebSocket, userId: string) {
-  const branches = getBranchListForOwner(userId);
+function sendBranchListToOwner(ws: import("ws").WebSocket, owner: OwnerEntry) {
+  const branches = getBranchListForOwner(owner);
   const msg: ServerMessage = { type: "BRANCH_LIST", branches };
   if (ws.readyState === 1) ws.send(JSON.stringify(msg));
 }
@@ -538,11 +518,7 @@ function sendBranchListToOwner(ws: import("ws").WebSocket, userId: string) {
  * token (claim === null) is restricted to the default branch only — a missing claim is NEVER treated
  * as "all branches".
  */
-function isBranchAllowed(branchId: string, authorizedBranches: string[] | null): boolean {
-  const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
-  if (authorizedBranches === null) return normalized === DEFAULT_BRANCH_ID;
-  return authorizedBranches.includes(normalized);
-}
+// isBranchAllowed is imported from ./branch-room (canonical, pure, unit-tested).
 
 function validateRegisterPayload(
   msg: unknown
@@ -697,6 +673,16 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      // PR-0: workspace scope comes ONLY from the signed token (never the REGISTER body). Room = workspace+branch.
+      const workspaceId = auth.workspaceId ?? null;
+      const scopeKey = workspaceScopeKey(workspaceId, userId);
+      if (!workspaceId) {
+        console.warn(
+          "[SyncBiz WS][scope] legacy token without signed workspaceId — using per-user fallback room",
+          JSON.stringify({ userId, branchId, role }),
+        );
+      }
+
       if (role === "owner_global") {
         const regIntent = sanitizeRegistrationIntent(
           (msg as { registrationIntent?: unknown }).registrationIntent
@@ -704,9 +690,10 @@ wss.on("connection", (ws) => {
         if (process.env.NODE_ENV === "development" && regIntent) {
           console.info("[SyncBiz WS] register owner_global intent", regIntent);
         }
-        owners.push({ ws, userId, authorizedBranches });
+        const ownerEntry: OwnerEntry = { ws, userId, workspaceId, scopeKey, authorizedBranches };
+        owners.push(ownerEntry);
         ws.send(JSON.stringify({ type: "REGISTERED" } as ServerMessage));
-        sendBranchListToOwner(ws, userId);
+        sendBranchListToOwner(ws, ownerEntry);
         console.log("[SyncBiz WS] register owner", { userId });
         return;
       }
@@ -718,10 +705,11 @@ wss.on("connection", (ws) => {
           (msg as { registrationIntent?: unknown }).registrationIntent
         );
 
-        clearExpiredGracePeriods(userId, branchId);
+        const roomKey = runtimeBranchKey(workspaceId, userId, branchId);
+        clearExpiredGracePeriods(roomKey);
         let mode: DeviceMode = "CONTROL";
         let secondaryDesktop = false;
-        const key = branchKey(userId, branchId);
+        const key = roomKey;
         const primaryId = primaryMasterByBranch.get(key);
         let masterDecisionReason = "";
 
@@ -729,7 +717,7 @@ wss.on("connection", (ws) => {
         const isStreamerReg = purpose === "branch_streamer_station";
         const isDesktopReg = purpose === "branch_desktop_station";
         const primaryConn = primaryId ? devices.get(primaryId) : undefined;
-        const activeStreamerMaster = getActiveStreamerMaster(userId, branchId);
+        const activeStreamerMaster = getActiveStreamerMaster(roomKey);
 
         // ── Playing-master hard lock ─────────────────────────────────────────────
         // Evaluated before ALL other MASTER/CONTROL decisions so it gates every path.
@@ -738,7 +726,7 @@ wss.on("connection", (ws) => {
         // Mobile is also exempt: it can never become MASTER anyway.
         const playingLockId = (isMobile || isStreamerReg)
           ? null
-          : getMasterPlayingLockId(userId, branchId, deviceId);
+          : getMasterPlayingLockId(key, deviceId);
 
         if (isMobile) {
           // Mobile must never own primary. Clean up any stale ownership.
@@ -775,7 +763,7 @@ wss.on("connection", (ws) => {
           } else {
             mode = "MASTER";
             masterDisconnectedAt.delete(key);
-            demoteOtherMasters(userId, branchId, deviceId, deviceId);
+            demoteOtherMasters(key, deviceId, deviceId);
             masterByBranch.set(key, deviceId);
             primaryMasterByBranch.set(key, deviceId);
             persistMasterLease();
@@ -792,14 +780,14 @@ wss.on("connection", (ws) => {
           } else {
             mode = "MASTER";
             masterDisconnectedAt.delete(key);
-            demoteOtherMasters(userId, branchId, deviceId, deviceId);
+            demoteOtherMasters(key, deviceId, deviceId);
             masterByBranch.set(key, deviceId);
             primaryMasterByBranch.set(key, deviceId);
             persistMasterLease();
             masterDecisionReason = "streamer priority -> MASTER (demoted fallback holders)";
           }
         } else if (isDesktopReg) {
-          if (streamerBlocksFallbackMaster(userId, branchId, deviceId)) {
+          if (streamerBlocksFallbackMaster(key, deviceId)) {
             secondaryDesktop = true;
             masterDecisionReason = activeStreamerMaster
               ? "streamer active MASTER -> desktop CONTROL"
@@ -815,7 +803,7 @@ wss.on("connection", (ws) => {
           } else {
             mode = "MASTER";
             masterDisconnectedAt.delete(key);
-            demoteOtherMasters(userId, branchId, deviceId, deviceId);
+            demoteOtherMasters(key, deviceId, deviceId);
             masterByBranch.set(key, deviceId);
             primaryMasterByBranch.set(key, deviceId);
             persistMasterLease();
@@ -823,7 +811,7 @@ wss.on("connection", (ws) => {
           }
         } else {
           // Web station: fallback only when streamer and desktop are not blocking.
-          if (streamerBlocksFallbackMaster(userId, branchId, deviceId)) {
+          if (streamerBlocksFallbackMaster(key, deviceId)) {
             masterDecisionReason = activeStreamerMaster
               ? "streamer active MASTER -> web CONTROL"
               : "streamer primary reserved in grace -> web CONTROL";
@@ -866,7 +854,9 @@ wss.on("connection", (ws) => {
           mode,
           isMobile,
           userId,
+          workspaceId,
           branchId,
+          roomKey,
           registrationIntent,
         });
         console.log("[SyncBiz WS] register device", { deviceId, userId, branchId, mode });
@@ -887,7 +877,7 @@ wss.on("connection", (ws) => {
         const sessionCode = getOrCreateSessionCode(userId);
         const reply: ServerMessage = { type: "REGISTERED", deviceId, sessionCode };
         ws.send(JSON.stringify(reply));
-        const masterDeviceIdForClient = getMasterForBranch(userId, branchId);
+        const masterDeviceIdForClient = getMasterForRoom(roomKey);
         const setModeMsg: ServerMessage =
           mode === "CONTROL" && masterDeviceIdForClient
             ? { type: "SET_DEVICE_MODE", mode, masterDeviceId: masterDeviceIdForClient, secondaryDesktop }
@@ -907,13 +897,14 @@ wss.on("connection", (ws) => {
         if (process.env.NODE_ENV === "development" && regIntent) {
           console.info("[SyncBiz WS] register controller intent", regIntent);
         }
-        controllers.push({ ws, userId, branchId });
+        const roomKey = runtimeBranchKey(workspaceId, userId, branchId);
+        controllers.push({ ws, userId, workspaceId, branchId, roomKey });
         const sessionCode = getOrCreateSessionCode(userId);
         const reply: ServerMessage = { type: "REGISTERED", sessionCode };
         ws.send(JSON.stringify(reply));
-        broadcastDeviceListForUserAndBranch(userId, branchId);
-        sendInitialStateToController(ws, userId, branchId);
-        console.log("[SyncBiz WS] register controller", { userId, branchId });
+        broadcastDeviceListForRoom(roomKey);
+        sendInitialStateToController(ws, roomKey);
+        console.log("[SyncBiz WS] register controller", { userId, branchId, roomKey });
       }
       return;
     }
@@ -928,7 +919,7 @@ wss.on("connection", (ws) => {
 
     if (msg.type === "BRANCH_LIST_REQUEST" && role === "owner_global") {
       const owner = owners.find((o) => o.ws === ws);
-      if (owner) sendBranchListToOwner(ws, owner.userId);
+      if (owner) sendBranchListToOwner(ws, owner);
       return;
     }
 
@@ -972,8 +963,11 @@ wss.on("connection", (ws) => {
       if (!rec) return;
       const userId = rec.targetSessionId;
       const conn = devices.get(deviceId!);
-      const senderUserId = conn?.userId ?? (controllers.find((c) => c.ws === ws)?.userId ?? "");
+      const senderCtrl = controllers.find((c) => c.ws === ws);
+      const senderUserId = conn?.userId ?? (senderCtrl?.userId ?? "");
       if (senderUserId !== userId) return;
+      // Route the approved play to the APPROVER'S room master (guest pairing stays user-scoped for identity).
+      const approverRoomKey = conn?.roomKey ?? senderCtrl?.roomKey ?? null;
       pendingRecommendations.delete(msg.recommendationId);
       rec.status = msg.type === "APPROVE_GUEST_RECOMMEND" ? "approved" : "rejected";
       const result: ServerMessage = { type: "GUEST_RECOMMEND_RESULT", recommendationId: msg.recommendationId, status: rec.status };
@@ -985,7 +979,7 @@ wss.on("connection", (ws) => {
         if (d.role === "device" && (d.userId ?? "") === userId && d.ws.readyState === 1) d.ws.send(raw);
       });
       if (msg.type === "APPROVE_GUEST_RECOMMEND") {
-        const masterId = getMasterForBranch(userId, DEFAULT_BRANCH_ID);
+        const masterId = approverRoomKey ? getMasterForRoom(approverRoomKey) : null;
         const master = masterId ? devices.get(masterId) : null;
         if (master && master.ws.readyState === 1) {
           master.ws.send(JSON.stringify({
@@ -1013,7 +1007,9 @@ wss.on("connection", (ws) => {
       if (conn) conn.lastSeen = new Date().toISOString();
       const userId = conn?.userId ?? "";
       const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
-      broadcastStateUpdate(deviceId, msg.state, userId, branchId);
+      const roomKey = conn?.roomKey ?? runtimeBranchKey(conn?.workspaceId, userId, branchId);
+      const scopeKey = workspaceScopeKey(conn?.workspaceId, userId);
+      broadcastStateUpdate(deviceId, msg.state, roomKey, scopeKey, branchId);
       return;
     }
 
@@ -1023,7 +1019,7 @@ wss.on("connection", (ws) => {
       const isMobile = conn?.isMobile ?? false;
       const userId = conn?.userId ?? "";
       const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
-      const key = branchKey(userId, branchId);
+      const key = conn?.roomKey ?? runtimeBranchKey(conn?.workspaceId, userId, branchId);
       const primaryId = primaryMasterByBranch.get(key);
       const requesterIsStreamer = isStreamerStation(conn);
       const requesterIsDesktop = isDesktopOnlyStation(conn);
@@ -1073,13 +1069,13 @@ wss.on("connection", (ws) => {
       }
 
       // Streamer priority: desktop/web cannot take MASTER while streamer holds priority.
-      if (requesterIsDesktop && streamerBlocksFallbackMaster(userId, branchId, deviceId)) {
+      if (requesterIsDesktop && streamerBlocksFallbackMaster(key, deviceId)) {
         logLeaseEvent("set_master_blocked", {
           userId,
           branchId,
           deviceId,
           purpose: conn?.registrationIntent?.devicePurpose ?? "unknown",
-          reason: getActiveStreamerMaster(userId, branchId)
+          reason: getActiveStreamerMaster(key)
             ? "desktop SET_MASTER blocked: streamer active MASTER"
             : "desktop SET_MASTER blocked: streamer primary reserved in grace",
           triggeredBy: "SET_MASTER",
@@ -1120,7 +1116,7 @@ wss.on("connection", (ws) => {
       const oldMasterWasPlaying = oldMasterIdForLog
         ? (deviceState.get(oldMasterIdForLog)?.status === "playing") : false;
 
-      demoteOtherMasters(userId, branchId, deviceId, deviceId);
+      demoteOtherMasters(key, deviceId, deviceId);
       masterByBranch.set(key, deviceId);
       // Always set primary so every explicitly-claimed MASTER gets grace-period protection
       // on its next disconnect — prevents any brief WS interruption from opening the lease.
@@ -1152,7 +1148,7 @@ wss.on("connection", (ws) => {
       if (conn) conn.lastSeen = new Date().toISOString();
       const userId = conn?.userId ?? "";
       const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
-      const key = branchKey(userId, branchId);
+      const key = conn?.roomKey ?? runtimeBranchKey(conn?.workspaceId, userId, branchId);
       const designatedMasterId = masterByBranch.get(key);
       if (designatedMasterId !== deviceId) return;
       masterByBranch.delete(key);
@@ -1176,27 +1172,31 @@ wss.on("connection", (ws) => {
 
     if (msg.type === "COMMAND") {
       let masterId: string | null = null;
+      // The command may ONLY reach a MASTER in this exact room (workspace+branch) — never cross rooms.
+      let expectedRoomKey: string | null = null;
       if (role === "owner_global") {
         const owner = owners.find((o) => o.ws === ws);
-        const userId = owner?.userId ?? "";
         const targetBranchId = (msg.targetBranchId ?? "").trim() || DEFAULT_BRANCH_ID;
         // Phase 1: an owner may only target a branch present in its token claim.
         if (!owner || !isBranchAllowed(targetBranchId, owner.authorizedBranches)) {
           ws.send(JSON.stringify({ type: "ERROR", message: "Branch not authorized" } as ServerMessage));
           return;
         }
-        masterId = getMasterForBranch(userId, targetBranchId);
+        // Target the workspace room for (owner workspace, targetBranch).
+        expectedRoomKey = runtimeBranchKey(owner.workspaceId, owner.userId, targetBranchId);
+        masterId = getMasterForRoom(expectedRoomKey);
       } else {
-        const userId = role === "controller"
-          ? (controllers.find((c) => c.ws === ws)?.userId ?? "")
-          : (devices.get(deviceId!)?.userId ?? "");
-        const branchId = role === "controller"
-          ? (controllers.find((c) => c.ws === ws)?.branchId ?? DEFAULT_BRANCH_ID)
-          : (devices.get(deviceId!)?.branchId ?? DEFAULT_BRANCH_ID);
-        masterId = getMasterForBranch(userId, branchId) ?? msg.targetDeviceId ?? null;
+        expectedRoomKey =
+          (role === "controller"
+            ? controllers.find((c) => c.ws === ws)?.roomKey
+            : devices.get(deviceId!)?.roomKey) ?? null;
+        // Prefer the current room MASTER; a targetDeviceId fallback is honored ONLY if it is in the SAME room.
+        masterId = (expectedRoomKey ? getMasterForRoom(expectedRoomKey) : null) ?? msg.targetDeviceId ?? null;
       }
       const target = masterId ? devices.get(masterId) : null;
-      if (!target || target.role !== "device" || target.mode !== "MASTER") {
+      // Room-isolation guard: target must be a MASTER whose room === expectedRoomKey (blocks cross-room
+      // targetDeviceId escape). expectedRoomKey null (no room) → rejected.
+      if (!expectedRoomKey || !commandTargetInRoom(expectedRoomKey, target)) {
         ws.send(JSON.stringify({ type: "ERROR", message: "No MASTER device" } as ServerMessage));
         return;
       }
@@ -1208,9 +1208,9 @@ wss.on("connection", (ws) => {
       const canSend =
         role === "controller" ||
         role === "owner_global" ||
-        (role === "device" && deviceId && target.id === masterId && target.mode === "MASTER");
-      if (canSend && target.ws.readyState === 1) {
-        target.ws.send(JSON.stringify(cmd));
+        (role === "device" && deviceId && target!.id === masterId);
+      if (canSend && target!.ws.readyState === 1) {
+        target!.ws.send(JSON.stringify(cmd));
       }
     }
   });
@@ -1226,7 +1226,7 @@ wss.on("connection", (ws) => {
       if (conn && conn.ws === ws) {
         const userId = conn.userId ?? "";
         const branchId = conn.branchId ?? DEFAULT_BRANCH_ID;
-        const key = branchKey(userId, branchId);
+        const key = conn.roomKey ?? runtimeBranchKey(conn.workspaceId, userId, branchId);
         const designatedMasterId = masterByBranch.get(key);
         let shouldTryAutoPromote = false;
         let masterDeathReason = "";
@@ -1246,7 +1246,7 @@ wss.on("connection", (ws) => {
               let hasOtherDedicatedControl = false;
               for (const d of devices.values()) {
                 if (d.id === deviceId) continue;
-                if (!isEligibleConnectedPlaybackCandidate(d, userId, branchId)) continue;
+                if (!isEligibleConnectedPlaybackCandidate(d, key)) continue;
                 if (d.mode !== "CONTROL") continue;
                 if (isDedicatedPlayerStation(d)) {
                   hasOtherDedicatedControl = true;
@@ -1298,8 +1298,8 @@ wss.on("connection", (ws) => {
                 const reservedId = masterByBranch.get(sweepKey);
                 const reservedConn = reservedId ? devices.get(reservedId) : undefined;
                 if (reservedConn && reservedConn.ws.readyState === 1) return;
-                clearExpiredGracePeriods(sweepUserId, sweepBranchId);
-                const promoted = tryPromoteConnectedControlOnMasterLoss(sweepUserId, sweepBranchId);
+                clearExpiredGracePeriods(sweepKey);
+                const promoted = tryPromoteConnectedControlOnMasterLoss(sweepKey);
                 if (promoted) {
                   logLeaseEvent("grace_sweep_promote", {
                     userId: sweepUserId,
@@ -1332,7 +1332,7 @@ wss.on("connection", (ws) => {
         devices.delete(deviceId);
         deviceState.delete(deviceId);
         if (shouldTryAutoPromote && userId) {
-          tryPromoteConnectedControlOnMasterLoss(userId, branchId);
+          tryPromoteConnectedControlOnMasterLoss(key);
         }
       }
     }
