@@ -93,11 +93,18 @@ export interface DeriveResult {
   appProcessAlive?: boolean;
 }
 
-/** True when a control state is a valid, non-expired maintenance/stop directive. */
+/**
+ * True when a control directive should currently SUPPRESS recovery.
+ *   - none              → inactive
+ *   - maintenance       → active only while now < expiresAt (bounded / anti-stale)
+ *   - intentional_stop  → active INDEFINITELY (expiresAt === null) until the marker is explicitly cleared
+ */
 export function isMaintenanceActive(control: VonoControlState | null, now: number): boolean {
   if (!control) return false;
   if (control.mode === "none") return false;
-  return now < control.expiresAt; // self-expiring: a stale directive can never keep a branch down
+  if (control.mode === "intentional_stop") return true; // persistent until cleared — never times out
+  // maintenance: bounded
+  return typeof control.expiresAt === "number" && now < control.expiresAt;
 }
 
 /**
@@ -109,7 +116,14 @@ export function deriveState(input: DeriveInput): DeriveResult {
   const { hb, control, appProcessAlive, now } = input;
 
   if (isMaintenanceActive(control, now)) {
-    return { state: "MAINTENANCE", reason: `maintenance until ${control!.expiresAt} (${control!.reason})` };
+    // Same suppression state, two shapes of marker: a persistent intentional-stop (expiresAt === null) vs a
+    // bounded maintenance window (numeric expiresAt). Format the reason correctly for each so the log doesn't
+    // read "maintenance until null".
+    const reason =
+      control!.mode === "intentional_stop"
+        ? `intentional stop active (${control!.reason})`
+        : `maintenance until ${control!.expiresAt} (${control!.reason})`;
+    return { state: "MAINTENANCE", reason };
   }
 
   // APP: heartbeat missing/stale OR no process ⇒ the app can't help itself. Two sub-cases, resolved by

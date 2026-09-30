@@ -5,6 +5,8 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AddAdditionalMusicFolderResult,
   AutoStartState,
+  ProtectionState,
+  ExitVonoResult,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
@@ -84,6 +86,10 @@ const api: SyncBizDesktopMvp = {
   getAutoStart: (): Promise<AutoStartState> => ipcRenderer.invoke(MVP_IPC.GET_AUTOSTART),
   setAutoStart: (enabled: boolean): Promise<AutoStartState> =>
     ipcRenderer.invoke(MVP_IPC.SET_AUTOSTART, enabled),
+  getProtectionState: (): Promise<ProtectionState> => ipcRenderer.invoke(MVP_IPC.GET_PROTECTION_STATE),
+  setProtectionState: (enabled: boolean): Promise<ProtectionState> =>
+    ipcRenderer.invoke(MVP_IPC.SET_PROTECTION_STATE, enabled),
+  exitVono: (): Promise<ExitVonoResult> => ipcRenderer.invoke(MVP_IPC.EXIT_VONO),
   getMusicFolder: (): Promise<MusicFolderSnapshot> => ipcRenderer.invoke(MVP_IPC.GET_MUSIC_FOLDER),
   pickMusicFolder: (): Promise<PickMusicFolderResult> => ipcRenderer.invoke(MVP_IPC.PICK_MUSIC_FOLDER),
   clearMusicFolder: (): Promise<MusicFolderSnapshot> => ipcRenderer.invoke(MVP_IPC.CLEAR_MUSIC_FOLDER),

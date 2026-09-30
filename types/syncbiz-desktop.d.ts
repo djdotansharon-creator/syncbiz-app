@@ -25,6 +25,18 @@ type DesktopAutoStartState = {
   supported: boolean;
 };
 
+/** Effective VONO Protection state (the unattended-player control; not openAtLogin). */
+type DesktopProtectionState = {
+  enabled: boolean;
+  supported: boolean;
+  taskPresent: boolean | null;
+  source: string;
+  drift: "none" | "task_missing" | "task_unexpected" | "task_unknown";
+  healthy: boolean;
+  error?: string;
+};
+type DesktopExitVonoResult = { ok: boolean; error?: string };
+
 type DesktopMusicFolderSnapshot = {
   path: string | null;
 };
@@ -142,9 +154,15 @@ type SyncBizDesktopBridgePreload = {
   scanLocalAudioFolder?: (dir: string) => Promise<ScanLocalAudioFolderIpcResult>;
   /** Optional: native path for a dropped `File` (Electron webUtils). */
   getPathForFile?: (file: File) => string;
-  /** Optional: OS auto-start (login item) state. */
+  /** Optional: OS auto-start (login item) state. LEGACY — not the VONO Protection control. */
   getAutoStart?: () => Promise<DesktopAutoStartState>;
   setAutoStart?: (enabled: boolean) => Promise<DesktopAutoStartState>;
+  /** Optional: VONO Protection (Scheduled Task + watchdog) — the real unattended-player control. */
+  getProtectionState?: () => Promise<DesktopProtectionState>;
+  setProtectionState?: (enabled: boolean) => Promise<DesktopProtectionState>;
+  /** Optional: explicit "Exit VONO" (writes+verifies intentional-stop marker when Protection ON, then quits;
+   *  returns { ok:false, error } WITHOUT quitting if the marker can't be written). */
+  exitVono?: () => Promise<DesktopExitVonoResult>;
   /** Optional: persisted music folder path. */
   getMusicFolder?: () => Promise<DesktopMusicFolderSnapshot>;
   pickMusicFolder?: () => Promise<DesktopPickMusicFolderResult>;

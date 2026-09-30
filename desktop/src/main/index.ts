@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { app, BrowserWindow, screen, shell } from "electron";
 
 import { initFileLogger, fileLog, getLogFilePath } from "./file-logger";
-import { registerMvpIpc, getEffectiveRuntimeConfig } from "./ipc-mvp";
+import { registerMvpIpc, getEffectiveRuntimeConfig, getProtectionService } from "./ipc-mvp";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat-writer";
 import { startEmbeddedNextServer, type EmbeddedNextHandle } from "./embedded-next-server";
 import { flushLocalCollectionTagSnapshotWrites } from "./local-collection-snapshot";
@@ -472,6 +472,38 @@ app.whenReady().then(async () => {
 
   fileLog("INFO", "app.whenReady: start", { logFile: getLogFilePath() });
 
+  // ── Phase B1 — Protection startup gate (BEFORE any side effect: binaries / orchestrator / heartbeat / WS / window / playback) ──
+  // Defense-in-depth against the watchdog↔Exit race: a watchdog-origin relaunch must NOT bring VONO back up while an
+  // explicit "Exit VONO" marker is active, and a manual relaunch must clear that marker (verified) before running as
+  // a normally-protected station. Never touches identity / branch / MASTER / playback.
+  try {
+    const protection = getProtectionService();
+    if (process.env.VONO_LAUNCH_SOURCE === "watchdog") {
+      if (protection.isIntentionalStopActive()) {
+        fileLog("WARN", "app.whenReady: watchdog-origin launch blocked by active intentional-stop marker — quitting before startup");
+        app.quit();
+        return;
+      }
+      fileLog("INFO", "app.whenReady: watchdog-origin launch — no active intentional-stop, continuing");
+    } else {
+      // Manual launch → the operator is deliberately (re)starting VONO: clear the marker and VERIFY it is gone.
+      // If a marker existed and could not be removed, refuse normal protected runtime (quitting is safer than
+      // running with a marker that would permanently suppress future watchdog recovery).
+      const cleared = protection.clearIntentionalStop();
+      if (cleared.hadMarker && !cleared.ok) {
+        fileLog("ERROR", "app.whenReady: manual launch could not clear intentional-stop marker — quitting to avoid suppressed recovery", { err: cleared.error });
+        app.quit();
+        return;
+      }
+      if (cleared.hadMarker) fileLog("INFO", "app.whenReady: manual launch — intentional-stop marker cleared and verified");
+    }
+  } catch (err) {
+    // A failure to even evaluate the gate must not silently proceed for a watchdog launch (fail closed), but a
+    // manual launch may proceed (the operator is present). VONO_LAUNCH_SOURCE distinguishes the two.
+    fileLog("ERROR", "app.whenReady: protection startup gate errored", { err: (err as Error)?.message });
+    if (process.env.VONO_LAUNCH_SOURCE === "watchdog") { app.quit(); return; }
+  }
+
   let binaries: { mpvBin: string; ytDlpBin: string | null };
   try {
     fileLog("INFO", "app.whenReady: calling ensureRuntimeBinaries");
@@ -496,6 +528,7 @@ app.whenReady().then(async () => {
   orchestrator = new PlaybackOrchestrator();
   orchestrator.start(binaries);
   registerMvpIpc(getMainWindow, orchestrator);
+  // (Protection startup gate — intentional-stop clear/quit — already ran above, before any side effects.)
   // Seed the heartbeat with the durable MAIN identity (ProgramData deviceId) up front, so the FIRST heartbeat
   // already carries deviceId/branchId even if the renderer never loads / WS never connects / nothing plays.
   const effectiveConfig = getEffectiveRuntimeConfig();

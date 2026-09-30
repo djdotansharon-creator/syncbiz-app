@@ -1,9 +1,12 @@
 import { BrowserWindow, ipcMain, app, dialog } from "electron";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync, rmSync, renameSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { join, dirname } from "node:path";
 import type {
   AddAdditionalMusicFolderResult,
   AutoStartState,
+  ProtectionState,
+  ExitVonoResult,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
@@ -66,6 +69,12 @@ import {
   registrationRelevantChanged,
   type RegistrationRelevant,
 } from "./station-device-registration";
+import { vonoProtectionStatePath, vonoControlPath } from "./vono-paths";
+import {
+  createProtectionService,
+  VONO_PROTECTION_TASK_NAME,
+  type ProtectionService,
+} from "./protection-service";
 import type { PlaybackOrchestrator } from "./playback-orchestrator";
 import { scanLocalAudioFolder } from "./scan-local-audio-folder";
 import { listMusicLibraryDir } from "./list-music-library-dir";
@@ -144,6 +153,76 @@ function getStationRegistrar(): StationDeviceRegistrar {
     });
   }
   return stationRegistrar;
+}
+
+// Phase B1 — VONO Protection (Scheduled Task + intentional-stop). NEVER touches identity/branch/MASTER/playback.
+let protectionService: ProtectionService | null = null;
+export function getProtectionService(): ProtectionService {
+  if (!protectionService) {
+    const installDir = dirname(process.execPath); // packaged: the INSTDIR holding the .exe + vono-watchdog\
+    const watchdogDir = join(installDir, "vono-watchdog");
+    const provisionScript = join(watchdogDir, "provision-vono-protection.ps1");
+    const psExe = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+    const runPs = (args: string[]): { status: number | null; stderr: string } => {
+      const r = spawnSync(psExe, args, { windowsHide: true, encoding: "utf-8" });
+      return { status: r.status, stderr: (r.stderr ?? "").toString().trim() };
+    };
+    protectionService = createProtectionService({
+      now: () => Date.now(),
+      platform: process.platform,
+      readFile: (p) => (existsSync(p) ? readFileSync(p, "utf-8") : null),
+      writeFile: (p, data) => writeFileSync(p, data, "utf-8"),
+      removeFile: (p) => { try { rmSync(p, { force: true }); } catch { /* ignore */ } },
+      renameFile: (from, to) => renameSync(from, to), // same-dir atomic replace (mirrors watchdog saveCacheAtomic)
+      protectionStatePath: vonoProtectionStatePath,
+      controlPath: vonoControlPath,
+      taskStatus: () => {
+        // Tri-state, fail-CLOSED. Absence is POSITIVELY observed: only the "task not found" error
+        // (CategoryInfo.Category === ObjectNotFound) counts as absent (exit 3). Any OTHER failure — a broken
+        // Task Scheduler / CIM subsystem, access error, PS crash, non-interactive block — is UNKNOWN (exit 1 /
+        // null), never silently read as "absent". Present = exit 0.
+        const { status, stderr } = runPs([
+          "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
+          `try { if (Get-ScheduledTask -TaskName '${VONO_PROTECTION_TASK_NAME}' -ErrorAction Stop) { exit 0 } else { exit 3 } } ` +
+            `catch { if ($_.CategoryInfo.Category -eq 'ObjectNotFound') { exit 3 } else { exit 1 } }`,
+        ]);
+        if (status === 0) return { ok: true, present: true };
+        if (status === 3) return { ok: true, present: false };
+        return { ok: false, error: stderr || `task query exited ${status}` };
+      },
+      requiredWatchdogFilesPresent: () =>
+        ["node.exe", "watchdog.cjs", "launch-watchdog.ps1", "provision-vono-protection.ps1"].every((f) =>
+          existsSync(join(watchdogDir, f)),
+        ),
+      provision: (action) => {
+        const { status, stderr } = runPs([
+          "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
+          "-File", provisionScript, "-Action", action, "-InstallDir", installDir,
+        ]);
+        return status === 0 ? { ok: true } : { ok: false, error: stderr || `provision ${action} exited ${status}` };
+      },
+      disableElectronAutostart: () => {
+        // Fail-CLOSED: the Scheduled Task must be the ONE start mechanism, so this ONLY reports ok when a
+        // successful read PROVES openAtLogin is false. A set failure, a verify-read failure, or a still-on
+        // read all return ok:false (never assume success).
+        try {
+          app.setLoginItemSettings({ openAtLogin: false });
+        } catch (e) {
+          return { ok: false, error: (e as Error)?.message || "setLoginItemSettings failed." };
+        }
+        let openAtLogin: boolean;
+        try {
+          openAtLogin = app.getLoginItemSettings().openAtLogin === true;
+        } catch (e) {
+          return { ok: false, error: (e as Error)?.message || "Could not verify the OS login-item state." };
+        }
+        return openAtLogin ? { ok: false, error: "OS login-item auto-start is still enabled." } : { ok: true };
+      },
+      log: (event, fields) =>
+        fileLog(/fail|missing|still_present/.test(event) ? "WARN" : "INFO", event, fields ?? {}),
+    });
+  }
+  return protectionService;
 }
 
 /** Snapshot the registration-relevant config for change detection (SAVE_CONFIG trigger). */
@@ -456,6 +535,34 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       console.error("[SyncBiz desktop] setLoginItemSettings failed:", err);
     }
     return readAutoStartState();
+  });
+
+  // ── Phase B1 — VONO Protection (the real unattended-player control; NOT openAtLogin) ──
+  ipcMain.handle(MVP_IPC.GET_PROTECTION_STATE, (): ProtectionState => getProtectionService().getEffective());
+  ipcMain.handle(MVP_IPC.SET_PROTECTION_STATE, (_e, enabled: unknown): ProtectionState => {
+    const res = getProtectionService().setEnabled(enabled === true, "app");
+    return res.state;
+  });
+  ipcMain.handle(MVP_IPC.EXIT_VONO, (): ExitVonoResult => {
+    // Explicit user exit, decided on LIVE recovery risk (desired-ON OR a live task present) — not just the
+    // persisted flag. requestExit() writes+verifies the intentional-stop marker when required and returns
+    // ok:false (with no quit) when the marker can't be written OR the task status is unknown. Only quit on ok.
+    const svc = getProtectionService();
+    let decision: ExitVonoResult;
+    try {
+      decision = svc.requestExit();
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      fileLog("WARN", "EXIT_VONO: requestExit threw — NOT quitting", { err });
+      return { ok: false, error: "Could not determine a safe exit; VONO was not stopped." };
+    }
+    if (!decision.ok) {
+      fileLog("WARN", "EXIT_VONO: unsafe to quit — NOT quitting", { err: decision.error });
+      return { ok: false, error: decision.error };
+    }
+    // Defer the quit so this IPC reply flushes to the renderer first.
+    setImmediate(() => app.quit());
+    return { ok: true };
   });
 
   ipcMain.handle(MVP_IPC.GET_MUSIC_FOLDER, (): MusicFolderSnapshot => {
