@@ -59,12 +59,15 @@ export interface ProtectionDeps {
   renameFile: (from: string, to: string) => void;
   protectionStatePath: () => string;
   controlPath: () => string;
-  /** Tri-state probe for the "VONO Protection" Scheduled Task (never fail-open). */
-  taskStatus: () => TaskStatus;
+  /**
+   * Tri-state probe for the "VONO Protection" Scheduled Task (never fail-open). ASYNC: the real implementation
+   * runs PowerShell off the MAIN thread so a slow query can never block the Electron event loop / heartbeat.
+   */
+  taskStatus: () => Promise<TaskStatus>;
   /** Are node.exe / watchdog.cjs / launch-watchdog.ps1 / provision-vono-protection.ps1 present in InstallDir? */
   requiredWatchdogFilesPresent: () => boolean;
-  /** Run provision-vono-protection.ps1 -Action install|uninstall. */
-  provision: (action: "install" | "uninstall") => { ok: boolean; error?: string };
+  /** Run provision-vono-protection.ps1 -Action install|uninstall. ASYNC (never blocks MAIN). */
+  provision: (action: "install" | "uninstall") => Promise<{ ok: boolean; error?: string }>;
   /** Turn OFF legacy Electron openAtLogin AND VERIFY it (set fail, verify-read fail, or still-on ⇒ ok:false). */
   disableElectronAutostart: () => { ok: boolean; error?: string };
   log: (event: string, fields?: Record<string, unknown>) => void;
@@ -73,8 +76,8 @@ export interface ProtectionDeps {
 function isWindows(deps: ProtectionDeps): boolean {
   return deps.platform === "win32";
 }
-function safeTaskStatus(deps: ProtectionDeps): TaskStatus {
-  try { return deps.taskStatus(); } catch (e) { return { ok: false, error: errMsg(e) }; }
+async function safeTaskStatus(deps: ProtectionDeps): Promise<TaskStatus> {
+  try { return await deps.taskStatus(); } catch (e) { return { ok: false, error: errMsg(e) }; }
 }
 function parseState(raw: string | null): ProtectionState | null {
   if (!raw) return null;
@@ -115,9 +118,9 @@ export function createProtectionService(deps: ProtectionDeps) {
    * ⇒ ON (preserves the pilot Lenovo), no task ⇒ OFF — but ONLY when the task status is KNOWN. If the status is
    * unknown, do NOT persist a migration and return an unhealthy task_unknown state.
    */
-  function getEffective(): EffectiveProtection {
+  async function computeEffective(): Promise<EffectiveProtection> {
     const supported = isWindows(deps);
-    const ts: TaskStatus = supported ? safeTaskStatus(deps) : { ok: true, present: false };
+    const ts: TaskStatus = supported ? await safeTaskStatus(deps) : { ok: true, present: false };
     const taskPresent: boolean | null = ts.ok ? ts.present : null;
     const existing = parseState(deps.readFile(deps.protectionStatePath()));
     if (existing) {
@@ -143,8 +146,8 @@ export function createProtectionService(deps: ProtectionDeps) {
    * task op, then a REQUIRED tri-state verify (unknown ⇒ fail — never substitute the desired state), then persist.
    * Failure keeps the prior persisted state + returns an error. Never kills VONO/MPV.
    */
-  function setEnabled(target: boolean, source: ProtectionSource = "app"): SetProtectionResult {
-    const before = getEffective();
+  async function doSetEnabled(target: boolean, source: ProtectionSource = "app"): Promise<SetProtectionResult> {
+    const before = await computeEffective();
     if (!before.supported) return { ok: false, state: { ...before, error: "Protection is only supported on Windows." } };
     if (target && !deps.requiredWatchdogFilesPresent()) {
       deps.log("protection_enable_missing_files", {});
@@ -158,13 +161,13 @@ export function createProtectionService(deps: ProtectionDeps) {
     }
 
     const action = target ? "install" : "uninstall";
-    const res = deps.provision(action);
+    const res = await deps.provision(action);
     if (!res.ok) {
       deps.log("protection_provision_failed", { action, err: res.error });
       return { ok: false, state: { ...before, error: res.error || `Failed to ${action} the Protection task.` } };
     }
 
-    const ts = safeTaskStatus(deps);
+    const ts = await safeTaskStatus(deps);
     if (!ts.ok) {
       deps.log("protection_verify_unknown", { action, err: ts.error });
       return { ok: false, state: { ...before, error: `Could not verify the Protection task after ${action}.` } };
@@ -185,7 +188,7 @@ export function createProtectionService(deps: ProtectionDeps) {
       // built from a FRESH effective read (so the UI sees the real drift), never a stale success. Fail-closed:
       // ok:false. Next launch's migration (task-exists ⇒ ON) still recovers a lost ON record.
       deps.log("protection_persist_failed", { target, err: errMsg(e) });
-      return { ok: false, state: { ...getEffective(), error: "Protection task changed but the setting could not be saved." } };
+      return { ok: false, state: { ...(await computeEffective()), error: "Protection task changed but the setting could not be saved." } };
     }
     deps.log(target ? "protection_enabled" : "protection_disabled", { source });
     return { ok: true, state: effective(target, source, true, ts.present) };
@@ -238,10 +241,10 @@ export function createProtectionService(deps: ProtectionDeps) {
    * is required when Protection is desired ON OR a live task is present. If the task status is UNKNOWN → do NOT
    * quit (fail closed). Returns { ok:true } only when it is safe to quit.
    */
-  function requestExit(): ExitDecision {
+  async function doRequestExit(): Promise<ExitDecision> {
     const supported = isWindows(deps);
     if (!supported) return { ok: true }; // no watchdog task off-Windows
-    const ts = safeTaskStatus(deps);
+    const ts = await safeTaskStatus(deps);
     if (!ts.ok) {
       deps.log("exit_blocked_task_unknown", { err: ts.error });
       return { ok: false, error: "Protection status could not be determined; VONO was not stopped." };
@@ -278,7 +281,31 @@ export function createProtectionService(deps: ProtectionDeps) {
     return { ok: true, hadMarker: true };
   }
 
-  return { getEffective, setEnabled, writeIntentionalStop, clearIntentionalStop, isIntentionalStopActive, requestExit };
+  // ── Single-flight transition lock ──────────────────────────────────────────────────────────────────────────
+  // Every async Protection operation (GET / SET / EXIT) runs strictly one-at-a-time through this serial queue, so
+  // two SETs never interleave, a GET during a SET waits for the transition and then reads a CONSISTENT state, and
+  // an EXIT during a SET serializes safely (it evaluates live risk only after the SET settles). The chain never
+  // rejects, so one failed op can't wedge the queue. Because the ops are async (PowerShell off-thread), waiting
+  // here never blocks the MAIN event loop / heartbeat / playback. Internal callers use doSetEnabled/computeEffective
+  // directly (already inside the lock) to avoid self-deadlock.
+  let chain: Promise<unknown> = Promise.resolve();
+  function runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const result = chain.then(fn, fn);
+    chain = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  return {
+    getEffective: (): Promise<EffectiveProtection> => runExclusive(computeEffective),
+    setEnabled: (target: boolean, source: ProtectionSource = "app"): Promise<SetProtectionResult> =>
+      runExclusive(() => doSetEnabled(target, source)),
+    requestExit: (): Promise<ExitDecision> => runExclusive(doRequestExit),
+    // Marker helpers are synchronous filesystem-only ops (no PowerShell) used by the startup gate; they never
+    // block on MAIN and are intentionally NOT serialized through the transition lock.
+    writeIntentionalStop,
+    clearIntentionalStop,
+    isIntentionalStopActive,
+  };
 }
 
 export type ProtectionService = ReturnType<typeof createProtectionService>;

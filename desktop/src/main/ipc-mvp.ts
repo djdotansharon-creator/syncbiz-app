@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain, app, dialog } from "electron";
 import { existsSync, readFileSync, writeFileSync, rmSync, renameSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { join, dirname } from "node:path";
 import type {
   AddAdditionalMusicFolderResult,
@@ -163,10 +163,36 @@ export function getProtectionService(): ProtectionService {
     const watchdogDir = join(installDir, "vono-watchdog");
     const provisionScript = join(watchdogDir, "provision-vono-protection.ps1");
     const psExe = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-    const runPs = (args: string[]): { status: number | null; stderr: string } => {
-      const r = spawnSync(psExe, args, { windowsHide: true, encoding: "utf-8" });
-      return { status: r.status, stderr: (r.stderr ?? "").toString().trim() };
-    };
+    // ASYNC PowerShell — NEVER spawnSync. A synchronous PowerShell call blocked Electron MAIN for tens of seconds
+    // on the pilot Lenovo (heartbeat stopped, renderer saw a playback freeze and restarted the track). This runs
+    // the child off-thread with a hard timeout that KILLS the child; a timeout/spawn error resolves to a distinct
+    // signal the callers map to UNKNOWN / fail-closed. shell:false + arg array (no shell interpolation).
+    const runPs = (args: string[], timeoutMs = 60_000): Promise<{ status: number | null; stderr: string; timedOut: boolean }> =>
+      new Promise((resolve) => {
+        let child: import("node:child_process").ChildProcess;
+        try {
+          child = spawn(psExe, args, { windowsHide: true, shell: false });
+        } catch (e) {
+          resolve({ status: null, stderr: (e as Error)?.message ?? String(e), timedOut: false });
+          return;
+        }
+        let stderr = "";
+        let settled = false;
+        const finish = (r: { status: number | null; stderr: string; timedOut: boolean }) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(r);
+        };
+        const timer = setTimeout(() => {
+          try { child.kill(); } catch { /* ignore */ }
+          finish({ status: null, stderr: `timed out after ${timeoutMs}ms`, timedOut: true });
+        }, timeoutMs);
+        if (typeof timer.unref === "function") timer.unref();
+        child.stderr?.on("data", (d) => { stderr += d.toString(); });
+        child.on("error", (e) => finish({ status: null, stderr: e.message, timedOut: false }));
+        child.on("close", (code) => finish({ status: code, stderr: stderr.trim(), timedOut: false }));
+      });
     protectionService = createProtectionService({
       now: () => Date.now(),
       platform: process.platform,
@@ -176,16 +202,17 @@ export function getProtectionService(): ProtectionService {
       renameFile: (from, to) => renameSync(from, to), // same-dir atomic replace (mirrors watchdog saveCacheAtomic)
       protectionStatePath: vonoProtectionStatePath,
       controlPath: vonoControlPath,
-      taskStatus: () => {
+      taskStatus: async () => {
         // Tri-state, fail-CLOSED. Absence is POSITIVELY observed: only the "task not found" error
         // (CategoryInfo.Category === ObjectNotFound) counts as absent (exit 3). Any OTHER failure — a broken
-        // Task Scheduler / CIM subsystem, access error, PS crash, non-interactive block — is UNKNOWN (exit 1 /
-        // null), never silently read as "absent". Present = exit 0.
-        const { status, stderr } = runPs([
+        // Task Scheduler / CIM subsystem, access error, PS crash, non-interactive block, OR a TIMEOUT — is
+        // UNKNOWN, never silently read as "absent". Present = exit 0.
+        const { status, stderr, timedOut } = await runPs([
           "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
           `try { if (Get-ScheduledTask -TaskName '${VONO_PROTECTION_TASK_NAME}' -ErrorAction Stop) { exit 0 } else { exit 3 } } ` +
             `catch { if ($_.CategoryInfo.Category -eq 'ObjectNotFound') { exit 3 } else { exit 1 } }`,
         ]);
+        if (timedOut) return { ok: false, error: "task query timed out" };
         if (status === 0) return { ok: true, present: true };
         if (status === 3) return { ok: true, present: false };
         return { ok: false, error: stderr || `task query exited ${status}` };
@@ -194,11 +221,12 @@ export function getProtectionService(): ProtectionService {
         ["node.exe", "watchdog.cjs", "launch-watchdog.ps1", "provision-vono-protection.ps1"].every((f) =>
           existsSync(join(watchdogDir, f)),
         ),
-      provision: (action) => {
-        const { status, stderr } = runPs([
+      provision: async (action) => {
+        const { status, stderr, timedOut } = await runPs([
           "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
           "-File", provisionScript, "-Action", action, "-InstallDir", installDir,
         ]);
+        if (timedOut) return { ok: false, error: `provision ${action} timed out` };
         return status === 0 ? { ok: true } : { ok: false, error: stderr || `provision ${action} exited ${status}` };
       },
       disableElectronAutostart: () => {
@@ -538,19 +566,21 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   });
 
   // ── Phase B1 — VONO Protection (the real unattended-player control; NOT openAtLogin) ──
-  ipcMain.handle(MVP_IPC.GET_PROTECTION_STATE, (): ProtectionState => getProtectionService().getEffective());
-  ipcMain.handle(MVP_IPC.SET_PROTECTION_STATE, (_e, enabled: unknown): ProtectionState => {
-    const res = getProtectionService().setEnabled(enabled === true, "app");
+  // ASYNC handlers: the service runs PowerShell off-thread, so these never block MAIN / the heartbeat / playback,
+  // and the service's single-flight lock serializes overlapping GET/SET/EXIT.
+  ipcMain.handle(MVP_IPC.GET_PROTECTION_STATE, async (): Promise<ProtectionState> => getProtectionService().getEffective());
+  ipcMain.handle(MVP_IPC.SET_PROTECTION_STATE, async (_e, enabled: unknown): Promise<ProtectionState> => {
+    const res = await getProtectionService().setEnabled(enabled === true, "app");
     return res.state;
   });
-  ipcMain.handle(MVP_IPC.EXIT_VONO, (): ExitVonoResult => {
+  ipcMain.handle(MVP_IPC.EXIT_VONO, async (): Promise<ExitVonoResult> => {
     // Explicit user exit, decided on LIVE recovery risk (desired-ON OR a live task present) — not just the
     // persisted flag. requestExit() writes+verifies the intentional-stop marker when required and returns
     // ok:false (with no quit) when the marker can't be written OR the task status is unknown. Only quit on ok.
     const svc = getProtectionService();
     let decision: ExitVonoResult;
     try {
-      decision = svc.requestExit();
+      decision = await svc.requestExit();
     } catch (e) {
       const err = e instanceof Error ? e.message : String(e);
       fileLog("WARN", "EXIT_VONO: requestExit threw — NOT quitting", { err });
