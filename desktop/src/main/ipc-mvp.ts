@@ -1,5 +1,5 @@
 import { BrowserWindow, ipcMain, app, dialog } from "electron";
-import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, rmSync, renameSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import type {
@@ -173,16 +173,18 @@ export function getProtectionService(): ProtectionService {
       readFile: (p) => (existsSync(p) ? readFileSync(p, "utf-8") : null),
       writeFile: (p, data) => writeFileSync(p, data, "utf-8"),
       removeFile: (p) => { try { rmSync(p, { force: true }); } catch { /* ignore */ } },
+      renameFile: (from, to) => renameSync(from, to), // same-dir atomic replace (mirrors watchdog saveCacheAtomic)
       protectionStatePath: vonoProtectionStatePath,
       controlPath: vonoControlPath,
       taskStatus: () => {
-        // Tri-state, fail-CLOSED. Distinct exit codes so a query failure is NEVER read as "absent":
-        //   0 = task present, 3 = task absent, anything else / null (PS crash, non-interactive block) = unknown.
+        // Tri-state, fail-CLOSED. Absence is POSITIVELY observed: only the "task not found" error
+        // (CategoryInfo.Category === ObjectNotFound) counts as absent (exit 3). Any OTHER failure — a broken
+        // Task Scheduler / CIM subsystem, access error, PS crash, non-interactive block — is UNKNOWN (exit 1 /
+        // null), never silently read as "absent". Present = exit 0.
         const { status, stderr } = runPs([
           "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
           `try { if (Get-ScheduledTask -TaskName '${VONO_PROTECTION_TASK_NAME}' -ErrorAction Stop) { exit 0 } else { exit 3 } } ` +
-            `catch [Microsoft.Management.Infrastructure.CimException] { exit 3 } ` +
-            `catch { exit 1 }`,
+            `catch { if ($_.CategoryInfo.Category -eq 'ObjectNotFound') { exit 3 } else { exit 1 } }`,
         ]);
         if (status === 0) return { ok: true, present: true };
         if (status === 3) return { ok: true, present: false };

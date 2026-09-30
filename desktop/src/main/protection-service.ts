@@ -55,6 +55,8 @@ export interface ProtectionDeps {
   readFile: (path: string) => string | null;
   writeFile: (path: string, data: string) => void;
   removeFile: (path: string) => void;
+  /** Rename within the same directory (atomic replace) — used for the concurrently-read control.json. */
+  renameFile: (from: string, to: string) => void;
   protectionStatePath: () => string;
   controlPath: () => string;
   /** Tri-state probe for the "VONO Protection" Scheduled Task (never fail-open). */
@@ -176,7 +178,15 @@ export function createProtectionService(deps: ProtectionDeps) {
       return { ok: false, state: { ...before, error: "Protection task is still present after removal." } };
     }
 
-    persist({ schemaVersion: PROTECTION_SCHEMA_VERSION, enabled: target, updatedAt: deps.now(), source });
+    try {
+      persist({ schemaVersion: PROTECTION_SCHEMA_VERSION, enabled: target, updatedAt: deps.now(), source });
+    } catch (e) {
+      // The task WAS mutated but the desired state couldn't be recorded. Return a CONTROLLED degraded result
+      // built from a FRESH effective read (so the UI sees the real drift), never a stale success. Fail-closed:
+      // ok:false. Next launch's migration (task-exists ⇒ ON) still recovers a lost ON record.
+      deps.log("protection_persist_failed", { target, err: errMsg(e) });
+      return { ok: false, state: { ...getEffective(), error: "Protection task changed but the setting could not be saved." } };
+    }
     deps.log(target ? "protection_enabled" : "protection_disabled", { source });
     return { ok: true, state: effective(target, source, true, ts.present) };
   }
@@ -204,7 +214,11 @@ export function createProtectionService(deps: ProtectionDeps) {
       bootId: null,
     };
     try {
-      deps.writeFile(deps.controlPath(), JSON.stringify(control));
+      // ATOMIC write: the watchdog reads control.json every tick concurrently, so write to a temp file in the
+      // SAME directory and rename over the target — the reader never observes a torn/partial marker.
+      const tmp = deps.controlPath() + ".tmp";
+      deps.writeFile(tmp, JSON.stringify(control));
+      deps.renameFile(tmp, deps.controlPath());
     } catch (e) {
       deps.log("intentional_stop_write_failed", { err: errMsg(e) });
       return { ok: false, error: "Could not write the Exit marker; VONO was not stopped to avoid an auto-restart." };

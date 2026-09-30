@@ -35,7 +35,9 @@ type Overrides = {
   taskThrows?: boolean;  // taskStatus() throws
   filesPresent?: boolean;
   autostartOk?: boolean;
-  removeFails?: boolean; // removeFile is a no-op so the verify read still sees the marker
+  removeFails?: boolean;     // removeFile is a no-op so the verify read still sees the marker
+  renameFails?: boolean;     // renameFile throws (atomic control.json write can't complete)
+  writeFailPath?: string;    // writeFile throws for this exact path (simulate a persist failure)
   provision?: (action: "install" | "uninstall", state: { taskPresent: boolean }) => { ok: boolean; error?: string };
 };
 function harness(o: Overrides = {}) {
@@ -46,8 +48,9 @@ function harness(o: Overrides = {}) {
     now: () => NOW,
     platform: o.platform ?? "win32",
     readFile: (p) => (files.has(p) ? files.get(p)! : null),
-    writeFile: (p, d) => { files.set(p, d); },
+    writeFile: (p, d) => { if (o.writeFailPath && p === o.writeFailPath) throw new Error("write failed"); files.set(p, d); },
     removeFile: (p) => { if (!o.removeFails) files.delete(p); },
+    renameFile: (from, to) => { if (o.renameFails) throw new Error("rename failed"); if (files.has(from)) { files.set(to, files.get(from)!); files.delete(from); } },
     protectionStatePath: () => P,
     controlPath: () => C,
     taskStatus: (): TaskStatus => {
@@ -154,7 +157,7 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   let installed = false;
   const svc = createProtectionService({
     now: () => NOW, platform: "win32",
-    readFile: (p) => (p === P && installed ? null : null), writeFile: () => {}, removeFile: () => {},
+    readFile: (p) => (p === P && installed ? null : null), writeFile: () => {}, removeFile: () => {}, renameFile: () => {},
     protectionStatePath: () => P, controlPath: () => C,
     taskStatus: () => ({ ok: false, error: "verify failed" }),
     requiredWatchdogFilesPresent: () => true,
@@ -177,7 +180,7 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   const svc = createProtectionService({
     now: () => NOW, platform: "win32",
     readFile: (p) => (p === P ? JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }) : null),
-    writeFile: () => {}, removeFile: () => {},
+    writeFile: () => {}, removeFile: () => {}, renameFile: () => {},
     protectionStatePath: () => P, controlPath: () => C,
     taskStatus: () => (uninstalled ? { ok: false, error: "verify failed" } : { ok: true, present: true }),
     requiredWatchdogFilesPresent: () => true,
@@ -221,7 +224,7 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   // verified-write failure → ok:false (caller must NOT quit)
   const svc = createProtectionService({
     now: () => NOW, platform: "win32",
-    readFile: () => null, writeFile: () => { /* dropped */ }, removeFile: () => {},
+    readFile: () => null, writeFile: () => { /* dropped */ }, removeFile: () => {}, renameFile: (f, t) => { void f; void t; },
     protectionStatePath: () => P, controlPath: () => C,
     taskStatus: () => ({ ok: true, present: true }), requiredWatchdogFilesPresent: () => true,
     provision: () => ({ ok: true }), disableElectronAutostart: () => ({ ok: true }), log: () => {},
@@ -266,7 +269,7 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   const svc = createProtectionService({
     now: () => NOW, platform: "win32",
     readFile: (p) => (p === P ? JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }) : null),
-    writeFile: () => { /* dropped */ }, removeFile: () => {},
+    writeFile: () => { /* dropped */ }, removeFile: () => {}, renameFile: () => {},
     protectionStatePath: () => P, controlPath: () => C,
     taskStatus: () => ({ ok: true, present: true }), requiredWatchdogFilesPresent: () => true,
     provision: () => ({ ok: true }), disableElectronAutostart: () => ({ ok: true }), log: () => {},
@@ -351,12 +354,53 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   assert("13b. OFF + task present → drift task_unexpected, not healthy, error", !eff.enabled && eff.drift === "task_unexpected" && !eff.healthy && !!eff.error);
 }
 
+// ── Item #2: ATOMIC control.json write (temp + rename) ───────────────────────────────────────────────────────
+{
+  const h = harness({ taskPresent: true });
+  h.files.set(P, JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }));
+  const res = h.svc.writeIntentionalStop("exit");
+  assert("#2.1 atomic write → final control.json present, no leftover .tmp",
+    res.ok && h.files.has(C) && !h.files.has(C + ".tmp") && (JSON.parse(h.files.get(C)!) as VonoControlState).mode === "intentional_stop");
+}
+{
+  // rename failure must fail-CLOSED (marker not committed → do not quit)
+  const h = harness({ taskPresent: true, renameFails: true });
+  h.files.set(P, JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }));
+  const res = h.svc.writeIntentionalStop("exit");
+  assert("#2.2 rename failure → ok:false, marker NOT committed", !res.ok && !!res.error && !h.files.has(C));
+  const exit = h.svc.requestExit();
+  assert("#2.3 requestExit fails-closed when atomic marker can't be committed", !exit.ok && !h.files.has(C));
+}
+
+// ── Item #3(b): guarded protection.json persist failure AFTER task mutation ───────────────────────────────────
+{
+  // ON: watchdog files present, autostart ok, provision installs, verify present — but persist(P) throws.
+  const h = harness({ taskPresent: false, writeFailPath: P });
+  const res = h.svc.setEnabled(true);
+  assert("#3b.1 persist failure after install → ok:false (not a thrown exception)", res.ok === false);
+  assert("#3b.1 controlled degraded result carries a save-failure error", !!res.state.error && /could not be saved/i.test(res.state.error!));
+  assert("#3b.1 task WAS mutated (install ran)", h.calls.provision.includes("install") && h.state.taskPresent === true);
+  assert("#3b.1 no successful ON persisted to protection.json", !h.files.has(P));
+}
+{
+  // OFF: persisted ON exists, uninstall runs, verify absent — but persist(P) throws → degraded, stays truthful.
+  const h = harness({ taskPresent: true, writeFailPath: P });
+  h.files.set(P, JSON.stringify({ schemaVersion: 1, enabled: true, updatedAt: 1, source: "app" }));
+  const res = h.svc.setEnabled(false);
+  assert("#3b.2 OFF persist failure → ok:false + error, no throw", res.ok === false && !!res.state.error);
+  assert("#3b.2 protection.json NOT overwritten (still prior value)", JSON.parse(h.files.get(P)!).enabled === true);
+}
+
 // ── Static guards ─────────────────────────────────────────────────────────────────────────────────────────────
 {
   const svcSrc = readFileSync(path.join(__dirname, "..", "src", "main", "protection-service.ts"), "utf-8");
   assert("guard: no 7-day / TTL constant remains", !/INTENTIONAL_STOP_TTL_MS|7 \* 24/.test(svcSrc));
   assert("guard: intentional_stop written with expiresAt null", /mode: "intentional_stop"[\s\S]*expiresAt: null/.test(svcSrc));
   assert("guard: deps use taskStatus tri-state, not fail-open taskExists", /taskStatus: \(\) =>/.test(svcSrc) && !/taskExists/.test(svcSrc));
+  assert("#2. control marker written atomically (tmp + renameFile)",
+    /controlPath\(\) \+ "\.tmp"/.test(svcSrc) && /renameFile\(tmp, deps\.controlPath\(\)\)/.test(svcSrc));
+  assert("#3b. setEnabled persist is guarded + returns controlled save-failure result",
+    /try \{[\s\S]*persist\(\{ schemaVersion[\s\S]*\} catch[\s\S]*could not be saved/.test(svcSrc));
   assert("guard: protection-service has no identity/config/master coupling",
     !/from ["']\.\/(device-identity-reconcile|station-device-store|station-device-prisma|station-device-registration|durable-device-id|runtime-config-service)["']/.test(svcSrc) &&
     !/patchRuntimeConfig|saveRuntimeConfig|masterByBranch|\.branchId\b/.test(svcSrc));
@@ -384,6 +428,11 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   // B3: real task probe distinguishes present(0)/absent(3)/unknown.
   assert("B3. real taskStatus dep maps exit 0=present / 3=absent / else=unknown",
     /taskStatus: \(\) =>/.test(ipc) && /exit 0/.test(ipc) && /exit 3/.test(ipc) && /return \{ ok: false, error:/.test(ipc));
+  // #1: absence POSITIVELY observed (ObjectNotFound), never a broad CimException→absent.
+  assert("#1. absence via ObjectNotFound only, no broad CimException→absent",
+    /CategoryInfo\.Category -eq 'ObjectNotFound'/.test(ipc) && !/catch \[Microsoft[^\]]*CimException\][^\n]*exit 3/.test(ipc));
+  // #2: real renameFile dep for atomic control write.
+  assert("#2. real renameFile dep uses renameSync", /renameFile: \(from, to\) => renameSync/.test(ipc));
   // B5: autostart verify fail-closed (verify-read failure and still-on both → ok:false).
   assert("B5. disableElectronAutostart fail-closed on verify-read failure + still-on",
     /getLoginItemSettings\(\)\.openAtLogin === true/.test(ipc) && /return openAtLogin \? \{ ok: false/.test(ipc));
@@ -399,6 +448,11 @@ const readState = (files: Map<string, string>) => (files.has(P) ? JSON.parse(fil
   assert("UI uses getProtectionState/setProtectionState, not autostart", /getProtectionState/.test(body) && /setProtectionState/.test(body) && !/getAutoStart|setAutoStart/.test(body));
   assert("UI handles exitVono result (ok:false surfaces error)", /res\.ok/.test(body) && /exitVono/.test(body));
   assert("UI surfaces drift incl. task_unknown", /task_unknown/.test(body) && /could not be determined/.test(body));
+  // #4: drift repair RE-APPLIES current desired (no inversion); toggle disabled during drift; explicit Repair.
+  assert("#4. drift Repair re-applies current desired (setProtectionState(protection.enabled))",
+    /setProtectionState\(protection\.enabled\)/.test(body) && /Repair Protection/.test(body));
+  assert("#4. toggle disabled during drift (can't invert desired)", /busy \|\| drifted/.test(body));
+  assert("#4. drift copy tells the operator to use Repair, not to toggle", /use Repair/.test(body) && !/toggle Protection to repair/.test(body));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

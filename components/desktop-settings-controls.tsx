@@ -92,6 +92,26 @@ export function DesktopStartupSettingsCard() {
     }
   }, [protection]);
 
+  // Drift repair RE-APPLIES the current desired state (never inverts it): task_missing + desired ON → send true
+  // (re-install), task_unexpected + desired OFF → send false (remove), task_unknown → re-apply current desired
+  // (setEnabled stays fail-closed if the status is still unknown). This is why drift uses an explicit Repair
+  // action instead of the ON/OFF toggle, which would flip the operator's intent.
+  const onRepair = useCallback(async () => {
+    const api = window.syncbizDesktop;
+    if (!api?.setProtectionState || !protection) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await api.setProtectionState(protection.enabled);
+      setProtection(next);
+      if (next.error) setError(next.error);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [protection]);
+
   const onExitVono = useCallback(async () => {
     const api = window.syncbizDesktop;
     if (!api?.exitVono) return;
@@ -127,7 +147,8 @@ export function DesktopStartupSettingsCard() {
   const supported = Boolean(protection?.supported);
   const healthy = ready && Boolean(protection?.healthy);
   // Drift (desired state ≠ live task) is surfaced from the effective state, plus any transition error.
-  const driftError = protection?.drift && protection.drift !== "none" ? protection.error : undefined;
+  const drifted = ready && supported && Boolean(protection) && protection!.drift !== "none";
+  const driftError = drifted ? protection?.error : undefined;
   const shownError = error ?? driftError ?? null;
 
   return (
@@ -150,11 +171,11 @@ export function DesktopStartupSettingsCard() {
           role="switch"
           aria-checked={on}
           aria-label="VONO Protection"
-          disabled={!ready || !supported || busy}
+          disabled={!ready || !supported || busy || drifted}
           onClick={onToggleProtection}
           className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
             on ? "bg-emerald-500/80" : "bg-slate-700"
-          } ${!ready || !supported || busy ? "opacity-50" : "hover:opacity-90"}`}
+          } ${!ready || !supported || busy || drifted ? "opacity-50" : "hover:opacity-90"}`}
         >
           <span
             className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
@@ -171,15 +192,26 @@ export function DesktopStartupSettingsCard() {
               ? "Protected · automatic startup and recovery enabled"
               : "Off · manual mode"
             : protection?.drift === "task_unknown"
-              ? "Protection status could not be determined — try again."
+              ? "Protection status could not be determined — use Repair to re-check."
               : protection?.drift === "task_missing"
-                ? "Enabled, but the watchdog task is missing — toggle Protection to repair."
+                ? "Enabled, but the watchdog task is missing — use Repair to re-install it."
                 : protection?.drift === "task_unexpected"
-                  ? "Off, but a watchdog task is still active — toggle Protection to repair."
+                  ? "Off, but a watchdog task is still active — use Repair to remove it."
                   : on
                     ? "Protected · automatic startup and recovery enabled"
                     : "Off · manual mode"}
         </p>
+      ) : null}
+
+      {drifted ? (
+        <button
+          type="button"
+          onClick={onRepair}
+          disabled={busy}
+          className="rounded-md border border-amber-500/50 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-300 hover:bg-amber-500/20 disabled:opacity-50"
+        >
+          Repair Protection
+        </button>
       ) : null}
 
       {ready && window.syncbizDesktop?.exitVono ? (
