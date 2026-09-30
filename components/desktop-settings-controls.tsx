@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-type AutoStartState = {
+type ProtectionState = {
   enabled: boolean;
   supported: boolean;
+  taskPresent: boolean;
+  source: string;
+  error?: string;
 };
 
 type MusicFolderSnapshot = {
@@ -23,10 +26,10 @@ function isInElectron(): boolean {
   return "syncbizDesktop" in window && Boolean(window.syncbizDesktop);
 }
 
-function autoStartApiAvailable(): boolean {
+function protectionApiAvailable(): boolean {
   if (typeof window === "undefined") return false;
   const api = window.syncbizDesktop;
-  return Boolean(api?.getAutoStart && api?.setAutoStart);
+  return Boolean(api?.getProtectionState && api?.setProtectionState);
 }
 
 function musicFolderApiAvailable(): boolean {
@@ -35,10 +38,13 @@ function musicFolderApiAvailable(): boolean {
   return Boolean(api?.getMusicFolder && api?.pickMusicFolder && api?.clearMusicFolder);
 }
 
-/** Login item toggle — first card under Settings. */
+/**
+ * VONO Protection — the real unattended-branch-player control (Scheduled Task + watchdog), NOT the legacy
+ * Electron openAtLogin toggle. Uses ONLY getProtectionState/setProtectionState (+ optional exitVono).
+ */
 export function DesktopStartupSettingsCard() {
   const [load, setLoad] = useState<LoadState>("idle");
-  const [autoStart, setAutoStart] = useState<AutoStartState | null>(null);
+  const [protection, setProtection] = useState<ProtectionState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,9 +58,9 @@ export function DesktopStartupSettingsCard() {
     (async () => {
       try {
         const api = window.syncbizDesktop;
-        const a = api?.getAutoStart ? await api.getAutoStart() : null;
+        const p = api?.getProtectionState ? await api.getProtectionState() : null;
         if (cancelled) return;
-        setAutoStart(a ?? null);
+        setProtection(p ?? null);
         setLoad("ready");
       } catch (e) {
         if (cancelled) return;
@@ -67,25 +73,40 @@ export function DesktopStartupSettingsCard() {
     };
   }, []);
 
-  const onToggleAutoStart = useCallback(async () => {
+  const onToggleProtection = useCallback(async () => {
     const api = window.syncbizDesktop;
-    if (!api?.setAutoStart || !autoStart) return;
+    if (!api?.setProtectionState || !protection) return;
     setBusy(true);
     setError(null);
     try {
-      const next = await api.setAutoStart(!autoStart.enabled);
-      setAutoStart(next);
+      const next = await api.setProtectionState(!protection.enabled);
+      setProtection(next);
+      // The service reports the UNCHANGED prior state + an error string when a transition fails.
+      if (next.error) setError(next.error);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [autoStart]);
+  }, [protection]);
+
+  const onExitVono = useCallback(async () => {
+    const api = window.syncbizDesktop;
+    if (!api?.exitVono) return;
+    setBusy(true);
+    try {
+      await api.exitVono();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+    // On success the app quits; no state update needed.
+  }, []);
 
   if (load === "web-only") {
     return (
       <p className="text-xs text-slate-500">
-        Open SyncBiz in the desktop app to configure startup options.
+        VONO Protection is configured from the VONO Desktop app on the branch player.
       </p>
     );
   }
@@ -94,39 +115,62 @@ export function DesktopStartupSettingsCard() {
     return <p className="text-xs text-slate-500">Loading…</p>;
   }
 
-  const autoStartReady = autoStartApiAvailable();
+  const ready = protectionApiAvailable();
+  const on = ready && Boolean(protection?.enabled);
+  const supported = Boolean(protection?.supported);
 
   return (
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-sm text-slate-200">Launch SyncBiz when computer starts</p>
+          <p className="text-sm text-slate-200">VONO Protection</p>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            {!autoStartReady
-              ? "Update the SyncBiz desktop app to enable this control."
-              : autoStart?.supported
-                ? "Adds SyncBiz to your OS login items."
-                : "Not supported on this platform."}
+            {!ready
+              ? "Update the SyncBiz desktop app to manage Protection."
+              : !supported
+                ? "Not supported on this platform."
+                : on
+                  ? "VONO starts with Windows and automatically recovers the player if it stops."
+                  : "Manual mode. VONO will not auto-start or recover after it is closed."}
           </p>
         </div>
         <button
           type="button"
           role="switch"
-          aria-checked={autoStartReady ? Boolean(autoStart?.enabled) : false}
-          disabled={!autoStartReady || !autoStart?.supported || busy}
-          onClick={onToggleAutoStart}
+          aria-checked={on}
+          aria-label="VONO Protection"
+          disabled={!ready || !supported || busy}
+          onClick={onToggleProtection}
           className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
-            autoStartReady && autoStart?.enabled ? "bg-emerald-500/80" : "bg-slate-700"
-          } ${!autoStartReady || !autoStart?.supported || busy ? "opacity-50" : "hover:opacity-90"}`}
+            on ? "bg-emerald-500/80" : "bg-slate-700"
+          } ${!ready || !supported || busy ? "opacity-50" : "hover:opacity-90"}`}
         >
           <span
             className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
-              autoStartReady && autoStart?.enabled ? "translate-x-5" : "translate-x-0.5"
+              on ? "translate-x-5" : "translate-x-0.5"
             }`}
           />
         </button>
       </div>
-      {!autoStartReady ? (
+
+      {ready && supported ? (
+        <p className={`text-[11px] ${on ? "text-emerald-400/90" : "text-slate-500"}`}>
+          {on ? "Protected · automatic startup and recovery enabled" : "Off · manual mode"}
+        </p>
+      ) : null}
+
+      {ready && window.syncbizDesktop?.exitVono ? (
+        <button
+          type="button"
+          onClick={onExitVono}
+          disabled={busy}
+          className="rounded-md border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+        >
+          Exit VONO
+        </button>
+      ) : null}
+
+      {!ready ? (
         <p className="text-[11px] text-amber-400/90">
           Some controls are unavailable in this desktop build. Update the SyncBiz desktop app to use them.
         </p>

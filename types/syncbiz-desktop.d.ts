@@ -25,6 +25,15 @@ type DesktopAutoStartState = {
   supported: boolean;
 };
 
+/** Effective VONO Protection state (the unattended-player control; not openAtLogin). */
+type DesktopProtectionState = {
+  enabled: boolean;
+  supported: boolean;
+  taskPresent: boolean;
+  source: string;
+  error?: string;
+};
+
 type DesktopMusicFolderSnapshot = {
   path: string | null;
 };
@@ -142,9 +151,14 @@ type SyncBizDesktopBridgePreload = {
   scanLocalAudioFolder?: (dir: string) => Promise<ScanLocalAudioFolderIpcResult>;
   /** Optional: native path for a dropped `File` (Electron webUtils). */
   getPathForFile?: (file: File) => string;
-  /** Optional: OS auto-start (login item) state. */
+  /** Optional: OS auto-start (login item) state. LEGACY — not the VONO Protection control. */
   getAutoStart?: () => Promise<DesktopAutoStartState>;
   setAutoStart?: (enabled: boolean) => Promise<DesktopAutoStartState>;
+  /** Optional: VONO Protection (Scheduled Task + watchdog) — the real unattended-player control. */
+  getProtectionState?: () => Promise<DesktopProtectionState>;
+  setProtectionState?: (enabled: boolean) => Promise<DesktopProtectionState>;
+  /** Optional: explicit "Exit VONO" (writes intentional-stop marker when Protection ON, then quits). */
+  exitVono?: () => Promise<void>;
   /** Optional: persisted music folder path. */
   getMusicFolder?: () => Promise<DesktopMusicFolderSnapshot>;
   pickMusicFolder?: () => Promise<DesktopPickMusicFolderResult>;

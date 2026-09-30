@@ -47,3 +47,21 @@ export function vonoHeartbeatPath(): string {
 export function vonoDeviceIdPath(): string {
   return path.join(vonoStateDir(), "device-id.json");
 }
+
+/**
+ * Absolute path to the machine-scoped VONO Protection state (`…\VONO\state\protection.json`). Holds only
+ * { schemaVersion, enabled, updatedAt, source } — never tokens/URLs/user data/identity/MASTER/branch. Lives in
+ * the same ProgramData authority dir as device-id.json/heartbeat.json (survives userData loss / reinstall).
+ */
+export function vonoProtectionStatePath(): string {
+  return path.join(vonoStateDir(), "protection.json");
+}
+
+/**
+ * Absolute path to the VONO control file (`…\VONO\state\control.json`) — the maintenance / intentional-stop
+ * marker the external watchdog already reads (VonoControlState). Written ONLY on an explicit "Exit VONO" while
+ * Protection is ON; cleared on manual startup. Same path the watchdog observer polls.
+ */
+export function vonoControlPath(): string {
+  return path.join(vonoStateDir(), "control.json");
+}

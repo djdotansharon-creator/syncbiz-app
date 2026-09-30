@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { app, BrowserWindow, screen, shell } from "electron";
 
 import { initFileLogger, fileLog, getLogFilePath } from "./file-logger";
-import { registerMvpIpc, getEffectiveRuntimeConfig } from "./ipc-mvp";
+import { registerMvpIpc, getEffectiveRuntimeConfig, getProtectionService } from "./ipc-mvp";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat-writer";
 import { startEmbeddedNextServer, type EmbeddedNextHandle } from "./embedded-next-server";
 import { flushLocalCollectionTagSnapshotWrites } from "./local-collection-snapshot";
@@ -496,6 +496,12 @@ app.whenReady().then(async () => {
   orchestrator = new PlaybackOrchestrator();
   orchestrator.start(binaries);
   registerMvpIpc(getMainWindow, orchestrator);
+  // Phase B1 — this process starting means VONO is (manually or watchdog-)launched and about to run, so clear any
+  // intentional-stop marker BEFORE heartbeat/recovery begins. A valid marker suppresses the watchdog, so the app
+  // only reaches here via a real launch → clearing lets Protection recovery resume. Never touches identity/MASTER.
+  try { getProtectionService().clearIntentionalStop(); } catch (err) {
+    fileLog("WARN", "app.whenReady: clearIntentionalStop failed (non-fatal)", { err: (err as Error)?.message });
+  }
   // Seed the heartbeat with the durable MAIN identity (ProgramData deviceId) up front, so the FIRST heartbeat
   // already carries deviceId/branchId even if the renderer never loads / WS never connects / nothing plays.
   const effectiveConfig = getEffectiveRuntimeConfig();

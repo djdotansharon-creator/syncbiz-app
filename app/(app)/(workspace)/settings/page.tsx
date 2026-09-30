@@ -95,7 +95,7 @@ export default async function SettingsPage() {
         >
           <SettingsPreferencesControls />
         </PlaceholderCard>
-        <PlaceholderCard title="Startup" description="Desktop app launches at login.">
+        <PlaceholderCard title="VONO Protection" description="Unattended branch-player: auto-start with Windows and automatic recovery (VONO Desktop).">
           <DesktopStartupSettingsCard />
         </PlaceholderCard>
         <PlaceholderCard title="PlayItPro Local Library" description="Play local music on this machine. The file location is never shown.">
@@ -210,7 +210,7 @@ export default async function SettingsPage() {
         <ul className="mt-4 space-y-3 text-sm text-slate-300">
           <li className="flex items-start gap-2">
             <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
-            Require local agent watchdog
+            Optional watchdog recovery (enable via VONO Protection)
           </li>
           <li className="flex items-start gap-2">
             <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />

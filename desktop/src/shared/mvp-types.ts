@@ -40,10 +40,16 @@ export const MVP_IPC = {
   GET_APP_VERSION: "mvp:get-app-version",
   /** Main process: list audio files in a directory (Desktop only). */
   SCAN_LOCAL_AUDIO_FOLDER: "mvp:scan-local-audio-folder",
-  /** Read OS login-item state via app.getLoginItemSettings. */
+  /** Read OS login-item state via app.getLoginItemSettings. LEGACY — not the VONO Protection control. */
   GET_AUTOSTART: "mvp:get-autostart",
-  /** Write OS login-item state via app.setLoginItemSettings. */
+  /** Write OS login-item state via app.setLoginItemSettings. LEGACY — not the VONO Protection control. */
   SET_AUTOSTART: "mvp:set-autostart",
+  /** Read effective VONO Protection state (enabled/supported/task presence). */
+  GET_PROTECTION_STATE: "mvp:get-protection-state",
+  /** Enable/disable VONO Protection (provision/deprovision the Scheduled Task). */
+  SET_PROTECTION_STATE: "mvp:set-protection-state",
+  /** Explicit "Exit VONO": write an intentional-stop marker when Protection is ON, then quit. */
+  EXIT_VONO: "mvp:exit-vono",
   /** Read persisted music folder path. */
   GET_MUSIC_FOLDER: "mvp:get-music-folder",
   /** Open native folder picker; persist + return chosen path. */
@@ -205,12 +211,26 @@ export type ScanLocalAudioFolderResult =
   | { status: "not_directory" }
   | { status: "error"; message: string };
 
-/** Current login-item state from app.getLoginItemSettings. */
+/** Current login-item state from app.getLoginItemSettings. LEGACY — not the VONO Protection control. */
 export type AutoStartState = {
   /** True if Electron will launch the app at OS login. */
   enabled: boolean;
   /** False on platforms where openAtLogin is unsupported (e.g. some Linux configs). */
   supported: boolean;
+};
+
+/** Effective VONO Protection state for the UI (the real unattended-player control, not openAtLogin). */
+export type ProtectionState = {
+  /** True when the "VONO Protection" Scheduled Task/watchdog is the active start+recovery mechanism. */
+  enabled: boolean;
+  /** False off-Windows (the Scheduled Task mechanism is Windows-only) → the switch is disabled. */
+  supported: boolean;
+  /** Whether the "VONO Protection" Scheduled Task is currently present. */
+  taskPresent: boolean;
+  /** How the current state was set: installer | app | migration | admin | default. */
+  source: string;
+  /** Present when the last transition failed; `enabled` then reflects the UNCHANGED prior state. */
+  error?: string;
 };
 
 /** Result of the native music-folder picker. */
