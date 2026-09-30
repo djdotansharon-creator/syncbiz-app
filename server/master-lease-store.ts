@@ -15,15 +15,27 @@ const railwayVolumePath =
 const DATA_DIR = railwayVolumePath ? join(railwayVolumePath, "ws-lease") : join(__dirname, "data");
 const LEASE_FILE = join(DATA_DIR, "master-lease.json");
 
-/** Key format: userId:branchId */
+/**
+ * Lease-format version. PR-0 switched the runtime key from `userId:branchId` (v1/unversioned) to the
+ * workspace-scoped room key `ws:<workspaceId>:<branch>` / `legacy:<userId>:<branch>` (see branch-room.ts).
+ * Old keys CANNOT be safely reinterpreted as workspace keys, so a file whose version !== this is IGNORED on
+ * load (runtime election starts fresh — safe because permanent designation is not active yet). The old file is
+ * left on disk untouched (never deleted) and is overwritten with the new format on the next save.
+ */
+export const LEASE_FORMAT_VERSION = 2;
+
+/** Key format (v2): the runtime room key from branch-room.ts (`ws:<workspaceId>:<branch>` or `legacy:...`). */
 export type LeaseSnapshot = {
+  version?: number;
   masterByBranch: Record<string, string>;
   masterDisconnectedAt: Record<string, number>;
-  /** Designated primary MASTER per branch. Only this device can be MASTER. */
+  /** Designated primary MASTER per room. Only this device can be MASTER. */
   primaryMasterByBranch: Record<string, string>;
-  /** @deprecated Migrated to masterByBranch. Kept for load compat. */
-  masterByUserId?: Record<string, string>;
 };
+
+function emptySnapshot(): LeaseSnapshot {
+  return { version: LEASE_FORMAT_VERSION, masterByBranch: {}, masterDisconnectedAt: {}, primaryMasterByBranch: {} };
+}
 
 function ensureDir() {
   if (!existsSync(DATA_DIR)) {
@@ -31,42 +43,39 @@ function ensureDir() {
   }
 }
 
-/** Load persisted lease state. Migrates old masterByUserId to masterByBranch (userId -> userId:default). */
+/**
+ * Load persisted lease state. A file without version === LEASE_FORMAT_VERSION is a legacy (userId-scoped)
+ * lease whose keys are NOT valid workspace room keys, so it is ignored (start fresh). Never throws.
+ */
 export function loadLease(): LeaseSnapshot {
   try {
-    if (!existsSync(LEASE_FILE)) return { masterByBranch: {}, masterDisconnectedAt: {}, primaryMasterByBranch: {} };
+    if (!existsSync(LEASE_FILE)) return emptySnapshot();
     const raw = readFileSync(LEASE_FILE, "utf-8");
-    const data = JSON.parse(raw) as LeaseSnapshot & { masterByUserId?: Record<string, string> };
-    let masterByBranch = typeof data.masterByBranch === "object" ? data.masterByBranch : {};
-    let masterDisconnectedAt = typeof data.masterDisconnectedAt === "object" ? data.masterDisconnectedAt : {};
-    let primaryMasterByBranch = typeof data.primaryMasterByBranch === "object" ? data.primaryMasterByBranch : {};
-    if (data.masterByUserId && Object.keys(masterByBranch).length === 0) {
-      for (const [userId, deviceId] of Object.entries(data.masterByUserId)) {
-        masterByBranch[`${userId}:default`] = deviceId;
-      }
-      const oldDisconnected = (data as { masterDisconnectedAt?: Record<string, number> }).masterDisconnectedAt;
-      if (oldDisconnected) {
-        for (const [userId, ts] of Object.entries(oldDisconnected)) {
-          masterDisconnectedAt[`${userId}:default`] = ts;
-        }
-      }
+    const data = JSON.parse(raw) as Partial<LeaseSnapshot>;
+    if (data.version !== LEASE_FORMAT_VERSION) {
+      console.warn(
+        `[SyncBiz WS] Ignoring legacy master-lease format (found version=${data.version ?? "none"}, need ${LEASE_FORMAT_VERSION}) — starting fresh.`,
+      );
+      return emptySnapshot();
     }
-    if (Object.keys(primaryMasterByBranch).length === 0 && Object.keys(masterByBranch).length > 0) {
-      for (const [k, v] of Object.entries(masterByBranch)) {
-        primaryMasterByBranch[k] = v;
-      }
-    }
-    return { masterByBranch, masterDisconnectedAt, primaryMasterByBranch };
+    return {
+      version: LEASE_FORMAT_VERSION,
+      masterByBranch: typeof data.masterByBranch === "object" && data.masterByBranch ? data.masterByBranch : {},
+      masterDisconnectedAt:
+        typeof data.masterDisconnectedAt === "object" && data.masterDisconnectedAt ? data.masterDisconnectedAt : {},
+      primaryMasterByBranch:
+        typeof data.primaryMasterByBranch === "object" && data.primaryMasterByBranch ? data.primaryMasterByBranch : {},
+    };
   } catch {
-    return { masterByBranch: {}, masterDisconnectedAt: {}, primaryMasterByBranch: {} };
+    return emptySnapshot();
   }
 }
 
-/** Persist lease state to disk. */
+/** Persist lease state to disk (always stamped with the current format version). */
 export function saveLease(snapshot: LeaseSnapshot): void {
   try {
     ensureDir();
-    writeFileSync(LEASE_FILE, JSON.stringify(snapshot, null, 2), "utf-8");
+    writeFileSync(LEASE_FILE, JSON.stringify({ version: LEASE_FORMAT_VERSION, ...snapshot }, null, 2), "utf-8");
   } catch (err) {
     console.warn("[SyncBiz WS] Failed to persist master lease:", err);
   }
