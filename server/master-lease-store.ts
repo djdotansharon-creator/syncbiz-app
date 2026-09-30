@@ -75,7 +75,8 @@ export function loadLease(): LeaseSnapshot {
 export function saveLease(snapshot: LeaseSnapshot): void {
   try {
     ensureDir();
-    writeFileSync(LEASE_FILE, JSON.stringify({ version: LEASE_FORMAT_VERSION, ...snapshot }, null, 2), "utf-8");
+    // `version` LAST so a caller's snapshot.version can never override the required current format version.
+    writeFileSync(LEASE_FILE, JSON.stringify({ ...snapshot, version: LEASE_FORMAT_VERSION }, null, 2), "utf-8");
   } catch (err) {
     console.warn("[SyncBiz WS] Failed to persist master lease:", err);
   }

@@ -40,3 +40,37 @@ export function workspaceScopeKey(
 export function isLegacyRoomKey(key: string): boolean {
   return key.startsWith("legacy:");
 }
+
+/**
+ * Per-user branch authorization from the token's `authorizedBranches` claim (canonical impl, pure/testable).
+ * A legacy token (claim === null) is restricted to the default branch only — a missing claim is NEVER "all".
+ * Workspace scope is necessary but NOT sufficient: this per-user check must ALSO pass.
+ */
+export function isBranchAllowed(branchId: string, authorizedBranches: string[] | null): boolean {
+  const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
+  if (authorizedBranches === null) return normalized === DEFAULT_BRANCH_ID;
+  return authorizedBranches.includes(normalized);
+}
+
+/**
+ * Whether an owner_global connection may receive a branch's list entry / state. Requires BOTH the workspace
+ * scope match AND per-user branch authorization (owner role is client-supplied; the token only proves
+ * userId/workspaceId/authorizedBranches, so authorizedBranches must still gate every branch).
+ */
+export function ownerReceivesBranch(
+  owner: { scopeKey: string; authorizedBranches: string[] | null },
+  room: { scopeKey: string; branchId: string },
+): boolean {
+  return owner.scopeKey === room.scopeKey && isBranchAllowed(room.branchId, owner.authorizedBranches);
+}
+
+/**
+ * COMMAND room-isolation guard: a resolved target may be commanded ONLY if it is a MASTER device AND its room
+ * exactly equals the expected (caller/owner) room. Prevents a supplied targetDeviceId from crossing rooms.
+ */
+export function commandTargetInRoom(
+  expectedRoomKey: string,
+  target: { role?: string; mode?: string; roomKey?: string } | null | undefined,
+): boolean {
+  return !!target && target.role === "device" && target.mode === "MASTER" && target.roomKey === expectedRoomKey;
+}

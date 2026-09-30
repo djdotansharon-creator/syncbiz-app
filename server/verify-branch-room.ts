@@ -13,7 +13,14 @@ import { readFileSync, mkdtempSync, writeFileSync, mkdirSync, rmSync } from "nod
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runtimeBranchKey, workspaceScopeKey, isLegacyRoomKey } from "./branch-room.js";
+import {
+  runtimeBranchKey,
+  workspaceScopeKey,
+  isLegacyRoomKey,
+  isBranchAllowed,
+  ownerReceivesBranch,
+  commandTargetInRoom,
+} from "./branch-room.js";
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean, detail = ""): void {
@@ -54,6 +61,33 @@ async function main(): Promise<void> {
     assert("workspaceScopeKey: distinct workspaces isolated", workspaceScopeKey("ws-A", "u") !== workspaceScopeKey("ws-B", "u"));
   }
 
+  // ── BLOCKER 1: owner_global branch authorization (workspace scope is necessary but NOT sufficient) ────────
+  {
+    const owner = { scopeKey: "ws:ws-1", authorizedBranches: ["branch-A"] };
+    assert("owner sees authorized branch in own workspace", ownerReceivesBranch(owner, { scopeKey: "ws:ws-1", branchId: "branch-A" }));
+    assert("owner does NOT see unauthorized branch (same workspace) — BLOCKER 1", !ownerReceivesBranch(owner, { scopeKey: "ws:ws-1", branchId: "branch-B" }));
+    assert("owner does NOT see another workspace's branch", !ownerReceivesBranch(owner, { scopeKey: "ws:ws-2", branchId: "branch-A" }));
+    const legacyOwner = { scopeKey: "legacy:u", authorizedBranches: null };
+    assert("legacy-claim owner restricted to default only", ownerReceivesBranch(legacyOwner, { scopeKey: "legacy:u", branchId: "default" }) && !ownerReceivesBranch(legacyOwner, { scopeKey: "legacy:u", branchId: "branch-A" }));
+    // isBranchAllowed direct
+    assert("isBranchAllowed: null claim → default only", isBranchAllowed("default", null) && !isBranchAllowed("branch-A", null));
+    assert("isBranchAllowed: claim gates", isBranchAllowed("branch-A", ["branch-A"]) && !isBranchAllowed("branch-B", ["branch-A"]));
+  }
+
+  // ── BLOCKER 2: COMMAND room isolation (targetDeviceId can never cross the caller's room) ──────────────────
+  {
+    const expected = runtimeBranchKey("ws-1", "u", "branch-A"); // ws:ws-1:branch-A
+    const sameRoomMaster = { role: "device", mode: "MASTER", roomKey: expected };
+    const otherBranchMaster = { role: "device", mode: "MASTER", roomKey: runtimeBranchKey("ws-1", "u", "branch-B") };
+    const otherWsMaster = { role: "device", mode: "MASTER", roomKey: runtimeBranchKey("ws-2", "u", "branch-A") };
+    const sameRoomControl = { role: "device", mode: "CONTROL", roomKey: expected };
+    assert("command allowed to same-room MASTER", commandTargetInRoom(expected, sameRoomMaster));
+    assert("command BLOCKED to MASTER in another branch (same ws) — BLOCKER 2", !commandTargetInRoom(expected, otherBranchMaster));
+    assert("command BLOCKED to MASTER in another workspace", !commandTargetInRoom(expected, otherWsMaster));
+    assert("command BLOCKED to a non-MASTER in same room", !commandTargetInRoom(expected, sameRoomControl));
+    assert("command BLOCKED when target missing", !commandTargetInRoom(expected, null));
+  }
+
   // ── Versioned lease store: legacy userId-scoped files are ignored, not misread ────────────────────────────
   {
     const tmp = mkdtempSync(path.join(os.tmpdir(), "vono-lease-"));
@@ -73,6 +107,10 @@ async function main(): Promise<void> {
     assert("v2 workspace-scoped lease round-trips", reloaded.masterByBranch["ws:ws-1:default"] === "dev-new");
     const onDisk = JSON.parse(readFileSync(leaseFile, "utf-8")) as { version?: number };
     assert("persisted file is stamped with the format version", onDisk.version === store.LEASE_FORMAT_VERSION);
+    // A caller's snapshot.version must NOT override the required current version.
+    store.saveLease({ version: 999, masterByBranch: {}, masterDisconnectedAt: {}, primaryMasterByBranch: {} } as never);
+    const overridden = JSON.parse(readFileSync(leaseFile, "utf-8")) as { version?: number };
+    assert("snapshot.version cannot override persisted lease version", overridden.version === store.LEASE_FORMAT_VERSION);
     rmSync(tmp, { recursive: true, force: true });
   }
 
@@ -85,7 +123,9 @@ async function main(): Promise<void> {
     assert("workspaceId is never read from the REGISTER body/message", !/msg\.workspaceId|validation\.workspaceId|m\.workspaceId/.test(src));
     assert("DeviceConnection carries roomKey", /roomKey:\s*string/.test(src));
     assert("state broadcast routes by roomKey", /c\.roomKey === roomKey/.test(src) && /d\.roomKey === roomKey/.test(src));
-    assert("owner fan-out scoped by workspace scopeKey", /o\.scopeKey === scopeKey/.test(src));
+    assert("owner state fan-out gated by ownerReceivesBranch (scope + authz)", /ownerReceivesBranch\(o, \{ scopeKey, branchId \}\)/.test(src));
+    assert("owner branch-list gated by ownerReceivesBranch", /getBranchListForOwner/.test(src) && /ownerReceivesBranch\(owner,/.test(src));
+    assert("COMMAND enforces room isolation via commandTargetInRoom", /commandTargetInRoom\(expectedRoomKey, target\)/.test(src));
     assert("master maps are keyed by the room key (getMasterForRoom)", /function getMasterForRoom\(key: string\)/.test(src));
     assert("server/index.ts imports NO Prisma", !/@prisma\/client|["'].*lib\/prisma|PrismaClient/.test(src));
     assert("authorizedBranches still enforced per user (isBranchAllowed)", /isBranchAllowed\(/.test(src));

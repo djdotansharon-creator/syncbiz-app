@@ -43,7 +43,13 @@ import type {
 } from "./ws-remote-control-types.js";
 import { sanitizeRegistrationIntent, type SyncBizRegistrationIntent } from "./syncbiz-device-model.js";
 import { loadLease, saveLease } from "./master-lease-store.js";
-import { runtimeBranchKey, workspaceScopeKey } from "./branch-room.js";
+import {
+  runtimeBranchKey,
+  workspaceScopeKey,
+  isBranchAllowed,
+  ownerReceivesBranch,
+  commandTargetInRoom,
+} from "./branch-room.js";
 import { verifyWsToken } from "./ws-token.js";
 
 const WS_SECRET = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
@@ -438,7 +444,13 @@ function broadcastDeviceList() {
   rooms.forEach((roomKey) => broadcastDeviceListForRoom(roomKey));
 }
 
-function broadcastStateUpdate(deviceId: string, state: StationPlaybackState, roomKey: string, scopeKey: string) {
+function broadcastStateUpdate(
+  deviceId: string,
+  state: StationPlaybackState,
+  roomKey: string,
+  scopeKey: string,
+  branchId: string,
+) {
   deviceState.set(deviceId, state);
   const msg: ServerMessage = { type: "STATE_UPDATE", deviceId, state };
   const raw = JSON.stringify(msg);
@@ -450,8 +462,9 @@ function broadcastStateUpdate(deviceId: string, state: StationPlaybackState, roo
       d.ws.send(raw);
     }
   });
+  // Owner fan-out requires workspace scope AND per-user branch authorization (owner role is client-supplied).
   owners.forEach((o) => {
-    if (o.scopeKey === scopeKey && o.ws.readyState === 1) o.ws.send(raw);
+    if (o.ws.readyState === 1 && ownerReceivesBranch(o, { scopeKey, branchId })) o.ws.send(raw);
   });
 }
 
@@ -474,7 +487,8 @@ function getBranchListForOwner(owner: OwnerEntry): BranchSummary[] {
   devices.forEach((conn) => {
     if (conn.role !== "device" || conn.mode !== "MASTER" || conn.isMobile) return;
     if (conn.ws.readyState !== 1) return;
-    if (workspaceScopeKey(conn.workspaceId, conn.userId) !== owner.scopeKey) return;
+    // Workspace scope AND per-user branch authorization (scope alone is not sufficient).
+    if (!ownerReceivesBranch(owner, { scopeKey: workspaceScopeKey(conn.workspaceId, conn.userId), branchId: conn.branchId })) return;
     const branchId = conn.branchId;
     if (seen.has(branchId)) return;
     seen.add(branchId);
@@ -504,11 +518,7 @@ function sendBranchListToOwner(ws: import("ws").WebSocket, owner: OwnerEntry) {
  * token (claim === null) is restricted to the default branch only — a missing claim is NEVER treated
  * as "all branches".
  */
-function isBranchAllowed(branchId: string, authorizedBranches: string[] | null): boolean {
-  const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
-  if (authorizedBranches === null) return normalized === DEFAULT_BRANCH_ID;
-  return authorizedBranches.includes(normalized);
-}
+// isBranchAllowed is imported from ./branch-room (canonical, pure, unit-tested).
 
 function validateRegisterPayload(
   msg: unknown
@@ -996,9 +1006,10 @@ wss.on("connection", (ws) => {
       const conn = devices.get(deviceId);
       if (conn) conn.lastSeen = new Date().toISOString();
       const userId = conn?.userId ?? "";
-      const roomKey = conn?.roomKey ?? runtimeBranchKey(conn?.workspaceId, userId, conn?.branchId ?? DEFAULT_BRANCH_ID);
+      const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
+      const roomKey = conn?.roomKey ?? runtimeBranchKey(conn?.workspaceId, userId, branchId);
       const scopeKey = workspaceScopeKey(conn?.workspaceId, userId);
-      broadcastStateUpdate(deviceId, msg.state, roomKey, scopeKey);
+      broadcastStateUpdate(deviceId, msg.state, roomKey, scopeKey, branchId);
       return;
     }
 
@@ -1161,6 +1172,8 @@ wss.on("connection", (ws) => {
 
     if (msg.type === "COMMAND") {
       let masterId: string | null = null;
+      // The command may ONLY reach a MASTER in this exact room (workspace+branch) — never cross rooms.
+      let expectedRoomKey: string | null = null;
       if (role === "owner_global") {
         const owner = owners.find((o) => o.ws === ws);
         const targetBranchId = (msg.targetBranchId ?? "").trim() || DEFAULT_BRANCH_ID;
@@ -1170,15 +1183,20 @@ wss.on("connection", (ws) => {
           return;
         }
         // Target the workspace room for (owner workspace, targetBranch).
-        masterId = getMasterForRoom(runtimeBranchKey(owner.workspaceId, owner.userId, targetBranchId));
+        expectedRoomKey = runtimeBranchKey(owner.workspaceId, owner.userId, targetBranchId);
+        masterId = getMasterForRoom(expectedRoomKey);
       } else {
-        const actingRoomKey = role === "controller"
-          ? controllers.find((c) => c.ws === ws)?.roomKey
-          : devices.get(deviceId!)?.roomKey;
-        masterId = (actingRoomKey ? getMasterForRoom(actingRoomKey) : null) ?? msg.targetDeviceId ?? null;
+        expectedRoomKey =
+          (role === "controller"
+            ? controllers.find((c) => c.ws === ws)?.roomKey
+            : devices.get(deviceId!)?.roomKey) ?? null;
+        // Prefer the current room MASTER; a targetDeviceId fallback is honored ONLY if it is in the SAME room.
+        masterId = (expectedRoomKey ? getMasterForRoom(expectedRoomKey) : null) ?? msg.targetDeviceId ?? null;
       }
       const target = masterId ? devices.get(masterId) : null;
-      if (!target || target.role !== "device" || target.mode !== "MASTER") {
+      // Room-isolation guard: target must be a MASTER whose room === expectedRoomKey (blocks cross-room
+      // targetDeviceId escape). expectedRoomKey null (no room) → rejected.
+      if (!expectedRoomKey || !commandTargetInRoom(expectedRoomKey, target)) {
         ws.send(JSON.stringify({ type: "ERROR", message: "No MASTER device" } as ServerMessage));
         return;
       }
@@ -1190,9 +1208,9 @@ wss.on("connection", (ws) => {
       const canSend =
         role === "controller" ||
         role === "owner_global" ||
-        (role === "device" && deviceId && target.id === masterId && target.mode === "MASTER");
-      if (canSend && target.ws.readyState === 1) {
-        target.ws.send(JSON.stringify(cmd));
+        (role === "device" && deviceId && target!.id === masterId);
+      if (canSend && target!.ws.readyState === 1) {
+        target!.ws.send(JSON.stringify(cmd));
       }
     }
   });
