@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource, type PlaybackStatus } from "@/lib/playback-provider";
 import { shouldAdoptLiveMpv } from "@/lib/live-mpv-adopt";
-import { shouldFreezeSelfHeal, nextFreezeBaseline } from "@/lib/desktop-freeze-self-heal";
+import { shouldFreezeSelfHeal, nextFreezeBaseline, nextStartupBaseline, isEnginePaused } from "@/lib/desktop-freeze-self-heal";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { computeLivePosition } from "@/lib/remote-control/live-position";
 import { isPlayNextSourceId } from "@/lib/play-next";
@@ -679,20 +679,34 @@ export function AudioPlayer() {
       const prevSnapPos = desktopSnapLastPosRef.current;
       const posChanged = prevSnapPos === null || nextPos !== prevSnapPos;
       const snapStatus = (s.mockPlaybackStatus as DesktopMpvSnap["status"]) ?? "idle";
+      // Previous engine status (before we overwrite the snap ref) — needed to detect a PAUSED→PLAYING resume.
+      const prevSnapStatus = desktopMpvSnapRef.current?.status ?? null;
       // PR-C PAUSE INVARIANT — update the freeze clock via the pure helper so a PAUSED engine never accrues
       // freeze time (its position legitimately does not advance) and a long pause gets a FRESH baseline on
-      // resume (it can't become an instant "freeze" the moment playback resumes). Position-advance stamping
-      // for genuinely playing streams is unchanged.
+      // resume — INCLUDING the real case of one paused snap, silence, then a resume snap at the SAME position
+      // (handled by prevStatus). Position-advance stamping for genuinely playing streams is unchanged.
       {
         const fc = nextFreezeBaseline({
           prevBaseline: desktopSnapPositionAtRef.current,
           prevPos: prevSnapPos,
           nextPos,
+          prevStatus: prevSnapStatus,
           snapStatus,
           now: Date.now(),
         });
         desktopSnapPositionAtRef.current = fc.baseline;
         desktopSnapLastPosRef.current = fc.lastPos;
+      }
+      // PR-C Blocker 2 — during STREAM startup, exclude PAUSED wall-clock from the startup timeout and
+      // freshen its baseline on resume, so a long pause while "starting" can't cause an immediate
+      // startup_timeout redispatch/skip. Does NOT touch the retry budget.
+      if (streamPhaseRef.current === "starting") {
+        attemptStartAtRef.current = nextStartupBaseline({
+          prevBaseline: attemptStartAtRef.current,
+          prevStatus: prevSnapStatus,
+          snapStatus,
+          now: Date.now(),
+        });
       }
       const snap: DesktopMpvSnap = {
         status: snapStatus,
@@ -4022,6 +4036,18 @@ export function AudioPlayer() {
       if (statusRef.current !== "playing") return; // we must intend to play
       const url = currentPlayUrlRef.current;
       if (!url) return;
+
+      // PR-C PAUSE INVARIANT (interval-level, covers BOTH startup and freeze): this 1s interval ages
+      // independently of snapshots, and real MPV may emit NO periodic paused snapshots (one paused snap, then
+      // silence for minutes). While the last-known engine state is PAUSED, never age the startup/freeze clocks
+      // and never redispatch/skip — hold both baselines fresh so resume starts clean. This runs BEFORE the
+      // STREAM_STARTING timeout logic, so a paused engine can never hit startup_timeout.
+      if (isEnginePaused(desktopMpvSnapRef.current?.status)) {
+        const nowTs = Date.now();
+        attemptStartAtRef.current = nowTs;
+        desktopSnapPositionAtRef.current = nowTs;
+        return;
+      }
 
       // ── STREAM_STARTING — bounded startup timeout (RC1/RC3). A fresh STREAM attempt that has not yet
       //    shown real progress stays in "starting"; here the 6s freeze redispatch is SUPPRESSED (fixes
