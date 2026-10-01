@@ -51,6 +51,7 @@ import {
   commandTargetInRoom,
 } from "./branch-room.js";
 import { verifyWsToken } from "./ws-token.js";
+import { loadDesignations, saveDesignations } from "./branch-designation-store.js";
 
 const WS_SECRET = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
 if (!WS_SECRET || WS_SECRET.length < 16) {
@@ -92,6 +93,12 @@ type DeviceConnection = {
   roomKey: string;
   /** Sanitized REGISTER hint from client (optional). */
   registrationIntent?: SyncBizRegistrationIntent;
+  /**
+   * Pilot PERMANENT MASTER: true ONLY for the trusted designated station on a designated branch (REGISTER
+   * deviceId === token.stationDeviceId === designated). Gates SET_MASTER so a CONTROL device can never flip to
+   * MASTER on a designated branch.
+   */
+  designatedTrusted?: boolean;
 };
 
 const devices = new Map<string, DeviceConnection>();
@@ -126,14 +133,38 @@ const masterDisconnectedAt = new Map<string, number>();
 const primaryMasterByBranch = new Map<string, string>();
 
 /**
- * Pilot PERMANENT MASTER — room key → designated durable deviceId, learned from the signed token claim
- * (`designatedMasterByBranch`) on every REGISTER. In-memory only: the DB (BranchMasterDesignation) is the
- * source of truth, and every token for a designated branch carries the claim, so this map is repopulated by the
- * first REGISTER after any WS/server restart (designation survives restart via the DB + token claims). When a
- * room is in this map it is a PERMANENTLY-DESIGNATED branch: only the trusted designated station may be MASTER,
- * and normal grace/auto-election is disabled for it.
+ * Pilot PERMANENT MASTER — room key (`ws:<workspaceId>:<branch>`) → designated durable deviceId. When a room is
+ * present it is a PERMANENTLY-DESIGNATED branch: only the trusted designated station may be MASTER and normal
+ * grace/auto-election is disabled for it.
+ *
+ * Two provenance tiers:
+ *  - AUTHORITATIVE: loaded from the persisted store on startup + updated by the admin internal-sync endpoint.
+ *    The DB (BranchMasterDesignation) is the source of truth; the app syncs every change here. This survives
+ *    WS/server restart WITHOUT any client token, and a stale client token can NEVER overwrite it.
+ *  - bootstrap: a signed token claim (`designatedMasterByBranch`) may ADD a designation for a room that has no
+ *    authoritative entry yet, but never overwrite/revert an authoritative one.
  */
 const designatedByRoom = new Map<string, string>();
+/** Room keys whose designation came from the authoritative store/internal-sync (not a client token claim). */
+const authoritativeDesignationRooms = new Set<string>();
+(function loadPersistedDesignations() {
+  const rows = loadDesignations();
+  for (const [roomKey, durableId] of Object.entries(rows)) {
+    if (durableId) {
+      designatedByRoom.set(roomKey, durableId);
+      authoritativeDesignationRooms.add(roomKey);
+    }
+  }
+})();
+/** Persist ONLY the authoritative designations (never the token-bootstrapped ones) to the volume. */
+function persistDesignations(): void {
+  const out: Record<string, string> = {};
+  for (const rk of authoritativeDesignationRooms) {
+    const d = designatedByRoom.get(rk);
+    if (d) out[rk] = d;
+  }
+  saveDesignations(out);
+}
 
 /** Load persisted lease on startup (v2 workspace-scoped; legacy formats are ignored by the store). */
 (function loadPersistedLease() {
@@ -615,6 +646,66 @@ const httpServer = createServer((req, res) => {
     });
     return;
   }
+  // ── Pilot PERMANENT MASTER: authoritative designation sync from the app (DB is source of truth) ──────────────
+  // The admin designation route calls this after writing the DB. It sets/clears the AUTHORITATIVE designation so
+  // it survives WS restart independently of client tokens, and a stale token can never revert it.
+  if (req.method === "POST" && req.url === "/internal/branch-master-designation") {
+    const secret = req.headers["x-syncbiz-secret"] ?? req.headers["x-syncbiz-internal-secret"];
+    if (secret !== WS_SECRET) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Forbidden" }));
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      try {
+        const data = body ? (JSON.parse(body) as { workspaceId?: string; branchId?: string; durableDeviceId?: string | null }) : {};
+        const workspaceId = typeof data.workspaceId === "string" ? data.workspaceId.trim() : "";
+        const branchId = (typeof data.branchId === "string" ? data.branchId.trim() : "") || DEFAULT_BRANCH_ID;
+        if (!workspaceId) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "workspaceId required" }));
+          return;
+        }
+        const durableDeviceId = typeof data.durableDeviceId === "string" ? data.durableDeviceId.trim() : "";
+        // Designation rooms are ALWAYS workspace-scoped (ws:<workspaceId>:<branch>); userId is irrelevant.
+        const roomKey = runtimeBranchKey(workspaceId, "", branchId);
+        if (durableDeviceId) {
+          designatedByRoom.set(roomKey, durableDeviceId);
+          authoritativeDesignationRooms.add(roomKey);
+          // Enforce immediately: demote any current master in the room that is not the newly-designated device.
+          const curMasterId = masterByBranch.get(roomKey);
+          if (curMasterId && curMasterId !== durableDeviceId) {
+            const curConn = devices.get(curMasterId);
+            if (curConn) {
+              curConn.mode = "CONTROL";
+              curConn.designatedTrusted = false;
+              if (curConn.ws.readyState === 1) {
+                curConn.ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL" } as ServerMessage));
+              }
+            }
+            masterByBranch.delete(roomKey);
+            masterDisconnectedAt.delete(roomKey);
+            persistMasterLease();
+          }
+        } else {
+          // Clear (admin reset): the branch reverts to legacy (non-designated) behavior on future events.
+          designatedByRoom.delete(roomKey);
+          authoritativeDesignationRooms.delete(roomKey);
+        }
+        persistDesignations();
+        logLeaseEvent("designation_sync", { workspaceId, branchId, roomKey, durableDeviceId: durableDeviceId || null, triggeredBy: "internal_sync" });
+        broadcastDeviceList();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON" }));
+      }
+    });
+    return;
+  }
   res.writeHead(404);
   res.end();
 });
@@ -723,6 +814,7 @@ wss.on("connection", (ws) => {
         const roomKey = runtimeBranchKey(workspaceId, userId, branchId);
         clearExpiredGracePeriods(roomKey);
         let mode: DeviceMode = "CONTROL";
+        let designatedTrusted = false;
         let secondaryDesktop = false;
         const key = roomKey;
         const primaryId = primaryMasterByBranch.get(key);
@@ -738,9 +830,13 @@ wss.on("connection", (ws) => {
         // A packaged-Electron hosted renderer is CONTROL/mirror ONLY — it must never elect as a station MASTER
         // (this ends the dual-plane race where MAIN durable id + renderer localStorage id both competed).
         const isEmbeddedRenderer = (msg as { embeddedRenderer?: boolean }).embeddedRenderer === true;
-        // Learn/refresh this branch's permanent designation from the signed token claim (DB-sourced at mint).
+        // A signed token claim may BOOTSTRAP a designation ONLY for a room with no AUTHORITATIVE entry (and none
+        // already learned). It must NEVER overwrite/revert an authoritative (persisted / internal-synced)
+        // designation with stale data — an old token minted before a (re)designation can't change it.
         const claimDesignatedId = auth.designatedMasterByBranch?.[branchId] ?? null;
-        if (claimDesignatedId) designatedByRoom.set(key, claimDesignatedId);
+        if (claimDesignatedId && !authoritativeDesignationRooms.has(key) && !designatedByRoom.has(key)) {
+          designatedByRoom.set(key, claimDesignatedId);
+        }
         const roomDesignatedId = designatedByRoom.get(key) ?? null;
 
         const playingLockId = (isMobile || isStreamerReg || roomDesignatedId || isEmbeddedRenderer)
@@ -756,6 +852,7 @@ wss.on("connection", (ws) => {
             !isEmbeddedRenderer && deviceId === roomDesignatedId && auth.stationDeviceId === roomDesignatedId;
           if (isTrustedDesignatedStation) {
             mode = "MASTER";
+            designatedTrusted = true;
             masterDisconnectedAt.delete(key);
             demoteOtherMasters(key, deviceId, deviceId);
             masterByBranch.set(key, deviceId);
@@ -904,6 +1001,7 @@ wss.on("connection", (ws) => {
           branchId,
           roomKey,
           registrationIntent,
+          designatedTrusted,
         });
         console.log("[SyncBiz WS] register device", { deviceId, userId, branchId, mode });
         logLeaseEvent("register", {
@@ -1066,6 +1164,43 @@ wss.on("connection", (ws) => {
       const userId = conn?.userId ?? "";
       const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
       const key = conn?.roomKey ?? runtimeBranchKey(conn?.workspaceId, userId, branchId);
+
+      // ── Pilot PERMANENT MASTER: SET_MASTER cannot bypass a designation ───────────────────────────────────
+      // On a designated branch, ONLY the trusted designated station may be MASTER. SET_MASTER from anyone else
+      // (incl. the embedded renderer) is rejected and kept CONTROL; SET_MASTER never changes the designation.
+      const setMasterDesignatedId = designatedByRoom.get(key) ?? null;
+      if (setMasterDesignatedId) {
+        const allowed = !!conn && conn.designatedTrusted === true && deviceId === setMasterDesignatedId;
+        if (!allowed) {
+          logLeaseEvent("set_master_blocked", {
+            userId, branchId, deviceId,
+            reason: "permanent designation: only the trusted designated station may be MASTER",
+            triggeredBy: "SET_MASTER",
+          });
+          if (conn) conn.mode = "CONTROL";
+          if (ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: "ERROR", message: "Branch has a permanent designated MASTER" } as ServerMessage));
+            ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL", masterDeviceId: getMasterForRoom(key) ?? undefined } as ServerMessage));
+          }
+          return;
+        }
+        // Trusted designated station (re)asserts MASTER — no legacy blockers apply (it IS the permanent master).
+        demoteOtherMasters(key, deviceId, deviceId);
+        masterByBranch.set(key, deviceId);
+        primaryMasterByBranch.set(key, deviceId);
+        masterDisconnectedAt.delete(key);
+        persistMasterLease();
+        if (conn) conn.mode = "MASTER";
+        logLeaseEvent("set_master", {
+          userId, branchId, deviceId,
+          reason: "permanent designation: trusted station re-asserts MASTER",
+          triggeredBy: "SET_MASTER",
+        });
+        if (ws.readyState === 1) ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "MASTER" } as ServerMessage));
+        broadcastDeviceList();
+        return;
+      }
+
       const primaryId = primaryMasterByBranch.get(key);
       const requesterIsStreamer = isStreamerStation(conn);
       const requesterIsDesktop = isDesktopOnlyStation(conn);

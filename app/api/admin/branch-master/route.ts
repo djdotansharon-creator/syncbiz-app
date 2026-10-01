@@ -6,6 +6,7 @@ import {
   setBranchMasterDesignation,
   clearBranchMasterDesignation,
 } from "@/lib/branch-master-designation";
+import { syncBranchMasterDesignation } from "@/lib/broadcast-branch-master-designation";
 
 /**
  * Pilot permanent MASTER — admin designation API (OWNER only). Minimal: no fleet UI.
@@ -64,6 +65,8 @@ export async function POST(req: NextRequest) {
     durableDeviceId,
     designatedBy: auth.user.id,
   });
+  // Sync the authoritative designation to the WS server (survives WS restart; stale tokens can't revert it).
+  await syncBranchMasterDesignation({ workspaceId: auth.user.tenantId, branchId, durableDeviceId });
   return NextResponse.json({ designation });
 }
 
@@ -79,5 +82,6 @@ export async function DELETE(req: NextRequest) {
   const branchId = (body.branchId ?? "").trim();
   if (!branchId) return NextResponse.json({ error: "branchId is required" }, { status: 400 });
   await clearBranchMasterDesignation(auth.user.tenantId, branchId);
+  await syncBranchMasterDesignation({ workspaceId: auth.user.tenantId, branchId, durableDeviceId: null });
   return NextResponse.json({ ok: true });
 }

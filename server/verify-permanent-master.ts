@@ -13,6 +13,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { WebSocket } from "ws";
+import { loadDesignations, saveDesignations } from "./branch-designation-store.js";
 
 const TEST_SECRET = "test-ws-secret-permanent-master-0123456789";
 const PORT = 41000 + Math.floor(Math.random() * 2000);
@@ -185,6 +186,71 @@ async function main(): Promise<void> {
     const dmode = await registerDevice(desk, mintToken("u8", { workspaceId: WS8, authorizedBranches: [BR] }), "dsk-8", BR);
     assert("8. non-designated branch: real desktop → MASTER (current behavior preserved)", dmode === "MASTER", `mode=${dmode}`);
     rnd.close(); desk.close();
+  }
+
+  // ── BLOCKER 1 — SET_MASTER cannot bypass a designation ──────────────────────────────────────────────────────
+  {
+    const WSb1 = "ws-pm-b1", M = "dsk-b1-main", d = { [BR]: M };
+    const devMain = await mkClient();
+    const mm = await registerDevice(devMain, mintToken("ub1", { workspaceId: WSb1, authorizedBranches: [BR], stationDeviceId: M, designatedMasterByBranch: d }), M, BR);
+    assert("B1 setup: designated MAIN → MASTER", mm === "MASTER", `mode=${mm}`);
+    const devSecond = await mkClient();
+    const sm = await registerDevice(devSecond, mintToken("ub1", { workspaceId: WSb1, authorizedBranches: [BR], stationDeviceId: "dsk-b1-2", designatedMasterByBranch: d }), "dsk-b1-2", BR);
+    assert("B1 setup: second desktop → CONTROL", sm === "CONTROL", `mode=${sm}`);
+    // Second desktop tries to grab MASTER via SET_MASTER.
+    devSecond.send({ type: "SET_MASTER" });
+    await sleep(400);
+    const gotMaster = devSecond.got((m) => m.type === "SET_DEVICE_MODE" && (m as { mode?: string }).mode === "MASTER");
+    assert("B1 second desktop SET_MASTER → NOT made MASTER", !gotMaster);
+    assert("B1 second desktop SET_MASTER → rejected (ERROR)", devSecond.got((m) => m.type === "ERROR" && /permanent designated MASTER/i.test(String((m as { message?: string }).message))));
+    const ctrl = await mkClient();
+    await registerController(ctrl, mintToken("ub1", { workspaceId: WSb1, authorizedBranches: [BR] }), BR);
+    const dl = await ctrl.waitFor(isType("DEVICE_LIST"));
+    assert("B1 designated MAIN remains the only MASTER", masterOfList(dl) === M, `master=${masterOfList(dl)}`);
+    devMain.close(); devSecond.close(); ctrl.close();
+  }
+
+  // ── BLOCKER 2 — designation is AUTHORITATIVE (survives restart; stale tokens never revert it) ────────────────
+  async function syncDesignation(workspaceId: string, branchId: string, durableDeviceId: string | null): Promise<void> {
+    const res = await fetch(`http://127.0.0.1:${PORT}/internal/branch-master-designation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-SyncBiz-Secret": TEST_SECRET },
+      body: JSON.stringify({ workspaceId, branchId, durableDeviceId }),
+    });
+    void (await res.text());
+  }
+  {
+    const WSb2 = "ws-pm-b2", M = "dsk-b2-main";
+    // Admin designates via the authoritative internal sync (this is exactly what a post-restart load produces).
+    await syncDesignation(WSb2, BR, M);
+    // 3. An OLD token (no designation claim, not bound) connects FIRST → must be CONTROL (authoritative enforced).
+    const old = await mkClient();
+    const om = await registerDevice(old, mintToken("ub2", { workspaceId: WSb2, authorizedBranches: [BR] }), "dsk-b2-old", BR);
+    assert("B2.3 authoritative designation + OLD token (no claim) first → CONTROL", om === "CONTROL", `mode=${om}`);
+    // 4. designated trusted MAIN connects → MASTER.
+    const main = await mkClient();
+    const m4 = await registerDevice(main, mintToken("ub2", { workspaceId: WSb2, authorizedBranches: [BR], stationDeviceId: M, designatedMasterByBranch: { [BR]: M } }), M, BR);
+    assert("B2.4 designated trusted MAIN → MASTER", m4 === "MASTER", `mode=${m4}`);
+
+    // 5. Admin REPLACES the designation (M → M2). 6. An OLD token carrying the OLD designation claim cannot restore M.
+    const M2 = "dsk-b2-main2";
+    await syncDesignation(WSb2, BR, M2);
+    await sleep(200);
+    const staleM = await mkClient();
+    const sm = await registerDevice(staleM, mintToken("ub2", { workspaceId: WSb2, authorizedBranches: [BR], stationDeviceId: M, designatedMasterByBranch: { [BR]: M } }), M, BR);
+    assert("B2.6 stale token (old designation=M, bound to M) after replace → CONTROL (cannot restore old MASTER)", sm === "CONTROL", `mode=${sm}`);
+    const main2 = await mkClient();
+    const m2mode = await registerDevice(main2, mintToken("ub2", { workspaceId: WSb2, authorizedBranches: [BR], stationDeviceId: M2, designatedMasterByBranch: { [BR]: M2 } }), M2, BR);
+    assert("B2.6 new designated device M2 → MASTER", m2mode === "MASTER", `mode=${m2mode}`);
+    old.close(); main.close(); staleM.close(); main2.close();
+  }
+
+  // Store round-trip proves the reload-on-startup mechanism (what the WS server does at boot).
+  {
+    const probe = { "ws:store-probe:default": "dsk-probe" };
+    saveDesignations(probe);
+    const back = loadDesignations();
+    assert("store round-trip (reload-on-startup) persists designations", back["ws:store-probe:default"] === "dsk-probe");
   }
 
   finish();
