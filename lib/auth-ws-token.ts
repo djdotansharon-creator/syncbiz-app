@@ -38,6 +38,15 @@ function signPayload(payloadB64: string): string {
 export type WsTokenClaims = {
   workspaceId?: string | null;
   authorizedBranches?: string[];
+  /**
+   * Pilot permanent MASTER (additive, signed). `stationDeviceId` is the durable deviceId this token is BOUND to
+   * (validated at mint against the StationDevice registry) — the WS server requires REGISTER.deviceId to equal it
+   * before a device may be the permanent MASTER, so an arbitrary client-supplied deviceId can never claim it.
+   * `designatedMasterByBranch` maps branchId → designated durable deviceId for the token's authorized branches;
+   * its presence tells the WS server a branch is permanently designated (suppress grace/auto-election).
+   */
+  stationDeviceId?: string | null;
+  designatedMasterByBranch?: Record<string, string>;
 };
 
 function mintToken(
@@ -54,6 +63,8 @@ function mintToken(
     exp: number;
     workspaceId?: string;
     authorizedBranches?: string[];
+    stationDeviceId?: string;
+    designatedMasterByBranch?: Record<string, string>;
   } = {
     purpose,
     userId: userId.trim(),
@@ -63,6 +74,10 @@ function mintToken(
   // Additive only — legacy consumers ignore unknown fields.
   if (claims?.workspaceId) payload.workspaceId = claims.workspaceId;
   if (Array.isArray(claims?.authorizedBranches)) payload.authorizedBranches = claims!.authorizedBranches;
+  if (claims?.stationDeviceId) payload.stationDeviceId = claims.stationDeviceId;
+  if (claims?.designatedMasterByBranch && Object.keys(claims.designatedMasterByBranch).length > 0) {
+    payload.designatedMasterByBranch = claims.designatedMasterByBranch;
+  }
   const payloadB64 = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
   const sig = signPayload(payloadB64);
   return `${payloadB64}.${sig}`;

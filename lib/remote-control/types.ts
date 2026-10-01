@@ -172,6 +172,12 @@ export type ClientMessage =
       deviceType?: DeviceType;
       /** Optional client taxonomy for routing/analytics; ignored for auth. */
       registrationIntent?: SyncBizRegistrationIntent;
+      /**
+       * Pilot permanent MASTER: set by the hosted renderer running INSIDE packaged Electron. It marks this
+       * device as a CONTROL/mirror only — the server never elects it as a station MASTER (ends the dual-plane
+       * MAIN-durable-id vs renderer-localStorage-id race). Pure browsers omit it and are unaffected.
+       */
+      embeddedRenderer?: boolean;
     }
   | { type: "BRANCH_LIST_REQUEST" }
   | {

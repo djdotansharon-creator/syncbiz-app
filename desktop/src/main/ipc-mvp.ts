@@ -292,12 +292,15 @@ async function desktopSignInWithPassword(
     return { ok: false, error: "Email and password are required." };
   }
 
+  // Pilot permanent MASTER: send the durable MAIN station id so the server can BIND the token to it (only when
+  // it is a StationDevice registered to this workspace). Display-only elsewhere; never used to claim identity.
+  const durableDeviceId = getEffectiveRuntimeConfig().deviceId;
   let res: Response;
   try {
     res = await fetch(`${base}/api/auth/desktop/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: trimmedEmail, password }),
+      body: JSON.stringify({ email: trimmedEmail, password, deviceId: durableDeviceId }),
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

@@ -125,6 +125,16 @@ const masterDisconnectedAt = new Map<string, number>();
 /** Designated primary MASTER per room. Only this device can be MASTER. Persisted to disk. */
 const primaryMasterByBranch = new Map<string, string>();
 
+/**
+ * Pilot PERMANENT MASTER — room key → designated durable deviceId, learned from the signed token claim
+ * (`designatedMasterByBranch`) on every REGISTER. In-memory only: the DB (BranchMasterDesignation) is the
+ * source of truth, and every token for a designated branch carries the claim, so this map is repopulated by the
+ * first REGISTER after any WS/server restart (designation survives restart via the DB + token claims). When a
+ * room is in this map it is a PERMANENTLY-DESIGNATED branch: only the trusted designated station may be MASTER,
+ * and normal grace/auto-election is disabled for it.
+ */
+const designatedByRoom = new Map<string, string>();
+
 /** Load persisted lease on startup (v2 workspace-scoped; legacy formats are ignored by the store). */
 (function loadPersistedLease() {
   const snap = loadLease();
@@ -284,6 +294,11 @@ function demoteOtherMasters(roomKey: string, exceptDeviceId: string, newMasterId
 }
 
 function tryPromoteConnectedControlOnMasterLoss(roomKey: string): string | null {
+  // Pilot PERMANENT MASTER: a permanently-designated branch has NO auto-promotion and NO failover. When the
+  // designated station is offline the branch simply has no MASTER until it reconnects (REGISTER re-elects it).
+  if (designatedByRoom.has(roomKey)) {
+    return null;
+  }
   // Streamer priority: prefer streamer CONTROL, then desktop CONTROL, then web fallback.
   let streamerCandidate: DeviceConnection | null = null;
   let desktopCandidate: DeviceConnection | null = null;
@@ -719,16 +734,47 @@ wss.on("connection", (ws) => {
         const primaryConn = primaryId ? devices.get(primaryId) : undefined;
         const activeStreamerMaster = getActiveStreamerMaster(roomKey);
 
-        // ── Playing-master hard lock ─────────────────────────────────────────────
-        // Evaluated before ALL other MASTER/CONTROL decisions so it gates every path.
-        // Streamers are exempt: they hold the highest MASTER priority and may displace
-        // any lower-priority playing MASTER (web/desktop station).
-        // Mobile is also exempt: it can never become MASTER anyway.
-        const playingLockId = (isMobile || isStreamerReg)
+        // ── Pilot PERMANENT MASTER + embedded-renderer (evaluated FIRST) ─────────────────────────────────
+        // A packaged-Electron hosted renderer is CONTROL/mirror ONLY — it must never elect as a station MASTER
+        // (this ends the dual-plane race where MAIN durable id + renderer localStorage id both competed).
+        const isEmbeddedRenderer = (msg as { embeddedRenderer?: boolean }).embeddedRenderer === true;
+        // Learn/refresh this branch's permanent designation from the signed token claim (DB-sourced at mint).
+        const claimDesignatedId = auth.designatedMasterByBranch?.[branchId] ?? null;
+        if (claimDesignatedId) designatedByRoom.set(key, claimDesignatedId);
+        const roomDesignatedId = designatedByRoom.get(key) ?? null;
+
+        const playingLockId = (isMobile || isStreamerReg || roomDesignatedId || isEmbeddedRenderer)
           ? null
           : getMasterPlayingLockId(key, deviceId);
 
-        if (isMobile) {
+        if (roomDesignatedId) {
+          // PERMANENTLY-DESIGNATED branch: ONLY the trusted designated station is MASTER. No grace/auto-election.
+          // Trust requires BOTH the REGISTER deviceId to equal the designation AND the signed token to be BOUND
+          // to that same durable station (auth.stationDeviceId) — an arbitrary client-supplied deviceId cannot
+          // claim MASTER. An embedded renderer is never the station.
+          const isTrustedDesignatedStation =
+            !isEmbeddedRenderer && deviceId === roomDesignatedId && auth.stationDeviceId === roomDesignatedId;
+          if (isTrustedDesignatedStation) {
+            mode = "MASTER";
+            masterDisconnectedAt.delete(key);
+            demoteOtherMasters(key, deviceId, deviceId);
+            masterByBranch.set(key, deviceId);
+            primaryMasterByBranch.set(key, deviceId);
+            persistMasterLease();
+            masterDecisionReason = "permanent designation -> MASTER (trusted station)";
+          } else {
+            mode = "CONTROL";
+            masterDecisionReason = isEmbeddedRenderer
+              ? "permanent designation: embedded renderer -> CONTROL"
+              : deviceId === roomDesignatedId
+                ? "permanent designation: deviceId matches but token not bound to station -> CONTROL"
+                : "permanent designation: not the designated station -> CONTROL";
+          }
+        } else if (isEmbeddedRenderer) {
+          // Non-designated branch, but an embedded Electron renderer must still NEVER elect (non-electing mirror).
+          mode = "CONTROL";
+          masterDecisionReason = "embedded renderer -> CONTROL (non-electing)";
+        } else if (isMobile) {
           // Mobile must never own primary. Clean up any stale ownership.
           if (masterByBranch.get(key) === deviceId) {
             masterByBranch.delete(key);

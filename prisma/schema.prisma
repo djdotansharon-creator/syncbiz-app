@@ -473,6 +473,26 @@ model StationDevice {
   @@index([workspaceId, branchId])
 }
 
+/// Pilot permanent MASTER — the ONE explicitly designated MASTER device per (workspaceId, branchId).
+/// `durableDeviceId` MUST be an active StationDevice bound to the SAME (workspaceId, branchId). Keyed by the
+/// pair (workspaceId, branchId) — NEVER a global branchId. This is the source of truth for the WS permanent
+/// -master election: the DB-less WS server learns it via a signed token claim (designatedMasterByBranch) that
+/// the mint routes compute from this table, so a designation survives WS/app/server restarts. Only an
+/// authorized admin writes it; it is never changed automatically. Protection ON/OFF is unrelated.
+model BranchMasterDesignation {
+  id              String   @id @default(uuid())
+  workspaceId     String
+  branchId        String
+  durableDeviceId String
+  designatedBy    String
+  designatedAt    DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([workspaceId, branchId])
+  @@index([workspaceId])
+  @@index([durableDeviceId])
+}
+
 // ─────────────────────────────────────────────
 // MEDIA — WORKSPACE-SCOPED
 // ─────────────────────────────────────────────
