@@ -3,6 +3,8 @@ import type {
   AutoStartState,
   ProtectionState,
   ExitVonoResult,
+  ApplyDesktopAuthResult,
+  ApplyDesktopAuthPayload,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
@@ -45,6 +47,8 @@ export type SyncBizDesktopMvp = {
   selectStationSource: (item: BranchLibraryItem) => Promise<MvpStatusSnapshot>;
   localMockTransport: (payload: LocalMockTransportPayload) => Promise<MvpStatusSnapshot>;
   signInWithPassword: (email: string, password: string) => Promise<DesktopSignInResult>;
+  /** Auth-only handoff: hosted renderer gives MAIN a bound desktop_access token (token + expiry ONLY). */
+  applyDesktopAuth: (payload: ApplyDesktopAuthPayload) => Promise<ApplyDesktopAuthResult>;
   onStatus: (callback: (status: MvpStatusSnapshot) => void) => () => void;
   /** Dev-only: load and play a URL or local file path on the music channel (no WS required). */
   mpvPlayUrl: (url: string, attemptId?: number) => Promise<void>;

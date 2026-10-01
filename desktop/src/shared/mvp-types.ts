@@ -50,6 +50,8 @@ export const MVP_IPC = {
   SET_PROTECTION_STATE: "mvp:set-protection-state",
   /** Explicit "Exit VONO": write an intentional-stop marker when Protection is ON, then quit. */
   EXIT_VONO: "mvp:exit-vono",
+  /** Auth-only: hosted renderer hands MAIN a bound desktop_access token (token + expiry ONLY). */
+  APPLY_DESKTOP_AUTH: "mvp:apply-desktop-auth",
   /** Read persisted music folder path. */
   GET_MUSIC_FOLDER: "mvp:get-music-folder",
   /** Open native folder picker; persist + return chosen path. */
@@ -242,6 +244,11 @@ export type ProtectionState = {
 
 /** Result of an explicit "Exit VONO" request. On failure the app did NOT quit. */
 export type ExitVonoResult = { ok: boolean; error?: string };
+
+/** Result of applyDesktopAuth (the renderer→MAIN auth handoff). */
+export type ApplyDesktopAuthResult = { ok: boolean; error?: string };
+/** Payload for applyDesktopAuth — AUTH ONLY (token + expiry). No deviceId/endpoints/config fields. */
+export type ApplyDesktopAuthPayload = { token: string; expiresAtIso?: string };
 
 /** Result of the native music-folder picker. */
 export type PickMusicFolderResult =

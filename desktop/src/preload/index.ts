@@ -7,6 +7,8 @@ import type {
   AutoStartState,
   ProtectionState,
   ExitVonoResult,
+  ApplyDesktopAuthResult,
+  ApplyDesktopAuthPayload,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
@@ -55,6 +57,8 @@ const api: SyncBizDesktopMvp = {
     ipcRenderer.invoke(MVP_IPC.LOCAL_MOCK_TRANSPORT, payload),
   signInWithPassword: (email: string, password: string): Promise<DesktopSignInResult> =>
     ipcRenderer.invoke(MVP_IPC.DESKTOP_SIGN_IN, { email, password }),
+  applyDesktopAuth: (payload: ApplyDesktopAuthPayload): Promise<ApplyDesktopAuthResult> =>
+    ipcRenderer.invoke(MVP_IPC.APPLY_DESKTOP_AUTH, { token: payload.token, expiresAtIso: payload.expiresAtIso }),
   mpvPlayUrl: (url: string, attemptId?: number): Promise<void> =>
     ipcRenderer.invoke(MVP_IPC.MPV_PLAY_URL, url, attemptId),
   mpvPlayUrlCrossfade: (url: string, fadeSec: number, attemptId?: number): Promise<void> =>

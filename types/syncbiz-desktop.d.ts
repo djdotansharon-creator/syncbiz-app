@@ -148,7 +148,9 @@ type ImportLocalM3uPlaylistIpcResult =
   | { status: "error"; message: string };
 
 type SyncBizDesktopBridgePreload = {
-  getConfig: () => Promise<{ deviceId: string }>;
+  getConfig: () => Promise<{ deviceId: string; branchId?: string; wsToken?: string; desktopTokenExpiresAtIso?: string }>;
+  /** Auth-only handoff: hand MAIN a bound desktop_access token (token + expiry ONLY). Optional — legacy shells lack it. */
+  applyDesktopAuth?: (payload: { token: string; expiresAtIso?: string }) => Promise<{ ok: boolean; error?: string }>;
   localMockTransport: (payload: DesktopLocalMockPayload) => Promise<unknown>;
   /** Optional: folder scan (full Desktop preload). */
   scanLocalAudioFolder?: (dir: string) => Promise<ScanLocalAudioFolderIpcResult>;

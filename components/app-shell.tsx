@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { useDesktopActivation } from "@/lib/use-desktop-activation";
 import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
 import { useLibraryTheme } from "@/lib/library-theme-context";
@@ -477,6 +478,8 @@ function HeaderProfileButton({
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  // Electron-only: after one normal login, auto-provision MAIN's bound desktop_access token. No-op in a browser.
+  useDesktopActivation();
   const pathname = usePathname();
   // Read ?return= from window.location.search instead of useSearchParams() to avoid
   // the Suspense boundary that Next.js injects around useSearchParams() in layout-level
