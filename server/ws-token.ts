@@ -17,6 +17,10 @@ export type WsTokenResult = {
   /** Concrete authorized branch ids, or null for a legacy token without the claim. */
   authorizedBranches: string[] | null;
   workspaceId: string | null;
+  /** Pilot permanent MASTER: the durable deviceId this token is BOUND to (null if unbound). */
+  stationDeviceId: string | null;
+  /** Pilot permanent MASTER: branchId → designated durable deviceId (null if the token carries no designation). */
+  designatedMasterByBranch: Record<string, string> | null;
 };
 
 export function verifyWsToken(token: string): WsTokenResult | null {
@@ -35,6 +39,8 @@ export function verifyWsToken(token: string): WsTokenResult | null {
     exp?: number;
     workspaceId?: string;
     authorizedBranches?: unknown;
+    stationDeviceId?: unknown;
+    designatedMasterByBranch?: unknown;
   };
   try {
     payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
@@ -56,14 +62,26 @@ export function verifyWsToken(token: string): WsTokenResult | null {
       : null;
   const workspaceId = typeof payload.workspaceId === "string" ? payload.workspaceId : null;
 
+  // Pilot permanent-MASTER claims (additive; absent on legacy/unbound tokens → null).
+  const stationDeviceId =
+    typeof payload.stationDeviceId === "string" && payload.stationDeviceId.trim() ? payload.stationDeviceId : null;
+  let designatedMasterByBranch: Record<string, string> | null = null;
+  if (payload.designatedMasterByBranch && typeof payload.designatedMasterByBranch === "object") {
+    const map: Record<string, string> = {};
+    for (const [b, d] of Object.entries(payload.designatedMasterByBranch as Record<string, unknown>)) {
+      if (typeof d === "string" && d) map[b] = d;
+    }
+    if (Object.keys(map).length > 0) designatedMasterByBranch = map;
+  }
+
   if (payload.purpose === PURPOSE_WS_REGISTER) {
     if (payload.exp > now + 120) return null;
-    return { userId, authorizedBranches, workspaceId };
+    return { userId, authorizedBranches, workspaceId, stationDeviceId, designatedMasterByBranch };
   }
   if (payload.purpose === PURPOSE_DESKTOP_ACCESS) {
     if (payload.exp - payload.iat > MAX_DESKTOP_TTL_SEC) return null;
     if (payload.exp > now + MAX_DESKTOP_TTL_SEC) return null;
-    return { userId, authorizedBranches, workspaceId };
+    return { userId, authorizedBranches, workspaceId, stationDeviceId, designatedMasterByBranch };
   }
   return null;
 }

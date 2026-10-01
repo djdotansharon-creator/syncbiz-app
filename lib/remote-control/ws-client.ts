@@ -149,6 +149,8 @@ export function useRemoteControlWs(
               isMobile,
               branchId: "default",
               registrationIntent,
+              // Packaged-Electron hosted renderer = CONTROL/mirror only, never a station MASTER.
+              embeddedRenderer: options?.isDesktopApp === true,
             }
           : {
               type: "REGISTER",
