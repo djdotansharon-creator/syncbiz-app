@@ -162,20 +162,29 @@ type FakeOpts = {
   killFails?: boolean; // killTree returns false and never flips alive (simulates taskkill failure)
   isVonoSeq?: boolean[]; // scripted isVonoPid results per call (sticks to last) — for TOCTOU tests
   isVonoConst?: boolean; // constant isVonoPid override
+  isHealthyConst?: boolean; // PR-D: constant isAppHealthy override (default false — app unhealthy during recovery)
+  healthyAfterCalls?: number; // PR-D: isAppHealthy returns true once it has been called >= N times (for pre-force test)
 };
 function fakeDeps(initialAlive: boolean, opts: FakeOpts = {}): RecoveryDeps & { calls: string[] } {
   const calls: string[] = [];
   let alive = initialAlive;
   let clock = 0;
   let vonoCall = 0;
+  let healthyCall = 0;
   const isVono = (): boolean => {
     if (opts.isVonoSeq) { const a = opts.isVonoSeq; const v = a[Math.min(vonoCall, a.length - 1)]; vonoCall++; return v; }
     if (typeof opts.isVonoConst === "boolean") return opts.isVonoConst;
     return alive; // default: a live pid is VONO
   };
+  const isHealthy = (): boolean => {
+    healthyCall++;
+    if (typeof opts.healthyAfterCalls === "number") return healthyCall >= opts.healthyAfterCalls;
+    return opts.isHealthyConst === true; // default false: the app is NOT healthy during recovery
+  };
   const deps = {
     isValidExe: (_p: string) => true, // default valid; overridden per-test for I1
     isVonoPid: (_pid: number) => isVono(),
+    isAppHealthy: (_pid: number) => isHealthy(),
     launch: (p: string) => { calls.push(`launch:${p}`); return true; },
     killTree: (pid: number, force: boolean) => {
       calls.push(`kill:${force ? "force" : "graceful"}:${pid}`);
@@ -229,6 +238,67 @@ async function recoveryTests(): Promise<void> {
     const d = fakeDeps(true, { diesOnGraceful: false, diesOnForce: false });
     const r = await executeRecovery({ action: "restart_app", fromState: "MPV_DOWN", pid: 123, execPath: "VONO.exe" }, d);
     assert("G5 unkillable ⇒ no launch (no duplicate)", !r.ok && !d.calls.some((c) => c.startsWith("launch:")), d.calls.join(","));
+  }
+  // ── PR-D: ABORT restart if VONO recovers HEALTHY during the kill sequence ──────
+  // D1: restart starts unhealthy; app becomes HEALTHY during the graceful wait ⇒ abort: no force-kill,
+  //     no relaunch, result = ok (aborted healthy). The SAME pid stays alive & VONO throughout.
+  {
+    const d = fakeDeps(true, { diesOnGraceful: false, diesOnForce: false, isHealthyConst: true });
+    const r = await executeRecovery({ action: "restart_app", fromState: "PLAYBACK_STALLED", pid: 123, execPath: "VONO.exe" }, d);
+    assert(
+      "D1 recovered-healthy during grace ⇒ ABORT (no force-kill, no relaunch)",
+      r.ok && /healthy/i.test(r.detail) && !d.calls.includes("kill:force:123") && !d.calls.some((c) => c.startsWith("launch:")),
+      d.calls.join(",") + " | " + r.detail,
+    );
+  }
+  // D2: healthy ONLY at the final re-check immediately BEFORE force (false during every graceful poll) ⇒
+  //     still aborts, never force-kills, never relaunches. Exercises the pre-force guard specifically.
+  {
+    const graceCalls = Math.floor(WD.killGraceMs / WD.killPollMs); // isAppHealthy calls during the grace loop
+    const d = fakeDeps(true, { diesOnGraceful: false, diesOnForce: false, healthyAfterCalls: graceCalls + 1 });
+    const r = await executeRecovery({ action: "restart_app", fromState: "MPV_DOWN", pid: 123, execPath: "VONO.exe" }, d);
+    assert(
+      "D2 recovered-healthy just before force ⇒ ABORT (no force-kill, no relaunch)",
+      r.ok && /healthy/i.test(r.detail) && !d.calls.includes("kill:force:123") && !d.calls.some((c) => c.startsWith("launch:")),
+      d.calls.join(",") + " | " + r.detail,
+    );
+  }
+  // D3: app stays UNHEALTHY through recovery ⇒ existing graceful→force→relaunch still works (not aborted).
+  {
+    const d = fakeDeps(true, { diesOnGraceful: false, diesOnForce: true, isHealthyConst: false });
+    const r = await executeRecovery({ action: "restart_app", fromState: "PLAYBACK_STALLED", pid: 123, execPath: "VONO.exe" }, d);
+    const g = first(d.calls, (c) => c === "kill:graceful:123");
+    const f = first(d.calls, (c) => c === "kill:force:123");
+    const l = first(d.calls, (c) => c.startsWith("launch:"));
+    assert("D3 stays unhealthy ⇒ graceful→force→relaunch preserved", r.ok && g >= 0 && f > g && l > f && !/healthy/i.test(r.detail), d.calls.join(","));
+  }
+  // D4: pid dies normally during graceful wait (unhealthy) ⇒ relaunch still works (not an abort).
+  {
+    const d = fakeDeps(true, { diesOnGraceful: true, isHealthyConst: false });
+    const r = await executeRecovery({ action: "restart_app", fromState: "APP_MISSING", pid: 123, execPath: "VONO.exe" }, d);
+    const ki = first(d.calls, (c) => c.startsWith("kill:"));
+    const li = first(d.calls, (c) => c.startsWith("launch:"));
+    assert("D4 pid dies during grace ⇒ relaunch (not aborted-healthy)", r.ok && ki >= 0 && li > ki && !d.calls.includes("kill:force:123") && !/healthy/i.test(r.detail), d.calls.join(","));
+  }
+  // D5: PID reused/foreign mid-recovery ⇒ identity still wins (never force-kill a stranger), even though a
+  //     stray "healthy" would also be true — the isVonoPid check precedes the health check.
+  {
+    const d = fakeDeps(true, { isVonoSeq: [true, false], diesOnGraceful: false, isHealthyConst: true });
+    const r = await executeRecovery({ action: "restart_app", fromState: "MPV_DOWN", pid: 123, execPath: "VONO.exe" }, d);
+    assert("D5 pid reused mid-grace ⇒ never force-kill foreign; relaunch fresh", r.ok && !d.calls.includes("kill:force:123") && d.calls.some((c) => c.startsWith("launch:")), d.calls.join(","));
+  }
+  // D6: maintenance / intentional_stop still SUPPRESS recovery (decide layer) — unchanged by PR-D.
+  {
+    const appMissing = deriveState({ hb: null, control: null, appProcessAlive: false, now: T0, progress: PROGRESSED, mpvDownForMs: 0 });
+    void appMissing;
+    const maint: VonoControlState = { schemaVersion: 1, mode: "maintenance", reason: "upgrade", source: "installer", createdAt: T0, expiresAt: T0 + 60_000, bootId: null };
+    const stop: VonoControlState = { schemaVersion: 1, mode: "intentional_stop", reason: "exit", source: "app", createdAt: T0, expiresAt: null, bootId: null };
+    const mState = deriveState({ hb: null, control: maint, appProcessAlive: false, now: T0 + 1000, progress: PROGRESSED, mpvDownForMs: 0 });
+    const sState = deriveState({ hb: null, control: stop, appProcessAlive: false, now: T0 + 1000, progress: PROGRESSED, mpvDownForMs: 0 });
+    const mDec = decide(mState, initialMemory(), T0 + 1000);
+    const sDec = decide(sState, initialMemory(), T0 + 1000);
+    assert("D6 maintenance ⇒ suppressed (no recovery)", mState.state === "MAINTENANCE" && mDec.suppressed && mDec.action === "none", `${mState.state}/${mDec.action}`);
+    assert("D6 intentional_stop ⇒ suppressed (no recovery)", sState.state === "MAINTENANCE" && sDec.suppressed && sDec.action === "none", `${sState.state}/${sDec.action}`);
   }
   // G6: reload_renderer is reserved ⇒ no kill, no launch.
   {

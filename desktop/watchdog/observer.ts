@@ -257,6 +257,19 @@ export function launchDetached(execPath: string, spawnFn: typeof spawn = spawn):
 const realDeps: RecoveryDeps = {
   isValidExe,
   isVonoPid: verifyVonoPid,
+  // PR-D — re-read the CURRENT heartbeat and report whether THIS pid's own VONO is HEALTHY again: a fresh
+  // heartbeat written by exactly `pid`, engine ready, and (if it intends to play) not stalled. No threshold
+  // changes — reuses WD.appStaleMs / WD.playbackStallMs. Ties to the exact pid so a different/reused
+  // instance's heartbeat can never cause a false abort.
+  isAppHealthy: (pid: number): boolean => {
+    const hb = readJson<VonoHeartbeat>(heartbeatPath());
+    if (!hb || hb.pid !== pid) return false;                      // must be THIS pid's own heartbeat
+    const now = Date.now();
+    if (now - hb.writtenAt > WD.appStaleMs) return false;         // stale heartbeat → not healthy
+    if (!hb.mpv.engineReady) return false;                        // engine not ready → not healthy
+    if (hb.playback.status === "playing" && now - hb.playback.positionAt > WD.playbackStallMs) return false; // still stalled
+    return true;
+  },
   launch: (execPath: string) => launchDetached(execPath),
   killTree: (pid: number, force: boolean): boolean => {
     try {
