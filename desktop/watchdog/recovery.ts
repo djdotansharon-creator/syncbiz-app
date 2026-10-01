@@ -30,10 +30,26 @@ export interface RecoveryDeps {
   /** True ONLY if pid is alive AND its process image is an allowlisted VONO executable. This is the
    *  gate for any kill/skip decision, so a reused PID (now some other process) is never touched. */
   isVonoPid: (pid: number) => boolean;
+  /**
+   * PR-D — re-read the CURRENT heartbeat and report whether THIS pid's own VONO is genuinely HEALTHY again
+   * (fresh heartbeat written by exactly `pid`, engine ready, and — if it intends to play — not stalled).
+   * Used to ABORT an in-flight restart when the app recovers during the kill sequence. Must tie to the
+   * same pid (never abort on a different/reused instance's heartbeat), and must NOT change any threshold.
+   */
+  isAppHealthy: (pid: number) => boolean;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
   log: (line: string) => void;
 }
+
+/**
+ * Outcome of killWithEscalation:
+ *  - "dead"            — our VONO is no longer at this pid (exited or the pid is now foreign) → safe to launch.
+ *  - "alive"           — a live VONO is STILL here after force → caller aborts the launch (no duplicate).
+ *  - "aborted_healthy" — the SAME VONO recovered to HEALTHY during the wait → abort: do NOT force-kill,
+ *                        do NOT launch. This is NOT "pid died" and must never fall through to relaunch.
+ */
+export type KillOutcome = "dead" | "alive" | "aborted_healthy";
 
 export interface RecoveryContext {
   action: RecoveryAction;
@@ -55,11 +71,11 @@ export interface RecoveryResult {
  * stop immediately and never issue another kill. Returns true when OUR VONO is no longer at this pid
  * (exited or the pid is now foreign), false only if a live VONO is still there after force.
  */
-export async function killWithEscalation(pid: number, deps: RecoveryDeps): Promise<boolean> {
+export async function killWithEscalation(pid: number, deps: RecoveryDeps): Promise<KillOutcome> {
   // Re-verify RIGHT BEFORE the graceful kill (identity may have changed since decide()).
   if (!deps.isVonoPid(pid)) {
     deps.log(`[RECOVERY] pid ${pid} is not a live VONO at kill time — NOT killing`);
-    return true; // our VONO isn't here (dead or reused) → safe to proceed / launch fresh
+    return "dead"; // our VONO isn't here (dead or reused) → safe to proceed / launch fresh
   }
 
   // 1) Non-force kill first (ask the process tree to terminate).
@@ -67,32 +83,42 @@ export async function killWithEscalation(pid: number, deps: RecoveryDeps): Promi
   const graceDeadline = deps.now() + WD.killGraceMs;
   while (deps.now() < graceDeadline) {
     await deps.sleep(WD.killPollMs);
-    if (!deps.isAlive(pid)) return true; // exited
+    if (!deps.isAlive(pid)) return "dead"; // exited
     // Alive but identity changed ⇒ our VONO died and the PID was reused ⇒ do NOT force-kill a stranger.
     if (!deps.isVonoPid(pid)) {
       deps.log(`[RECOVERY] pid ${pid} alive but no longer VONO (PID reused) — NOT force-killing`);
-      return true;
+      return "dead";
+    }
+    // PR-D — the SAME VONO recovered to HEALTHY during the graceful wait ⇒ ABORT: do not force-kill it.
+    if (deps.isAppHealthy(pid)) {
+      deps.log(`[RECOVERY] pid ${pid} recovered HEALTHY during graceful wait — ABORTING restart (no force-kill)`);
+      return "aborted_healthy";
     }
   }
 
   // 2) Still a live VONO → re-verify IMMEDIATELY before force, then force (/F).
   if (!deps.isVonoPid(pid)) {
     deps.log(`[RECOVERY] pid ${pid} no longer VONO just before force — NOT force-killing`);
-    return true;
+    return "dead";
+  }
+  // PR-D — final health re-check immediately before force-kill: a healthy VONO must never be force-killed.
+  if (deps.isAppHealthy(pid)) {
+    deps.log(`[RECOVERY] pid ${pid} is HEALTHY just before force — ABORTING restart (no force-kill)`);
+    return "aborted_healthy";
   }
   deps.log(`[RECOVERY] pid ${pid} survived graceful kill after ${WD.killGraceMs}ms — escalating to force`);
   deps.killTree(pid, true);
   const forceDeadline = deps.now() + WD.killForceMs;
   while (deps.now() < forceDeadline) {
     await deps.sleep(WD.killPollMs);
-    if (!deps.isAlive(pid)) return true; // exited
+    if (!deps.isAlive(pid)) return "dead"; // exited
     if (!deps.isVonoPid(pid)) {
       deps.log(`[RECOVERY] pid ${pid} alive but no longer VONO during force — stopping`);
-      return true;
+      return "dead";
     }
   }
-  // A live VONO is still here after force ⇒ report NOT dead (caller aborts the launch — no duplicate).
-  return !deps.isVonoPid(pid);
+  // A live VONO is still here after force ⇒ report "alive" (caller aborts the launch — no duplicate).
+  return deps.isVonoPid(pid) ? "alive" : "dead";
 }
 
 /** Execute a decided recovery action. The caller must already have checked it is NOT suppressed. */
@@ -143,11 +169,18 @@ export async function executeRecovery(ctx: RecoveryContext, deps: RecoveryDeps):
     // launch. If the pid is not a live VONO (dead, or reused by another process), do NOT kill anything
     // — just launch a fresh VONO (single-instance lock covers any unknown live instance).
     if (pid != null && deps.isVonoPid(pid)) {
-      const dead = await killWithEscalation(pid, deps);
-      if (!dead) {
+      const outcome = await killWithEscalation(pid, deps);
+      if (outcome === "aborted_healthy") {
+        // PR-D — the app recovered HEALTHY during the kill sequence. This is a SUCCESSFUL no-op: do NOT
+        // force-kill, do NOT launch (no duplicate). Distinct from "kill failed" — the app is fine.
+        deps.log(`[RECOVERY] restart_app ABORTED — VONO pid ${pid} recovered HEALTHY during recovery; NOT force-killing or relaunching`);
+        return { action, ok: true, detail: "aborted: app recovered healthy" };
+      }
+      if (outcome === "alive") {
         deps.log(`[RECOVERY] restart_app ABORTED — VONO pid ${pid} would not die; NOT launching (no duplicate)`);
         return { action, ok: false, detail: "kill failed; launch aborted" };
       }
+      // outcome === "dead" → our VONO is gone → safe to launch a fresh instance below.
     } else if (pid != null) {
       deps.log(`[RECOVERY] restart_app — pid ${pid} is NOT a live VONO (stale/reused) — NOT killing; launching fresh`);
     }
