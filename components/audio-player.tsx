@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource, type PlaybackStatus } from "@/lib/playback-provider";
 import { shouldAdoptLiveMpv } from "@/lib/live-mpv-adopt";
+import { shouldFreezeSelfHeal, nextFreezeBaseline } from "@/lib/desktop-freeze-self-heal";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { computeLivePosition } from "@/lib/remote-control/live-position";
 import { isPlayNextSourceId } from "@/lib/play-next";
@@ -677,12 +678,24 @@ export function AudioPlayer() {
       const nextPos = typeof s.mpvPosition === "number" ? s.mpvPosition : 0;
       const prevSnapPos = desktopSnapLastPosRef.current;
       const posChanged = prevSnapPos === null || nextPos !== prevSnapPos;
-      if (posChanged) {
-        desktopSnapLastPosRef.current = nextPos;
-        desktopSnapPositionAtRef.current = Date.now();
+      const snapStatus = (s.mockPlaybackStatus as DesktopMpvSnap["status"]) ?? "idle";
+      // PR-C PAUSE INVARIANT — update the freeze clock via the pure helper so a PAUSED engine never accrues
+      // freeze time (its position legitimately does not advance) and a long pause gets a FRESH baseline on
+      // resume (it can't become an instant "freeze" the moment playback resumes). Position-advance stamping
+      // for genuinely playing streams is unchanged.
+      {
+        const fc = nextFreezeBaseline({
+          prevBaseline: desktopSnapPositionAtRef.current,
+          prevPos: prevSnapPos,
+          nextPos,
+          snapStatus,
+          now: Date.now(),
+        });
+        desktopSnapPositionAtRef.current = fc.baseline;
+        desktopSnapLastPosRef.current = fc.lastPos;
       }
       const snap: DesktopMpvSnap = {
-        status: (s.mockPlaybackStatus as DesktopMpvSnap["status"]) ?? "idle",
+        status: snapStatus,
         volume: typeof s.mockVolume === "number" ? s.mockVolume : 80,
         position: nextPos,
         duration: typeof s.mpvDuration === "number" ? s.mpvDuration : 0,
@@ -4004,6 +4017,8 @@ export function AudioPlayer() {
     const FREEZE_MS = 6000; // no time-pos advance for 6s while MPV claims "playing"
     const MAX_REDISPATCH = 3; // re-loadfile this many times before skipping forward
     const id = setInterval(() => {
+      // PR-C PAUSE INVARIANT (guard 1/2): if our transport intent is not "playing" (paused/stopped),
+      // never self-heal — a paused station must never accrue freeze time or redispatch/skip.
       if (statusRef.current !== "playing") return; // we must intend to play
       const url = currentPlayUrlRef.current;
       if (!url) return;
@@ -4048,6 +4063,7 @@ export function AudioPlayer() {
 
       // ── STREAM_PLAYING (or local file) — real progress observed; the FREEZE_MS self-heal may operate ──
       const snap = desktopMpvSnapRef.current;
+      // PR-C PAUSE INVARIANT (guard 2/2): if the engine itself reports "paused" (or idle), never self-heal.
       if (!snap || snap.status !== "playing") return; // MPV must claim it's playing
       if (snap.attemptId !== playbackAttemptGenRef.current) return; // INV1 — only the current attempt
       // NOTE: intentionally do NOT require duration>0. A stuck YouTube resolve
@@ -4072,9 +4088,22 @@ export function AudioPlayer() {
           ...extra,
         });
 
-      if (frozenMs < FREEZE_MS) {
-        // Healthy again → if we intervened on this track, report a one-time recovery.
+      // PR-C PAUSE INVARIANT (fire decision, pure + unit-tested): self-heal ONLY when the renderer intends
+      // to play AND the engine claims playing AND the position has been frozen past FREEZE_MS. A paused
+      // engine/intent is never a freeze. (lib/desktop-freeze-self-heal.ts)
+      const canSelfHeal = shouldFreezeSelfHeal({
+        rendererStatus: statusRef.current,
+        snapStatus: snap.status,
+        frozenMs,
+        freezeMs: FREEZE_MS,
+      });
+      if (!canSelfHeal) {
+        // Not frozen (or paused/not-playing) → if we had intervened on this track and it is genuinely
+        // playing + advancing again, report a one-time recovery. Never report "recovered" for a pause.
         if (
+          snap.status === "playing" &&
+          statusRef.current === "playing" &&
+          frozenMs < FREEZE_MS &&
           mpvFrozenForUrlRef.current === url &&
           mpvFrozenAttemptsRef.current > 0 &&
           mpvRecoveredReportedForUrlRef.current !== url
@@ -4082,7 +4111,7 @@ export function AudioPlayer() {
           mpvRecoveredReportedForUrlRef.current = url;
           tele("recovered", { recovered: true, attempt: mpvFrozenAttemptsRef.current });
         }
-        return; // position advanced recently → healthy
+        return; // paused / not-playing / position advanced recently → healthy, do nothing
       }
 
       // New track resets the recovery budget + recovery-report guard.
