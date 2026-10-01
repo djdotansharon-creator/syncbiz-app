@@ -147,23 +147,30 @@ const primaryMasterByBranch = new Map<string, string>();
 const designatedByRoom = new Map<string, string>();
 /** Room keys whose designation came from the authoritative store/internal-sync (not a client token claim). */
 const authoritativeDesignationRooms = new Set<string>();
+/**
+ * Room keys explicitly CLEARED by an admin (authoritative tombstone, state 3). A cleared room has NO permanent
+ * designation (legacy election is allowed) but a stale token claim may NOT revive the deleted designation. This
+ * survives restart alongside the designations, so an admin reset is never undone by an old client token.
+ */
+const clearedDesignationRooms = new Set<string>();
 (function loadPersistedDesignations() {
-  const rows = loadDesignations();
-  for (const [roomKey, durableId] of Object.entries(rows)) {
+  const state = loadDesignations();
+  for (const [roomKey, durableId] of Object.entries(state.designations)) {
     if (durableId) {
       designatedByRoom.set(roomKey, durableId);
       authoritativeDesignationRooms.add(roomKey);
     }
   }
+  for (const roomKey of state.cleared) clearedDesignationRooms.add(roomKey);
 })();
-/** Persist ONLY the authoritative designations (never the token-bootstrapped ones) to the volume. */
-function persistDesignations(): void {
-  const out: Record<string, string> = {};
+/** Persist the authoritative designations + clear tombstones (never token-bootstrapped ones). Returns success. */
+function persistDesignations(): boolean {
+  const designations: Record<string, string> = {};
   for (const rk of authoritativeDesignationRooms) {
     const d = designatedByRoom.get(rk);
-    if (d) out[rk] = d;
+    if (d) designations[rk] = d;
   }
-  saveDesignations(out);
+  return saveDesignations({ designations, cleared: [...clearedDesignationRooms] });
 }
 
 /** Load persisted lease on startup (v2 workspace-scoped; legacy formats are ignored by the store). */
@@ -674,6 +681,7 @@ const httpServer = createServer((req, res) => {
         if (durableDeviceId) {
           designatedByRoom.set(roomKey, durableDeviceId);
           authoritativeDesignationRooms.add(roomKey);
+          clearedDesignationRooms.delete(roomKey); // (re)designated → no longer a tombstone
           // Enforce immediately: demote any current master in the room that is not the newly-designated device.
           const curMasterId = masterByBranch.get(roomKey);
           if (curMasterId && curMasterId !== durableDeviceId) {
@@ -690,11 +698,20 @@ const httpServer = createServer((req, res) => {
             persistMasterLease();
           }
         } else {
-          // Clear (admin reset): the branch reverts to legacy (non-designated) behavior on future events.
+          // Clear (admin reset): drop the designation and record an authoritative TOMBSTONE so a stale token
+          // claim can never revive it. The branch reverts to legacy (non-designated) behavior on future events.
           designatedByRoom.delete(roomKey);
           authoritativeDesignationRooms.delete(roomKey);
+          clearedDesignationRooms.add(roomKey);
         }
-        persistDesignations();
+        // FAIL-CLOSED: if the authoritative state couldn't be persisted, report failure so the admin retries
+        // (idempotent) — never claim success when the WS store wasn't durably written.
+        const persisted = persistDesignations();
+        if (!persisted) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Failed to persist designation" }));
+          return;
+        }
         logLeaseEvent("designation_sync", { workspaceId, branchId, roomKey, durableDeviceId: durableDeviceId || null, triggeredBy: "internal_sync" });
         broadcastDeviceList();
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -834,7 +851,12 @@ wss.on("connection", (ws) => {
         // already learned). It must NEVER overwrite/revert an authoritative (persisted / internal-synced)
         // designation with stale data — an old token minted before a (re)designation can't change it.
         const claimDesignatedId = auth.designatedMasterByBranch?.[branchId] ?? null;
-        if (claimDesignatedId && !authoritativeDesignationRooms.has(key) && !designatedByRoom.has(key)) {
+        if (
+          claimDesignatedId &&
+          !authoritativeDesignationRooms.has(key) &&
+          !clearedDesignationRooms.has(key) && // an admin-cleared room (tombstone) must NOT be revived by a stale token
+          !designatedByRoom.has(key)
+        ) {
           designatedByRoom.set(key, claimDesignatedId);
         }
         const roomDesignatedId = designatedByRoom.get(key) ?? null;

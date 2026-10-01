@@ -66,7 +66,14 @@ export async function POST(req: NextRequest) {
     designatedBy: auth.user.id,
   });
   // Sync the authoritative designation to the WS server (survives WS restart; stale tokens can't revert it).
-  await syncBranchMasterDesignation({ workspaceId: auth.user.tenantId, branchId, durableDeviceId });
+  // Fail-closed: if the WS store didn't durably accept it, do NOT report success — the admin retries (idempotent).
+  const synced = await syncBranchMasterDesignation({ workspaceId: auth.user.tenantId, branchId, durableDeviceId });
+  if (!synced) {
+    return NextResponse.json(
+      { error: "Designation saved to the database but the player server did not confirm it. Please retry.", designation },
+      { status: 502 },
+    );
+  }
   return NextResponse.json({ designation });
 }
 
@@ -82,6 +89,12 @@ export async function DELETE(req: NextRequest) {
   const branchId = (body.branchId ?? "").trim();
   if (!branchId) return NextResponse.json({ error: "branchId is required" }, { status: 400 });
   await clearBranchMasterDesignation(auth.user.tenantId, branchId);
-  await syncBranchMasterDesignation({ workspaceId: auth.user.tenantId, branchId, durableDeviceId: null });
+  const synced = await syncBranchMasterDesignation({ workspaceId: auth.user.tenantId, branchId, durableDeviceId: null });
+  if (!synced) {
+    return NextResponse.json(
+      { error: "Designation cleared in the database but the player server did not confirm it. Please retry." },
+      { status: 502 },
+    );
+  }
   return NextResponse.json({ ok: true });
 }

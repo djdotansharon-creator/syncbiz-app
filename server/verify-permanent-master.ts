@@ -245,12 +245,36 @@ async function main(): Promise<void> {
     old.close(); main.close(); staleM.close(); main2.close();
   }
 
-  // Store round-trip proves the reload-on-startup mechanism (what the WS server does at boot).
+  // ── BLOCKER 2A — admin CLEAR tombstone: a stale token must NOT revive a deleted designation ─────────────────
   {
-    const probe = { "ws:store-probe:default": "dsk-probe" };
-    saveDesignations(probe);
+    const WSa = "ws-pm-a", M = "dsk-a-main";
+    await syncDesignation(WSa, BR, M);     // designate M
+    await syncDesignation(WSa, BR, null);  // admin CLEAR (authoritative tombstone)
+    await sleep(150);
+    // Reconnect with a STALE token that still carries the OLD designation claim {default:M}, bound to M.
+    const devM = await mkClient();
+    const mmode = await registerDevice(devM, mintToken("ua", { workspaceId: WSa, authorizedBranches: [BR], stationDeviceId: M, designatedMasterByBranch: { [BR]: M } }), M, BR);
+    // Legacy behavior (first desktop → MASTER) is fine; the point is the PERMANENT designation must NOT be revived.
+    assert("B2A: after clear, stale-token M registers under LEGACY (not a revived designation)", mmode === "MASTER", `mode=${mmode}`);
+    // Prove it's legacy, not designated: a second desktop can TAKE MASTER via SET_MASTER (a designated branch
+    // would REJECT this). If the tombstone had been ignored, devM would be the permanent MASTER and this fails.
+    const devSecond = await mkClient();
+    await registerDevice(devSecond, mintToken("ua", { workspaceId: WSa, authorizedBranches: [BR], stationDeviceId: "dsk-a-2", designatedMasterByBranch: { [BR]: M } }), "dsk-a-2", BR);
+    devSecond.send({ type: "SET_MASTER" });
+    const took = await devSecond
+      .waitFor((m) => m.type === "SET_DEVICE_MODE" && (m as { mode?: string }).mode === "MASTER", 1500)
+      .then(() => true)
+      .catch(() => false);
+    assert("B2A: cleared branch is LEGACY (SET_MASTER succeeds) → deleted designation NOT revived by stale token", took);
+    devM.close(); devSecond.close();
+  }
+
+  // Store round-trip proves the reload-on-startup mechanism (what the WS server does at boot), incl. tombstones.
+  {
+    const ok = saveDesignations({ designations: { "ws:store-probe:default": "dsk-probe" }, cleared: ["ws:store-cleared:default"] });
     const back = loadDesignations();
-    assert("store round-trip (reload-on-startup) persists designations", back["ws:store-probe:default"] === "dsk-probe");
+    assert("store round-trip persists designations + tombstones + reports success",
+      ok === true && back.designations["ws:store-probe:default"] === "dsk-probe" && back.cleared.includes("ws:store-cleared:default"));
   }
 
   finish();

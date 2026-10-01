@@ -8,19 +8,24 @@ function getWsServerHttpUrl(): string {
   return wsUrl.replace(/^ws(s?):/, "http$1:");
 }
 
+/**
+ * Returns TRUE only when the WS server durably accepted + persisted the change (HTTP 2xx). Returns FALSE on a
+ * missing secret, a network error, or a non-2xx response — the admin action is idempotent, so the caller should
+ * surface the failure and the admin can simply retry. Never throws.
+ */
 export async function syncBranchMasterDesignation(input: {
   workspaceId: string;
   branchId: string;
   /** The designated durable device id, or null to CLEAR the designation. */
   durableDeviceId: string | null;
-}): Promise<void> {
-  if (!input.workspaceId?.trim() || !input.branchId?.trim()) return;
+}): Promise<boolean> {
+  if (!input.workspaceId?.trim() || !input.branchId?.trim()) return false;
   const secret = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
   if (!secret) {
     if (process.env.NODE_ENV === "development") {
       console.warn("[broadcast-branch-master-designation] SYNCBIZ_WS_SECRET not set, skipping");
     }
-    return;
+    return false;
   }
   try {
     const url = `${getWsServerHttpUrl().replace(/\/$/, "")}/internal/branch-master-designation`;
@@ -36,9 +41,11 @@ export async function syncBranchMasterDesignation(input: {
     if (!res.ok && process.env.NODE_ENV === "development") {
       console.warn("[broadcast-branch-master-designation] POST failed:", res.status, await res.text());
     }
+    return res.ok;
   } catch (e) {
     if (process.env.NODE_ENV === "development") {
       console.warn("[broadcast-branch-master-designation] fetch error:", e);
     }
+    return false;
   }
 }
