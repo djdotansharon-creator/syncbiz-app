@@ -8,7 +8,9 @@
  *  - A binding CONFLICT (server 409 / token not bound) is TERMINAL and fail-closed: never treated as
  *    success, no token applied, and we stop retrying (retrying cannot resolve a workspace/branch conflict).
  *  - Every other failure (not-signed-in-yet, no deviceId, network error, 5xx, missing token,
- *    applyDesktopAuth { ok:false }) is TRANSIENT → retry with a small, capped (bounded) backoff.
+ *    applyDesktopAuth { ok:false }) is TRANSIENT → retry with a small, capped (bounded) backoff, and keep
+ *    retrying for the LIFETIME of the running app (an unattended branch player must recover from an outage
+ *    of any length with no human reload). The delay grows to the cap and then holds at the cap.
  *  - Running in a plain browser (no bridge) is a no-op.
  */
 
@@ -91,27 +93,27 @@ export function backoffDelayMs(attempt: number, baseMs: number, capMs: number): 
 }
 
 export type RetryOptions = {
-  maxAttempts: number;
   baseDelayMs: number;
   maxDelayMs: number;
   sleep: (ms: number) => Promise<void>;
+  /** Returns true to stop the loop cleanly (e.g. on React unmount). Checked before every attempt and sleep. */
   isCancelled: () => boolean;
 };
 
 /**
- * Drives attempts with capped backoff until SUCCESS, a terminal CONFLICT, cancellation, or the attempt
- * budget is exhausted. Returns the final outcome; the caller marks activation complete ONLY on success.
+ * Drives attempts with capped backoff and keeps retrying TRANSIENT failures for the lifetime of the app
+ * (there is no attempt budget) until one of three terminal outcomes: SUCCESS, a fail-closed CONFLICT, or
+ * CANCELLATION (unmount). The delay grows exponentially to `maxDelayMs` and then holds there. The caller
+ * marks activation complete ONLY on success.
  */
 export async function runActivationWithRetry(deps: ActivationDeps, opts: RetryOptions): Promise<AttemptResult> {
-  let last: AttemptResult = retry("not-started");
-  for (let attempt = 1; attempt <= opts.maxAttempts; attempt++) {
+  let attempt = 1;
+  for (;;) {
     if (opts.isCancelled()) return retry("cancelled");
-    last = await attemptActivationOnce(deps);
-    if (last.kind === "success" || last.kind === "conflict") return last;
-    if (attempt < opts.maxAttempts) {
-      if (opts.isCancelled()) return retry("cancelled");
-      await opts.sleep(backoffDelayMs(attempt, opts.baseDelayMs, opts.maxDelayMs));
-    }
+    const r = await attemptActivationOnce(deps);
+    if (r.kind === "success" || r.kind === "conflict") return r;
+    if (opts.isCancelled()) return retry("cancelled");
+    await opts.sleep(backoffDelayMs(attempt, opts.baseDelayMs, opts.maxDelayMs));
+    attempt++;
   }
-  return last;
 }

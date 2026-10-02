@@ -126,7 +126,7 @@ async function main(): Promise<void> {
   }
 
   // ── Activation reliability core: fail-closed + bounded retry (pure) ─────────────────────────────────────────
-  const DELAY = { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 4, sleep: async () => {}, isCancelled: () => false };
+  const DELAY = { baseDelayMs: 1, maxDelayMs: 4, sleep: async () => {}, isCancelled: () => false };
   function actDeps(over: Partial<ActivationDeps> = {}): ActivationDeps {
     return {
       checkSession: async () => true,
@@ -180,34 +180,64 @@ async function main(): Promise<void> {
     const r = await attemptActivationOnce(actDeps({ applyAuth: async () => { throw new Error("ipc"); } }));
     assert("attempt: applyDesktopAuth throws → retry", r.kind === "retry");
   }
-  // retry loop
+  // retry loop — TRANSIENT failures persist for the app's lifetime (no attempt budget)
   {
     let n = 0;
     const r = await runActivationWithRetry(actDeps({ requestToken: async () => (++n < 2 ? { status: "transient" } : { status: "ok", token: "tok" }) }), DELAY);
     assert("loop: first attempt API failure → retries then succeeds", r.kind === "success" && n === 2);
   }
   {
-    let applies = 0;
-    const r = await runActivationWithRetry(actDeps({ applyAuth: async () => { applies++; return false; } }), DELAY);
-    assert("loop: applyDesktopAuth {ok:false} keeps retrying up to the budget", r.kind === "retry" && applies === 5);
+    // Succeeds only on attempt 30 — well beyond the old 24-attempt boundary — proving no fixed budget.
+    let n = 0;
+    const r = await runActivationWithRetry(actDeps({ requestToken: async () => (++n < 30 ? { status: "transient" } : { status: "ok", token: "tok" }) }), DELAY);
+    assert("loop: transient outage past old 24-attempt boundary → keeps retrying then succeeds", r.kind === "success" && n === 30);
+  }
+  {
+    // applyDesktopAuth {ok:false} forever → keeps retrying far past 24; bounded here only by unmount.
+    let applies = 0; let cancel = false;
+    const r = await runActivationWithRetry(
+      actDeps({ applyAuth: async () => { applies++; if (applies >= 40) cancel = true; return false; } }),
+      { ...DELAY, isCancelled: () => cancel },
+    );
+    assert("loop: applyDesktopAuth {ok:false} keeps retrying for the app lifetime (past 24)", r.kind === "retry" && applies === 40);
+  }
+  {
+    // Prolonged outage then recovery: delay must be bounded by the 30s cap across many attempts.
+    const delays: number[] = []; let n = 0;
+    const r = await runActivationWithRetry(
+      actDeps({ requestToken: async () => (++n < 40 ? { status: "transient" } : { status: "ok", token: "tok" }) }),
+      { baseDelayMs: 2000, maxDelayMs: 30000, sleep: async (ms) => { delays.push(ms); }, isCancelled: () => false },
+    );
+    assert("loop: long outage → eventual success stops loop; capped delay never exceeds 30s",
+      r.kind === "success" && n === 40 && delays.length === 39 && Math.max(...delays) === 30000 && delays.every((d) => d <= 30000));
   }
   {
     let attempts = 0, applies = 0;
     const r = await runActivationWithRetry(actDeps({ requestToken: async () => { attempts++; return { status: "conflict" }; }, applyAuth: async () => { applies++; return true; } }), DELAY);
-    assert("loop: conflict → stops immediately (fail closed), never treated as success", r.kind === "conflict" && attempts === 1 && applies === 0);
+    assert("loop: conflict → stops immediately (fail closed), never retries, never success", r.kind === "conflict" && attempts === 1 && applies === 0);
   }
   {
     let attempts = 0;
     const r = await runActivationWithRetry(actDeps({ requestToken: async () => { attempts++; return { status: "ok", token: "tok" }; } }), DELAY);
-    assert("loop: success → stops retrying (no duplicate attempts)", r.kind === "success" && attempts === 1);
+    assert("loop: success → stops retrying permanently (no duplicate attempts)", r.kind === "success" && attempts === 1);
   }
   {
     let attempts = 0;
     const r = await runActivationWithRetry(actDeps({ checkSession: async () => { attempts++; return true; } }), { ...DELAY, isCancelled: () => true });
-    assert("loop: cancelled (unmount) → no attempt, resumable later", r.kind === "retry" && attempts === 0);
+    assert("loop: pre-cancelled (unmount) → no attempt, resumable later", r.kind === "retry" && attempts === 0);
+  }
+  {
+    // Mid-flight unmount: cancel after a few sleeps → loop stops cleanly even though failures persist.
+    let n = 0, sleeps = 0, cancel = false;
+    const r = await runActivationWithRetry(
+      actDeps({ requestToken: async () => { n++; return { status: "transient" }; } }),
+      { baseDelayMs: 1, maxDelayMs: 4, sleep: async () => { sleeps++; if (sleeps >= 3) cancel = true; }, isCancelled: () => cancel },
+    );
+    assert("loop: mid-flight cancellation stops cleanly", r.kind === "retry" && n >= 3 && sleeps === 3);
   }
   {
     assert("backoff is bounded (capped) and non-decreasing", backoffDelayMs(1, 2000, 30000) === 2000 && backoffDelayMs(2, 2000, 30000) === 4000 && backoffDelayMs(10, 2000, 30000) === 30000);
+    assert("backoff stays capped at 30s for very large attempt counts", backoffDelayMs(1000, 2000, 30000) === 30000);
   }
 
   // ── Static guards ───────────────────────────────────────────────────────────────────────────────────────────

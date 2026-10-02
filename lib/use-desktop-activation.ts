@@ -15,14 +15,15 @@ import { runActivationWithRetry, type ActivationDeps, type TokenResult } from "@
  *
  * Reliability: activation is marked complete ONLY after applyDesktopAuth returns { ok:true }. Transient failures
  * (not-signed-in-yet, no deviceId, network/5xx, missing token, applyDesktopAuth { ok:false }) retry automatically
- * with a small capped backoff — no human reload/sign-out needed. A binding conflict (409) is terminal and fail
- * closed (an unbound token is never applied). Never logs the token.
+ * with a small capped backoff and keep retrying for the LIFETIME of the running app — an unattended branch player
+ * recovers from an outage of any length with no human reload/sign-out/restart. A binding conflict (409) is terminal
+ * and fail closed (an unbound token is never applied). Never logs the token.
  */
 let activationDone = false; // set ONLY after a confirmed successful activation
 let activationInFlight = false; // prevents concurrent retry loops across remounts
 
-// Bounded backoff budget: ~covers a multi-minute outage (e.g. a deploy) then yields; a later mount resumes.
-const MAX_ATTEMPTS = 24;
+// Bounded backoff: delay grows to the cap and then holds there; the loop itself never gives up (persists for
+// the app's lifetime) so a prolonged internet/API outage self-heals once connectivity returns.
 const BASE_DELAY_MS = 2000;
 const MAX_DELAY_MS = 30000;
 
@@ -78,15 +79,14 @@ export function useDesktopActivation(): void {
 
     let cancelled = false;
     void runActivationWithRetry(makeRendererDeps(bridge), {
-      maxAttempts: MAX_ATTEMPTS,
       baseDelayMs: BASE_DELAY_MS,
       maxDelayMs: MAX_DELAY_MS,
       sleep,
       isCancelled: () => cancelled,
     })
       .then((r) => {
-        // Mark complete ONLY on confirmed success. conflict/retry/cancelled leave the flag clear so a later
-        // mount (after the owner fixes a designation, or the network recovers) can resume.
+        // Mark complete ONLY on confirmed success. conflict/cancelled leave the flag clear so a later
+        // mount (after the owner fixes a designation) can resume.
         if (r.kind === "success") activationDone = true;
       })
       .catch(() => {
