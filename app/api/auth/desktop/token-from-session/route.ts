@@ -26,6 +26,10 @@ export async function POST(req: NextRequest) {
     } catch {
       body = {};
     }
+    if (typeof body.deviceId !== "string" || !body.deviceId.trim()) {
+      // This endpoint exists to bind a desktop station; without a durable deviceId there is nothing to bind.
+      return NextResponse.json({ error: "A durable deviceId is required", bound: false }, { status: 400 });
+    }
     const authorizedBranches = await getAuthorizedBranchIds(user.id, user.tenantId);
     const bound = await ensureStationBoundAndBuildClaims({
       workspaceId: user.tenantId,
@@ -35,11 +39,20 @@ export async function POST(req: NextRequest) {
       platform: body.platform,
       appVersion: body.appVersion,
     });
+    // FAIL CLOSED: never hand MAIN an UNBOUND desktop token. If the device could not bind to this
+    // workspace+branch (conflict, unauthorized branch, or invalid durable id), return 409 and no token —
+    // the renderer must not activate on an unbound token.
+    if (!bound.stationDeviceId) {
+      return NextResponse.json(
+        { error: "Desktop device could not be bound to this workspace/branch", bound: false },
+        { status: 409 },
+      );
+    }
     const claims: WsTokenClaims = { workspaceId: user.tenantId, authorizedBranches, ...bound };
     const ttlSec = getDesktopTokenTtlSeconds();
     const token = createDesktopAccessToken(user.id, claims);
     const expiresAt = new Date(Date.now() + ttlSec * 1000).toISOString();
-    return NextResponse.json({ token, expiresAt, expiresInSec: ttlSec, bound: Boolean(bound.stationDeviceId) });
+    return NextResponse.json({ token, expiresAt, expiresInSec: ttlSec, bound: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("SYNCBIZ_WS_SECRET") || msg.includes("WS_SECRET")) {

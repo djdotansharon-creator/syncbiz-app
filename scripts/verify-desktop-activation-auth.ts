@@ -7,6 +7,13 @@ import path from "node:path";
 import { buildDesktopAuthClaims, type BuildClaimsDeps } from "../lib/station-device-bind";
 import { normalizeEndpointsForPackaged } from "../desktop/src/main/runtime-config-service";
 import { sanitizeApplyDesktopAuth } from "../desktop/src/shared/desktop-auth-payload";
+import {
+  attemptActivationOnce,
+  runActivationWithRetry,
+  backoffDelayMs,
+  type ActivationDeps,
+  type TokenResult,
+} from "../lib/desktop-activation-core";
 import type { RegisterOutcome, RegisterStationDeviceInput } from "../lib/station-device-store";
 import type { DesktopRuntimeConfig } from "../desktop/src/shared/mvp-types";
 
@@ -118,6 +125,91 @@ async function main(): Promise<void> {
     assert("applyDesktopAuth drops deviceId/apiBaseUrl/wsUrl (auth-only)", keys === "expiresAtIso,ok,token");
   }
 
+  // ── Activation reliability core: fail-closed + bounded retry (pure) ─────────────────────────────────────────
+  const DELAY = { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 4, sleep: async () => {}, isCancelled: () => false };
+  function actDeps(over: Partial<ActivationDeps> = {}): ActivationDeps {
+    return {
+      checkSession: async () => true,
+      getDeviceId: async () => DEV,
+      getBranchId: async () => "default",
+      requestToken: async () => ({ status: "ok", token: "tok", expiresAtIso: "x" } as TokenResult),
+      applyAuth: async () => true,
+      ...over,
+    };
+  }
+  // single attempt
+  {
+    const r = await attemptActivationOnce(actDeps());
+    assert("attempt: all-good → success", r.kind === "success");
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ checkSession: async () => false }));
+    assert("attempt: not signed in → retry (not success)", r.kind === "retry");
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ checkSession: async () => { throw new Error("net"); } }));
+    assert("attempt: session check throws → retry", r.kind === "retry");
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ getDeviceId: async () => null }));
+    assert("attempt: missing deviceId → retry (not permanently stuck)", r.kind === "retry");
+  }
+  {
+    let applied = false;
+    const r = await attemptActivationOnce(actDeps({ requestToken: async () => ({ status: "conflict" }), applyAuth: async () => { applied = true; return true; } }));
+    assert("attempt: binding conflict → conflict (terminal) and token NEVER applied", r.kind === "conflict" && applied === false);
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ requestToken: async () => ({ status: "transient" }) }));
+    assert("attempt: transient token error → retry", r.kind === "retry");
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ requestToken: async () => { throw new Error("fetch"); } }));
+    assert("attempt: token request throws → retry", r.kind === "retry");
+  }
+  {
+    let applied = false;
+    const r = await attemptActivationOnce(actDeps({ requestToken: async () => ({ status: "ok", token: "" } as TokenResult), applyAuth: async () => { applied = true; return true; } }));
+    assert("attempt: ok but empty token → retry, never applied", r.kind === "retry" && applied === false);
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ applyAuth: async () => false }));
+    assert("attempt: applyDesktopAuth {ok:false} → retry (not success)", r.kind === "retry");
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ applyAuth: async () => { throw new Error("ipc"); } }));
+    assert("attempt: applyDesktopAuth throws → retry", r.kind === "retry");
+  }
+  // retry loop
+  {
+    let n = 0;
+    const r = await runActivationWithRetry(actDeps({ requestToken: async () => (++n < 2 ? { status: "transient" } : { status: "ok", token: "tok" }) }), DELAY);
+    assert("loop: first attempt API failure → retries then succeeds", r.kind === "success" && n === 2);
+  }
+  {
+    let applies = 0;
+    const r = await runActivationWithRetry(actDeps({ applyAuth: async () => { applies++; return false; } }), DELAY);
+    assert("loop: applyDesktopAuth {ok:false} keeps retrying up to the budget", r.kind === "retry" && applies === 5);
+  }
+  {
+    let attempts = 0, applies = 0;
+    const r = await runActivationWithRetry(actDeps({ requestToken: async () => { attempts++; return { status: "conflict" }; }, applyAuth: async () => { applies++; return true; } }), DELAY);
+    assert("loop: conflict → stops immediately (fail closed), never treated as success", r.kind === "conflict" && attempts === 1 && applies === 0);
+  }
+  {
+    let attempts = 0;
+    const r = await runActivationWithRetry(actDeps({ requestToken: async () => { attempts++; return { status: "ok", token: "tok" }; } }), DELAY);
+    assert("loop: success → stops retrying (no duplicate attempts)", r.kind === "success" && attempts === 1);
+  }
+  {
+    let attempts = 0;
+    const r = await runActivationWithRetry(actDeps({ checkSession: async () => { attempts++; return true; } }), { ...DELAY, isCancelled: () => true });
+    assert("loop: cancelled (unmount) → no attempt, resumable later", r.kind === "retry" && attempts === 0);
+  }
+  {
+    assert("backoff is bounded (capped) and non-decreasing", backoffDelayMs(1, 2000, 30000) === 2000 && backoffDelayMs(2, 2000, 30000) === 4000 && backoffDelayMs(10, 2000, 30000) === 30000);
+  }
+
   // ── Static guards ───────────────────────────────────────────────────────────────────────────────────────────
   {
     const fromSession = read("app", "api", "auth", "desktop", "token-from-session", "route.ts");
@@ -125,6 +217,11 @@ async function main(): Promise<void> {
     assert("token-from-session: ensures StationDevice then mints (register-first)",
       fromSession.indexOf("await ensureStationBoundAndBuildClaims") !== -1 &&
         fromSession.indexOf("await ensureStationBoundAndBuildClaims") < fromSession.indexOf("createDesktopAccessToken(user.id"));
+    assert("token-from-session: FAILS CLOSED — 409 + no token when not bound",
+      /if \(!bound\.stationDeviceId\)/.test(fromSession) &&
+        fromSession.indexOf("if (!bound.stationDeviceId)") < fromSession.indexOf("createDesktopAccessToken(user.id") &&
+        /status: 409/.test(fromSession));
+    assert("token-from-session: requires a deviceId (400) before binding", /status: 400/.test(fromSession));
   }
   {
     const pwd = read("app", "api", "auth", "desktop", "token", "route.ts");
@@ -146,7 +243,10 @@ async function main(): Promise<void> {
     const hook = read("lib", "use-desktop-activation.ts");
     assert("renderer hook is Electron-gated (browser no-op)", /if \(!bridge \|\| typeof bridge\.applyDesktopAuth !== "function"/.test(hook));
     assert("renderer hook POSTs same-origin token-from-session + hands token via applyDesktopAuth",
-      /\/api\/auth\/desktop\/token-from-session/.test(hook) && /applyDesktopAuth!\(\{ token:/.test(hook));
+      /\/api\/auth\/desktop\/token-from-session/.test(hook) && /applyDesktopAuth!\(\{ token/.test(hook));
+    assert("renderer hook drives bounded retry (runActivationWithRetry)", /runActivationWithRetry\(/.test(hook));
+    assert("renderer hook marks complete ONLY after a confirmed success", /if \(r\.kind === "success"\) activationDone = true/.test(hook));
+    assert("renderer hook treats 409 as terminal conflict (never applies an unbound token)", /res\.status === 409/.test(hook) && /status: "conflict"/.test(hook));
     assert("renderer hook never logs token", !/console\.(log|info|warn)\([^)]*token/i.test(hook));
   }
   {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { runActivationWithRetry, type ActivationDeps, type TokenResult } from "@/lib/desktop-activation-core";
 
 /**
  * Desktop activation (Electron only). After ONE normal hosted login, this gives the Electron MAIN process a
@@ -9,11 +10,62 @@ import { useEffect } from "react";
  *   2. confirms an authenticated session (/api/auth/me);
  *   3. reads the durable deviceId from the bridge;
  *   4. POSTs SAME-ORIGIN to /api/auth/desktop/token-from-session (server ensures StationDevice FIRST, then mints
- *      a token already carrying stationDeviceId + designatedMasterByBranch);
+ *      a token already carrying stationDeviceId + designatedMasterByBranch; fails CLOSED with 409 if it cannot bind);
  *   5. hands ONLY the token + expiry to MAIN via applyDesktopAuth (MAIN stores it and reconnects/registers).
- * Runs once per app session. Never logs the token.
+ *
+ * Reliability: activation is marked complete ONLY after applyDesktopAuth returns { ok:true }. Transient failures
+ * (not-signed-in-yet, no deviceId, network/5xx, missing token, applyDesktopAuth { ok:false }) retry automatically
+ * with a small capped backoff — no human reload/sign-out needed. A binding conflict (409) is terminal and fail
+ * closed (an unbound token is never applied). Never logs the token.
  */
-let activationAttempted = false;
+let activationDone = false; // set ONLY after a confirmed successful activation
+let activationInFlight = false; // prevents concurrent retry loops across remounts
+
+// Bounded backoff budget: ~covers a multi-minute outage (e.g. a deploy) then yields; a later mount resumes.
+const MAX_ATTEMPTS = 24;
+const BASE_DELAY_MS = 2000;
+const MAX_DELAY_MS = 30000;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function makeRendererDeps(bridge: NonNullable<Window["syncbizDesktop"]>): ActivationDeps {
+  return {
+    checkSession: async () => {
+      const me = await fetch("/api/auth/me", { credentials: "include" });
+      return me.ok;
+    },
+    getDeviceId: async () => {
+      const cfg = await bridge.getConfig();
+      return cfg?.deviceId ?? null;
+    },
+    getBranchId: async () => {
+      const cfg = await bridge.getConfig();
+      return cfg?.branchId ?? "default";
+    },
+    requestToken: async ({ deviceId, branchId }): Promise<TokenResult> => {
+      const res = await fetch("/api/auth/desktop/token-from-session", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId, branchId, platform: "desktop" }),
+      });
+      if (res.status === 409) return { status: "conflict" }; // server could not bind — terminal, fail closed
+      if (!res.ok) return { status: "transient" };
+      let data: { token?: string; expiresAt?: string; bound?: boolean } = {};
+      try {
+        data = (await res.json()) as typeof data;
+      } catch {
+        return { status: "transient" };
+      }
+      if (!data.token || data.bound === false) return { status: "transient" };
+      return { status: "ok", token: data.token, expiresAtIso: data.expiresAt };
+    },
+    applyAuth: async ({ token, expiresAtIso }) => {
+      const r = await bridge.applyDesktopAuth!({ token, expiresAtIso });
+      return Boolean(r?.ok);
+    },
+  };
+}
 
 export function useDesktopActivation(): void {
   useEffect(() => {
@@ -21,36 +73,31 @@ export function useDesktopActivation(): void {
     const bridge = window.syncbizDesktop;
     // Not running inside the Electron desktop (or an older shell without the auth bridge) → do nothing.
     if (!bridge || typeof bridge.applyDesktopAuth !== "function" || typeof bridge.getConfig !== "function") return;
-    if (activationAttempted) return;
-    activationAttempted = true;
+    if (activationDone || activationInFlight) return;
+    activationInFlight = true;
 
     let cancelled = false;
-    (async () => {
-      try {
-        const me = await fetch("/api/auth/me", { credentials: "include" });
-        if (cancelled || !me.ok) return; // not signed in yet — a later mount after login retries (flag reset on reload)
-        const cfg = await bridge.getConfig();
-        const deviceId = cfg?.deviceId;
-        if (!deviceId) return;
-        const res = await fetch("/api/auth/desktop/token-from-session", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            deviceId,
-            branchId: cfg?.branchId ?? "default",
-            platform: "desktop",
-          }),
-        });
-        if (cancelled || !res.ok) return;
-        const data = (await res.json()) as { token?: string; expiresAt?: string };
-        if (cancelled || !data?.token) return;
-        await bridge.applyDesktopAuth!({ token: data.token, expiresAtIso: data.expiresAt });
-      } catch {
-        // Never throw into render; a reload will retry. Do not log token/credentials.
-        activationAttempted = false;
-      }
-    })();
-    return () => { cancelled = true; };
+    void runActivationWithRetry(makeRendererDeps(bridge), {
+      maxAttempts: MAX_ATTEMPTS,
+      baseDelayMs: BASE_DELAY_MS,
+      maxDelayMs: MAX_DELAY_MS,
+      sleep,
+      isCancelled: () => cancelled,
+    })
+      .then((r) => {
+        // Mark complete ONLY on confirmed success. conflict/retry/cancelled leave the flag clear so a later
+        // mount (after the owner fixes a designation, or the network recovers) can resume.
+        if (r.kind === "success") activationDone = true;
+      })
+      .catch(() => {
+        /* never throw into render; do not log token/credentials */
+      })
+      .finally(() => {
+        activationInFlight = false;
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 }
