@@ -1,0 +1,290 @@
+/**
+ * Production-grade desktop activation/auth — focused tests (pure helpers + static guards). No DB, no network.
+ * Run: npx tsx scripts/verify-desktop-activation-auth.ts
+ */
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { buildDesktopAuthClaims, type BuildClaimsDeps } from "../lib/station-device-bind";
+import { normalizeEndpointsForPackaged } from "../desktop/src/main/runtime-config-service";
+import { sanitizeApplyDesktopAuth } from "../desktop/src/shared/desktop-auth-payload";
+import {
+  attemptActivationOnce,
+  runActivationWithRetry,
+  backoffDelayMs,
+  type ActivationDeps,
+  type TokenResult,
+} from "../lib/desktop-activation-core";
+import type { RegisterOutcome, RegisterStationDeviceInput } from "../lib/station-device-store";
+import type { DesktopRuntimeConfig } from "../desktop/src/shared/mvp-types";
+
+let pass = 0, fail = 0;
+function assert(name: string, cond: boolean, detail = ""): void {
+  console.log(`${cond ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`);
+  if (cond) pass++; else { fail++; process.exitCode = 1; }
+}
+const read = (...p: string[]) => readFileSync(path.join(__dirname, "..", ...p), "utf-8");
+
+const PROD_API = "https://syncbiz-app-production.up.railway.app";
+const PROD_WS = "wss://syncbiz-ws-production.up.railway.app";
+
+function fakeDeps(outcome: RegisterOutcome, designated: Record<string, string> = {}) {
+  const calls: RegisterStationDeviceInput[] = [];
+  const deps: BuildClaimsDeps = {
+    register: async (i) => { calls.push(i); return { outcome }; },
+    getDesignatedMasters: async () => designated,
+  };
+  return { deps, calls };
+}
+const DEV = "dsk-cbeb93d0-0023-47e0-aebc-b07fe350415f";
+
+async function main(): Promise<void> {
+  // ── buildDesktopAuthClaims: register-FIRST, bind-SECOND ──────────────────────────────────────────────────────
+  {
+    const { deps, calls } = fakeDeps("created");
+    const c = await buildDesktopAuthClaims({ workspaceId: "ws-1", authorizedBranches: ["default"], deviceId: DEV, branchId: "default" }, deps);
+    assert("first login + created → token bound with stationDeviceId", c.stationDeviceId === DEV);
+    assert("register was called FIRST (before claims)", calls.length === 1 && calls[0].durableDeviceId === DEV && calls[0].workspaceId === "ws-1" && calls[0].branchId === "default");
+  }
+  {
+    const { deps } = fakeDeps("refreshed");
+    const c = await buildDesktopAuthClaims({ workspaceId: "ws-1", authorizedBranches: ["default"], deviceId: DEV, branchId: "default" }, deps);
+    assert("idempotent repeat (refreshed) → still bound", c.stationDeviceId === DEV);
+  }
+  {
+    const { deps } = fakeDeps("branch_conflict");
+    const c = await buildDesktopAuthClaims({ workspaceId: "ws-1", authorizedBranches: ["default"], deviceId: DEV, branchId: "default" }, deps);
+    assert("branch_conflict → NOT bound (no stationDeviceId)", c.stationDeviceId === undefined);
+  }
+  {
+    const { deps } = fakeDeps("workspace_conflict");
+    const c = await buildDesktopAuthClaims({ workspaceId: "ws-1", authorizedBranches: ["default"], deviceId: DEV, branchId: "default" }, deps);
+    assert("workspace_conflict → NOT bound", c.stationDeviceId === undefined);
+  }
+  {
+    const { deps, calls } = fakeDeps("created");
+    const c = await buildDesktopAuthClaims({ workspaceId: "ws-1", authorizedBranches: ["default"], deviceId: "short", branchId: "default" }, deps);
+    assert("invalid deviceId → no register, no binding", calls.length === 0 && c.stationDeviceId === undefined);
+  }
+  {
+    const { deps, calls } = fakeDeps("created");
+    const c = await buildDesktopAuthClaims({ workspaceId: "ws-1", authorizedBranches: ["default"], deviceId: DEV, branchId: "other" }, deps);
+    assert("unauthorized branch → no register, no binding", calls.length === 0 && c.stationDeviceId === undefined);
+  }
+  {
+    const { deps } = fakeDeps("created", { default: DEV });
+    const c = await buildDesktopAuthClaims({ workspaceId: "ws-1", authorizedBranches: ["default"], deviceId: DEV, branchId: "default" }, deps);
+    assert("designatedMasterByBranch embedded from dep", c.designatedMasterByBranch?.default === DEV);
+  }
+  {
+    const { deps } = fakeDeps("created");
+    const c = await buildDesktopAuthClaims({ workspaceId: "ws-1", authorizedBranches: ["default"], deviceId: DEV, branchId: "default" }, deps);
+    assert("no designation → designatedMasterByBranch omitted", c.designatedMasterByBranch === undefined);
+  }
+
+  // ── normalizeEndpointsForPackaged: packaged prod defaults + legacy self-heal + dev localhost ─────────────────
+  const baseCfg = (api: string, ws: string): DesktopRuntimeConfig => ({
+    deviceId: DEV, branchId: "default", workspaceLabel: "", apiBaseUrl: api, wsUrl: ws, wsToken: "",
+    lastAuthEmail: undefined, desktopTokenExpiresAtIso: undefined, musicFolderPath: undefined,
+  });
+  {
+    const r = normalizeEndpointsForPackaged(baseCfg("http://localhost:3000", "ws://localhost:3001"), { packaged: true, prodApiBaseUrl: PROD_API, prodWsUrl: PROD_WS });
+    assert("packaged + legacy localhost → prod endpoints", r.changed && r.config.apiBaseUrl === PROD_API && r.config.wsUrl === PROD_WS);
+  }
+  {
+    const r = normalizeEndpointsForPackaged(baseCfg("", ""), { packaged: true, prodApiBaseUrl: PROD_API, prodWsUrl: PROD_WS });
+    assert("packaged + empty endpoints → prod", r.changed && r.config.apiBaseUrl === PROD_API && r.config.wsUrl === PROD_WS);
+  }
+  {
+    const custom = "https://staging.example.com";
+    const customWs = "wss://staging-ws.example.com";
+    const r = normalizeEndpointsForPackaged(baseCfg(custom, customWs), { packaged: true, prodApiBaseUrl: PROD_API, prodWsUrl: PROD_WS });
+    assert("packaged + deliberate custom endpoints → UNCHANGED (not overwritten)", !r.changed && r.config.apiBaseUrl === custom && r.config.wsUrl === customWs);
+  }
+  {
+    const r = normalizeEndpointsForPackaged(baseCfg("http://localhost:3000", "ws://localhost:3001"), { packaged: false, prodApiBaseUrl: PROD_API, prodWsUrl: PROD_WS });
+    assert("dev / non-packaged → localhost kept (unchanged)", !r.changed && r.config.apiBaseUrl === "http://localhost:3000" && r.config.wsUrl === "ws://localhost:3001");
+  }
+
+  // ── sanitizeApplyDesktopAuth: auth-only, cannot carry config/deviceId/endpoints ─────────────────────────────
+  {
+    const s = sanitizeApplyDesktopAuth({ token: "tok", expiresAtIso: "2026-01-01T00:00:00Z" });
+    assert("valid token → ok + token + expiry", s.ok === true && s.ok && s.token === "tok" && s.expiresAtIso === "2026-01-01T00:00:00Z");
+  }
+  {
+    const s = sanitizeApplyDesktopAuth({ token: "   " });
+    assert("blank token → error", s.ok === false);
+  }
+  {
+    const s = sanitizeApplyDesktopAuth({} as { token?: unknown });
+    assert("missing token → error", s.ok === false);
+  }
+  {
+    // Extra fields (deviceId/apiBaseUrl/wsUrl) MUST be dropped — applyDesktopAuth is auth-only.
+    const s = sanitizeApplyDesktopAuth({ token: "tok", deviceId: "evil", apiBaseUrl: "http://evil", wsUrl: "ws://evil" } as { token?: unknown });
+    const keys = s.ok ? Object.keys(s).sort().join(",") : "err";
+    assert("applyDesktopAuth drops deviceId/apiBaseUrl/wsUrl (auth-only)", keys === "expiresAtIso,ok,token");
+  }
+
+  // ── Activation reliability core: fail-closed + bounded retry (pure) ─────────────────────────────────────────
+  const DELAY = { baseDelayMs: 1, maxDelayMs: 4, sleep: async () => {}, isCancelled: () => false };
+  function actDeps(over: Partial<ActivationDeps> = {}): ActivationDeps {
+    return {
+      checkSession: async () => true,
+      getDeviceId: async () => DEV,
+      getBranchId: async () => "default",
+      requestToken: async () => ({ status: "ok", token: "tok", expiresAtIso: "x" } as TokenResult),
+      applyAuth: async () => true,
+      ...over,
+    };
+  }
+  // single attempt
+  {
+    const r = await attemptActivationOnce(actDeps());
+    assert("attempt: all-good → success", r.kind === "success");
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ checkSession: async () => false }));
+    assert("attempt: not signed in → retry (not success)", r.kind === "retry");
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ checkSession: async () => { throw new Error("net"); } }));
+    assert("attempt: session check throws → retry", r.kind === "retry");
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ getDeviceId: async () => null }));
+    assert("attempt: missing deviceId → retry (not permanently stuck)", r.kind === "retry");
+  }
+  {
+    let applied = false;
+    const r = await attemptActivationOnce(actDeps({ requestToken: async () => ({ status: "conflict" }), applyAuth: async () => { applied = true; return true; } }));
+    assert("attempt: binding conflict → conflict (terminal) and token NEVER applied", r.kind === "conflict" && applied === false);
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ requestToken: async () => ({ status: "transient" }) }));
+    assert("attempt: transient token error → retry", r.kind === "retry");
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ requestToken: async () => { throw new Error("fetch"); } }));
+    assert("attempt: token request throws → retry", r.kind === "retry");
+  }
+  {
+    let applied = false;
+    const r = await attemptActivationOnce(actDeps({ requestToken: async () => ({ status: "ok", token: "" } as TokenResult), applyAuth: async () => { applied = true; return true; } }));
+    assert("attempt: ok but empty token → retry, never applied", r.kind === "retry" && applied === false);
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ applyAuth: async () => false }));
+    assert("attempt: applyDesktopAuth {ok:false} → retry (not success)", r.kind === "retry");
+  }
+  {
+    const r = await attemptActivationOnce(actDeps({ applyAuth: async () => { throw new Error("ipc"); } }));
+    assert("attempt: applyDesktopAuth throws → retry", r.kind === "retry");
+  }
+  // retry loop — TRANSIENT failures persist for the app's lifetime (no attempt budget)
+  {
+    let n = 0;
+    const r = await runActivationWithRetry(actDeps({ requestToken: async () => (++n < 2 ? { status: "transient" } : { status: "ok", token: "tok" }) }), DELAY);
+    assert("loop: first attempt API failure → retries then succeeds", r.kind === "success" && n === 2);
+  }
+  {
+    // Succeeds only on attempt 30 — well beyond the old 24-attempt boundary — proving no fixed budget.
+    let n = 0;
+    const r = await runActivationWithRetry(actDeps({ requestToken: async () => (++n < 30 ? { status: "transient" } : { status: "ok", token: "tok" }) }), DELAY);
+    assert("loop: transient outage past old 24-attempt boundary → keeps retrying then succeeds", r.kind === "success" && n === 30);
+  }
+  {
+    // applyDesktopAuth {ok:false} forever → keeps retrying far past 24; bounded here only by unmount.
+    let applies = 0; let cancel = false;
+    const r = await runActivationWithRetry(
+      actDeps({ applyAuth: async () => { applies++; if (applies >= 40) cancel = true; return false; } }),
+      { ...DELAY, isCancelled: () => cancel },
+    );
+    assert("loop: applyDesktopAuth {ok:false} keeps retrying for the app lifetime (past 24)", r.kind === "retry" && applies === 40);
+  }
+  {
+    // Prolonged outage then recovery: delay must be bounded by the 30s cap across many attempts.
+    const delays: number[] = []; let n = 0;
+    const r = await runActivationWithRetry(
+      actDeps({ requestToken: async () => (++n < 40 ? { status: "transient" } : { status: "ok", token: "tok" }) }),
+      { baseDelayMs: 2000, maxDelayMs: 30000, sleep: async (ms) => { delays.push(ms); }, isCancelled: () => false },
+    );
+    assert("loop: long outage → eventual success stops loop; capped delay never exceeds 30s",
+      r.kind === "success" && n === 40 && delays.length === 39 && Math.max(...delays) === 30000 && delays.every((d) => d <= 30000));
+  }
+  {
+    let attempts = 0, applies = 0;
+    const r = await runActivationWithRetry(actDeps({ requestToken: async () => { attempts++; return { status: "conflict" }; }, applyAuth: async () => { applies++; return true; } }), DELAY);
+    assert("loop: conflict → stops immediately (fail closed), never retries, never success", r.kind === "conflict" && attempts === 1 && applies === 0);
+  }
+  {
+    let attempts = 0;
+    const r = await runActivationWithRetry(actDeps({ requestToken: async () => { attempts++; return { status: "ok", token: "tok" }; } }), DELAY);
+    assert("loop: success → stops retrying permanently (no duplicate attempts)", r.kind === "success" && attempts === 1);
+  }
+  {
+    let attempts = 0;
+    const r = await runActivationWithRetry(actDeps({ checkSession: async () => { attempts++; return true; } }), { ...DELAY, isCancelled: () => true });
+    assert("loop: pre-cancelled (unmount) → no attempt, resumable later", r.kind === "retry" && attempts === 0);
+  }
+  {
+    // Mid-flight unmount: cancel after a few sleeps → loop stops cleanly even though failures persist.
+    let n = 0, sleeps = 0, cancel = false;
+    const r = await runActivationWithRetry(
+      actDeps({ requestToken: async () => { n++; return { status: "transient" }; } }),
+      { baseDelayMs: 1, maxDelayMs: 4, sleep: async () => { sleeps++; if (sleeps >= 3) cancel = true; }, isCancelled: () => cancel },
+    );
+    assert("loop: mid-flight cancellation stops cleanly", r.kind === "retry" && n >= 3 && sleeps === 3);
+  }
+  {
+    assert("backoff is bounded (capped) and non-decreasing", backoffDelayMs(1, 2000, 30000) === 2000 && backoffDelayMs(2, 2000, 30000) === 4000 && backoffDelayMs(10, 2000, 30000) === 30000);
+    assert("backoff stays capped at 30s for very large attempt counts", backoffDelayMs(1000, 2000, 30000) === 30000);
+  }
+
+  // ── Static guards ───────────────────────────────────────────────────────────────────────────────────────────
+  {
+    const fromSession = read("app", "api", "auth", "desktop", "token-from-session", "route.ts");
+    assert("token-from-session: cookie-authenticated", /getCurrentUserFromCookies\(\)/.test(fromSession) && /status: 401/.test(fromSession));
+    assert("token-from-session: ensures StationDevice then mints (register-first)",
+      fromSession.indexOf("await ensureStationBoundAndBuildClaims") !== -1 &&
+        fromSession.indexOf("await ensureStationBoundAndBuildClaims") < fromSession.indexOf("createDesktopAccessToken(user.id"));
+    assert("token-from-session: FAILS CLOSED — 409 + no token when not bound",
+      /if \(!bound\.stationDeviceId\)/.test(fromSession) &&
+        fromSession.indexOf("if (!bound.stationDeviceId)") < fromSession.indexOf("createDesktopAccessToken(user.id") &&
+        /status: 409/.test(fromSession));
+    assert("token-from-session: requires a deviceId (400) before binding", /status: 400/.test(fromSession));
+  }
+  {
+    const pwd = read("app", "api", "auth", "desktop", "token", "route.ts");
+    assert("desktop/token: uses register-first helper (no inline findByDurableId)",
+      /ensureStationBoundAndBuildClaims/.test(pwd) && !/findByDurableId/.test(pwd));
+  }
+  {
+    const ipc = read("desktop", "src", "main", "ipc-mvp.ts");
+    const h = ipc.slice(ipc.indexOf("MVP_IPC.APPLY_DESKTOP_AUTH"), ipc.indexOf("MVP_IPC.MPV_PLAY_URL"));
+    assert("APPLY_DESKTOP_AUTH sanitizes the payload", /sanitizeApplyDesktopAuth\(/.test(h));
+    assert("APPLY_DESKTOP_AUTH patches ONLY wsToken + desktopTokenExpiresAtIso",
+      /patchRuntimeConfig\(getUserData\(\), cur, \{ wsToken: s\.token, desktopTokenExpiresAtIso: s\.expiresAtIso \}\)/.test(h));
+    assert("APPLY_DESKTOP_AUTH never reads deviceId/apiBaseUrl/wsUrl from the payload",
+      !/payload\.(deviceId|apiBaseUrl|wsUrl)/.test(h) && !/\.apiBaseUrl/.test(h) && !/\.wsUrl/.test(h));
+    assert("APPLY_DESKTOP_AUTH reconnects WS without restart", /manager\.connect\(\)/.test(h));
+    assert("loadEffectiveRuntimeConfig applies packaged normalization", /normalizeEndpointsForPackaged\(withPro, \{[\s\S]*packaged: app\.isPackaged/.test(ipc));
+  }
+  {
+    const hook = read("lib", "use-desktop-activation.ts");
+    assert("renderer hook is Electron-gated (browser no-op)", /if \(!bridge \|\| typeof bridge\.applyDesktopAuth !== "function"/.test(hook));
+    assert("renderer hook POSTs same-origin token-from-session + hands token via applyDesktopAuth",
+      /\/api\/auth\/desktop\/token-from-session/.test(hook) && /applyDesktopAuth!\(\{ token/.test(hook));
+    assert("renderer hook drives bounded retry (runActivationWithRetry)", /runActivationWithRetry\(/.test(hook));
+    assert("renderer hook marks complete ONLY after a confirmed success", /if \(r\.kind === "success"\) activationDone = true/.test(hook));
+    assert("renderer hook treats 409 as terminal conflict (never applies an unbound token)", /res\.status === 409/.test(hook) && /status: "conflict"/.test(hook));
+    assert("renderer hook never logs token", !/console\.(log|info|warn)\([^)]*token/i.test(hook));
+  }
+  {
+    const preload = read("desktop", "src", "preload", "index.ts");
+    assert("preload exposes applyDesktopAuth (token+expiry only)", /applyDesktopAuth: \(payload: ApplyDesktopAuthPayload\)/.test(preload) && /token: payload\.token, expiresAtIso: payload\.expiresAtIso/.test(preload));
+  }
+
+  console.log(`\n${pass} passed, ${fail} failed`);
+}
+
+void main();

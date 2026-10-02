@@ -50,6 +50,38 @@ export function defaultRuntimeConfig(): DesktopRuntimeConfig {
   };
 }
 
+/** The exact legacy localhost defaults earlier VONO builds persisted. Only these are auto-healed to prod. */
+export const LEGACY_LOCAL_API_BASE_URL = "http://localhost:3000";
+export const LEGACY_LOCAL_WS_URL = "ws://localhost:3001";
+
+/**
+ * Packaged-only production endpoint defaults + legacy self-heal (PURE — no electron import, so it is unit-
+ * testable). In a packaged build, an EMPTY or exactly-legacy-localhost apiBaseUrl/wsUrl is replaced with the
+ * production endpoints; a deliberate custom endpoint (anything else, e.g. a staging URL) is preserved untouched.
+ * In dev/non-packaged mode nothing changes (localhost behavior kept). Returns the config + whether it changed so
+ * the caller can persist the correction once.
+ */
+export function normalizeEndpointsForPackaged(
+  cfg: DesktopRuntimeConfig,
+  opts: { packaged: boolean; prodApiBaseUrl: string; prodWsUrl: string },
+): { config: DesktopRuntimeConfig; changed: boolean } {
+  if (!opts.packaged) return { config: cfg, changed: false };
+  let changed = false;
+  let apiBaseUrl = cfg.apiBaseUrl;
+  let wsUrl = cfg.wsUrl;
+  const api = (apiBaseUrl ?? "").trim();
+  if ((api === "" || api === LEGACY_LOCAL_API_BASE_URL) && apiBaseUrl !== opts.prodApiBaseUrl) {
+    apiBaseUrl = opts.prodApiBaseUrl;
+    changed = true;
+  }
+  const ws = (wsUrl ?? "").trim();
+  if ((ws === "" || ws === LEGACY_LOCAL_WS_URL) && wsUrl !== opts.prodWsUrl) {
+    wsUrl = opts.prodWsUrl;
+    changed = true;
+  }
+  return changed ? { config: { ...cfg, apiBaseUrl, wsUrl }, changed: true } : { config: cfg, changed: false };
+}
+
 export function loadRuntimeConfig(userData: string): DesktopRuntimeConfig {
   const dir = userData;
   const path = join(dir, CONFIG_NAME);

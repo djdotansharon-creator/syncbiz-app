@@ -7,6 +7,7 @@ import type {
   AutoStartState,
   ProtectionState,
   ExitVonoResult,
+  ApplyDesktopAuthResult,
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
@@ -60,7 +61,9 @@ import { DeviceWsManager } from "../device-websocket-client/device-ws-manager";
 import { fetchBranchLibrarySummary } from "./branch-library-fetch";
 import { ensurePlaylistProRuntimeConfig } from "./playlistpro-config";
 import { musicFolderDisplayLabel } from "../shared/playlistpro-paths";
-import { loadRuntimeConfig, patchRuntimeConfig } from "./runtime-config-service";
+import { loadRuntimeConfig, patchRuntimeConfig, normalizeEndpointsForPackaged } from "./runtime-config-service";
+import { SYNCBIZ_HOSTED_WEB_APP_URL, SYNCBIZ_PROD_WS_URL } from "./hosted-url";
+import { sanitizeApplyDesktopAuth } from "../shared/desktop-auth-payload";
 import { reconcileDeviceIdentity, stripDeviceIdFromPatch } from "./device-identity-reconcile";
 import { fileLog } from "./file-logger";
 import {
@@ -110,7 +113,18 @@ function getUserData(): string {
 function loadEffectiveRuntimeConfig(): DesktopRuntimeConfig {
   const raw = loadRuntimeConfig(getUserData());
   const withPro = ensurePlaylistProRuntimeConfig(getUserData(), raw);
-  const next = reconcileDeviceIdentity(getUserData(), withPro);
+  // Packaged production endpoint defaults + legacy-localhost self-heal. A fresh/upgraded packaged install whose
+  // apiBaseUrl/wsUrl is empty or the old localhost default is corrected to the production endpoints (persisted
+  // once); a deliberate custom endpoint is preserved. Dev/non-packaged keeps localhost.
+  const norm = normalizeEndpointsForPackaged(withPro, {
+    packaged: app.isPackaged,
+    prodApiBaseUrl: SYNCBIZ_HOSTED_WEB_APP_URL,
+    prodWsUrl: SYNCBIZ_PROD_WS_URL,
+  });
+  const corrected = norm.changed
+    ? patchRuntimeConfig(getUserData(), withPro, { apiBaseUrl: norm.config.apiBaseUrl, wsUrl: norm.config.wsUrl })
+    : withPro;
+  const next = reconcileDeviceIdentity(getUserData(), corrected);
   cachedConfig = next;
   return next;
 }
@@ -486,6 +500,39 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       return desktopSignInWithPassword(getWindow, creds.email ?? "", creds.password ?? "");
     },
   );
+
+  // Auth-only handoff: the hosted renderer (after one normal login) gives MAIN a desktop_access token already
+  // bound to stationDeviceId. NARROWLY SCOPED — applies ONLY the token + expiry; it can never change deviceId,
+  // endpoints, branch, or any other config (the payload is sanitized to {token, expiresAtIso} and nothing else is
+  // read). The durable deviceId stays the ProgramData authority (reconcileDeviceIdentity). Never logs the token.
+  ipcMain.handle(MVP_IPC.APPLY_DESKTOP_AUTH, (_e, payload: unknown): ApplyDesktopAuthResult => {
+    const s = sanitizeApplyDesktopAuth(payload as { token?: unknown; expiresAtIso?: unknown });
+    if (!s.ok) return { ok: false, error: s.error };
+    try {
+      const cur = loadRuntimeConfig(getUserData());
+      const next = reconcileDeviceIdentity(
+        getUserData(),
+        patchRuntimeConfig(getUserData(), cur, { wsToken: s.token, desktopTokenExpiresAtIso: s.expiresAtIso }),
+      );
+      cachedConfig = next;
+      if (!manager) {
+        manager = new DeviceWsManager(next, orchestratorInstance);
+        manager.onStatus((st) => broadcast(getWindow(), st));
+      } else {
+        manager.setConfig(next);
+      }
+      // Reconnect/re-register immediately with the bound identity — no app restart needed.
+      manager.connect();
+      // Ensure the cloud StationDevice registration reflects this token scope (idempotent; server already did it).
+      getStationRegistrar().trigger("signin");
+      broadcast(getWindow(), manager.snapshot());
+      fileLog("INFO", "APPLY_DESKTOP_AUTH: desktop token applied + WS reconnect", { hasExpiry: Boolean(s.expiresAtIso) });
+      return { ok: true };
+    } catch (e) {
+      fileLog("WARN", "APPLY_DESKTOP_AUTH failed", { err: (e as Error)?.message });
+      return { ok: false, error: "Could not apply desktop auth." };
+    }
+  });
 
   ipcMain.handle(MVP_IPC.MPV_PLAY_URL, (_e, url: string, attemptId?: number): void => {
     const u = typeof url === "string" ? url.trim() : "";
