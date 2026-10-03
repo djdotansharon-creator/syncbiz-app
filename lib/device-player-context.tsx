@@ -23,7 +23,7 @@ import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
-import { deviceModeAllowsLocalPlayback } from "@/lib/device-mode-guard";
+import { deviceModeAllowsLocalPlayback, localSourceExecAllowed } from "@/lib/device-mode-guard";
 import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, setRepeatMode, onRepeatModeChanged, type RepeatMode } from "@/lib/mix-preferences";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { isNativeShellStreamerMode, isStreamerDeviceMode } from "@/lib/streamer-device-mode";
@@ -345,6 +345,36 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     playNextBaseline,
     isRestoring,
   } = usePlayback();
+
+  // ── Approach (b): LOCAL execution on the designated-MASTER machine ───────────────────────────────────
+  // The hosted renderer stays CONTROL (never MASTER). But when its CO-LOCATED Electron MAIN is the
+  // designated MASTER, the renderer may act as the local playback DECISION engine for LOCAL sources only:
+  // it drives the provider so the EXISTING desktop dispatch effect loads the local file on the co-located
+  // MAIN's orchestrator via the existing `mpvPlayUrl` IPC (local absolute path NEVER leaves the machine).
+  // `commandReady` is the MAIN's authoritative FAIL-CLOSED signal (registered && wsState==="connected" &&
+  // deviceRole==="MASTER"); any other value (CONTROL / unknown / stale / offline) → no local execution.
+  const [localMainCommandReady, setLocalMainCommandReady] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const bridge = (window as Window & {
+      syncbizDesktop?: {
+        onStatus?: (cb: (s: { commandReady?: boolean }) => void) => (() => void) | void;
+        getStatus?: () => Promise<{ commandReady?: boolean }>;
+      };
+    }).syncbizDesktop;
+    if (!bridge || typeof bridge.onStatus !== "function") return; // browser / legacy shell → stays false (fail-closed)
+    let cancelled = false;
+    if (typeof bridge.getStatus === "function") {
+      bridge.getStatus().then((s) => { if (!cancelled) setLocalMainCommandReady(Boolean(s?.commandReady)); }).catch(() => {});
+    }
+    const unsub = bridge.onStatus((s) => { if (!cancelled) setLocalMainCommandReady(Boolean(s?.commandReady)); });
+    return () => { cancelled = true; if (typeof unsub === "function") unsub(); };
+  }, []);
+  // Local execution is allowed ONLY inside Electron AND when the co-located MAIN proves MASTER (fail-closed).
+  const canLocalExec = isElectronShell === true && localMainCommandReady;
+  // Authoritative source classification (NOT an empty-url heuristic): the provider source type is "local".
+  const currentSourceIsLocal = currentSource?.type === "local";
+
   const [masterConfirmOpen, setMasterConfirmOpen] = useState(false);
   const [masterState, setMasterState] = useState<StationPlaybackState | null>(null);
   const [autoMixState, setAutoMixState] = useState<boolean>(() => getAutoMix());
@@ -898,6 +928,12 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       isEligibleBrowserPlayerRoute(pathname) ||
       (effectiveDeviceMode === "MASTER" && !isBrowserNonExecutingRoute(pathname)));
 
+  // Approach (b): the SECOND fail-closed permission. Allows LOCAL-source playback on the designated-MASTER
+  // machine (co-located Electron MAIN is MASTER) even though this renderer is CONTROL. PlaybackProvider checks
+  // it ONLY together with a local-source test, so URL/radio/YouTube are untouched; false on any non-designated
+  // / CONTROL / offline device. Never globally enables local playback.
+  localSourceExecAllowed.current = canLocalExec;
+
   // Track CONTROL -> MASTER transition so adoption can complete even if mirrored state arrives a
   // moment later than the mode flip.
   useEffect(() => {
@@ -1024,6 +1060,11 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     (source: UnifiedSource, trackIndex = 0) => {
       if (useLocalDeviceTransport) {
         playSource(source, trackIndex);
+      } else if (canLocalExec && source?.type === "local") {
+        // Designated-MASTER machine + LOCAL source → drive local audio via the renderer's existing engine
+        // (provider → existing desktop dispatch → mpvPlayUrl IPC → co-located MAIN orchestrator). The MAIN
+        // session metadata is kept in sync by the effect below (local paths never travel over WS).
+        playSource(source, trackIndex);
       } else {
         sendCommandToMaster("PLAY_SOURCE", {
           source: unifiedSourceToPayload(source),
@@ -1031,7 +1072,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [useLocalDeviceTransport, playSource, sendCommandToMaster]
+    [useLocalDeviceTransport, canLocalExec, playSource, sendCommandToMaster]
   );
 
   // Add to queue — local when we ARE the player; otherwise send QUEUE_NEXT to
@@ -1048,30 +1089,47 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     [useLocalDeviceTransport, addPlayNextSources, sendCommandToMaster]
   );
 
+  // For LOCAL execution on the designated-MASTER machine, transport acts on the local provider (which the
+  // existing desktop dispatch effect mirrors to the co-located MAIN orchestrator). Applies ONLY when the
+  // CURRENT source is local AND the co-located MAIN is MASTER (fail-closed); otherwise the remote path is unchanged.
+  const localExecCurrent = canLocalExec && currentSourceIsLocal;
+
   const playOrSend = useCallback(() => {
-    if (useLocalDeviceTransport) play();
+    if (useLocalDeviceTransport || localExecCurrent) play();
     else sendCommandToMaster("PLAY");
-  }, [useLocalDeviceTransport, play, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, localExecCurrent, play, sendCommandToMaster]);
 
   const pauseOrSend = useCallback(() => {
-    if (useLocalDeviceTransport) pause();
+    if (useLocalDeviceTransport || localExecCurrent) pause();
     else sendCommandToMaster("PAUSE");
-  }, [useLocalDeviceTransport, pause, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, localExecCurrent, pause, sendCommandToMaster]);
 
   const stopOrSend = useCallback(() => {
-    if (useLocalDeviceTransport) stop();
+    if (useLocalDeviceTransport || localExecCurrent) stop();
     else sendCommandToMaster("STOP");
-  }, [useLocalDeviceTransport, stop, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, localExecCurrent, stop, sendCommandToMaster]);
 
   const nextOrSend = useCallback(() => {
-    if (useLocalDeviceTransport) next();
+    if (useLocalDeviceTransport || localExecCurrent) next();
     else sendCommandToMaster("NEXT");
-  }, [useLocalDeviceTransport, next, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, localExecCurrent, next, sendCommandToMaster]);
 
   const prevOrSend = useCallback(() => {
-    if (useLocalDeviceTransport) prev();
+    if (useLocalDeviceTransport || localExecCurrent) prev();
     else sendCommandToMaster("PREV");
-  }, [useLocalDeviceTransport, prev, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, localExecCurrent, prev, sendCommandToMaster]);
+
+  // Keep the co-located MAIN's published session (title/artwork/queue/index) in sync while the renderer
+  // executes a LOCAL source locally. METADATA ONLY — `unifiedSourceToPayload` strips local absolute paths,
+  // so no path ever travels over WS; the MAIN's empty-url PLAY_SOURCE never initiates playback (Part 1 only
+  // populates the session for STATE_UPDATE mirrors). Fires on initial local play and each local transition.
+  useEffect(() => {
+    if (!canLocalExec || !currentSourceIsLocal || !currentSource) return;
+    sendCommandToMaster("PLAY_SOURCE", {
+      source: unifiedSourceToPayload(currentSource),
+      trackIndex: currentTrackIndex,
+    });
+  }, [canLocalExec, currentSourceIsLocal, currentSource, currentTrackIndex, sendCommandToMaster]);
 
   const seekOrSend = useCallback(
     (seconds: number) => {
