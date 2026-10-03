@@ -3,18 +3,21 @@
  *  - MockPlaybackSession.setStationSession populates session metadata and NEVER touches playback truth.
  *  - static guards proving the gate is fail-closed, local-only, metadata-only (no local path over WS),
  *    and that the MAIN's PLAY_SOURCE still never plays a local source (one action = one dispatch).
- * Run: npx tsx scripts/verify-local-playback-prb.ts
+ * Run (from desktop/): npx tsx scripts/verify-local-playback-prb.ts
+ * Lives under desktop/ (excluded from the Next app build) because it imports MockPlaybackSession, whose
+ * transitive imports reach `electron` — importing that chain from the app-scoped scripts/ broke `next build`.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { MockPlaybackSession } from "../desktop/src/playback-agent/mock-playback-session";
+import { MockPlaybackSession } from "../src/playback-agent/mock-playback-session";
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean, detail = ""): void {
   console.log(`${cond ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`);
   if (cond) pass++; else { fail++; process.exitCode = 1; }
 }
-const read = (...p: string[]) => readFileSync(path.join(__dirname, "..", ...p), "utf-8");
+// From desktop/scripts/, the repo root is two levels up.
+const read = (...p: string[]) => readFileSync(path.join(__dirname, "..", "..", ...p), "utf-8");
 
 // ── Part 1: setStationSession = metadata only, zero playback-truth mutation ──────────────────────────────
 {
@@ -80,6 +83,21 @@ const read = (...p: string[]) => readFileSync(path.join(__dirname, "..", ...p), 
     /if \(!canLocalExec \|\| !currentSourceIsLocal \|\| !currentSource\) return;[\s\S]*unifiedSourceToPayload\(currentSource\)/.test(dp));
   // The remote path must be unchanged: the original PLAY_SOURCE send is still the final else.
   assert("remote/URL path unchanged (still sends PLAY_SOURCE to MASTER)", /else \{\s*sendCommandToMaster\("PLAY_SOURCE", \{\s*source: unifiedSourceToPayload\(source\),/.test(dp));
+}
+
+// ── playback-provider: source-aware fail-closed permission (the ACTUAL execution guard) ──────────────────
+{
+  const guard = read("lib", "device-mode-guard.ts");
+  assert("2nd permission is fail-closed (default false)", /export const localSourceExecAllowed = \{ current: false \};/.test(guard));
+  const pp = read("lib", "playback-provider.tsx");
+  assert("provider imports localSourceExecAllowed", /import \{ deviceModeAllowsLocalPlayback, localSourceExecAllowed \} from "\.\/device-mode-guard"/.test(pp));
+  assert("localPlaybackPermitted = CONTROL guard OR (designated && LOCAL source)",
+    /deviceModeAllowsLocalPlayback\.current \|\| \(localSourceExecAllowed\.current && unifiedSourceIsLocal\(source, playUrl\)\)/.test(pp));
+  assert("local classification is authoritative source.type (plus local-path), not empty-url", /source\?\.type === "local"/.test(pp) && /isValidLocalFilePlaybackPath\(u\)/.test(pp));
+  assert("NO bare deviceModeAllowsLocalPlayback guard remains (every exec guard goes via localPlaybackPermitted)", !/if \(!deviceModeAllowsLocalPlayback\.current\)/.test(pp));
+  assert("reboot restore bypasses CONTROL guard ONLY for a LOCAL recovery block", /localSourceExecAllowed\.current && restoringLocal/.test(pp) && /const restoringLocal = !!persistedV2\?\.local;/.test(pp));
+  const dp = read("lib", "device-player-context.tsx");
+  assert("device-player-context sets the 2nd permission from canLocalExec (fail-closed signal)", /localSourceExecAllowed\.current = canLocalExec;/.test(dp));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

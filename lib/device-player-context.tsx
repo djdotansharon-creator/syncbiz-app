@@ -23,7 +23,7 @@ import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
-import { deviceModeAllowsLocalPlayback } from "@/lib/device-mode-guard";
+import { deviceModeAllowsLocalPlayback, localSourceExecAllowed } from "@/lib/device-mode-guard";
 import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, setRepeatMode, onRepeatModeChanged, type RepeatMode } from "@/lib/mix-preferences";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { isNativeShellStreamerMode, isStreamerDeviceMode } from "@/lib/streamer-device-mode";
@@ -927,6 +927,12 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     (!isBrowserShell ||
       isEligibleBrowserPlayerRoute(pathname) ||
       (effectiveDeviceMode === "MASTER" && !isBrowserNonExecutingRoute(pathname)));
+
+  // Approach (b): the SECOND fail-closed permission. Allows LOCAL-source playback on the designated-MASTER
+  // machine (co-located Electron MAIN is MASTER) even though this renderer is CONTROL. PlaybackProvider checks
+  // it ONLY together with a local-source test, so URL/radio/YouTube are untouched; false on any non-designated
+  // / CONTROL / offline device. Never globally enables local playback.
+  localSourceExecAllowed.current = canLocalExec;
 
   // Track CONTROL -> MASTER transition so adoption can complete even if mirrored state arrives a
   // moment later than the mode flip.
