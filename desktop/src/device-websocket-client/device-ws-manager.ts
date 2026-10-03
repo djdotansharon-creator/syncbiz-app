@@ -260,8 +260,45 @@ export class DeviceWsManager {
         break;
       }
       case "PLAY_SOURCE": {
+        // METADATA FIRST — always populate the station session (title/artwork/queue/index) from the
+        // payload so STATE_UPDATE mirrors it to CONTROL, INCLUDING a local playlist whose track urls were
+        // stripped on the wire (top-level url empty). This is metadata-only; it never triggers playback.
+        const srcMeta = (payload as {
+          source?: {
+            id?: unknown; title?: unknown; cover?: unknown; type?: unknown;
+            origin?: unknown; url?: unknown; playlistId?: unknown;
+            sessionTracks?: Array<{ id?: unknown; title?: unknown; cover?: unknown; durationSeconds?: unknown }>;
+          };
+          trackIndex?: unknown;
+        } | null | undefined);
+        const src = srcMeta?.source;
+        if (src && typeof src.id === "string" && src.id.trim()) {
+          const origin = src.origin === "playlist" || src.origin === "radio" || src.origin === "source" ? src.origin : undefined;
+          const tracks = Array.isArray(src.sessionTracks)
+            ? src.sessionTracks
+                .filter((t) => t && typeof t.id === "string")
+                .map((t) => ({
+                  id: String(t.id),
+                  title: typeof t.title === "string" ? t.title : "",
+                  cover: typeof t.cover === "string" ? t.cover : null,
+                  ...(typeof t.durationSeconds === "number" ? { durationSeconds: t.durationSeconds } : {}),
+                }))
+            : undefined;
+          this.mock.setStationSession({
+            id: src.id,
+            title: typeof src.title === "string" ? src.title : "",
+            cover: typeof src.cover === "string" ? src.cover : null,
+            origin,
+            sourceType: typeof src.type === "string" ? src.type : undefined,
+            url: typeof src.url === "string" ? src.url : undefined,
+            trackIndex: typeof srcMeta?.trackIndex === "number" ? srcMeta.trackIndex : 0,
+            sessionTitle: typeof src.title === "string" ? src.title : null,
+            sessionPlaylistId: typeof src.playlistId === "string" ? src.playlistId : null,
+            sessionTracks: tracks,
+          });
+        }
         const url = (p?.source?.url ?? "").trim();
-        if (!url) break;
+        if (!url) break; // local (paths stripped on the wire) → audio handled by the co-located renderer engine
         const fadeSec = orch.getCrossfadeSec();
         if (orch.getState().music.status === "playing") {
           orch.playMusicCrossfade(url, fadeSec);
