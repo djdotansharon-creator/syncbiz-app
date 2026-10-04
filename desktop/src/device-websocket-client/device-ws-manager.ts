@@ -16,12 +16,20 @@ import type {
 } from "../shared/mvp-types";
 import type { StationPlaybackState } from "../shared/station-state";
 import { registrationIntentBranchDesktopApp } from "../shared/syncbiz-registration-intent";
+import {
+  readDesignationRecord,
+  writeDesignationRecord,
+  clearDesignationRecord,
+  isDesignatedStationOffline,
+} from "../main/designation-cache";
 
 type StatusListener = (s: MvpStatusSnapshot) => void;
 
 type ParsedIncoming = {
   type: string;
   mode?: MvpDeviceRole;
+  /** SET_DEVICE_MODE permanent-designation flag: true/false from the server; undefined on older servers. */
+  designated?: boolean;
   command?: string;
   payload?: unknown;
   message?: string;
@@ -34,6 +42,7 @@ function parseIncoming(raw: string): ParsedIncoming {
     const out: ParsedIncoming = { type: t };
     if (t === "SET_DEVICE_MODE" && (o.mode === "MASTER" || o.mode === "CONTROL")) {
       out.mode = o.mode;
+      if (typeof o.designated === "boolean") out.designated = o.designated; // undefined on older servers
     }
     if (t === "COMMAND" && typeof o.command === "string") {
       out.command = o.command;
@@ -62,9 +71,24 @@ export class DeviceWsManager {
   private lastCommandSummary: string | null = null;
   private lastError: string | null = null;
   private listener: StatusListener | null = null;
+  /**
+   * Offline permanent-designation authority. Loaded SYNCHRONOUSLY from the ProgramData cache at construction
+   * (before the renderer mounts), then refreshed only by trusted online SET_DEVICE_MODE events. True ⇒ this
+   * station may execute LOCAL playback offline even with no WS (co-located renderer reads it via the snapshot).
+   */
+  private offlineDesignated = false;
+
+  /** Recompute `offlineDesignated` from the persisted cache vs the current durable id + branch. */
+  private refreshOfflineDesignated(): void {
+    this.offlineDesignated = isDesignatedStationOffline(readDesignationRecord(), {
+      durableDeviceId: (this.config.deviceId ?? "").trim(),
+      branchId: (this.config.branchId ?? "").trim() || "default",
+    });
+  }
 
   constructor(initialConfig: DesktopRuntimeConfig, orchestrator?: PlaybackOrchestrator) {
     this.config = initialConfig;
+    this.refreshOfflineDesignated(); // deterministic sync load — available in the very first snapshot
     this.orchestrator = orchestrator ?? null;
     if (this.orchestrator) {
       // Sync real playback events (music channel) into tracked state and re-broadcast.
@@ -78,6 +102,45 @@ export class DeviceWsManager {
 
   setConfig(c: DesktopRuntimeConfig): void {
     this.config = c;
+    this.refreshOfflineDesignated(); // durable id / branch may have changed
+  }
+
+  /**
+   * Apply an authoritative SET_DEVICE_MODE permanent-designation signal (approach b).
+   *  - MASTER + designated===true  → write/refresh the trusted cache (offline authority).
+   *  - CONTROL  OR designated===false → EXPLICIT REVOCATION: clear the cache; and if this station was the
+   *    offline-designated player, STOP station audio now (hand off) — stop music + any interrupt.
+   *  - designated===undefined (older server / non-flagged MASTER path) → leave the cache UNCHANGED.
+   * The stop fires ONLY on explicit revocation of a station that WAS designated; it never touches the normal
+   * renderer CONTROL / stopForControlHandoff path and cannot reintroduce the eject bug.
+   */
+  private applyDesignationSignal(mode: MvpDeviceRole, designated: boolean | undefined): void {
+    if (mode === "MASTER" && designated === true) {
+      writeDesignationRecord({
+        workspaceId: "", // keying only; the trust anchor is the durable id + this verified server event
+        branchId: (this.config.branchId ?? "").trim() || "default",
+        durableDeviceId: (this.config.deviceId ?? "").trim(),
+        designatedAt: Date.now(),
+      });
+      this.refreshOfflineDesignated();
+      return;
+    }
+    if (mode === "CONTROL" || designated === false) {
+      const wasDesignated = this.offlineDesignated;
+      clearDesignationRecord();
+      this.offlineDesignated = false;
+      // Explicit revocation of a station that WAS the designated offline player → stop + hand off.
+      if (wasDesignated && this.orchestrator) {
+        const st = this.orchestrator.getState().music.status;
+        if (st === "playing" || st === "paused") {
+          console.warn("[SyncBiz:desktop-mpv] permanent-designation REVOKED → stopping station audio (hand off)");
+          this.orchestrator.stopMusic();
+          this.orchestrator.stopInterrupt();
+        }
+      }
+      return;
+    }
+    // designated === undefined on a MASTER signal → no change (never clears a valid cache).
   }
 
   onStatus(fn: StatusListener): void {
@@ -139,6 +202,9 @@ export class DeviceWsManager {
       registered: this.registered,
       deviceRole: this.deviceRole,
       commandReady,
+      // Offline permanent-designation authority (approach b): true ⇒ the co-located renderer may execute LOCAL
+      // playback even with no WS. Loaded sync from the ProgramData cache; refreshed only by trusted server events.
+      designatedStationOffline: this.offlineDesignated,
       mockPlaybackStatus: st.status,
       mockVolume: st.volume ?? 0,
       mockCurrentSourceLabel: this.mock.sourceLabel,
@@ -437,6 +503,7 @@ export class DeviceWsManager {
 
       if (p.type === "SET_DEVICE_MODE" && p.mode) {
         this.deviceRole = p.mode;
+        this.applyDesignationSignal(p.mode, p.designated); // trusted cache write/clear + revocation stop
         this.sendStateUpdateIfMaster();
       }
 

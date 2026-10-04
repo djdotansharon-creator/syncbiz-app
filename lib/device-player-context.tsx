@@ -23,7 +23,7 @@ import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
-import { deviceModeAllowsLocalPlayback, localSourceExecAllowed } from "@/lib/device-mode-guard";
+import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, notifyLocalSourceExecChanged, localExecResolved } from "@/lib/device-mode-guard";
 import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, setRepeatMode, onRepeatModeChanged, type RepeatMode } from "@/lib/mix-preferences";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { isNativeShellStreamerMode, isStreamerDeviceMode } from "@/lib/streamer-device-mode";
@@ -351,29 +351,49 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // designated MASTER, the renderer may act as the local playback DECISION engine for LOCAL sources only:
   // it drives the provider so the EXISTING desktop dispatch effect loads the local file on the co-located
   // MAIN's orchestrator via the existing `mpvPlayUrl` IPC (local absolute path NEVER leaves the machine).
-  // `commandReady` is the MAIN's authoritative FAIL-CLOSED signal (registered && wsState==="connected" &&
-  // deviceRole==="MASTER"); any other value (CONTROL / unknown / stale / offline) → no local execution.
+  // `commandReady` is the MAIN's authoritative ONLINE signal (registered && wsState==="connected" &&
+  // deviceRole==="MASTER"). `designatedStationOffline` is the OFFLINE authority: the ProgramData designation
+  // cache (written only after a verified online SET_DEVICE_MODE{MASTER,designated:true}) matches this station,
+  // so a no-internet designated station can still play LOCAL. Either one (fail-closed) permits local execution.
   const [localMainCommandReady, setLocalMainCommandReady] = useState(false);
+  const [localMainDesignatedOffline, setLocalMainDesignatedOffline] = useState(false);
+  // True once the MAIN has sent at least one status snapshot (permission is resolved, true or false).
+  const [mainSnapResolved, setMainSnapResolved] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const bridge = (window as Window & {
       syncbizDesktop?: {
-        onStatus?: (cb: (s: { commandReady?: boolean }) => void) => (() => void) | void;
-        getStatus?: () => Promise<{ commandReady?: boolean }>;
+        onStatus?: (cb: (s: { commandReady?: boolean; designatedStationOffline?: boolean }) => void) => (() => void) | void;
+        getStatus?: () => Promise<{ commandReady?: boolean; designatedStationOffline?: boolean }>;
       };
     }).syncbizDesktop;
     if (!bridge || typeof bridge.onStatus !== "function") return; // browser / legacy shell → stays false (fail-closed)
     let cancelled = false;
+    const apply = (s: { commandReady?: boolean; designatedStationOffline?: boolean }) => {
+      if (cancelled) return;
+      setLocalMainCommandReady(Boolean(s?.commandReady));
+      setLocalMainDesignatedOffline(Boolean(s?.designatedStationOffline));
+      setMainSnapResolved(true); // permission is now resolved (true or false)
+    };
     if (typeof bridge.getStatus === "function") {
-      bridge.getStatus().then((s) => { if (!cancelled) setLocalMainCommandReady(Boolean(s?.commandReady)); }).catch(() => {});
+      bridge.getStatus().then(apply).catch(() => {});
     }
-    const unsub = bridge.onStatus((s) => { if (!cancelled) setLocalMainCommandReady(Boolean(s?.commandReady)); });
+    const unsub = bridge.onStatus(apply);
     return () => { cancelled = true; if (typeof unsub === "function") unsub(); };
   }, []);
-  // Local execution is allowed ONLY inside Electron AND when the co-located MAIN proves MASTER (fail-closed).
-  const canLocalExec = isElectronShell === true && localMainCommandReady;
+  // Local execution is allowed ONLY inside Electron AND when the co-located MAIN proves MASTER (online) OR this
+  // station is the trusted designated MASTER per the offline cache (fail-closed — both default false).
+  const canLocalExec = isElectronShell === true && (localMainCommandReady || localMainDesignatedOffline);
   // Authoritative source classification (NOT an empty-url heuristic): the provider source type is "local".
   const currentSourceIsLocal = currentSource?.type === "local";
+
+  // Notify the one-shot playback restore (PlaybackProvider) when the local-exec permission resolves or changes,
+  // so an offline designated station that recovers LOCAL doesn't lose the cold-boot race (deterministic, no
+  // timeout). Runs AFTER render, so `localSourceExecAllowed.current` already reflects the latest `canLocalExec`.
+  useEffect(() => {
+    localExecResolved.current = mainSnapResolved || isElectronShell !== true; // browser/no-bridge → resolved
+    notifyLocalSourceExecChanged();
+  }, [canLocalExec, mainSnapResolved, isElectronShell]);
 
   const [masterConfirmOpen, setMasterConfirmOpen] = useState(false);
   const [masterState, setMasterState] = useState<StationPlaybackState | null>(null);

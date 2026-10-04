@@ -69,7 +69,7 @@ import {
   reconstructUrlSource,
   mergeCurrentIntoRecoveredQueue,
 } from "./local-recovery";
-import { deviceModeAllowsLocalPlayback, localSourceExecAllowed } from "./device-mode-guard";
+import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, localExecResolved, subscribeLocalSourceExec } from "./device-mode-guard";
 import { urlTimingMark } from "./url-startup-timing";
 
 export type PlaybackStatus = "idle" | "playing" | "paused" | "stopped";
@@ -1519,6 +1519,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     seekToRef.current = seekTo;
   }, [seekTo]);
 
+  // Re-runs the one-shot restore when the local-exec permission resolves (designated-station cold boot).
+  const [restoreTick, setRestoreTick] = useState(0);
   // Restore playback state from storage after refresh (e.g. Radio station).
   // Runs once per mount. While in flight, `isRestoring === true` so URL-driven
   // consumers (player-page) don't flash transient sources before recovery.
@@ -1533,6 +1535,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (!persistedV2 && !persistedV1) {
       setIsRestoring(false);
       return;
+    }
+    // DETERMINISTIC cold-boot wait (no timeout): a LOCAL recovery inside Electron must not make its one-shot
+    // decision before the designated-station permission is RESOLVED. If not yet permitted and not yet resolved,
+    // wait for the permission transition (fired by DevicePlayerProvider on the first MAIN snapshot) and re-run.
+    // A non-designated device resolves to "not permitted" → falls through to the normal (blocked) restore path.
+    const restoringLocalPending = !!persistedV2?.local && typeof window !== "undefined" && "syncbizDesktop" in window;
+    const permittedNow = deviceModeAllowsLocalPlayback.current || (localSourceExecAllowed.current && !!persistedV2?.local);
+    if (restoringLocalPending && !permittedNow && !localExecResolved.current) {
+      const unsub = subscribeLocalSourceExec(() => {
+        unsub();
+        setRestoreTick((t) => t + 1); // re-run once the permission has resolved; isRestoring stays true meanwhile
+      });
+      return () => unsub();
     }
     hasRestoredRef.current = true;
     let cancelled = false;
@@ -1750,11 +1765,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-    // Intentionally empty deps: runs once on mount. `playSource` / `seekTo` are
-    // accessed via refs above; `isRestoring` / `state.currentSource` are read
-    // on mount only and should not retrigger this effect.
+    // Re-runs only when `restoreTick` bumps — i.e. the local-exec permission RESOLVED after an initial wait
+    // (designated-station cold boot). `playSource`/`seekTo` are accessed via refs; `isRestoring`/
+    // `state.currentSource` are read on (re)entry only and must not retrigger this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [restoreTick]);
 
   const playPlaylist = useCallback(
     (playlist: Playlist, trackIndex = 0) => {

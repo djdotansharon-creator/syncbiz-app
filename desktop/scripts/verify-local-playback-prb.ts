@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { MockPlaybackSession } from "../src/playback-agent/mock-playback-session";
+import { isDesignatedStationOffline, type DesignationRecord } from "../src/main/designation-cache";
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean, detail = ""): void {
@@ -74,8 +75,8 @@ const read = (...p: string[]) => readFileSync(path.join(__dirname, "..", "..", .
 // ── device-player-context: fail-closed, local-only, metadata-only (no local path over WS) ────────────────
 {
   const dp = read("lib", "device-player-context.tsx");
-  assert("gate is fail-closed (electron AND commandReady)", /const canLocalExec = isElectronShell === true && localMainCommandReady;/.test(dp));
-  assert("commandReady comes from the co-located MAIN bridge status", /bridge\.onStatus\(\(s\) => \{ if \(!cancelled\) setLocalMainCommandReady\(Boolean\(s\?\.commandReady\)\)/.test(dp));
+  assert("gate is fail-closed (electron AND (commandReady OR designatedStationOffline))", /const canLocalExec = isElectronShell === true && \(localMainCommandReady \|\| localMainDesignatedOffline\);/.test(dp));
+  assert("commandReady + designatedStationOffline come from the co-located MAIN bridge status", /bridge\.onStatus\(apply\)/.test(dp) && /setLocalMainCommandReady\(Boolean\(s\?\.commandReady\)\)/.test(dp) && /setLocalMainDesignatedOffline\(Boolean\(s\?\.designatedStationOffline\)\)/.test(dp));
   assert("local detection is authoritative source type (not empty-url heuristic)", /currentSource\?\.type === "local"/.test(dp) && /source\?\.type === "local"/.test(dp));
   assert("local play uses provider transport (not WS audio)", /canLocalExec && source\?\.type === "local"\) \{[\s\S]*playSource\(source, trackIndex\)/.test(dp));
   assert("local transport gate on current source (play/pause/next/prev)", /const localExecCurrent = canLocalExec && currentSourceIsLocal;/.test(dp));
@@ -90,7 +91,7 @@ const read = (...p: string[]) => readFileSync(path.join(__dirname, "..", "..", .
   const guard = read("lib", "device-mode-guard.ts");
   assert("2nd permission is fail-closed (default false)", /export const localSourceExecAllowed = \{ current: false \};/.test(guard));
   const pp = read("lib", "playback-provider.tsx");
-  assert("provider imports localSourceExecAllowed", /import \{ deviceModeAllowsLocalPlayback, localSourceExecAllowed \} from "\.\/device-mode-guard"/.test(pp));
+  assert("provider imports localSourceExecAllowed (+ reactive restore signals)", /import \{ deviceModeAllowsLocalPlayback, localSourceExecAllowed, localExecResolved, subscribeLocalSourceExec \} from "\.\/device-mode-guard"/.test(pp));
   assert("localPlaybackPermitted = CONTROL guard OR (designated && LOCAL source)",
     /deviceModeAllowsLocalPlayback\.current \|\| \(localSourceExecAllowed\.current && unifiedSourceIsLocal\(source, playUrl\)\)/.test(pp));
   assert("local classification is authoritative source.type (plus local-path), not empty-url", /source\?\.type === "local"/.test(pp) && /isValidLocalFilePlaybackPath\(u\)/.test(pp));
@@ -98,6 +99,47 @@ const read = (...p: string[]) => readFileSync(path.join(__dirname, "..", "..", .
   assert("reboot restore bypasses CONTROL guard ONLY for a LOCAL recovery block", /localSourceExecAllowed\.current && restoringLocal/.test(pp) && /const restoringLocal = !!persistedV2\?\.local;/.test(pp));
   const dp = read("lib", "device-player-context.tsx");
   assert("device-player-context sets the 2nd permission from canLocalExec (fail-closed signal)", /localSourceExecAllowed\.current = canLocalExec;/.test(dp));
+}
+
+// ── Offline permanent-designation authority (pure) ───────────────────────────────────────────────────────
+{
+  const rec: DesignationRecord = { schemaVersion: 1, workspaceId: "ws1", branchId: "default", durableDeviceId: "dsk-LENOVO", designatedAt: 1 };
+  assert("offline: designated station matches (device+branch)", isDesignatedStationOffline(rec, { durableDeviceId: "dsk-LENOVO", branchId: "default", workspaceId: "ws1" }) === true);
+  assert("offline: Dev-PC (different durable id) BLOCKED", isDesignatedStationOffline(rec, { durableDeviceId: "dsk-DEVPC", branchId: "default", workspaceId: "ws1" }) === false);
+  assert("offline: different branch BLOCKED", isDesignatedStationOffline(rec, { durableDeviceId: "dsk-LENOVO", branchId: "other" }) === false);
+  assert("offline: workspace mismatch BLOCKED", isDesignatedStationOffline(rec, { durableDeviceId: "dsk-LENOVO", branchId: "default", workspaceId: "ws2" }) === false);
+  assert("offline: no record BLOCKED", isDesignatedStationOffline(null, { durableDeviceId: "dsk-LENOVO", branchId: "default" }) === false);
+  assert("offline: empty stored workspace tolerated (keying optional; device+branch anchor)", isDesignatedStationOffline({ ...rec, workspaceId: "" }, { durableDeviceId: "dsk-LENOVO", branchId: "default" }) === true);
+}
+
+// ── Static guards: cache rule, revocation stop, server protocol, deterministic restore ───────────────────
+{
+  const ws = read("desktop", "src", "device-websocket-client", "device-ws-manager.ts");
+  assert("MAIN writes cache ONLY on MASTER + designated===true", /mode === "MASTER" && designated === true/.test(ws) && /writeDesignationRecord\(/.test(ws));
+  assert("MAIN clears cache on CONTROL or designated===false", /mode === "CONTROL" \|\| designated === false/.test(ws) && /clearDesignationRecord\(\)/.test(ws));
+  assert("MAIN leaves cache on designated===undefined (no accidental clear)", /designated === undefined on a MASTER signal/.test(ws));
+  assert("MAIN stops station audio on revocation when it WAS designated", /wasDesignated && this\.orchestrator/.test(ws) && /stopMusic\(\)/.test(ws) && /stopInterrupt\(\)/.test(ws));
+  assert("MAIN snapshot exposes designatedStationOffline", /designatedStationOffline: this\.offlineDesignated/.test(ws));
+  assert("MAIN loads cache synchronously at construction (deterministic, no race)", /this\.refreshOfflineDesignated\(\); \/\/ deterministic sync load/.test(ws));
+}
+{
+  const srv = read("server", "index.ts");
+  assert("server REGISTER transmits designated: designatedTrusted", /designated: designatedTrusted/.test(srv));
+  assert("server CLEAR + REASSIGN both revoke via unified helper with designated:false",
+    /const revokeCurrentDesignatedMaster =/.test(srv) &&
+      /mode: "CONTROL", designated: false/.test(srv) &&
+      /revokeCurrentDesignatedMaster\(durableDeviceId\)/.test(srv) &&
+      /revokeCurrentDesignatedMaster\(\);/.test(srv));
+}
+{
+  const dp = read("lib", "device-player-context.tsx");
+  assert("renderer gate includes OFFLINE designation", /localMainCommandReady \|\| localMainDesignatedOffline/.test(dp));
+  const pp = read("lib", "playback-provider.tsx");
+  assert("restore waits DETERMINISTICALLY for permission (subscribe, not timeout)",
+    /subscribeLocalSourceExec\(\(\) => \{[\s\S]*?setRestoreTick\(/.test(pp));
+  assert("restore has no sleep/timeout-based wait", !/setTimeout\([^)]*restore/i.test(pp));
+  assert("restore re-runs on restoreTick", /\}, \[restoreTick\]\);/.test(pp));
+  assert("offline-capable LOCAL recovery condition is scoped (syncbizDesktop + persistedV2.local)", /!!persistedV2\?\.local && typeof window !== "undefined" && "syncbizDesktop" in window/.test(pp));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -170,7 +170,7 @@ export type ServerMessage =
         mode?: "playlist" | "track" | "off";
       };
     }
-  | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string; secondaryDesktop?: boolean }
+  | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string; secondaryDesktop?: boolean; designated?: boolean }
   | { type: "GUEST_RECOMMEND_RECEIVED"; recommendation: GuestRecommendationPayload }
   | { type: "GUEST_RECOMMEND_RESULT"; recommendationId: string; status: "approved" | "rejected" }
   | { type: "GUEST_RECOMMEND_SENT"; recommendationId: string }

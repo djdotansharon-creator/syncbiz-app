@@ -65,6 +65,7 @@ import { loadRuntimeConfig, patchRuntimeConfig, normalizeEndpointsForPackaged } 
 import { SYNCBIZ_HOSTED_WEB_APP_URL, SYNCBIZ_PROD_WS_URL } from "./hosted-url";
 import { sanitizeApplyDesktopAuth } from "../shared/desktop-auth-payload";
 import { reconcileDeviceIdentity, stripDeviceIdFromPatch } from "./device-identity-reconcile";
+import { readDesignationRecord, isDesignatedStationOffline } from "./designation-cache";
 import { fileLog } from "./file-logger";
 import {
   StationDeviceRegistrar,
@@ -1068,6 +1069,12 @@ function fallbackSnapshotFromConfig(c: DesktopRuntimeConfig): MvpStatusSnapshot 
     registered: false,
     deviceRole: "unknown",
     commandReady: false,
+    // Offline designation authority is cache-backed, so it is meaningful even on the pre-manager fallback
+    // snapshot (lets the renderer see it at the very first getStatus on an offline cold boot).
+    designatedStationOffline: isDesignatedStationOffline(readDesignationRecord(), {
+      durableDeviceId: (c.deviceId ?? "").trim(),
+      branchId: (c.branchId ?? "").trim() || "default",
+    }),
     mockPlaybackStatus: "idle",
     mockVolume: 80,
     mockCurrentSourceLabel: "—",
