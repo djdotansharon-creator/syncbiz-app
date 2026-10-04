@@ -1078,6 +1078,17 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     [masterDeviceId, sendCommand]
   );
 
+  // LOCAL session ownership + idempotency for the MAIN metadata mirror (fixes the LOCAL→URL overwrite + flood).
+  // The renderer mirrors the LOCAL session to the MAIN ONLY while it is the active local player. On committing a
+  // NON-local (URL/remote) source via WS it relinquishes ownership, so the stale provider LOCAL state can never
+  // overwrite the URL session. The key makes the sync idempotent (send only when the LOCAL identity/track really
+  // changes — not on every render). sendCommandToMaster is read through a ref so the sync effect never re-runs on
+  // that callback's unstable identity (it is a fresh function each render — the source of the ~20x/sec flood).
+  const localSessionOwnedRef = useRef(true);
+  const lastLocalPushKeyRef = useRef<string | null>(null);
+  const sendCommandToMasterRef = useRef(sendCommandToMaster);
+  useEffect(() => { sendCommandToMasterRef.current = sendCommandToMaster; }, [sendCommandToMaster]);
+
   // VONO native shell never runs local transport (playSource); every source is sent to the
   // MASTER (the native ExoPlayer service), even during the provisional pre-mode "MASTER" window.
   const useLocalDeviceTransport =
@@ -1086,13 +1097,22 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const playSourceOrSend = useCallback(
     (source: UnifiedSource, trackIndex = 0) => {
       if (useLocalDeviceTransport) {
+        localSessionOwnedRef.current = true;
+        lastLocalPushKeyRef.current = null; // force a fresh MAIN session commit for the new local selection
         playSource(source, trackIndex);
       } else if (canLocalExec && source?.type === "local") {
         // Designated-MASTER machine + LOCAL source → drive local audio via the renderer's existing engine
         // (provider → existing desktop dispatch → mpvPlayUrl IPC → co-located MAIN orchestrator). The MAIN
         // session metadata is kept in sync by the effect below (local paths never travel over WS).
+        // [VONO MetaSync — READ-ONLY TEST] select → LOCAL(provider). No behavior change.
+        console.warn("[VONO MetaSync] select->LOCAL(provider) " + JSON.stringify({ type: source?.type ?? null, id: source?.id ?? null, title: source?.title ?? null, trackIndex }));
+        localSessionOwnedRef.current = true;  // (re)acquire LOCAL ownership
+        lastLocalPushKeyRef.current = null;   // force a fresh MAIN commit (handles URL → same-LOCAL re-selection)
         playSource(source, trackIndex);
       } else {
+        // [VONO MetaSync — READ-ONLY TEST] select → WS PLAY_SOURCE (URL / remote). No behavior change.
+        console.warn("[VONO MetaSync] select->WS PLAY_SOURCE " + JSON.stringify({ type: source?.type ?? null, id: source?.id ?? null, title: source?.title ?? null, trackIndex }));
+        localSessionOwnedRef.current = false; // relinquish: a non-local source is now the committed station source
         sendCommandToMaster("PLAY_SOURCE", {
           source: unifiedSourceToPayload(source),
           trackIndex,
@@ -1152,11 +1172,36 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // populates the session for STATE_UPDATE mirrors). Fires on initial local play and each local transition.
   useEffect(() => {
     if (!canLocalExec || !currentSourceIsLocal || !currentSource) return;
-    sendCommandToMaster("PLAY_SOURCE", {
+    // OWNERSHIP: once a non-local (URL/remote) source is the committed station source, the stale provider LOCAL
+    // state must never overwrite it. Relinquished in playSourceOrSend's WS branch; re-acquired on a local select.
+    if (!localSessionOwnedRef.current) return;
+    // IDEMPOTENCY: send ONLY when the LOCAL identity/track actually changes — not on every render. This is what
+    // stops the ~20x/sec flood (the effect may still re-run, but it sends at most once per real local transition).
+    const key = `${currentSource.id}:${currentTrackIndex}`;
+    if (key === lastLocalPushKeyRef.current) return;
+    lastLocalPushKeyRef.current = key;
+    // [VONO MetaSync — READ-ONLY TEST] renderer pushes the LOCAL session to the MAIN (now owned + de-duped).
+    console.warn("[VONO MetaSync] localSync->PLAY_SOURCE " + JSON.stringify({ type: currentSource.type ?? null, id: currentSource.id ?? null, title: currentSource.title ?? null, trackIndex: currentTrackIndex, canLocalExec, currentSourceIsLocal }));
+    sendCommandToMasterRef.current("PLAY_SOURCE", {
       source: unifiedSourceToPayload(currentSource),
       trackIndex: currentTrackIndex,
     });
-  }, [canLocalExec, currentSourceIsLocal, currentSource, currentTrackIndex, sendCommandToMaster]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sendCommandToMaster read via ref (unstable identity by design)
+  }, [canLocalExec, currentSourceIsLocal, currentSource, currentTrackIndex]);
+
+  // [VONO MetaSync — READ-ONLY TEST] Observe the MAIN session as mirrored in masterState (ms). Logs ONLY when the
+  // session IDENTITY changes (source id/title/type/url or current-track title) — NOT on position ticks — so it is
+  // event-driven, never continuous. Proves what the MAIN committed (URL) and whether it reverts to LOCAL after a
+  // stale re-push. No behavior change.
+  const msSessionKeyRef = useRef<string>("");
+  useEffect(() => {
+    const cs = masterState?.currentSource;
+    const ct = masterState?.currentTrack;
+    const key = masterState ? `${cs?.id ?? ""}|${cs?.title ?? ""}|${ct?.title ?? ""}` : "";
+    if (key === msSessionKeyRef.current) return;
+    msSessionKeyRef.current = key;
+    console.warn("[VONO MetaSync] MAIN-session(ms) " + JSON.stringify({ srcId: cs?.id ?? null, srcTitle: cs?.title ?? null, trackTitle: ct?.title ?? null }));
+  }, [masterState]);
 
   const seekOrSend = useCallback(
     (seconds: number) => {

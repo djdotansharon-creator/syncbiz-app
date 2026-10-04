@@ -82,8 +82,10 @@ const read = (...p: string[]) => readFileSync(path.join(__dirname, "..", "..", .
   assert("local transport gate on current source (play/pause/next/prev)", /const localExecCurrent = canLocalExec && currentSourceIsLocal;/.test(dp));
   assert("metadata-sync uses unifiedSourceToPayload (strips local paths → nothing local over WS)",
     /if \(!canLocalExec \|\| !currentSourceIsLocal \|\| !currentSource\) return;[\s\S]*unifiedSourceToPayload\(currentSource\)/.test(dp));
-  // The remote path must be unchanged: the original PLAY_SOURCE send is still the final else.
-  assert("remote/URL path unchanged (still sends PLAY_SOURCE to MASTER)", /else \{\s*sendCommandToMaster\("PLAY_SOURCE", \{\s*source: unifiedSourceToPayload\(source\),/.test(dp));
+  // The remote/URL path still sends PLAY_SOURCE to MASTER, and now relinquishes LOCAL session ownership first
+  // (so stale provider LOCAL state can never overwrite the committed URL session).
+  assert("remote/URL path sends PLAY_SOURCE to MASTER + relinquishes LOCAL ownership",
+    /localSessionOwnedRef\.current = false;[\s\S]{0,160}?sendCommandToMaster\("PLAY_SOURCE", \{\s*source: unifiedSourceToPayload\(source\),/.test(dp));
 }
 
 // ── playback-provider: source-aware fail-closed permission (the ACTUAL execution guard) ──────────────────
