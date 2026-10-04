@@ -3065,6 +3065,20 @@ export function AudioPlayer() {
     ytOverlapFadeAbortRef.current = null;
   }, [currentPlayUrl]);
 
+  // Per-track re-arm of the desktop-MPV AUTOMIX mix-point latch. The latch's other reset lives in the
+  // crossfade-state effect above, which EARLY-RETURNS (skipping every reset, including this latch) while a
+  // BROWSER A/B transition guard is held (deckTransitionLock / streamTransitionAbortRef / YT / SC). Those
+  // guards can stay latched on the designated CONTROL/local-exec path after the first crossfade, so the latch
+  // never re-armed and AUTOMIX stopped firing on every later track. This ref is desktop-MPV-only state, wholly
+  // unrelated to the browser crossfade decks, so it is ALWAYS safe to clear on a new currentPlayUrl. Re-arm
+  // ONLY — this never calls next(); the mix-advance effect's own one-shot guard (pos < mixAt || started, then
+  // immediately sets started=true) still fires exactly once per track, so there is no duplicate next()/double
+  // crossfade. currentPlayUrl is stable within a track (self-heal re-dispatch keeps the same URL), so this
+  // fires once per real track change, not mid-track.
+  useEffect(() => {
+    mpvDesktopMixStartedRef.current = false;
+  }, [currentPlayUrl]);
+
   useEffect(() => {
     return () => {
       crossfadeCleanupRef.current?.();
