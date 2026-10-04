@@ -71,6 +71,13 @@ type DevicePlayerContextValue = {
   setShuffleOrSend: (value: boolean) => void;
   /** AutoMix is MASTER-controlled; CONTROL sends explicit command and waits for STATE_UPDATE. */
   setAutoMixOrSend: (value: boolean) => void;
+  /**
+   * True when THIS device is the designated station locally executing a LOCAL source (approach b): the hosted
+   * renderer stays CONTROL, but SEEK / AUTOMIX / SHUFFLE must act on the co-located local player (direct MPV +
+   * local prefs), NOT the WS CONTROL mirror. Equals `canLocalExec && currentSource.type === "local"`, so it is
+   * false for a Dev-PC / ordinary CONTROL (canLocalExec false) and for URL/radio/YouTube (not a local source).
+   */
+  isLocalExecActive: boolean;
   /** Session code for guest recommendations. Operator shares /guest?code=XXX */
   sessionCode: string | null;
   /** Full guest recommendation link for sharing */
@@ -1212,6 +1219,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       setVolumeOrSend,
       setShuffleOrSend,
       setAutoMixOrSend,
+      isLocalExecActive: localExecCurrent,
       sessionCode,
       guestLink,
       isObserverOnlyBrowser,
@@ -1245,6 +1253,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       setVolumeOrSend,
       setShuffleOrSend,
       setAutoMixOrSend,
+      localExecCurrent,
       sessionCode,
       guestLink,
       isObserverOnlyBrowser,

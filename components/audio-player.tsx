@@ -501,6 +501,12 @@ export function AudioPlayer() {
       deviceCtx.deviceMode === "CONTROL" &&
       !deviceCtx.isMobileLocalPlayback,
   );
+  // Designated station executing a LOCAL source while the hosted renderer is CONTROL (PR #52 approach b). In this
+  // and only this case the local UI must behave like a normal local player for SEEK / AUTOMIX / SHUFFLE — act on
+  // the co-located local player (direct MPV + local prefs), not the WS CONTROL mirror. The predicate is the
+  // context's authoritative `canLocalExec && currentSource.type === "local"`, so a Dev-PC / ordinary CONTROL
+  // (canLocalExec false) and URL/radio/YouTube sources (not local) are never affected.
+  const isDesignatedLocalExec = Boolean(deviceCtx?.isLocalExecActive);
 
   // ─── Diagnostic: log isControlMirror / isBranchConnected changes ────────
   useEffect(() => {
@@ -4358,7 +4364,7 @@ export function AudioPlayer() {
       ? (typeof ms?.volume === "number" && Number.isFinite(ms.volume) ? ms.volume : 80)
       : volume;
   const displayShuffle =
-    isControlMirror ? (typeof ms?.shuffle === "boolean" ? ms?.shuffle : shuffle) : shuffle;
+    isControlMirror && !isDesignatedLocalExec ? (typeof ms?.shuffle === "boolean" ? ms?.shuffle : shuffle) : shuffle;
   // READ-ONLY diagnostic (no behavior change): proves layer E on the Lenovo — whether the RANDOM button's
   // shown state (displayShuffle) tracks the provider's persisted `shuffle` or diverges via a control-mirror
   // path (isControlMirror true / masterState shuffle). Grep: [VONO Shuffle Diag]
@@ -4372,7 +4378,7 @@ export function AudioPlayer() {
     });
   }, [shuffle, displayShuffle, isControlMirror, deviceCtx?.deviceMode, ms?.shuffle]);
   const displayAutoMix =
-    isControlMirror ? (typeof ms?.autoMix === "boolean" ? ms?.autoMix : autoMix) : autoMix;
+    isControlMirror && !isDesignatedLocalExec ? (typeof ms?.autoMix === "boolean" ? ms?.autoMix : autoMix) : autoMix;
   const displayThumbnailCover = (() => {
     if (!isControlMirror && ytMultiTrackState?.currentThumbnail) return ytMultiTrackState.currentThumbnail;
     if (isControlMirror) {
@@ -4789,7 +4795,10 @@ export function AudioPlayer() {
 
   const onSeekChange = useCallback(
     (pct: number) => {
-      if (isDesktopLocal) {
+      if (isDesktopLocal || isDesignatedLocalExec) {
+        // Designated station playing LOCAL: seek the co-located MPV directly (same path a MASTER desktop uses),
+        // so the position actually moves instead of snapping back from the WS mirror. displayDuration here is the
+        // mirrored MPV duration (ms?.duration), which is the real loaded-file duration.
         if (displayDuration <= 0) return;
         void (window as any).syncbizDesktop.mpvSeekTo((pct / 100) * displayDuration);
       } else if (isControlMirror) {
@@ -4804,7 +4813,7 @@ export function AudioPlayer() {
         seekTo((pct / 100) * duration);
       }
     },
-    [isDesktopLocal, isControlMirror, displayDuration, canSeek, duration, seekTo]
+    [isDesktopLocal, isDesignatedLocalExec, isControlMirror, displayDuration, canSeek, duration, seekTo]
   );
 
   // Commit a CONTROL seek: send exactly one authoritative SEEK, keep the pending value owning
@@ -5191,11 +5200,11 @@ export function AudioPlayer() {
               contentDisabled={!displayHasContent}
               isPlaying={displayStatus === "playing"}
               onAutoMixToggle={() => {
-                if (!isControlMirror) setAutoMix((a) => !a);
+                if (!isControlMirror || isDesignatedLocalExec) setAutoMix((a) => !a);
                 else deviceCtx?.setAutoMixOrSend?.(!displayAutoMix);
               }}
               onShuffleToggle={() => {
-                if (!isControlMirror) toggleShuffle();
+                if (!isControlMirror || isDesignatedLocalExec) toggleShuffle();
                 else deviceCtx?.setShuffleOrSend?.(!displayShuffle);
               }}
               displayAutoMix={displayAutoMix}
