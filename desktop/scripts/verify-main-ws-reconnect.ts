@@ -47,7 +47,7 @@ assert("no permanent give-up (no MAX_ATTEMPTS / giveUp gate on reconnect)",
 assert("disconnect() sets intentionalClose = true", /disconnect\(\): void \{[\s\S]{0,400}this\.intentionalClose = true;/.test(mgr));
 assert("disconnect() clears the reconnect timer", /this\.intentionalClose = true;\s*this\.clearReconnectTimer\(\);/.test(mgr));
 assert("connect() re-enables reconnect for the live attempt", /this\.intentionalClose = false;\s*this\.clearReconnectTimer\(\);/.test(mgr));
-assert("connect() tears down the old socket first (clean slate, no duplicate)", /connect\(\): void \{\s*this\.disconnect\(\);/.test(mgr));
+assert("connect() tears down the old socket first (clean slate, no duplicate)", /connect\(\): void \{\s*(?:\/\/[^\n]*\n\s*)*this\.teardownSocket\(false\);/.test(mgr));
 assert("successful open resets the backoff", /socket\.on\("open", \(\) => \{\s*this\.reconnectAttempt = 0;/.test(mgr));
 
 // ── identity reuse: reconnect reuses this.config; never mints a new device id ────────────────────────────

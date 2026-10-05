@@ -391,6 +391,13 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // Local execution is allowed ONLY inside Electron AND when the co-located MAIN proves MASTER (online) OR this
   // station is the trusted designated MASTER per the offline cache (fail-closed — both default false).
   const canLocalExec = isElectronShell === true && (localMainCommandReady || localMainDesignatedOffline);
+  // Fresh value for callbacks/effects that must read the CURRENT designation signal (onDeviceMode, designation-loss
+  // effect). `canLocalExec` is the STABLE "this is the designated/master station" signal: it stays true across a
+  // transport reconnect because `localMainDesignatedOffline` (the MAIN's ProgramData designation.json cache) is
+  // cleared ONLY by a verified revoke/reassign — not by a network blip. (We intentionally do NOT use
+  // isLocalExecActive here: that also gates on currentSourceIsLocal, which could flap during reconnect.)
+  const canLocalExecRef = useRef(canLocalExec);
+  canLocalExecRef.current = canLocalExec;
   // Authoritative source classification (NOT an empty-url heuristic): the provider source type is "local".
   const currentSourceIsLocal = currentSource?.type === "local";
 
@@ -638,6 +645,17 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
            behalf (a renderer re-claim can demote the station itself). Renderer
            demotion falls through to the classic mirror handoff. */
         const isElectronRenderer = typeof window !== "undefined" && "syncbizDesktop" in window;
+        // CHAIN B: the permanently-designated station's embedded renderer is CONTROL BY DESIGN and drives LOCAL via
+        // the co-located MAIN. A CONTROL (re)assertion while the station is STILL designated (canLocalExec is
+        // stable-true via the offline-designation cache across a reconnect) is a transport/state refresh — NOT a
+        // playback handoff, so it must NOT stop local audio. A genuine revoke/reassign clears the designation
+        // (canLocalExec → false) and is handled by the MAIN (applyDesignationSignal stops MPV) and by the
+        // designation-loss effect below — never by this CONTROL path.
+        if (isElectronRenderer && canLocalExecRef.current) {
+          setMasterReclaim(false);
+          console.log("[SyncBiz Audit] CONTROL reassertion on designated station — transport refresh, no handoff");
+          return;
+        }
         if (
           !isElectronRenderer &&
           playStatusRef.current === "playing" &&
@@ -667,6 +685,21 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     },
     [stopForControlHandoff, isMobileLocalPlayback, setMasterReclaim, isNativeShellStreamer],
   );
+
+  /* CHAIN B — genuine designation loss (NOT a transport reconnect). `canLocalExec` is the stable designated-station
+     signal: a reconnect keeps it TRUE (offline cache survives), so a real revoke/reassign/clear is the ONLY thing
+     that flips it true→false. When that happens while this Electron station was the local player, stop + hand off —
+     deterministically, independent of SET_DEVICE_MODE message ordering. (The MAIN's applyDesignationSignal also
+     stops MPV on revoke; this additionally stops the renderer/provider so the UI reflects the handoff.) */
+  const prevCanLocalExecRef = useRef(canLocalExec);
+  useEffect(() => {
+    const was = prevCanLocalExecRef.current;
+    prevCanLocalExecRef.current = canLocalExec;
+    if (isElectronShell === true && was && !canLocalExec && playStatusRef.current === "playing") {
+      console.warn("[SyncBiz Audit] designation lost (canLocalExec true→false) — stopForControlHandoff");
+      stopForControlHandoff();
+    }
+  }, [canLocalExec, isElectronShell, stopForControlHandoff]);
 
   const onMasterClaimDenied = useCallback(
     (reason: string) => {

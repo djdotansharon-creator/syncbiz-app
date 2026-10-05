@@ -456,11 +456,15 @@ export class DeviceWsManager {
     }, delay);
   }
 
-  disconnect(): void {
-    // Deliberate disconnect → cancel auto-reconnect. removeAllListeners() below means the socket's own close
-    // handler will NOT fire, so this can never schedule a reconnect.
-    this.intentionalClose = true;
-    this.clearReconnectTimer();
+  /**
+   * Tear down the current socket + WS-registration state. `resetSession` controls PLAYBACK TRUTH:
+   *  - true  (INTENTIONAL disconnect: shutdown / sign-out / WS_DISCONNECT) → clear the mock session.
+   *  - false (TRANSPORT drop / reconnect) → PRESERVE the mock session (status/position/currentSource). A network
+   *    blip must NEVER mutate playback truth; the orchestrator keeps feeding real MPV state via syncMpvStatus, so
+   *    broadcasting a reset "idle" here is a FALSE EOF the renderer would act on (CHAIN A). Preserving it means the
+   *    renderer keeps seeing the true "playing" state across the outage.
+   */
+  private teardownSocket(resetSession: boolean): void {
     if (this.ws) {
       try {
         this.ws.removeAllListeners();
@@ -473,13 +477,22 @@ export class DeviceWsManager {
     this.wsState = "disconnected";
     this.registered = false;
     this.deviceRole = "unknown";
-    this.mock.reset();
+    if (resetSession) this.mock.reset();
     this.branchCatalog = [];
     this.push();
   }
 
+  disconnect(): void {
+    // Deliberate disconnect → cancel auto-reconnect and clear the session. removeAllListeners() (in teardownSocket)
+    // means the socket's own close handler will NOT fire, so this can never schedule a reconnect.
+    this.intentionalClose = true;
+    this.clearReconnectTimer();
+    this.teardownSocket(true);
+  }
+
   connect(): void {
-    this.disconnect(); // clean slate (sets intentionalClose=true, cancels any pending timer, tears down old socket)
+    // Clean slate for a (re)connect — TRANSPORT teardown that PRESERVES playback truth (never a false idle).
+    this.teardownSocket(false);
     // This is a LIVE connect attempt → re-enable auto-reconnect for the socket we are about to open.
     this.intentionalClose = false;
     this.clearReconnectTimer();
@@ -511,7 +524,8 @@ export class DeviceWsManager {
     this.lastError = null;
     this.registered = false;
     this.deviceRole = "unknown";
-    this.mock.reset();
+    // NOTE: deliberately NO mock session reset here — a (re)connect must not wipe playback truth to a false idle
+    // (CHAIN A). The session is reconciled by the server's post-REGISTER STATE and by live syncMpvStatus.
     this.wsState = "connecting";
     this.push();
 
@@ -587,7 +601,9 @@ export class DeviceWsManager {
         this.wsState = "disconnected";
         this.registered = false;
         this.deviceRole = "unknown";
-        this.mock.reset();
+        // CHAIN A: do NOT reset the mock session on a transport close — a reset broadcasts a false "idle" playback
+        // status (with the live MPV attempt id) that the renderer misreads as a natural EOF → spurious next().
+        // Playback truth stays owned by the orchestrator (syncMpvStatus); a network drop never mutates it.
         this.branchCatalog = [];
         this.push();
       }
