@@ -23,7 +23,7 @@ import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
-import { deviceModeAllowsLocalPlayback } from "@/lib/device-mode-guard";
+import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, notifyLocalSourceExecChanged, localExecResolved } from "@/lib/device-mode-guard";
 import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, setRepeatMode, onRepeatModeChanged, type RepeatMode } from "@/lib/mix-preferences";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { isNativeShellStreamerMode, isStreamerDeviceMode } from "@/lib/streamer-device-mode";
@@ -71,6 +71,13 @@ type DevicePlayerContextValue = {
   setShuffleOrSend: (value: boolean) => void;
   /** AutoMix is MASTER-controlled; CONTROL sends explicit command and waits for STATE_UPDATE. */
   setAutoMixOrSend: (value: boolean) => void;
+  /**
+   * True when THIS device is the designated station locally executing a LOCAL source (approach b): the hosted
+   * renderer stays CONTROL, but SEEK / AUTOMIX / SHUFFLE must act on the co-located local player (direct MPV +
+   * local prefs), NOT the WS CONTROL mirror. Equals `canLocalExec && currentSource.type === "local"`, so it is
+   * false for a Dev-PC / ordinary CONTROL (canLocalExec false) and for URL/radio/YouTube (not a local source).
+   */
+  isLocalExecActive: boolean;
   /** Session code for guest recommendations. Operator shares /guest?code=XXX */
   sessionCode: string | null;
   /** Full guest recommendation link for sharing */
@@ -345,6 +352,63 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     playNextBaseline,
     isRestoring,
   } = usePlayback();
+
+  // ── Approach (b): LOCAL execution on the designated-MASTER machine ───────────────────────────────────
+  // The hosted renderer stays CONTROL (never MASTER). But when its CO-LOCATED Electron MAIN is the
+  // designated MASTER, the renderer may act as the local playback DECISION engine for LOCAL sources only:
+  // it drives the provider so the EXISTING desktop dispatch effect loads the local file on the co-located
+  // MAIN's orchestrator via the existing `mpvPlayUrl` IPC (local absolute path NEVER leaves the machine).
+  // `commandReady` is the MAIN's authoritative ONLINE signal (registered && wsState==="connected" &&
+  // deviceRole==="MASTER"). `designatedStationOffline` is the OFFLINE authority: the ProgramData designation
+  // cache (written only after a verified online SET_DEVICE_MODE{MASTER,designated:true}) matches this station,
+  // so a no-internet designated station can still play LOCAL. Either one (fail-closed) permits local execution.
+  const [localMainCommandReady, setLocalMainCommandReady] = useState(false);
+  const [localMainDesignatedOffline, setLocalMainDesignatedOffline] = useState(false);
+  // True once the MAIN has sent at least one status snapshot (permission is resolved, true or false).
+  const [mainSnapResolved, setMainSnapResolved] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const bridge = (window as Window & {
+      syncbizDesktop?: {
+        onStatus?: (cb: (s: { commandReady?: boolean; designatedStationOffline?: boolean }) => void) => (() => void) | void;
+        getStatus?: () => Promise<{ commandReady?: boolean; designatedStationOffline?: boolean }>;
+      };
+    }).syncbizDesktop;
+    if (!bridge || typeof bridge.onStatus !== "function") return; // browser / legacy shell → stays false (fail-closed)
+    let cancelled = false;
+    const apply = (s: { commandReady?: boolean; designatedStationOffline?: boolean }) => {
+      if (cancelled) return;
+      setLocalMainCommandReady(Boolean(s?.commandReady));
+      setLocalMainDesignatedOffline(Boolean(s?.designatedStationOffline));
+      setMainSnapResolved(true); // permission is now resolved (true or false)
+    };
+    if (typeof bridge.getStatus === "function") {
+      bridge.getStatus().then(apply).catch(() => {});
+    }
+    const unsub = bridge.onStatus(apply);
+    return () => { cancelled = true; if (typeof unsub === "function") unsub(); };
+  }, []);
+  // Local execution is allowed ONLY inside Electron AND when the co-located MAIN proves MASTER (online) OR this
+  // station is the trusted designated MASTER per the offline cache (fail-closed — both default false).
+  const canLocalExec = isElectronShell === true && (localMainCommandReady || localMainDesignatedOffline);
+  // Fresh value for callbacks/effects that must read the CURRENT designation signal (onDeviceMode, designation-loss
+  // effect). `canLocalExec` is the STABLE "this is the designated/master station" signal: it stays true across a
+  // transport reconnect because `localMainDesignatedOffline` (the MAIN's ProgramData designation.json cache) is
+  // cleared ONLY by a verified revoke/reassign — not by a network blip. (We intentionally do NOT use
+  // isLocalExecActive here: that also gates on currentSourceIsLocal, which could flap during reconnect.)
+  const canLocalExecRef = useRef(canLocalExec);
+  canLocalExecRef.current = canLocalExec;
+  // Authoritative source classification (NOT an empty-url heuristic): the provider source type is "local".
+  const currentSourceIsLocal = currentSource?.type === "local";
+
+  // Notify the one-shot playback restore (PlaybackProvider) when the local-exec permission resolves or changes,
+  // so an offline designated station that recovers LOCAL doesn't lose the cold-boot race (deterministic, no
+  // timeout). Runs AFTER render, so `localSourceExecAllowed.current` already reflects the latest `canLocalExec`.
+  useEffect(() => {
+    localExecResolved.current = mainSnapResolved || isElectronShell !== true; // browser/no-bridge → resolved
+    notifyLocalSourceExecChanged();
+  }, [canLocalExec, mainSnapResolved, isElectronShell]);
+
   const [masterConfirmOpen, setMasterConfirmOpen] = useState(false);
   const [masterState, setMasterState] = useState<StationPlaybackState | null>(null);
   const [autoMixState, setAutoMixState] = useState<boolean>(() => getAutoMix());
@@ -581,6 +645,17 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
            behalf (a renderer re-claim can demote the station itself). Renderer
            demotion falls through to the classic mirror handoff. */
         const isElectronRenderer = typeof window !== "undefined" && "syncbizDesktop" in window;
+        // CHAIN B: the permanently-designated station's embedded renderer is CONTROL BY DESIGN and drives LOCAL via
+        // the co-located MAIN. A CONTROL (re)assertion while the station is STILL designated (canLocalExec is
+        // stable-true via the offline-designation cache across a reconnect) is a transport/state refresh — NOT a
+        // playback handoff, so it must NOT stop local audio. A genuine revoke/reassign clears the designation
+        // (canLocalExec → false) and is handled by the MAIN (applyDesignationSignal stops MPV) and by the
+        // designation-loss effect below — never by this CONTROL path.
+        if (isElectronRenderer && canLocalExecRef.current) {
+          setMasterReclaim(false);
+          console.log("[SyncBiz Audit] CONTROL reassertion on designated station — transport refresh, no handoff");
+          return;
+        }
         if (
           !isElectronRenderer &&
           playStatusRef.current === "playing" &&
@@ -610,6 +685,21 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     },
     [stopForControlHandoff, isMobileLocalPlayback, setMasterReclaim, isNativeShellStreamer],
   );
+
+  /* CHAIN B — genuine designation loss (NOT a transport reconnect). `canLocalExec` is the stable designated-station
+     signal: a reconnect keeps it TRUE (offline cache survives), so a real revoke/reassign/clear is the ONLY thing
+     that flips it true→false. When that happens while this Electron station was the local player, stop + hand off —
+     deterministically, independent of SET_DEVICE_MODE message ordering. (The MAIN's applyDesignationSignal also
+     stops MPV on revoke; this additionally stops the renderer/provider so the UI reflects the handoff.) */
+  const prevCanLocalExecRef = useRef(canLocalExec);
+  useEffect(() => {
+    const was = prevCanLocalExecRef.current;
+    prevCanLocalExecRef.current = canLocalExec;
+    if (isElectronShell === true && was && !canLocalExec && playStatusRef.current === "playing") {
+      console.warn("[SyncBiz Audit] designation lost (canLocalExec true→false) — stopForControlHandoff");
+      stopForControlHandoff();
+    }
+  }, [canLocalExec, isElectronShell, stopForControlHandoff]);
 
   const onMasterClaimDenied = useCallback(
     (reason: string) => {
@@ -898,6 +988,12 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       isEligibleBrowserPlayerRoute(pathname) ||
       (effectiveDeviceMode === "MASTER" && !isBrowserNonExecutingRoute(pathname)));
 
+  // Approach (b): the SECOND fail-closed permission. Allows LOCAL-source playback on the designated-MASTER
+  // machine (co-located Electron MAIN is MASTER) even though this renderer is CONTROL. PlaybackProvider checks
+  // it ONLY together with a local-source test, so URL/radio/YouTube are untouched; false on any non-designated
+  // / CONTROL / offline device. Never globally enables local playback.
+  localSourceExecAllowed.current = canLocalExec;
+
   // Track CONTROL -> MASTER transition so adoption can complete even if mirrored state arrives a
   // moment later than the mode flip.
   useEffect(() => {
@@ -1015,6 +1111,17 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     [masterDeviceId, sendCommand]
   );
 
+  // LOCAL session ownership + idempotency for the MAIN metadata mirror (fixes the LOCAL→URL overwrite + flood).
+  // The renderer mirrors the LOCAL session to the MAIN ONLY while it is the active local player. On committing a
+  // NON-local (URL/remote) source via WS it relinquishes ownership, so the stale provider LOCAL state can never
+  // overwrite the URL session. The key makes the sync idempotent (send only when the LOCAL identity/track really
+  // changes — not on every render). sendCommandToMaster is read through a ref so the sync effect never re-runs on
+  // that callback's unstable identity (it is a fresh function each render — the source of the ~20x/sec flood).
+  const localSessionOwnedRef = useRef(true);
+  const lastLocalPushKeyRef = useRef<string | null>(null);
+  const sendCommandToMasterRef = useRef(sendCommandToMaster);
+  useEffect(() => { sendCommandToMasterRef.current = sendCommandToMaster; }, [sendCommandToMaster]);
+
   // VONO native shell never runs local transport (playSource); every source is sent to the
   // MASTER (the native ExoPlayer service), even during the provisional pre-mode "MASTER" window.
   const useLocalDeviceTransport =
@@ -1023,15 +1130,29 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const playSourceOrSend = useCallback(
     (source: UnifiedSource, trackIndex = 0) => {
       if (useLocalDeviceTransport) {
+        localSessionOwnedRef.current = true;
+        lastLocalPushKeyRef.current = null; // force a fresh MAIN session commit for the new local selection
+        playSource(source, trackIndex);
+      } else if (canLocalExec && source?.type === "local") {
+        // Designated-MASTER machine + LOCAL source → drive local audio via the renderer's existing engine
+        // (provider → existing desktop dispatch → mpvPlayUrl IPC → co-located MAIN orchestrator). The MAIN
+        // session metadata is kept in sync by the effect below (local paths never travel over WS).
+        // [VONO MetaSync — READ-ONLY TEST] select → LOCAL(provider). No behavior change.
+        console.warn("[VONO MetaSync] select->LOCAL(provider) " + JSON.stringify({ type: source?.type ?? null, id: source?.id ?? null, title: source?.title ?? null, trackIndex }));
+        localSessionOwnedRef.current = true;  // (re)acquire LOCAL ownership
+        lastLocalPushKeyRef.current = null;   // force a fresh MAIN commit (handles URL → same-LOCAL re-selection)
         playSource(source, trackIndex);
       } else {
+        // [VONO MetaSync — READ-ONLY TEST] select → WS PLAY_SOURCE (URL / remote). No behavior change.
+        console.warn("[VONO MetaSync] select->WS PLAY_SOURCE " + JSON.stringify({ type: source?.type ?? null, id: source?.id ?? null, title: source?.title ?? null, trackIndex }));
+        localSessionOwnedRef.current = false; // relinquish: a non-local source is now the committed station source
         sendCommandToMaster("PLAY_SOURCE", {
           source: unifiedSourceToPayload(source),
           trackIndex,
         });
       }
     },
-    [useLocalDeviceTransport, playSource, sendCommandToMaster]
+    [useLocalDeviceTransport, canLocalExec, playSource, sendCommandToMaster]
   );
 
   // Add to queue — local when we ARE the player; otherwise send QUEUE_NEXT to
@@ -1048,30 +1169,72 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     [useLocalDeviceTransport, addPlayNextSources, sendCommandToMaster]
   );
 
+  // For LOCAL execution on the designated-MASTER machine, transport acts on the local provider (which the
+  // existing desktop dispatch effect mirrors to the co-located MAIN orchestrator). Applies ONLY when the
+  // CURRENT source is local AND the co-located MAIN is MASTER (fail-closed); otherwise the remote path is unchanged.
+  const localExecCurrent = canLocalExec && currentSourceIsLocal;
+
   const playOrSend = useCallback(() => {
-    if (useLocalDeviceTransport) play();
+    if (useLocalDeviceTransport || localExecCurrent) play();
     else sendCommandToMaster("PLAY");
-  }, [useLocalDeviceTransport, play, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, localExecCurrent, play, sendCommandToMaster]);
 
   const pauseOrSend = useCallback(() => {
-    if (useLocalDeviceTransport) pause();
+    if (useLocalDeviceTransport || localExecCurrent) pause();
     else sendCommandToMaster("PAUSE");
-  }, [useLocalDeviceTransport, pause, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, localExecCurrent, pause, sendCommandToMaster]);
 
   const stopOrSend = useCallback(() => {
-    if (useLocalDeviceTransport) stop();
+    if (useLocalDeviceTransport || localExecCurrent) stop();
     else sendCommandToMaster("STOP");
-  }, [useLocalDeviceTransport, stop, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, localExecCurrent, stop, sendCommandToMaster]);
 
   const nextOrSend = useCallback(() => {
-    if (useLocalDeviceTransport) next();
+    if (useLocalDeviceTransport || localExecCurrent) next();
     else sendCommandToMaster("NEXT");
-  }, [useLocalDeviceTransport, next, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, localExecCurrent, next, sendCommandToMaster]);
 
   const prevOrSend = useCallback(() => {
-    if (useLocalDeviceTransport) prev();
+    if (useLocalDeviceTransport || localExecCurrent) prev();
     else sendCommandToMaster("PREV");
-  }, [useLocalDeviceTransport, prev, sendCommandToMaster]);
+  }, [useLocalDeviceTransport, localExecCurrent, prev, sendCommandToMaster]);
+
+  // Keep the co-located MAIN's published session (title/artwork/queue/index) in sync while the renderer
+  // executes a LOCAL source locally. METADATA ONLY — `unifiedSourceToPayload` strips local absolute paths,
+  // so no path ever travels over WS; the MAIN's empty-url PLAY_SOURCE never initiates playback (Part 1 only
+  // populates the session for STATE_UPDATE mirrors). Fires on initial local play and each local transition.
+  useEffect(() => {
+    if (!canLocalExec || !currentSourceIsLocal || !currentSource) return;
+    // OWNERSHIP: once a non-local (URL/remote) source is the committed station source, the stale provider LOCAL
+    // state must never overwrite it. Relinquished in playSourceOrSend's WS branch; re-acquired on a local select.
+    if (!localSessionOwnedRef.current) return;
+    // IDEMPOTENCY: send ONLY when the LOCAL identity/track actually changes — not on every render. This is what
+    // stops the ~20x/sec flood (the effect may still re-run, but it sends at most once per real local transition).
+    const key = `${currentSource.id}:${currentTrackIndex}`;
+    if (key === lastLocalPushKeyRef.current) return;
+    lastLocalPushKeyRef.current = key;
+    // [VONO MetaSync — READ-ONLY TEST] renderer pushes the LOCAL session to the MAIN (now owned + de-duped).
+    console.warn("[VONO MetaSync] localSync->PLAY_SOURCE " + JSON.stringify({ type: currentSource.type ?? null, id: currentSource.id ?? null, title: currentSource.title ?? null, trackIndex: currentTrackIndex, canLocalExec, currentSourceIsLocal }));
+    sendCommandToMasterRef.current("PLAY_SOURCE", {
+      source: unifiedSourceToPayload(currentSource),
+      trackIndex: currentTrackIndex,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sendCommandToMaster read via ref (unstable identity by design)
+  }, [canLocalExec, currentSourceIsLocal, currentSource, currentTrackIndex]);
+
+  // [VONO MetaSync — READ-ONLY TEST] Observe the MAIN session as mirrored in masterState (ms). Logs ONLY when the
+  // session IDENTITY changes (source id/title/type/url or current-track title) — NOT on position ticks — so it is
+  // event-driven, never continuous. Proves what the MAIN committed (URL) and whether it reverts to LOCAL after a
+  // stale re-push. No behavior change.
+  const msSessionKeyRef = useRef<string>("");
+  useEffect(() => {
+    const cs = masterState?.currentSource;
+    const ct = masterState?.currentTrack;
+    const key = masterState ? `${cs?.id ?? ""}|${cs?.title ?? ""}|${ct?.title ?? ""}` : "";
+    if (key === msSessionKeyRef.current) return;
+    msSessionKeyRef.current = key;
+    console.warn("[VONO MetaSync] MAIN-session(ms) " + JSON.stringify({ srcId: cs?.id ?? null, srcTitle: cs?.title ?? null, trackTitle: ct?.title ?? null }));
+  }, [masterState]);
 
   const seekOrSend = useCallback(
     (seconds: number) => {
@@ -1134,6 +1297,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       setVolumeOrSend,
       setShuffleOrSend,
       setAutoMixOrSend,
+      isLocalExecActive: localExecCurrent,
       sessionCode,
       guestLink,
       isObserverOnlyBrowser,
@@ -1167,6 +1331,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       setVolumeOrSend,
       setShuffleOrSend,
       setAutoMixOrSend,
+      localExecCurrent,
       sessionCode,
       guestLink,
       isObserverOnlyBrowser,

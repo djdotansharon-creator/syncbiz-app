@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource, type PlaybackStatus } from "@/lib/playback-provider";
 import { shouldAdoptLiveMpv } from "@/lib/live-mpv-adopt";
-import { shouldFreezeSelfHeal, nextFreezeBaseline, nextStartupBaseline, isEnginePaused } from "@/lib/desktop-freeze-self-heal";
+import { shouldFreezeSelfHeal, nextFreezeBaseline, nextStartupBaseline, isEnginePaused, decideLocalStartupStall } from "@/lib/desktop-freeze-self-heal";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { computeLivePosition } from "@/lib/remote-control/live-position";
 import { isPlayNextSourceId } from "@/lib/play-next";
@@ -501,6 +501,12 @@ export function AudioPlayer() {
       deviceCtx.deviceMode === "CONTROL" &&
       !deviceCtx.isMobileLocalPlayback,
   );
+  // Designated station executing a LOCAL source while the hosted renderer is CONTROL (PR #52 approach b). In this
+  // and only this case the local UI must behave like a normal local player for SEEK / AUTOMIX / SHUFFLE — act on
+  // the co-located local player (direct MPV + local prefs), not the WS CONTROL mirror. The predicate is the
+  // context's authoritative `canLocalExec && currentSource.type === "local"`, so a Dev-PC / ordinary CONTROL
+  // (canLocalExec false) and URL/radio/YouTube sources (not local) are never affected.
+  const isDesignatedLocalExec = Boolean(deviceCtx?.isLocalExecActive);
 
   // ─── Diagnostic: log isControlMirror / isBranchConnected changes ────────
   useEffect(() => {
@@ -3777,6 +3783,21 @@ export function AudioPlayer() {
   const mpvPendingUrlRef = useRef<string | null>(null);
   const mpvCoalesceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mpvDesktopMixStartedRef = useRef(false);
+  // Re-arm the desktop AUTOMIX pre-EOF latch EXACTLY ONCE per NEW MPV attempt. `desktopMpvSnap.attemptId` changes
+  // only when the orchestrator starts a genuinely new track/attempt, and that snapshot arrives with position≈0 —
+  // so this re-arms the pre-EOF mix-advance scheduler per track WITHOUT ever letting it fire against a stale
+  // (old-track, high-position) snapshot. (The reverted f2dc229 re-armed on currentPlayUrl, which flips BEFORE the
+  // new snapshot lands → the scheduler re-fired on the old position → multi-track cascade.) Reset-ONLY: it never
+  // calls next(); the scheduler still decides WHEN to fire from position/duration/mixSec. The one-shot guard
+  // (mixArmAttemptRef) + the attemptId-only dep mean a bare currentPlayUrl change or a re-render never re-arms.
+  const mixArmAttemptRef = useRef<number | null>(null);
+  useEffect(() => {
+    const id = desktopMpvSnap?.attemptId;
+    if (typeof id !== "number") return;
+    if (id === mixArmAttemptRef.current) return; // same attempt → do not re-arm again
+    mixArmAttemptRef.current = id;
+    mpvDesktopMixStartedRef.current = false;
+  }, [desktopMpvSnap?.attemptId]);
   // Fires 4 s after mpvPlayUrl() is dispatched. If MPV hasn't confirmed "playing" by
   // then, the fake-PLAYING UI is reset and the error is surfaced to the user.
   const mpvStallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3953,36 +3974,43 @@ export function AudioPlayer() {
           }
           mpvLastDispatchAtRef.current = Date.now();
 
-          // Stall backstop — LOCAL FILES ONLY. A local file must report "playing" almost immediately;
-          // if it doesn't within 4s it's a genuine missing/unsupported file → surface + stop.
+          // Stall backstop — LOCAL FILES ONLY. 4s without a "playing" confirmation is the point where we
+          // ENTER RECOVERY — it is NOT a failure verdict and must NEVER stop the player or clear the session
+          // (P0: under CPU/RAM/disk pressure MPV can be alive but take >4s from loadfile to start-file; the
+          // old stop() here wiped source/queue/recovery snapshot permanently). Genuine load errors are owned by
+          // the load_error skip path, crossfade attempts by the orchestrator; everything else is handed to the
+          // EXISTING bounded STREAM_STARTING machine (grace → one retry → SKIP_FORWARD, never-stop), whose
+          // progress detection lets a late confirmation recover normally.
           // STREAMS (direct URL / YouTube) are DELIBERATELY excluded here: their startup is owned solely
-          // by the STREAM_STARTING phase machine (bounded STREAM_STARTUP_TIMEOUT_MS grace → retry →
-          // SKIP_FORWARD, never-stop). No stall→stop() may fire for a stream during startup.
+          // by the STREAM_STARTING phase machine from dispatch.
           if (mpvStallTimerRef.current) { clearTimeout(mpvStallTimerRef.current); mpvStallTimerRef.current = null; }
           if (isValidLocalFilePlaybackPath(latest)) {
             mpvStallTimerRef.current = setTimeout(() => {
               mpvStallTimerRef.current = null;
-              if (
-                playbackAttemptGenRef.current === attemptId &&
-                statusRef.current === "playing" &&
-                currentPlayUrlRef.current === latest &&
-                mpvChAStatusRef.current !== "playing"
-              ) {
-                const snap = desktopMpvSnapRef.current;
-                const engineOk = snap?.engineReady !== false;
-                const errDetail = snap?.lastError ?? null;
-                const userMsg = !engineOk
-                  ? (errDetail ?? "MPV player is not ready — check the desktop installation")
-                  : (errDetail ?? "Desktop playback did not start — file may be missing or in an unsupported format");
-                console.warn("[SyncBiz Audit] Desktop MPV stall — no playing confirmation after 4 s (local file)", {
-                  url: latest.slice(0, 100),
-                  mpvChAStatus: mpvChAStatusRef.current,
-                  engineReady: snap?.engineReady ?? null,
-                  lastError: errDetail,
-                });
-                setLastMessage(userMsg);
-                stop();
-              }
+              const snap = desktopMpvSnapRef.current;
+              const decision = decideLocalStartupStall({
+                attemptId,
+                currentAttemptId: playbackAttemptGenRef.current,
+                rendererStatus: statusRef.current,
+                armedUrl: latest,
+                currentUrl: currentPlayUrlRef.current,
+                engineStatus: mpvChAStatusRef.current,
+                snap,
+              });
+              if (decision === "ignore") return;
+              console.warn("[SyncBiz Audit] Desktop MPV stall — no playing confirmation after 4 s (local file) — recovering, session preserved", {
+                url: latest.slice(0, 100),
+                decision,
+                mpvChAStatus: mpvChAStatusRef.current,
+                engineReady: snap?.engineReady ?? null,
+                lastError: snap?.lastError ?? null,
+              });
+              sbDiag("STARTUP_STALL", { decision, attemptId, engineReady: snap?.engineReady ?? null, sourceType: classifySource(latest), urlHash: sbUrlHash(latest) }); // DIAG
+              if (decision !== "enter_startup_recovery") return; // load_error path / orchestrator own it
+              // Hand THIS attempt to the bounded startup machine. Keyed to the SAME item so its single retry
+              // keeps counting toward SKIP_FORWARD; attemptStartAt stays the dispatch time (bounded grace).
+              streamStartupItemRef.current = latest;
+              streamPhaseRef.current = "starting";
             }, 4000);
           }
         }, MPV_LOADFILE_COALESCE_MS);
@@ -4073,6 +4101,7 @@ export function AudioPlayer() {
           mpvLastUrlRef.current = url; // keep the routing effect in sync
           mpvLastDispatchAtRef.current = Date.now();
           resetStreamAttempt(url); // fresh clock/progress + attemptStartAt=now; SAME item keeps the retry budget
+          streamPhaseRef.current = "starting"; // a retry is still STARTING for any source (no-op for streams; keeps a slow LOCAL start bounded)
           void desktop.mpvPlayUrl(url, playbackAttemptGenRef.current); // fresh loadfile (== manual refresh)
           sbDiag("REDISPATCH", { reason: "startup_timeout", attempt: attemptNo, attemptId: playbackAttemptGenRef.current, startingMs, sourceType: classifySource(url), urlHash: sbUrlHash(url) }); // DIAG
         } else {
@@ -4358,7 +4387,7 @@ export function AudioPlayer() {
       ? (typeof ms?.volume === "number" && Number.isFinite(ms.volume) ? ms.volume : 80)
       : volume;
   const displayShuffle =
-    isControlMirror ? (typeof ms?.shuffle === "boolean" ? ms?.shuffle : shuffle) : shuffle;
+    isControlMirror && !isDesignatedLocalExec ? (typeof ms?.shuffle === "boolean" ? ms?.shuffle : shuffle) : shuffle;
   // READ-ONLY diagnostic (no behavior change): proves layer E on the Lenovo — whether the RANDOM button's
   // shown state (displayShuffle) tracks the provider's persisted `shuffle` or diverges via a control-mirror
   // path (isControlMirror true / masterState shuffle). Grep: [VONO Shuffle Diag]
@@ -4372,7 +4401,7 @@ export function AudioPlayer() {
     });
   }, [shuffle, displayShuffle, isControlMirror, deviceCtx?.deviceMode, ms?.shuffle]);
   const displayAutoMix =
-    isControlMirror ? (typeof ms?.autoMix === "boolean" ? ms?.autoMix : autoMix) : autoMix;
+    isControlMirror && !isDesignatedLocalExec ? (typeof ms?.autoMix === "boolean" ? ms?.autoMix : autoMix) : autoMix;
   const displayThumbnailCover = (() => {
     if (!isControlMirror && ytMultiTrackState?.currentThumbnail) return ytMultiTrackState.currentThumbnail;
     if (isControlMirror) {
@@ -4789,7 +4818,10 @@ export function AudioPlayer() {
 
   const onSeekChange = useCallback(
     (pct: number) => {
-      if (isDesktopLocal) {
+      if (isDesktopLocal || isDesignatedLocalExec) {
+        // Designated station playing LOCAL: seek the co-located MPV directly (same path a MASTER desktop uses),
+        // so the position actually moves instead of snapping back from the WS mirror. displayDuration here is the
+        // mirrored MPV duration (ms?.duration), which is the real loaded-file duration.
         if (displayDuration <= 0) return;
         void (window as any).syncbizDesktop.mpvSeekTo((pct / 100) * displayDuration);
       } else if (isControlMirror) {
@@ -4804,7 +4836,7 @@ export function AudioPlayer() {
         seekTo((pct / 100) * duration);
       }
     },
-    [isDesktopLocal, isControlMirror, displayDuration, canSeek, duration, seekTo]
+    [isDesktopLocal, isDesignatedLocalExec, isControlMirror, displayDuration, canSeek, duration, seekTo]
   );
 
   // Commit a CONTROL seek: send exactly one authoritative SEEK, keep the pending value owning
@@ -5191,11 +5223,11 @@ export function AudioPlayer() {
               contentDisabled={!displayHasContent}
               isPlaying={displayStatus === "playing"}
               onAutoMixToggle={() => {
-                if (!isControlMirror) setAutoMix((a) => !a);
+                if (!isControlMirror || isDesignatedLocalExec) setAutoMix((a) => !a);
                 else deviceCtx?.setAutoMixOrSend?.(!displayAutoMix);
               }}
               onShuffleToggle={() => {
-                if (!isControlMirror) toggleShuffle();
+                if (!isControlMirror || isDesignatedLocalExec) toggleShuffle();
                 else deviceCtx?.setShuffleOrSend?.(!displayShuffle);
               }}
               displayAutoMix={displayAutoMix}

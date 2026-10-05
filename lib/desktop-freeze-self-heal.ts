@@ -79,6 +79,39 @@ export function nextStartupBaseline(args: {
 }
 
 /**
+ * P0 — LOCAL startup-stall backstop decision (fired once, 4s after a LOCAL loadfile dispatch).
+ *
+ * A late "playing" confirmation is NOT a failed track: under CPU/RAM/disk pressure MPV can take >4s from
+ * loadfile to start-file while being perfectly alive. This decision NEVER means "stop playback":
+ *  - "ignore"                  → not our attempt any more / not intending to play / already confirmed playing.
+ *  - "defer_load_error"        → MPV reported a genuine load error for THIS attempt; the existing load_error
+ *                                path (skip forward once, session preserved) owns it.
+ *  - "defer_crossfade"         → a crossfade-mode attempt; the orchestrator owns its startup timeout.
+ *  - "enter_startup_recovery"  → slow/unconfirmed start (or engine temporarily unavailable): hand the attempt to
+ *                                the EXISTING bounded startup machine (grace → one retry → SKIP_FORWARD).
+ */
+export type LocalStartupStallDecision = "ignore" | "defer_load_error" | "defer_crossfade" | "enter_startup_recovery";
+
+export function decideLocalStartupStall(args: {
+  attemptId: number;          // the attempt this backstop was armed for
+  currentAttemptId: number;   // playbackAttemptGenRef now
+  rendererStatus: string;     // our transport intent (statusRef)
+  armedUrl: string;           // the URL this backstop was armed for
+  currentUrl: string | null;  // currentPlayUrlRef now
+  engineStatus: string | null; // latest MPV channel status (mpvChAStatusRef)
+  snap: { attemptId?: number | null; lastError?: string | null; attemptMode?: string | null } | null;
+}): LocalStartupStallDecision {
+  if (args.currentAttemptId !== args.attemptId) return "ignore"; // superseded attempt
+  if (args.rendererStatus !== "playing") return "ignore";        // paused / stopped intent
+  if (args.currentUrl !== args.armedUrl) return "ignore";        // a different track now
+  if (args.engineStatus === "playing") return "ignore";          // confirmed in time
+  const snapIsThisAttempt = !!args.snap && args.snap.attemptId === args.attemptId;
+  if (snapIsThisAttempt && args.snap!.lastError) return "defer_load_error";
+  if (snapIsThisAttempt && args.snap!.attemptMode === "crossfade") return "defer_crossfade";
+  return "enter_startup_recovery";
+}
+
+/**
  * Decide whether the "playing but frozen" self-heal (redispatch / skip-forward) may fire.
  *
  * Returns true ONLY when BOTH the renderer intends to play AND the engine claims it is playing AND the

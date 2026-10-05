@@ -1578,15 +1578,31 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                           {resultCard.kind} · {resultCard.durationLabel || "—"}
                         </span>
                       </div>
+                      {/* PREVIEW is LOCAL-ONLY and can NEVER broadcast. In the desktop app local browser audio is
+                          muted (all sound goes through MPV = On-Air), so Preview is shown as unavailable there
+                          instead of silently turning into On-Air. On-Air is a separate, explicit button. */}
                       <button
                         type="button"
                         className="jcx-result-play"
-                        disabled={!resultCard.url}
-                        onClick={isDesktop ? handleResultPlay : () => preview.toggle(resultCard.url)}
-                        title={isDesktop ? "Play On-Air" : "Preview in your browser"}
+                        disabled={!resultCard.url || isDesktop}
+                        onClick={() => {
+                          if (!isDesktop) preview.toggle(resultCard.url);
+                        }}
+                        title={isDesktop ? "Preview isn't available in the desktop app yet — use a browser or phone to preview" : "Preview in your browser (not On-Air)"}
                       >
                         {!isDesktop && preview.previewUrl === resultCard.url ? "■ Stop" : "▶ Preview"}
                       </button>
+                      {isDesktop ? (
+                        <button
+                          type="button"
+                          className="jcx-result-play"
+                          disabled={!resultCard.url}
+                          onClick={handleResultPlay}
+                          title="Play On-Air — the branch hears this (ducks store music)"
+                        >
+                          📡 On-Air
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="jcx-result-dismiss"
@@ -1657,17 +1673,29 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                           </div>
                         </div>
                         <div className="jc-lib-actions">
+                          {/* Preview = LOCAL only, never broadcasts (unavailable in the desktop app). */}
                           <button
                             type="button"
                             className="jc-btn jc-btn--small jc-btn--primary"
-                            disabled={!a.url}
-                            onClick={() =>
-                              isDesktop ? fireOnAir(a.url) : preview.toggle(a.url)
-                            }
-                            title={isDesktop ? "Play On-Air" : "Preview in browser"}
+                            disabled={!a.url || isDesktop}
+                            onClick={() => {
+                              if (!isDesktop) preview.toggle(a.url);
+                            }}
+                            title={isDesktop ? "Preview isn't available in the desktop app yet" : "Preview in browser (not On-Air)"}
                           >
                             {!isDesktop && preview.previewUrl === a.url ? "■" : "▶"}
                           </button>
+                          {isDesktop ? (
+                            <button
+                              type="button"
+                              className="jc-btn jc-btn--small jc-btn--ghost"
+                              disabled={!a.url}
+                              onClick={() => fireOnAir(a.url)}
+                              title="Play On-Air — the branch hears this"
+                            >
+                              📡 On-Air
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="jc-btn jc-btn--small jc-btn--ghost"

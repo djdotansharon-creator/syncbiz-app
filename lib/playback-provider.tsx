@@ -69,10 +69,29 @@ import {
   reconstructUrlSource,
   mergeCurrentIntoRecoveredQueue,
 } from "./local-recovery";
-import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
+import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, localExecResolved, subscribeLocalSourceExec } from "./device-mode-guard";
 import { urlTimingMark } from "./url-startup-timing";
 
 export type PlaybackStatus = "idle" | "playing" | "paused" | "stopped";
+
+/**
+ * A source is LOCAL when its provider type is "local" (authoritative) or its resolved play url is a local
+ * filesystem path. Used only to scope the designated-MASTER local-execution permission below.
+ */
+function unifiedSourceIsLocal(source?: UnifiedSource | null, playUrl?: string | null): boolean {
+  if (source?.type === "local") return true;
+  const u = (playUrl ?? "").trim();
+  return u.length > 0 && isValidLocalFilePlaybackPath(u);
+}
+/**
+ * Local playback is permitted when the normal CONTROL guard allows it (`deviceModeAllowsLocalPlayback`,
+ * unchanged) OR — fail-closed, LOCAL sources ONLY — when this is the designated-MASTER machine
+ * (`localSourceExecAllowed`, set from canLocalExec). URL/radio/YouTube never satisfy the second clause, so
+ * their behavior is unchanged; a non-designated/CONTROL/offline device has both clauses false → blocked.
+ */
+function localPlaybackPermitted(source?: UnifiedSource | null, playUrl?: string | null): boolean {
+  return deviceModeAllowsLocalPlayback.current || (localSourceExecAllowed.current && unifiedSourceIsLocal(source, playUrl));
+}
 
 /** Origin of the last play/transport command — surfaced for P0 transition diagnostics. */
 export type PlayCommandVia = "library" | "queue" | "url" | "natural" | "control" | "transport" | "unknown";
@@ -1046,7 +1065,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
    * lib/play-local.ts. Only the in-app player owns stop.
    */
   const stopAllBeforePlay = useCallback(() => {
-    if (!deviceModeAllowsLocalPlayback.current) return;
+    // Called only from an already-permitted play; allow on the designated-MASTER machine too (machine-level).
+    if (!deviceModeAllowsLocalPlayback.current && !localSourceExecAllowed.current) return;
     console.log("[P0_XFADE_DEBUG] stopAllBeforePlay_called", {
       stack: new Error().stack?.split("\n").slice(1, 4).join(" | "),
     });
@@ -1070,7 +1090,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const playSource = useCallback(
     (source: UnifiedSource, trackIndex = 0, opts?: PlaySourceOptions) => {
       setUrlPrepareActive(false);
-      if (!deviceModeAllowsLocalPlayback.current) {
+      if (!localPlaybackPermitted(source, getPlayUrl(source, trackIndex))) {
         console.warn("[SyncBiz Audit] playSource BLOCKED by deviceModeAllowsLocalPlayback", {
           sourceId: source.id,
           sourceTitle: source.title,
@@ -1345,7 +1365,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         }
 
         void (async () => {
-          if (!deviceModeAllowsLocalPlayback.current) return;
+          if (!localPlaybackPermitted(source, getPlayUrl(source, trackIndex))) return;
           try {
             console.log("[SyncBiz Audit] playSource shell hydration fetch_start", {
               fetchUrl,
@@ -1499,6 +1519,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     seekToRef.current = seekTo;
   }, [seekTo]);
 
+  // Re-runs the one-shot restore when the local-exec permission resolves (designated-station cold boot).
+  const [restoreTick, setRestoreTick] = useState(0);
   // Restore playback state from storage after refresh (e.g. Radio station).
   // Runs once per mount. While in flight, `isRestoring === true` so URL-driven
   // consumers (player-page) don't flash transient sources before recovery.
@@ -1514,6 +1536,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       setIsRestoring(false);
       return;
     }
+    // DETERMINISTIC cold-boot wait (no timeout): a LOCAL recovery inside Electron must not make its one-shot
+    // decision before the designated-station permission is RESOLVED. If not yet permitted and not yet resolved,
+    // wait for the permission transition (fired by DevicePlayerProvider on the first MAIN snapshot) and re-run.
+    // A non-designated device resolves to "not permitted" → falls through to the normal (blocked) restore path.
+    const restoringLocalPending = !!persistedV2?.local && typeof window !== "undefined" && "syncbizDesktop" in window;
+    const permittedNow = deviceModeAllowsLocalPlayback.current || (localSourceExecAllowed.current && !!persistedV2?.local);
+    if (restoringLocalPending && !permittedNow && !localExecResolved.current) {
+      const unsub = subscribeLocalSourceExec(() => {
+        unsub();
+        setRestoreTick((t) => t + 1); // re-run once the permission has resolved; isRestoring stays true meanwhile
+      });
+      return () => unsub();
+    }
     hasRestoredRef.current = true;
     let cancelled = false;
     const done = () => {
@@ -1522,7 +1557,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     fetchUnifiedSourcesWithFallback()
       .then(async (items) => {
         if (cancelled) return;
-        if (!deviceModeAllowsLocalPlayback.current) {
+        // A LOCAL reboot recovery (persistedV2.local block present) may bypass the CONTROL guard on the
+        // designated-MASTER machine; a non-local recovery stays on the existing (CONTROL-blocked) path.
+        const restoringLocal = !!persistedV2?.local;
+        if (!deviceModeAllowsLocalPlayback.current && !(localSourceExecAllowed.current && restoringLocal)) {
           done();
           return;
         }
@@ -1727,11 +1765,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-    // Intentionally empty deps: runs once on mount. `playSource` / `seekTo` are
-    // accessed via refs above; `isRestoring` / `state.currentSource` are read
-    // on mount only and should not retrigger this effect.
+    // Re-runs only when `restoreTick` bumps — i.e. the local-exec permission RESOLVED after an initial wait
+    // (designated-station cold boot). `playSource`/`seekTo` are accessed via refs; `isRestoring`/
+    // `state.currentSource` are read on (re)entry only and must not retrigger this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [restoreTick]);
 
   const playPlaylist = useCallback(
     (playlist: Playlist, trackIndex = 0) => {
@@ -1751,7 +1789,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   );
 
   const play = useCallback(() => {
-    if (!deviceModeAllowsLocalPlayback.current) {
+    if (!localPlaybackPermitted(stateRef.current.currentSource)) {
       console.warn("[SyncBiz Audit] play() BLOCKED by deviceModeAllowsLocalPlayback");
       return;
     }
@@ -1766,7 +1804,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     // STOP halts playback but preserves the operator's queued Play Next items + baseline so
     // the operator can press Play (or Next) and resume from where they staged things. Clearing
     // here would silently drop work the operator just queued, which the desk treated as a bug.
-    if (!deviceModeAllowsLocalPlayback.current) {
+    if (!localPlaybackPermitted(stateRef.current.currentSource)) {
       try {
         stopAllPlayersRef.current?.();
       } catch {
@@ -1829,7 +1867,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }), []);
 
   const prev = useCallback(() => {
-    if (!deviceModeAllowsLocalPlayback.current) return;
+    if (!localPlaybackPermitted(stateRef.current.currentSource)) return;
     if (transportLockRef.current) return;
     transportLockRef.current = true;
     setState((s) => {
@@ -1952,7 +1990,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, [stopAllBeforePlay, playLocal, playSource, getAdvanceState]);
 
   const next = useCallback((opts?: { skipPlay?: boolean; auditTransportCase?: "ended_auto" } | unknown) => {
-    if (!deviceModeAllowsLocalPlayback.current) return;
+    if (!localPlaybackPermitted(stateRef.current.currentSource)) return;
     if (transportLockRef.current) return;
     const skipPlay: boolean =
       !!(opts && typeof opts === "object" && "skipPlay" in opts && (opts as { skipPlay?: boolean }).skipPlay === true);

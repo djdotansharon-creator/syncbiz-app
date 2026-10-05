@@ -678,31 +678,39 @@ const httpServer = createServer((req, res) => {
         const durableDeviceId = typeof data.durableDeviceId === "string" ? data.durableDeviceId.trim() : "";
         // Designation rooms are ALWAYS workspace-scoped (ws:<workspaceId>:<branch>); userId is irrelevant.
         const roomKey = runtimeBranchKey(workspaceId, "", branchId);
+        // Unified revocation of the CURRENT designated master in the room. `exceptDeviceId` is the newly
+        // designated device on a reassign (it must NOT be demoted); on a clear it is undefined (demote whoever
+        // currently holds the lease). Sends an explicit `designated:false` so the old station clears its local
+        // designation cache and stops offline-designated playback. Does not alter normal auto-election.
+        const revokeCurrentDesignatedMaster = (exceptDeviceId?: string) => {
+          const curMasterId = masterByBranch.get(roomKey);
+          if (!curMasterId || (exceptDeviceId && curMasterId === exceptDeviceId)) return;
+          const curConn = devices.get(curMasterId);
+          if (curConn) {
+            curConn.mode = "CONTROL";
+            curConn.designatedTrusted = false;
+            if (curConn.ws.readyState === 1) {
+              curConn.ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL", designated: false } as ServerMessage));
+            }
+          }
+          masterByBranch.delete(roomKey);
+          masterDisconnectedAt.delete(roomKey);
+          persistMasterLease();
+        };
         if (durableDeviceId) {
           designatedByRoom.set(roomKey, durableDeviceId);
           authoritativeDesignationRooms.add(roomKey);
           clearedDesignationRooms.delete(roomKey); // (re)designated → no longer a tombstone
           // Enforce immediately: demote any current master in the room that is not the newly-designated device.
-          const curMasterId = masterByBranch.get(roomKey);
-          if (curMasterId && curMasterId !== durableDeviceId) {
-            const curConn = devices.get(curMasterId);
-            if (curConn) {
-              curConn.mode = "CONTROL";
-              curConn.designatedTrusted = false;
-              if (curConn.ws.readyState === 1) {
-                curConn.ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL" } as ServerMessage));
-              }
-            }
-            masterByBranch.delete(roomKey);
-            masterDisconnectedAt.delete(roomKey);
-            persistMasterLease();
-          }
+          revokeCurrentDesignatedMaster(durableDeviceId);
         } else {
           // Clear (admin reset): drop the designation and record an authoritative TOMBSTONE so a stale token
-          // claim can never revive it. The branch reverts to legacy (non-designated) behavior on future events.
+          // claim can never revive it. UNIFIED REVOCATION: also revoke the current designated MASTER now (same as
+          // reassign) so the old station gets an explicit designated:false → clears its cache + stops audio.
           designatedByRoom.delete(roomKey);
           authoritativeDesignationRooms.delete(roomKey);
           clearedDesignationRooms.add(roomKey);
+          revokeCurrentDesignatedMaster();
         }
         // FAIL-CLOSED: if the authoritative state couldn't be persisted, report failure so the admin retries
         // (idempotent) — never claim success when the WS store wasn't durably written.
@@ -1046,8 +1054,8 @@ wss.on("connection", (ws) => {
         const masterDeviceIdForClient = getMasterForRoom(roomKey);
         const setModeMsg: ServerMessage =
           mode === "CONTROL" && masterDeviceIdForClient
-            ? { type: "SET_DEVICE_MODE", mode, masterDeviceId: masterDeviceIdForClient, secondaryDesktop }
-            : { type: "SET_DEVICE_MODE", mode, secondaryDesktop };
+            ? { type: "SET_DEVICE_MODE", mode, masterDeviceId: masterDeviceIdForClient, secondaryDesktop, designated: designatedTrusted }
+            : { type: "SET_DEVICE_MODE", mode, secondaryDesktop, designated: designatedTrusted };
         ws.send(JSON.stringify(setModeMsg));
         if (mode === "CONTROL" && masterDeviceIdForClient) {
           const masterState = deviceState.get(masterDeviceIdForClient);

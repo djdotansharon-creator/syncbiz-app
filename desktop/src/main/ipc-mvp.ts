@@ -65,6 +65,7 @@ import { loadRuntimeConfig, patchRuntimeConfig, normalizeEndpointsForPackaged } 
 import { SYNCBIZ_HOSTED_WEB_APP_URL, SYNCBIZ_PROD_WS_URL } from "./hosted-url";
 import { sanitizeApplyDesktopAuth } from "../shared/desktop-auth-payload";
 import { reconcileDeviceIdentity, stripDeviceIdFromPatch } from "./device-identity-reconcile";
+import { readDesignationRecord, isDesignatedStationOffline } from "./designation-cache";
 import { fileLog } from "./file-logger";
 import {
   StationDeviceRegistrar,
@@ -360,6 +361,12 @@ function broadcast(win: BrowserWindow | null, payload: MvpStatusSnapshot): void 
   updateFromMpv(data);
 }
 
+/** Intentional shutdown hook: cancel the station WS auto-reconnect and close the socket cleanly on app quit, so a
+ *  pending reconnect timer can never re-open a socket during/after shutdown. Safe no-op if no manager exists. */
+export function shutdownStationWs(): void {
+  if (manager) manager.disconnect();
+}
+
 export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrator?: PlaybackOrchestrator): void {
   orchestratorInstance = orchestrator;
   cachedConfig = loadEffectiveRuntimeConfig();
@@ -367,6 +374,17 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   manager.onStatus((s) => {
     broadcast(getWindow(), s);
   });
+
+  // OFFLINE COLD BOOT: the station WS must not depend on the hosted renderer loading (it never does on an offline
+  // boot). If MAIN already holds persisted station auth, connect NOW with the reconciled durable identity. Offline,
+  // the socket fails → the EXISTING abnormal-close reconnect loop retries indefinitely (bounded backoff) and
+  // connects as soon as the network returns. Same deviceId/branch/token as every other path; designation semantics,
+  // DeviceWsManager reconnect logic and the orchestrator/MPV are untouched. No persisted token → unchanged (the
+  // renderer's APPLY_DESKTOP_AUTH connects later, exactly as before).
+  if ((cachedConfig.wsToken ?? "").trim() && (cachedConfig.wsUrl ?? "").trim()) {
+    manager.connect();
+    fileLog("INFO", "startup: station WS connect attempted with persisted auth (renderer-independent)");
+  }
 
   // Phase 0.2A trigger (A) — STARTUP: fire-and-forget cloud registration if a token is present. Never awaited,
   // so it can never delay playback / window / WS startup. Skips silently when no token (returning-user path).
@@ -521,12 +539,17 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       } else {
         manager.setConfig(next);
       }
-      // Reconnect/re-register immediately with the bound identity — no app restart needed.
-      manager.connect();
+      // The fresh token is ALWAYS stored (setConfig above + persisted config). Reconnect only when the station is
+      // NOT already registered+connected: MAIN now connects at startup on its own, so re-connecting a healthy
+      // registered socket here would needlessly drop and re-register the designated MASTER. Disconnected /
+      // backing-off / auth-rejected → connect immediately with the fresh token (no app restart needed).
+      const st = manager.snapshot();
+      const alreadyRegistered = st.registered === true && st.wsState === "connected";
+      if (!alreadyRegistered) manager.connect();
       // Ensure the cloud StationDevice registration reflects this token scope (idempotent; server already did it).
       getStationRegistrar().trigger("signin");
       broadcast(getWindow(), manager.snapshot());
-      fileLog("INFO", "APPLY_DESKTOP_AUTH: desktop token applied + WS reconnect", { hasExpiry: Boolean(s.expiresAtIso) });
+      fileLog("INFO", "APPLY_DESKTOP_AUTH: desktop token applied", { hasExpiry: Boolean(s.expiresAtIso), reconnected: !alreadyRegistered });
       return { ok: true };
     } catch (e) {
       fileLog("WARN", "APPLY_DESKTOP_AUTH failed", { err: (e as Error)?.message });
@@ -1068,6 +1091,12 @@ function fallbackSnapshotFromConfig(c: DesktopRuntimeConfig): MvpStatusSnapshot 
     registered: false,
     deviceRole: "unknown",
     commandReady: false,
+    // Offline designation authority is cache-backed, so it is meaningful even on the pre-manager fallback
+    // snapshot (lets the renderer see it at the very first getStatus on an offline cold boot).
+    designatedStationOffline: isDesignatedStationOffline(readDesignationRecord(), {
+      durableDeviceId: (c.deviceId ?? "").trim(),
+      branchId: (c.branchId ?? "").trim() || "default",
+    }),
     mockPlaybackStatus: "idle",
     mockVolume: 80,
     mockCurrentSourceLabel: "—",
