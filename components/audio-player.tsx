@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource, type PlaybackStatus } from "@/lib/playback-provider";
 import { shouldAdoptLiveMpv } from "@/lib/live-mpv-adopt";
-import { shouldFreezeSelfHeal, nextFreezeBaseline, nextStartupBaseline, isEnginePaused } from "@/lib/desktop-freeze-self-heal";
+import { shouldFreezeSelfHeal, nextFreezeBaseline, nextStartupBaseline, isEnginePaused, decideLocalStartupStall } from "@/lib/desktop-freeze-self-heal";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { computeLivePosition } from "@/lib/remote-control/live-position";
 import { isPlayNextSourceId } from "@/lib/play-next";
@@ -3974,36 +3974,43 @@ export function AudioPlayer() {
           }
           mpvLastDispatchAtRef.current = Date.now();
 
-          // Stall backstop — LOCAL FILES ONLY. A local file must report "playing" almost immediately;
-          // if it doesn't within 4s it's a genuine missing/unsupported file → surface + stop.
+          // Stall backstop — LOCAL FILES ONLY. 4s without a "playing" confirmation is the point where we
+          // ENTER RECOVERY — it is NOT a failure verdict and must NEVER stop the player or clear the session
+          // (P0: under CPU/RAM/disk pressure MPV can be alive but take >4s from loadfile to start-file; the
+          // old stop() here wiped source/queue/recovery snapshot permanently). Genuine load errors are owned by
+          // the load_error skip path, crossfade attempts by the orchestrator; everything else is handed to the
+          // EXISTING bounded STREAM_STARTING machine (grace → one retry → SKIP_FORWARD, never-stop), whose
+          // progress detection lets a late confirmation recover normally.
           // STREAMS (direct URL / YouTube) are DELIBERATELY excluded here: their startup is owned solely
-          // by the STREAM_STARTING phase machine (bounded STREAM_STARTUP_TIMEOUT_MS grace → retry →
-          // SKIP_FORWARD, never-stop). No stall→stop() may fire for a stream during startup.
+          // by the STREAM_STARTING phase machine from dispatch.
           if (mpvStallTimerRef.current) { clearTimeout(mpvStallTimerRef.current); mpvStallTimerRef.current = null; }
           if (isValidLocalFilePlaybackPath(latest)) {
             mpvStallTimerRef.current = setTimeout(() => {
               mpvStallTimerRef.current = null;
-              if (
-                playbackAttemptGenRef.current === attemptId &&
-                statusRef.current === "playing" &&
-                currentPlayUrlRef.current === latest &&
-                mpvChAStatusRef.current !== "playing"
-              ) {
-                const snap = desktopMpvSnapRef.current;
-                const engineOk = snap?.engineReady !== false;
-                const errDetail = snap?.lastError ?? null;
-                const userMsg = !engineOk
-                  ? (errDetail ?? "MPV player is not ready — check the desktop installation")
-                  : (errDetail ?? "Desktop playback did not start — file may be missing or in an unsupported format");
-                console.warn("[SyncBiz Audit] Desktop MPV stall — no playing confirmation after 4 s (local file)", {
-                  url: latest.slice(0, 100),
-                  mpvChAStatus: mpvChAStatusRef.current,
-                  engineReady: snap?.engineReady ?? null,
-                  lastError: errDetail,
-                });
-                setLastMessage(userMsg);
-                stop();
-              }
+              const snap = desktopMpvSnapRef.current;
+              const decision = decideLocalStartupStall({
+                attemptId,
+                currentAttemptId: playbackAttemptGenRef.current,
+                rendererStatus: statusRef.current,
+                armedUrl: latest,
+                currentUrl: currentPlayUrlRef.current,
+                engineStatus: mpvChAStatusRef.current,
+                snap,
+              });
+              if (decision === "ignore") return;
+              console.warn("[SyncBiz Audit] Desktop MPV stall — no playing confirmation after 4 s (local file) — recovering, session preserved", {
+                url: latest.slice(0, 100),
+                decision,
+                mpvChAStatus: mpvChAStatusRef.current,
+                engineReady: snap?.engineReady ?? null,
+                lastError: snap?.lastError ?? null,
+              });
+              sbDiag("STARTUP_STALL", { decision, attemptId, engineReady: snap?.engineReady ?? null, sourceType: classifySource(latest), urlHash: sbUrlHash(latest) }); // DIAG
+              if (decision !== "enter_startup_recovery") return; // load_error path / orchestrator own it
+              // Hand THIS attempt to the bounded startup machine. Keyed to the SAME item so its single retry
+              // keeps counting toward SKIP_FORWARD; attemptStartAt stays the dispatch time (bounded grace).
+              streamStartupItemRef.current = latest;
+              streamPhaseRef.current = "starting";
             }, 4000);
           }
         }, MPV_LOADFILE_COALESCE_MS);
@@ -4094,6 +4101,7 @@ export function AudioPlayer() {
           mpvLastUrlRef.current = url; // keep the routing effect in sync
           mpvLastDispatchAtRef.current = Date.now();
           resetStreamAttempt(url); // fresh clock/progress + attemptStartAt=now; SAME item keeps the retry budget
+          streamPhaseRef.current = "starting"; // a retry is still STARTING for any source (no-op for streams; keeps a slow LOCAL start bounded)
           void desktop.mpvPlayUrl(url, playbackAttemptGenRef.current); // fresh loadfile (== manual refresh)
           sbDiag("REDISPATCH", { reason: "startup_timeout", attempt: attemptNo, attemptId: playbackAttemptGenRef.current, startingMs, sourceType: classifySource(url), urlHash: sbUrlHash(url) }); // DIAG
         } else {
