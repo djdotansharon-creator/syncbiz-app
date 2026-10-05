@@ -3783,6 +3783,21 @@ export function AudioPlayer() {
   const mpvPendingUrlRef = useRef<string | null>(null);
   const mpvCoalesceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mpvDesktopMixStartedRef = useRef(false);
+  // Re-arm the desktop AUTOMIX pre-EOF latch EXACTLY ONCE per NEW MPV attempt. `desktopMpvSnap.attemptId` changes
+  // only when the orchestrator starts a genuinely new track/attempt, and that snapshot arrives with position≈0 —
+  // so this re-arms the pre-EOF mix-advance scheduler per track WITHOUT ever letting it fire against a stale
+  // (old-track, high-position) snapshot. (The reverted f2dc229 re-armed on currentPlayUrl, which flips BEFORE the
+  // new snapshot lands → the scheduler re-fired on the old position → multi-track cascade.) Reset-ONLY: it never
+  // calls next(); the scheduler still decides WHEN to fire from position/duration/mixSec. The one-shot guard
+  // (mixArmAttemptRef) + the attemptId-only dep mean a bare currentPlayUrl change or a re-render never re-arms.
+  const mixArmAttemptRef = useRef<number | null>(null);
+  useEffect(() => {
+    const id = desktopMpvSnap?.attemptId;
+    if (typeof id !== "number") return;
+    if (id === mixArmAttemptRef.current) return; // same attempt → do not re-arm again
+    mixArmAttemptRef.current = id;
+    mpvDesktopMixStartedRef.current = false;
+  }, [desktopMpvSnap?.attemptId]);
   // Fires 4 s after mpvPlayUrl() is dispatched. If MPV hasn't confirmed "playing" by
   // then, the fake-PLAYING UI is reset and the error is surfaced to the user.
   const mpvStallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
