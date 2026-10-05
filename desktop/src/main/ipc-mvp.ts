@@ -361,6 +361,12 @@ function broadcast(win: BrowserWindow | null, payload: MvpStatusSnapshot): void 
   updateFromMpv(data);
 }
 
+/** Intentional shutdown hook: cancel the station WS auto-reconnect and close the socket cleanly on app quit, so a
+ *  pending reconnect timer can never re-open a socket during/after shutdown. Safe no-op if no manager exists. */
+export function shutdownStationWs(): void {
+  if (manager) manager.disconnect();
+}
+
 export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrator?: PlaybackOrchestrator): void {
   orchestratorInstance = orchestrator;
   cachedConfig = loadEffectiveRuntimeConfig();

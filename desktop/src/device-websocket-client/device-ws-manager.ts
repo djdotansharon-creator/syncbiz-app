@@ -419,7 +419,48 @@ export class DeviceWsManager {
     this.sendStateUpdateIfMaster();
   }
 
+  // ── Auto-reconnect (P0: MAIN durable WS must recover after an abnormal/network disconnect without an app
+  // restart) ───────────────────────────────────────────────────────────────────────────────────────────
+  // `intentionalClose` distinguishes a deliberate disconnect (shutdown / sign-out / WS_DISCONNECT) — which must
+  // NOT reconnect — from an abnormal socket close (network/WS outage) — which MUST keep retrying. Reconnect uses
+  // the SAME authenticated station identity from `this.config` (durable deviceId + latest wsToken); it never mints
+  // a new identity, never alters MASTER/designation semantics, and never touches the orchestrator/MPV, so current
+  // LOCAL audio keeps playing throughout. A single pending timer + the clean-slate teardown in connect() prevent
+  // duplicate sockets/timers.
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private intentionalClose = false;
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  /** Schedule a reconnect after an ABNORMAL close. Bounded exponential backoff + jitter, capped at 30s, retried
+   *  indefinitely (long outages never give up). No-op when an intentional close is in effect, a timer is already
+   *  pending, or a socket is already OPEN/CONNECTING — so there is never a duplicate socket or timer. */
+  private scheduleReconnect(): void {
+    if (this.intentionalClose) return;
+    if (this.reconnectTimer) return;
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
+    const attempt = this.reconnectAttempt;
+    const base = Math.min(30_000, 1_000 * 2 ** Math.min(attempt, 5)); // 1,2,4,8,16,30,30,…
+    const delay = base + Math.floor(Math.random() * 1_000); // jitter avoids thundering herd across a fleet
+    this.reconnectAttempt = attempt + 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.intentionalClose) return;
+      this.connect(); // reuses this.config (durable id + latest token); tears down any stale socket first
+    }, delay);
+  }
+
   disconnect(): void {
+    // Deliberate disconnect → cancel auto-reconnect. removeAllListeners() below means the socket's own close
+    // handler will NOT fire, so this can never schedule a reconnect.
+    this.intentionalClose = true;
+    this.clearReconnectTimer();
     if (this.ws) {
       try {
         this.ws.removeAllListeners();
@@ -438,7 +479,10 @@ export class DeviceWsManager {
   }
 
   connect(): void {
-    this.disconnect();
+    this.disconnect(); // clean slate (sets intentionalClose=true, cancels any pending timer, tears down old socket)
+    // This is a LIVE connect attempt → re-enable auto-reconnect for the socket we are about to open.
+    this.intentionalClose = false;
+    this.clearReconnectTimer();
     const { wsUrl, wsToken, deviceId, branchId } = this.config;
     const url = (wsUrl ?? "").trim();
     const token = (wsToken ?? "").trim();
@@ -484,6 +528,7 @@ export class DeviceWsManager {
     this.ws = socket;
 
     socket.on("open", () => {
+      this.reconnectAttempt = 0; // successful connection → reset backoff for any future outage
       const msg = {
         type: "REGISTER" as const,
         role: "device" as const,
@@ -546,6 +591,11 @@ export class DeviceWsManager {
         this.branchCatalog = [];
         this.push();
       }
+      // ABNORMAL close (network/WS outage): the listeners are still attached (a deliberate disconnect() removes
+      // them first), so keep the permanent station alive by auto-reconnecting. Never touches MPV/orchestrator, so
+      // current LOCAL audio is unaffected. Stale sockets (this.ws !== socket) still schedule — scheduleReconnect()
+      // self-guards against duplicates and against an already-live socket.
+      if (!this.intentionalClose) this.scheduleReconnect();
     });
 
     socket.on("error", (err) => {

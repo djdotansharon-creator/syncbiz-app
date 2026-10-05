@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { app, BrowserWindow, screen, shell } from "electron";
 
 import { initFileLogger, fileLog, getLogFilePath } from "./file-logger";
-import { registerMvpIpc, getEffectiveRuntimeConfig, getProtectionService } from "./ipc-mvp";
+import { registerMvpIpc, getEffectiveRuntimeConfig, getProtectionService, shutdownStationWs } from "./ipc-mvp";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat-writer";
 import { startEmbeddedNextServer, type EmbeddedNextHandle } from "./embedded-next-server";
 import { flushLocalCollectionTagSnapshotWrites } from "./local-collection-snapshot";
@@ -572,6 +572,7 @@ app.on("before-quit", (e) => {
     void flushLocalCollectionTagSnapshotWrites()
       .catch(() => undefined)
       .finally(() => {
+        shutdownStationWs(); // intentional shutdown → cancel station WS auto-reconnect
         stopHeartbeat();
         orchestrator?.kill();
         shutdownEmbeddedNext();
@@ -580,6 +581,7 @@ app.on("before-quit", (e) => {
     return;
   }
   fileLog("INFO", "before-quit: final quit");
+  shutdownStationWs(); // intentional shutdown → cancel station WS auto-reconnect
   stopHeartbeat();
   orchestrator?.kill();
   shutdownEmbeddedNext();
