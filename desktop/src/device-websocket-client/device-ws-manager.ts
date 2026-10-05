@@ -57,6 +57,64 @@ function parseIncoming(raw: string): ParsedIncoming {
   }
 }
 
+/**
+ * PLAY_INTERRUPT (remote On-Air jingle/announcement) → validated, absolute audio URL for MPV, or null.
+ *  - Relative server paths ("/api/jingles/…") resolve against the configured VONO app origin (`apiBaseUrl`) and
+ *    must stay on that origin.
+ *  - Absolute URLs must be https (http only when it is the configured app origin itself, e.g. local dev).
+ *  - LOCAL filesystem paths / file: / local:// / any other scheme are REJECTED — a WS command can never make the
+ *    station open a local file.
+ * PURE (no MPV / WS / fs) so it is unit-testable.
+ */
+export function resolveInterruptUrl(raw: unknown, appBaseUrl: string | undefined): string | null {
+  if (typeof raw !== "string") return null;
+  const u = raw.trim();
+  if (!u || u.length > 2048) return null;
+  if (/^[a-zA-Z]:[\\/]/.test(u) || u.startsWith("\\\\") || u.includes("\\")) return null; // Windows / UNC paths
+  if (/^(file|local):/i.test(u)) return null;
+  let base: URL | null = null;
+  try {
+    const b = new URL((appBaseUrl ?? "").trim());
+    if (b.protocol === "https:" || b.protocol === "http:") base = b;
+  } catch {
+    base = null;
+  }
+  if (u.startsWith("/")) {
+    if (u.startsWith("//") || !base) return null; // protocol-relative or no configured origin → reject
+    try {
+      const r = new URL(u, base.origin);
+      return r.origin === base.origin ? r.toString() : null;
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const a = new URL(u);
+    if (a.protocol === "https:") return a.toString();
+    if (a.protocol === "http:" && base && a.origin === base.origin) return a.toString();
+    return null;
+  } catch {
+    return null; // bare relative paths without a leading "/" (e.g. "C:foo", "foo.mp3") are not accepted
+  }
+}
+
+/**
+ * Ordered MPV interrupt URLs for a PLAY_INTERRUPT payload: optional pre-roll bell (when `preRoll` + a safe
+ * `bellStyle` other than "off"), then the announcement. Mirrors the renderer browser-MASTER On-Air handler.
+ * Returns [] when the payload is invalid (fail-safe: nothing plays).
+ */
+export function interruptUrlsForPayload(payload: unknown, appBaseUrl: string | undefined): string[] {
+  const p = (payload ?? {}) as { url?: unknown; preRoll?: unknown; bellStyle?: unknown };
+  const main = resolveInterruptUrl(p.url, appBaseUrl);
+  if (!main) return [];
+  const style = typeof p.bellStyle === "string" ? p.bellStyle.trim() : "";
+  if (p.preRoll === true && style && style !== "off" && /^[a-z0-9_-]{1,32}$/i.test(style)) {
+    const bell = resolveInterruptUrl(`/api/jingles/bell/${style}`, appBaseUrl);
+    if (bell) return [bell, main];
+  }
+  return [main];
+}
+
 export class DeviceWsManager {
   private ws: WebSocket | null = null;
   private config: DesktopRuntimeConfig;
@@ -385,6 +443,18 @@ export class DeviceWsManager {
         if (typeof vol === "number" && Number.isFinite(vol)) {
           orch.setVolume(vol);
         }
+        break;
+      }
+      case "PLAY_INTERRUPT": {
+        // Remote On-Air jingle/announcement for the designated station (MAIN = branch MASTER since PR #50).
+        // Hands the validated URL(s) to the EXISTING interrupt channel (duck → play once → restore). Music
+        // channel, queue/session and designation are untouched. Invalid / local-path payloads play nothing.
+        const urls = interruptUrlsForPayload(payload, this.config.apiBaseUrl);
+        if (urls.length === 0) {
+          console.warn("[SyncBiz:desktop-mpv:route] PLAY_INTERRUPT rejected (invalid or non-server URL)");
+          break;
+        }
+        for (const u of urls) orch.playInterrupt(u);
         break;
       }
       default:
