@@ -30,8 +30,10 @@
   on canonical `90d2b7b8…` (Playlist 6, JinglePadAssignment 4, Announcement 1; 0 on "default"). **GATE 2B
   COMPLETE.** See §7 "GATE 2B-2".
 - **CONTROL ROOM GATE 3A (capability engine, SHADOW): ACCEPTED** (2026-10-06, TEST only) — commit `dd4ea6b`, app
-  deployment `d02448b1`. Mode SHADOW (nothing enforced). **Gate 3B (security hardening) NOT started.** See §7
-  "GATE 3A"; 3B items in §9 item 11.
+  deployment `d02448b1`. Mode SHADOW (nothing enforced). See §7 "GATE 3A"; 3B items in §9 item 11.
+- **CONTROL ROOM GATE 3B-1 (active-workspace isolation): ACCEPTED** (2026-10-06, TEST only) — commit `23ff679`, app
+  deployment `062d3827`. Closes §9 items 11b + 11c. Authz mode still SHADOW. **Gate 3B-2 NOT started.** See §7
+  "GATE 3B-1".
 - **PR #52:** OPEN — **NOT MERGED / DO NOT MERGE** without explicit approval
 - **PROD:** UNTOUCHED
 - **Written from:** Dev-PC (`dsk-9b11bfa1-a353-4abb-859c-2351cf1d0608`) — no direct Lenovo log access.
@@ -132,6 +134,33 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM GATE 3B-1 — ACTIVE-WORKSPACE ISOLATION — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
+- Commit **`23ff679`** (APP only, security): closes the primary-workspace privilege leak (§9 11b) and the bearer
+  workspace drift (§9 11c).
+  - Auth helpers take the ACTIVE workspace explicitly (`hasBranchAccess`, `hasTenantAdminRole`,
+    `getAccessTypeForUser`, `getAssignedBranchIdsForUser`, `isOwner`, `isBranchUser`, `requireBranchAccess`);
+    `requireAdmin` uses the session user's `tenantId`; missing workspace → fail closed. All 20 route call sites pass
+    `user.tenantId`.
+  - `getTenantRole` with an explicit workspace: membership role or **null** (no primary fallback); a non-member gets no
+    branches (never the implicit "default").
+  - Bearer API auth: `verifyWsTokenClaims` (token format unchanged) → user resolved in the token's **signed**
+    workspace + `enforceTokenWorkspaceScope`; **missing workspace claim → DENY**; non-member workspace → DENY.
+  - `lib/playlist-access.ts` fallback (no active workspace) → **403 fail closed**.
+- Audit proof (pre-fix, real helpers over a fake two-workspace DB): ADMIN in primary A + CONTROLLER/VIEWER in active B
+  had `requireAdmin` / `isOwner` / `"*"` / any-branch access in B. Post-fix (`scripts/verify-gate3b1-active-workspace.ts`
+  33/33, real signed cookies + tokens): all DENY in B; reverse case (admin only in active workspace) now correctly
+  ALLOW; inverse / no-membership / bearer cases fail closed; single-workspace behavior unchanged. Full regression
+  matrix (19 suites) + typecheck + `next build` PASS.
+- TEST app deployment `062d3827` (all 16 changed files hash-verified).
+- **Runtime — server-log / DB corroborated:** VONO reopen 18:01:20Z → MAIN MASTER + renderer CONTROL 18:01:40Z in the
+  canonical room; token mint normal; `playlists/[id]:PUT` ×3 succeeded (content.manage ALLOW, workspace `31d30e23…`);
+  no 401 / 403 / 409 / branch_conflict / `bearer_missing_workspace`. Branch-master: unauthenticated GET → 401; TEST
+  owner membership WORKSPACE_ADMIN / ACTIVE (single membership) → `isOwner(user, activeWs)` true; Gate 3A shadow
+  `master.designate` ALLOW; designation intact. (Owner-session GET not exercised — accepted by owner.)
+- **ACCEPTED — owner-attested 2026-10-06:** VONO opened normally; MASTER badge; LOCAL; On-Air; pads visible;
+  playlists visible + editable; Access Control loads; no visible error (screenshot).
+- No DB / schema / WS / desktop change; authz mode **SHADOW**. **PROD untouched.**
 
 ### CONTROL ROOM GATE 3A — CAPABILITY ENGINE (SHADOW) — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
 - Commit **`dd4ea6b`** (APP only): `lib/authz.ts` = ONE centralized `authorize(subject, capability, branchIds)`
@@ -425,11 +454,11 @@ Not pilot blockers. Do not fix inside unrelated work.
    PROVEN BY CODE; present in the shared code (PROD has the same code paths). Each a separate audited fix in 3B:
    a. **Schedule cross-workspace IDOR** — `schedules/[id]` looks up by global id; workspace mismatch only logged
       (`app/api/schedules/[id]/route.ts:28-33`); any workspace OWNER passes via `"*"`.
-   b. **Primary-workspace drift** — `hasBranchAccess` / `getAssignedBranchIdsForUser` / `requireAdmin` / `isOwner`
-      resolve the user's PRIMARY workspace (`lib/auth-helpers.ts:140,147,163`); `getTenantRole` falls back to the
-      primary membership (`lib/user-store.ts:1121`).
-   c. **Bearer token workspace drift** — `getCurrentUserFromApiRequest` drops the token's signed workspace
-      (`lib/auth-helpers.ts:71-73`).
+   b. ~~**Primary-workspace drift**~~ — **FIXED in Gate 3B-1 (`23ff679`, TEST)**. Was: `hasBranchAccess` /
+      `getAssignedBranchIdsForUser` / `requireAdmin` / `isOwner` resolved the user's PRIMARY workspace;
+      `getTenantRole` fell back to the primary membership.
+   c. ~~**Bearer token workspace drift**~~ — **FIXED in Gate 3B-1 (`23ff679`, TEST)**. Was: `getCurrentUserFromApiRequest`
+      dropped the token's signed workspace.
    d. **Unauthenticated mutating routes** — `player/commands`, `play-now`, `commands/play-local`,
       `commands/stop-local`, `agent/commands`, `announcements` GET/POST, `logs` (verify no beta.10 / renderer caller
       before closing; `jingles/audio/[id]` must stay URL-playable for MAIN On-Air).
