@@ -1,12 +1,15 @@
-import { NextResponse } from "next/server";
-import { consumeNextCommand } from "@/lib/agent-commands";
-
 /**
- * Local agent polls this endpoint (e.g. every 10s).
- * Returns the next pending command and removes it from the queue.
- * No auth for MVP.
+ * RETIRED — Control Room Gate 3B-4a (2026-10-06): legacy local-agent command poll (unauthenticated queue drain; nothing enqueues).
+ * This unauthenticated route is not part of the pilot playback path. Every method returns 410 Gone and does
+ * nothing else: no process execution, no agent-queue / player-state mutation, no log write, and no echo of
+ * request data. It intentionally imports nothing that can execute, log or mutate.
  */
-export async function GET() {
-  const command = consumeNextCommand();
-  return NextResponse.json({ command });
+import { NextResponse } from "next/server";
+
+function gone(): NextResponse {
+  return NextResponse.json({ error: "Gone" }, { status: 410 });
+}
+
+export async function GET(): Promise<NextResponse> {
+  return gone();
 }
