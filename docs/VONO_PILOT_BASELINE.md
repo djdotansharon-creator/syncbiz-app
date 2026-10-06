@@ -28,7 +28,10 @@
   See §7 "GATE 2B-1".
 - **CONTROL ROOM GATE 2B-2 (content data migration): ACCEPTED** (2026-10-06, TEST only) — all TEST content rows now
   on canonical `90d2b7b8…` (Playlist 6, JinglePadAssignment 4, Announcement 1; 0 on "default"). **GATE 2B
-  COMPLETE.** Next Control Room gate NOT started. See §7 "GATE 2B-2".
+  COMPLETE.** See §7 "GATE 2B-2".
+- **CONTROL ROOM GATE 3A (capability engine, SHADOW): ACCEPTED** (2026-10-06, TEST only) — commit `dd4ea6b`, app
+  deployment `d02448b1`. Mode SHADOW (nothing enforced). **Gate 3B (security hardening) NOT started.** See §7
+  "GATE 3A"; 3B items in §9 item 11.
 - **PR #52:** OPEN — **NOT MERGED / DO NOT MERGE** without explicit approval
 - **PROD:** UNTOUCHED
 - **Written from:** Dev-PC (`dsk-9b11bfa1-a353-4abb-859c-2351cf1d0608`) — no direct Lenovo log access.
@@ -129,6 +132,34 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM GATE 3A — CAPABILITY ENGINE (SHADOW) — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
+- Commit **`dd4ea6b`** (APP only): `lib/authz.ts` = ONE centralized `authorize(subject, capability, branchIds)`
+  resolved from the **ACTIVE SESSION WORKSPACE only** (no primary-workspace fallback; no membership / SUSPENDED →
+  DENY). Mode code constant OFF | SHADOW | ENFORCE = **SHADOW**.
+- Capabilities: playback.control, announcement.send, schedule.edit, users.manage, master.designate, monitoring.view,
+  campaign.manage, branches.manage, **content.manage (new)**. Locked presets (owner decisions 2026-10-06): SUPER_ADMIN /
+  WORKSPACE_ADMIN → ADMIN (all); **MANAGER → HQ_CONTROL** (ALL scope; operational + content; no users / master /
+  branches); REGIONAL_MANAGER operational (branch-scoped until a region model); BRANCH_MANAGER (incl. all API-created
+  BRANCH_CONTROLLER rows) → playback + announcement + monitoring; VIEW_ONLY / VIEWER → monitoring only. Legacy
+  "default" ≡ canonical only inside the workspace.
+- Shadow hooks (fire-and-forget, never awaited, never block; placed after each route's existing gate): playback
+  (`playlists/play`), schedules, admin users / members, branch-master, branches, content (playlists, sources, radio,
+  AI build, add-from-catalog, jingle pads / library / generate) + would-be capability summary at the 3 token mint
+  routes. Structured `[VONO authz] shadow` log with safe identifiers only.
+- Tests: `scripts/verify-gate3a-authz.ts` 36/36 (ADMIN / HQ / REGIONAL / BRANCH / VIEW presets, scope, active
+  workspace vs primary, cross-workspace / cross-branch DENY, fail closed, shadow never blocks / never throws, safe
+  logging, hook coverage) + full regression matrix (18 suites). Typecheck + `next build` PASS.
+- TEST app deployment `d02448b1` (all 24 changed files hash-verified).
+- **Runtime — server-log / DB corroborated:** active workspace `31d30e23…` on every decision; token-mint summaries
+  (preset ADMIN: playback / announcement / monitoring / master.designate ALLOW); **content.manage ALLOW** observed for
+  `playlists/[id]:PUT` ×4, `jingles/generate:POST` ×2, `jingles/library:POST`, `jingles/pads:POST` (new pad
+  `pad-meat` created **canonical**, no duplicate pad); no unexpected DENY; no 403 / 409 / branch_conflict; MAIN MASTER
+  + renderer CONTROL unchanged in the canonical room; nothing blocked. Not exercised at runtime (test-proven only):
+  schedule.edit, users.manage, branches.manage, existing-pad update-in-place.
+- **ACCEPTED — owner-attested 2026-10-06:** normal VONO use (reopen, playlist playback, On-Air, pad save outside
+  fullscreen) with no behavior change.
+- No DB / schema / WS / desktop change; nothing enforced. **PROD untouched.**
 
 ### CONTROL ROOM GATE 2B-2 — CONTENT DATA MIGRATION — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`) — GATE 2B COMPLETE
 - Script **`scripts/control-room/migrate-content-2b2.mjs`** (commit `bb6a4d2`; exact file executed on TEST, sha256
