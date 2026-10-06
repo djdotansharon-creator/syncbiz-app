@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { getCurrentUserFromCookies, isOwner } from "@/lib/auth-helpers";
 import { prismaStationDeviceRepo } from "@/lib/station-device-prisma";
 import {
@@ -44,6 +45,7 @@ export async function POST(req: NextRequest) {
   }
   const branchId = (body.branchId ?? "").trim();
   const durableDeviceId = (body.durableDeviceId ?? "").trim();
+  shadowAuthorize("admin/branch-master:POST", { userId: auth.user.id, workspaceId: auth.user.tenantId }, "master.designate", [branchId]); // Gate 3A shadow: log only, never blocks
   if (!branchId || !durableDeviceId) {
     return NextResponse.json({ error: "branchId and durableDeviceId are required" }, { status: 400 });
   }
@@ -88,6 +90,7 @@ export async function DELETE(req: NextRequest) {
   }
   const branchId = (body.branchId ?? "").trim();
   if (!branchId) return NextResponse.json({ error: "branchId is required" }, { status: 400 });
+  shadowAuthorize("admin/branch-master:DELETE", { userId: auth.user.id, workspaceId: auth.user.tenantId }, "master.designate", [branchId]); // Gate 3A shadow: log only, never blocks
   await clearBranchMasterDesignation(auth.user.tenantId, branchId);
   const synced = await syncBranchMasterDesignation({ workspaceId: auth.user.tenantId, branchId, durableDeviceId: null });
   if (!synced) {

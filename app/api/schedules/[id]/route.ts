@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
@@ -77,6 +78,7 @@ export async function PATCH(
       { status: access.status },
     );
   }
+  shadowAuthorize("schedules/[id]:PATCH", { userId: access.user.id, workspaceId: access.user.tenantId }, "schedule.edit", [access.schedule.branchId ?? "default"]); // Gate 3A shadow: log only, never blocks
 
   const data = (await req.json()) as Partial<Schedule> & { sourceId?: string };
 
@@ -147,6 +149,7 @@ export async function DELETE(
       { status: access.status },
     );
   }
+  shadowAuthorize("schedules/[id]:DELETE", { userId: access.user.id, workspaceId: access.user.tenantId }, "schedule.edit", [access.schedule.branchId ?? "default"]); // Gate 3A shadow: log only, never blocks
   const deleted = await db.deleteSchedule(id);
   if (!deleted) {
     return NextResponse.json({ error: "Schedule not found" }, { status: 404 });

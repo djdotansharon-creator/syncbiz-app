@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowTokenCapabilities } from "@/lib/authz";
 import { validateCredentialsAsync } from "@/lib/auth";
 import { getOrCreateUserByEmail } from "@/lib/user-store";
 import { createDesktopAccessToken, getDesktopTokenTtlSeconds, type WsTokenClaims } from "@/lib/auth-ws-token";
@@ -31,6 +32,7 @@ export async function POST(req: NextRequest) {
     const ttlSec = getDesktopTokenTtlSeconds();
     // Authoritative branch claim, computed from the user's DB authorization — never from the client.
     const authorizedBranches = await getAuthorizedBranchIds(user.id, user.tenantId);
+    shadowTokenCapabilities("auth/desktop/token:POST", { userId: user.id, workspaceId: user.tenantId }, authorizedBranches); // Gate 3A shadow: log only
 
     // Register the StationDevice FIRST, then build claims, so the token minted below already carries a verified
     // stationDeviceId (+ designatedMasterByBranch) on the FIRST sign-in — no second sign-in needed to bind.

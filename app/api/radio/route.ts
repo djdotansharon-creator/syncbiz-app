@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { listRadioStationsForTenant, createRadioStation } from "@/lib/radio-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession, getAssignedBranchIdsForUser } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest) {
     if (!(await hasBranchAccess(user.id, branchId))) {
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
+    shadowAuthorize("radio:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks
     const station = await createRadioStation({
       name,
       url,

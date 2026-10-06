@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
@@ -51,6 +52,7 @@ export async function PATCH(
     if (!(await hasBranchAccess(user.id, branchId))) {
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
+    shadowAuthorize("sources/[id]:PATCH", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks
     const data = (await req.json()) as Partial<{ name: string; target: string; type: string; description?: string; artworkUrl?: string; browserPreference?: string }>;
     const updated = await db.updateSource(id, {
       ...(data.name != null && { name: data.name }),
@@ -87,6 +89,7 @@ export async function DELETE(
     if (!(await hasBranchAccess(user.id, branchId))) {
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
+    shadowAuthorize("sources/[id]:DELETE", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks
     await db.deleteSource(id);
     const userId = await getUserIdFromSession();
     if (userId) void notifyLibraryUpdated(userId, { branchId: source.branchId, entityType: "source", action: "deleted" });

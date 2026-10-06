@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { EntitlementLimitError } from "@/lib/entitlement-limits";
 import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, getAccessTypeForUser } from "@/lib/auth-helpers";
@@ -39,6 +40,7 @@ export async function POST(req: NextRequest) {
   if (accessType !== "OWNER") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  shadowAuthorize("branches:POST", { userId: user.id, workspaceId: user.tenantId }, "branches.manage", []); // Gate 3A shadow: log only, never blocks
 
   try {
     const body = (await req.json()) as { id?: string; name?: string; timezone?: string };

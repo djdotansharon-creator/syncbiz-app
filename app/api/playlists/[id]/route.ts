@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { getPlaylist, updatePlaylist, deletePlaylist, isPlaylistPersistError } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies, getUserIdFromSession } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
@@ -60,6 +61,7 @@ export async function PUT(
   const user = await getCurrentUserFromCookies();
   const existing = await getPlaylist(id);
   const g = await gatePlaylistAccess(user ?? null, existing);
+  if (g.allow && user && existing) shadowAuthorize("playlists/[id]:PUT", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [resolveMediaBranchId(existing)]); // Gate 3A shadow: log only, never blocks
   if (!g.allow) {
     return NextResponse.json({ error: g.message }, { status: g.httpStatus });
   }
@@ -306,6 +308,7 @@ export async function DELETE(
     const user = await getCurrentUserFromCookies();
     const existing = await getPlaylist(id);
     const del = await gatePlaylistAccess(user ?? null, existing);
+    if (del.allow && user && existing) shadowAuthorize("playlists/[id]:DELETE", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [resolveMediaBranchId(existing)]); // Gate 3A shadow: log only, never blocks
     if (!del.allow) {
       return NextResponse.json({ error: del.message }, { status: del.httpStatus });
     }

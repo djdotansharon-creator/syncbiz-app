@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserFromApiRequest } from "@/lib/auth-helpers";
 import { canonicalContentBranchForWrite } from "@/lib/branch-resolver";
@@ -91,6 +92,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const user = await getCurrentUserFromApiRequest(req);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  shadowAuthorize("jingles/library:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", ["default"]); // Gate 3A shadow: log only, never blocks
 
   let body: Record<string, unknown>;
   try {

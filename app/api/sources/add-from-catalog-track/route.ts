@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { findOrCreateCatalogItem, normalizeCatalogUrlKey } from "@/lib/catalog-store";
 import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
@@ -72,6 +73,7 @@ export async function POST(req: NextRequest) {
   if (!(await hasBranchAccess(user.id, branchId))) {
     return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
   }
+  shadowAuthorize("sources/add-from-catalog-track:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks
 
   const playlistType = mediaTypeToPlaylistType(mediaType);
   const urlKey = catalogKeyForTarget(url, playlistType);

@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { requireAdmin } from "@/lib/auth-helpers";
 import { EntitlementLimitError } from "@/lib/entitlement-limits";
 import {
@@ -40,6 +41,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const admin = await requireAdmin();
+  if (admin) shadowAuthorize("admin/users:POST", { userId: admin.id, workspaceId: admin.tenantId }, "users.manage", []); // Gate 3A shadow: log only, never blocks
   if (!admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -219,6 +221,7 @@ export async function POST(req: NextRequest) {
  */
 export async function DELETE(req: NextRequest) {
   const admin = await requireAdmin();
+  if (admin) shadowAuthorize("admin/users:DELETE", { userId: admin.id, workspaceId: admin.tenantId }, "users.manage", []); // Gate 3A shadow: log only, never blocks
   if (!admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -289,6 +292,7 @@ export async function DELETE(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   const admin = await requireAdmin();
+  if (admin) shadowAuthorize("admin/users:PATCH", { userId: admin.id, workspaceId: admin.tenantId }, "users.manage", []); // Gate 3A shadow: log only, never blocks
   if (!admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

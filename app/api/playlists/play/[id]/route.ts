@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
+import { shadowAuthorize } from "@/lib/authz";
 import { getPlaylist } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { gatePlaylistAccess } from "@/lib/playlist-access";
@@ -16,6 +18,7 @@ export async function POST(
   const { id } = await params;
   const playlist = await getPlaylist(id);
   const g = await gatePlaylistAccess(user ?? null, playlist);
+  if (g.allow && user && playlist) shadowAuthorize("playlists/play:POST", { userId: user.id, workspaceId: user.tenantId }, "playback.control", [resolveMediaBranchId(playlist)]); // Gate 3A shadow: log only, never blocks
   if (!g.allow) {
     return NextResponse.json({ error: g.message }, { status: g.httpStatus });
   }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowTokenCapabilities } from "@/lib/authz";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { createDesktopAccessToken, getDesktopTokenTtlSeconds, type WsTokenClaims } from "@/lib/auth-ws-token";
 import { getAuthorizedBranchIds } from "@/lib/user-store";
@@ -31,6 +32,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "A durable deviceId is required", bound: false }, { status: 400 });
     }
     const authorizedBranches = await getAuthorizedBranchIds(user.id, user.tenantId);
+    shadowTokenCapabilities("auth/desktop/token-from-session:POST", { userId: user.id, workspaceId: user.tenantId }, authorizedBranches); // Gate 3A shadow: log only
     const bound = await ensureStationBoundAndBuildClaims({
       workspaceId: user.tenantId,
       authorizedBranches,

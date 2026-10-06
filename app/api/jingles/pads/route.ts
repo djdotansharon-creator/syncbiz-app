@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserFromApiRequest } from "@/lib/auth-helpers";
 import { SAMPLER_PADS } from "@/components/jingles-control/seed-data";
@@ -122,6 +123,7 @@ export async function POST(req: Request) {
   const preRoll = body.preRoll === true;
 
   const data = { label, url, color, bellStyle, preRoll };
+  shadowAuthorize("jingles/pads:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [DEFAULT_BRANCH_ID]); // Gate 3A shadow: log only, never blocks
   const branchIds = await expandLegacyBranchEquivalents(user.tenantId, [DEFAULT_BRANCH_ID]);
   const writeBranchId = await canonicalContentBranchForWrite(user.tenantId, DEFAULT_BRANCH_ID);
   const res = await writePad(padRepo, { workspaceId: user.tenantId, padId, data, branchIds, writeBranchId });

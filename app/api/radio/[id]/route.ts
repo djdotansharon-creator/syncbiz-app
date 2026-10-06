@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { getRadioStation, updateRadioStation, deleteRadioStation } from "@/lib/radio-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
@@ -50,6 +51,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         { status: access.status },
       );
     }
+    shadowAuthorize("radio/[id]:PUT", { userId: access.user.id, workspaceId: access.user.tenantId }, "content.manage", [resolveMediaBranchId(existing!)]); // Gate 3A shadow: log only, never blocks
     const body = (await req.json()) as { name?: string; url?: string; genre?: string; cover?: string | null };
     const station = await updateRadioStation(id, {
       ...(typeof body.name === "string" && { name: body.name.trim() }),
@@ -80,6 +82,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
         { status: access.status },
       );
     }
+    shadowAuthorize("radio/[id]:DELETE", { userId: access.user.id, workspaceId: access.user.tenantId }, "content.manage", [resolveMediaBranchId(existing!)]); // Gate 3A shadow: log only, never blocks
     const ok = await deleteRadioStation(id);
     if (!ok) return NextResponse.json({ error: "Not found" }, { status: 404 });
     const uid = await getUserIdFromSession();

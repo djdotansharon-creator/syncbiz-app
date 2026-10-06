@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { ensurePlaylistTracksLinkedToCatalog, findOrCreateCatalogItem, normalizeCatalogUrlKey } from "@/lib/catalog-store";
 import { listPlaylistsForTenant, createPlaylist, isPlaylistPersistError } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession, getAssignedBranchIdsForUser } from "@/lib/auth-helpers";
@@ -92,6 +93,7 @@ export async function POST(req: NextRequest) {
     if (!(await hasBranchAccess(user.id, branchId))) {
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
+    shadowAuthorize("playlists:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks
 
     if (!VALID_TYPES.includes(type)) {
       return NextResponse.json(

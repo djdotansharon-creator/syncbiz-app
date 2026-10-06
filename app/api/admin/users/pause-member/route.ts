@@ -12,6 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { requireAdmin } from "@/lib/auth-helpers";
 import { pauseMembershipInWorkspace } from "@/lib/user-store";
 import { prisma } from "@/lib/prisma";
@@ -19,6 +20,7 @@ import { extractClientIp, writeTenantAuditLog } from "@/lib/admin/tenant-audit";
 
 export async function POST(req: NextRequest) {
   const admin = await requireAdmin();
+  if (admin) shadowAuthorize("admin/users/pause-member:POST", { userId: admin.id, workspaceId: admin.tenantId }, "users.manage", []); // Gate 3A shadow: log only, never blocks
   if (!admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

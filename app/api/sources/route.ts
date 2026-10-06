@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession, getAssignedBranchIdsForUser } from "@/lib/auth-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest) {
   if (!(await hasBranchAccess(user.id, branchId))) {
     return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
   }
+  shadowAuthorize("sources:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks
 
   const source = await db.addSource({
     name: data.name,
