@@ -390,6 +390,24 @@ Not pilot blockers. Do not fix inside unrelated work.
 10. **Generic `/api/announcements` POST (found in Gate 2B-1).** Unauthenticated, stores `workspaceId: "system"`,
    so its branch cannot be canonicalized safely; left unchanged in 2B-1. Jingle announcements use the
    authenticated `/api/jingles/library` (canonical). Separate audit.
+11. **GATE 3B SECURITY-HARDENING ITEMS (authorization audit 2026-10-06; recorded in Gate 3A, NOT fixed).** All
+   PROVEN BY CODE; present in the shared code (PROD has the same code paths). Each a separate audited fix in 3B:
+   a. **Schedule cross-workspace IDOR** — `schedules/[id]` looks up by global id; workspace mismatch only logged
+      (`app/api/schedules/[id]/route.ts:28-33`); any workspace OWNER passes via `"*"`.
+   b. **Primary-workspace drift** — `hasBranchAccess` / `getAssignedBranchIdsForUser` / `requireAdmin` / `isOwner`
+      resolve the user's PRIMARY workspace (`lib/auth-helpers.ts:140,147,163`); `getTenantRole` falls back to the
+      primary membership (`lib/user-store.ts:1121`).
+   c. **Bearer token workspace drift** — `getCurrentUserFromApiRequest` drops the token's signed workspace
+      (`lib/auth-helpers.ts:71-73`).
+   d. **Unauthenticated mutating routes** — `player/commands`, `play-now`, `commands/play-local`,
+      `commands/stop-local`, `agent/commands`, `announcements` GET/POST, `logs` (verify no beta.10 / renderer caller
+      before closing; `jingles/audio/[id]` must stay URL-playable for MAIN On-Air).
+   e. **MANAGER → OWNER escalation** — `admin/users` POST/PATCH accept `accessType:"OWNER"` with no caller-rank check.
+   f. **Client-chosen `owner_global`** — WS REGISTER accepts any role from the client (`server/index.ts:686`).
+   g. **WS COMMAND capability bypass** — no role/capability check on COMMAND (`server/index.ts:1532-1573`); MAIN
+      executes any relayed command; non-designated branches allow browser MASTER election.
+   h. **Workspace-wide announcements** — GET returns all workspaces; POST writes workspace `"system"`.
+   i. **Guest session-code scope** — session codes are not workspace-scoped.
 
 Carried over (still open):
 - Jingle library/pads still use `branchId:"default"`; no link to `MediaAsset`; generated-but-unsaved MP3s
