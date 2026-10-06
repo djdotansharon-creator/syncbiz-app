@@ -500,6 +500,12 @@ Not pilot blockers. Do not fix inside unrelated work.
    Classified as a fullscreen modal / UI visibility issue only — NOT a jingle backend or playback issue; unrelated
    to Gate 3A. Non-blocking; fix in the later UI gate. (HYPOTHESIS, not proven: may explain the Gate 3A shadow
    review observation that a pad edit produced no server-side pad save.)
+13. **EXISTING-USER WORKSPACE INVITE HAS NO ACCEPTANCE / CONSENT FLOW (security / product, recorded 2026-10-06 in
+   Gate 3B-3).** `POST /api/admin/users` with an existing user's email adds that user to the caller's workspace
+   immediately (`inviteExistingUserToWorkspace`), with no acceptance step. The account-takeover chains that used this
+   are CLOSED in Gate 3B-3 (a workspace admin can no longer overwrite another user's global password, an invite never
+   sets/changes an existing user's password, and global disable is platform SUPER_ADMIN only), but unsolicited
+   membership itself remains. Needs a product decision (invite / accept flow); not redesigned in 3B-3.
 
 Carried over (still open):
 - Jingle library/pads still use `branchId:"default"`; no link to `MediaAsset`; generated-but-unsaved MP3s
