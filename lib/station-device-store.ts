@@ -33,7 +33,13 @@ export type RegisterStationDeviceInput = {
 };
 
 export type RegisterOutcome = "created" | "refreshed" | "branch_conflict" | "workspace_conflict";
-export type RegisterResult = { outcome: RegisterOutcome };
+/** `boundBranchId` = the branch the device is actually bound to (the STORED value on refresh) when created/refreshed. */
+export type RegisterResult = { outcome: RegisterOutcome; boundBranchId?: string };
+/**
+ * Optional branch equivalence (Gate 2A-1): lets a legacy "default" request match a row already stored under its
+ * canonical alias (or vice versa) WITHOUT moving the row. Default = strict equality (unchanged behavior).
+ */
+export type RegisterOptions = { isSameBranch?: (stored: string, requested: string) => boolean };
 
 /** Thrown by a repo's create() when durableDeviceId already exists (unique constraint). */
 export class DurableDeviceConflictError extends Error {
@@ -65,23 +71,26 @@ export interface StationDeviceRepo {
 export async function registerStationDevice(
   repo: StationDeviceRepo,
   input: RegisterStationDeviceInput,
+  options?: RegisterOptions,
 ): Promise<RegisterResult> {
   const durableDeviceId = input.durableDeviceId.trim();
   const { workspaceId, branchId, platform, appVersion } = input;
+  const isSameBranch = options?.isSameBranch ?? ((stored: string, requested: string) => stored === requested);
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       await repo.create({ durableDeviceId, workspaceId, branchId, platform, appVersion });
-      return { outcome: "created" };
+      return { outcome: "created", boundBranchId: branchId };
     } catch (e) {
       if (!(e instanceof DurableDeviceConflictError)) throw e;
     }
     const existing = await repo.findByDurableId(durableDeviceId);
     if (!existing) continue; // deleted between create-fail and read (rare) → retry create
     if (existing.workspaceId !== workspaceId) return { outcome: "workspace_conflict" }; // no mutation
-    if (existing.branchId !== branchId) return { outcome: "branch_conflict" }; // no mutation, no auto-move
-    await repo.refresh(durableDeviceId, { workspaceId, branchId }, { platform, appVersion });
-    return { outcome: "refreshed" };
+    if (!isSameBranch(existing.branchId, branchId)) return { outcome: "branch_conflict" }; // no mutation, no auto-move
+    // Refresh against the STORED binding (never moves the row, even when the request used an equivalent alias).
+    await repo.refresh(durableDeviceId, { workspaceId, branchId: existing.branchId }, { platform, appVersion });
+    return { outcome: "refreshed", boundBranchId: existing.branchId };
   }
   throw new Error("registerStationDevice: unresolved registration race");
 }

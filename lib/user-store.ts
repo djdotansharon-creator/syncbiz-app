@@ -12,6 +12,7 @@ import {
   enforceCanAddWorkspaceMember,
 } from "./entitlement-limits";
 import { hashPassword } from "./password-utils";
+import { expandLegacyBranchEquivalents, getCanonicalLegacyBranchId, legacyBranchEquivalents } from "./branch-resolver";
 import { emitEvent, EVENT_TYPES } from "./analytics-boundary";
 import type { User, Tenant, TenantRole, BranchRole, AccessType } from "./user-types";
 
@@ -1153,7 +1154,8 @@ export async function getAssignedBranchIds(userId: string, workspaceId?: string 
     where: ws ? { userId, workspaceId: ws } : { userId },
   });
   const ids = [...new Set(assignments.map((a) => a.branchId))];
-  return ids.length > 0 ? ids : [DEFAULT_BRANCH_ID];
+  // Gate 2A-1: legacy "default" ≡ the workspace's canonical branch (same workspace alias only) for authorization.
+  return expandLegacyBranchEquivalents(ws, ids.length > 0 ? ids : [DEFAULT_BRANCH_ID]);
 }
 
 export async function getBranchesForUser(userId: string, workspaceId?: string | null): Promise<string[]> {
@@ -1207,10 +1209,12 @@ export async function getBranchRole(
 ): Promise<BranchRole | null> {
   const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
   const ws = workspaceId ?? (await getUserById(userId))?.tenantId;
+  // Gate 2A-1: an assignment stored under the legacy key or its canonical alias (same workspace) both match.
+  const candidates = legacyBranchEquivalents(normalized, await getCanonicalLegacyBranchId(ws));
   const assignment = await prisma.userBranchAssignment.findFirst({
     where: ws
-      ? { userId, branchId: normalized, workspaceId: ws }
-      : { userId, branchId: normalized },
+      ? { userId, branchId: { in: candidates }, workspaceId: ws }
+      : { userId, branchId: { in: candidates } },
   });
   return (assignment?.role as BranchRole) ?? null;
 }

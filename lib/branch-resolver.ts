@@ -54,6 +54,57 @@ export async function findCanonicalLegacyBranchId(workspaceId: string): Promise<
   }
 }
 
+// ── GATE 2A-1: IDENTITY / AUTHORIZATION compatibility (NOT content normalization) ──────────────────────────────
+// During the canonical-branch transition the legacy key "default" and the workspace's canonical Branch (the row
+// with legacyKey="default") are the SAME branch — but ONLY within that workspace's own alias mapping. Used by
+// station bind/register comparisons, token claims and branch-authorization comparisons. Content write paths do
+// NOT use this (BRANCH_RESOLUTION_RUNTIME_MODE stays "shadow" until Gate 2B).
+
+/** PURE: are two branch ids the same branch given this workspace's canonical id for "default"? */
+export function legacyBranchEquivalent(a: string | null | undefined, b: string | null | undefined, canonical: string | null): boolean {
+  const x = (a ?? "").trim() || LEGACY_DEFAULT_BRANCH_KEY;
+  const y = (b ?? "").trim() || LEGACY_DEFAULT_BRANCH_KEY;
+  if (x === y) return true;
+  if (!canonical) return false;
+  return (x === LEGACY_DEFAULT_BRANCH_KEY && y === canonical) || (x === canonical && y === LEGACY_DEFAULT_BRANCH_KEY);
+}
+
+/** PURE: the id plus its legacy equivalent (if any) within this workspace. */
+export function legacyBranchEquivalents(id: string | null | undefined, canonical: string | null): string[] {
+  const x = (id ?? "").trim() || LEGACY_DEFAULT_BRANCH_KEY;
+  if (!canonical) return [x];
+  if (x === LEGACY_DEFAULT_BRANCH_KEY) return [x, canonical];
+  if (x === canonical) return [x, LEGACY_DEFAULT_BRANCH_KEY];
+  return [x];
+}
+
+/** PURE: canonical form of a branch id ("default" → canonical when the workspace has one). */
+export function canonicalizeLegacyBranch(id: string | null | undefined, canonical: string | null): string {
+  const x = (id ?? "").trim() || LEGACY_DEFAULT_BRANCH_KEY;
+  return x === LEGACY_DEFAULT_BRANCH_KEY && canonical ? canonical : x;
+}
+
+// Tiny per-process cache (the canonical row is created once per workspace and never moves).
+const canonicalCache = new Map<string, { id: string | null; at: number }>();
+const CANONICAL_CACHE_MS = 60_000;
+/** Cached canonical id for a workspace's legacy "default" (null when the workspace has none). Never throws. */
+export async function getCanonicalLegacyBranchId(workspaceId: string | null | undefined): Promise<string | null> {
+  const ws = (workspaceId ?? "").trim();
+  if (!ws) return null;
+  const hit = canonicalCache.get(ws);
+  if (hit && Date.now() - hit.at < CANONICAL_CACHE_MS) return hit.id;
+  const id = await findCanonicalLegacyBranchId(ws);
+  canonicalCache.set(ws, { id, at: Date.now() });
+  return id;
+}
+
+/** Expand a set of branch ids with their legacy equivalents within the workspace (authorization comparisons). */
+export async function expandLegacyBranchEquivalents(workspaceId: string | null | undefined, ids: string[]): Promise<string[]> {
+  const canonical = await getCanonicalLegacyBranchId(workspaceId);
+  if (!canonical) return ids;
+  return [...new Set(ids.flatMap((id) => legacyBranchEquivalents(id, canonical)))];
+}
+
 const loggedShadow = new Set<string>();
 
 /**

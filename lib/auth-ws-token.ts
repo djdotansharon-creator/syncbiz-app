@@ -46,6 +46,11 @@ export type WsTokenClaims = {
    * its presence tells the WS server a branch is permanently designated (suppress grace/auto-election).
    */
   stationDeviceId?: string | null;
+  /**
+   * Gate 2A-1 (additive, signed): the canonical branch the bound station belongs to, derived server-side from the
+   * StationDevice binding. Not yet consumed by the WS server (Gate 2A-3 makes it the station's room authority).
+   */
+  stationBranchId?: string | null;
   designatedMasterByBranch?: Record<string, string>;
 };
 
@@ -64,6 +69,7 @@ function mintToken(
     workspaceId?: string;
     authorizedBranches?: string[];
     stationDeviceId?: string;
+    stationBranchId?: string;
     designatedMasterByBranch?: Record<string, string>;
   } = {
     purpose,
@@ -75,6 +81,8 @@ function mintToken(
   if (claims?.workspaceId) payload.workspaceId = claims.workspaceId;
   if (Array.isArray(claims?.authorizedBranches)) payload.authorizedBranches = claims!.authorizedBranches;
   if (claims?.stationDeviceId) payload.stationDeviceId = claims.stationDeviceId;
+  // Only meaningful together with a bound station (never emitted on its own).
+  if (claims?.stationDeviceId && claims?.stationBranchId) payload.stationBranchId = claims.stationBranchId;
   if (claims?.designatedMasterByBranch && Object.keys(claims.designatedMasterByBranch).length > 0) {
     payload.designatedMasterByBranch = claims.designatedMasterByBranch;
   }

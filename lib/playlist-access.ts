@@ -10,6 +10,7 @@
 import type { Playlist } from "@/lib/playlist-types";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { prisma } from "@/lib/prisma";
+import { expandLegacyBranchEquivalents } from "@/lib/branch-resolver";
 // Fallback path (used when tenantId is unavailable on the user object)
 import { hasBranchAccess, getAssignedBranchIdsForUser } from "@/lib/auth-helpers";
 
@@ -91,8 +92,12 @@ export async function gatePlaylistAccess(
     // Branch-scoped check
     const branchId = resolveMediaBranchId(playlist);
     const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
+    // Gate 2A-1: legacy "default" ≡ the workspace's canonical branch (same workspace alias only).
     const assignedIds = new Set(
-      assignments.map((a) => (a.branchId ?? "").trim() || DEFAULT_BRANCH_ID),
+      await expandLegacyBranchEquivalents(
+        workspaceId,
+        assignments.map((a) => (a.branchId ?? "").trim() || DEFAULT_BRANCH_ID),
+      ),
     );
     // If user has no explicit assignments, default branch is implied
     const effectiveIds = assignedIds.size > 0 ? assignedIds : new Set([DEFAULT_BRANCH_ID]);
