@@ -114,6 +114,15 @@ export function createDesktopAccessToken(userId: string, claims?: WsTokenClaims)
  * Returns userId or null.
  */
 export function verifyWsToken(token: string): string | null {
+  return verifyWsTokenClaims(token)?.userId ?? null;
+}
+
+/**
+ * Gate 3B-1: same verification as `verifyWsToken` (both purposes, same TTL rules) but returns the SIGNED
+ * `workspaceId` claim too (null when the token carries none), so bearer API auth can scope to the token's workspace
+ * instead of the user's primary workspace. Token format unchanged.
+ */
+export function verifyWsTokenClaims(token: string): { userId: string; workspaceId: string | null } | null {
   const secret = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
   if (!secret || secret.length < 16) return null;
   if (!token || typeof token !== "string") return null;
@@ -122,7 +131,7 @@ export function verifyWsToken(token: string): string | null {
   const [payloadB64, sigB64] = parts;
   const expectedSig = createHmac("sha256", secret).update(payloadB64).digest("base64url");
   if (expectedSig !== sigB64) return null;
-  let payload: { purpose?: string; userId?: string; iat?: number; exp?: number };
+  let payload: { purpose?: string; userId?: string; iat?: number; exp?: number; workspaceId?: unknown };
   try {
     payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
   } catch {
@@ -134,15 +143,17 @@ export function verifyWsToken(token: string): string | null {
 
   const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
   if (!userId) return null;
+  const workspaceId =
+    typeof payload.workspaceId === "string" && payload.workspaceId.trim() ? payload.workspaceId.trim() : null;
 
   if (payload.purpose === PURPOSE_WS_REGISTER) {
     if (payload.exp > now + 120) return null;
-    return userId;
+    return { userId, workspaceId };
   }
   if (payload.purpose === PURPOSE_DESKTOP_ACCESS) {
     if (payload.exp - payload.iat > MAX_DESKTOP_TTL_SEC) return null;
     if (payload.exp > now + MAX_DESKTOP_TTL_SEC) return null;
-    return userId;
+    return { userId, workspaceId };
   }
   return null;
 }

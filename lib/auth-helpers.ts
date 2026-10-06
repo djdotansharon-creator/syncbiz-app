@@ -6,7 +6,7 @@
 
 import { cookies } from "next/headers";
 import { parseSessionValue } from "@/lib/auth-session";
-import { verifyWsToken, verifyDesktopAccessTokenClaims } from "@/lib/auth-ws-token";
+import { verifyWsTokenClaims, verifyDesktopAccessTokenClaims } from "@/lib/auth-ws-token";
 import { enforceTokenWorkspaceScope } from "@/lib/desktop-token-scope";
 import {
   getUserByEmail,
@@ -68,11 +68,18 @@ export async function getCurrentUserFromApiRequest(request: Request): Promise<Us
   if (!auth?.toLowerCase().startsWith("bearer ")) return null;
   const token = auth.slice(7).trim();
   if (!token) return null;
-  const userId = verifyWsToken(token);
-  if (!userId) return null;
-  const user = await getUserById(userId);
+  const claims = verifyWsTokenClaims(token);
+  if (!claims) return null;
+  // Gate 3B-1: bearer auth is scoped to the token's SIGNED workspace — never the user's primary workspace.
+  // No workspace claim → deny (fail closed); non-member / silent fallback → deny (enforceTokenWorkspaceScope).
+  if (!claims.workspaceId) {
+    logIdentity("session_resolve", { result: "denied", reason: "bearer_missing_workspace", via: "bearer_ws_token" });
+    return null;
+  }
+  const resolved = await getUserById(claims.userId, { activeWorkspaceId: claims.workspaceId });
+  const user = enforceTokenWorkspaceScope(claims, resolved);
   if (user) {
-    logIdentity("session_resolve", { result: "user", userId: user.id, via: "bearer_ws_token" });
+    logIdentity("session_resolve", { result: "user", userId: user.id, workspaceId: claims.workspaceId, via: "bearer_ws_token" });
   }
   return user;
 }
@@ -136,42 +143,47 @@ export async function resolveEmailToUser(email: string): Promise<User> {
   return getOrCreateUserByEmail(email);
 }
 
-/** Check if user has access to branch. */
-export async function hasBranchAccess(userId: string, branchId: string): Promise<boolean> {
-  const u = await getUserById(userId);
-  if (!u) return false;
-  return storeHasBranchAccess(userId, branchId ?? DEFAULT_BRANCH_ID, u.tenantId);
+// Gate 3B-1: every authorization helper takes the ACTIVE workspace explicitly (session flows pass user.tenantId).
+// None of them resolves the user's primary workspace; a missing workspace fails closed.
+const activeWs = (workspaceId: string | null | undefined) => (workspaceId ?? "").trim();
+
+/** Check if user has access to branch in the ACTIVE workspace. */
+export async function hasBranchAccess(userId: string, branchId: string, workspaceId: string | null | undefined): Promise<boolean> {
+  const ws = activeWs(workspaceId);
+  if (!ws) return false;
+  return storeHasBranchAccess(userId, branchId ?? DEFAULT_BRANCH_ID, ws);
 }
 
-/** Check if user has tenant-level admin role. */
-export async function hasTenantAdminRole(userId: string): Promise<boolean> {
-  const u = await getUserById(userId);
-  if (!u) return false;
-  const r = await getTenantRole(userId, u.tenantId);
+/** Check if user has tenant-level admin role in the ACTIVE workspace. */
+export async function hasTenantAdminRole(userId: string, workspaceId: string | null | undefined): Promise<boolean> {
+  const ws = activeWs(workspaceId);
+  if (!ws) return false;
+  const r = await getTenantRole(userId, ws);
   return r === "TENANT_OWNER" || r === "TENANT_ADMIN";
 }
 
-/** V1 public: get simplified access type. */
-export async function getAccessTypeForUser(userId: string): Promise<"OWNER" | "BRANCH_USER"> {
-  const u = await getUserById(userId);
-  if (!u) return "BRANCH_USER";
-  return getAccessType(userId, u.tenantId);
+/** V1 public: simplified access type in the ACTIVE workspace (no workspace → BRANCH_USER, the least privilege). */
+export async function getAccessTypeForUser(userId: string, workspaceId: string | null | undefined): Promise<"OWNER" | "BRANCH_USER"> {
+  const ws = activeWs(workspaceId);
+  if (!ws) return "BRANCH_USER";
+  return getAccessType(userId, ws);
 }
 
-/** V1 public: assigned branch IDs. OWNER returns ["*"]. */
-export async function getAssignedBranchIdsForUser(userId: string): Promise<string[]> {
-  const u = await getUserById(userId);
-  return getAssignedBranchIds(userId, u?.tenantId);
+/** V1 public: assigned branch IDs in the ACTIVE workspace. OWNER returns ["*"]; no workspace → []. */
+export async function getAssignedBranchIdsForUser(userId: string, workspaceId: string | null | undefined): Promise<string[]> {
+  const ws = activeWs(workspaceId);
+  if (!ws) return [];
+  return getAssignedBranchIds(userId, ws);
 }
 
-/** V1 public: is OWNER. */
-export async function isOwner(userId: string): Promise<boolean> {
-  return storeIsOwner(userId);
+/** V1 public: is OWNER in the ACTIVE workspace. */
+export async function isOwner(userId: string, workspaceId: string | null | undefined): Promise<boolean> {
+  return storeIsOwner(userId, workspaceId);
 }
 
-/** V1 public: is BRANCH_USER. */
-export async function isBranchUser(userId: string): Promise<boolean> {
-  return storeIsBranchUser(userId);
+/** V1 public: is BRANCH_USER in the ACTIVE workspace. */
+export async function isBranchUser(userId: string, workspaceId: string | null | undefined): Promise<boolean> {
+  return storeIsBranchUser(userId, workspaceId);
 }
 
 /**
@@ -190,7 +202,7 @@ export async function getUserIdFromSession(): Promise<string | null> {
 export async function requireAdmin(): Promise<User | null> {
   const user = await getCurrentUserFromCookies();
   if (!user) return null;
-  const isAdmin = await hasTenantAdminRole(user.id);
+  const isAdmin = await hasTenantAdminRole(user.id, user.tenantId);
   return isAdmin ? user : null;
 }
 
@@ -198,6 +210,6 @@ export async function requireAdmin(): Promise<User | null> {
  * Check branch access. For future enforcement - returns false if no access.
  * Does not throw; caller decides how to respond.
  */
-export async function requireBranchAccess(userId: string, branchId: string): Promise<boolean> {
-  return hasBranchAccess(userId, branchId ?? DEFAULT_BRANCH_ID);
+export async function requireBranchAccess(userId: string, branchId: string, workspaceId: string | null | undefined): Promise<boolean> {
+  return hasBranchAccess(userId, branchId ?? DEFAULT_BRANCH_ID, workspaceId);
 }

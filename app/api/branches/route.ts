@@ -36,7 +36,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const accessType = await getAccessTypeForUser(user.id);
+  const accessType = await getAccessTypeForUser(user.id, user.tenantId);
   if (accessType !== "OWNER") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

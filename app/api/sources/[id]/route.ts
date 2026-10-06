@@ -24,7 +24,7 @@ export async function GET(
       return NextResponse.json({ error: "Source not found" }, { status: 404 });
     }
     const branchId = source.branchId ?? "default";
-    if (!(await hasBranchAccess(user.id, branchId))) {
+    if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
     return NextResponse.json(source);
@@ -49,7 +49,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Source not found" }, { status: 404 });
     }
     const branchId = source.branchId ?? "default";
-    if (!(await hasBranchAccess(user.id, branchId))) {
+    if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
     shadowAuthorize("sources/[id]:PATCH", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks
@@ -86,7 +86,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Source not found" }, { status: 404 });
     }
     const branchId = source.branchId ?? "default";
-    if (!(await hasBranchAccess(user.id, branchId))) {
+    if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
     shadowAuthorize("sources/[id]:DELETE", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks

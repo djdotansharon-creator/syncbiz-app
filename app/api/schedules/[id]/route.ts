@@ -33,7 +33,7 @@ async function requireScheduleAccess(schedule: Schedule | null) {
     // We still validate branch access below.
   }
   const branchId = (schedule.branchId ?? "default").trim() || "default";
-  if (!(await hasBranchAccess(user.id, branchId))) {
+  if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
     return { ok: false as const, status: 403 } as const;
   }
   return { ok: true as const, user, schedule } as const;
@@ -84,7 +84,7 @@ export async function PATCH(
 
   if (data.branchId !== undefined) {
     const branchId = (data.branchId ?? "default").trim() || "default";
-    if (!(await hasBranchAccess(access.user!.id, branchId))) {
+    if (!(await hasBranchAccess(access.user!.id, branchId, access.user!.tenantId))) {
       return NextResponse.json({ error: "Forbidden: no access to target branch" }, { status: 403 });
     }
   }

@@ -16,7 +16,7 @@ async function requireRadioAccess(station: { branchId?: string; tenantId?: strin
     return { ok: false as const, status: 404 } as const;
   }
   const branchId = resolveMediaBranchId(station);
-  if (!(await hasBranchAccess(user.id, branchId))) {
+  if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
     return { ok: false as const, status: 403 } as const;
   }
   return { ok: true as const, user } as const;

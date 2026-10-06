@@ -18,7 +18,7 @@ export async function GET() {
     return NextResponse.json({ error: "Tenant context missing" }, { status: 400 });
   }
   const all = await db.getSources(resolveAccountScope(user.tenantId));
-  const allowedBranchIds = await getAssignedBranchIdsForUser(user.id);
+  const allowedBranchIds = await getAssignedBranchIdsForUser(user.id, user.tenantId);
   const isOwner = allowedBranchIds.includes("*");
   const filtered: Source[] = all.filter((s) => {
     if (isOwner) return true;
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
     );
   }
   const branchId = (data.branchId ?? "default").trim() || "default";
-  if (!(await hasBranchAccess(user.id, branchId))) {
+  if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
     return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
   }
   shadowAuthorize("sources:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks

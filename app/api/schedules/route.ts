@@ -21,7 +21,7 @@ export async function GET() {
   }
   await db.ensureSchedulesLoaded();
   const all = await db.getSchedules(resolveAccountScope(user.tenantId));
-  const allowedBranchIds = await getAssignedBranchIdsForUser(user.id);
+  const allowedBranchIds = await getAssignedBranchIdsForUser(user.id, user.tenantId);
   const isOwner = allowedBranchIds.includes("*");
   const filtered = all.filter((s) => {
     if (isOwner) return true;
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!(await hasBranchAccess(user.id, branchId))) {
+  if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
     return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
   }
   shadowAuthorize("schedules:POST", { userId: user.id, workspaceId: user.tenantId }, "schedule.edit", [branchId]); // Gate 3A shadow: log only, never blocks

@@ -17,7 +17,7 @@ export async function GET() {
   }
   try {
     const all = await listRadioStationsForTenant(user.tenantId);
-    const allowedBranchIds = await getAssignedBranchIdsForUser(user.id);
+    const allowedBranchIds = await getAssignedBranchIdsForUser(user.id, user.tenantId);
     const isOwner = allowedBranchIds.includes("*");
     const filtered = all.filter((s) => {
       if (isOwner) return true;
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     if (!name || !url) {
       return NextResponse.json({ error: "name and url are required" }, { status: 400 });
     }
-    if (!(await hasBranchAccess(user.id, branchId))) {
+    if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
     shadowAuthorize("radio:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks

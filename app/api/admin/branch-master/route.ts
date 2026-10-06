@@ -21,7 +21,7 @@ import { syncBranchMasterDesignation } from "@/lib/broadcast-branch-master-desig
 async function requireOwner() {
   const user = await getCurrentUserFromCookies();
   if (!user) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  if (!(await isOwner(user.id))) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  if (!(await isOwner(user.id, user.tenantId))) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   return { user };
 }
 

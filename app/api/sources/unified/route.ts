@@ -117,7 +117,7 @@ export async function GET(request: NextRequest) {
     // triggered 3–4 DB queries per item (user lookup + role check + branch assignment).
     // With 20+ playlists and 20+ sources, that created 80–120 concurrent DB queries on
     // a 2-connection pool → P2024 timeouts.  Now: 1 query total.
-    const allowedBranchIds = await getAssignedBranchIdsForUser(user.id);
+    const allowedBranchIds = await getAssignedBranchIdsForUser(user.id, user.tenantId);
     const isUnrestrictedOwner = allowedBranchIds.includes("*");
     function canAccessBranch(branchId: string): boolean {
       if (isUnrestrictedOwner) return true;
