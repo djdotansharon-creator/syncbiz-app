@@ -2280,20 +2280,22 @@ function SourcesManagerInner({
   /** Play / next / prev must use the full syncbiz queue order, not the stale global queue. */
   const playSyncbizPlaylistExpandedItem = useCallback(
     (item: UnifiedSource) => {
+      // P0 (LOCAL→URL coherence): the clicked leaf's real track index travels on EVERY branch of the CONTROL
+      // path (playSourceOrSend defaulted to 0 → MAIN labelled Now Playing / NEXT from sessionTracks[0]).
+      const ti = playlistLeafTrackIndexForQueueItem(item);
       if (!activePlaylistKey) {
-        if (playSourceOverride) playSourceOverride(item);
+        if (playSourceOverride) playSourceOverride(item, ti);
         else playSource(item);
         return;
       }
       const queue = resolveSyncbizPlaylistPlayQueue(activePlaylistKey, sources, playlistItemAssignments);
       if (queue.length === 0 || !queue.some((q) => q.id === item.id)) {
-        if (playSourceOverride) playSourceOverride(item);
+        if (playSourceOverride) playSourceOverride(item, ti);
         else playSource(item);
         return;
       }
       setQueue(queue, { force: true });
-      const ti = playlistLeafTrackIndexForQueueItem(item);
-      if (playSourceOverride) playSourceOverride(item);
+      if (playSourceOverride) playSourceOverride(item, ti);
       else playSource(item, ti);
     },
     [activePlaylistKey, sources, playlistItemAssignments, setQueue, playSourceOverride, playSource],

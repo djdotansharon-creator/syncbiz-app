@@ -99,7 +99,13 @@ const routes: [string, string, string[]][] = [
   assert("retired route files import only next/server", routeSrcs.length === 5 && routeSrcs.every((s) => (s.match(/^import /gm) ?? []).length === 1 && /import \{ NextResponse \} from "next\/server";/.test(s)));
   assert("no play-local / agent-commands / player-command-store / store / child_process import in retired routes",
     routeSrcs.every((s) => !/play-local|agent-commands|player-command-store|lib\/store|child_process|console\./.test(s)));
-  const diffName = (p: string) => execSync(`git diff --name-only HEAD -- "${p}"`, { cwd: path.join(__dirname, "..") }).toString().trim();
+  // Scope of the Gate 3B-4a commit itself (2cb46d2) — later, separately approved commits may touch lib / components.
+  const GATE_COMMIT = "2cb46d28306fedbd118d42d9a844625fda9b03b9";
+  const inRepo = (cmd: string) => execSync(cmd, { cwd: path.join(__dirname, "..") }).toString().trim();
+  const hasGateCommit = (() => { try { inRepo(`git cat-file -e ${GATE_COMMIT}`); return true; } catch { return false; } })();
+  const diffName = (p: string) => (hasGateCommit
+    ? inRepo(`git diff --name-only ${GATE_COMMIT}~1 ${GATE_COMMIT} -- "${p}"`)
+    : inRepo(`git diff --name-only HEAD -- "${p}"`));
   assert("beta.10 public routes untouched: jingles/audio + jingles/bell", diffName("app/api/jingles/audio") === "" && diffName("app/api/jingles/bell") === "");
   assert("accepted playback / content routes untouched", ["app/api/playlists", "app/api/sources", "app/api/radio", "app/api/jingles", "app/api/auth", "app/api/devices", "app/api/announcements", "app/api/logs", "lib", "components", "server", "desktop"]
     .every((p) => diffName(p) === ""));

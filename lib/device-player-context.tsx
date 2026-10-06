@@ -19,6 +19,7 @@ import { GuestRecommendationModal } from "@/components/guest-recommendation-moda
 import { urlToUnifiedSource } from "@/lib/remote-control/url-to-source";
 import { payloadToUnifiedSource } from "@/lib/remote-control/payload-to-source";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
+import { routeStationTransport, resolveUrlSessionStep } from "@/lib/station-transport-routing";
 import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
@@ -1150,6 +1151,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // that callback's unstable identity (it is a fresh function each render — the source of the ~20x/sec flood).
   const localSessionOwnedRef = useRef(true);
   const lastLocalPushKeyRef = useRef<string | null>(null);
+  // P0 (LOCAL→URL coherence): the last URL playlist leaf this renderer committed via WS PLAY_SOURCE (carries the
+  // parent playlist with every track URL) — used to step the SAME session on NEXT / PREV.
+  const lastSentUrlLeafRef = useRef<UnifiedSource | null>(null);
   const sendCommandToMasterRef = useRef(sendCommandToMaster);
   useEffect(() => { sendCommandToMasterRef.current = sendCommandToMaster; }, [sendCommandToMaster]);
 
@@ -1163,6 +1167,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       if (useLocalDeviceTransport) {
         localSessionOwnedRef.current = true;
         lastLocalPushKeyRef.current = null; // force a fresh MAIN session commit for the new local selection
+        lastSentUrlLeafRef.current = null;
         playSource(source, trackIndex);
       } else if (canLocalExec && source?.type === "local") {
         // Designated-MASTER machine + LOCAL source → drive local audio via the renderer's existing engine
@@ -1172,11 +1177,13 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         console.warn("[VONO MetaSync] select->LOCAL(provider) " + JSON.stringify({ type: source?.type ?? null, id: source?.id ?? null, title: source?.title ?? null, trackIndex }));
         localSessionOwnedRef.current = true;  // (re)acquire LOCAL ownership
         lastLocalPushKeyRef.current = null;   // force a fresh MAIN commit (handles URL → same-LOCAL re-selection)
+        lastSentUrlLeafRef.current = null;
         playSource(source, trackIndex);
       } else {
         // [VONO MetaSync — READ-ONLY TEST] select → WS PLAY_SOURCE (URL / remote). No behavior change.
         console.warn("[VONO MetaSync] select->WS PLAY_SOURCE " + JSON.stringify({ type: source?.type ?? null, id: source?.id ?? null, title: source?.title ?? null, trackIndex }));
         localSessionOwnedRef.current = false; // relinquish: a non-local source is now the committed station source
+        lastSentUrlLeafRef.current = source;
         sendCommandToMaster("PLAY_SOURCE", {
           source: unifiedSourceToPayload(source),
           trackIndex,
@@ -1204,31 +1211,66 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // existing desktop dispatch effect mirrors to the co-located MAIN orchestrator). Applies ONLY when the
   // CURRENT source is local AND the co-located MAIN is MASTER (fail-closed); otherwise the remote path is unchanged.
   const localExecCurrent = canLocalExec && currentSourceIsLocal;
+  // P0 (LOCAL→URL coherence): transport may run on the provider only while this renderer OWNS the LOCAL session.
+  // After a URL selection relinquished ownership, the provider's stale LOCAL state must never be driven by NEXT /
+  // PREV / PLAY / PAUSE / STOP (that played a LOCAL file under a MAIN URL session). Ownership is (re)acquired by a
+  // LOCAL select (playSourceOrSend) and starts owned (cold-boot LOCAL restore) — read at call time via the ref.
+  const transportRunsLocally = useCallback(
+    () =>
+      routeStationTransport({
+        useLocalDeviceTransport,
+        canLocalExec,
+        currentSourceIsLocal,
+        localSessionOwned: localSessionOwnedRef.current,
+      }) === "local",
+    [useLocalDeviceTransport, canLocalExec, currentSourceIsLocal]
+  );
+  // P0: URL playlist session NEXT / PREV on the designated station → PLAY_SOURCE of item N±1 (trackIndex N±1) of
+  // the SAME session MAIN mirrors. Returns false when no coherent URL session exists (caller keeps the MAIN command).
+  const stepUrlSession = useCallback(
+    (direction: "next" | "prev"): boolean => {
+      if (!canLocalExec || localSessionOwnedRef.current) return false;
+      const step = resolveUrlSessionStep({
+        sentLeaf: lastSentUrlLeafRef.current,
+        mainSourceId: masterState?.currentSource?.id ?? null,
+        mainTrackIndex: masterState?.currentTrackIndex ?? null,
+        mainSessionTrackCount: masterState?.sessionTracks?.length ?? null,
+        direction,
+        repeatMode: getRepeatMode(),
+      });
+      if (!step) return false;
+      if ("noop" in step) return true;
+      lastSentUrlLeafRef.current = step.leaf;
+      sendCommandToMaster("PLAY_SOURCE", { source: unifiedSourceToPayload(step.leaf), trackIndex: step.trackIndex });
+      return true;
+    },
+    [canLocalExec, masterState, sendCommandToMaster]
+  );
 
   const playOrSend = useCallback(() => {
-    if (useLocalDeviceTransport || localExecCurrent) play();
+    if (transportRunsLocally()) play();
     else sendCommandToMaster("PLAY");
-  }, [useLocalDeviceTransport, localExecCurrent, play, sendCommandToMaster]);
+  }, [transportRunsLocally, play, sendCommandToMaster]);
 
   const pauseOrSend = useCallback(() => {
-    if (useLocalDeviceTransport || localExecCurrent) pause();
+    if (transportRunsLocally()) pause();
     else sendCommandToMaster("PAUSE");
-  }, [useLocalDeviceTransport, localExecCurrent, pause, sendCommandToMaster]);
+  }, [transportRunsLocally, pause, sendCommandToMaster]);
 
   const stopOrSend = useCallback(() => {
-    if (useLocalDeviceTransport || localExecCurrent) stop();
+    if (transportRunsLocally()) stop();
     else sendCommandToMaster("STOP");
-  }, [useLocalDeviceTransport, localExecCurrent, stop, sendCommandToMaster]);
+  }, [transportRunsLocally, stop, sendCommandToMaster]);
 
   const nextOrSend = useCallback(() => {
-    if (useLocalDeviceTransport || localExecCurrent) next();
-    else sendCommandToMaster("NEXT");
-  }, [useLocalDeviceTransport, localExecCurrent, next, sendCommandToMaster]);
+    if (transportRunsLocally()) next();
+    else if (!stepUrlSession("next")) sendCommandToMaster("NEXT");
+  }, [transportRunsLocally, stepUrlSession, next, sendCommandToMaster]);
 
   const prevOrSend = useCallback(() => {
-    if (useLocalDeviceTransport || localExecCurrent) prev();
-    else sendCommandToMaster("PREV");
-  }, [useLocalDeviceTransport, localExecCurrent, prev, sendCommandToMaster]);
+    if (transportRunsLocally()) prev();
+    else if (!stepUrlSession("prev")) sendCommandToMaster("PREV");
+  }, [transportRunsLocally, stepUrlSession, prev, sendCommandToMaster]);
 
   // Keep the co-located MAIN's published session (title/artwork/queue/index) in sync while the renderer
   // executes a LOCAL source locally. METADATA ONLY — `unifiedSourceToPayload` strips local absolute paths,

@@ -46,8 +46,11 @@ assert("pre-EOF scheduler still gates on (pos < mixAt || latch) and sets the lat
 assert("pre-EOF scheduler still advances via next({ skipPlay: true }) at the mix point",
   /nextRef\.current\(\{ skipPlay: true, auditTransportCase: "ended_auto" \}\);\s*\n\s*\}, \[desktopMpvSnap, status, currentPlayUrl, getNextStreamUrl\]\);/.test(ap));
 
-// 6 — manual NEXT path is unchanged (local-exec → provider next(); never touches the mix latch).
+// 6 — manual NEXT path is unchanged in behavior (local-exec → provider next(); never touches the mix latch).
+// Regex updated 2026-10-06 (P0 LOCAL→URL coherence): the local-exec condition is now `transportRunsLocally()`
+// (= MASTER-mode transport, or designated + LOCAL source + LOCAL session OWNED). The invariant is intact: when the
+// transport runs locally, manual NEXT still calls provider next() and nothing here touches the mix latch.
 assert("manual NEXT still routes local-exec through provider next() (unchanged)",
-  /const nextOrSend = useCallback\(\(\) => \{\s*if \(useLocalDeviceTransport \|\| localExecCurrent\) next\(\);/.test(dp));
+  /const nextOrSend = useCallback\(\(\) => \{\s*if \(transportRunsLocally\(\)\) next\(\);/.test(dp));
 
 console.log(`\n${pass} passed, ${fail} failed`);
