@@ -25,7 +25,10 @@
   "default". See §7 "GATE 2A-3".
 - **CONTROL ROOM GATE 2B-1 (content branch compatibility): ACCEPTED** (2026-10-06, TEST only) — commit
   `9e06f40`, app deployment `8273a78b`. Content reads accept "default" + canonical; NEW content writes canonical;
-  existing content rows still on "default". **Gate 2B-2 (content data migration) NOT started.** See §7 "GATE 2B-1".
+  See §7 "GATE 2B-1".
+- **CONTROL ROOM GATE 2B-2 (content data migration): ACCEPTED** (2026-10-06, TEST only) — all TEST content rows now
+  on canonical `90d2b7b8…` (Playlist 6, JinglePadAssignment 4, Announcement 1; 0 on "default"). **GATE 2B
+  COMPLETE.** Next Control Room gate NOT started. See §7 "GATE 2B-2".
 - **PR #52:** OPEN — **NOT MERGED / DO NOT MERGE** without explicit approval
 - **PROD:** UNTOUCHED
 - **Written from:** Dev-PC (`dsk-9b11bfa1-a353-4abb-859c-2351cf1d0608`) — no direct Lenovo log access.
@@ -66,6 +69,7 @@ Lineage: `865ba81` (offline cold boot, MAIN) → `2ebdbe4` (renderer stall fix) 
 | **Jingle storage** | generated MP3s under **`/data/jingles/<uuid>.mp3`**, served at `/api/jingles/audio/<uuid>` |
 | **WS volume (2026-10-06)** | `syncbiz-ws-test-volume` (id `18b32178-da30-484f-8403-785b347baf73`) on `syncbiz-ws-test` only, mount `/data` → designation / lease / branch-alias state in `/data/ws-lease/` (proven to survive redeploy with no re-assertion) |
 | **Control Room Phase 1 deploys (2026-10-06)** | app `87a05469-b3f5-4afc-819a-c33746e0182e` (source `6b5b9a0`, file-hash verified for the changed renderer files); WS `335dad0a-e3a4-4802-b1b6-c9ae40697e51` (Gate 1 shadow code `cea1585`) |
+| **TEST DB backup before Gate 2B-2** | `D:\SyncBiz_Backups\test-env\20261006T145008Z-gate2b2\` (pg_dump sha256 `d6a5c882ceef7808ea62310db113b82f8f95e8ba370c7d6004bcff813fb1dbb7`, 241240 B; **restore test PASS** — 13 counts identical, throwaway DB dropped) + `gate2b2-manifest.json` (sha256 `f6893d7050a0813c6921a6d8a8164ade31a57786765daf3dd8d2416e644d494b`; also on TEST app volume `/data/control-room/gate2b2-manifest.json`) + `BACKUP-RECORD.txt`. Git HEAD at backup `2d2ccdf` |
 | **Gate 2B-1 app deploy (2026-10-06)** | app `8273a78b-8b93-476a-9625-6d4983717d05` (SUCCESS 14:13Z; source `9e06f40`, clean tree; all 12 changed source files hash-verified). WS NOT redeployed |
 | **Gate 2A-3 WS deploy (2026-10-06)** | WS `23e94c01-38ba-4dde-9f22-336bb304bdde` (SUCCESS 11:37Z; source `384df45`, clean tree). Previous shadow WS build `335dad0a…` = rollback reference (rollback also needs the legacy WS files from the Gate 2A backup) |
 | **Canonical TEST branch** | `90d2b7b8-7bce-4d5d-a984-5f84fa8ba0d2`, code `T001`, "TEST Pilot Branch (legacy default)", `legacyKey="default"`; **since Gate 2A-3 the WS routes the TEST workspace by this canonical id** (clients still send `"default"`; content rows still `"default"` until Gate 2B) |
@@ -125,6 +129,28 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM GATE 2B-2 — CONTENT DATA MIGRATION — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`) — GATE 2B COMPLETE
+- Script **`scripts/control-room/migrate-content-2b2.mjs`** (commit `bb6a4d2`; exact file executed on TEST, sha256
+  `8d19a2ee…f29c`): dry-run / apply / reverse; explicit workspace + canonical args (refuses "system"); exact
+  expected counts; pad-conflict fail-safe (no merge / delete / guess); exact-id updates in ONE transaction; manifest
+  (table, id, old/new branch, content fingerprint) written before apply; post-apply fingerprint proof; out-of-scope
+  fingerprint guard; idempotent; reverse by manifest ids only.
+- Pre-flight PASS (2B-1 app `8273a78b` + 2A-3 WS `23e94c01` live; MAIN MASTER + renderer CONTROL canonical; no
+  conflict / 409 / 403; no pad under both aliases). Backup + restore test PASS (see §3).
+- **Dry-run → APPLIED ~14:51Z** (workspace `31d30e23…` only), "default" → canonical: Playlist 5
+  (`1f260a23`, `75b76942`, `99085b78`, `a0d1c99f`, `c9e3d568`), JinglePadAssignment 3 (`2e87dc9a` pad-birthday,
+  `308291f2` pad-promo, `abaaa0d8` pad-closing), Announcement 1 (`114e5d7f`), Source 0, Schedule 0. Second apply =
+  NO-OP. All row ids preserved; content fingerprints identical (only branchId / updatedAt changed); no unrelated
+  row changed (identity tables + PlaybackIncident telemetry untouched).
+- **Result: Playlist 6, JinglePadAssignment 4, Announcement 1 — all canonical; Source 0; Schedule 0; zero intended
+  content rows on "default"; no duplicate pads** (pad-birthday, pad-bread, pad-closing, pad-promo).
+- **Runtime — server-log / DB corroborated:** full VONO restart 14:55:28Z → MAIN `dsk-cbeb93d0` **MASTER** 14:55:37Z
+  (`stationBranchMatchesRoom: true`), renderer **CONTROL** 14:55:40Z, both in `ws:31d30e23…:90d2b7b8…`; no 403 /
+  409 / branch_conflict / error lines (app + WS); no content recreated on "default".
+- **ACCEPTED — owner-attested 2026-10-06:** VONO opened normally; MASTER correct; LOCAL resumed and playing; all
+  pads and playlists visible; jingles / On-Air work; no visible error.
+- **Rollback not required. PROD untouched.**
 
 ### CONTROL ROOM GATE 2B-1 — CONTENT BRANCH COMPATIBILITY — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
 - Commit **`9e06f40`** (APP only; no DB migration, no desktop, no WS server, no playback change): legacy "default" ≡
