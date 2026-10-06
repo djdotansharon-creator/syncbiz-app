@@ -14,7 +14,6 @@ import path from "node:path";
 import { routeStationTransport, resolveUrlSessionStep } from "../lib/station-transport-routing";
 import { unifiedSourceToPayload } from "../lib/remote-control/source-to-payload";
 import { expandPlaylistEntityToItems, playlistLeafTrackIndexForQueueItem } from "../lib/syncbiz-playlist-queue";
-import { MockPlaybackSession } from "../desktop/src/playback-agent/mock-playback-session";
 import type { UnifiedSource } from "../lib/source-types";
 
 let pass = 0, fail = 0;
@@ -41,7 +40,13 @@ const urlLeaves = expandPlaylistEntityToItems(urlShell);
 const localLeaves = expandPlaylistEntityToItems(localShell);
 
 // ── MAIN: real session builder + the same PLAY_SOURCE metadata mapping as device-ws-manager.ts ───────────────
-const main = new MockPlaybackSession();
+// Loaded through a COMPUTED path at runtime so the app type-check (next build includes scripts/) does not follow the
+// desktop module graph (it reaches `electron`, which is not installed on the app build host). Same real class.
+type StationState = { currentSource?: { id?: string; title?: string } | null; currentTrack?: { title?: string; cover?: string | null } | null; currentTrackIndex: number; sessionTracks?: { title?: string }[] };
+type MainSession = { setStationSession(input: Record<string, unknown>): void; getState(): StationState };
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const desktopSessionModule = require(path.join(ROOT, "desktop", "src", "playback-agent", "mock-playback-session")) as { MockPlaybackSession: new () => MainSession };
+const main: MainSession = new desktopSessionModule.MockPlaybackSession();
 const mainPlayed: string[] = [];
 function mainPlaySource(payload: { source?: Record<string, unknown>; trackIndex?: unknown }): void {
   const src = payload.source as { id: string; title?: string; cover?: string | null; type?: string; origin?: string; url?: string; playlistId?: string; sessionTracks?: { id: string; title: string; cover?: string | null }[] };
@@ -52,7 +57,7 @@ function mainPlaySource(payload: { source?: Record<string, unknown>; trackIndex?
     sourceType: src.type, url: src.url,
     trackIndex: typeof payload.trackIndex === "number" ? payload.trackIndex : 0,
     sessionTitle: src.title ?? null, sessionPlaylistId: src.playlistId ?? null, sessionTracks: tracks,
-  } as Parameters<MockPlaybackSession["setStationSession"]>[0]);
+  });
   if (src.url) mainPlayed.push(src.url);
 }
 const ui = () => { const ms = main.getState(); return { title: ms.currentTrack?.title ?? ms.currentSource?.title ?? null, art: ms.currentTrack?.cover ?? null, index: ms.currentTrackIndex, next: ms.sessionTracks?.[ms.currentTrackIndex + 1]?.title ?? null }; };
