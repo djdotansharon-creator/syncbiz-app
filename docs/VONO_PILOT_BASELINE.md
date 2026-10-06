@@ -17,8 +17,10 @@
   on branch `feature/control-room-phase1` (NOT PR #52, which stays FROZEN at its accepted head). Gate 2
   (activation / "default" migration) NOT started. See §7 "CONTROL ROOM PHASE 1".
 - **CONTROL ROOM GATE 2A-1 (identity/authorization compatibility): ACCEPTED** (2026-10-06, TEST only) —
-  commit `2466820`, TEST app deployment `b6050fc1`. **Gate 2A-2 (identity data migration) NOT started.**
-  See §7 "GATE 2A-1".
+  commit `2466820`, TEST app deployment `b6050fc1`. See §7 "GATE 2A-1".
+- **CONTROL ROOM GATE 2A-2 (identity data migration): ACCEPTED** (2026-10-06, TEST only) — identity rows now on
+  canonical branch `90d2b7b8…`; WS effective room still `:default`. **Gate 2A-3 (WS canonical activation) NOT
+  started.** See §7 "GATE 2A-2".
 - **PR #52:** OPEN — **NOT MERGED / DO NOT MERGE** without explicit approval
 - **PROD:** UNTOUCHED
 - **Written from:** Dev-PC (`dsk-9b11bfa1-a353-4abb-859c-2351cf1d0608`) — no direct Lenovo log access.
@@ -116,6 +118,37 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM GATE 2A-2 — IDENTITY DATA MIGRATION — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
+- Script **`scripts/control-room/migrate-identity-2a2.mjs`** (commit `c54c8b2`; exact file executed on TEST,
+  sha256 `8e930499…a256`): dry-run / apply / reverse, explicit workspace + canonical args, exact expected counts,
+  collision checks, exact-id updates in one transaction, manifest written before apply, idempotent.
+- Preconditions re-confirmed immediately before apply: canonical Branch `90d2b7b8-7bce-4d5d-a984-5f84fa8ba0d2`
+  (T001, `legacyKey="default"`) exists; counts 1/2/1; no target collisions; WS alias SHADOW, effective `:default`;
+  WS state files byte-identical to the Gate 2A backup; Lenovo MASTER in `:default`.
+- **Dry-run PASS** → **APPLIED ~10:52Z** (workspace `31d30e23…` only), "default" → canonical:
+  - BranchMasterDesignation ×1 (`36880080-6638-4a48-9ee6-4b9a77a50523`, Lenovo `dsk-cbeb93d0`)
+  - StationDevice ×2 (`1d8e7c6d-6968-42b2-97cc-d6d9ed2b07da` Lenovo `dsk-cbeb93d0`; `20f2cf18-b0ca-4d07-9368-bea0d135f685` Dev-PC `dsk-9b11bfa1`)
+  - UserBranchAssignment ×1 (`a3924506-7872-43c4-a7de-6e9fdd98b281`)
+  - Second apply = NO-OP (idempotent).
+- **Content rows NOT migrated** (still on "default", unchanged: Playlist 5, JinglePadAssignment 2,
+  Announcement 1, Source 0) — Gate 2B.
+- **Manifest** (reverse source): TEST app volume `/data/control-room/gate2a2-manifest.json` + local copy
+  `D:\SyncBiz_Backups\test-env\20261006T100051Z-gate2a\gate2a2-manifest.json`, sha256
+  `b3e750bdafb294475fe616908ccacacd818b68b00d8a69ab69704eff7d5e48c6`. Reverse:
+  `--reverse --manifest=<path>` (canonical → "default", exact ids).
+- **WS NOT restarted; effective room still `ws:31d30e23…:default`**; WS state files unchanged.
+- **Compatibility rule PROVEN BY RUNTIME** (Lenovo VONO restart after migration, server-log/DB corroborated):
+  MAIN closed 11:07:52Z → **MASTER** 11:08:12Z ("permanent designation -> MASTER (trusted station)") in `:default`;
+  renderer **CONTROL** 11:08:15Z in `:default`; Lenovo StationDevice refreshed 11:08:13.899Z with `branchId`
+  still canonical (stored row not moved; pre-2A-1 code would have returned branch_conflict). **No
+  branch_conflict, no 409, no error lines.** `stationDeviceId` preserved (trusted-station MASTER requires it).
+- **ACCEPTED — owner-attested 2026-10-06:** auto reopen without login PASS; MASTER badge PASS; LOCAL resumed
+  automatically PASS; On-Air announcement (PLAY_INTERRUPT) PASS; nothing looked wrong.
+- **Rollback not required. PROD untouched.**
+- `stationBranchId` remains **PROVEN BY CODE / TEST ONLY**; its first runtime use is Gate 2A-3.
+- Cosmetic, not a blocker: StationDevice `lastSeenAt` is `@updatedAt`, so the migration bumped the Dev-PC row
+  to 10:52:33Z.
 
 ### CONTROL ROOM GATE 2A-1 — IDENTITY COMPATIBILITY — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
 - Commit **`2466820`** (SERVER / app API only): legacy `"default"` ≡ the workspace's canonical branch
