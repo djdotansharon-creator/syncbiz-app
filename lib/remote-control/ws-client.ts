@@ -24,6 +24,71 @@ export function getWsUrl(): string {
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 
+/**
+ * ZERO-TOUCH reconnect backoff (mirrors the desktop MAIN station socket): 1s, 2s, 4s, 8s, 16s, then capped at
+ * 30s, plus up to 1s jitter. Retries forever — an unattended branch must never stay disconnected waiting for a
+ * focus/visibility event.
+ */
+export const RECONNECT_BASE_MS = 1_000;
+export const RECONNECT_MAX_MS = 30_000;
+export function reconnectBackoffMs(attempt: number, random: () => number = Math.random): number {
+  const base = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(Math.max(0, attempt), 5));
+  return base + Math.floor(random() * 1_000);
+}
+
+/**
+ * Single-timer reconnect scheduler (pure; timers injected so it is deterministic under test).
+ *  - `scheduleRetry()` arms ONE timer (no-op if one is already pending) with the next backoff delay.
+ *  - `connected()` resets the backoff and cancels any pending timer.
+ *  - `cancelPending()` cancels the timer without resetting the backoff (a new socket attempt is starting).
+ *  - `dispose()` cancels and makes every later call a no-op (unmount / intentional teardown).
+ */
+export function createReconnectScheduler(deps: {
+  onFire: () => void;
+  setTimer?: (fn: () => void, ms: number) => unknown;
+  clearTimer?: (h: unknown) => void;
+  random?: () => number;
+}) {
+  const setTimer = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  const clearTimer = deps.clearTimer ?? ((h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>));
+  let attempt = 0;
+  let timer: unknown = null;
+  let disposed = false;
+  const cancelPending = () => {
+    if (timer !== null) {
+      clearTimer(timer);
+      timer = null;
+    }
+  };
+  return {
+    scheduleRetry(): number | null {
+      if (disposed || timer !== null) return null;
+      const delay = reconnectBackoffMs(attempt, deps.random);
+      attempt += 1;
+      timer = setTimer(() => {
+        timer = null;
+        if (!disposed) deps.onFire();
+      }, delay);
+      return delay;
+    },
+    connected() {
+      attempt = 0;
+      cancelPending();
+    },
+    cancelPending,
+    dispose() {
+      disposed = true;
+      cancelPending();
+    },
+    get pending() {
+      return timer !== null;
+    },
+    get attempt() {
+      return attempt;
+    },
+  };
+}
+
 export function useRemoteControlWs(
   role: "device" | "controller",
   deviceId: string | null,
@@ -102,6 +167,25 @@ export function useRemoteControlWs(
     if (needsReconnect) setReconnectTrigger((k) => k + 1);
   };
 
+  // ZERO-TOUCH auto-reconnect (unattended stations never get focus/visibility events): ONE backoff timer,
+  // armed only by a NON-intentional socket close; it reconnects only when no socket is OPEN/CONNECTING.
+  // Created per mount (StrictMode-safe) and declared BEFORE the socket effect so it exists when that runs.
+  const reconnectSchedulerRef = useRef<ReturnType<typeof createReconnectScheduler> | null>(null);
+  useEffect(() => {
+    const scheduler = createReconnectScheduler({
+      onFire: () => {
+        const cur = wsRef.current;
+        if (cur && (cur.readyState === WebSocket.OPEN || cur.readyState === WebSocket.CONNECTING)) return;
+        setReconnectTrigger((k) => k + 1);
+      },
+    });
+    reconnectSchedulerRef.current = scheduler;
+    return () => {
+      scheduler.dispose();
+      if (reconnectSchedulerRef.current === scheduler) reconnectSchedulerRef.current = null;
+    };
+  }, []);
+
   // Device socket deps use `!!options?.authToken` (presence-only) — same pattern
   // as the controller/owner hooks below — to avoid tearing down a live socket
   // every time DevicePlayerProvider refreshes the token on window focus (which
@@ -121,6 +205,10 @@ export function useRemoteControlWs(
     const url = getWsUrl();
     if (!url) return;
 
+    // A new socket attempt is starting → drop any pending auto-retry (never two sockets / two timers).
+    reconnectSchedulerRef.current?.cancelPending();
+    // Set by THIS effect's cleanup: an intentional teardown (unmount / deps change) must never auto-reconnect.
+    let intentionalClose = false;
     const ws = new globalThis.WebSocket(url);
     wsRef.current = ws;
       setStatus("connecting");
@@ -167,6 +255,9 @@ export function useRemoteControlWs(
         const data = JSON.parse(e.data as string) as ServerMessage;
         if (data.type === "REGISTERED" || data.type === "SET_DEVICE_MODE") {
           setStatus("connected");
+          // Accepted by the server → reset the auto-reconnect backoff (not on bare `open`: a rejected REGISTER
+          // must keep backing off instead of looping at 1s).
+          reconnectSchedulerRef.current?.connected();
           if (data.type === "REGISTERED") console.warn("[SyncBiz DIAG] WS connected (REGISTERED)", { role });
         }
         if (data.type === "SET_DEVICE_MODE") {
@@ -238,10 +329,16 @@ export function useRemoteControlWs(
       setHasExistingMaster(false);
       setSessionCode(null);
       console.warn("[SyncBiz DIAG] WS disconnected", { role, code: closeEvent?.code, reason: closeEvent?.reason, wasClean: closeEvent?.wasClean, reconnectTrigger });
+      // ZERO-TOUCH: a server restart / network loss / server-side close re-connects on its own (backoff, forever).
+      if (!intentionalClose) {
+        const delay = reconnectSchedulerRef.current?.scheduleRetry();
+        if (delay != null) console.warn("[SyncBiz DIAG] WS auto-reconnect scheduled", { role, delayMs: delay });
+      }
     };
     ws.onerror = (err) => { console.warn("[SyncBiz DIAG] WS error", { role, err }); setStatus("error"); };
 
     return () => {
+      intentionalClose = true;
       ws.close();
       wsRef.current = null;
       setStatus("disconnected");
@@ -273,13 +370,16 @@ export function useRemoteControlWs(
     const onPageShow = (e: PageTransitionEvent) => {
       if (e.persisted) tryReconnect();
     };
+    const onOnline = () => tryReconnect(); // network came back → retry immediately (auto-backoff covers the rest)
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onFocus);
     window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("online", onOnline);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("online", onOnline);
     };
   }, [role]);
 

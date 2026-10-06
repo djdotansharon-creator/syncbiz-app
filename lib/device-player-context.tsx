@@ -13,7 +13,7 @@ import {
 import { usePathname } from "next/navigation";
 import { getDeviceId, initDeviceId } from "@/lib/device-id";
 import { usePlayback, type PlaybackStatus } from "@/lib/playback-provider";
-import { useRemoteControlWs, type DeviceInfo } from "@/lib/remote-control/ws-client";
+import { useRemoteControlWs, reconnectBackoffMs, type DeviceInfo } from "@/lib/remote-control/ws-client";
 import { SecondaryDesktopModal } from "@/components/secondary-desktop-modal";
 import { GuestRecommendationModal } from "@/components/guest-recommendation-modal";
 import { urlToUnifiedSource } from "@/lib/remote-control/url-to-source";
@@ -264,10 +264,27 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       return;
     }
     let cancelled = false;
+    // ZERO-TOUCH token recovery: a network / server failure (e.g. offline cold boot, WS/app restart) must not
+    // leave the station without a token until someone focuses the window. ONE retry timer per effect run,
+    // bounded backoff (1s→30s + jitter), forever while active; cleared on success / cleanup / re-run (a
+    // focus-triggered refresh re-runs this effect, whose cleanup cancels the old timer → never two loops).
+    // 401 (not signed in / auth rejected) keeps the existing behavior: no loop, existing auth path recovers.
+    let retryAttempt = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleTokenRetry = (why: string) => {
+      if (cancelled || retryTimer) return;
+      const delay = reconnectBackoffMs(retryAttempt);
+      retryAttempt += 1;
+      console.warn("[SyncBiz DIAG] WS token fetch failed — auto-retry scheduled", { why, delayMs: delay });
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (!cancelled) fetchToken();
+      }, delay);
+    };
     if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
       console.info("[SyncBiz WS client] token refresh requested", { role: "device" });
     }
-    const fetchToken = (retry = false) => {
+    const fetchToken = () => {
       fetch("/api/auth/ws-token")
         .then((r) => {
           if (cancelled) return;
@@ -278,21 +295,22 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
             }
             return;
           }
-          if (!r.ok && !retry) {
-            setTimeout(() => fetchToken(true), 1000);
+          if (!r.ok) {
+            scheduleTokenRetry(`http_${r.status}`);
             return;
           }
-          if (!r.ok) return;
           return r.json();
         })
         .then((data: { token?: string } | undefined) => {
-          if (cancelled) return;
+          if (cancelled || data === undefined) return;
           if (!data?.token) {
             if (process.env.NODE_ENV === "development") {
               console.info("[SyncBiz WS client] token refresh failure (no token)");
             }
+            scheduleTokenRetry("no_token");
             return;
           }
+          retryAttempt = 0;
           setWsToken(data.token);
           if (process.env.NODE_ENV === "development") {
             console.info("[SyncBiz WS client] token refresh success", { role: "device" });
@@ -304,10 +322,15 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
           if (process.env.NODE_ENV === "development") {
             console.info("[SyncBiz WS client] token refresh failure (network)");
           }
+          scheduleTokenRetry("network");
         });
     };
     fetchToken();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
+    };
   }, [isActive, authLoaded, userId, tokenRefreshTrigger]);
 
   useEffect(() => {
