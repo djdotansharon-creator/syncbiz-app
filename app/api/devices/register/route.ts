@@ -3,6 +3,7 @@ import { getDesktopUserFromApiRequest } from "@/lib/auth-helpers";
 import { getAuthorizedBranchIds } from "@/lib/user-store";
 import { processStationDeviceRegister, type RegisterDeps } from "@/lib/station-device-register";
 import { registerStationDeviceWithPrisma } from "@/lib/station-device-prisma";
+import { observeBranchResolutionShadow } from "@/lib/branch-resolver";
 
 /**
  * Phase 0.2A — POST /api/devices/register
@@ -26,5 +27,10 @@ export async function POST(request: NextRequest) {
     body = null;
   }
   const { status, body: resBody } = await processStationDeviceRegister(user, body, deps);
+  // Control Room Phase 1 / Gate 1: SHADOW observation only — registration result above is unchanged.
+  if (user) {
+    const rawBranch = body && typeof body === "object" ? (body as { branchId?: unknown }).branchId : undefined;
+    void observeBranchResolutionShadow("devices-register", user.tenantId, typeof rawBranch === "string" ? rawBranch : "");
+  }
   return NextResponse.json(resBody, { status });
 }

@@ -52,6 +52,15 @@ import {
 } from "./branch-room.js";
 import { verifyWsToken } from "./ws-token.js";
 import { loadDesignations, saveDesignations } from "./branch-designation-store.js";
+import {
+  BRANCH_ALIAS_RUNTIME_MODE,
+  applyAliasSync,
+  decideBranchAlias,
+  loadBranchAliases,
+  parseAliasSyncBody,
+  saveBranchAliases,
+  type BranchAliases,
+} from "./branch-alias.js";
 
 const WS_SECRET = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
 if (!WS_SECRET || WS_SECRET.length < 16) {
@@ -163,6 +172,29 @@ const clearedDesignationRooms = new Set<string>();
   }
   for (const roomKey of state.cleared) clearedDesignationRooms.add(roomKey);
 })();
+/**
+ * CONTROL ROOM PHASE 1 (Gate 1, SHADOW): legacy branch alias map, synced from the app. Used ONLY to log what a
+ * REGISTER WOULD resolve to — routing, rooms, designation and leases are untouched in this build.
+ */
+let branchAliases: BranchAliases = loadBranchAliases();
+/** Log the shadow alias decision for a REGISTER (never changes routing). */
+function logBranchAliasShadow(info: { role: string; workspaceId: string | null; branchId: string; deviceId: string | null; roomKey: string }): void {
+  const d = decideBranchAlias({ mode: BRANCH_ALIAS_RUNTIME_MODE, workspaceId: info.workspaceId, rawBranchId: info.branchId, aliases: branchAliases });
+  if (!d.candidateBranchId) return;
+  console.log(
+    "[SyncBiz WS][branch-alias] shadow",
+    JSON.stringify({
+      role: info.role,
+      deviceId: info.deviceId,
+      rawBranchId: d.rawBranchId,
+      candidateBranchId: d.candidateBranchId,
+      effectiveBranchId: d.effectiveBranchId,
+      effectiveRoom: info.roomKey,
+      wouldResolveTo: runtimeBranchKey(info.workspaceId, "", d.candidateBranchId),
+      mode: d.mode,
+    }),
+  );
+}
 /** Persist the authoritative designations + clear tombstones (never token-bootstrapped ones). Returns success. */
 function persistDesignations(): boolean {
   const designations: Record<string, string> = {};
@@ -731,6 +763,39 @@ const httpServer = createServer((req, res) => {
     });
     return;
   }
+  // CONTROL ROOM PHASE 1 (Gate 1): app → WS legacy branch alias sync. Stores { workspaceId, legacyKey →
+  // canonicalBranchId } for SHADOW logging only — never re-keys rooms, designations or leases.
+  if (req.method === "POST" && req.url === "/internal/branch-alias") {
+    const secret = req.headers["x-syncbiz-secret"] ?? req.headers["x-syncbiz-internal-secret"];
+    if (secret !== WS_SECRET) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Forbidden" }));
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      let parsed: unknown = null;
+      try { parsed = body ? JSON.parse(body) : null; } catch { parsed = null; }
+      const s = parseAliasSyncBody(parsed);
+      if (!s) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid alias body" }));
+        return;
+      }
+      const next = applyAliasSync(branchAliases, s);
+      if (!saveBranchAliases(next)) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Failed to persist alias" }));
+        return;
+      }
+      branchAliases = next;
+      console.log("[SyncBiz WS][branch-alias] sync", JSON.stringify({ ...s, mode: BRANCH_ALIAS_RUNTIME_MODE }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, mode: BRANCH_ALIAS_RUNTIME_MODE }));
+    });
+    return;
+  }
   res.writeHead(404);
   res.end();
 });
@@ -837,6 +902,7 @@ wss.on("connection", (ws) => {
         );
 
         const roomKey = runtimeBranchKey(workspaceId, userId, branchId);
+        logBranchAliasShadow({ role: "device", workspaceId, branchId, deviceId, roomKey }); // Gate 1: LOG ONLY
         clearExpiredGracePeriods(roomKey);
         let mode: DeviceMode = "CONTROL";
         let designatedTrusted = false;
@@ -1072,6 +1138,7 @@ wss.on("connection", (ws) => {
           console.info("[SyncBiz WS] register controller intent", regIntent);
         }
         const roomKey = runtimeBranchKey(workspaceId, userId, branchId);
+        logBranchAliasShadow({ role: "controller", workspaceId, branchId, deviceId: null, roomKey }); // Gate 1: LOG ONLY
         controllers.push({ ws, userId, workspaceId, branchId, roomKey });
         const sessionCode = getOrCreateSessionCode(userId);
         const reply: ServerMessage = { type: "REGISTERED", sessionCode };

@@ -410,6 +410,9 @@ model Branch {
   businessType  BusinessType @default(OTHER)
   devicesOnline Int          @default(0)
   devicesTotal  Int          @default(0)
+  /// Control Room Phase 1: the legacy runtime branch key this canonical branch represents (e.g. "default").
+  /// Nullable; unique per workspace. Gate 1 = shadow only (nothing routes by it yet).
+  legacyKey     String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
@@ -417,6 +420,7 @@ model Branch {
   devices   Device[]
   schedules Schedule[]
 
+  @@unique([workspaceId, legacyKey])
   @@index([workspaceId])
 }
 

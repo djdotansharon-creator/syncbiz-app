@@ -3,6 +3,7 @@ import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { createWsToken, type WsTokenClaims } from "@/lib/auth-ws-token";
 import { getAuthorizedBranchIds } from "@/lib/user-store";
 import { getDesignatedMastersForBranches } from "@/lib/branch-master-designation";
+import { observeBranchResolutionShadow } from "@/lib/branch-resolver";
 
 /** Returns short-lived token for WS REGISTER. Requires authenticated session. Uses stable userId. */
 export async function GET() {
@@ -20,6 +21,8 @@ export async function GET() {
     const designatedMasterByBranch = await getDesignatedMastersForBranches(user.tenantId, authorizedBranches);
     if (Object.keys(designatedMasterByBranch).length > 0) claims.designatedMasterByBranch = designatedMasterByBranch;
     const token = createWsToken(user.id, claims);
+    // Control Room Phase 1 / Gate 1: SHADOW observation only (claims above are unchanged).
+    void observeBranchResolutionShadow("ws-token", user.tenantId, "default");
     return NextResponse.json({ token });
   } catch (err) {
     return NextResponse.json({ error: "Token creation failed" }, { status: 500 });
