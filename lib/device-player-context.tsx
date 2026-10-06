@@ -78,6 +78,14 @@ type DevicePlayerContextValue = {
    * false for a Dev-PC / ordinary CONTROL (canLocalExec false) and for URL/radio/YouTube (not a local source).
    */
   isLocalExecActive: boolean;
+  /**
+   * DISPLAY ONLY — true when THIS physical machine is the designated station that outputs the branch audio
+   * (read-only mirror of the existing `canLocalExec`: Electron shell + co-located MAIN commandReady OR its cached
+   * offline designation). Independent of the renderer's own WS role, which stays CONTROL by design.
+   */
+  isDesignatedAudioStation: boolean;
+  /** DISPLAY ONLY — true once the co-located MAIN's first status was received (avoids a startup badge flicker). */
+  mainSnapResolved: boolean;
   /** Session code for guest recommendations. Operator shares /guest?code=XXX */
   sessionCode: string | null;
   /** Full guest recommendation link for sharing */
@@ -1321,6 +1329,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       setShuffleOrSend,
       setAutoMixOrSend,
       isLocalExecActive: localExecCurrent,
+      isDesignatedAudioStation: canLocalExec,
+      mainSnapResolved,
       sessionCode,
       guestLink,
       isObserverOnlyBrowser,
@@ -1355,6 +1365,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       setShuffleOrSend,
       setAutoMixOrSend,
       localExecCurrent,
+      canLocalExec,
+      mainSnapResolved,
       sessionCode,
       guestLink,
       isObserverOnlyBrowser,
