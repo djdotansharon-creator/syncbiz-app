@@ -32,8 +32,10 @@
 - **CONTROL ROOM GATE 3A (capability engine, SHADOW): ACCEPTED** (2026-10-06, TEST only) — commit `dd4ea6b`, app
   deployment `d02448b1`. Mode SHADOW (nothing enforced). See §7 "GATE 3A"; 3B items in §9 item 11.
 - **CONTROL ROOM GATE 3B-1 (active-workspace isolation): ACCEPTED** (2026-10-06, TEST only) — commit `23ff679`, app
-  deployment `062d3827`. Closes §9 items 11b + 11c. Authz mode still SHADOW. **Gate 3B-2 NOT started.** See §7
-  "GATE 3B-1".
+  deployment `062d3827`. Closes §9 items 11b + 11c. See §7 "GATE 3B-1".
+- **CONTROL ROOM GATE 3B-2 (schedule cross-workspace IDOR): ACCEPTED** (2026-10-06, TEST only) — commit `cdebde5`,
+  app deployment `d9d1dda5`. Closes §9 item 11a. Authz mode still SHADOW. **Gate 3B-3 NOT started.** See §7
+  "GATE 3B-2".
 - **PR #52:** OPEN — **NOT MERGED / DO NOT MERGE** without explicit approval
 - **PROD:** UNTOUCHED
 - **Written from:** Dev-PC (`dsk-9b11bfa1-a353-4abb-859c-2351cf1d0608`) — no direct Lenovo log access.
@@ -134,6 +136,31 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM GATE 3B-2 — SCHEDULE CROSS-WORKSPACE IDOR — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
+- Commit **`cdebde5`** (APP only, security): closes §9 item 11a.
+  - GET / PATCH / DELETE `/api/schedules/[id]` load the schedule ONLY from the active session workspace via new
+    `db.findScheduleInWorkspace` (id + workspaceId in the query; fails closed; resolved like the list/create routes).
+    Not found or another workspace → **404** BEFORE any owner wildcard / branch / alias logic (existence not revealed).
+    The "log mismatch and fall through" path is removed.
+  - Writes are workspace-bound: `updateSchedule` / `deleteSchedule` require the workspace and use `updateMany` /
+    `deleteMany` where `{ id, workspaceId }`; 0 rows → 404 (no check/write race). The fail-open `getSchedule` path is
+    not used.
+  - Same-workspace behavior unchanged (owner / admin, branch user incl. legacy alias, 403 on unassigned branch, 401
+    without session). List / create routes, target validation, browser schedule execution and 3A shadow hooks
+    untouched.
+- Audit proof (pre-fix, real handlers over a fake two-workspace DB): OWNER of A could GET / PATCH (rename) / DELETE
+  Schedule B (all 200). Post-fix `scripts/verify-gate3b2-schedule-idor.ts` 19/19: cross-workspace GET / PATCH / DELETE
+  → **404** with Schedule B unchanged (incl. legacy "default" branch user and B canonical branch); same-workspace 200;
+  unknown id 404; no session 401; unassigned branch 403; no id-only write executed. Full regression matrix (20 suites)
+  + typecheck + `next build` PASS.
+- TEST app deployment `d9d1dda5` (both changed files hash-verified).
+- **Runtime (regression only, by owner decision — no Schedule row created, to keep §9 item 9 out of this gate):**
+  server-log corroborated VONO reopen 18:35:22Z → MAIN MASTER 18:35:32Z + renderer CONTROL 18:35:36Z in the canonical
+  room; token mint normal; no 401 / 403 / 409 / branch_conflict. TEST DB still 0 Schedule rows, 1 Branch row.
+- **ACCEPTED — owner-attested 2026-10-06:** VONO opened normally; MASTER badge; LOCAL; On-Air; pads + playlists
+  normal; Access Control loads; no visible error. Cross-workspace behavior accepted from the focused test.
+- No DB / schema / WS / desktop change; authz mode **SHADOW**. **PROD untouched.**
 
 ### CONTROL ROOM GATE 3B-1 — ACTIVE-WORKSPACE ISOLATION — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
 - Commit **`23ff679`** (APP only, security): closes the primary-workspace privilege leak (§9 11b) and the bearer
@@ -452,8 +479,8 @@ Not pilot blockers. Do not fix inside unrelated work.
    authenticated `/api/jingles/library` (canonical). Separate audit.
 11. **GATE 3B SECURITY-HARDENING ITEMS (authorization audit 2026-10-06; recorded in Gate 3A, NOT fixed).** All
    PROVEN BY CODE; present in the shared code (PROD has the same code paths). Each a separate audited fix in 3B:
-   a. **Schedule cross-workspace IDOR** — `schedules/[id]` looks up by global id; workspace mismatch only logged
-      (`app/api/schedules/[id]/route.ts:28-33`); any workspace OWNER passes via `"*"`.
+   a. ~~**Schedule cross-workspace IDOR**~~ — **FIXED in Gate 3B-2 (`cdebde5`, TEST)**. Was: `schedules/[id]` looked
+      up by global id; workspace mismatch only logged; any workspace OWNER passed via `"*"`.
    b. ~~**Primary-workspace drift**~~ — **FIXED in Gate 3B-1 (`23ff679`, TEST)**. Was: `hasBranchAccess` /
       `getAssignedBranchIdsForUser` / `requireAdmin` / `isOwner` resolved the user's PRIMARY workspace;
       `getTenantRole` fell back to the primary membership.
