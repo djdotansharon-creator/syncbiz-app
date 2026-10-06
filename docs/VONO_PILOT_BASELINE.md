@@ -13,6 +13,9 @@
   - **PLAYER PHASE: PILOT ACCEPTED** (owner-attested 2026-10-05)
   - **JINGLES / ANNOUNCEMENTS: PILOT ACCEPTED** (owner-attested 2026-10-05)
 - **Current active P0:** none. Next phase: Control Room / branch management.
+- **CONTROL ROOM PHASE 1 — GATE 1 (canonical branch, SHADOW): FULL PASS / ACCEPTED** (2026-10-06, TEST only)
+  on branch `feature/control-room-phase1` (NOT PR #52, which stays FROZEN at its accepted head). Gate 2
+  (activation / "default" migration) NOT started. See §7 "CONTROL ROOM PHASE 1".
 - **PR #52:** OPEN — **NOT MERGED / DO NOT MERGE** without explicit approval
 - **PROD:** UNTOUCHED
 - **Written from:** Dev-PC (`dsk-9b11bfa1-a353-4abb-859c-2351cf1d0608`) — no direct Lenovo log access.
@@ -51,6 +54,10 @@ Lineage: `865ba81` (offline cold boot, MAIN) → `2ebdbe4` (renderer stall fix) 
 | **ElevenLabs** | `ELEVENLABS_API_KEY` configured on `syncbiz-app-test` by the owner (verified by NAME only; value never read) |
 | **App volume** | `syncbiz-app-test-volume` (id `4272e7c6-1518-436d-9da0-1fe1c7c5e54f`) attached to `syncbiz-app-test` only, mount path **`/data`**; Railway exposes `RAILWAY_VOLUME_MOUNT_PATH=/data` |
 | **Jingle storage** | generated MP3s under **`/data/jingles/<uuid>.mp3`**, served at `/api/jingles/audio/<uuid>` |
+| **WS volume (2026-10-06)** | `syncbiz-ws-test-volume` (id `18b32178-da30-484f-8403-785b347baf73`) on `syncbiz-ws-test` only, mount `/data` → designation / lease / branch-alias state in `/data/ws-lease/` (proven to survive redeploy with no re-assertion) |
+| **Control Room Phase 1 deploys (2026-10-06)** | app `87a05469-b3f5-4afc-819a-c33746e0182e` (source `6b5b9a0`, file-hash verified for the changed renderer files); WS `335dad0a-e3a4-4802-b1b6-c9ae40697e51` (Gate 1 shadow code `cea1585`) |
+| **Canonical TEST branch (Gate 1, shadow)** | `90d2b7b8-7bce-4d5d-a984-5f84fa8ba0d2`, code `T001`, "TEST Pilot Branch (legacy default)", `legacyKey="default"`; runtime still routes by `"default"` |
+| **TEST DB backup before Gate 1** | `D:\SyncBiz_Backups\test-env\20261006T050718Z-control-room-gate1\` (pg_dump sha256 `a0a65c1d…d13e`, restore-verified) + WS state file copies |
 
 **PROD untouched.** No PROD deploy, DB, WS, variable, volume or installer action in this baseline.
 
@@ -104,6 +111,18 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM PHASE 1 — GATE 1 — FULL PASS / ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
+- Commits: `cea1585` (Gate 1 shadow: `Branch.legacyKey`, app resolver + WS alias map, mode = code constant
+  "shadow"), `c3a14aa` (docs: TEST workspace id), **`6b5b9a0` (renderer zero-touch WS reconnect — isolated,
+  cherry-pickable; preserved at local branch `fix/renderer-zero-touch-ws-reconnect`)**.
+- **Server-log corroborated:** shadow resolves raw `default` → candidate `90d2b7b8…` with **effective `default`**,
+  room `ws:31d30e23…:default` (no routing change); designation / lease / alias survive WS redeploy with no
+  re-assertion; after a WS restart with nobody touching the Lenovo, MAIN `dsk-cbeb93d0` → MASTER (08:38:27.707
+  UTC) and renderer `ba8ffdba` → CONTROL (08:38:28.044 UTC) in the same `:default` room; a TEST CONTROL saw
+  MASTER + CONTROL online and its PLAY_INTERRUPT was delivered with no error.
+- **ACCEPTED — owner-attested 2026-10-06:** renderer reconnect fix (automatic, no focus/interaction);
+  PLAY_INTERRUPT from TEST CONTROL heard (duck → announcement → music resumed); LOCAL playback stable throughout.
 
 ### JINGLES / ANNOUNCEMENTS — ACCEPTED — owner-attested 2026-10-05 (Lenovo beta.10 + TEST renderer `cd4c631`)
 - Announcement Generate works in TEST.
@@ -166,6 +185,9 @@ designated MASTER re-registration + renderer CONTROL + no auto-failover — serv
 ## 9. PARKED / NON-BLOCKING
 
 Not pilot blockers. Do not fix inside unrelated work.
+0. **User-facing MASTER/CONTROL badge (OPEN, audited 2026-10-06, not yet implemented):** the designated
+   Lenovo shows blue "CONTROL · Controlling: Branch Master" (renderer socket role). Product meaning requires
+   GREEN "MASTER · Playing store audio · Branch …" on the designated station. UI-only fix, separate approval.
 1. **Jingle schedules are still localStorage-only** (`components/jingles-control/schedule-storage.ts` +
    `JingleScheduleAutoPlayer`): each device fires only its own schedules while that client is open.
    **Must move to a central/server-side model during Control Room.**
