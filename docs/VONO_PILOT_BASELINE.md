@@ -37,8 +37,10 @@
   app deployment `d9d1dda5`. Closes §9 item 11a. See §7 "GATE 3B-2".
 - **CONTROL ROOM GATE 3B-3 (user-management hardening): ACCEPTED** (2026-10-06, TEST only) — commit `c5ddf8b`, app
   deployment `85d08dca`. Closes §9 item 11e + the cross-workspace password / global-disable takeover paths;
-  existing-user invite consent PARKED (§9 item 13). Authz mode still SHADOW. **Gate 3B-4 NOT started.** See §7
-  "GATE 3B-3".
+  existing-user invite consent PARKED (§9 item 13). See §7 "GATE 3B-3".
+- **CONTROL ROOM GATE 3B-4a (retire dead / legacy command routes): ACCEPTED** (2026-10-06, TEST only) — commit
+  `2cb46d2`, app deployment `f8d3bc55`. Closes the command-route part of §9 item 11d (announcements / logs /
+  metadata-proxy remain for 3B-4b..d). Authz mode still SHADOW. **Gate 3B-4b NOT started.** See §7 "GATE 3B-4a".
 - **PR #52:** OPEN — **NOT MERGED / DO NOT MERGE** without explicit approval
 - **PROD:** UNTOUCHED
 - **Written from:** Dev-PC (`dsk-9b11bfa1-a353-4abb-859c-2351cf1d0608`) — no direct Lenovo log access.
@@ -139,6 +141,29 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM GATE 3B-4a — RETIRE DEAD / LEGACY COMMAND ROUTES — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
+- Commit **`2cb46d2`** (APP only, security): `/api/player/commands` (GET, POST), `/api/play-now` (POST),
+  `/api/commands/play-local` (POST), `/api/commands/stop-local` (POST), `/api/agent/commands` (GET) → **410 Gone**
+  (`{"error":"Gone"}`) and nothing else: no process execution (`cmd /c start` / `taskkill`), no agent-queue drain, no
+  in-memory player-state mutation, no global-log write, no console echo of request target / path / device. The route
+  files import only `next/server`. Legacy UI callers (fire-and-forget) left unchanged.
+- Audit basis (3B-4): these routes were unauthenticated; `play-local` / `player/commands` wrote client-supplied targets
+  (possibly LOCAL paths) to the global log served by the anonymous `/api/logs` and to the server console; on Linux they
+  never executed (Windows-only guard); `play-now` was dead; nothing enqueued agent commands.
+- Tests: `scripts/verify-gate3b4a-retired-routes.ts` 14/14 (runtime 410s, exec spies, queue / player-state / global-log
+  intact, zero console output, no echo; static imports; jingles/audio + jingles/bell untouched; authz SHADOW) + full
+  regression matrix (22 suites) + typecheck + `next build` PASS.
+- TEST app deployment `f8d3bc55` (5 retired files + jingles/audio + jingles/bell hash-verified).
+- **Runtime — server-log corroborated:** across **1,629 TEST HTTP requests (19:38:44Z → 19:47:34Z)** covering three VONO
+  reopens and the URL test: **zero hits on any retired route, zero 410s**; `/api/jingles/audio/:id` and
+  `/api/jingles/bell/*` 200 from the beta.10 player; MAIN MASTER (19:40:21Z, 19:41:07Z, 19:47:04Z) + renderer CONTROL in
+  the canonical room; no 403 / 409 / branch_conflict. URL playback makes no app-API playback call (renderer → WS →
+  MAIN → MPV). The two `POST /api/music-bank/authorize` 503s are pre-existing TEST configuration ("not configured").
+- **ACCEPTED — owner-attested 2026-10-06:** VONO reopen; MASTER badge; LOCAL; URL playlist play; URL NEXT; URL → LOCAL;
+  On-Air over URL; pads + playlists; Access Control; no visible error.
+- Observation recorded separately: excessive `/api/schedules` polling (§9 item 14).
+- No DB / schema / WS / desktop change; authz mode **SHADOW**. **PROD untouched.**
 
 ### CONTROL ROOM GATE 3B-3 — USER-MANAGEMENT HARDENING — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
 - Commit **`c5ddf8b`** (APP only, security): closes §9 item 11e (MANAGER → OWNER escalation) and the two takeover
@@ -518,9 +543,11 @@ Not pilot blockers. Do not fix inside unrelated work.
       `getTenantRole` fell back to the primary membership.
    c. ~~**Bearer token workspace drift**~~ — **FIXED in Gate 3B-1 (`23ff679`, TEST)**. Was: `getCurrentUserFromApiRequest`
       dropped the token's signed workspace.
-   d. **Unauthenticated mutating routes** — `player/commands`, `play-now`, `commands/play-local`,
-      `commands/stop-local`, `agent/commands`, `announcements` GET/POST, `logs` (verify no beta.10 / renderer caller
-      before closing; `jingles/audio/[id]` must stay URL-playable for MAIN On-Air).
+   d. **Unauthenticated mutating routes** — PARTIALLY FIXED. ~~`player/commands`, `play-now`, `commands/play-local`,
+      `commands/stop-local`, `agent/commands`~~ → **retired to 410 in Gate 3B-4a (`2cb46d2`, TEST)**. Still open (per
+      the 3B-4 audit split): `announcements` GET/POST (3B-4b), `logs` (3B-4c), metadata / proxy routes incl. SSRF on
+      `radio/metadata` + `sources/parse-url` and anonymous yt-dlp (3B-4d). `jingles/audio/[id]` + `jingles/bell/*`
+      must stay URL-playable for MAIN On-Air.
    e. ~~**MANAGER → OWNER escalation**~~ — **FIXED in Gate 3B-3 (`c5ddf8b`, TEST)**, together with the cross-workspace
       global-password takeover and tenant global-disable takeover found in its audit. Was: `admin/users` POST/PATCH
       accepted `accessType:"OWNER"` with no caller-rank check (MANAGER passed `requireAdmin`).
@@ -540,6 +567,11 @@ Not pilot blockers. Do not fix inside unrelated work.
    are CLOSED in Gate 3B-3 (a workspace admin can no longer overwrite another user's global password, an invite never
    sets/changes an existing user's password, and global disable is platform SUPER_ADMIN only), but unsolicited
    membership itself remains. Needs a product decision (invite / accept flow); not redesigned in 3B-3.
+14. **EXCESSIVE SCHEDULES POLLING (performance, recorded 2026-10-06 during Gate 3B-4a runtime review).** TEST HTTP logs
+   show ~1,549 `GET /api/schedules` requests in ~9 minutes (19:38:44Z → 19:47:34Z; ~3 requests / second) — far above
+   what a schedule check needs. NOT a Gate 3B-4a regression; not investigated or changed. Later audit should determine:
+   exact caller(s); whether multiple renderers / components poll independently; the intended polling interval;
+   duplicate timers / effects; the effect at 300-station scale; whether push / event-driven refresh can replace it.
 
 Carried over (still open):
 - Jingle library/pads still use `branchId:"default"`; no link to `MediaAsset`; generated-but-unsaved MP3s
