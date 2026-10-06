@@ -92,7 +92,7 @@ export async function PATCH(
 
   if (data.targetType !== undefined || data.targetId !== undefined || data.sourceId !== undefined) {
     const branchId = (data.branchId ?? existing!.branchId ?? "default").trim() || "default";
-    const validation = await validateScheduleTarget(branchId, targetType, targetId || existing!.targetId);
+    const validation = await validateScheduleTarget(branchId, targetType, targetId || existing!.targetId, user.tenantId);
     if (!validation.ok) {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }

@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
   }
 
-  const validation = await validateScheduleTarget(branchId, targetType, targetId || (data.sourceId ?? ""));
+  const validation = await validateScheduleTarget(branchId, targetType, targetId || (data.sourceId ?? ""), user.tenantId);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
   }

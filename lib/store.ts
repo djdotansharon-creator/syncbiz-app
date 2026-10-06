@@ -5,6 +5,7 @@
  */
 
 import { prisma } from "./prisma";
+import { canonicalContentBranchForWrite } from "./branch-resolver";
 import {
   enforceCanAddBranch,
   enforceCanAddDevice,
@@ -306,7 +307,8 @@ export const db = {
         name: input.name,
         url: target,
         type: input.type,
-        branchId: input.branchId ?? "default",
+        // Gate 2B-1: legacy branch key → the workspace's canonical branch.
+        branchId: await canonicalContentBranchForWrite(wsId, input.branchId ?? "default"),
         description: input.description ?? null,
         capabilities: (input.capabilities ?? []) as string[],
         artworkUrl: input.artworkUrl ?? null,

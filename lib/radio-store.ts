@@ -6,6 +6,7 @@
  */
 
 import { prisma } from "./prisma";
+import { canonicalContentBranchForWrite } from "./branch-resolver";
 import type { RadioStream } from "./source-types";
 
 export type RadioCreateInput = {
@@ -81,7 +82,8 @@ export async function createRadioStation(input: RadioCreateInput): Promise<Radio
   const wsId = await resolveWorkspaceId(input.tenantId);
   if (!wsId) throw new Error("Workspace not found for tenantId: " + input.tenantId);
 
-  const branchId = (input.branchId ?? "default").trim() || "default";
+  // Gate 2B-1: legacy branch key → the workspace's canonical branch (an existing Branch row, so no stub is created).
+  const branchId = await canonicalContentBranchForWrite(wsId, (input.branchId ?? "default").trim() || "default");
 
   // Ensure branch stub exists (same pattern as store.ts)
   await prisma.branch.upsert({

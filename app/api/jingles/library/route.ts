@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserFromApiRequest } from "@/lib/auth-helpers";
+import { canonicalContentBranchForWrite } from "@/lib/branch-resolver";
 
 /**
  * Cloud Jingle Library — the single authoritative list of saved jingles per workspace.
@@ -124,7 +125,8 @@ export async function POST(req: Request) {
       data: {
         workspaceId: user.tenantId,
         announcementType: JINGLE_TYPE,
-        branchId: "default",
+        // Gate 2B-1: new jingles persist under the workspace's canonical branch (legacy "default" when none).
+        branchId: await canonicalContentBranchForWrite(user.tenantId, "default"),
         name: title,
         audioUrl: url,
         voiceId,

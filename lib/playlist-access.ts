@@ -99,8 +99,12 @@ export async function gatePlaylistAccess(
         assignments.map((a) => (a.branchId ?? "").trim() || DEFAULT_BRANCH_ID),
       ),
     );
-    // If user has no explicit assignments, default branch is implied
-    const effectiveIds = assignedIds.size > 0 ? assignedIds : new Set([DEFAULT_BRANCH_ID]);
+    // If user has no explicit assignments, default branch is implied (Gate 2B-1: with its same-workspace
+    // canonical alias, so a canonical content row is the same branch — nothing broader).
+    const effectiveIds =
+      assignedIds.size > 0
+        ? assignedIds
+        : new Set(await expandLegacyBranchEquivalents(workspaceId, [DEFAULT_BRANCH_ID]));
     if (!effectiveIds.has(normalized)) {
       return { allow: false, httpStatus: 403, message: "Forbidden: no access to this branch" };
     }

@@ -6,6 +6,7 @@
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
+import { canonicalContentBranchForWrite } from "./branch-resolver";
 import { enforceCanAddPlaylist } from "./entitlement-limits";
 import { normalizePlaylistForPersist, PlaylistPersistError } from "./playlist-persist-rules";
 import type { Playlist, PlaylistCreateInput, PlaylistTrack } from "./playlist-types";
@@ -179,7 +180,8 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
       playlistType: normalized.type ?? "youtube",
       url: normalized.url ?? "",
       thumbnail: normalized.thumbnail ?? "",
-      branchId: normalized.branchId ?? null,
+      // Gate 2B-1: a legacy branch key persists as the workspace's canonical branch (null stays null = legacy default).
+      branchId: normalized.branchId ? await canonicalContentBranchForWrite(wsId, normalized.branchId) : null,
       catalogItemId: normalized.type === "local" ? null : normalized.catalogItemId ?? null,
       viewCount: normalized.viewCount ?? null,
       durationSeconds: normalized.durationSeconds ?? null,

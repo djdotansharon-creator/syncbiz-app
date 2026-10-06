@@ -2,11 +2,18 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserFromApiRequest } from "@/lib/auth-helpers";
 import { SAMPLER_PADS } from "@/components/jingles-control/seed-data";
+import { canonicalContentBranchForWrite, expandLegacyBranchEquivalents } from "@/lib/branch-resolver";
+import { readPads, writePad, type PadRepo } from "@/lib/jingle-pad-compat";
 
 /**
  * Cloud Quick Pads — the shared pad board. One row per (workspace, branch, pad slot) so Desktop and
  * Mobile see and edit the SAME 8 canonical pads. Workspace is ALWAYS derived from the authenticated
  * session (never from the client); branchId is the single-branch V1 "default" for now.
+ *
+ * Gate 2B-1 (canonical-branch transition): a pad may be stored under the legacy "default" OR the workspace's
+ * canonical branch id. GET returns the pad from either alias; POST updates the row that already represents the
+ * pad (never a second copy) and creates new pads canonical. A pad present under BOTH aliases is a conflict: it is
+ * not guessed — GET omits it and reports it in `conflicts`, POST returns 409 (see lib/jingle-pad-compat.ts).
  *
  * POST is an idempotent per-pad upsert keyed on the (workspaceId, branchId, padId) unique — two
  * clients editing DIFFERENT pads never clobber each other; the same pad is simple last-write-wins.
@@ -43,6 +50,17 @@ function isLegitPadUrl(url: string, req: Request): boolean {
   return AUDIO_PATH_RE.test(u.pathname);
 }
 
+/** Prisma wiring for the pad read/write flows (branch alias set passed in explicitly). */
+const padRepo: PadRepo = {
+  findMany: ({ workspaceId, branchIds, padId }) =>
+    prisma.jinglePadAssignment.findMany({
+      where: { workspaceId, branchId: { in: branchIds }, ...(padId ? { padId } : {}) },
+      orderBy: { padId: "asc" },
+    }),
+  update: (id, data) => prisma.jinglePadAssignment.update({ where: { id }, data }),
+  create: (data) => prisma.jinglePadAssignment.create({ data }),
+};
+
 type PadItem = {
   padId: string;
   label: string;
@@ -70,11 +88,13 @@ export async function GET(req: Request) {
   const user = await getCurrentUserFromApiRequest(req);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const rows = await prisma.jinglePadAssignment.findMany({
-    where: { workspaceId: user.tenantId, branchId: DEFAULT_BRANCH_ID },
-    orderBy: { padId: "asc" },
-  });
-  return NextResponse.json({ items: rows.map(rowToPad) });
+  const branchIds = await expandLegacyBranchEquivalents(user.tenantId, [DEFAULT_BRANCH_ID]);
+  const { pads, conflicts } = await readPads(padRepo, user.tenantId, branchIds);
+  if (conflicts.length > 0) {
+    console.error("[api/jingles/pads] branch alias conflict (pad stored under legacy AND canonical branch)", JSON.stringify({ workspaceId: user.tenantId, conflicts }));
+    return NextResponse.json({ items: pads.map(rowToPad), conflicts });
+  }
+  return NextResponse.json({ items: pads.map(rowToPad) });
 }
 
 export async function POST(req: Request) {
@@ -101,16 +121,13 @@ export async function POST(req: Request) {
   const bellStyle = typeof body.bellStyle === "string" && body.bellStyle ? body.bellStyle : null;
   const preRoll = body.preRoll === true;
 
-  const row = await prisma.jinglePadAssignment.upsert({
-    where: {
-      workspaceId_branchId_padId: {
-        workspaceId: user.tenantId,
-        branchId: DEFAULT_BRANCH_ID,
-        padId,
-      },
-    },
-    update: { label, url, color, bellStyle, preRoll },
-    create: { workspaceId: user.tenantId, branchId: DEFAULT_BRANCH_ID, padId, label, url, color, bellStyle, preRoll },
-  });
-  return NextResponse.json({ item: rowToPad(row) });
+  const data = { label, url, color, bellStyle, preRoll };
+  const branchIds = await expandLegacyBranchEquivalents(user.tenantId, [DEFAULT_BRANCH_ID]);
+  const writeBranchId = await canonicalContentBranchForWrite(user.tenantId, DEFAULT_BRANCH_ID);
+  const res = await writePad(padRepo, { workspaceId: user.tenantId, padId, data, branchIds, writeBranchId });
+  if (!res.ok) {
+    console.error("[api/jingles/pads] branch alias conflict on write", JSON.stringify({ workspaceId: user.tenantId, padId }));
+    return NextResponse.json({ error: "Pad exists under both legacy and canonical branch; not written", padId }, { status: 409 });
+  }
+  return NextResponse.json({ item: rowToPad(res.row) });
 }

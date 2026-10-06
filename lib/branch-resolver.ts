@@ -105,6 +105,50 @@ export async function expandLegacyBranchEquivalents(workspaceId: string | null |
   return [...new Set(ids.flatMap((id) => legacyBranchEquivalents(id, canonical)))];
 }
 
+// ── Gate 2B-1: content compatibility (legacy "default" ≡ the workspace's canonical branch) ──────────────────────
+
+/** Branch id to PERSIST for a new content row: a legacy key resolves to the workspace's canonical branch (when the
+ *  workspace has one); any other id is kept as-is. Never broadens scope — only the same-workspace alias. */
+export async function canonicalContentBranchForWrite(workspaceId: string | null | undefined, branchId: string | null | undefined): Promise<string> {
+  return canonicalizeLegacyBranch(branchId, await getCanonicalLegacyBranchId(workspaceId));
+}
+
+/** Same-branch test for content, honoring ONLY the legacy alias within one workspace. */
+export async function contentBranchesEquivalent(
+  workspaceId: string | null | undefined,
+  a: string | null | undefined,
+  b: string | null | undefined,
+): Promise<boolean> {
+  const x = (a ?? "").trim() || LEGACY_DEFAULT_BRANCH_KEY;
+  const y = (b ?? "").trim() || LEGACY_DEFAULT_BRANCH_KEY;
+  if (x === y) return true;
+  return legacyBranchEquivalent(x, y, await getCanonicalLegacyBranchId(workspaceId));
+}
+
+const legacyKeyCache = new Map<string, { key: string | null; at: number }>();
+/**
+ * The branch key EXISTING clients registered with: a canonical branch that represents a legacy key (Branch.legacyKey)
+ * maps back to that key ("default"); anything else is returned unchanged. Used for WS LIBRARY_UPDATED delivery, which
+ * matches the clients' raw REGISTER branch exactly. Never throws (falls back to the given id).
+ */
+export async function legacyClientBranchKey(branchId: string | null | undefined): Promise<string> {
+  const id = (branchId ?? "").trim() || LEGACY_DEFAULT_BRANCH_KEY;
+  if (id === LEGACY_DEFAULT_BRANCH_KEY) return id;
+  try {
+    const hit = legacyKeyCache.get(id);
+    let key: string | null;
+    if (hit && Date.now() - hit.at < CANONICAL_CACHE_MS) key = hit.key;
+    else {
+      const row = await prisma.branch.findUnique({ where: { id }, select: { legacyKey: true } });
+      key = row?.legacyKey ?? null;
+      legacyKeyCache.set(id, { key, at: Date.now() });
+    }
+    return key || id;
+  } catch {
+    return id;
+  }
+}
+
 const loggedShadow = new Set<string>();
 
 /**

@@ -138,7 +138,14 @@ const LENOVO = "dsk-cbeb93d0-0023-47e0-aebc-b07fe350415f";
   assert("WS uses stationBranchId only in the alias log hook (not for routing)",
     !/(const roomKey = |expectedRoomKey = |const effectiveBranchId = )[^\n]*stationBranchId/.test(idx) && (idx.match(/stationBranchId: auth\.stationBranchId/g) ?? []).length === 1);
   const contentRoutes = ["app/api/jingles/pads/route.ts", "app/api/jingles/library/route.ts", "app/api/playlists/route.ts", "app/api/radio/route.ts"];
-  assert("content write paths untouched (no resolver import)", contentRoutes.every((p) => !/branch-resolver/.test(read(...p.split("/")))));
+  // Gate 2B-1 (documented change): content routes may import ONLY the 2B-1 content-compat helpers from the resolver
+  // (no shadow/resolution-mode switch); playlists/radio routes stay resolver-free (their stores canonicalize).
+  assert("content routes use only the 2B-1 content-compat resolver helpers", contentRoutes.every((p) => {
+    const src = read(...p.split("/"));
+    const m = src.match(/import \{([^}]*)\} from "@\/lib\/branch-resolver";/);
+    if (!m) return !/branch-resolver/.test(src);
+    return m[1].split(",").map((s) => s.trim()).filter(Boolean).every((n) => ["canonicalContentBranchForWrite", "expandLegacyBranchEquivalents"].includes(n));
+  }) && !/branch-resolver/.test(read("app", "api", "playlists", "route.ts")) && !/branch-resolver/.test(read("app", "api", "radio", "route.ts")));
 
   console.log(`\n${pass} passed, ${fail} failed`);
 })();

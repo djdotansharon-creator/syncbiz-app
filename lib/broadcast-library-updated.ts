@@ -1,7 +1,12 @@
 /**
  * Server-side only. Notifies the WS server to broadcast LIBRARY_UPDATED to clients.
  * Call after playlist/radio/source mutations so connected clients refetch library.
+ *
+ * Gate 2B-1: the WS server delivers LIBRARY_UPDATED to clients whose RAW register branch equals the sent branch.
+ * Existing clients (beta.10 MAIN, hosted renderer, browser, mobile) register with the legacy key "default", so a
+ * canonical branch id that represents a legacy key is sent as that key (legacyClientBranchKey). No WS change.
  */
+import { legacyClientBranchKey } from "./branch-resolver";
 
 function getWsServerHttpUrl(): string {
   const wsUrl = process.env.NEXT_PUBLIC_WS_URL ?? process.env.WS_SERVER_HTTP_URL ?? "http://localhost:3001";
@@ -33,7 +38,7 @@ export async function notifyLibraryUpdated(
       },
       body: JSON.stringify({
         userId: userId.trim(),
-        branchId: options?.branchId?.trim() || "default",
+        branchId: await legacyClientBranchKey(options?.branchId?.trim() || "default"),
         entityType: options?.entityType,
         action: options?.action,
       }),
