@@ -19,8 +19,10 @@
 - **CONTROL ROOM GATE 2A-1 (identity/authorization compatibility): ACCEPTED** (2026-10-06, TEST only) —
   commit `2466820`, TEST app deployment `b6050fc1`. See §7 "GATE 2A-1".
 - **CONTROL ROOM GATE 2A-2 (identity data migration): ACCEPTED** (2026-10-06, TEST only) — identity rows now on
-  canonical branch `90d2b7b8…`; WS effective room still `:default`. **Gate 2A-3 (WS canonical activation) NOT
-  started.** See §7 "GATE 2A-2".
+  canonical branch `90d2b7b8…`. See §7 "GATE 2A-2".
+- **CONTROL ROOM GATE 2A-3 (canonical WS room activation): ACCEPTED** (2026-10-06, TEST only) — commit
+  `384df45`, WS deployment `23e94c01`. Live room is now `ws:31d30e23…:90d2b7b8…`; content rows still on
+  "default". **Gate 2B (content migration) NOT started.** See §7 "GATE 2A-3".
 - **PR #52:** OPEN — **NOT MERGED / DO NOT MERGE** without explicit approval
 - **PROD:** UNTOUCHED
 - **Written from:** Dev-PC (`dsk-9b11bfa1-a353-4abb-859c-2351cf1d0608`) — no direct Lenovo log access.
@@ -61,7 +63,8 @@ Lineage: `865ba81` (offline cold boot, MAIN) → `2ebdbe4` (renderer stall fix) 
 | **Jingle storage** | generated MP3s under **`/data/jingles/<uuid>.mp3`**, served at `/api/jingles/audio/<uuid>` |
 | **WS volume (2026-10-06)** | `syncbiz-ws-test-volume` (id `18b32178-da30-484f-8403-785b347baf73`) on `syncbiz-ws-test` only, mount `/data` → designation / lease / branch-alias state in `/data/ws-lease/` (proven to survive redeploy with no re-assertion) |
 | **Control Room Phase 1 deploys (2026-10-06)** | app `87a05469-b3f5-4afc-819a-c33746e0182e` (source `6b5b9a0`, file-hash verified for the changed renderer files); WS `335dad0a-e3a4-4802-b1b6-c9ae40697e51` (Gate 1 shadow code `cea1585`) |
-| **Canonical TEST branch (Gate 1, shadow)** | `90d2b7b8-7bce-4d5d-a984-5f84fa8ba0d2`, code `T001`, "TEST Pilot Branch (legacy default)", `legacyKey="default"`; runtime still routes by `"default"` |
+| **Gate 2A-3 WS deploy (2026-10-06)** | WS `23e94c01-38ba-4dde-9f22-336bb304bdde` (SUCCESS 11:37Z; source `384df45`, clean tree). Previous shadow WS build `335dad0a…` = rollback reference (rollback also needs the legacy WS files from the Gate 2A backup) |
+| **Canonical TEST branch** | `90d2b7b8-7bce-4d5d-a984-5f84fa8ba0d2`, code `T001`, "TEST Pilot Branch (legacy default)", `legacyKey="default"`; **since Gate 2A-3 the WS routes the TEST workspace by this canonical id** (clients still send `"default"`; content rows still `"default"` until Gate 2B) |
 | **Gate 2A-1 deploy (2026-10-06)** | app `b6050fc1-e762-49d1-af2d-b4f6677abc8d` (SUCCESS 10:10Z; source `2466820`, all 9 changed files hash-verified: live = working tree, LF-normalized = commit). WS NOT redeployed (still `335dad0a…`) |
 | **TEST DB backup before Gate 2A** | `D:\SyncBiz_Backups\test-env\20261006T100051Z-gate2a\` (pg_dump sha256 `aff8197d9b048f121fc81e8c4c58a69246136e800affa7aede4307c3c429fc46`; **restore test PASS** — row counts matched, throwaway DB dropped) + WS designation / lease / alias file copies (hashed); `BACKUP-RECORD.txt` inside. Git HEAD at backup `273f042` |
 | **TEST DB backup before Gate 1** | `D:\SyncBiz_Backups\test-env\20261006T050718Z-control-room-gate1\` (pg_dump sha256 `a0a65c1d…d13e`, restore-verified) + WS state file copies |
@@ -118,6 +121,38 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM GATE 2A-3 — CANONICAL WS ROOM ACTIVATION — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
+- Commit **`384df45`** (SERVER / WS only: `server/branch-alias.ts`, `server/index.ts`, `server/ws-token.ts` + tests):
+  alias mode ACTIVE (code constant); raw `"default"` resolves to the canonical branch for ROOM routing (device +
+  controller REGISTER, owner COMMAND target, internal designation sync); connections keep the raw branchId
+  (client messages / content unchanged); boot re-key BEFORE listen of designation / tombstone / lease keys
+  `ws:<ws>:default` → `ws:<ws>:<canonical>` with the same values (fail safe on conflict: workspace stays on raw
+  room); an active alias cannot be changed at runtime (409). `stationBranchId` read for evidence logging only.
+  No playback / renderer / desktop / app / content change. Tests: `server/verify-gate2a3-activation.ts` 34/34
+  (real-process boot re-key) + full regression matrix (16 suites); Gate 1 / 2A-1 static asserts updated from
+  "shadow" to the documented 2A-3 behavior.
+- Pre-flight PASS (backups + WS files byte-identical to the Gate 2A backup, identity canonical, Lenovo MASTER in
+  `:default`). One content difference found and explained: owner-created `pad-birthday` (10:58:12Z, owner-confirmed),
+  left on "default" for Gate 2B.
+- **WS deploy `23e94c01` (one controlled restart, Lenovo untouched) — server-log corroborated:** boot re-key
+  `rekeyed` + persisted 11:37:49Z before listen; workspace active. MAIN `dsk-cbeb93d0` → **MASTER** ("trusted
+  station") and renderer → **CONTROL** at 11:38:09Z in **`ws:31d30e23-8f4a-4bf2-a1df-c707b69b5673:90d2b7b8-7bce-4d5d-a984-5f84fa8ba0d2`**;
+  persisted designation + lease = canonical room → Lenovo, **zero `:default` keys**; alias file unchanged.
+- **`stationBranchId` — PROVEN BY RUNTIME** (first runtime use): station REGISTER carries
+  `stationBranchId=90d2b7b8…`, `stationBranchMatchesRoom: true`. **`stationDeviceId` preserved** (trusted-station MASTER).
+- Resilience (each server-log corroborated: MAIN MASTER + renderer CONTROL in the canonical room, no `:default`
+  MASTER, no branch_conflict / 409 / revoke / promote / duplicate MASTER):
+  - **VONO restart PASS** — close 11:46:11Z → MASTER 11:46:18Z, renderer CONTROL 11:46:20Z.
+  - **Clean unattended Windows reboot PASS** — disconnect 12:07:55Z → MASTER 12:09:36Z, renderer 12:09:37Z.
+  - **Internet outage / recovery PASS** — disconnect 13:01:26Z (~2 m 50 s offline, past the 90 s timeout) →
+    renderer CONTROL 13:04:16Z, MAIN MASTER 13:04:25Z; automatic.
+- **ACCEPTED — owner-attested 2026-10-06:** LOCAL normal, MASTER badge correct, On-Air works after activation and
+  VONO restart; clean reboot: VONO autostarted via watchdog, LOCAL auto-resumed, ~10 min clean, no login/action;
+  outage: **music did not stop, skip or restart; MASTER badge stayed visible throughout**.
+- The heavy-load freeze self-heal event (first reboot attempt / later remote session + Claude on the Lenovo) is
+  NOT a Gate 2A-3 issue — PARKED item 0c (separate audit).
+- **PROD untouched.**
 
 ### CONTROL ROOM GATE 2A-2 — IDENTITY DATA MIGRATION — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
 - Script **`scripts/control-room/migrate-identity-2a2.mjs`** (commit `c54c8b2`; exact file executed on TEST,
