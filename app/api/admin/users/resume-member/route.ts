@@ -6,13 +6,15 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { shadowAuthorize } from "@/lib/authz";
-import { requireAdmin } from "@/lib/auth-helpers";
+import { requireWorkspaceAdmin, loadWorkspaceMemberTarget } from "@/lib/auth-helpers";
+import { checkMembershipOp } from "@/lib/admin/user-management-policy";
 import { resumeMembershipInWorkspace } from "@/lib/user-store";
 import { prisma } from "@/lib/prisma";
 import { extractClientIp, writeTenantAuditLog } from "@/lib/admin/tenant-audit";
 
 export async function POST(req: NextRequest) {
-  const admin = await requireAdmin();
+  const guard = await requireWorkspaceAdmin(); // Gate 3B-3: WORKSPACE_ADMIN of the ACTIVE workspace only (MANAGER → 403)
+  const admin = guard?.user ?? null;
   if (admin) shadowAuthorize("admin/users/resume-member:POST", { userId: admin.id, workspaceId: admin.tenantId }, "users.manage", []); // Gate 3A shadow: log only, never blocks
   if (!admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -32,6 +34,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Valid email required" }, { status: 400 });
   }
 
+  // Gate 3B-3: owner row never; another WORKSPACE_ADMIN only by the Workspace Owner (or platform SUPER_ADMIN).
+  const opTarget = await loadWorkspaceMemberTarget(guard!.workspaceId, email);
+  const opDenied = opTarget ? checkMembershipOp(guard!, opTarget, "resume") : null;
+  if (opDenied) return NextResponse.json({ error: opDenied.error, code: opDenied.code }, { status: opDenied.status });
   const outcome = await resumeMembershipInWorkspace({
     email,
     tenantId: admin.tenantId.trim(),

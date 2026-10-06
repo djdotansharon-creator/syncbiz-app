@@ -5,7 +5,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { shadowAuthorize } from "@/lib/authz";
-import { requireAdmin } from "@/lib/auth-helpers";
+import { requireWorkspaceAdmin, loadWorkspaceMemberTarget, countOtherActiveWorkspaceAdmins } from "@/lib/auth-helpers";
+import { checkCreateMember, checkEditMember, checkGlobalDisable, checkLastAdminDemotion } from "@/lib/admin/user-management-policy";
 import { EntitlementLimitError } from "@/lib/entitlement-limits";
 import {
   createUser,
@@ -27,7 +28,8 @@ function resolveAccountScope(userTenantId: string): string {
 }
 
 export async function GET() {
-  const admin = await requireAdmin();
+  const guard = await requireWorkspaceAdmin(); // Gate 3B-3: WORKSPACE_ADMIN of the ACTIVE workspace only (MANAGER → 403)
+  const admin = guard?.user ?? null;
   if (!admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -40,7 +42,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const admin = await requireAdmin();
+  const guard = await requireWorkspaceAdmin(); // Gate 3B-3: WORKSPACE_ADMIN of the ACTIVE workspace only (MANAGER → 403)
+  const admin = guard?.user ?? null;
   if (admin) shadowAuthorize("admin/users:POST", { userId: admin.id, workspaceId: admin.tenantId }, "users.manage", []); // Gate 3A shadow: log only, never blocks
   if (!admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -89,6 +92,9 @@ export async function POST(req: NextRequest) {
     if (accessType !== "OWNER" && accessType !== "BRANCH_USER") {
       return NextResponse.json({ error: "accessType must be OWNER or BRANCH_USER" }, { status: 400 });
     }
+    // Gate 3B-3: only the Workspace Owner (or platform SUPER_ADMIN) may create a WORKSPACE_ADMIN.
+    const createDenied = checkCreateMember(guard!, accessType);
+    if (createDenied) return NextResponse.json({ error: createDenied.error, code: createDenied.code }, { status: createDenied.status });
 
     const tenantKey = admin.tenantId.trim();
     const workspace = await prisma.workspace.findFirst({
@@ -156,7 +162,8 @@ export async function POST(req: NextRequest) {
         tenantId: tenantKey,
         tenantRole,
         branchAssignments,
-        seedPassword: password.trim().length > 0 ? password : null,
+        // Gate 3B-3: a workspace invite never sets or changes an EXISTING user's global password.
+        seedPassword: null,
       });
       await writeTenantAuditLog(prisma, {
         action: "member.invite",
@@ -168,7 +175,7 @@ export async function POST(req: NextRequest) {
           targetEmail: email,
           tenantRole,
           branchAssignments: branchAssignments.map((a) => a.branchId),
-          seededPassword: password.trim().length > 0 && !rowByEmail.passwordHash,
+          seededPassword: false,
         },
       });
       return NextResponse.json(user, { status: 201 });
@@ -220,7 +227,8 @@ export async function POST(req: NextRequest) {
  * - Refuses to disable: self / SUPER_ADMIN / workspace owner / last admin.
  */
 export async function DELETE(req: NextRequest) {
-  const admin = await requireAdmin();
+  const guard = await requireWorkspaceAdmin(); // Gate 3B-3: WORKSPACE_ADMIN of the ACTIVE workspace only (MANAGER → 403)
+  const admin = guard?.user ?? null;
   if (admin) shadowAuthorize("admin/users:DELETE", { userId: admin.id, workspaceId: admin.tenantId }, "users.manage", []); // Gate 3A shadow: log only, never blocks
   if (!admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -240,6 +248,9 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Valid email required" }, { status: 400 });
   }
 
+  // Gate 3B-3: global disable (User.status across ALL workspaces) is platform SUPER_ADMIN only.
+  const disableDenied = checkGlobalDisable(guard!);
+  if (disableDenied) return NextResponse.json({ error: disableDenied.error, code: disableDenied.code }, { status: disableDenied.status });
   const outcome = await disableUserInWorkspace({
     email,
     tenantId: admin.tenantId.trim(),
@@ -291,7 +302,8 @@ export async function DELETE(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const admin = await requireAdmin();
+  const guard = await requireWorkspaceAdmin(); // Gate 3B-3: WORKSPACE_ADMIN of the ACTIVE workspace only (MANAGER → 403)
+  const admin = guard?.user ?? null;
   if (admin) shadowAuthorize("admin/users:PATCH", { userId: admin.id, workspaceId: admin.tenantId }, "users.manage", []); // Gate 3A shadow: log only, never blocks
   if (!admin) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -323,6 +335,14 @@ export async function PATCH(req: NextRequest) {
     }
     if (accessType !== "OWNER" && accessType !== "BRANCH_USER") {
       return NextResponse.json({ error: "accessType must be OWNER or BRANCH_USER" }, { status: 400 });
+    }
+    // Gate 3B-3: rank / owner / global-password / last-admin rules (target resolved inside the ACTIVE workspace).
+    const target = await loadWorkspaceMemberTarget(guard!.workspaceId, email);
+    if (target) {
+      const editDenied =
+        checkEditMember(guard!, target, { accessType, hasNewPassword: !!newPassword }) ??
+        checkLastAdminDemotion(target, accessType, await countOtherActiveWorkspaceAdmins(guard!.workspaceId, target.userId));
+      if (editDenied) return NextResponse.json({ error: editDenied.error, code: editDenied.code }, { status: editDenied.status });
     }
 
     const tenantRole: TenantRole = accessType === "OWNER" ? "TENANT_OWNER" : "TENANT_MEMBER";

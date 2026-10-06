@@ -23,6 +23,8 @@ import {
 } from "@/lib/user-store";
 import type { User, SessionUser, BranchRole } from "@/lib/user-types";
 import { ACTIVE_WORKSPACE_COOKIE_NAME } from "@/lib/active-workspace-constants";
+import { prisma } from "@/lib/prisma";
+import { isAdminMembershipRole, type UmCaller, type UmTarget } from "@/lib/admin/user-management-policy";
 
 const COOKIE_NAME = "syncbiz-session";
 const DEFAULT_BRANCH_ID = "default";
@@ -193,6 +195,53 @@ export async function isBranchUser(userId: string, workspaceId: string | null | 
 export async function getUserIdFromSession(): Promise<string | null> {
   const user = await getCurrentUserFromCookies();
   return user?.id ?? null;
+}
+
+/** Gate 3B-3: a legitimate tenant administrator of the ACTIVE workspace (see requireWorkspaceAdmin). */
+export type WorkspaceAdminCaller = UmCaller & { user: User; workspaceId: string };
+
+/**
+ * Gate 3B-3: tenant user management guard. Requires an ACTIVE WorkspaceMember with role WORKSPACE_ADMIN (or a
+ * SUPER_ADMIN membership) in the ACTIVE session workspace. MANAGER (HQ_CONTROL) and below → null (403).
+ * Also returns whether the caller is the Workspace Owner and/or a platform SUPER_ADMIN (User.role).
+ */
+export async function requireWorkspaceAdmin(): Promise<WorkspaceAdminCaller | null> {
+  const user = await getCurrentUserFromCookies();
+  const ws = (user?.tenantId ?? "").trim();
+  if (!user || !ws) return null;
+  const [membership, workspace, row] = await Promise.all([
+    prisma.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: ws, userId: user.id } }, select: { role: true, status: true } }),
+    prisma.workspace.findUnique({ where: { id: ws }, select: { id: true, ownerId: true } }),
+    prisma.user.findUnique({ where: { id: user.id }, select: { role: true } }),
+  ]);
+  if (!membership || membership.status === "SUSPENDED" || !workspace) return null;
+  if (!isAdminMembershipRole(String(membership.role))) return null;
+  return {
+    user,
+    workspaceId: workspace.id,
+    userId: user.id,
+    isWorkspaceOwner: workspace.ownerId === user.id,
+    isPlatformSuperAdmin: String(row?.role ?? "") === "SUPER_ADMIN",
+  };
+}
+
+/** Gate 3B-3: load a user-management target (by email) inside one workspace; null if not a member there. */
+export async function loadWorkspaceMemberTarget(workspaceId: string, email: string): Promise<UmTarget | null> {
+  const target = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() }, select: { id: true } });
+  if (!target) return null;
+  const [membership, workspace] = await Promise.all([
+    prisma.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId, userId: target.id } }, select: { role: true } }),
+    prisma.workspace.findUnique({ where: { id: workspaceId }, select: { ownerId: true } }),
+  ]);
+  if (!membership) return null;
+  return { userId: target.id, membershipRole: String(membership.role), isWorkspaceOwner: workspace?.ownerId === target.id };
+}
+
+/** Gate 3B-3: ACTIVE admin-role members of the workspace other than `exceptUserId` (last-admin rule). */
+export async function countOtherActiveWorkspaceAdmins(workspaceId: string, exceptUserId: string): Promise<number> {
+  return prisma.workspaceMember.count({
+    where: { workspaceId, userId: { not: exceptUserId }, status: "ACTIVE", role: { in: ["WORKSPACE_ADMIN", "SUPER_ADMIN"] } },
+  });
 }
 
 /**
