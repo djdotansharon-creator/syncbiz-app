@@ -260,6 +260,17 @@ Not pilot blockers. Do not fix inside unrelated work.
 0b. **BLOCKER BEFORE A SECOND TEST BRANCH (pre-multi-branch):** the embedded renderer still activates with
    branch `"default"` from MAIN's config; its branch must come from its co-located trusted Station/MAIN
    binding. Separate audited fix — NOT part of Gate 2A.
+0c. **PLAYBACK HARDENING — freeze self-heal REDISPATCH (recorded 2026-10-06, separate audit/approval required).**
+   Observed during the first Gate 2A-3 Windows-reboot test on the Lenovo. Classification from the Lenovo-local
+   audit (owner-provided; this Dev-PC session did not inspect the Lenovo logs): NOT caused by Gate 2A-3
+   canonical routing; MAIN / MPV / renderer did not crash or reload; session/queue preserved; the earlier
+   destructive startup-stall bug did NOT recur; the event was the existing bounded freeze self-heal reacting to
+   a system-wide stall (Claude was opened shortly before the stall — causation NOT proven). Two issues:
+   1. freeze REDISPATCH reloads the same LOCAL track from position 0 (loses the playback position);
+   2. the freeze timer is not reset on PLAYING_CONFIRMED, which allows a redundant REDISPATCH.
+   **Do NOT implement during Gate 2A-3.** Needs its own AUDIT → root cause → approval. Protected playback
+   baseline stays unchanged until then. The Gate 2A-3 reboot test is repeated as a CLEAN unattended test
+   (no Claude, no extra apps, no interaction, wait 2–3 min after LOCAL starts).
 1. **Jingle schedules are still localStorage-only** (`components/jingles-control/schedule-storage.ts` +
    `JingleScheduleAutoPlayer`): each device fires only its own schedules while that client is open.
    **Must move to a central/server-side model during Control Room.**
