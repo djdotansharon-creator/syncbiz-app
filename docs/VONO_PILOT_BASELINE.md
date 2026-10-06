@@ -408,6 +408,11 @@ Not pilot blockers. Do not fix inside unrelated work.
       executes any relayed command; non-designated branches allow browser MASTER election.
    h. **Workspace-wide announcements** — GET returns all workspaces; POST writes workspace `"system"`.
    i. **Guest session-code scope** — session codes are not workspace-scoped.
+12. **FULLSCREEN MODALS (UI, recorded 2026-10-06; owner-observed on the Lenovo).** In fullscreen mode the Jingles
+   "Add to Pad" and "Schedule" dialogs are not visible; outside fullscreen both work normally, and On-Air works.
+   Classified as a fullscreen modal / UI visibility issue only — NOT a jingle backend or playback issue; unrelated
+   to Gate 3A. Non-blocking; fix in the later UI gate. (HYPOTHESIS, not proven: may explain the Gate 3A shadow
+   review observation that a pad edit produced no server-side pad save.)
 
 Carried over (still open):
 - Jingle library/pads still use `branchId:"default"`; no link to `MediaAsset`; generated-but-unsaved MP3s
