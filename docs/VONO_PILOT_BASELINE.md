@@ -34,8 +34,11 @@
 - **CONTROL ROOM GATE 3B-1 (active-workspace isolation): ACCEPTED** (2026-10-06, TEST only) — commit `23ff679`, app
   deployment `062d3827`. Closes §9 items 11b + 11c. See §7 "GATE 3B-1".
 - **CONTROL ROOM GATE 3B-2 (schedule cross-workspace IDOR): ACCEPTED** (2026-10-06, TEST only) — commit `cdebde5`,
-  app deployment `d9d1dda5`. Closes §9 item 11a. Authz mode still SHADOW. **Gate 3B-3 NOT started.** See §7
-  "GATE 3B-2".
+  app deployment `d9d1dda5`. Closes §9 item 11a. See §7 "GATE 3B-2".
+- **CONTROL ROOM GATE 3B-3 (user-management hardening): ACCEPTED** (2026-10-06, TEST only) — commit `c5ddf8b`, app
+  deployment `85d08dca`. Closes §9 item 11e + the cross-workspace password / global-disable takeover paths;
+  existing-user invite consent PARKED (§9 item 13). Authz mode still SHADOW. **Gate 3B-4 NOT started.** See §7
+  "GATE 3B-3".
 - **PR #52:** OPEN — **NOT MERGED / DO NOT MERGE** without explicit approval
 - **PROD:** UNTOUCHED
 - **Written from:** Dev-PC (`dsk-9b11bfa1-a353-4abb-859c-2351cf1d0608`) — no direct Lenovo log access.
@@ -136,6 +139,35 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM GATE 3B-3 — USER-MANAGEMENT HARDENING — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
+- Commit **`c5ddf8b`** (APP only, security): closes §9 item 11e (MANAGER → OWNER escalation) and the two takeover
+  paths found in its audit.
+  - `requireWorkspaceAdmin()` (WORKSPACE_ADMIN or SUPER_ADMIN membership, ACTIVE, in the ACTIVE workspace) replaces
+    `requireAdmin` on `admin/users` GET / POST / PATCH / DELETE and pause- / resume- / remove-member. **MANAGER
+    (HQ_CONTROL) → 403** on all of them, incl. the user list. `admin/audit` unchanged (separate product decision).
+  - Rank / ownership rules (`lib/admin/user-management-policy.ts`): only the **Workspace Owner** (or platform
+    SUPER_ADMIN) creates / promotes / modifies / pauses / resumes / removes another WORKSPACE_ADMIN; a non-owner admin
+    manages lower ranks only; the **owner row can never be demoted / paused / removed / disabled** (no implicit
+    ownership transfer); the **last active admin cannot be demoted**.
+  - **Global password:** PATCH `newPassword` only for self or a platform SUPER_ADMIN; a workspace invite never sets or
+    changes an existing user's global password → **cross-workspace password takeover FIXED**.
+  - **Global disable** (`DELETE` → `User.status`): platform SUPER_ADMIN only → **tenant global-disable takeover
+    FIXED**; workspace-level removal stays on remove-member.
+- Audit proof (pre-fix, real handlers over a fake workspace): MANAGER could create / promote / self-promote to
+  WORKSPACE_ADMIN, demote the owner, reset the owner's password, pause / remove / globally disable admins; any admin
+  could invite an existing user from another workspace and overwrite their global password. Post-fix
+  `scripts/verify-gate3b3-user-management.ts` 45/45 (MANAGER / non-owner admin / owner / platform / takeover chains /
+  last admin / existing guards / static). Full regression matrix (21 suites) + typecheck + `next build` PASS.
+- TEST app deployment `85d08dca` (all 6 changed files hash-verified).
+- **Runtime (regression only; no TEST user created / edited / paused / removed / disabled / password-changed):**
+  server-log corroborated VONO reopen 19:06:55Z → MAIN MASTER 19:06:56Z + renderer CONTROL 19:06:58Z in the canonical
+  room; token mint normal; no 401 / 403 / 409 / branch_conflict. TEST DB: 1 user (ACTIVE), 1 membership
+  (WORKSPACE_ADMIN / ACTIVE) — unchanged.
+- **ACCEPTED — owner-attested 2026-10-06:** Access Control loads and lists users; VONO reopened; MASTER badge; LOCAL;
+  On-Air; pads + playlists normal; no visible error. Privilege protections accepted from the focused test.
+- Existing-user invite consent remains **PARKED** (§9 item 13).
+- No DB / schema / WS / desktop change; authz mode **SHADOW**. **PROD untouched.**
 
 ### CONTROL ROOM GATE 3B-2 — SCHEDULE CROSS-WORKSPACE IDOR — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
 - Commit **`cdebde5`** (APP only, security): closes §9 item 11a.
@@ -489,7 +521,9 @@ Not pilot blockers. Do not fix inside unrelated work.
    d. **Unauthenticated mutating routes** — `player/commands`, `play-now`, `commands/play-local`,
       `commands/stop-local`, `agent/commands`, `announcements` GET/POST, `logs` (verify no beta.10 / renderer caller
       before closing; `jingles/audio/[id]` must stay URL-playable for MAIN On-Air).
-   e. **MANAGER → OWNER escalation** — `admin/users` POST/PATCH accept `accessType:"OWNER"` with no caller-rank check.
+   e. ~~**MANAGER → OWNER escalation**~~ — **FIXED in Gate 3B-3 (`c5ddf8b`, TEST)**, together with the cross-workspace
+      global-password takeover and tenant global-disable takeover found in its audit. Was: `admin/users` POST/PATCH
+      accepted `accessType:"OWNER"` with no caller-rank check (MANAGER passed `requireAdmin`).
    f. **Client-chosen `owner_global`** — WS REGISTER accepts any role from the client (`server/index.ts:686`).
    g. **WS COMMAND capability bypass** — no role/capability check on COMMAND (`server/index.ts:1532-1573`); MAIN
       executes any relayed command; non-designated branches allow browser MASTER election.
