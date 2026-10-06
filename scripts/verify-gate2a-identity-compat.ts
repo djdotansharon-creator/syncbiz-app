@@ -132,8 +132,11 @@ const LENOVO = "dsk-cbeb93d0-0023-47e0-aebc-b07fe350415f";
   // ── scope guards (static) ─────────────────────────────────────────────────────────────────────────────────
   const res = read("lib", "branch-resolver.ts");
   assert("content resolver still SHADOW (no content normalization in 2A)", /export const BRANCH_RESOLUTION_RUNTIME_MODE: BranchResolutionMode = "shadow";/.test(res));
-  assert("WS alias still SHADOW (no room change in 2A-1)", /export const BRANCH_ALIAS_RUNTIME_MODE: BranchAliasMode = "shadow";/.test(read("server", "branch-alias.ts")));
-  assert("WS server does not consume stationBranchId yet", !/stationBranchId/.test(read("server", "index.ts")));
+  // Gate 2A-3 (documented change): WS alias is ACTIVE; stationBranchId is read for evidence logging only, never routing.
+  assert("WS alias ACTIVE since Gate 2A-3", /export const BRANCH_ALIAS_RUNTIME_MODE: BranchAliasMode = "active";/.test(read("server", "branch-alias.ts")));
+  const idx = read("server", "index.ts");
+  assert("WS uses stationBranchId only in the alias log hook (not for routing)",
+    !/(const roomKey = |expectedRoomKey = |const effectiveBranchId = )[^\n]*stationBranchId/.test(idx) && (idx.match(/stationBranchId: auth\.stationBranchId/g) ?? []).length === 1);
   const contentRoutes = ["app/api/jingles/pads/route.ts", "app/api/jingles/library/route.ts", "app/api/playlists/route.ts", "app/api/radio/route.ts"];
   assert("content write paths untouched (no resolver import)", contentRoutes.every((p) => !/branch-resolver/.test(read(...p.split("/")))));
 

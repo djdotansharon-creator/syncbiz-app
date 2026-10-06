@@ -5,9 +5,10 @@
  * renderer REGISTER). The app owns the canonical `Branch` row (Branch.legacyKey = "default") and syncs
  * `{ workspaceId, legacyKey → canonicalBranchId }` here via an authenticated internal endpoint.
  *
- * GATE 1 = SHADOW ONLY. `BRANCH_ALIAS_RUNTIME_MODE` is a code constant (NOT an env var) so routing can never be
- * switched by configuration: REGISTER keeps joining `ws:<workspace>:<raw branch>` and only LOGS what the room
- * WOULD be. Activation (Gate 2) is a separate, reviewed code change together with the data migration.
+ * `BRANCH_ALIAS_RUNTIME_MODE` is a code constant (NOT an env var) so routing can never be switched by configuration.
+ * GATE 1 = shadow (log only). GATE 2A-3 = ACTIVE: a raw legacy key (e.g. "default") from an old client resolves to
+ * the workspace's canonical branch for ROOM routing only — but ONLY for workspaces whose persisted room state was
+ * re-keyed successfully at boot (see rekeyRoomStateForAliases); any conflict keeps that workspace on its raw room.
  *
  * Persisted next to the designation store (same dir rules), format version 1. Never throws.
  */
@@ -17,8 +18,8 @@ import { fileURLToPath } from "url";
 
 export type BranchAliasMode = "off" | "shadow" | "active";
 
-/** GATE 1: explicit shadow. Effective routing is NEVER changed by this build. */
-export const BRANCH_ALIAS_RUNTIME_MODE: BranchAliasMode = "shadow";
+/** GATE 2A-3: active (room routing resolves legacy keys for boot-activated workspaces only). */
+export const BRANCH_ALIAS_RUNTIME_MODE: BranchAliasMode = "active";
 
 export const LEGACY_DEFAULT_BRANCH_KEY = "default";
 
@@ -73,6 +74,118 @@ export function applyAliasSync(
   else delete next[s.workspaceId][s.legacyKey];
   if (Object.keys(next[s.workspaceId]).length === 0) delete next[s.workspaceId];
   return next;
+}
+
+// ── GATE 2A-3: boot re-key of persisted room state (PURE) ──────────────────────────────────────────────────────
+export type RoomState = {
+  designations: Record<string, string>;
+  cleared: string[];
+  masterByBranch: Record<string, string>;
+  masterDisconnectedAt: Record<string, number>;
+  primaryMasterByBranch: Record<string, string>;
+};
+export type RekeyResult = {
+  workspaceId: string;
+  legacyKey: string;
+  from: string;
+  to: string;
+  outcome: "rekeyed" | "already" | "nothing" | "conflict";
+  detail?: string;
+};
+
+/**
+ * PURE. For each alias (workspace, legacyKey → canonical), move persisted room state from
+ * `ws:<workspace>:<legacyKey>` to `ws:<workspace>:<canonical>`: designation, cleared tombstone, lease maps.
+ * Same values are carried over unchanged (same durable MASTER id; nothing is revoked, added or duplicated).
+ * FAIL SAFE: if the canonical key is already occupied in any map (or a designation and a tombstone would collide),
+ * that workspace's state is left exactly as-is and the workspace is NOT activated (keeps routing by raw key).
+ */
+export function rekeyRoomStateForAliases(aliases: BranchAliases, state: RoomState): {
+  state: RoomState;
+  activeWorkspaces: string[];
+  results: RekeyResult[];
+  changed: boolean;
+} {
+  const next: RoomState = {
+    designations: { ...state.designations },
+    cleared: [...state.cleared],
+    masterByBranch: { ...state.masterByBranch },
+    masterDisconnectedAt: { ...state.masterDisconnectedAt },
+    primaryMasterByBranch: { ...state.primaryMasterByBranch },
+  };
+  const maps = ["designations", "masterByBranch", "masterDisconnectedAt", "primaryMasterByBranch"] as const;
+  const results: RekeyResult[] = [];
+  const conflictWorkspaces = new Set<string>();
+  const okWorkspaces = new Set<string>();
+  let changed = false;
+  for (const [workspaceId, byKey] of Object.entries(aliases)) {
+    for (const [legacyKey, canonical] of Object.entries(byKey)) {
+      const from = `ws:${workspaceId}:${legacyKey}`;
+      const to = `ws:${workspaceId}:${canonical}`;
+      const base = { workspaceId, legacyKey, from, to };
+      if (!SAFE_ID.test(workspaceId) || !SAFE_ID.test(legacyKey) || !SAFE_ID.test(canonical) || canonical === legacyKey) {
+        results.push({ ...base, outcome: "conflict", detail: "invalid alias" });
+        conflictWorkspaces.add(workspaceId);
+        continue;
+      }
+      const hasFrom = maps.some((m) => from in next[m]) || next.cleared.includes(from);
+      const hasTo = maps.some((m) => to in next[m]) || next.cleared.includes(to);
+      if (hasFrom && hasTo) {
+        results.push({ ...base, outcome: "conflict", detail: "both legacy and canonical keys present" });
+        conflictWorkspaces.add(workspaceId);
+        continue;
+      }
+      if (from in next.designations && next.cleared.includes(from)) {
+        results.push({ ...base, outcome: "conflict", detail: "designation and tombstone on legacy key" });
+        conflictWorkspaces.add(workspaceId);
+        continue;
+      }
+      if (!hasFrom) {
+        results.push({ ...base, outcome: hasTo ? "already" : "nothing" });
+        okWorkspaces.add(workspaceId);
+        continue;
+      }
+      results.push({ ...base, outcome: "rekeyed" });
+      okWorkspaces.add(workspaceId);
+    }
+  }
+  // Apply moves only for workspaces with no conflict in ANY of their aliases.
+  for (const r of results) {
+    if (r.outcome !== "rekeyed" || conflictWorkspaces.has(r.workspaceId)) continue;
+    for (const m of maps) {
+      const rec = next[m] as Record<string, string | number>;
+      if (r.from in rec) {
+        rec[r.to] = rec[r.from];
+        delete rec[r.from];
+        changed = true;
+      }
+    }
+    const i = next.cleared.indexOf(r.from);
+    if (i >= 0) {
+      next.cleared[i] = r.to;
+      changed = true;
+    }
+  }
+  const activeWorkspaces = [...okWorkspaces].filter((w) => !conflictWorkspaces.has(w));
+  if (conflictWorkspaces.size > 0) {
+    // Report rekeyed-but-blocked entries honestly as not applied.
+    for (const r of results) if (r.outcome === "rekeyed" && conflictWorkspaces.has(r.workspaceId)) r.detail = "not applied: workspace has a conflict";
+  }
+  return { state: changed ? next : state, activeWorkspaces, results, changed };
+}
+
+/** PURE: the routing branch for a raw REGISTER/target branch — canonical only for an ACTIVE workspace. */
+export function resolveRoutingBranch(args: {
+  mode: BranchAliasMode;
+  workspaceId: string | null | undefined;
+  rawBranchId: string;
+  aliases: BranchAliases;
+  activeWorkspaces: ReadonlySet<string>;
+}): string {
+  const ws = (args.workspaceId ?? "").trim();
+  const raw = (args.rawBranchId ?? "").trim() || LEGACY_DEFAULT_BRANCH_KEY;
+  if (!ws || !args.activeWorkspaces.has(ws)) return raw;
+  return decideBranchAlias({ mode: args.mode, workspaceId: ws, rawBranchId: raw, aliases: args.aliases }).effectiveBranchId;
 }
 
 // ── persistence (same directory rules as branch-designation-store.ts) ─────────────────────────────────────────
