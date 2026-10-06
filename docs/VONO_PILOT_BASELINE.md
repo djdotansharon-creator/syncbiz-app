@@ -16,6 +16,9 @@
 - **CONTROL ROOM PHASE 1 — GATE 1 (canonical branch, SHADOW): FULL PASS / ACCEPTED** (2026-10-06, TEST only)
   on branch `feature/control-room-phase1` (NOT PR #52, which stays FROZEN at its accepted head). Gate 2
   (activation / "default" migration) NOT started. See §7 "CONTROL ROOM PHASE 1".
+- **CONTROL ROOM GATE 2A-1 (identity/authorization compatibility): ACCEPTED** (2026-10-06, TEST only) —
+  commit `2466820`, TEST app deployment `b6050fc1`. **Gate 2A-2 (identity data migration) NOT started.**
+  See §7 "GATE 2A-1".
 - **PR #52:** OPEN — **NOT MERGED / DO NOT MERGE** without explicit approval
 - **PROD:** UNTOUCHED
 - **Written from:** Dev-PC (`dsk-9b11bfa1-a353-4abb-859c-2351cf1d0608`) — no direct Lenovo log access.
@@ -57,6 +60,8 @@ Lineage: `865ba81` (offline cold boot, MAIN) → `2ebdbe4` (renderer stall fix) 
 | **WS volume (2026-10-06)** | `syncbiz-ws-test-volume` (id `18b32178-da30-484f-8403-785b347baf73`) on `syncbiz-ws-test` only, mount `/data` → designation / lease / branch-alias state in `/data/ws-lease/` (proven to survive redeploy with no re-assertion) |
 | **Control Room Phase 1 deploys (2026-10-06)** | app `87a05469-b3f5-4afc-819a-c33746e0182e` (source `6b5b9a0`, file-hash verified for the changed renderer files); WS `335dad0a-e3a4-4802-b1b6-c9ae40697e51` (Gate 1 shadow code `cea1585`) |
 | **Canonical TEST branch (Gate 1, shadow)** | `90d2b7b8-7bce-4d5d-a984-5f84fa8ba0d2`, code `T001`, "TEST Pilot Branch (legacy default)", `legacyKey="default"`; runtime still routes by `"default"` |
+| **Gate 2A-1 deploy (2026-10-06)** | app `b6050fc1-e762-49d1-af2d-b4f6677abc8d` (SUCCESS 10:10Z; source `2466820`, all 9 changed files hash-verified: live = working tree, LF-normalized = commit). WS NOT redeployed (still `335dad0a…`) |
+| **TEST DB backup before Gate 2A** | `D:\SyncBiz_Backups\test-env\20261006T100051Z-gate2a\` (pg_dump sha256 `aff8197d9b048f121fc81e8c4c58a69246136e800affa7aede4307c3c429fc46`; **restore test PASS** — row counts matched, throwaway DB dropped) + WS designation / lease / alias file copies (hashed); `BACKUP-RECORD.txt` inside. Git HEAD at backup `273f042` |
 | **TEST DB backup before Gate 1** | `D:\SyncBiz_Backups\test-env\20261006T050718Z-control-room-gate1\` (pg_dump sha256 `a0a65c1d…d13e`, restore-verified) + WS state file copies |
 
 **PROD untouched.** No PROD deploy, DB, WS, variable, volume or installer action in this baseline.
@@ -111,6 +116,28 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM GATE 2A-1 — IDENTITY COMPATIBILITY — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
+- Commit **`2466820`** (SERVER / app API only): legacy `"default"` ≡ the workspace's canonical branch
+  (same-workspace alias only) for StationDevice binding and branch-authorization comparisons; the stored
+  StationDevice row is never moved; real branch/workspace conflicts unchanged; desktop token gains additive
+  signed `stationBranchId` (only together with `stationDeviceId`). WS server untouched; content resolver and
+  WS alias remain **shadow**; no Playlist / Jingle / Announcement / Source / schedule change; no protected
+  playback file changed. Test `scripts/verify-gate2a-identity-compat.ts` 25/25 + full regression matrix + build.
+- TEST app deployment `b6050fc1` (hash-verified). Backup verified + restore test PASS (see §3).
+- **Server-log corroborated** (Lenovo VONO restart after deploy): MAIN `dsk-cbeb93d0` closed 10:26:57Z →
+  **MASTER** 10:27:17Z ("permanent designation -> MASTER (trusted station)"), renderer `ba8ffdba` **CONTROL**
+  10:27:17Z, both in `ws:31d30e23…:default`; renderer bind (`devices-register`, `ws-token`) ran on the new code
+  at 10:27:20Z; **no 409 / no branch_conflict / no error** lines since deploy.
+- **`stationDeviceId` preserved — PROVEN BY RUNTIME** (trusted-station MASTER requires the token's station binding).
+- **`stationBranchId` — PROVEN BY CODE / TEST ONLY** at this stage (not logged; not consumed until 2A-3).
+- **ACCEPTED — owner-attested 2026-10-06:** MASTER badge PASS; LOCAL resumed automatically PASS;
+  On-Air (PLAY_INTERRUPT) PASS; nothing looked wrong.
+- **PROD untouched.**
+- **KNOWN CAVEAT (expected):** the alias-equivalence path is NOT exercised by runtime until the StationDevice
+  row moves to the canonical branch in Gate 2A-2 (pre-migration the row is still `"default"`, so no conflict
+  was possible). **First mandatory acceptance check after the 2A-2 migration:** Lenovo VONO restart →
+  MAIN still MASTER, renderer CONTROL, `stationDeviceId` present, no 409 / branch_conflict.
 
 ### CONTROL ROOM PHASE 1 — GATE 1 — FULL PASS / ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
 - Commits: `cea1585` (Gate 1 shadow: `Branch.legacyKey`, app resolver + WS alias map, mode = code constant
@@ -197,6 +224,9 @@ designated MASTER re-registration + renderer CONTROL + no auto-failover — serv
 Not pilot blockers. Do not fix inside unrelated work.
 0. ~~User-facing MASTER/CONTROL badge~~ — **RESOLVED 2026-10-06** (commit `284ff66`, see §7). Branch
    code/name in the badge still deferred to the canonical-branch work (Gate 2 / Control Room).
+0b. **BLOCKER BEFORE A SECOND TEST BRANCH (pre-multi-branch):** the embedded renderer still activates with
+   branch `"default"` from MAIN's config; its branch must come from its co-located trusted Station/MAIN
+   binding. Separate audited fix — NOT part of Gate 2A.
 1. **Jingle schedules are still localStorage-only** (`components/jingles-control/schedule-storage.ts` +
    `JingleScheduleAutoPlayer`): each device fires only its own schedules while that client is open.
    **Must move to a central/server-side model during Control Room.**
