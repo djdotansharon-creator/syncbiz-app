@@ -22,7 +22,10 @@
   canonical branch `90d2b7b8…`. See §7 "GATE 2A-2".
 - **CONTROL ROOM GATE 2A-3 (canonical WS room activation): ACCEPTED** (2026-10-06, TEST only) — commit
   `384df45`, WS deployment `23e94c01`. Live room is now `ws:31d30e23…:90d2b7b8…`; content rows still on
-  "default". **Gate 2B (content migration) NOT started.** See §7 "GATE 2A-3".
+  "default". See §7 "GATE 2A-3".
+- **CONTROL ROOM GATE 2B-1 (content branch compatibility): ACCEPTED** (2026-10-06, TEST only) — commit
+  `9e06f40`, app deployment `8273a78b`. Content reads accept "default" + canonical; NEW content writes canonical;
+  existing content rows still on "default". **Gate 2B-2 (content data migration) NOT started.** See §7 "GATE 2B-1".
 - **PR #52:** OPEN — **NOT MERGED / DO NOT MERGE** without explicit approval
 - **PROD:** UNTOUCHED
 - **Written from:** Dev-PC (`dsk-9b11bfa1-a353-4abb-859c-2351cf1d0608`) — no direct Lenovo log access.
@@ -63,6 +66,7 @@ Lineage: `865ba81` (offline cold boot, MAIN) → `2ebdbe4` (renderer stall fix) 
 | **Jingle storage** | generated MP3s under **`/data/jingles/<uuid>.mp3`**, served at `/api/jingles/audio/<uuid>` |
 | **WS volume (2026-10-06)** | `syncbiz-ws-test-volume` (id `18b32178-da30-484f-8403-785b347baf73`) on `syncbiz-ws-test` only, mount `/data` → designation / lease / branch-alias state in `/data/ws-lease/` (proven to survive redeploy with no re-assertion) |
 | **Control Room Phase 1 deploys (2026-10-06)** | app `87a05469-b3f5-4afc-819a-c33746e0182e` (source `6b5b9a0`, file-hash verified for the changed renderer files); WS `335dad0a-e3a4-4802-b1b6-c9ae40697e51` (Gate 1 shadow code `cea1585`) |
+| **Gate 2B-1 app deploy (2026-10-06)** | app `8273a78b-8b93-476a-9625-6d4983717d05` (SUCCESS 14:13Z; source `9e06f40`, clean tree; all 12 changed source files hash-verified). WS NOT redeployed |
 | **Gate 2A-3 WS deploy (2026-10-06)** | WS `23e94c01-38ba-4dde-9f22-336bb304bdde` (SUCCESS 11:37Z; source `384df45`, clean tree). Previous shadow WS build `335dad0a…` = rollback reference (rollback also needs the legacy WS files from the Gate 2A backup) |
 | **Canonical TEST branch** | `90d2b7b8-7bce-4d5d-a984-5f84fa8ba0d2`, code `T001`, "TEST Pilot Branch (legacy default)", `legacyKey="default"`; **since Gate 2A-3 the WS routes the TEST workspace by this canonical id** (clients still send `"default"`; content rows still `"default"` until Gate 2B) |
 | **Gate 2A-1 deploy (2026-10-06)** | app `b6050fc1-e762-49d1-af2d-b4f6677abc8d` (SUCCESS 10:10Z; source `2466820`, all 9 changed files hash-verified: live = working tree, LF-normalized = commit). WS NOT redeployed (still `335dad0a…`) |
@@ -121,6 +125,37 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM GATE 2B-1 — CONTENT BRANCH COMPATIBILITY — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
+- Commit **`9e06f40`** (APP only; no DB migration, no desktop, no WS server, no playback change): legacy "default" ≡
+  workspace canonical branch (same-workspace alias only) for content.
+  - Jingle pads (`app/api/jingles/pads/route.ts` + `lib/jingle-pad-compat.ts`): read from either alias; update the
+    row that already represents the pad (no duplicate); new pads canonical; a pad under BOTH aliases = conflict
+    (GET reports `conflicts`, POST 409; never guessed); concurrent first-create race handled.
+  - Canonical writes at the store layer: playlists (`lib/playlist-store.ts`, null stays null; covers AI build /
+    generation), sources (`lib/store.ts addSource`), radio (`lib/radio-store.ts`, canonicalized before the Branch
+    upsert → no stub for the migrated workspace), jingle library.
+  - `lib/playlist-access.ts` zero-assignment fallback = {default + canonical} only.
+  - `lib/schedule-target-validator.ts` alias-aware for SOURCE / PLAYLIST / RADIO (caller workspace).
+  - `lib/broadcast-library-updated.ts`: a canonical branch is sent to the WS as its legacy key ("default") so existing
+    clients (registered with "default") still receive LIBRARY_UPDATED — no WS change.
+  - Tests: `scripts/verify-gate2b1-content-compat.ts` 36/36 (real helpers / pad flows / notification over an
+    in-memory fake DB) + full regression matrix (17 suites); the 2A-1 content-route guard was updated to the
+    documented 2B-1 rule. Typecheck + `next build` PASS.
+- TEST app deployment `8273a78b` (hash-verified). After deploy, before owner activity: Playlist 5 / Pads 3 /
+  Announcement 1 all still "default".
+- **Runtime — DB / server-log corroborated:** VONO reopen 14:21:17Z → MAIN MASTER + renderer CONTROL in the
+  canonical room 14:21:47Z. Legacy rows untouched (3 pads, 5 playlists, 1 announcement — timestamps unchanged).
+  New pad `pad-bread` (`e43d1bc7…`, 14:24:58Z) = **canonical**; new playlist **"YCD3"** (`a623406d…`, 14:26:00Z) =
+  **canonical**. No pad under both aliases (no duplicate). No 409 / 403 / conflict / error lines. Three jingles
+  generated (audio files only); none saved to the jingle library, so no new Announcement row.
+- **ACCEPTED — owner-attested 2026-10-06:** VONO reopened with the new hosted renderer; 3 legacy pads + 5 legacy
+  playlists visible; Bread pad and YCD3 still visible after a full VONO reopen (mixed legacy + canonical reads);
+  On-Air works.
+- NOT PROVEN by runtime: LIBRARY_UPDATED delivery (the WS does not log it) — proven by test/code only.
+- Current TEST content state (intentionally mixed until Gate 2B-2): Playlist 5 "default" + 1 canonical;
+  JinglePadAssignment 3 "default" + 1 canonical; Announcement 1 "default".
+- **PROD untouched.**
 
 ### CONTROL ROOM GATE 2A-3 — CANONICAL WS ROOM ACTIVATION — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
 - Commit **`384df45`** (SERVER / WS only: `server/branch-alias.ts`, `server/index.ts`, `server/ws-token.ts` + tests):
@@ -315,6 +350,20 @@ Not pilot blockers. Do not fix inside unrelated work.
    `lib/playback-provider.tsx`: a station powered off >24h may not auto-resume. Record only.
 5. **Explicit kill-`mpv.exe` resilience test** — manual destructive test not yet run (code path regression-tested).
 6. **Missing/corrupt LOCAL file runtime acceptance** — manual test not yet run (code path regression-tested).
+7. **STARTUP PLAYLIST CONTENT HYDRATION (UI, recorded 2026-10-06).** On VONO startup LOCAL playback begins
+   correctly, but the visible playlist / queue track stack may stay empty until the first track transition.
+   Owner: NOT a pilot blocker. Separate audit later; do NOT change playback for it now.
+8. **ACTIVE PLAYLIST VISUAL INDICATOR (UI, recorded 2026-10-06).** The UI previously showed which playlist was
+   actively playing (especially URL playlists) with an animated LED / snake-style border around the playlist
+   artwork. Owner wants an obvious "currently playing playlist" indication restored later. Not a pilot blocker.
+   Separate audit later; no UI redesign now.
+9. **Branch stub creation (found in the Gate 2B audit, 2026-10-06).** `lib/store.ts` (addSchedule / addDevice) and
+   `lib/radio-store.ts` upsert a Branch row whose **id** is the raw branch key (e.g. id `"default"`, `update: {}`);
+   Branch.id is global, so a second workspace would link to the first workspace's stub. Not present in TEST
+   (0 Schedule / Device rows; radio now canonicalizes first). Separate audit; not part of Gate 2B.
+10. **Generic `/api/announcements` POST (found in Gate 2B-1).** Unauthenticated, stores `workspaceId: "system"`,
+   so its branch cannot be canonicalized safely; left unchanged in 2B-1. Jingle announcements use the
+   authenticated `/api/jingles/library` (canonical). Separate audit.
 
 Carried over (still open):
 - Jingle library/pads still use `branchId:"default"`; no link to `MediaAsset`; generated-but-unsaved MP3s
