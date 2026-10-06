@@ -124,6 +124,16 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 - **ACCEPTED — owner-attested 2026-10-06:** renderer reconnect fix (automatic, no focus/interaction);
   PLAY_INTERRUPT from TEST CONTROL heard (duck → announcement → music resumed); LOCAL playback stable throughout.
 
+### MASTER / CONTROL USER-FACING STATUS — ACCEPTED — owner-attested 2026-10-06
+- Commit **`284ff66`** (renderer/display only, `feature/control-room-phase1`, pushed): the designated station
+  shows GREEN "MASTER · Playing store audio" (from the existing `canLocalExec`, exposed read-only as
+  `isDesignatedAudioStation`); never CONTROL / Standalone there; other devices unchanged (blue CONTROL).
+  TEST deploy `5116757e-04a9-4f75-9fe5-77c408c051b8` (changed files file-hash verified).
+- Owner-attested on the Lenovo: header GREEN MASTER, "Playing store audio" visible, music continues normally.
+- **Server-log corroborated:** after the reload the renderer `ba8ffdba` still registers **CONTROL**
+  ("embedded renderer -> CONTROL") and MAIN `dsk-cbeb93d0` **MASTER** ("permanent designation") — the
+  internal WS roles are unchanged.
+
 ### JINGLES / ANNOUNCEMENTS — ACCEPTED — owner-attested 2026-10-05 (Lenovo beta.10 + TEST renderer `cd4c631`)
 - Announcement Generate works in TEST.
 - Generated MP3 is persisted on the Railway volume.
@@ -185,9 +195,8 @@ designated MASTER re-registration + renderer CONTROL + no auto-failover — serv
 ## 9. PARKED / NON-BLOCKING
 
 Not pilot blockers. Do not fix inside unrelated work.
-0. **User-facing MASTER/CONTROL badge (OPEN, audited 2026-10-06, not yet implemented):** the designated
-   Lenovo shows blue "CONTROL · Controlling: Branch Master" (renderer socket role). Product meaning requires
-   GREEN "MASTER · Playing store audio · Branch …" on the designated station. UI-only fix, separate approval.
+0. ~~User-facing MASTER/CONTROL badge~~ — **RESOLVED 2026-10-06** (commit `284ff66`, see §7). Branch
+   code/name in the badge still deferred to the canonical-branch work (Gate 2 / Control Room).
 1. **Jingle schedules are still localStorage-only** (`components/jingles-control/schedule-storage.ts` +
    `JingleScheduleAutoPlayer`): each device fires only its own schedules while that client is open.
    **Must move to a central/server-side model during Control Room.**
