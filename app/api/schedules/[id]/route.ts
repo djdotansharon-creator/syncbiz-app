@@ -21,17 +21,16 @@ function normalizeScheduleRouteId(raw: string | undefined): string {
   }
 }
 
-async function requireScheduleAccess(schedule: Schedule | null) {
+/**
+ * Gate 3B-2: the schedule is loaded ONLY from the active session workspace (id + workspaceId in the query, resolved
+ * exactly like the list/create routes). Not found OR another workspace's schedule → 404 (existence never revealed),
+ * BEFORE any owner wildcard / branch / alias logic. Branch access inside the correct workspace is unchanged.
+ */
+async function requireScheduleAccess(id: string) {
   const user = await getCurrentUserFromCookies();
   if (!user) return { ok: false as const, status: 401 } as const;
+  const schedule = await db.findScheduleInWorkspace(id, resolveAccountScope(user.tenantId));
   if (!schedule) return { ok: false as const, status: 404 } as const;
-  const scope = resolveAccountScope(user.tenantId);
-  const scheduleAccount = (schedule.accountId ?? "").trim();
-  if (scheduleAccount !== scope) {
-    console.error("[requireScheduleAccess] workspace mismatch — schedule.accountId:", scheduleAccount, "user scope:", scope, "scheduleId:", schedule.id);
-    // Stale workspace ID (e.g. DB was reset): fall through and allow owner to manage their own schedules.
-    // We still validate branch access below.
-  }
   const branchId = (schedule.branchId ?? "default").trim() || "default";
   if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
     return { ok: false as const, status: 403 } as const;
@@ -49,8 +48,7 @@ export async function GET(
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await db.ensureSchedulesLoaded();
-  const schedule = await db.findScheduleById(id);
-  const access = await requireScheduleAccess(schedule);
+  const access = await requireScheduleAccess(id);
   if (!access.ok) {
     return NextResponse.json(
       access.status === 401 ? { error: "Unauthorized" } : access.status === 403 ? { error: "Forbidden: no access to this branch" } : { error: "Schedule not found" },
@@ -70,8 +68,8 @@ export async function PATCH(
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await db.ensureSchedulesLoaded();
-  const existing = await db.findScheduleById(id);
-  const access = await requireScheduleAccess(existing);
+  const access = await requireScheduleAccess(id);
+  const existing = access.ok ? access.schedule : null;
   if (!access.ok) {
     return NextResponse.json(
       access.status === 401 ? { error: "Unauthorized" } : access.status === 403 ? { error: "Forbidden: no access to this branch" } : { error: "Schedule not found" },
@@ -125,7 +123,9 @@ export async function PATCH(
   const uid = await getUserIdFromSession();
   if (uid) updates.updatedBy = uid;
 
-  const updated = await db.updateSchedule(id, updates);
+  // Gate 3B-2: workspace-bound write (id + workspaceId); 0 rows → 404.
+  const updated = await db.updateSchedule(id, updates, resolveAccountScope(user.tenantId));
+  if (!updated) return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
   await db.persistSchedules();
   revalidatePath("/schedules");
   return NextResponse.json(updated);
@@ -141,8 +141,7 @@ export async function DELETE(
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await db.ensureSchedulesLoaded();
-  const schedule = await db.findScheduleById(id);
-  const access = await requireScheduleAccess(schedule);
+  const access = await requireScheduleAccess(id);
   if (!access.ok) {
     return NextResponse.json(
       access.status === 401 ? { error: "Unauthorized" } : access.status === 403 ? { error: "Forbidden: no access to this branch" } : { error: "Schedule not found" },
@@ -150,7 +149,8 @@ export async function DELETE(
     );
   }
   shadowAuthorize("schedules/[id]:DELETE", { userId: access.user.id, workspaceId: access.user.tenantId }, "schedule.edit", [access.schedule.branchId ?? "default"]); // Gate 3A shadow: log only, never blocks
-  const deleted = await db.deleteSchedule(id);
+  // Gate 3B-2: workspace-bound delete (id + workspaceId); 0 rows → 404.
+  const deleted = await db.deleteSchedule(id, resolveAccountScope(user.tenantId));
   if (!deleted) {
     return NextResponse.json({ error: "Schedule not found" }, { status: 404 });
   }

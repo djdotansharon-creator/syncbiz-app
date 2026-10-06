@@ -369,6 +369,18 @@ export const db = {
     return row ? rowToSchedule(row) : null;
   },
 
+  /**
+   * Gate 3B-2: schedule lookup scoped to ONE workspace (id + workspaceId in the query). Fails closed: an unknown /
+   * missing workspace or id → null. Unlike getSchedule, never drops the workspace filter.
+   */
+  async findScheduleInWorkspace(id: string, accountId: string | undefined): Promise<Schedule | null> {
+    const sid = (id ?? "").trim();
+    const wsId = await resolveWorkspaceId(accountId);
+    if (!sid || !wsId) return null;
+    const row = await prisma.schedule.findFirst({ where: { id: sid, workspaceId: wsId } });
+    return row ? rowToSchedule(row) : null;
+  },
+
   async getSchedule(id: string, accountId?: string): Promise<Schedule | null> {
     const wsId = await resolveWorkspaceId(accountId);
     const row = await prisma.schedule.findFirst({
@@ -430,9 +442,11 @@ export const db = {
     return rowToSchedule(row);
   },
 
-  async updateSchedule(id: string, data: Partial<Schedule>): Promise<Schedule | null> {
-    const existing = await prisma.schedule.findUnique({ where: { id: id.trim() } });
-    if (!existing) return null;
+  /** Gate 3B-2: workspace-bound write (id + workspaceId at write time); 0 rows / no workspace → null. */
+  async updateSchedule(id: string, data: Partial<Schedule>, accountId: string | undefined): Promise<Schedule | null> {
+    const sid = id.trim();
+    const wsId = await resolveWorkspaceId(accountId);
+    if (!sid || !wsId) return null;
 
     const endRaw = data.endTimeLocal;
     const endTimeLocal =
@@ -440,8 +454,8 @@ export const db = {
         ? typeof endRaw === "string" && endRaw.trim().length > 0 ? endRaw : "23:59"
         : undefined;
 
-    const row = await prisma.schedule.update({
-      where: { id: id.trim() },
+    const res = await prisma.schedule.updateMany({
+      where: { id: sid, workspaceId: wsId },
       data: {
         ...(data.name !== undefined && { name: data.name ?? null }),
         ...(data.branchId !== undefined && { branchId: data.branchId }),
@@ -462,15 +476,18 @@ export const db = {
         ...(data.updatedBy !== undefined && { updatedBy: data.updatedBy ?? null }),
       },
     });
-    return rowToSchedule(row);
+    if (res.count !== 1) return null;
+    const row = await prisma.schedule.findFirst({ where: { id: sid, workspaceId: wsId } });
+    return row ? rowToSchedule(row) : null;
   },
 
-  async deleteSchedule(id: string): Promise<boolean> {
-    const trimmed = id.trim();
-    const existing = await prisma.schedule.findUnique({ where: { id: trimmed } });
-    if (!existing) return false;
-    await prisma.schedule.delete({ where: { id: trimmed } });
-    return true;
+  /** Gate 3B-2: workspace-bound delete (id + workspaceId at write time); 0 rows / no workspace → false. */
+  async deleteSchedule(id: string, accountId: string | undefined): Promise<boolean> {
+    const sid = id.trim();
+    const wsId = await resolveWorkspaceId(accountId);
+    if (!sid || !wsId) return false;
+    const res = await prisma.schedule.deleteMany({ where: { id: sid, workspaceId: wsId } });
+    return res.count === 1;
   },
 
   async ensureSchedulesLoaded(): Promise<void> { /* no-op */ },
