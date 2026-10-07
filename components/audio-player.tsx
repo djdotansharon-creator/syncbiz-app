@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource, type PlaybackStatus } from "@/lib/playback-provider";
+import { rendererOwnsSnapshot } from "@/lib/playback-ownership";
 import { shouldAdoptLiveMpv } from "@/lib/live-mpv-adopt";
 import { shouldFreezeSelfHeal, nextFreezeBaseline, nextStartupBaseline, isEnginePaused, decideLocalStartupStall } from "@/lib/desktop-freeze-self-heal";
 import { getPlaylistTracks } from "@/lib/playlist-types";
@@ -3724,6 +3725,9 @@ export function AudioPlayer() {
     if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
     if (!desktopMpvSnap || status !== "playing" || !getAutoMix()) return;
     if (!currentPlayUrl || isHlsUrl(currentPlayUrl)) return;
+    // P0 URL ownership: act ONLY on the renderer's OWN current attempt. A MAIN URL session (MAIN-minted attempt id)
+    // must never drive the stale LOCAL provider into next() → LOCAL PLAY_REQUEST before the URL's natural EOF.
+    if (!rendererOwnsSnapshot(desktopMpvSnap.attemptId, playbackAttemptGenRef.current)) return;
 
     const pos = desktopMpvSnap.position;
     const dur = desktopMpvSnap.duration;

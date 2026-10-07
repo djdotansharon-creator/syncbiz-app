@@ -210,8 +210,9 @@ function station(startIndex: number) {
     /else if \(!stepUrlSession\("next"\)\) sendCommandToMaster\("NEXT"\);/.test(ctx) && /else if \(!stepUrlSession\("prev"\)\) sendCommandToMaster\("PREV"\);/.test(ctx));
   assert("S3 every step disarms (no double step) and a URL selection disarms", /urlEofStateRef\.current = disarmUrlEof\(urlEofStateRef\.current\);\n\s+if \("noop" in step\) return true;/.test(ctx) && (ctx.match(/disarmUrlEof\(urlEofStateRef\.current\)/g) ?? []).length === 2);
   assert("S4 MAIN_WS_ATTEMPT_BASE parity with desktop MAIN", /export const MAIN_WS_ATTEMPT_BASE = 1_000_000_000;/.test(read("desktop", "src", "main", "main-attempt-id.ts")) && MAIN_WS_ATTEMPT_BASE === 1_000_000_000);
-  const changed = execSync(`git diff --name-only HEAD -- app lib components server desktop middleware.ts`, { cwd: ROOT }).toString().trim().split("\n").filter(Boolean);
-  assert("S5 RENDERER ONLY: the only changed runtime file is lib/device-player-context.tsx (+ new lib/url-eof-advance.ts)", changed.length === 1 && changed[0] === "lib/device-player-context.tsx", changed.join(","));
+  // Scope of the URL-EOF commit itself (8e8895a) — bound so later, separately approved commits may touch runtime files.
+  const changed = execSync(`git diff --name-only 8e8895a~1 8e8895a -- app lib components server desktop middleware.ts`, { cwd: ROOT }).toString().trim().split("\n").filter(Boolean).sort();
+  assert("S5 RENDERER ONLY: 8e8895a changed only lib/device-player-context.tsx + new lib/url-eof-advance.ts", JSON.stringify(changed) === JSON.stringify(["lib/device-player-context.tsx", "lib/url-eof-advance.ts"]), changed.join(","));
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(process.exitCode ?? 0);
