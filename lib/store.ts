@@ -6,6 +6,7 @@
 
 import { prisma } from "./prisma";
 import { canonicalContentBranchForWrite } from "./branch-resolver";
+import { ensureDefaultBrandId, defaultZoneData } from "./control-room-foundation";
 import {
   enforceCanAddBranch,
   enforceCanAddDevice,
@@ -204,17 +205,25 @@ export const db = {
     if (!normalizedName) throw new Error("name is required");
     const id = (input.id ?? "").trim() || crypto.randomUUID();
     const code = (input.code ?? normalizedName.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24)).trim() || "BRANCH";
-    const row = await prisma.branch.create({
-      data: {
-        id,
-        workspaceId: wsId,
-        name: normalizedName,
-        code,
-        timezone: input.timezone ?? "America/New_York",
-        city: input.city ?? "",
-        country: input.country ?? "",
-        status: input.status ?? "active",
-      },
+    // Control Room F1 (SHADOW): a legitimate new Location gets the workspace default Brand and its default Zone in
+    // the SAME transaction (exactly-one-default guarantee; the partial unique indexes only guarantee at-most-one).
+    const row = await prisma.$transaction(async (tx) => {
+      const brandId = await ensureDefaultBrandId(tx, wsId);
+      const created = await tx.branch.create({
+        data: {
+          id,
+          workspaceId: wsId,
+          name: normalizedName,
+          code,
+          timezone: input.timezone ?? "America/New_York",
+          city: input.city ?? "",
+          country: input.country ?? "",
+          status: input.status ?? "active",
+          brandId,
+        },
+      });
+      await tx.zone.create({ data: defaultZoneData(wsId, created.id) });
+      return created;
     });
     return rowToBranch(row);
   },

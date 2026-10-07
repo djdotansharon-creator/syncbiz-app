@@ -297,6 +297,8 @@ model Workspace {
   members             WorkspaceMember[]
   branchAssignments   UserBranchAssignment[]
   branches            Branch[]
+  /// Control Room F1 (SHADOW): brands of this organization (exactly one isDefault — see Brand).
+  brands              Brand[]
   sources             Source[]
   playlists           Playlist[]
   schedules           Schedule[]
@@ -413,15 +415,78 @@ model Branch {
   /// Control Room Phase 1: the legacy runtime branch key this canonical branch represents (e.g. "default").
   /// Nullable; unique per workspace. Gate 1 = shadow only (nothing routes by it yet).
   legacyKey     String?
+  /// Control Room F1 (SHADOW): the Location's primary Brand. Nullable in F1 (backfilled to the workspace default
+  /// brand); made mandatory only in a later hardening gate. Nothing reads it for runtime decisions yet.
+  brandId       String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brand     Brand?     @relation(fields: [brandId], references: [id], onDelete: SetNull)
   devices   Device[]
   schedules Schedule[]
+  zones     Zone[]
 
   @@unique([workspaceId, legacyKey])
   @@index([workspaceId])
+  @@index([brandId])
+}
+
+/// Control Room F1 (SHADOW) — a first-class Brand inside ONE Organization (= Workspace). A Brand Board is a filter
+/// over the same rows, never a separate tenant. AT MOST ONE `isDefault` brand per workspace is enforced by the
+/// partial unique index "Brand_one_default_per_workspace" (raw SQL in migration 20261007120000_control_room_f1_brand_zone;
+/// not expressible in Prisma). EXACTLY ONE default is guaranteed by the idempotent backfill + transactional Location
+/// creation + the F1 check script. Archive (status/archivedAt), never hard-delete, in later gates.
+model Brand {
+  id          String    @id @default(uuid())
+  workspaceId String
+  name        String
+  /// Stable short code, uppercase; unique per workspace (future bulk-import key).
+  code        String
+  isDefault   Boolean   @default(false)
+  status      String    @default("active")
+  color       String?
+  logoUrl     String?
+  sortOrder   Int       @default(0)
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  branches  Branch[]
+
+  @@unique([workspaceId, code])
+  @@index([workspaceId])
+}
+
+/// Control Room F1 (SHADOW) — a physical AUDIO destination inside a Location (Branch). Zone is the final playback
+/// destination (CLAUDE.md §11). `zoneTypeCode` is a flexible canonical code (MAIN, LOBBY, POOL, SPA, …) validated in
+/// code (lib/control-room-foundation.ts) — NOT a DB enum, so new types never need a migration. `name` is free text.
+/// AT MOST ONE `isDefault` zone per Location is enforced by the partial unique index "Zone_one_default_per_branch"
+/// (raw SQL); EXACTLY ONE is guaranteed by backfill + transactional Location creation + the F1 check script.
+/// Provisioned / unprovisioned is DERIVED (designation + bound station), never stored.
+model Zone {
+  id           String   @id @default(uuid())
+  /// Denormalized; must equal branch.workspaceId (checked by the F1 check script).
+  workspaceId  String
+  branchId     String
+  name         String
+  /// Stable per Location (future bulk-import key).
+  code         String
+  zoneTypeCode String   @default("MAIN")
+  isDefault    Boolean  @default(false)
+  status       String   @default("active")
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  branch         Branch                    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  stationDevices StationDevice[]
+  designations   BranchMasterDesignation[]
+
+  @@unique([branchId, code])
+  @@index([workspaceId])
+  @@index([workspaceId, zoneTypeCode])
 }
 
 model Device {
@@ -472,9 +537,15 @@ model StationDevice {
   appVersion        String
   firstRegisteredAt DateTime @default(now())
   lastSeenAt        DateTime @updatedAt
+  /// Control Room F1 (SHADOW): bound Zone. NULL = COMPATIBILITY semantics "the Location's default Zone" (not the
+  /// final model — made mandatory in a later hardening gate). The register path does not set it in F1.
+  zoneId            String?
+
+  zone Zone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId])
   @@index([workspaceId, branchId])
+  @@index([zoneId])
 }
 
 /// Pilot permanent MASTER — the ONE explicitly designated MASTER device per (workspaceId, branchId).
@@ -491,8 +562,14 @@ model BranchMasterDesignation {
   designatedBy    String
   designatedAt    DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  /// Control Room F1 (SHADOW): designated Zone. NULL = COMPATIBILITY semantics "the Location's default Zone".
+  /// Uniqueness stays (workspaceId, branchId) in F1 — per-zone uniqueness is a later multi-zone gate.
+  zoneId          String?
+
+  zone Zone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, branchId])
+  @@index([zoneId])
   @@index([workspaceId])
   @@index([durableDeviceId])
 }
