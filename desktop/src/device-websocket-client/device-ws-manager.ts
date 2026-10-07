@@ -130,6 +130,10 @@ export class DeviceWsManager {
   private lastCommandSummary: string | null = null;
   /** P0 Gate 1a: (source id # trackIndex) of the last WS URL load — a duplicate PLAY_SOURCE for it is ignored while pending. */
   private pendingWsLoadKey: string | null = null;
+  // P0 Gate 1d: remote NEXT / PREV relay identity (see MvpStatusSnapshot.sessionStep*).
+  private readonly sessionStepBootId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  private sessionStepSeq = 0;
+  private sessionStepDirection: "next" | "prev" | null = null;
   private lastError: string | null = null;
   private listener: StatusListener | null = null;
   /**
@@ -290,6 +294,9 @@ export class DeviceWsManager {
       // Live media identity (hash only) — lets a renderer remount prove it re-owns the SAME media before
       // adopting the running engine (no restart). Never a raw URL/path, so safe in any status payload.
       mpvCurrentMediaKey: orchState?.currentMediaKey ?? "",
+      sessionStepBootId: this.sessionStepBootId,
+      sessionStepSeq: this.sessionStepSeq,
+      sessionStepDirection: this.sessionStepDirection,
     };
   }
 
@@ -315,6 +322,25 @@ export class DeviceWsManager {
       url: item.url,
     });
     this.push();
+    this.sendStateUpdateIfMaster();
+  }
+
+  /**
+   * P0 Gate 1d: WS NEXT / PREV. While a station session exists, the co-located renderer OWNS it (URL session index /
+   * LOCAL queue) → relay ONE step request (new seq) to it via the status snapshot; MAIN metadata is NOT touched here
+   * (it changes only when the renderer actually steps: PLAY_SOURCE / LOCAL session sync). No session → the existing
+   * catalog step (nothing audible to diverge from).
+   */
+  private handleRemoteStep(cmd: "PREV" | "NEXT"): void {
+    if (this.mock.getState().currentSource) {
+      this.sessionStepSeq += 1;
+      this.sessionStepDirection = cmd === "NEXT" ? "next" : "prev";
+      this.lastCommandSummary = `${cmd} (relayed to station renderer #${this.sessionStepSeq})`;
+      console.log("[VONO step-relay] WS " + cmd + " → renderer step request", { seq: this.sessionStepSeq });
+      return; // the caller pushes the snapshot (delivers the request)
+    }
+    const moved = this.navigateCatalogStep(cmd);
+    if (moved) this.lastCommandSummary = cmd;
     this.sendStateUpdateIfMaster();
   }
 
@@ -656,9 +682,7 @@ export class DeviceWsManager {
         const cmd = p.command;
         if (this.deviceRole === "MASTER") {
           if (cmd === "PREV" || cmd === "NEXT") {
-            const moved = this.navigateCatalogStep(cmd);
-            if (moved) this.lastCommandSummary = cmd;
-            this.sendStateUpdateIfMaster();
+            this.handleRemoteStep(cmd);
           } else {
             this.runTransportCommand(cmd, p.payload, "ws");
             this.sendStateUpdateIfMaster();

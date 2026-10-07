@@ -13,9 +13,14 @@
  * The pending state follows the ACTUAL attempt, never a UI timer:
  *   station (sees MAIN attempt ids via desktop IPC): bound = the first new MAIN attempt (> 1e9) after the send;
  *     confirmed = that attempt playing with an ADVANCING position; failed = that attempt idle + lastError, engine up.
- *   remote (sees only the mirrored STATE_UPDATE): bound = the mirrored source / track equals the target;
- *     confirmed = playing with an advancing position; failed = idle + mpvEngineError.
- *   Safety ends (not delays): station unbound > 15 s → "not sent"; remote unconfirmed > 150 s → cleared.
+ *   remote (mirrored STATE_UPDATE incl. mpvAttemptId — Gate 1d): bound = the first mirrored attempt id DIFFERENT from
+ *     the one mirrored when the command was sent; if that attempt plays ANOTHER target (another controller's
+ *     selection) → "superseded" (cleared at once). confirmed = the bound attempt playing with an advancing position;
+ *     failed = the bound attempt idle + mpvEngineError. A same-item re-selection can never confirm on the OLD attempt.
+ *     (No mirrored attempt id — an older MAIN — → legacy source/track binding.)
+ *   Either mode: once bound, a NEWER attempt replacing ours → "superseded" (cleared at once, never stuck Loading).
+ *   Safety backstops only (broken connectivity): station unbound > 15 s → "not sent"; remote unbound > 15 s →
+ *     cleared; remote bound but unresolved > 150 s → cleared (MAIN's own load timeouts normally end it first).
  * 1b (station only — the controller that OWNS the URL session): a failed bound attempt (any position, incl. pos 0) or a
  *   confirmed attempt that later fails steps the session forward ONCE; at most MAX_CONSECUTIVE_FAILURES in a row
  *   (any confirmed attempt resets the count); no next item / exhausted → message only, never a LOCAL fallback.
@@ -47,7 +52,9 @@ export type UrlTransition = {
 };
 
 export type TransitionObservation = {
-  /** Station only (MAIN attempt id from desktop IPC); null for remote controllers. */
+  /** "station" = desktop IPC (attempt ids, no mirrored source); "remote" = mirrored STATE_UPDATE. */
+  mode?: "station" | "remote";
+  /** MAIN attempt id (station IPC, or mirrored mpvAttemptId); null = unknown (older MAIN → legacy remote binding). */
   attemptId: number | null;
   sourceId: string | null;
   trackIndex: number | null;
@@ -110,12 +117,14 @@ export function failTransition(t: UrlTransition, now: number): UrlTransition {
   return { ...t, phase: t.audibleAtStart ? "failed-kept" : "failed-idle", messageUntil: now + MESSAGE_MS };
 }
 
-export type ObserveEvent = "none" | "bound" | "confirmed" | "failed";
+export type ObserveEvent = "none" | "bound" | "confirmed" | "failed" | "superseded";
 
 /** PURE: fold one observation into the transition. */
 export function observeTransition(t: UrlTransition | null, o: TransitionObservation): { t: UrlTransition | null; event: ObserveEvent } {
   if (!t || t.phase === "failed-kept" || t.phase === "failed-idle" || t.phase === "not-sent") return { t, event: "none" };
-  const station = o.attemptId !== null;
+  const station = (o.mode ?? (o.attemptId !== null ? "station" : "remote")) === "station";
+  const byAttempt = o.attemptId !== null && o.attemptId > 0;
+  const obsKey = targetKeyOf(o.sourceId, o.trackIndex);
   let next = t;
   let event: ObserveEvent = "none";
   // ── binding ──
@@ -126,15 +135,24 @@ export function observeTransition(t: UrlTransition | null, o: TransitionObservat
         next = { ...next, bound: true, boundAttemptId: id };
         event = "bound";
       }
-    } else if (next.targetKey !== null && targetKeyOf(o.sourceId, o.trackIndex) === next.targetKey) {
+    } else if (byAttempt) {
+      if (o.attemptId !== next.priorAttemptId) {
+        // a NEW attempt: ours, unless it plays another target (another controller's selection replaced our request)
+        if (next.targetKey !== null && obsKey !== next.targetKey) return { t: null, event: "superseded" };
+        next = { ...next, bound: true, boundAttemptId: o.attemptId };
+        event = "bound";
+      }
+    } else if (next.targetKey !== null && obsKey === next.targetKey) {
       next = { ...next, bound: true };
       event = "bound";
     }
     if (!next.bound) return { t: next, event: "none" };
   }
-  // ── the bound attempt only ──
-  if (station && o.attemptId !== next.boundAttemptId) return { t: next, event };
-  if (!station && targetKeyOf(o.sourceId, o.trackIndex) !== next.targetKey) return { t: next, event };
+  // ── the bound attempt only; a newer attempt replacing ours ends the transition at once ──
+  if (next.boundAttemptId !== null) {
+    if (o.attemptId !== null && o.attemptId > 0 && o.attemptId !== next.boundAttemptId) return { t: null, event: "superseded" };
+    if (o.attemptId !== next.boundAttemptId) return { t: next, event };
+  } else if (obsKey !== next.targetKey) return { t: next, event };
   if (o.status === "idle" && o.error && o.engineReady !== false) return { t: next, event: "failed" };
   if (next.phase === "confirmed") return { t: next, event };
   if (o.status === "playing" && !o.error) {
@@ -150,6 +168,7 @@ export function tickTransition(t: UrlTransition | null, now: number, isStation: 
   if (t.messageUntil !== null) return now >= t.messageUntil ? null : t;
   if (!isBlocking(t)) return t;
   if (isStation && !t.bound && now - t.startedAt > STATION_UNBOUND_TIMEOUT_MS) return { ...t, phase: "not-sent", messageUntil: now + MESSAGE_MS };
+  if (!isStation && !t.bound && now - t.startedAt > STATION_UNBOUND_TIMEOUT_MS) return null;
   if (!isStation && now - t.startedAt > REMOTE_UNCONFIRMED_TIMEOUT_MS) return null;
   return t;
 }

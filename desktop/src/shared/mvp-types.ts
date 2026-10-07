@@ -604,6 +604,12 @@ export type MvpStatusSnapshot = {
    *  re-owning the SAME live media before adopting the engine (suppressing the initial loadfile). Empty
    *  when nothing is playing. Safe to include anywhere — it is a one-way hash. */
   mpvCurrentMediaKey?: string;
+  /** P0 Gate 1d — remote NEXT / PREV relay to the co-located renderer (the URL / LOCAL session owner). A request is
+   *  identified by (sessionStepBootId, sessionStepSeq): the seq is monotonic per MAIN boot, so a re-delivered status
+   *  carries the SAME identity (consumed once) and a renderer remount baselines the current seq (never replays). */
+  sessionStepBootId?: string;
+  sessionStepSeq?: number;
+  sessionStepDirection?: "next" | "prev" | null;
 };
 
 export type MvpConfigPatch = Partial<Omit<DesktopRuntimeConfig, "deviceId">> & {

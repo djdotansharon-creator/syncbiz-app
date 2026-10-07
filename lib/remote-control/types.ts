@@ -98,6 +98,9 @@ export type StationPlaybackState = {
   mpvEngineReady?: boolean;
   /** Optional: last MPV/engine error string from branch desktop (not optimistic). */
   mpvEngineError?: string | null;
+  /** P0 Gate 1d: the CURRENT MAIN music attempt id (a number — never a path / URL / token). Lets remote controllers
+   *  bind a pending transition to the real attempt (requested / confirmed / failed / replaced). */
+  mpvAttemptId?: number;
 };
 
 /** Minimal source payload for PLAY_SOURCE command. */

@@ -1178,6 +1178,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   }, []);
   /** Latest MAIN snapshot over desktop IPC (station only): attempt id + status when a command is sent. */
   const lastMainSnapRef = useRef<{ attemptId: number; status: string } | null>(null);
+  /** P0 Gate 1d: last consumed MAIN step-relay identity (null until the first snapshot of this mount = baseline). */
+  const stepRelayConsumedRef = useRef<{ boot: string; seq: number } | null>(null);
+  const relayedStepRef = useRef<(direction: "next" | "prev", seq: number) => void>(() => {});
   const masterStateRef = useRef<StationPlaybackState | null>(masterState);
   masterStateRef.current = masterState;
   /** This controller can observe MAIN attempt ids directly (the designated station's co-located renderer). */
@@ -1188,7 +1191,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     if (!isBlocking(urlTransitionRef.current)) heldMasterStateRef.current = audibleNow ? masterStateRef.current : null;
     const t = beginTransition({
       origin, targetKey, now: Date.now(),
-      priorAttemptId: station ? (lastMainSnapRef.current?.attemptId ?? null) : null,
+      priorAttemptId: station ? (lastMainSnapRef.current?.attemptId ?? null) : (masterStateRef.current?.mpvAttemptId ?? null),
       audibleAtStart: audibleNow || !!heldMasterStateRef.current,
       consecutiveFailures,
     });
@@ -1343,7 +1346,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isStationObserver() || !urlTransitionRef.current) return;
     observeUrlTransitionRef.current({
-      attemptId: null,
+      mode: "remote",
+      attemptId: typeof masterState?.mpvAttemptId === "number" ? masterState.mpvAttemptId : null, // P0 Gate 1d
       sourceId: masterState?.currentSource?.id ?? null,
       trackIndex: typeof masterState?.currentTrackIndex === "number" ? masterState.currentTrackIndex : null,
       status: masterState?.status ?? "idle",
@@ -1376,11 +1380,22 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       lastMainSnapRef.current = { attemptId: snapAttempt, status: snapStatus };
       if (canLocalExecRef.current) {
         observeUrlTransitionRef.current({
-          attemptId: snapAttempt, sourceId: null, trackIndex: null, status: snapStatus,
+          mode: "station", attemptId: snapAttempt, sourceId: null, trackIndex: null, status: snapStatus,
           position: typeof st?.mpvPosition === "number" ? st.mpvPosition : 0,
           error: typeof st?.mpvLastError === "string" && st.mpvLastError ? st.mpvLastError : null,
           engineReady: st?.mpvEngineReady !== false,
         }, true);
+      }
+      // P0 Gate 1d: remote NEXT / PREV relayed by MAIN — ONE step per (bootId, seq). The first snapshot this mount sees
+      // (or a new MAIN boot) only sets the baseline, so a remount / re-delivered status can never replay a step.
+      const reqBoot = typeof st?.sessionStepBootId === "string" ? st.sessionStepBootId : null;
+      const reqSeq = typeof st?.sessionStepSeq === "number" ? st.sessionStepSeq : null;
+      if (reqBoot !== null && reqSeq !== null) {
+        const last = stepRelayConsumedRef.current;
+        stepRelayConsumedRef.current = { boot: reqBoot, seq: Math.max(reqSeq, last && last.boot === reqBoot ? last.seq : 0) };
+        if (last && last.boot === reqBoot && reqSeq > last.seq && (st.sessionStepDirection === "next" || st.sessionStepDirection === "prev")) {
+          relayedStepRef.current(st.sessionStepDirection, reqSeq);
+        }
       }
       const sent = lastSentUrlLeafRef.current;
       const urlSessionActive = canLocalExecRef.current && !localSessionOwnedRef.current && !!sent?.playlist && sent.type !== "local";
@@ -1427,19 +1442,38 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     else sendCommandToMaster("STOP");
   }, [transportRunsLocally, stop, sendCommandToMaster, setUrlTransition]);
 
+  /** P0 Gate 1d: a remote controller's NEXT / PREV → MAIN relays it to the station renderer (the session owner).
+   *  Feedback here: ONE pending nav intent bound to the next MAIN attempt (mirrored mpvAttemptId). */
+  const sendRemoteNav = (cmd: "NEXT" | "PREV") => {
+    if (!isStationObserver() && typeof masterStateRef.current?.mpvAttemptId === "number") beginUrlTransition(cmd === "NEXT" ? "next" : "prev", null);
+    sendCommandToMaster(cmd);
+  };
   const nextOrSend = useCallback(() => {
     if (transportRunsLocally()) next();
     else if (transitionPending()) console.info("[VONO intent] NEXT ignored — transition pending");
-    else if (!stepUrlSession("next")) sendCommandToMaster("NEXT");
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- transitionPending reads a ref
+    else if (!stepUrlSession("next")) sendRemoteNav("NEXT");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- transitionPending / sendRemoteNav read refs
   }, [transportRunsLocally, stepUrlSession, next, sendCommandToMaster]);
 
   const prevOrSend = useCallback(() => {
     if (transportRunsLocally()) prev();
     else if (transitionPending()) console.info("[VONO intent] PREV ignored — transition pending");
-    else if (!stepUrlSession("prev")) sendCommandToMaster("PREV");
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- transitionPending reads a ref
+    else if (!stepUrlSession("prev")) sendRemoteNav("PREV");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- transitionPending / sendRemoteNav read refs
   }, [transportRunsLocally, stepUrlSession, prev, sendCommandToMaster]);
+
+  // P0 Gate 1d: execute a relayed remote step with the SAME station path as the station's own NEXT / PREV buttons
+  // (LOCAL → provider; URL → stepUrlSession), under the same pending-intent guard — but NEVER send NEXT / PREV back to
+  // MAIN (no relay loop; no catalog step). Not the station owner → ignored (MAIN metadata was never changed).
+  const relayedStep = useCallback((direction: "next" | "prev", seq: number) => {
+    let result: string;
+    if (!canLocalExecRef.current) result = "ignored — not the station session owner";
+    else if (transportRunsLocally()) { if (direction === "next") next(); else prev(); result = "LOCAL step"; }
+    else if (isBlocking(urlTransitionRef.current)) result = "ignored — transition pending";
+    else result = stepUrlSession(direction) ? "URL session step" : "no URL session step (unchanged)";
+    console.info("[VONO step-relay] remote " + direction.toUpperCase() + " #" + seq + " → " + result);
+  }, [transportRunsLocally, stepUrlSession, next, prev]);
+  useEffect(() => { relayedStepRef.current = relayedStep; }, [relayedStep]);
 
   // Keep the co-located MAIN's published session (title/artwork/queue/index) in sync while the renderer
   // executes a LOCAL source locally. METADATA ONLY — `unifiedSourceToPayload` strips local absolute paths,

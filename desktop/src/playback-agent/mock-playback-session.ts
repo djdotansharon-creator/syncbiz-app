@@ -118,6 +118,7 @@ export class MockPlaybackSession {
     this.state.positionAt = Date.now();
     this.state.mpvEngineReady = mpv.engineReady;
     this.state.mpvEngineError = mpv.lastError ?? null;
+    if (typeof mpv.attemptId === "number") this.state.mpvAttemptId = mpv.attemptId; // P0 Gate 1d mirror (number only)
   }
 
   /**

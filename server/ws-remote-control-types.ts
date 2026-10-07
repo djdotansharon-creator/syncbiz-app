@@ -57,6 +57,8 @@ export type StationPlaybackState = {
   activePlaybackEngineType?: string;
   mpvEngineReady?: boolean;
   mpvEngineError?: string | null;
+  /** P0 Gate 1d: current MAIN music attempt id (number only; passed through unchanged). */
+  mpvAttemptId?: number;
 };
 
 export type PlaySourcePayload = {

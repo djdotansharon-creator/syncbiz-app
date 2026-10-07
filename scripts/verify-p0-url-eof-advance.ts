@@ -209,7 +209,9 @@ function station(startIndex: number) {
     /observeUrlEof\(/.test(ctx) && (ctx.match(/stepUrlSessionRef\.current\("next", \{ noWrap: true \}\)/g) ?? []).length === 1 &&
     (ctx.match(/noWrap: true/g) ?? []).length === 2 && /stepUrlSessionRef\.current\("next", \{ noWrap: true, origin: "auto-failure", failures \}\)/.test(ctx));
   assert("S2 manual NEXT / PREV unchanged (no noWrap, same fallbacks)",
-    /else if \(!stepUrlSession\("next"\)\) sendCommandToMaster\("NEXT"\);/.test(ctx) && /else if \(!stepUrlSession\("prev"\)\) sendCommandToMaster\("PREV"\);/.test(ctx));
+    // Updated 2026-10-08 (P0 Gate 1d): fallback via sendRemoteNav (= sendCommandToMaster(NEXT/PREV) + remote feedback).
+    /else if \(!stepUrlSession\("next"\)\) sendRemoteNav\("NEXT"\);/.test(ctx) && /else if \(!stepUrlSession\("prev"\)\) sendRemoteNav\("PREV"\);/.test(ctx) &&
+    /const sendRemoteNav = \(cmd: "NEXT" \| "PREV"\) => \{\n[^\n]*\n    sendCommandToMaster\(cmd\);\n  \};/.test(ctx));
   assert("S3 every step disarms (no double step) and a URL selection disarms", /urlEofStateRef\.current = disarmUrlEof\(urlEofStateRef\.current\);\n\s+if \("noop" in step\) return true;/.test(ctx) && (ctx.match(/disarmUrlEof\(urlEofStateRef\.current\)/g) ?? []).length === 2);
   assert("S4 MAIN_WS_ATTEMPT_BASE parity with desktop MAIN", /export const MAIN_WS_ATTEMPT_BASE = 1_000_000_000;/.test(read("desktop", "src", "main", "main-attempt-id.ts")) && MAIN_WS_ATTEMPT_BASE === 1_000_000_000);
   // Scope of the URL-EOF commit itself (8e8895a) — bound so later, separately approved commits may touch runtime files.

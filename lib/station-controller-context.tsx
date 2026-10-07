@@ -90,7 +90,8 @@ export function StationControllerProvider({ children }: { children: ReactNode })
     const cur = transitionRef.current;
     if (!cur) return;
     const res = observeTransition(cur, {
-      attemptId: null,
+      mode: "remote",
+      attemptId: typeof remoteState?.mpvAttemptId === "number" ? remoteState.mpvAttemptId : null, // P0 Gate 1d
       sourceId: remoteState?.currentSource?.id ?? null,
       trackIndex: typeof remoteState?.currentTrackIndex === "number" ? remoteState.currentTrackIndex : null,
       status: remoteState?.status ?? "idle",
@@ -126,22 +127,35 @@ export function StationControllerProvider({ children }: { children: ReactNode })
     if (masterDeviceId) sendCommand(masterDeviceId, "STOP");
   }, [masterDeviceId, sendCommand, setTransition]);
 
+  // P0 Gate 1d: MAIN relays NEXT / PREV to the station renderer (session owner) → one real step. ONE pending nav
+  // intent here, bound to the next MAIN attempt via the mirrored mpvAttemptId (no target key: the owner picks it).
+  const beginNav = useCallback((origin: "next" | "prev") => {
+    const prior = remoteStateRef.current?.mpvAttemptId;
+    if (typeof prior !== "number") return; // older MAIN (no mirrored attempt id) → no feedback rather than a stuck Loading
+    setTransition(beginTransition({ origin, targetKey: null, now: Date.now(), priorAttemptId: prior, audibleAtStart: remoteStateRef.current?.status === "playing" }));
+  }, [setTransition]);
+
   const sendNext = useCallback(() => {
     if (isBlocking(transitionRef.current)) return; // P0 Gate 1c: one navigation intent
-    if (masterDeviceId) sendCommand(masterDeviceId, "NEXT");
-  }, [masterDeviceId, sendCommand]);
+    if (!masterDeviceId) return;
+    beginNav("next");
+    sendCommand(masterDeviceId, "NEXT");
+  }, [masterDeviceId, sendCommand, beginNav]);
 
   const sendPrev = useCallback(() => {
     if (isBlocking(transitionRef.current)) return; // P0 Gate 1c
-    if (masterDeviceId) sendCommand(masterDeviceId, "PREV");
-  }, [masterDeviceId, sendCommand]);
+    if (!masterDeviceId) return;
+    beginNav("prev");
+    sendCommand(masterDeviceId, "PREV");
+  }, [masterDeviceId, sendCommand, beginNav]);
 
   const sendPlaySource = useCallback(
     (source: UnifiedSource) => {
       if (!masterDeviceId) return;
       const key = targetKeyOf(source?.id, 0); // this path sends no trackIndex → MAIN mirrors index 0
       if (decideUserCommand(transitionRef.current, { kind: "select", targetKey: key }) !== "accept") return; // P0 Gate 1c
-      const t = beginTransition({ origin: "select", targetKey: key, now: Date.now(), priorAttemptId: null, audibleAtStart: remoteStateRef.current?.status === "playing" });
+      const prior = remoteStateRef.current?.mpvAttemptId;
+      const t = beginTransition({ origin: "select", targetKey: key, now: Date.now(), priorAttemptId: typeof prior === "number" ? prior : null, audibleAtStart: remoteStateRef.current?.status === "playing" });
       transitionRef.current = t;
       setTransitionState(t);
       sendCommand(masterDeviceId, "PLAY_SOURCE", { source: unifiedSourceToPayload(source) });
