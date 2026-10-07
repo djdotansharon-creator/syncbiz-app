@@ -356,6 +356,21 @@ export class PlaybackOrchestrator {
     return this.crossfadeSec;
   }
 
+  /**
+   * P0 Gate 1a (read-only): is the CURRENT music attempt still UNPROVEN — loading, resolving, or started but without
+   * real decode progress yet, and not failed? A standby crossfade load is pending until the ramp starts (the ramp
+   * only begins after proven readiness). Used by MAIN command handling to refuse duplicate PLAY / PLAY_SOURCE
+   * intents that would otherwise abort and relaunch the same in-flight load. Never changes playback.
+   */
+  isMusicAttemptPending(): boolean {
+    if (this.currentAttemptId === 0 || this.currentAttemptError) return false;
+    if (this.xfadePending) return true;
+    if (this.xfadeRampId !== null) return false;
+    const cur = this.currentAttemptSt();
+    if (cur.attemptId !== this.currentAttemptId) return true; // load requested, start-file not bound yet
+    return cur.status === "playing" && !cur.progressObserved;
+  }
+
   playMusic(url: string, attemptId = 0): void {
     const u = url.trim();
     if (!u) return;

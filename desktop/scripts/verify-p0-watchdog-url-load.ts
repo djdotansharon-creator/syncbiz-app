@@ -52,8 +52,11 @@ assert("1: MAIN range never collides with renderer ids (renderer gen starts at 0
 const wsm = read("src", "device-websocket-client", "device-ws-manager.ts");
 const routeStart = wsm.indexOf("private routeToOrchestrator(");
 const route = wsm.slice(routeStart, wsm.indexOf("\n  private ", routeStart + 10)); // the whole method
-assert("1: all 6 WS-initiated loads (cold + crossfade) pass a fresh id; none use the default 0",
-  (route.match(/nextMainWsAttemptId\(\)/g) ?? []).length === 6 && !/orch\.playMusic\(\w+\)/.test(route) && !/orch\.playMusicCrossfade\(\w+, fadeSec\)/.test(route));
+// Updated 2026-10-07 (P0 Gate 1a): the 6 cold/crossfade load calls became 3 crossfade-entry calls (the orchestrator
+// decides cold vs crossfade). Invariant unchanged: EVERY WS-initiated load passes a fresh id; none uses the default 0.
+const loadCalls = route.match(/orch\.playMusic(?:Crossfade)?\([^;]*\);/g) ?? [];
+assert("1: every WS-initiated load passes a fresh id; none use the default 0",
+  loadCalls.length >= 3 && loadCalls.every((c) => /nextMainWsAttemptId\(\)/.test(c)) && !/orch\.playMusic\(\w+\)/.test(route) && !/orch\.playMusicCrossfade\(\w+, fadeSec\)/.test(route), String(loadCalls.length));
 
 // ── 2. each fresh attempt resets progress tracking ───────────────────────────────────────────────────────────
 {

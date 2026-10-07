@@ -128,6 +128,8 @@ export class DeviceWsManager {
   private branchCatalog: BranchLibraryItem[] = [];
   private lastServerMessageType: string | null = null;
   private lastCommandSummary: string | null = null;
+  /** P0 Gate 1a: (source id # trackIndex) of the last WS URL load — a duplicate PLAY_SOURCE for it is ignored while pending. */
+  private pendingWsLoadKey: string | null = null;
   private lastError: string | null = null;
   private listener: StatusListener | null = null;
   /**
@@ -358,25 +360,23 @@ export class DeviceWsManager {
       case "PLAY": {
         const url = (p?.url ?? "").trim();
         const fadeSec = orch.getCrossfadeSec();
+        // P0 Gate 1a: EVERY WS URL load goes through playMusicCrossfade() — the orchestrator decides crossfade vs cold
+        // from the REAL active deck (cold only when nothing is audible). Never infer audibility from the
+        // current-attempt snapshot (a pending / failed attempt reads idle while the active deck is still audible).
         if (url) {
-          if (orch.getState().music.status === "playing") {
-            orch.playMusicCrossfade(url, fadeSec, nextMainWsAttemptId());
-          } else {
-            orch.playMusic(url, nextMainWsAttemptId());
-          }
+          orch.playMusicCrossfade(url, fadeSec, nextMainWsAttemptId());
         } else {
           const mpvStatus = orch.getState().music.status;
           if (mpvStatus === "paused") {
             orch.resumeMusic();
+          } else if (orch.isMusicAttemptPending()) {
+            // P0 Gate 1a: a PLAY while the current attempt is still loading must NOT restart that load.
+            console.log("[DeviceWsManager] PLAY ignored — current music attempt still pending");
           } else {
             const srcUrl = (this.mock.getState().currentSource?.url ?? "").trim();
             if (srcUrl) {
               console.log("[DeviceWsManager] PLAY → loadfile on Channel A:", srcUrl.slice(0, 100));
-              if (mpvStatus === "playing") {
-                orch.playMusicCrossfade(srcUrl, fadeSec, nextMainWsAttemptId());
-              } else {
-                orch.playMusic(srcUrl, nextMainWsAttemptId());
-              }
+              orch.playMusicCrossfade(srcUrl, fadeSec, nextMainWsAttemptId());
             } else {
               orch.resumeMusic();
             }
@@ -385,6 +385,18 @@ export class DeviceWsManager {
         break;
       }
       case "PLAY_SOURCE": {
+        // P0 Gate 1a: an identical PLAY_SOURCE (same source id + trackIndex) for the target whose load is STILL pending
+        // is a duplicate intent → ignore it (no metadata churn, no abort / relaunch of the in-flight load).
+        {
+          const dupSrc = (payload as { source?: { id?: unknown; url?: unknown }; trackIndex?: unknown } | null | undefined);
+          const dupKey = typeof dupSrc?.source?.id === "string" && typeof dupSrc?.source?.url === "string" && dupSrc.source.url.trim()
+            ? `${dupSrc.source.id}#${typeof dupSrc.trackIndex === "number" ? dupSrc.trackIndex : 0}`
+            : null;
+          if (dupKey && dupKey === this.pendingWsLoadKey && orch.isMusicAttemptPending()) {
+            console.log("[DeviceWsManager] PLAY_SOURCE ignored — same target already loading");
+            break;
+          }
+        }
         // METADATA FIRST — always populate the station session (title/artwork/queue/index) from the
         // payload so STATE_UPDATE mirrors it to CONTROL, INCLUDING a local playlist whose track urls were
         // stripped on the wire (top-level url empty). This is metadata-only; it never triggers playback.
@@ -425,11 +437,9 @@ export class DeviceWsManager {
         const url = (p?.source?.url ?? "").trim();
         if (!url) break; // local (paths stripped on the wire) → audio handled by the co-located renderer engine
         const fadeSec = orch.getCrossfadeSec();
-        if (orch.getState().music.status === "playing") {
-          orch.playMusicCrossfade(url, fadeSec, nextMainWsAttemptId());
-        } else {
-          orch.playMusic(url, nextMainWsAttemptId());
-        }
+        // P0 Gate 1a: always the crossfade entry point (orchestrator → cold only when nothing is audible).
+        this.pendingWsLoadKey = typeof src?.id === "string" ? `${src.id}#${typeof srcMeta?.trackIndex === "number" ? srcMeta.trackIndex : 0}` : null;
+        orch.playMusicCrossfade(url, fadeSec, nextMainWsAttemptId());
         break;
       }
       case "PAUSE":
