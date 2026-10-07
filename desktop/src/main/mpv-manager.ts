@@ -84,6 +84,18 @@ export type MpvStatus = {
    * bound back to the exact attempt that produced it. Desktop-internal only — never sent over WS / to CONTROL.
    */
   attemptId: number;
+  // ── Readiness signals (P0 2026-10-07, crossfade readiness). ADDITIVE ONLY — they never change `status`. ──
+  /** MPV `core-idle` (true while nothing is actually being played: loading / buffering / paused). null = not observed yet. */
+  coreIdle: boolean | null;
+  /** MPV `paused-for-cache` (true while playback waits for the network cache). null = not observed yet. */
+  pausedForCache: boolean | null;
+  /** Epoch ms of the last REAL MPV `time-pos` update on this deck (0 = none since the current load). */
+  positionAt: number;
+  /** true once THIS load produced a real `time-pos` ADVANCE (a later time-pos strictly greater than an
+   *  earlier one, both after start-file). Never inferred from duration or renderer extrapolation. */
+  progressObserved: boolean;
+  /** true once MPV emitted `file-loaded` for the current load (after any yt-dlp resolution). */
+  fileLoaded: boolean;
 };
 
 export function createInitialMpvStatus(): MpvStatus {
@@ -95,6 +107,11 @@ export function createInitialMpvStatus(): MpvStatus {
     engineReady: false,
     lastError: null,
     attemptId: 0,
+    coreIdle: null,
+    pausedForCache: null,
+    positionAt: 0,
+    progressObserved: false,
+    fileLoaded: false,
   };
 }
 
@@ -135,6 +152,8 @@ export class MpvManager {
   private ytDlpArgFragment: string[] = [];
   /** If we kill the process because IPC recovery failed, exit handler uses a clearer `lastError`. */
   private pendingExitDetail: string | null = null;
+  /** Raw (unfloored) time-pos last seen for the CURRENT load — progress = a strictly greater later value. */
+  private lastTimePos: number | null = null;
 
   /** @param pipeName Unique name for this instance's IPC socket (e.g. "syncbiz-music"). */
   constructor(pipeName = "syncbiz-mpv") {
@@ -399,6 +418,9 @@ export class MpvManager {
       this.raw(JSON.stringify({ command: ["observe_property", 2, "time-pos"] }));
       this.raw(JSON.stringify({ command: ["observe_property", 3, "duration"] }));
       this.raw(JSON.stringify({ command: ["observe_property", 4, "volume"] }));
+      // Readiness signals (crossfade readiness only — they do not alter `status`).
+      this.raw(JSON.stringify({ command: ["observe_property", 5, "core-idle"] }));
+      this.raw(JSON.stringify({ command: ["observe_property", 6, "paused-for-cache"] }));
 
       if (this.cmdQueue.length > 0) {
         console.log("[MpvManager]", this.pipePath, "IPC connected — flushing", this.cmdQueue.length, "queued command(s)");
@@ -532,6 +554,21 @@ export class MpvManager {
         case "time-pos":
           if (typeof data === "number") {
             this.st.position = Math.floor(data);
+            this.st.positionAt = Date.now();
+            if (this.lastTimePos !== null && data > this.lastTimePos) this.st.progressObserved = true;
+            this.lastTimePos = data;
+            this.push();
+          }
+          break;
+        case "core-idle":
+          if (typeof data === "boolean" && data !== this.st.coreIdle) {
+            this.st.coreIdle = data;
+            this.push();
+          }
+          break;
+        case "paused-for-cache":
+          if (typeof data === "boolean" && data !== this.st.pausedForCache) {
+            this.st.pausedForCache = data;
             this.push();
           }
           break;
@@ -565,6 +602,10 @@ export class MpvManager {
       fileLog("INFO", "MPV_STARTFILE", { attemptId: this.st.attemptId, entryId: typeof entryId === "number" ? entryId : null });
       this.st.status = "playing";
       this.st.position = 0;
+      this.resetLoadProgress();
+      this.push();
+    } else if (ev === "file-loaded") {
+      this.st.fileLoaded = true;
       this.push();
     } else if (ev === "end-file") {
       const reason = msg["reason"] as string | undefined;
@@ -596,6 +637,14 @@ export class MpvManager {
       // DIAG (endFileReason evidence).
       fileLog("INFO", "MPV_ENDFILE", { reason: reason ?? "eof", attemptId: this.st.attemptId });
     }
+  }
+
+  /** A new load has produced no progress yet (readiness signals only; `status` untouched). */
+  private resetLoadProgress(): void {
+    this.lastTimePos = null;
+    this.st.progressObserved = false;
+    this.st.positionAt = 0;
+    this.st.fileLoaded = false;
   }
 
   // ─── Command helpers ─────────────────────────────────────────────────────────
@@ -634,6 +683,7 @@ export class MpvManager {
     // the PREVIOUS track's position/duration — which would let a fresh attempt falsely look "confirmed".
     this.st.position = 0;
     this.st.duration = 0;
+    this.resetLoadProgress();
     if (!this.child) {
       this.st.lastError = "play(): mpv is not running (binary missing, process exiting, or watchdog restarting)";
       this.st.status = "idle";

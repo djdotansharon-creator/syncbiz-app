@@ -21,7 +21,9 @@
 
 import { MpvManager, type MpvBinaries, type MpvStatus, createInitialMpvStatus } from "./mpv-manager";
 import { redactMediaToken } from "../shared/redact-media-token";
-import { standbyLoadTimeoutMs } from "./mpv-input-normalize";
+import { standbyLoadTimeoutMs, isStreamLoadTarget } from "./mpv-input-normalize";
+import { isCrossfadeIncomingReady } from "./crossfade-readiness";
+import { fileLog } from "./file-logger";
 import { mediaKey as liveMediaKey } from "./live-media-key";
 
 const ORCH = "[SyncBiz:desktop-mpv:orchestrator] music";
@@ -136,6 +138,10 @@ export class PlaybackOrchestrator {
   private xfadeStartTimeoutId: ReturnType<typeof setTimeout> | null = null;
   /** Handle to the active crossfade dual-ramp timer. */
   private xfadeRampId: ReturnType<typeof setInterval> | null = null;
+  /** Incoming (standby) target is a network stream → readiness requires REAL progress (crossfade-readiness.ts). */
+  private xfadeIncomingIsStream = false;
+  /** Last-logged incoming readiness signals — main.log lines are written ON CHANGE only (no per-tick logging). */
+  private xfadeTrace: { startFile: boolean; fileLoaded: boolean; coreIdle: boolean | null; pausedForCache: boolean | null; progress: boolean } | null = null;
 
   private listener: StatusListener | null = null;
 
@@ -231,9 +237,12 @@ export class PlaybackOrchestrator {
     // the good active track before the NEW URL truly started. MpvManager keeps the OLD attemptId until
     // the new load's start-file binds, so this filters exactly those stale events.
     if (s.attemptId !== this.currentAttemptId) return;
+    this.traceIncoming(deck, s);
     if (s.status === "playing") {
       this.xfadeStandbySawPlaying = true;
-      if (s.duration > 0 || s.position > 0) {
+      // READINESS (P0 2026-10-07): a STREAM incoming deck must show real time-pos progress and not be
+      // core-idle / paused-for-cache — a known duration alone is NOT readiness. LOCAL keeps the legacy rule.
+      if (isCrossfadeIncomingReady(s, this.xfadeIncomingIsStream)) {
         const { fadeSec } = this.xfadePending;
         this.xfadePending = null;
         if (this.xfadeStartTimeoutId !== null) {
@@ -249,6 +258,21 @@ export class PlaybackOrchestrator {
       console.warn(ORCH, "crossfade standby failed to decode — keeping current track");
       this.abortXfade("standby_decode_failed");
     }
+  }
+
+  /** main.log crossfade trace for the incoming deck — one line per signal CHANGE (never per time-pos tick). */
+  private traceIncoming(deck: MusicDeckId, s: MpvStatus): void {
+    const t = this.xfadeTrace;
+    if (!t) return;
+    const base = { attemptId: this.currentAttemptId, activeDeck: this.activeMusicDeck, standbyDeck: deck };
+    if (!t.startFile && s.status === "playing") { t.startFile = true; fileLog("INFO", "XFADE_IN_START_FILE", base); }
+    if (!t.fileLoaded && s.fileLoaded) { t.fileLoaded = true; fileLog("INFO", "XFADE_IN_FILE_LOADED", { ...base, duration: s.duration }); }
+    if (s.coreIdle !== t.coreIdle || s.pausedForCache !== t.pausedForCache) {
+      t.coreIdle = s.coreIdle;
+      t.pausedForCache = s.pausedForCache;
+      fileLog("INFO", "XFADE_IN_READINESS", { ...base, coreIdle: s.coreIdle, pausedForCache: s.pausedForCache, position: s.position });
+    }
+    if (!t.progress && s.progressObserved) { t.progress = true; fileLog("INFO", "XFADE_IN_FIRST_PROGRESS", { ...base, position: s.position, positionAt: s.positionAt }); }
   }
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────────
@@ -401,6 +425,9 @@ export class PlaybackOrchestrator {
                  // start-file — so the renderer defers its cold startup-timeout from t≈0, not at ~30s.
     this.xfadePending = { fadeSec };
     this.xfadeStandbySawPlaying = false;
+    this.xfadeIncomingIsStream = isStreamLoadTarget(u);
+    this.xfadeTrace = { startFile: false, fileLoaded: false, coreIdle: null, pausedForCache: null, progress: false };
+    fileLog("INFO", "XFADE_BEGIN", { attemptId, activeDeck: this.activeMusicDeck, standbyDeck: this.standbyDeckId(), source: this.xfadeIncomingIsStream ? "stream" : "local", fadeSec });
     standby.play(u, attemptId);
     // SOURCE-AWARE window: URLs (yt-dlp) get 30s; local files keep the fast 12s. Reuse the existing
     // normalizer's classification — no duplicate URL/local logic.
@@ -426,6 +453,7 @@ export class PlaybackOrchestrator {
     const outDeck = this.activeMpv();
     const inDeck = this.standbyMpv();
     console.log(ORCH, "crossfade ramp start", { fadeSec: sec, steps, stepMs, target, toDeck: this.standbyDeckId() });
+    fileLog("INFO", "XFADE_RAMP_START", { attemptId: this.currentAttemptId, fromDeck: this.activeMusicDeck, toDeck: this.standbyDeckId(), targetVolume: target, fadeSec: sec });
     let step = 0;
     this.xfadeRampId = setInterval(() => {
       step++;
@@ -447,7 +475,15 @@ export class PlaybackOrchestrator {
     // The incoming attempt is now the audible active deck — keep the current-attempt pointer on it.
     this.currentAttemptDeck = this.activeMusicDeck;
     oldDeck.stop();
+    // PROMOTION SAFETY (P0 2026-10-07): final normalization of the newly promoted deck — duck-aware target
+    // volume + unpaused. Idempotent when already true (MPV emits no property-change for an unchanged value).
+    const promoted = this.activeMpv();
+    const promotedVolume = this.currentMusicTarget();
+    promoted.setVolume(promotedVolume);
+    promoted.resume();
+    this.xfadeTrace = null;
     console.log(ORCH, "crossfade complete — decks swapped", { activeDeck: this.activeMusicDeck });
+    fileLog("INFO", "XFADE_COMPLETE", { attemptId: this.currentAttemptId, promotedDeck: this.activeMusicDeck, promotedVolume, pause: false });
     this.push();
   }
 
@@ -483,11 +519,13 @@ export class PlaybackOrchestrator {
           : "incoming track failed to decode";
     }
     console.log(ORCH, "crossfade aborted", { reason });
+    fileLog("INFO", "XFADE_ABORT", { attemptId: this.currentAttemptId, reason, activeDeck: this.activeMusicDeck });
     this.push();
   }
 
   private clearXfadeTimers(): void {
     this.xfadePending = null;
+    this.xfadeTrace = null;
     this.xfadeStandbySawPlaying = false;
     if (this.xfadeStartTimeoutId !== null) {
       clearTimeout(this.xfadeStartTimeoutId);

@@ -79,6 +79,12 @@ export function isYtDlpResolvedUrl(raw: string): boolean {
   return YTDLP_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
 }
 
+/** True for a network target (http/https/ytdl) — anything else is a LOCAL file. Same rule as standbyLoadTimeoutMs. */
+export function isStreamLoadTarget(raw: string): boolean {
+  const low = (raw ?? "").trim().toLowerCase();
+  return low.startsWith("http://") || low.startsWith("https://") || low.startsWith("ytdl://");
+}
+
 /** Standby (crossfade incoming) load window for a target: LOCAL 12 s · plain stream 30 s · yt-dlp source 90 s. */
 export function standbyLoadTimeoutMs(raw: string): number {
   const s = (raw ?? "").trim();
