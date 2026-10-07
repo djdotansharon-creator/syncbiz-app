@@ -17,16 +17,20 @@
  *  - no membership / SUSPENDED membership = DENY
  */
 import { CAPABILITIES, PRESET_CAPABILITIES, type Capability, type Preset } from "@/lib/authz";
+import { matchLocation } from "@/lib/location-filter";
 
 export const LEGACY_DEFAULT_KEY = "default";
 export const LEGACY_ALL_SENTINEL = "*";
 export const SCOPE_PRESETS: readonly Preset[] = ["ADMIN", "HQ_CONTROL", "REGIONAL_MANAGER", "BRANCH_MANAGER", "VIEW_ONLY"];
 
-/** Location-level dimensions (F3 adds REGION / GROUP / TAG). */
-export const LOCATION_DIMENSIONS = ["BRAND", "LOCATION"] as const;
+/** Location-level PERMISSION dimensions. F3a adds REGION + GROUP. A Tag is NEVER a permission dimension
+ *  (owner-locked 2026-10-07): tags exist only in operational filtering (lib/location-filter.ts). */
+export const LOCATION_DIMENSIONS = ["BRAND", "LOCATION", "REGION", "GROUP"] as const;
 /** Zone-level dimensions. */
 export const ZONE_DIMENSIONS = ["ZONE", "ZONE_TYPE"] as const;
 export type ScopeDimension = (typeof LOCATION_DIMENSIONS)[number] | (typeof ZONE_DIMENSIONS)[number];
+/** Every permission dimension the evaluator understands (anything else fails closed). */
+export const KNOWN_SCOPE_DIMENSIONS: readonly ScopeDimension[] = [...LOCATION_DIMENSIONS, ...ZONE_DIMENSIONS];
 
 export type ScopeTarget = { dimension: ScopeDimension; value: string };
 export type ScopeRow = { id: string; preset: Preset; allLocations: boolean; status: string; targets: ScopeTarget[] };
@@ -35,8 +39,16 @@ export type HierarchyIndex = {
   workspaceId: string;
   defaultBrandId: string | null;
   canonicalLegacyBranchId: string | null;
-  locations: { id: string; brandId: string | null; status: string }[];
+  locations: {
+    id: string; brandId: string | null; status: string;
+    /** F3a classification (optional so pre-F3 indexes stay valid; missing = none). */
+    regionId?: string | null; groupIds?: string[]; tagIds?: string[];
+  }[];
   zones: { id: string; branchId: string; zoneTypeCode: string; isDefault: boolean; status: string }[];
+  /** F3a: classification rows (status "archived" never matches). Missing = none known. */
+  regions?: { id: string; status: string }[];
+  groups?: { id: string; status: string }[];
+  tags?: { id: string; status: string }[];
 };
 
 export type ScopeEvalInputs = {
@@ -72,13 +84,12 @@ function valuesOf(row: ScopeRow, d: ScopeDimension): string[] {
 
 /** Does a row's LOCATION-level filter accept location L? (every present location dimension must contain L's value) */
 function rowAcceptsLocation(row: ScopeRow, h: HierarchyIndex, locId: string): boolean {
-  const loc = h.locations.find((l) => l.id === locId);
-  if (!loc || loc.status === ARCHIVED) return false;
-  const brands = valuesOf(row, "BRAND");
-  if (brands.length > 0 && !brands.includes(loc.brandId ?? h.defaultBrandId ?? "")) return false;
-  const locs = valuesOf(row, "LOCATION");
-  if (locs.length > 0 && !locs.includes(loc.id)) return false;
-  return true;
+  // The SAME matcher as operational filtering — but tagIds are NEVER passed: a Tag can never grant / restrict access.
+  return matchLocation(
+    { brandIds: valuesOf(row, "BRAND"), locationIds: valuesOf(row, "LOCATION"), regionIds: valuesOf(row, "REGION"), groupIds: valuesOf(row, "GROUP") },
+    h,
+    locId,
+  );
 }
 
 function rowHasZoneDimension(row: ScopeRow): boolean {
@@ -88,6 +99,9 @@ function rowHasZoneDimension(row: ScopeRow): boolean {
 /** PURE: does ONE row contain the (already resolved) target? Capability is NOT considered here. */
 export function rowContainsTarget(row: ScopeRow, h: HierarchyIndex, t: EvalTarget): boolean {
   if (row.status !== "active") return false;
+  // Fail closed: a row carrying ANY unknown dimension (e.g. a "TAG" — never a permission dimension) matches nothing,
+  // so an unrecognised constraint can never be silently ignored and widen the row.
+  if (row.targets.some((x) => !(KNOWN_SCOPE_DIMENSIONS as readonly string[]).includes(x.dimension))) return false;
   if (t.kind === "WORKSPACE") return row.allLocations;
   if (t.kind === "LOCATION") {
     const loc = h.locations.find((l) => l.id === t.branchId);
@@ -227,22 +241,36 @@ type ReadDb = {
   zone: { findMany: (a: unknown) => Promise<{ id: string; branchId: string; zoneTypeCode: string; isDefault: boolean; status: string }[]> };
   brand: { findFirst: (a: unknown) => Promise<{ id: string } | null> };
   workspaceMember: { findUnique: (a: unknown) => Promise<{ role: unknown; status: unknown } | null> };
-  memberScope: { findMany: (a: unknown) => Promise<{ id: string; preset: string; allLocations: boolean; status: string; targets: { dimension: string; brandId: string | null; branchId: string | null; zoneId: string | null; zoneTypeCode: string | null }[] }[]> };
+  memberScope: { findMany: (a: unknown) => Promise<{ id: string; preset: string; allLocations: boolean; status: string; targets: { dimension: string; brandId: string | null; branchId: string | null; zoneId: string | null; zoneTypeCode: string | null; regionId?: string | null; groupId?: string | null }[] }[]> };
+  region?: { findMany: (a: unknown) => Promise<{ id: string; status: string }[]> };
+  locationGroup?: { findMany: (a: unknown) => Promise<{ id: string; status: string }[]> };
+  locationGroupMember?: { findMany: (a: unknown) => Promise<{ groupId: string; branchId: string }[]> };
+  locationTag?: { findMany: (a: unknown) => Promise<{ id: string; status: string }[]> };
+  locationTagAssignment?: { findMany: (a: unknown) => Promise<{ tagId: string; branchId: string }[]> };
 };
 
 /** Read-only: the workspace hierarchy index (locations, zones, default brand, canonical legacy branch). */
 export async function loadHierarchy(db: ReadDb, workspaceId: string): Promise<HierarchyIndex> {
-  const [branches, zones, defBrand] = await Promise.all([
-    db.branch.findMany({ where: { workspaceId }, select: { id: true, brandId: true, status: true, legacyKey: true } }),
+  const none = async () => [] as never[];
+  const [branches, zones, defBrand, regions, groups, members, tags, tagAs] = await Promise.all([
+    db.branch.findMany({ where: { workspaceId }, select: { id: true, brandId: true, status: true, legacyKey: true, regionId: true } }) as Promise<{ id: string; brandId: string | null; status: string; legacyKey: string | null; regionId?: string | null }[]>,
     db.zone.findMany({ where: { workspaceId }, select: { id: true, branchId: true, zoneTypeCode: true, isDefault: true, status: true } }),
     db.brand.findFirst({ where: { workspaceId, isDefault: true }, select: { id: true } }),
+    db.region ? db.region.findMany({ where: { workspaceId }, select: { id: true, status: true } }) : none(),
+    db.locationGroup ? db.locationGroup.findMany({ where: { workspaceId }, select: { id: true, status: true } }) : none(),
+    db.locationGroupMember ? db.locationGroupMember.findMany({ where: { workspaceId }, select: { groupId: true, branchId: true } }) : none(),
+    db.locationTag ? db.locationTag.findMany({ where: { workspaceId }, select: { id: true, status: true } }) : none(),
+    db.locationTagAssignment ? db.locationTagAssignment.findMany({ where: { workspaceId }, select: { tagId: true, branchId: true } }) : none(),
   ]);
+  const groupsOf = (b: string) => (members as { groupId: string; branchId: string }[]).filter((m) => m.branchId === b).map((m) => m.groupId);
+  const tagsOf = (b: string) => (tagAs as { tagId: string; branchId: string }[]).filter((t) => t.branchId === b).map((t) => t.tagId);
   return {
     workspaceId,
     defaultBrandId: defBrand?.id ?? null,
     canonicalLegacyBranchId: branches.find((b) => b.legacyKey === LEGACY_DEFAULT_KEY)?.id ?? null,
-    locations: branches.map((b) => ({ id: b.id, brandId: b.brandId, status: b.status })),
+    locations: branches.map((b) => ({ id: b.id, brandId: b.brandId, status: b.status, regionId: b.regionId ?? null, groupIds: groupsOf(b.id), tagIds: tagsOf(b.id) })),
     zones,
+    regions, groups, tags,
   };
 }
 
@@ -254,7 +282,7 @@ export async function loadScopeInputs(db: ReadDb, workspaceId: string | null, us
     db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: ws, userId } }, select: { role: true, status: true } }),
     db.memberScope.findMany({
       where: { workspaceId: ws, userId },
-      select: { id: true, preset: true, allLocations: true, status: true, targets: { select: { dimension: true, brandId: true, branchId: true, zoneId: true, zoneTypeCode: true } } },
+      select: { id: true, preset: true, allLocations: true, status: true, targets: { select: { dimension: true, brandId: true, branchId: true, zoneId: true, zoneTypeCode: true, regionId: true, groupId: true } } },
       orderBy: { id: "asc" },
     }),
     hierarchy ? Promise.resolve(hierarchy) : loadHierarchy(db, ws),
@@ -267,7 +295,7 @@ export async function loadScopeInputs(db: ReadDb, workspaceId: string | null, us
       const targets: ScopeTarget[] = [];
       let invalid = false;
       for (const t of r.targets) {
-        const value = t.brandId ?? t.branchId ?? t.zoneId ?? t.zoneTypeCode;
+        const value = t.brandId ?? t.branchId ?? t.zoneId ?? t.zoneTypeCode ?? t.regionId ?? t.groupId;
         if (!dims.has(t.dimension) || !value) { invalid = true; continue; }
         targets.push({ dimension: t.dimension as ScopeDimension, value });
       }

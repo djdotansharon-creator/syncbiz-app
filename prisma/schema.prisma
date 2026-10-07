@@ -299,6 +299,10 @@ model Workspace {
   branches            Branch[]
   /// Control Room F1 (SHADOW): brands of this organization (exactly one isDefault — see Brand).
   brands              Brand[]
+  /// Control Room F3a (SHADOW): organization-level location classification.
+  regions             Region[]
+  locationGroups      LocationGroup[]
+  locationTags        LocationTag[]
   sources             Source[]
   playlists           Playlist[]
   schedules           Schedule[]
@@ -412,16 +416,24 @@ model MemberScopeTarget {
   branchId     String?
   zoneId       String?
   zoneTypeCode String?
+  /// F3a: REGION dimension value.
+  regionId     String?
+  /// F3a: GROUP dimension value. (There is deliberately NO tag column — a Tag is never a permission dimension.)
+  groupId      String?
 
-  scope  MemberScope @relation(fields: [scopeId], references: [id], onDelete: Cascade)
-  brand  Brand?      @relation(fields: [brandId], references: [id], onDelete: NoAction)
-  branch Branch?     @relation(fields: [branchId], references: [id], onDelete: NoAction)
-  zone   Zone?       @relation(fields: [zoneId], references: [id], onDelete: NoAction)
+  scope  MemberScope    @relation(fields: [scopeId], references: [id], onDelete: Cascade)
+  brand  Brand?         @relation(fields: [brandId], references: [id], onDelete: NoAction)
+  branch Branch?        @relation(fields: [branchId], references: [id], onDelete: NoAction)
+  zone   Zone?          @relation(fields: [zoneId], references: [id], onDelete: NoAction)
+  region Region?        @relation(fields: [regionId], references: [id], onDelete: NoAction)
+  group  LocationGroup? @relation(fields: [groupId], references: [id], onDelete: NoAction)
 
   @@index([scopeId])
   @@index([brandId])
   @@index([branchId])
   @@index([zoneId])
+  @@index([regionId])
+  @@index([groupId])
 }
 
 /// User-to-branch access assignment (granular branch scoping for non-owner users).
@@ -478,19 +490,134 @@ model Branch {
   /// Control Room F1 (SHADOW): the Location's primary Brand. Nullable in F1 (backfilled to the workspace default
   /// brand); made mandatory only in a later hardening gate. Nothing reads it for runtime decisions yet.
   brandId       String?
+  /// Control Room F3a (SHADOW): the Location's ONE primary Region (nullable; FK NO ACTION DEFERRABLE INITIALLY DEFERRED).
+  regionId      String?
+  /// Control Room F3a: canonical, organization-unique import key (nullable; set explicitly by admin / import).
+  /// NOT `code` — `code` is name-derived / "DEFAULT" on legacy paths and stays a display code.
+  locationCode  String?
+  addressLine1  String?
+  addressLine2  String?
+  postalCode    String?
+  stateProvince String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   brand     Brand?     @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  region    Region?    @relation(fields: [regionId], references: [id], onDelete: NoAction)
   devices   Device[]
   schedules Schedule[]
   zones     Zone[]
   scopeTargets MemberScopeTarget[]
+  groupMemberships LocationGroupMember[]
+  tagAssignments   LocationTagAssignment[]
 
   @@unique([workspaceId, legacyKey])
+  @@unique([workspaceId, locationCode])
+  /// F3a: composite key target so memberships can only link rows of the SAME workspace (DB-enforced).
+  @@unique([id, workspaceId])
   @@index([workspaceId])
   @@index([brandId])
+  @@index([regionId])
+}
+
+/// Control Room F3a (SHADOW) — ONE primary geographic / operational region per Location. Organization-level (never
+/// brand-specific). Archive (status / archivedAt), never hard-delete; an archived region never matches a filter / scope.
+model Region {
+  id          String    @id @default(uuid())
+  workspaceId String
+  /// Canonical import key, ^[A-Z][A-Z0-9_]{0,39}$ (CENTER, NORTH, JERUSALEM). Unique per organization.
+  code        String
+  name        String
+  status      String    @default("active")
+  sortOrder   Int       @default(0)
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace    Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  branches     Branch[]
+  scopeTargets MemberScopeTarget[]
+
+  @@unique([workspaceId, code])
+  @@index([workspaceId])
+}
+
+/// Control Room F3a (SHADOW) — a managed operational cohort of Locations (MALLS, OUTLET, FLAGSHIP_STORES, AIRPORT).
+/// Organization-level, flat (no hierarchy). May later drive permissions / commands / announcements / campaigns / filters.
+/// Named LocationGroup because GROUP is an SQL reserved word.
+model LocationGroup {
+  id          String    @id @default(uuid())
+  workspaceId String
+  code        String
+  name        String
+  status      String    @default("active")
+  sortOrder   Int       @default(0)
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace    Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members      LocationGroupMember[]
+  scopeTargets MemberScopeTarget[]
+
+  @@unique([workspaceId, code])
+  @@unique([id, workspaceId])
+  @@index([workspaceId])
+}
+
+/// Control Room F3a — Location ∈ Group (zero or many per Location). Composite FKs pin both sides to ONE workspace.
+model LocationGroupMember {
+  groupId     String
+  branchId    String
+  workspaceId String
+  createdAt   DateTime @default(now())
+  createdBy   String?
+
+  group  LocationGroup @relation(fields: [groupId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  branch Branch        @relation(fields: [branchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@id([groupId, branchId])
+  @@index([branchId])
+  @@index([workspaceId])
+}
+
+/// Control Room F3a — a lightweight annotation / filter label (VIP, TEST, NEW_STORE, NEEDS_ATTENTION).
+/// LOCKED (owner 2026-10-07): a Tag is NOT a permission dimension — it never grants or restricts access and is never a
+/// MemberScope target. It is used by operational filtering only (lib/location-filter.ts).
+model LocationTag {
+  id          String    @id @default(uuid())
+  workspaceId String
+  code        String
+  name        String
+  color       String?
+  status      String    @default("active")
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace   Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignments LocationTagAssignment[]
+
+  @@unique([workspaceId, code])
+  @@unique([id, workspaceId])
+  @@index([workspaceId])
+}
+
+/// Control Room F3a — Location has Tag (zero or many per Location). Composite FKs pin both sides to ONE workspace.
+model LocationTagAssignment {
+  tagId       String
+  branchId    String
+  workspaceId String
+  createdAt   DateTime @default(now())
+  createdBy   String?
+
+  tag    LocationTag @relation(fields: [tagId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  branch Branch      @relation(fields: [branchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@id([tagId, branchId])
+  @@index([branchId])
+  @@index([workspaceId])
 }
 
 /// Control Room F1 (SHADOW) — a first-class Brand inside ONE Organization (= Workspace). A Brand Board is a filter

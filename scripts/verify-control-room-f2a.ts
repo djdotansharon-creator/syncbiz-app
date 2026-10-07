@@ -118,6 +118,8 @@ if (DBURL) {
   try {
     importers = execSync(`git grep -l --untracked "authz-scope" -- app lib components server desktop middleware.ts`, { cwd: ROOT, stdio: ["ignore", "pipe", "ignore"] }).toString().trim().split("\n").filter(Boolean);
   } catch { importers = []; } // git grep exits 1 when nothing matches = no importer
+  // F3a (2026-10-07): lib/location-filter.ts type-imports HierarchyIndex — itself OFFLINE (pinned by verify-control-room-f3a T5).
+  importers = importers.filter((f) => f !== "lib/location-filter.ts");
   assert("A26 NOTHING in app / lib / server / desktop imports the evaluator (offline only)", importers.length === 0, importers.join(","));
   // Scope of the F2a commit itself (398cce7) — bound 2026-10-07 so later, separately approved gates may touch runtime files.
   const F2A_COMMIT = "398cce77662ad4d5fda79c7738556b6620a660f1";

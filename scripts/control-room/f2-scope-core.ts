@@ -21,10 +21,12 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any; // PrismaClient or an interactive-transaction client
 
+// F3a: REGION / GROUP columns added (no TAG — a Tag is never a permission dimension).
 const targetColumn = (t: ScopeTarget) =>
-  t.dimension === "BRAND" ? { brandId: t.value } : t.dimension === "LOCATION" ? { branchId: t.value } : t.dimension === "ZONE" ? { zoneId: t.value } : { zoneTypeCode: t.value };
-const storedTargets = (rows: { dimension: string; brandId: string | null; branchId: string | null; zoneId: string | null; zoneTypeCode: string | null }[]): ScopeTarget[] =>
-  rows.map((t) => ({ dimension: t.dimension as ScopeTarget["dimension"], value: (t.brandId ?? t.branchId ?? t.zoneId ?? t.zoneTypeCode) as string }));
+  t.dimension === "BRAND" ? { brandId: t.value } : t.dimension === "LOCATION" ? { branchId: t.value } : t.dimension === "ZONE" ? { zoneId: t.value }
+    : t.dimension === "REGION" ? { regionId: t.value } : t.dimension === "GROUP" ? { groupId: t.value } : { zoneTypeCode: t.value };
+const storedTargets = (rows: { dimension: string; brandId: string | null; branchId: string | null; zoneId: string | null; zoneTypeCode: string | null; regionId?: string | null; groupId?: string | null }[]): ScopeTarget[] =>
+  rows.map((t) => ({ dimension: t.dimension as ScopeTarget["dimension"], value: (t.brandId ?? t.branchId ?? t.zoneId ?? t.zoneTypeCode ?? t.regionId ?? t.groupId) as string }));
 
 async function memberContext(db: Db, workspaceId: string) {
   const [members, assignments, branches] = await Promise.all([
@@ -94,15 +96,18 @@ export async function checkScopes(db: Db): Promise<{ ok: boolean; violations: st
   const byPreset: Record<string, number> = {};
   for (const ws of workspaces) {
     const { members, assignments, ctx } = await memberContext(db, ws.id);
-    const [brands, branches, zones] = await Promise.all([
+    const [brands, branches, zones, regions, groups] = await Promise.all([
       db.brand.findMany({ where: { workspaceId: ws.id }, select: { id: true } }),
       db.branch.findMany({ where: { workspaceId: ws.id }, select: { id: true } }),
       db.zone.findMany({ where: { workspaceId: ws.id }, select: { id: true } }),
+      db.region ? db.region.findMany({ where: { workspaceId: ws.id }, select: { id: true } }) : [],
+      db.locationGroup ? db.locationGroup.findMany({ where: { workspaceId: ws.id }, select: { id: true } }) : [],
     ]);
-    const ok = { BRAND: new Set(brands.map((x: { id: string }) => x.id)), LOCATION: new Set(branches.map((x: { id: string }) => x.id)), ZONE: new Set(zones.map((x: { id: string }) => x.id)) } as Record<string, Set<string>>;
+    const ids = (a: { id: string }[]) => new Set(a.map((x) => x.id));
+    const ok = { BRAND: ids(brands), LOCATION: ids(branches), ZONE: ids(zones), REGION: ids(regions), GROUP: ids(groups) } as Record<string, Set<string>>;
     for (const m of members) {
       const derived = deriveScopesFromLegacy({ role: String(m.role) }, assignments.filter((a: { userId: string }) => a.userId === m.userId), ctx).rows;
-      const stored: { id: string; workspaceId: string; userId: string; source: string; preset: string; allLocations: boolean; targets: { dimension: string; workspaceId: string; brandId: string | null; branchId: string | null; zoneId: string | null; zoneTypeCode: string | null }[] }[] =
+      const stored: { id: string; workspaceId: string; userId: string; source: string; preset: string; allLocations: boolean; targets: { dimension: string; workspaceId: string; brandId: string | null; branchId: string | null; zoneId: string | null; zoneTypeCode: string | null; regionId?: string | null; groupId?: string | null }[] }[] =
         await db.memberScope.findMany({ where: { memberId: m.id }, include: { targets: true } });
       rows += stored.length;
       for (const s of stored) {
@@ -110,7 +115,7 @@ export async function checkScopes(db: Db): Promise<{ ok: boolean; violations: st
         targets += s.targets.length;
         if (s.workspaceId !== ws.id || s.userId !== m.userId) v.push(`scope ${s.id}: workspace/user mismatch with its member`);
         for (const t of s.targets) {
-          const val = (t.brandId ?? t.branchId ?? t.zoneId) as string | null;
+          const val = (t.brandId ?? t.branchId ?? t.zoneId ?? t.regionId ?? t.groupId) as string | null;
           if (t.workspaceId !== ws.id) v.push(`scope ${s.id}: target in another workspace`);
           if (val && ok[t.dimension] && !ok[t.dimension].has(val)) v.push(`scope ${s.id}: ${t.dimension} target outside its workspace`);
         }
