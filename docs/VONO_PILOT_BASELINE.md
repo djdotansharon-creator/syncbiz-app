@@ -17,6 +17,11 @@
 - **Phase:** PILOT HARDENING
   - **PLAYER PHASE: PILOT ACCEPTED** (owner-attested 2026-10-05)
   - **JINGLES / ANNOUNCEMENTS: PILOT ACCEPTED** (owner-attested 2026-10-05)
+- **CONTROL ROOM F3a — LOCATION CLASSIFICATION FOUNDATION (SHADOW): ACCEPTED** (2026-10-07, TEST only) — clean commit
+  `ca8312e` on `4fdd719`, app deployment `4d2b0f53`, migration `20261007200000_control_room_f3a_location_classification`.
+  Region / LocationGroup / LocationTag + nullable Branch classification fields; MemberScope dimensions BRAND, LOCATION,
+  ZONE, ZONE_TYPE, REGION, GROUP; **a Tag is NOT a permission dimension** (filter only). Canonical TEST branch
+  locationCode = T001. The beta.13 playback diagnostic (`3ef27b8`) is NOT in this lineage. Record: `docs/CONTROL_ROOM_F3A_ACCEPTANCE_2026-10-07.md`.
 - **⭐ P0 URL CONTINUITY + OWNERSHIP — ACCEPTED / LOCKED (2026-10-07, TEST, RENDERER ONLY)** — `8e8895a` (URL EOF →
   next URL) + `d617314` (stale LOCAL AUTOMIX can never take over a MAIN URL session); TEST app deployment `3f258faf`.
   **Current renderer / playback baseline = `d617314`** (Desktop stays 2.2.8-beta.12). Lenovo owner-attested with
@@ -102,6 +107,8 @@ Lineage: `865ba81` (offline cold boot, MAIN) → `2ebdbe4` (renderer stall fix) 
 | **WS volume (2026-10-06)** | `syncbiz-ws-test-volume` (id `18b32178-da30-484f-8403-785b347baf73`) on `syncbiz-ws-test` only, mount `/data` → designation / lease / branch-alias state in `/data/ws-lease/` (proven to survive redeploy with no re-assertion) |
 | **Control Room Phase 1 deploys (2026-10-06)** | app `87a05469-b3f5-4afc-819a-c33746e0182e` (source `6b5b9a0`, file-hash verified for the changed renderer files); WS `335dad0a-e3a4-4802-b1b6-c9ae40697e51` (Gate 1 shadow code `cea1585`) |
 | **TEST DB backup before Gate 2B-2** | `D:\SyncBiz_Backups\test-env\20261006T145008Z-gate2b2\` (pg_dump sha256 `d6a5c882ceef7808ea62310db113b82f8f95e8ba370c7d6004bcff813fb1dbb7`, 241240 B; **restore test PASS** — 13 counts identical, throwaway DB dropped) + `gate2b2-manifest.json` (sha256 `f6893d7050a0813c6921a6d8a8164ade31a57786765daf3dd8d2416e644d494b`; also on TEST app volume `/data/control-room/gate2b2-manifest.json`) + `BACKUP-RECORD.txt`. Git HEAD at backup `2d2ccdf` |
+| **Control Room F3a deploys (2026-10-07)** | deploy A `71cfcb1c-cecc-4811-bdbb-85de9fffcec4` (= `4fdd719` + F3a migration folder only → `prisma migrate deploy`); deploy B **`4d2b0f53-2361-4401-9c92-5034c99e97e1`** (= `ca8312e`, clean tree, hash-verified; playback renderer files identical to `d617314`). WS NOT redeployed (`23e94c01`) |
+| **TEST DB backup before F3a** | `D:\SyncBiz_Backups\test-env\20261007T195345Z-control-room-f3a\` (pg_dump sha256 `fcdf6a4a458e0791e6f27be9272c3d481aab357508791136cbe838a700dd8db7`; **restore test PASS**; pre/post fingerprints) |
 | **P0 URL continuity + ownership deploy (2026-10-07)** | app **`3f258faf-d90b-4f5d-8bbf-d2246e7aec8b`** (= `d617314`, incl. `8e8895a`; clean tree; changed renderer files hash-verified). WS / desktop / DB unchanged |
 | **Control Room F2a deploys (2026-10-07)** | deploy A `8a9e36f9-1526-4f04-9858-5938e629581a` (= `25d4c06` + F2a migration folder only → `prisma migrate deploy`); deploy B **`54f898f9-bd3c-4267-ba42-5b3edad36a8f`** (= `398cce7`, clean tree, hash-verified). WS NOT redeployed (`23e94c01`) |
 | **TEST DB backup before F2a** | `D:\SyncBiz_Backups\test-env\20261007T104212Z-control-room-f2a\` (pg_dump sha256 `c2b8d7edd03ec011bb3876707c8d67c1daaf7ffc974fa132de3842286ad9c5b7`; **restore test PASS**; pre/post fingerprints) |
@@ -181,6 +188,14 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM F3a — LOCATION CLASSIFICATION FOUNDATION (SHADOW) — ACCEPTED (2026-10-07, TEST, branch `feature/control-room-phase1`)
+
+- **Server / DB corroborated** after the owner's normal VONO reopen (~20:03Z): desktop token 200 ×2, ws-token 200 ×3,
+  register 200 ×3; MAIN MASTER (trusted station) + renderer CONTROL in canonical room `ws:31d30e23…:90d2b7b8…`; 0 × 409; no
+  branch conflict. F3a check ok; locationCode backfill T001 (second run NO-OP); F1 ok; F2a matrix 36/36 (0 unexpected);
+  fingerprint 0 diffs in 18 groups (only approved change: locationCode); no Region / Group / Tag / fake rows.
+- Commit `ca8312e` · tag `pilot-baseline/2026-10-07-control-room-f3a-ca8312e` · details `docs/CONTROL_ROOM_F3A_ACCEPTANCE_2026-10-07.md`.
 
 ### P0 URL CONTINUITY + OWNERSHIP — ACCEPTED — owner-attested 2026-10-07 (Lenovo, beta.12 + TEST renderer `d617314`)
 
@@ -770,6 +785,7 @@ Carried over (still open):
 
 | Layer | Reference |
 |---|---|
+| **Control Room F3a (2026-10-07)** | tag `pilot-baseline/2026-10-07-control-room-f3a-ca8312e` → `ca8312e81b92e6ac82e970f09d3007e1f8f87546`; app deployment `4d2b0f53`; DB backup `D:\SyncBiz_Backups\test-env\20261007T195345Z-control-room-f3a\` (or drop the additive F3a tables / columns) |
 | **Renderer / playback baseline (2026-10-07, CURRENT)** | tag `pilot-baseline/2026-10-07-renderer-d617314` → `d61731471cc9a8a52965c417a0a3898495b721e8`; TEST deployment `3f258faf` (renderer only — Desktop installer unchanged, beta.12) |
 | **Control Room F2a (2026-10-07)** | tag `pilot-baseline/2026-10-07-control-room-f2a-398cce7` → `398cce77662ad4d5fda79c7738556b6620a660f1`; app deployment `54f898f9`; DB backup `D:\SyncBiz_Backups\test-env\20261007T104212Z-control-room-f2a\` (or drop MemberScopeTarget + MemberScope) |
 | **Control Room F1 (2026-10-07)** | tag `pilot-baseline/2026-10-07-control-room-f1-25d4c06` → `25d4c0685517f235df69fac3fb89c555807ef698`; app deployment `538902e8`; DB backup `D:\SyncBiz_Backups\test-env\20261007T094829Z-control-room-f1\` (or drop the additive F1 objects) |
