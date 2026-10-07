@@ -17,6 +17,11 @@
 - **Phase:** PILOT HARDENING
   - **PLAYER PHASE: PILOT ACCEPTED** (owner-attested 2026-10-05)
   - **JINGLES / ANNOUNCEMENTS: PILOT ACCEPTED** (owner-attested 2026-10-05)
+- **⭐ P0 URL CONTINUITY + OWNERSHIP — ACCEPTED / LOCKED (2026-10-07, TEST, RENDERER ONLY)** — `8e8895a` (URL EOF →
+  next URL) + `d617314` (stale LOCAL AUTOMIX can never take over a MAIN URL session); TEST app deployment `3f258faf`.
+  **Current renderer / playback baseline = `d617314`** (Desktop stays 2.2.8-beta.12). Lenovo owner-attested with
+  main.log evidence (EOF attempt 1000000001 → 283 ms → LOADFILE 1000000002 kind url; no LOCAL takeover). Record:
+  `docs/P0_URL_CONTINUITY_OWNERSHIP_ACCEPTANCE_2026-10-07.md`. No playback change without a new isolated gate.
 - **CONTROL ROOM F2a — MEMBER SCOPE FOUNDATION (SHADOW / OFFLINE): ACCEPTED** (2026-10-07, TEST only) — commit
   `398cce7`, app deployment `54f898f9`, migration `20261007150000_control_room_f2a_member_scope`. Scopes stored +
   evaluated OFFLINE only (nothing enforces / no request path reads them); TEST matrix 36/36 agree, 0 unexpected.
@@ -97,6 +102,7 @@ Lineage: `865ba81` (offline cold boot, MAIN) → `2ebdbe4` (renderer stall fix) 
 | **WS volume (2026-10-06)** | `syncbiz-ws-test-volume` (id `18b32178-da30-484f-8403-785b347baf73`) on `syncbiz-ws-test` only, mount `/data` → designation / lease / branch-alias state in `/data/ws-lease/` (proven to survive redeploy with no re-assertion) |
 | **Control Room Phase 1 deploys (2026-10-06)** | app `87a05469-b3f5-4afc-819a-c33746e0182e` (source `6b5b9a0`, file-hash verified for the changed renderer files); WS `335dad0a-e3a4-4802-b1b6-c9ae40697e51` (Gate 1 shadow code `cea1585`) |
 | **TEST DB backup before Gate 2B-2** | `D:\SyncBiz_Backups\test-env\20261006T145008Z-gate2b2\` (pg_dump sha256 `d6a5c882ceef7808ea62310db113b82f8f95e8ba370c7d6004bcff813fb1dbb7`, 241240 B; **restore test PASS** — 13 counts identical, throwaway DB dropped) + `gate2b2-manifest.json` (sha256 `f6893d7050a0813c6921a6d8a8164ade31a57786765daf3dd8d2416e644d494b`; also on TEST app volume `/data/control-room/gate2b2-manifest.json`) + `BACKUP-RECORD.txt`. Git HEAD at backup `2d2ccdf` |
+| **P0 URL continuity + ownership deploy (2026-10-07)** | app **`3f258faf-d90b-4f5d-8bbf-d2246e7aec8b`** (= `d617314`, incl. `8e8895a`; clean tree; changed renderer files hash-verified). WS / desktop / DB unchanged |
 | **Control Room F2a deploys (2026-10-07)** | deploy A `8a9e36f9-1526-4f04-9858-5938e629581a` (= `25d4c06` + F2a migration folder only → `prisma migrate deploy`); deploy B **`54f898f9-bd3c-4267-ba42-5b3edad36a8f`** (= `398cce7`, clean tree, hash-verified). WS NOT redeployed (`23e94c01`) |
 | **TEST DB backup before F2a** | `D:\SyncBiz_Backups\test-env\20261007T104212Z-control-room-f2a\` (pg_dump sha256 `c2b8d7edd03ec011bb3876707c8d67c1daaf7ffc974fa132de3842286ad9c5b7`; **restore test PASS**; pre/post fingerprints) |
 | **Control Room F1 deploys (2026-10-07)** | deploy A `bbb98798-8487-4e43-b308-a101b34e402c` (= `483fd28` + F1 migration folder only → `prisma migrate deploy`); deploy B **`538902e8-439d-46c4-a38d-ea978c7baaac`** (= `25d4c06`, clean tree, changed files hash-verified). WS NOT redeployed (`23e94c01`) |
@@ -175,6 +181,15 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### P0 URL CONTINUITY + OWNERSHIP — ACCEPTED — owner-attested 2026-10-07 (Lenovo, beta.12 + TEST renderer `d617314`)
+
+- **Owner-attested (main.log values supplied by the owner):** LOCAL queue present in the background; URL attempt
+  1000000001 played with no LOCAL takeover; `MPV_ENDFILE reason:"eof" attemptId:1000000001` → 283 ms →
+  `MPV_LOADFILE attemptId:1000000002 kind:"url"`. URL ownership PASS · URL EOF → next URL PASS · LOCAL takeover
+  BLOCKED · duplicate load NONE. Earlier: saved YouTube album auto-advanced URL → URL with no manual NEXT.
+- **Server-log corroborated:** MAIN MASTER (trusted station) + renderer CONTROL in canonical room; 0 × 409.
+- Commits `8e8895a` + `d617314` · tag `pilot-baseline/2026-10-07-renderer-d617314` · details `docs/P0_URL_CONTINUITY_OWNERSHIP_ACCEPTANCE_2026-10-07.md`.
 
 ### CONTROL ROOM F2a — MEMBER SCOPE FOUNDATION (SHADOW / OFFLINE) — ACCEPTED (2026-10-07, TEST, branch `feature/control-room-phase1`)
 
@@ -659,8 +674,7 @@ Not pilot blockers. Do not fix inside unrelated work.
    audio for some yt-dlp URLs on the Lenovo (beta.12). Continuity is protected (outgoing audio continues; no watchdog
    restart; no force kill), so this is a PERFORMANCE item, not a playback-continuity P0. Own audit/gate; not part of
    the baseline-lock commit.
-16. **URL NATURAL EOF AUTO-ADVANCE (playback, PARKED 2026-10-07).** MAIN does not auto-advance a URL session at
-   natural EOF. Own gate.
+16. ~~**URL NATURAL EOF AUTO-ADVANCE**~~ — **FIXED 2026-10-07** (`8e8895a`, runtime accepted; see §7).
 17. **EXTERNAL CONTROLLER OWNERSHIP RELEASE (playback, PARKED 2026-10-07).** Another controller switching MAIN to a
    source does not release the Lenovo renderer's session ownership. Own gate.
 18. **yt-dlp `_MEI*` TEMP CLEANUP (desktop hygiene, PARKED 2026-10-07).** Leftover PyInstaller extraction folders from
@@ -671,6 +685,14 @@ Not pilot blockers. Do not fix inside unrelated work.
 20. **WATCHDOG MANUAL-LAUNCH RACE (Protection, NON-P0, recorded 2026-10-07).** After an intentional stop followed by a
    manual launch, the watchdog may briefly issue a redundant launch because it still sees the old PID; single-instance
    protection currently absorbs it (no duplicate player observed). Own audit; do NOT fix now.
+
+21. **PREMATURE LONG-URL EOF (playback, PARKED 2026-10-07).** Long (~2 h) YouTube URLs reached `MPV_ENDFILE reason=eof`
+   at ~14 min (r7, r8). Since `8e8895a` the session advances instead of going silent, but the premature termination
+   itself is UNEXPLAINED. Own audit / gate (evidence first).
+22. **STARTUP SOURCE RESTORE / SETTINGS COHERENCE (playback, PARKED 2026-10-07).** VONO startup always resumes LOCAL even
+   when URL / YouTube was the last active source; a renderer reload / navigation to Settings can start stale LOCAL while
+   MAIN still reports URL. Desired: startup / reload restores the actual active source / session (not blindly LOCAL);
+   no UI / audio source mismatch. Own audit / gate.
 
 Carried over (still open):
 - Jingle library/pads still use `branchId:"default"`; no link to `MediaAsset`; generated-but-unsaved MP3s
@@ -689,6 +711,11 @@ Carried over (still open):
 - Pre-existing desktop `tsconfig.typecheck.json` errors (not the packaging path) — known, untouched.
 
 ## 10. DO NOT REGRESS
+
+*(added 2026-10-07, P0 URL continuity + ownership — renderer `d617314`)*
+- URL session natural EOF → exactly one auto-advance to the next URL (no wrap at the last item, no duplicate load)
+- while MAIN plays a URL session, LOCAL autonomous transitions (AUTOMIX / NEXT / PLAY_REQUEST / crossfade / load) are inert
+- explicit URL → LOCAL switch, LOCAL-only AUTOMIX and manual LOCAL NEXT unchanged
 
 *(added 2026-10-07, P0 playback hardening — beta.12)*
 - URL trackIndex correct (no wrong first item); URL NEXT/PREV coherent; no LOCAL contamination of a URL session
@@ -743,6 +770,7 @@ Carried over (still open):
 
 | Layer | Reference |
 |---|---|
+| **Renderer / playback baseline (2026-10-07, CURRENT)** | tag `pilot-baseline/2026-10-07-renderer-d617314` → `d61731471cc9a8a52965c417a0a3898495b721e8`; TEST deployment `3f258faf` (renderer only — Desktop installer unchanged, beta.12) |
 | **Control Room F2a (2026-10-07)** | tag `pilot-baseline/2026-10-07-control-room-f2a-398cce7` → `398cce77662ad4d5fda79c7738556b6620a660f1`; app deployment `54f898f9`; DB backup `D:\SyncBiz_Backups\test-env\20261007T104212Z-control-room-f2a\` (or drop MemberScopeTarget + MemberScope) |
 | **Control Room F1 (2026-10-07)** | tag `pilot-baseline/2026-10-07-control-room-f1-25d4c06` → `25d4c0685517f235df69fac3fb89c555807ef698`; app deployment `538902e8`; DB backup `D:\SyncBiz_Backups\test-env\20261007T094829Z-control-room-f1\` (or drop the additive F1 objects) |
 | **CURRENT desktop baseline tag (2026-10-07)** | `pilot-baseline/2026-10-07-desktop-beta12-dc74457` → `dc744575e97279358e6794687ed37d408706677d` |
