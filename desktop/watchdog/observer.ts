@@ -30,6 +30,7 @@ import {
   initialMemory,
   initProgressTracker,
   observeProgress,
+  isAppHealthyFromHeartbeat,
   observeMpvDown,
   recordAttempt,
   isMaintenanceActive,
@@ -254,6 +255,9 @@ export function launchDetached(execPath: string, spawnFn: typeof spawn = spawn):
   });
 }
 
+/** P0 2026-10-07: the observer loop's live ProgressTracker (set by startObserver) — read by isAppHealthy. */
+let liveProgressTracker: ProgressTracker | null = null;
+
 const realDeps: RecoveryDeps = {
   isValidExe,
   isVonoPid: verifyVonoPid,
@@ -261,15 +265,11 @@ const realDeps: RecoveryDeps = {
   // heartbeat written by exactly `pid`, engine ready, and (if it intends to play) not stalled. No threshold
   // changes — reuses WD.appStaleMs / WD.playbackStallMs. Ties to the exact pid so a different/reused
   // instance's heartbeat can never cause a false abort.
-  isAppHealthy: (pid: number): boolean => {
-    const hb = readJson<VonoHeartbeat>(heartbeatPath());
-    if (!hb || hb.pid !== pid) return false;                      // must be THIS pid's own heartbeat
-    const now = Date.now();
-    if (now - hb.writtenAt > WD.appStaleMs) return false;         // stale heartbeat → not healthy
-    if (!hb.mpv.engineReady) return false;                        // engine not ready → not healthy
-    if (hb.playback.status === "playing" && now - hb.playback.positionAt > WD.playbackStallMs) return false; // still stalled
-    return true;
-  },
+  // P0 2026-10-07: SAME semantics as deriveState (shared evaluatePlaybackStall via the observer's LIVE progress
+  // tracker) — the old cruder "playing && positionAt stale" rule could keep a restart going on a fresh,
+  // still-resolving attempt that the state machine already considered healthy.
+  isAppHealthy: (pid: number): boolean =>
+    isAppHealthyFromHeartbeat(readJson<VonoHeartbeat>(heartbeatPath()), pid, liveProgressTracker ?? initProgressTracker(), Date.now()),
   launch: (execPath: string) => launchDetached(execPath),
   killTree: (pid: number, force: boolean): boolean => {
     try {
@@ -351,6 +351,7 @@ export function tick(mem: WatchdogMemory, tracker: ProgressTracker, cache: Watch
 export function startObserver(): ReturnType<typeof setInterval> {
   const mem = initialMemory();
   const tracker = initProgressTracker();
+  liveProgressTracker = tracker; // P0: the recovery kill-abort check samples the SAME tracker as the ticks
   const cache = loadCache();
   const cacheKey = (c: WatchdogCache) => `${c.lastKnownExecPath}|${c.lastKnownPid}`;
   let lastCacheKey = cacheKey(cache);

@@ -21,7 +21,7 @@
 
 import { MpvManager, type MpvBinaries, type MpvStatus, createInitialMpvStatus } from "./mpv-manager";
 import { redactMediaToken } from "../shared/redact-media-token";
-import { normalizeMpvLoadTarget } from "./mpv-input-normalize";
+import { standbyLoadTimeoutMs } from "./mpv-input-normalize";
 import { mediaKey as liveMediaKey } from "./live-media-key";
 
 const ORCH = "[SyncBiz:desktop-mpv:orchestrator] music";
@@ -38,12 +38,9 @@ const DUCK_STEP_MS = 30;
 // ─── Crossfade constants ──────────────────────────────────────────────────────
 /** Volume steps per second during an A/B crossfade ramp. */
 const XFADE_STEPS_PER_SEC = 10;
-/** Standby deck must reach "playing" within this window or the crossfade aborts (active track keeps
- *  playing). SOURCE-AWARE: local files load instantly (12s is plenty; real local failures surface via
- *  decode-fail sooner), but a URL resolves through yt-dlp and can take ~20–30s on real hardware — so a
- *  stream gets the full 30s window (== renderer STREAM_STARTUP_TIMEOUT_MS). */
-const XFADE_LOAD_TIMEOUT_LOCAL_MS = 12_000;
-const XFADE_LOAD_TIMEOUT_URL_MS = 30_000;
+/** Standby deck must reach "playing" within a SOURCE-AWARE window or the crossfade aborts (active track keeps
+ *  playing — never a process restart). P0 2026-10-07: LOCAL 12s · plain stream URL 30s · yt-dlp-resolved source
+ *  (YouTube / SoundCloud page) 90s — see standbyLoadTimeoutMs() in mpv-input-normalize.ts. */
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -407,7 +404,7 @@ export class PlaybackOrchestrator {
     standby.play(u, attemptId);
     // SOURCE-AWARE window: URLs (yt-dlp) get 30s; local files keep the fast 12s. Reuse the existing
     // normalizer's classification — no duplicate URL/local logic.
-    const loadTimeoutMs = normalizeMpvLoadTarget(u).kind === "url" ? XFADE_LOAD_TIMEOUT_URL_MS : XFADE_LOAD_TIMEOUT_LOCAL_MS;
+    const loadTimeoutMs = standbyLoadTimeoutMs(u);
     this.xfadeStartTimeoutId = setTimeout(() => {
       // Incoming track never started (bad URL / yt-dlp failure): keep the business audio alive on the
       // current track — never fade into silence. Aborts the STANDBY deck only; active deck untouched.

@@ -32,6 +32,10 @@ export const WD = {
   // once AND (b) lived at least this long. >= the app's own stream-startup policy (~30s) so the
   // watchdog can never fight a legitimate 20–30s URL/YouTube startup.
   startupGraceMs: 30_000,
+  // P0 2026-10-07 — bounded no-progress hard maximum: a FRESH attempt that has NEVER shown progress may stay in
+  // startup / loading (e.g. a slow yt-dlp resolve; Lenovo evidence 61–69 s) up to this long while the app intends
+  // to play. Beyond it, it is genuinely stuck (no infinite silent loading).
+  startupHardMaxMs: 120_000,
   rendererStaleMs: 20_000,
   recoveryConfirmMs: 20_000,
   interAttemptCooldownMs: 30_000,

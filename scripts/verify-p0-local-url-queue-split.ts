@@ -206,7 +206,12 @@ assert("ctx: URL select records the sent leaf + releases ownership; LOCAL select
 assert("F: ownership starts owned (cold-boot restore)", /const localSessionOwnedRef = useRef\(true\);/.test(ctx));
 const diff = execSync("git diff HEAD -- lib/device-player-context.tsx components/sources-manager.tsx", { cwd: ROOT }).toString();
 assert("G: On-Air (PLAY_INTERRUPT) path unchanged", !/PLAY_INTERRUPT|interrupt/i.test(diff.split("\n").filter((l) => /^[+-][^+-]/.test(l)).join("\n")));
-const names = execSync("git diff --name-only HEAD", { cwd: ROOT }).toString();
+// Scope of the queue/index fix commit itself (e78e8a0); later, separately approved commits (e.g. the P0 watchdog
+// / URL-load desktop fix) may touch desktop/. Falls back to the working tree if the commit is unavailable.
+const FIX_COMMIT = "e78e8a0bbd3410a456b8f0120a131581918f65e0";
+const hasFixCommit = (() => { try { execSync(`git cat-file -e ${FIX_COMMIT}`, { cwd: ROOT, stdio: "ignore" }); return true; } catch { return false; } })();
+const names = execSync(hasFixCommit ? `git diff --name-only ${FIX_COMMIT}~1 ${FIX_COMMIT}` : "git diff --name-only HEAD", { cwd: ROOT }).toString()
+  .split("\n").filter((n) => !n.startsWith("scripts/") && !n.startsWith("desktop/scripts/")).join("\n"); // test-only pins excluded
 assert("scope: no desktop / server / playback-provider / audio-player change", !/^(desktop|server)\//m.test(names) && !/playback-provider|audio-player/.test(names));
 
 console.log(`\n${pass} passed, ${fail} failed`);

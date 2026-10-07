@@ -4,6 +4,7 @@
  */
 
 import WebSocket from "ws";
+import { nextMainWsAttemptId } from "../main/main-attempt-id";
 import { MockPlaybackSession } from "../playback-agent";
 import type { PlaybackOrchestrator } from "../main/playback-orchestrator";
 import type {
@@ -359,9 +360,9 @@ export class DeviceWsManager {
         const fadeSec = orch.getCrossfadeSec();
         if (url) {
           if (orch.getState().music.status === "playing") {
-            orch.playMusicCrossfade(url, fadeSec);
+            orch.playMusicCrossfade(url, fadeSec, nextMainWsAttemptId());
           } else {
-            orch.playMusic(url);
+            orch.playMusic(url, nextMainWsAttemptId());
           }
         } else {
           const mpvStatus = orch.getState().music.status;
@@ -372,9 +373,9 @@ export class DeviceWsManager {
             if (srcUrl) {
               console.log("[DeviceWsManager] PLAY → loadfile on Channel A:", srcUrl.slice(0, 100));
               if (mpvStatus === "playing") {
-                orch.playMusicCrossfade(srcUrl, fadeSec);
+                orch.playMusicCrossfade(srcUrl, fadeSec, nextMainWsAttemptId());
               } else {
-                orch.playMusic(srcUrl);
+                orch.playMusic(srcUrl, nextMainWsAttemptId());
               }
             } else {
               orch.resumeMusic();
@@ -425,9 +426,9 @@ export class DeviceWsManager {
         if (!url) break; // local (paths stripped on the wire) → audio handled by the co-located renderer engine
         const fadeSec = orch.getCrossfadeSec();
         if (orch.getState().music.status === "playing") {
-          orch.playMusicCrossfade(url, fadeSec);
+          orch.playMusicCrossfade(url, fadeSec, nextMainWsAttemptId());
         } else {
-          orch.playMusic(url);
+          orch.playMusic(url, nextMainWsAttemptId());
         }
         break;
       }
