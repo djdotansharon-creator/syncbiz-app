@@ -20,6 +20,7 @@ import { urlToUnifiedSource } from "@/lib/remote-control/url-to-source";
 import { payloadToUnifiedSource } from "@/lib/remote-control/payload-to-source";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
 import { routeStationTransport, resolveUrlSessionStep } from "@/lib/station-transport-routing";
+import { initialUrlEofState, observeUrlEof, disarmUrlEof, type UrlEofState } from "@/lib/url-eof-advance";
 import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
@@ -1154,6 +1155,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // P0 (LOCAL→URL coherence): the last URL playlist leaf this renderer committed via WS PLAY_SOURCE (carries the
   // parent playlist with every track URL) — used to step the SAME session on NEXT / PREV.
   const lastSentUrlLeafRef = useRef<UnifiedSource | null>(null);
+  // P0 (URL EOF auto-advance): natural-end tracker of the MAIN attempt playing OUR URL session (lib/url-eof-advance.ts).
+  const urlEofStateRef = useRef<UrlEofState>(initialUrlEofState());
   const sendCommandToMasterRef = useRef(sendCommandToMaster);
   useEffect(() => { sendCommandToMasterRef.current = sendCommandToMaster; }, [sendCommandToMaster]);
 
@@ -1182,6 +1185,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       } else {
         // [VONO MetaSync — READ-ONLY TEST] select → WS PLAY_SOURCE (URL / remote). No behavior change.
         console.warn("[VONO MetaSync] select->WS PLAY_SOURCE " + JSON.stringify({ type: source?.type ?? null, id: source?.id ?? null, title: source?.title ?? null, trackIndex }));
+        urlEofStateRef.current = disarmUrlEof(urlEofStateRef.current); // P0 URL EOF: a new selection never double-steps
         localSessionOwnedRef.current = false; // relinquish: a non-local source is now the committed station source
         lastSentUrlLeafRef.current = source;
         sendCommandToMaster("PLAY_SOURCE", {
@@ -1227,8 +1231,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   );
   // P0: URL playlist session NEXT / PREV on the designated station → PLAY_SOURCE of item N±1 (trackIndex N±1) of
   // the SAME session MAIN mirrors. Returns false when no coherent URL session exists (caller keeps the MAIN command).
+  // `noWrap` (natural EOF only): never wrap past the last item — end-of-session behavior is unchanged (no invented loop).
   const stepUrlSession = useCallback(
-    (direction: "next" | "prev"): boolean => {
+    (direction: "next" | "prev", opts?: { noWrap?: boolean }): boolean => {
       if (!canLocalExec || localSessionOwnedRef.current) return false;
       const step = resolveUrlSessionStep({
         sentLeaf: lastSentUrlLeafRef.current,
@@ -1236,9 +1241,11 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         mainTrackIndex: masterState?.currentTrackIndex ?? null,
         mainSessionTrackCount: masterState?.sessionTracks?.length ?? null,
         direction,
-        repeatMode: getRepeatMode(),
+        repeatMode: opts?.noWrap ? "off" : getRepeatMode(),
       });
       if (!step) return false;
+      // Any step (manual NEXT / PREV or the EOF step itself) disarms: a pending natural end can never step again.
+      urlEofStateRef.current = disarmUrlEof(urlEofStateRef.current);
       if ("noop" in step) return true;
       lastSentUrlLeafRef.current = step.leaf;
       sendCommandToMaster("PLAY_SOURCE", { source: unifiedSourceToPayload(step.leaf), trackIndex: step.trackIndex });
@@ -1246,6 +1253,43 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     },
     [canLocalExec, masterState, sendCommandToMaster]
   );
+
+  // P0 (URL EOF auto-advance): observe MAIN's music status (co-located desktop IPC). On the natural end of the confirmed
+  // MAIN attempt playing the URL session THIS renderer committed, step the SAME session forward exactly once via the
+  // existing PLAY_SOURCE N+1 path. No second transport path; no wrap at the last item; LOCAL is untouched (LOCAL runs
+  // through the provider with renderer-owned attempt ids, which this observer ignores).
+  const stepUrlSessionRef = useRef(stepUrlSession);
+  useEffect(() => { stepUrlSessionRef.current = stepUrlSession; }, [stepUrlSession]);
+  useEffect(() => {
+    if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const desktop = (window as any).syncbizDesktop;
+    if (typeof desktop?.onStatus !== "function") return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const unsub = desktop.onStatus((st: any) => {
+      const sent = lastSentUrlLeafRef.current;
+      const urlSessionActive = canLocalExecRef.current && !localSessionOwnedRef.current && !!sent?.playlist && sent.type !== "local";
+      const res = observeUrlEof(
+        urlEofStateRef.current,
+        {
+          status: typeof st?.mockPlaybackStatus === "string" ? st.mockPlaybackStatus : "idle",
+          attemptId: typeof st?.mpvAttemptId === "number" ? st.mpvAttemptId : 0,
+          position: typeof st?.mpvPosition === "number" ? st.mpvPosition : 0,
+          duration: typeof st?.mpvDuration === "number" ? st.mpvDuration : 0,
+          lastError: typeof st?.mpvLastError === "string" && st.mpvLastError ? st.mpvLastError : null,
+          engineReady: st?.mpvEngineReady !== false,
+        },
+        urlSessionActive,
+      );
+      urlEofStateRef.current = res.state;
+      if (!res.advance) return;
+      const stepped = stepUrlSessionRef.current("next", { noWrap: true });
+      console.info("[VONO url-eof] natural end of MAIN URL attempt → " + (stepped ? "stepped session forward once" : "no coherent session / last item — unchanged"), {
+        attemptId: typeof st?.mpvAttemptId === "number" ? st.mpvAttemptId : null,
+      });
+    });
+    return () => { if (typeof unsub === "function") unsub(); };
+  }, []); // mount-only — reads refs at event time
 
   const playOrSend = useCallback(() => {
     if (transportRunsLocally()) play();

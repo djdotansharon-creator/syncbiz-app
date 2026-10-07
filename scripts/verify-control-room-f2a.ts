@@ -119,7 +119,9 @@ if (DBURL) {
     importers = execSync(`git grep -l --untracked "authz-scope" -- app lib components server desktop middleware.ts`, { cwd: ROOT, stdio: ["ignore", "pipe", "ignore"] }).toString().trim().split("\n").filter(Boolean);
   } catch { importers = []; } // git grep exits 1 when nothing matches = no importer
   assert("A26 NOTHING in app / lib / server / desktop imports the evaluator (offline only)", importers.length === 0, importers.join(","));
-  const changed = execSync(`git diff --name-only HEAD -- lib app components server desktop middleware.ts`, { cwd: ROOT }).toString().trim().split("\n").filter(Boolean);
+  // Scope of the F2a commit itself (398cce7) — bound 2026-10-07 so later, separately approved gates may touch runtime files.
+  const F2A_COMMIT = "398cce77662ad4d5fda79c7738556b6620a660f1";
+  const changed = execSync(`git diff --name-only ${F2A_COMMIT}~1 ${F2A_COMMIT} -- lib app components server desktop middleware.ts`, { cwd: ROOT }).toString().trim().split("\n").filter(Boolean).filter((f) => f !== "lib/authz-scope.ts");
   assert("A27 no existing runtime file changed (authz.ts / shadowAuthorize / tokens / WS / playback untouched)", changed.length === 0, changed.join(","));
 
   if (!DBURL) {

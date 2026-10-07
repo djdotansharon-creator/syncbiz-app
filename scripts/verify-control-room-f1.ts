@@ -82,7 +82,9 @@ if (DBURL) {
   // Only store.addBranch uses the foundation module; no authz / token / WS / station / playback file touched.
   const users = execSync(`git grep -l --untracked "control-room-foundation" -- app lib components server desktop`, { cwd: ROOT }).toString().trim().split("\n").filter(Boolean).sort();
   assert("A16 SHADOW: only lib/store.ts imports the foundation module", JSON.stringify(users) === JSON.stringify(["lib/store.ts"]), users.join(","));
-  const changed = execSync(`git diff --name-only HEAD -- lib app components server desktop middleware.ts`, { cwd: ROOT }).toString().trim().split("\n").filter(Boolean).sort();
+  // Scope of the F1 commit itself (25d4c06) — bound 2026-10-07 so later, separately approved gates may touch runtime files.
+  const F1_COMMIT = "25d4c0685517f235df69fac3fb89c555807ef698";
+  const changed = execSync(`git diff --name-only ${F1_COMMIT}~1 ${F1_COMMIT} -- lib app components server desktop middleware.ts`, { cwd: ROOT }).toString().trim().split("\n").filter(Boolean).sort().filter((f) => f !== "lib/control-room-foundation.ts");
   assert("A17 no runtime file changed except lib/store.ts (authz / tokens / WS / station / playback untouched)", changed.every((f) => f === "lib/store.ts"), changed.join(","));
 
   // ── Part B — real throwaway local Postgres ─────────────────────────────────────────────────────────────────
