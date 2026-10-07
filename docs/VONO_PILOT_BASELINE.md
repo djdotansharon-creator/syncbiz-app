@@ -8,11 +8,18 @@
 
 ## 1. STATUS
 
-- **Date:** 2026-10-05 (jingles acceptance recorded 2026-10-06 UTC+3 night)
+- **⭐ P0 PLAYBACK HARDENING — ACCEPTED / BASELINE LOCKED (owner-attested 2026-10-07, TEST).** Desktop
+  **2.2.8-beta.12** (SHA256 `3becd1c881c6c847f11c0c10f2f1549c7987be92bb1e83808b36cf8528e49429`) from `dc74457` +
+  TEST renderer `3d6a70d` (deployment `a1028a7f`). Accepted commits `e78e8a0`, `3d6a70d`, `2e5b4b8`, `dc74457`
+  on `feature/control-room-phase1` (pushed). Full record: `docs/P0_PLAYBACK_HARDENING_ACCEPTANCE_2026-10-07.md`. **No playback code change after this lock
+  without a new isolated gate.** URL startup latency PARKED (§9 item 15).
+- **Date:** 2026-10-07 (P0 lock); earlier: 2026-10-05 (jingles acceptance recorded 2026-10-06 UTC+3 night)
 - **Phase:** PILOT HARDENING
   - **PLAYER PHASE: PILOT ACCEPTED** (owner-attested 2026-10-05)
   - **JINGLES / ANNOUNCEMENTS: PILOT ACCEPTED** (owner-attested 2026-10-05)
-- **Current active P0:** none. Next phase: Control Room / branch management.
+- **Current active P0:** none (P0 playback hardening accepted 2026-10-07). Next architecture step: Control Room
+  **Foundation Gate — Brand + Zone + composite permission scopes** (blueprint `docs/CONTROL_ROOM_BLUEPRINT.md`,
+  D14–D22; no schema/runtime work started).
 - **CONTROL ROOM PHASE 1 — GATE 1 (canonical branch, SHADOW): FULL PASS / ACCEPTED** (2026-10-06, TEST only)
   on branch `feature/control-room-phase1` (NOT PR #52, which stays FROZEN at its accepted head). Gate 2
   (activation / "default" migration) NOT started. See §7 "CONTROL ROOM PHASE 1".
@@ -99,10 +106,25 @@ Lineage: `865ba81` (offline cold boot, MAIN) → `2ebdbe4` (renderer stall fix) 
 | branch | `default` | server-log corroborated |
 | workspace (TEST) | `31d30e23-8f4a-4bf2-a1df-c707b69b5673` | verified 2026-10-06 from the TEST DB (`BranchMasterDesignation`) + TEST WS designation file (`ws:31d30e23-…:default`) |
 | workspace (PROD — not this pilot env) | `f2366813-341d-46ba-a6b8-92d2c1fd39b1` | PROD designation of the same Lenovo (2026-10-02); earlier versions of this file wrongly listed it as the TEST workspace — corrected 2026-10-06 |
-| Installed Desktop | `2.2.8-beta.10` | **OWNER-ATTESTED / NOT DIRECTLY VERIFIED FROM THIS MACHINE** |
+| Installed Desktop | `2.2.8-beta.12` (since 2026-10-07; before: beta.10) | **OWNER-ATTESTED / NOT DIRECTLY VERIFIED FROM THIS MACHINE** |
 | Embedded renderer WS id | `ba8ffdba-d00b-468d-bf74-f805013d37ef` (CONTROL) | server-log corroborated (earlier sessions) |
 
 ## 5. DESKTOP INSTALLER (ACCEPTED)
+
+### CURRENT — `2.2.8-beta.12` (P0 playback hardening, accepted owner-attested 2026-10-07)
+
+| Item | Value |
+|---|---|
+| Version | `2.2.8-beta.12` |
+| Desktop source lineage | `dc744575e97279358e6794687ed37d408706677d` (branch `feature/control-room-phase1`) |
+| Artifact | `SyncBiz-Player-Setup-2.2.8-beta.12-x64.exe` |
+| SHA256 | `3becd1c881c6c847f11c0c10f2f1549c7987be92bb1e83808b36cf8528e49429` |
+| Size | 140,772,149 bytes · unsigned · **NOT published** · **TEST-pinned** |
+| Transient build edits (reverted) | `hosted-url.ts` → TEST app + TEST WS; `normalizeEndpointsForPackaged` → force TEST endpoints; `desktop/package.json` version → `2.2.8-beta.12` |
+| Accepted copy | `D:\SyncBiz_Backups\pilot\2026-10-07-beta12-p0-accepted\` (hash verified) · candidate copy `…\2026-10-07-beta12-dc74457\` |
+| Details | `docs/P0_PLAYBACK_HARDENING_ACCEPTANCE_2026-10-07.md` |
+
+### PREVIOUS — `2.2.8-beta.10` (jingles baseline; now a rollback reference)
 
 | Item | Value |
 |---|---|
@@ -141,6 +163,19 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### P0 PLAYBACK HARDENING — ACCEPTED — owner-attested 2026-10-07 (Lenovo, Desktop beta.12 + TEST renderer `3d6a70d`)
+
+Accepted on the Lenovo (Dotan; this Dev-PC session did not inspect Lenovo logs): correct URL trackIndex · URL
+NEXT/PREV queue coherence · no LOCAL contamination during a URL session · fresh MAIN attemptId per WS load · watchdog
+does not falsely restart during slow URL resolution · recovery kill cancellation · source-aware URL load timeouts ·
+crossfade does not start on duration alone · stream crossfade waits for real MPV progress · coreIdle /
+pausedForCache gating · outgoing audio audible during long URL buffering · promotion volume + pause normalization ·
+URL → LOCAL · LOCAL NEXT after URL · LOCAL automatic transition · no playback gap · no watchdog restart · no force kill.
+Server-verified (read-only, 2026-10-07): live TEST renderer files hash-identical to `3d6a70d`.
+Commits `e78e8a0` (RENDERER ONLY) · `3d6a70d` (test) · `2e5b4b8` (DESKTOP MAIN + WATCHDOG) · `dc74457` (DESKTOP MAIN).
+Tags `pilot-baseline/2026-10-07-desktop-beta12-dc74457`, `pilot-baseline/2026-10-07-renderer-3d6a70d`.
+Root causes / fixes: §8 and `docs/P0_PLAYBACK_HARDENING_ACCEPTANCE_2026-10-07.md`.
 
 ### CONTROL ROOM GATE 3B-4a — RETIRE DEAD / LEGACY COMMAND ROUTES — ACCEPTED (2026-10-06, TEST, branch `feature/control-room-phase1`)
 - Commit **`2cb46d2`** (APP only, security): `/api/player/commands` (GET, POST), `/api/play-now` (POST),
@@ -468,6 +503,18 @@ designated MASTER re-registration + renderer CONTROL + no auto-failover — serv
 
 ## 8. ROOT CAUSES FIXED
 
+### P0 PLAYBACK HARDENING — FIXED + runtime accepted (owner-attested 2026-10-07) — details in `docs/P0_PLAYBACK_HARDENING_ACCEPTANCE_2026-10-07.md`
+- **Wrong URL item / LOCAL contamination** (`e78e8a0`): PLAY_SOURCE sent without the item's trackIndex (→ 0); on the
+  designated station URL-session NEXT/PREV ran against the local queue. Fixed: index passed; `transportRunsLocally()`
+  routing; URL NEXT/PREV = PLAY_SOURCE N±1.
+- **Watchdog vs slow URL resolution** (`2e5b4b8`): WS loads reused attemptId 0 → resolving URL judged stalled after
+  ~13 s → kill/restart. Fixed: fresh MAIN attemptId per WS load; shared stall predicate for state + kill abort;
+  120 s startup hard max; kill cancellation on recovered health; source-aware standby windows (LOCAL 12 s / stream
+  30 s / yt-dlp 90 s).
+- **Crossfade before the incoming URL was audible** (`dc74457`): ramp started on "playing + duration known". Fixed:
+  stream incoming requires real time-pos progress ∧ ¬coreIdle ∧ ¬pausedForCache; promotion re-asserts volume +
+  pause=false; global MPV status semantics unchanged.
+
 ### JINGLES / ANNOUNCEMENTS — FIXED + runtime accepted (owner-attested 2026-10-05)
 - **Generate failed on TEST:** `ELEVENLABS_API_KEY` missing on `syncbiz-app-test` (route returned 503
   before any TTS) → configured by the owner. No persistent app volume (files lost on redeploy) → `/data`
@@ -573,6 +620,19 @@ Not pilot blockers. Do not fix inside unrelated work.
    exact caller(s); whether multiple renderers / components poll independently; the intended polling interval;
    duplicate timers / effects; the effect at 300-station scale; whether push / event-driven refresh can replace it.
 
+15. **URL STARTUP LATENCY (performance — PARKED 2026-10-07 at the P0 lock).** Owner-observed ~15–76 s from command to
+   audio for some yt-dlp URLs on the Lenovo (beta.12). Continuity is protected (outgoing audio continues; no watchdog
+   restart; no force kill), so this is a PERFORMANCE item, not a playback-continuity P0. Own audit/gate; not part of
+   the baseline-lock commit.
+16. **URL NATURAL EOF AUTO-ADVANCE (playback, PARKED 2026-10-07).** MAIN does not auto-advance a URL session at
+   natural EOF. Own gate.
+17. **EXTERNAL CONTROLLER OWNERSHIP RELEASE (playback, PARKED 2026-10-07).** Another controller switching MAIN to a
+   source does not release the Lenovo renderer's session ownership. Own gate.
+18. **yt-dlp `_MEI*` TEMP CLEANUP (desktop hygiene, PARKED 2026-10-07).** Leftover PyInstaller extraction folders from
+   yt-dlp runs. Own gate.
+19. **MAIN engine failure with mock status "playing" (watchdog residual, recorded 2026-10-07).** Recovery then relies
+   on the 120 s startup hard max instead of the 12 s stall rule. Record only.
+
 Carried over (still open):
 - Jingle library/pads still use `branchId:"default"`; no link to `MediaAsset`; generated-but-unsaved MP3s
   are never cleaned up; `/api/jingles/audio/<id>` is unauthenticated (UUID-only).
@@ -581,7 +641,7 @@ Carried over (still open):
 - `[VONO Shuffle Diag]` `console.log` — still present in `components/audio-player.tsx` (~4395).
 - Git stash `pr52-xfade-diag-hold` (`stash@{0}`) — still present; diagnostic only.
 - Long-outage / token-expiry endurance test — not yet run.
-- URL startup latency (~10–13 s on Lenovo) — owner-reported; reproducibility NOT VERIFIED.
+- ~~URL startup latency (~10–13 s on Lenovo)~~ — superseded by §9 item 15 (observed 15–76 s, 2026-10-07).
 - Reconnect: CONTROL LOCAL title display blank — addressed in `9264bb3`; **NOT runtime-confirmed**.
 - Offline cache edge: a TEST deploy during an outage may break lazily-loaded UI pieces until restart.
 - Offline station cannot play hosted jingle MP3s (no local jingle cache yet).
@@ -590,6 +650,14 @@ Carried over (still open):
 - Pre-existing desktop `tsconfig.typecheck.json` errors (not the packaging path) — known, untouched.
 
 ## 10. DO NOT REGRESS
+
+*(added 2026-10-07, P0 playback hardening — beta.12)*
+- URL trackIndex correct (no wrong first item); URL NEXT/PREV coherent; no LOCAL contamination of a URL session
+- fresh MAIN attemptId per WS load; watchdog never restarts a slow-resolving URL (startup hard max 120 s); kill
+  cancelled when health returns
+- source-aware standby windows (LOCAL 12 s / stream 30 s / yt-dlp 90 s) — timeout keeps the current track
+- stream crossfade only after real MPV progress (¬coreIdle, ¬pausedForCache); outgoing deck audible while buffering
+- promoted deck volume + pause normalized; LOCAL→LOCAL crossfade fast path unchanged
 
 - permanent designated MASTER (MAIN = MASTER, renderer = CONTROL; no failover, no steal)
 - LOCAL playback
@@ -620,6 +688,10 @@ Carried over (still open):
 
 ## 11. LAST ACCEPTANCE
 
+- **Date:** 2026-10-07 — **P0 PLAYBACK HARDENING** — Desktop 2.2.8-beta.12 (SHA256 `3becd1c8…9429`) + TEST renderer
+  `3d6a70d` (deployment `a1028a7f`). **OWNER-ATTESTED** on the Lenovo (§7). Result: ACCEPTED; baseline locked
+  (tags in §12). Previous acceptance below.
+
 - **Date:** 2026-10-05
 - **Build under test:** Desktop 2.2.8-beta.10 (TEST-pinned, SHA256 `0e292ec1…f9b0`) + TEST renderer `cd4c631`.
 - **OWNER-ATTESTED:** §7 jingles list — Generate in TEST, MP3 persisted, On-Air from CONTROL reaches the
@@ -632,7 +704,10 @@ Carried over (still open):
 
 | Layer | Reference |
 |---|---|
-| **Accepted renderer tag** | `pilot-baseline/2026-10-05-renderer-cd4c631` → `cd4c631fc90570f062040def825f0c91bcff5bc3` |
+| **CURRENT desktop baseline tag (2026-10-07)** | `pilot-baseline/2026-10-07-desktop-beta12-dc74457` → `dc744575e97279358e6794687ed37d408706677d` |
+| **CURRENT renderer baseline tag (2026-10-07)** | `pilot-baseline/2026-10-07-renderer-3d6a70d` → `3d6a70de92e54e88ba00e2f7f14dc6589e5cf644`; TEST deployment `a1028a7f-98f2-4a5f-9a82-fb47f35f03f7` |
+| **CURRENT accepted installer** | `D:\SyncBiz_Backups\pilot\2026-10-07-beta12-p0-accepted\SyncBiz-Player-Setup-2.2.8-beta.12-x64.exe`, SHA256 `3becd1c881c6c847f11c0c10f2f1549c7987be92bb1e83808b36cf8528e49429` |
+| **Accepted renderer tag** (previous, jingles) | `pilot-baseline/2026-10-05-renderer-cd4c631` → `cd4c631fc90570f062040def825f0c91bcff5bc3` |
 | **Accepted desktop source-lineage tag** | `pilot-baseline/2026-10-05-desktop-beta10-cd4c631` → `cd4c631fc90570f062040def825f0c91bcff5bc3` |
 | **Accepted installer artifact** | `D:\SyncBiz_Backups\pilot\2026-10-05-beta10-jingles-accepted\SyncBiz-Player-Setup-2.2.8-beta.10-x64.exe`, SHA256 `0e292ec190f587dca920f4f0d00a50fe67cfbb934f21c8aaf377bc3c4b23f9b0` |
 | Railway TEST deployment | `b591c130-4112-433a-a928-6f0f424a5dce` (may become non-redeployable once REMOVED — the tag is the fallback) |
