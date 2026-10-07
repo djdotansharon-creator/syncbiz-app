@@ -195,7 +195,9 @@ assert("H: playSyncbizPlaylistExpandedItem passes the real index on ALL 3 CONTRO
   (fnBlock.match(/playSourceOverride\(item, ti\)/g) ?? []).length === 3 && !/playSourceOverride\(item\)/.test(fnBlock) && fnBlock.indexOf("const ti =") < fnBlock.indexOf("if (!activePlaylistKey)"));
 const tBlock = ctx.slice(ctx.indexOf("const transportRunsLocally"), ctx.indexOf("const seekOrSend"));
 assert("ctx: all 5 transports route through transportRunsLocally (ownership-gated)",
-  ["playOrSend", "pauseOrSend", "stopOrSend", "nextOrSend", "prevOrSend"].every((f) => new RegExp(`const ${f} = useCallback\\(\\(\\) => \\{\\n    if \\(transportRunsLocally\\(\\)\\)`).test(tBlock)) &&
+  // Updated 2026-10-07 (P0 Gate 1c): PAUSE / STOP first clear the pending URL intent (`setUrlTransition(null);`) — the
+  // ownership gate (transportRunsLocally) is unchanged and still routes every transport.
+  ["playOrSend", "pauseOrSend", "stopOrSend", "nextOrSend", "prevOrSend"].every((f) => new RegExp(`const ${f} = useCallback\\(\\(\\) => \\{\\n(    setUrlTransition\\(null\\);\\n)?    if \\(transportRunsLocally\\(\\)\\)`).test(tBlock)) &&
   !/useLocalDeviceTransport \|\| localExecCurrent\) (play|pause|stop|next|prev)\(\)/.test(ctx));
 assert("ctx: gate includes ownership (localSessionOwnedRef) via routeStationTransport",
   /routeStationTransport\(\{\s*useLocalDeviceTransport,\s*canLocalExec,\s*currentSourceIsLocal,\s*localSessionOwned: localSessionOwnedRef\.current,/.test(tBlock));

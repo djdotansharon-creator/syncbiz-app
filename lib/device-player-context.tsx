@@ -21,6 +21,10 @@ import { payloadToUnifiedSource } from "@/lib/remote-control/payload-to-source";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
 import { routeStationTransport, resolveUrlSessionStep } from "@/lib/station-transport-routing";
 import { initialUrlEofState, observeUrlEof, disarmUrlEof, type UrlEofState } from "@/lib/url-eof-advance";
+import {
+  beginTransition, decideUserCommand, failTransition, isBlocking, observeTransition, targetKeyOf, tickTransition,
+  MAX_CONSECUTIVE_FAILURES, type TransitionObservation, type TransitionOrigin, type UrlTransition,
+} from "@/lib/url-transition-intent";
 import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
@@ -47,6 +51,10 @@ type DevicePlayerContextValue = {
   hasExistingMaster: boolean;
   /** Remote state from master (for CONTROL mode display). */
   masterState: StationPlaybackState | null;
+  /** P0 Gate 1c: the ONE pending source transition started from THIS controller (null = none). */
+  urlTransition: UrlTransition | null;
+  /** P0 Gate 1c: mirrored state held while a transition is pending — the audible item stays visibly current. */
+  urlTransitionHeldState: StationPlaybackState | null;
   masterConfirmOpen: boolean;
   setMasterConfirmOpen: (open: boolean) => void;
   /** Report position/duration (+ optional MASTER-authoritative status) from the MASTER
@@ -1157,6 +1165,37 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const lastSentUrlLeafRef = useRef<UnifiedSource | null>(null);
   // P0 (URL EOF auto-advance): natural-end tracker of the MAIN attempt playing OUR URL session (lib/url-eof-advance.ts).
   const urlEofStateRef = useRef<UrlEofState>(initialUrlEofState());
+  // P0 Gate 1b/1c: the ONE pending source-transition intent (lib/url-transition-intent.ts), shared by every UI that uses
+  // this context (station renderer, web app, phone source rows). State drives the UI; the ref drives synchronous decisions.
+  const [urlTransition, setUrlTransitionState] = useState<UrlTransition | null>(null);
+  const urlTransitionRef = useRef<UrlTransition | null>(null);
+  const heldMasterStateRef = useRef<StationPlaybackState | null>(null);
+  const setUrlTransition = useCallback((t: UrlTransition | null) => {
+    if (t === urlTransitionRef.current) return;
+    urlTransitionRef.current = t;
+    if (!isBlocking(t)) heldMasterStateRef.current = null;
+    setUrlTransitionState(t);
+  }, []);
+  /** Latest MAIN snapshot over desktop IPC (station only): attempt id + status when a command is sent. */
+  const lastMainSnapRef = useRef<{ attemptId: number; status: string } | null>(null);
+  const masterStateRef = useRef<StationPlaybackState | null>(masterState);
+  masterStateRef.current = masterState;
+  /** This controller can observe MAIN attempt ids directly (the designated station's co-located renderer). */
+  const isStationObserver = () => canLocalExecRef.current && typeof window !== "undefined" && "syncbizDesktop" in window;
+  const beginUrlTransition = useCallback((origin: TransitionOrigin, targetKey: string | null, consecutiveFailures = 0) => {
+    const station = isStationObserver();
+    const audibleNow = station ? lastMainSnapRef.current?.status === "playing" : masterStateRef.current?.status === "playing";
+    if (!isBlocking(urlTransitionRef.current)) heldMasterStateRef.current = audibleNow ? masterStateRef.current : null;
+    const t = beginTransition({
+      origin, targetKey, now: Date.now(),
+      priorAttemptId: station ? (lastMainSnapRef.current?.attemptId ?? null) : null,
+      audibleAtStart: audibleNow || !!heldMasterStateRef.current,
+      consecutiveFailures,
+    });
+    urlTransitionRef.current = t;
+    setUrlTransitionState(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs only
+  }, []);
   const sendCommandToMasterRef = useRef(sendCommandToMaster);
   useEffect(() => { sendCommandToMasterRef.current = sendCommandToMaster; }, [sendCommandToMaster]);
 
@@ -1171,6 +1210,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         localSessionOwnedRef.current = true;
         lastLocalPushKeyRef.current = null; // force a fresh MAIN session commit for the new local selection
         lastSentUrlLeafRef.current = null;
+        setUrlTransition(null); // P0 Gate 1c: an explicit LOCAL / local-transport selection clears any URL intent
         playSource(source, trackIndex);
       } else if (canLocalExec && source?.type === "local") {
         // Designated-MASTER machine + LOCAL source → drive local audio via the renderer's existing engine
@@ -1181,10 +1221,16 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         localSessionOwnedRef.current = true;  // (re)acquire LOCAL ownership
         lastLocalPushKeyRef.current = null;   // force a fresh MAIN commit (handles URL → same-LOCAL re-selection)
         lastSentUrlLeafRef.current = null;
+        setUrlTransition(null); // P0 Gate 1c: explicit LOCAL selection clears the URL intent (existing safe LOCAL path)
         playSource(source, trackIndex);
       } else {
+        // P0 Gate 1c: ONE source-transition intent — the same target while it is still pending is a duplicate.
+        const selectKey = targetKeyOf(source?.id, trackIndex);
+        const verdict = decideUserCommand(urlTransitionRef.current, { kind: "select", targetKey: selectKey });
+        if (verdict !== "accept") { console.info("[VONO intent] selection ignored — " + verdict); return; }
         // [VONO MetaSync — READ-ONLY TEST] select → WS PLAY_SOURCE (URL / remote). No behavior change.
         console.warn("[VONO MetaSync] select->WS PLAY_SOURCE " + JSON.stringify({ type: source?.type ?? null, id: source?.id ?? null, title: source?.title ?? null, trackIndex }));
+        beginUrlTransition("select", selectKey); // P0 Gate 1c: immediate Loading… on THIS controller
         urlEofStateRef.current = disarmUrlEof(urlEofStateRef.current); // P0 URL EOF: a new selection never double-steps
         localSessionOwnedRef.current = false; // relinquish: a non-local source is now the committed station source
         lastSentUrlLeafRef.current = source;
@@ -1194,7 +1240,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [useLocalDeviceTransport, canLocalExec, playSource, sendCommandToMaster]
+    [useLocalDeviceTransport, canLocalExec, playSource, sendCommandToMaster, setUrlTransition, beginUrlTransition]
   );
 
   // Add to queue — local when we ARE the player; otherwise send QUEUE_NEXT to
@@ -1233,7 +1279,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // the SAME session MAIN mirrors. Returns false when no coherent URL session exists (caller keeps the MAIN command).
   // `noWrap` (natural EOF only): never wrap past the last item — end-of-session behavior is unchanged (no invented loop).
   const stepUrlSession = useCallback(
-    (direction: "next" | "prev", opts?: { noWrap?: boolean }): boolean => {
+    (direction: "next" | "prev", opts?: { noWrap?: boolean; origin?: TransitionOrigin; failures?: number }): boolean => {
       if (!canLocalExec || localSessionOwnedRef.current) return false;
       const step = resolveUrlSessionStep({
         sentLeaf: lastSentUrlLeafRef.current,
@@ -1248,10 +1294,12 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       urlEofStateRef.current = disarmUrlEof(urlEofStateRef.current);
       if ("noop" in step) return true;
       lastSentUrlLeafRef.current = step.leaf;
+      // P0 Gate 1c: every session step is ONE tracked transition (manual, natural-EOF or failure step).
+      beginUrlTransition(opts?.origin ?? (opts?.noWrap ? "auto-eof" : direction), targetKeyOf(step.leaf.id, step.trackIndex), opts?.failures ?? 0);
       sendCommandToMaster("PLAY_SOURCE", { source: unifiedSourceToPayload(step.leaf), trackIndex: step.trackIndex });
       return true;
     },
-    [canLocalExec, masterState, sendCommandToMaster]
+    [canLocalExec, masterState, sendCommandToMaster, beginUrlTransition]
   );
 
   // P0 (URL EOF auto-advance): observe MAIN's music status (co-located desktop IPC). On the natural end of the confirmed
@@ -1260,6 +1308,61 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // through the provider with renderer-owned attempt ids, which this observer ignores).
   const stepUrlSessionRef = useRef(stepUrlSession);
   useEffect(() => { stepUrlSessionRef.current = stepUrlSession; }, [stepUrlSession]);
+
+  // P0 Gate 1b/1c: fold one observation of MAIN into the pending transition. Station (attempt ids): a failed bound
+  // attempt — at ANY position, incl. pos 0 — or a confirmed attempt that later fails steps the URL session forward ONCE
+  // (≤ MAX_CONSECUTIVE_FAILURES in a row); no next / exhausted → message only (never a LOCAL fallback). Remote: feedback
+  // only (MAIN owns no playlist; the session owner steps).
+  const observeUrlTransition = useCallback((o: TransitionObservation, station: boolean) => {
+    const cur = urlTransitionRef.current;
+    if (!cur) return;
+    const res = observeTransition(cur, o);
+    if (res.event === "confirmed") {
+      heldMasterStateRef.current = null;
+      setUrlTransition(station ? res.t : null);
+      return;
+    }
+    if (res.event !== "failed" || !res.t) { setUrlTransition(res.t); return; }
+    const now = Date.now();
+    if (!station) { setUrlTransition(failTransition(res.t, now)); return; }
+    const failures = (res.t.phase === "confirmed" ? 0 : res.t.consecutiveFailures) + 1;
+    const before = urlTransitionRef.current;
+    const stepped = failures < MAX_CONSECUTIVE_FAILURES && canLocalExecRef.current && !localSessionOwnedRef.current &&
+      stepUrlSessionRef.current("next", { noWrap: true, origin: "auto-failure", failures });
+    const sent = stepped && urlTransitionRef.current !== before;
+    console.info("[VONO url-failure] MAIN URL attempt failed → " + (sent ? "stepped session forward once" : "no next / exhausted — " + (res.t.audibleAtStart ? "current music kept" : "idle")), {
+      attemptId: o.attemptId, consecutiveFailures: failures,
+    });
+    if (!sent) setUrlTransition(failTransition(res.t, now));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs + stable setters only
+  }, [setUrlTransition]);
+  const observeUrlTransitionRef = useRef(observeUrlTransition);
+  useEffect(() => { observeUrlTransitionRef.current = observeUrlTransition; }, [observeUrlTransition]);
+
+  // Remote controllers (no desktop IPC): observe the mirrored STATE_UPDATE.
+  useEffect(() => {
+    if (isStationObserver() || !urlTransitionRef.current) return;
+    observeUrlTransitionRef.current({
+      attemptId: null,
+      sourceId: masterState?.currentSource?.id ?? null,
+      trackIndex: typeof masterState?.currentTrackIndex === "number" ? masterState.currentTrackIndex : null,
+      status: masterState?.status ?? "idle",
+      position: typeof masterState?.position === "number" ? masterState.position : 0,
+      error: masterState?.mpvEngineError ?? null,
+      engineReady: masterState?.mpvEngineReady !== false,
+    }, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- masterState is the trigger
+  }, [masterState]);
+
+  // Safety ends (not UI delays) + message expiry — a 1 s tick only while a transition exists.
+  useEffect(() => {
+    if (!urlTransition) return;
+    const id = setInterval(() => {
+      setUrlTransition(tickTransition(urlTransitionRef.current, Date.now(), isStationObserver()));
+    }, 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setter stable; tick reads refs
+  }, [urlTransition, setUrlTransition]);
   useEffect(() => {
     if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1267,6 +1370,18 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     if (typeof desktop?.onStatus !== "function") return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const unsub = desktop.onStatus((st: any) => {
+      // P0 Gate 1b/1c: latest MAIN snapshot + the pending transition (station only).
+      const snapAttempt = typeof st?.mpvAttemptId === "number" ? st.mpvAttemptId : 0;
+      const snapStatus = typeof st?.mockPlaybackStatus === "string" ? st.mockPlaybackStatus : "idle";
+      lastMainSnapRef.current = { attemptId: snapAttempt, status: snapStatus };
+      if (canLocalExecRef.current) {
+        observeUrlTransitionRef.current({
+          attemptId: snapAttempt, sourceId: null, trackIndex: null, status: snapStatus,
+          position: typeof st?.mpvPosition === "number" ? st.mpvPosition : 0,
+          error: typeof st?.mpvLastError === "string" && st.mpvLastError ? st.mpvLastError : null,
+          engineReady: st?.mpvEngineReady !== false,
+        }, true);
+      }
       const sent = lastSentUrlLeafRef.current;
       const urlSessionActive = canLocalExecRef.current && !localSessionOwnedRef.current && !!sent?.playlist && sent.type !== "local";
       const res = observeUrlEof(
@@ -1291,29 +1406,39 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     return () => { if (typeof unsub === "function") unsub(); };
   }, []); // mount-only — reads refs at event time
 
+  // P0 Gate 1c: while a source transition is pending, PLAY / NEXT / PREV are ignored (one intent; no restart, no
+  // multi-skip). PAUSE / STOP are ALWAYS accepted and clear the pending intent.
+  const transitionPending = () => isBlocking(urlTransitionRef.current);
   const playOrSend = useCallback(() => {
     if (transportRunsLocally()) play();
+    else if (decideUserCommand(urlTransitionRef.current, { kind: "play" }) !== "accept") console.info("[VONO intent] PLAY ignored — transition pending");
     else sendCommandToMaster("PLAY");
   }, [transportRunsLocally, play, sendCommandToMaster]);
 
   const pauseOrSend = useCallback(() => {
+    setUrlTransition(null);
     if (transportRunsLocally()) pause();
     else sendCommandToMaster("PAUSE");
-  }, [transportRunsLocally, pause, sendCommandToMaster]);
+  }, [transportRunsLocally, pause, sendCommandToMaster, setUrlTransition]);
 
   const stopOrSend = useCallback(() => {
+    setUrlTransition(null);
     if (transportRunsLocally()) stop();
     else sendCommandToMaster("STOP");
-  }, [transportRunsLocally, stop, sendCommandToMaster]);
+  }, [transportRunsLocally, stop, sendCommandToMaster, setUrlTransition]);
 
   const nextOrSend = useCallback(() => {
     if (transportRunsLocally()) next();
+    else if (transitionPending()) console.info("[VONO intent] NEXT ignored — transition pending");
     else if (!stepUrlSession("next")) sendCommandToMaster("NEXT");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- transitionPending reads a ref
   }, [transportRunsLocally, stepUrlSession, next, sendCommandToMaster]);
 
   const prevOrSend = useCallback(() => {
     if (transportRunsLocally()) prev();
+    else if (transitionPending()) console.info("[VONO intent] PREV ignored — transition pending");
     else if (!stepUrlSession("prev")) sendCommandToMaster("PREV");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- transitionPending reads a ref
   }, [transportRunsLocally, stepUrlSession, prev, sendCommandToMaster]);
 
   // Keep the co-located MAIN's published session (title/artwork/queue/index) in sync while the renderer
@@ -1397,6 +1522,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       masterDeviceName,
       hasExistingMaster: hasExistingMaster ?? false,
       masterState,
+      urlTransition,
+      urlTransitionHeldState: isBlocking(urlTransition) ? heldMasterStateRef.current : null,
       masterConfirmOpen,
       setMasterConfirmOpen,
       reportPosition,
@@ -1434,6 +1561,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       masterDeviceName,
       hasExistingMaster,
       masterState,
+      urlTransition,
       masterConfirmOpen,
       reportPosition,
       sendSetMaster,

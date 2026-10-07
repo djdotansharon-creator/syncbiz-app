@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource, type PlaybackStatus } from "@/lib/playback-provider";
 import { rendererOwnsSnapshot } from "@/lib/playback-ownership";
+import { transitionLabel } from "@/lib/url-transition-intent";
 import { shouldAdoptLiveMpv } from "@/lib/live-mpv-adopt";
 import { shouldFreezeSelfHeal, nextFreezeBaseline, nextStartupBaseline, isEnginePaused, decideLocalStartupStall } from "@/lib/desktop-freeze-self-heal";
 import { getPlaylistTracks } from "@/lib/playlist-types";
@@ -4282,7 +4283,23 @@ export function AudioPlayer() {
   // ── End desktop routing ───────────────────────────────────────────────────
 
   /** Unified display values: desktop MPV > CONTROL mirror > local React state. */
-  const ms = deviceCtx?.masterState;
+  // P0 Gate 1c: while a source transition is pending, the item that is still AUDIBLE stays visibly current (title /
+  // status / clock from the state held at the start of the transition); live toggles (shuffle / autoMix / volume /
+  // queue) keep coming from the live mirror. Switches to the new item only when it reaches PLAYING_CONFIRMED.
+  const msLive = deviceCtx?.masterState;
+  const msHeld = deviceCtx?.urlTransitionHeldState ?? null;
+  const ms = useMemo(
+    () => (msHeld && msLive
+      ? {
+          ...msLive,
+          status: msHeld.status, currentTrack: msHeld.currentTrack, currentSource: msHeld.currentSource,
+          currentTrackIndex: msHeld.currentTrackIndex, sessionTracks: msHeld.sessionTracks, nextSessionTrack: msHeld.nextSessionTrack,
+          position: msHeld.position, positionAt: msHeld.positionAt, duration: msHeld.duration,
+        }
+      : msLive),
+    [msLive, msHeld],
+  );
+  const transitionStatusText = transitionLabel(deviceCtx?.urlTransition);
   // isDesktopMode is declared earlier (near the desktopMpvSnap state) to avoid TDZ errors
   // in effects that reference it in their dependency arrays before this line in the file.
 
@@ -4553,7 +4570,9 @@ export function AudioPlayer() {
       : 0;
 
   const displayStatusLabel =
-    isUrlPreparing
+    transitionStatusText
+      ? transitionStatusText
+      : isUrlPreparing
       ? "Preparing URL"
       : isYtAwaitingEngine
         ? "Loading"

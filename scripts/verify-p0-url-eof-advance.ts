@@ -205,7 +205,9 @@ function station(startIndex: number) {
   // ── static pins ─────────────────────────────────────────────────────────────────────────────────────────────
   const ctx = read("lib", "device-player-context.tsx");
   assert("S1 context observes desktop status with the pure tracker and steps with noWrap only for EOF",
-    /observeUrlEof\(/.test(ctx) && /stepUrlSessionRef\.current\("next", \{ noWrap: true \}\)/.test(ctx) && (ctx.match(/noWrap: true/g) ?? []).length === 1);
+    // Updated 2026-10-07 (P0 Gate 1b): the only OTHER noWrap step is the explicit failure step (origin "auto-failure").
+    /observeUrlEof\(/.test(ctx) && (ctx.match(/stepUrlSessionRef\.current\("next", \{ noWrap: true \}\)/g) ?? []).length === 1 &&
+    (ctx.match(/noWrap: true/g) ?? []).length === 2 && /stepUrlSessionRef\.current\("next", \{ noWrap: true, origin: "auto-failure", failures \}\)/.test(ctx));
   assert("S2 manual NEXT / PREV unchanged (no noWrap, same fallbacks)",
     /else if \(!stepUrlSession\("next"\)\) sendCommandToMaster\("NEXT"\);/.test(ctx) && /else if \(!stepUrlSession\("prev"\)\) sendCommandToMaster\("PREV"\);/.test(ctx));
   assert("S3 every step disarms (no double step) and a URL selection disarms", /urlEofStateRef\.current = disarmUrlEof\(urlEofStateRef\.current\);\n\s+if \("noop" in step\) return true;/.test(ctx) && (ctx.match(/disarmUrlEof\(urlEofStateRef\.current\)/g) ?? []).length === 2);

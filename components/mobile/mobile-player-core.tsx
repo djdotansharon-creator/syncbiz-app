@@ -3,6 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { useStationController } from "@/lib/station-controller-context";
+import { isBlocking, transitionLabel } from "@/lib/url-transition-intent";
 import { usePlayback } from "@/lib/playback-provider";
 import { useLocalPlaybackTime } from "@/lib/playback-time-store";
 import { computeLivePosition } from "@/lib/remote-control/live-position";
@@ -169,19 +170,23 @@ function useDerivedPlayer(): MobilePlayerDerived {
     const src = rs?.currentSource ?? null;
     const trk = rs?.currentTrack ?? null;
     const status = rs?.status ?? "idle";
-    const isPlaying = canControl && status === "playing";
+    // P0 Gate 1c: while a source transition is pending over AUDIBLE music, the station is still playing — never show it
+    // as stopped; the status line shows Loading… / Couldn't play … from the shared intent.
+    const tr = station.transition;
+    const transitionText = canControl ? transitionLabel(tr) : null;
+    const isPlaying = canControl && (status === "playing" || (isBlocking(tr) && !!tr?.audibleAtStart));
     return {
       mode: "controller",
       canControl,
       hasSource: canControl && !!src,
       isPlaying,
       title: canControl ? trk?.title ?? src?.title ?? "No playback" : "Connect a player",
-      subtitle:
-        canControl && src?.title && trk?.title !== src.title
+      subtitle: transitionText ??
+        (canControl && src?.title && trk?.title !== src.title
           ? src.title
           : canControl
             ? null
-            : "Go to the Remote tab to pick a MASTER device",
+            : "Go to the Remote tab to pick a MASTER device"),
       cover: canControl ? trk?.cover ?? src?.cover ?? null : null,
       position: canControl ? controllerPosition : 0,
       duration: rs?.duration ?? 0,
