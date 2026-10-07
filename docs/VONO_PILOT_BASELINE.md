@@ -17,6 +17,10 @@
 - **Phase:** PILOT HARDENING
   - **PLAYER PHASE: PILOT ACCEPTED** (owner-attested 2026-10-05)
   - **JINGLES / ANNOUNCEMENTS: PILOT ACCEPTED** (owner-attested 2026-10-05)
+- **CONTROL ROOM F2a — MEMBER SCOPE FOUNDATION (SHADOW / OFFLINE): ACCEPTED** (2026-10-07, TEST only) — commit
+  `398cce7`, app deployment `54f898f9`, migration `20261007150000_control_room_f2a_member_scope`. Scopes stored +
+  evaluated OFFLINE only (nothing enforces / no request path reads them); TEST matrix 36/36 agree, 0 unexpected.
+  **F2b NOT started.** Record: `docs/CONTROL_ROOM_F2A_ACCEPTANCE_2026-10-07.md`.
 - **CONTROL ROOM F1 — BRAND + ZONE FOUNDATION (SHADOW): ACCEPTED** (2026-10-07, TEST only) — commit `25d4c06`, app
   deployment `538902e8`, migration `20261007120000_control_room_f1_brand_zone`. Default brand `11db397d…` (MAIN),
   default zone `6739408a…` (MAIN) on canonical branch `90d2b7b8…`. Nothing reads Brand/Zone at runtime yet. **F2 NOT
@@ -93,6 +97,8 @@ Lineage: `865ba81` (offline cold boot, MAIN) → `2ebdbe4` (renderer stall fix) 
 | **WS volume (2026-10-06)** | `syncbiz-ws-test-volume` (id `18b32178-da30-484f-8403-785b347baf73`) on `syncbiz-ws-test` only, mount `/data` → designation / lease / branch-alias state in `/data/ws-lease/` (proven to survive redeploy with no re-assertion) |
 | **Control Room Phase 1 deploys (2026-10-06)** | app `87a05469-b3f5-4afc-819a-c33746e0182e` (source `6b5b9a0`, file-hash verified for the changed renderer files); WS `335dad0a-e3a4-4802-b1b6-c9ae40697e51` (Gate 1 shadow code `cea1585`) |
 | **TEST DB backup before Gate 2B-2** | `D:\SyncBiz_Backups\test-env\20261006T145008Z-gate2b2\` (pg_dump sha256 `d6a5c882ceef7808ea62310db113b82f8f95e8ba370c7d6004bcff813fb1dbb7`, 241240 B; **restore test PASS** — 13 counts identical, throwaway DB dropped) + `gate2b2-manifest.json` (sha256 `f6893d7050a0813c6921a6d8a8164ade31a57786765daf3dd8d2416e644d494b`; also on TEST app volume `/data/control-room/gate2b2-manifest.json`) + `BACKUP-RECORD.txt`. Git HEAD at backup `2d2ccdf` |
+| **Control Room F2a deploys (2026-10-07)** | deploy A `8a9e36f9-1526-4f04-9858-5938e629581a` (= `25d4c06` + F2a migration folder only → `prisma migrate deploy`); deploy B **`54f898f9-bd3c-4267-ba42-5b3edad36a8f`** (= `398cce7`, clean tree, hash-verified). WS NOT redeployed (`23e94c01`) |
+| **TEST DB backup before F2a** | `D:\SyncBiz_Backups\test-env\20261007T104212Z-control-room-f2a\` (pg_dump sha256 `c2b8d7edd03ec011bb3876707c8d67c1daaf7ffc974fa132de3842286ad9c5b7`; **restore test PASS**; pre/post fingerprints) |
 | **Control Room F1 deploys (2026-10-07)** | deploy A `bbb98798-8487-4e43-b308-a101b34e402c` (= `483fd28` + F1 migration folder only → `prisma migrate deploy`); deploy B **`538902e8-439d-46c4-a38d-ea978c7baaac`** (= `25d4c06`, clean tree, changed files hash-verified). WS NOT redeployed (`23e94c01`) |
 | **TEST DB backup before F1** | `D:\SyncBiz_Backups\test-env\20261007T094829Z-control-room-f1\` (pg_dump sha256 `4d9ea2da808c4fa19bdb0f63d40ea4ae72ccfb5564ea63dd7fd81bcf0e2bc22b`; **restore test PASS**; pre/post fingerprints) |
 | **Gate 2B-1 app deploy (2026-10-06)** | app `8273a78b-8b93-476a-9625-6d4983717d05` (SUCCESS 14:13Z; source `9e06f40`, clean tree; all 12 changed source files hash-verified). WS NOT redeployed |
@@ -169,6 +175,16 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM F2a — MEMBER SCOPE FOUNDATION (SHADOW / OFFLINE) — ACCEPTED (2026-10-07, TEST, branch `feature/control-room-phase1`)
+
+- **Server / DB corroborated:** after the owner's normal exit + reopen — desktop token 200 ×2, ws-token 200 ×2, register
+  200 ×3; durable id `dsk-cbeb93d0…` unchanged; MAIN MASTER (10:51:31Z, trusted station) and renderer CONTROL in canonical
+  room `ws:31d30e23…:90d2b7b8…`; 0 × 409; only 5xx = 2 × pre-existing music-bank 503. MemberScope check ok (1 row:
+  ADMIN + allLocations); matrix 36/36 agree, 0 unexpected; F1 check ok; fingerprint 0 diffs (18 groups).
+- Static: evaluator imported by nothing in app / lib / server / desktop; `lib/authz.ts` / `shadowAuthorize`, token, WS,
+  station and desktop files unchanged vs F1.
+- Commit `398cce7` · tag `pilot-baseline/2026-10-07-control-room-f2a-398cce7` · details `docs/CONTROL_ROOM_F2A_ACCEPTANCE_2026-10-07.md`.
 
 ### CONTROL ROOM F1 — BRAND + ZONE FOUNDATION (SHADOW) — ACCEPTED (2026-10-07, TEST, branch `feature/control-room-phase1`)
 
@@ -727,6 +743,7 @@ Carried over (still open):
 
 | Layer | Reference |
 |---|---|
+| **Control Room F2a (2026-10-07)** | tag `pilot-baseline/2026-10-07-control-room-f2a-398cce7` → `398cce77662ad4d5fda79c7738556b6620a660f1`; app deployment `54f898f9`; DB backup `D:\SyncBiz_Backups\test-env\20261007T104212Z-control-room-f2a\` (or drop MemberScopeTarget + MemberScope) |
 | **Control Room F1 (2026-10-07)** | tag `pilot-baseline/2026-10-07-control-room-f1-25d4c06` → `25d4c0685517f235df69fac3fb89c555807ef698`; app deployment `538902e8`; DB backup `D:\SyncBiz_Backups\test-env\20261007T094829Z-control-room-f1\` (or drop the additive F1 objects) |
 | **CURRENT desktop baseline tag (2026-10-07)** | `pilot-baseline/2026-10-07-desktop-beta12-dc74457` → `dc744575e97279358e6794687ed37d408706677d` |
 | **CURRENT renderer baseline tag (2026-10-07)** | `pilot-baseline/2026-10-07-renderer-3d6a70d` → `3d6a70de92e54e88ba00e2f7f14dc6589e5cf644`; TEST deployment `a1028a7f-98f2-4a5f-9a82-fb47f35f03f7` |
