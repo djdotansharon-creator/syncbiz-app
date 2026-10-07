@@ -76,7 +76,9 @@ if (DBURL) {
   const schema = read("prisma", "schema.prisma");
   assert("A14 zoneTypeCode is a String (no ZoneType enum)", /zoneTypeCode String\s+@default\("MAIN"\)/.test(schema) && !/enum ZoneType/.test(schema));
   assert("A15 StationDevice.zoneId / BranchMasterDesignation.zoneId nullable; designation uniqueness unchanged",
-    (schema.match(/zoneId\s+String\?/g) ?? []).length === 2 && /@@unique\(\[workspaceId, branchId\]\)\n\s+@@index\(\[zoneId\]\)/.test(schema));
+    // Scoped to the two models (updated 2026-10-07 for F2a: MemberScopeTarget also has a nullable zoneId — invariant unchanged).
+    ["StationDevice", "BranchMasterDesignation"].every((m) => /zoneId\s+String\?/.test(schema.slice(schema.indexOf(`model ${m} {`), schema.indexOf("\n}", schema.indexOf(`model ${m} {`))))) &&
+    /@@unique\(\[workspaceId, branchId\]\)\n\s+@@index\(\[zoneId\]\)/.test(schema));
   // Only store.addBranch uses the foundation module; no authz / token / WS / station / playback file touched.
   const users = execSync(`git grep -l --untracked "control-room-foundation" -- app lib components server desktop`, { cwd: ROOT }).toString().trim().split("\n").filter(Boolean).sort();
   assert("A16 SHADOW: only lib/store.ts imports the foundation module", JSON.stringify(users) === JSON.stringify(["lib/store.ts"]), users.join(","));

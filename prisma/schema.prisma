@@ -358,10 +358,70 @@ model WorkspaceMember {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Control Room F2a (SHADOW / OFFLINE): composite permission scopes of this membership.
+  scopes    MemberScope[]
 
   @@unique([workspaceId, userId])
   @@index([workspaceId])
   @@index([userId])
+}
+
+/// Control Room F2a (SHADOW / OFFLINE ONLY) — one composite permission scope row of a workspace member.
+/// NOTHING ENFORCES IT: current authorization stays authoritative; the evaluator (lib/authz-scope.ts) is used only by
+/// the offline TEST matrix / tests. Semantics: within a row the same dimension = OR, different dimensions = AND; across
+/// rows = UNION; a row with allLocations=false and no targets MATCHES NOTHING (fail closed); a row's capabilities come
+/// ONLY from its own preset. Rows are derived from WorkspaceMember + UserBranchAssignment by the F2a sync
+/// (source / sourceRef keep every row traceable and the sync idempotent).
+model MemberScope {
+  id           String   @id @default(uuid())
+  memberId     String
+  /// Denormalized for queries.
+  workspaceId  String
+  /// Denormalized for queries.
+  userId       String
+  /// F2a presets: ADMIN | HQ_CONTROL | REGIONAL_MANAGER | BRANCH_MANAGER | VIEW_ONLY (validated in code).
+  preset       String
+  allLocations Boolean  @default(false)
+  status       String   @default("active")
+  /// migrated:role | migrated:assignment | migrated:implicit-default | admin
+  source       String
+  /// e.g. the UserBranchAssignment id ("" for role / implicit-default rows).
+  sourceRef    String   @default("")
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  member  WorkspaceMember     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  targets MemberScopeTarget[]
+
+  @@unique([memberId, source, sourceRef])
+  @@index([workspaceId, userId])
+}
+
+/// Control Room F2a — one value of one dimension of a MemberScope row (normalized; FK-checked). Raw CHECK constraint
+/// "MemberScopeTarget_one_value_matches_dimension": exactly one value column is set and it matches `dimension`
+/// (BRAND→brandId, LOCATION→branchId, ZONE→zoneId, ZONE_TYPE→zoneTypeCode; F3 adds REGION / GROUP / TAG).
+/// FKs to Brand / Branch / Zone are NO ACTION so a referenced value can never silently disappear (which could
+/// broaden an AND row); a whole-workspace cascade still works (checked at end of statement).
+model MemberScopeTarget {
+  id           String  @id @default(uuid())
+  scopeId      String
+  workspaceId  String
+  dimension    String
+  brandId      String?
+  branchId     String?
+  zoneId       String?
+  zoneTypeCode String?
+
+  scope  MemberScope @relation(fields: [scopeId], references: [id], onDelete: Cascade)
+  brand  Brand?      @relation(fields: [brandId], references: [id], onDelete: NoAction)
+  branch Branch?     @relation(fields: [branchId], references: [id], onDelete: NoAction)
+  zone   Zone?       @relation(fields: [zoneId], references: [id], onDelete: NoAction)
+
+  @@index([scopeId])
+  @@index([brandId])
+  @@index([branchId])
+  @@index([zoneId])
 }
 
 /// User-to-branch access assignment (granular branch scoping for non-owner users).
@@ -426,6 +486,7 @@ model Branch {
   devices   Device[]
   schedules Schedule[]
   zones     Zone[]
+  scopeTargets MemberScopeTarget[]
 
   @@unique([workspaceId, legacyKey])
   @@index([workspaceId])
@@ -454,6 +515,7 @@ model Brand {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   branches  Branch[]
+  scopeTargets MemberScopeTarget[]
 
   @@unique([workspaceId, code])
   @@index([workspaceId])
@@ -483,6 +545,7 @@ model Zone {
   branch         Branch                    @relation(fields: [branchId], references: [id], onDelete: Cascade)
   stationDevices StationDevice[]
   designations   BranchMasterDesignation[]
+  scopeTargets   MemberScopeTarget[]
 
   @@unique([branchId, code])
   @@index([workspaceId])
