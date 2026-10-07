@@ -54,7 +54,7 @@ VONO is being hardened for **unattended retail branches**. Priority order:
 
 1. player/audio stability
 2. zero-touch startup/recovery
-3. permanent branch MASTER identity
+3. permanent branch / zone MASTER identity
 4. offline playback/recovery
 5. reconnect/network recovery
 6. jingles/announcements
@@ -146,24 +146,45 @@ Always report explicitly: **TEST / PROD / NOT DEPLOYED.**
 
 ## 11. Permanent MASTER architecture — HARD INVARIANT
 
-Branch Station is the playback authority.
+The designated Station is the playback authority. The playback-authority unit is the **Zone**
+(hierarchy: Organization → Brand → Location → Zone → Station; Region / Group / Tags are
+filtering / classification dimensions, never playback destinations). *(Amended 2026-10-07 — D18,
+`docs/CONTROL_ROOM_BLUEPRINT.md`.)*
 
-- **Electron MAIN on the designated branch machine:** owns station identity (durable device id
+- **Electron MAIN on the designated station of a zone:** owns station identity (durable device id
   in `ProgramData\VONO\state\device-id.json`), owns MASTER registration, owns MPV/playback status,
-  is the permanent designated MASTER.
+  is the permanent designated MASTER of that zone.
 - **Local Electron renderer:** CONTROL/mirror by design; may execute explicitly-approved
   co-located LOCAL paths; must never become a competing MASTER.
 - **Cloud / browser / mobile:** CONTROL only.
 
-Permanent MASTER rules: exactly one explicitly designated station per branch; reconnect does not
-elect a new MASTER; another Desktop cannot steal MASTER; browser and phone cannot become MASTER;
-**if the permanent MASTER is offline there is NO automatic failover** (before pilot); designation
-changes only by explicit admin action. A CONTROL reassertion on the designated station renderer is
-not a designation revoke.
+**Zone MASTER lifecycle rule:** **At most one designated MASTER per Zone at all times. Every active / provisioned playback Zone must have exactly one designated MASTER. An unprovisioned Zone may temporarily have zero designated MASTERs.**
+- **Provisioned zone:** a Zone with an activated / bound Station intended to provide playback.
+- **Unprovisioned zone:** a configured Zone that does not yet have an active designated playback
+  Station (shown as "Setup required"; never a fake StationDevice or fake MASTER).
+
+Permanent MASTER rules: max one designated MASTER per Zone; a Zone may contain multiple
+StationDevice records — every non-designated station is CONTROL / service / standby and never
+becomes MASTER automatically; no station may steal MASTER on reconnect, reboot or order of
+startup; reconnect does not elect a new MASTER; browser and phone cannot become MASTER; **if the
+permanent MASTER is offline there is NO automatic failover**; standby promotion and every
+designation change happen only by explicit, audited admin action. A CONTROL reassertion on the
+designated station renderer is not a designation revoke.
+
+**Default Zone (backward compatibility):** every Location has a default Zone, hidden in normal UI
+while it is the only one. A single-zone Location behaves exactly as the accepted single-branch
+pilot: the existing branch designation, station binding, signed token claims, canonical WS room,
+pads, announcements and schedules map 1:1 to the default Zone. Introducing zones must not change
+accepted pilot behavior (the Lenovo stays exactly as the accepted beta.12 baseline). The WS room
+format for additional zones is DEFERRED to the Zone Foundation Gate audit.
+
+**Zones are the final playback destination:** playback commands, status, announcements, schedules
+and campaigns target Zones; a Location-level target expands to its Zones. New code must not assume
+a Branch / Location is the final playback destination.
 
 The older lease model (90-second grace, auto-election/auto-promotion, failover,
 `server/data/master-lease.json`) applies **only to non-designated / legacy branches**. Designated
-branches short-circuit it.
+branches (and their zones) short-circuit it.
 
 ## 12. Local file security — HARD INVARIANT
 
@@ -367,7 +388,7 @@ The central pane below the player is the system's **monitor**: it swaps "channel
 Reads/writes persistent state via **PostgreSQL (Prisma)**. JSON files under `data/` are stale orphans — no longer read or written by any store. All stores (`store.ts`, `user-store.ts`, `playlist-store.ts`, `radio-store.ts`, `catalog-store.ts`) use `lib/prisma.ts` directly.
 
 **WebSocket Device Registry (server/index.ts)**  
-Devices register with a `REGISTER` message. **Designated branches** use a permanent, explicit MASTER designation (`BranchMasterDesignation`, trusted via signed token claims) — the designated station is MASTER, everything else CONTROL, **no automatic failover** (see §11). **Non-designated / legacy branches only:** a per-branch MASTER lease with a 90-second grace period and auto-election, persisted to `server/data/master-lease.json`. Heartbeat: ping every 30s, disconnect at 90s timeout.
+Devices register with a `REGISTER` message. **Designated zones** (today every designated branch = its single default zone) use a permanent, explicit MASTER designation (`BranchMasterDesignation`, trusted via signed token claims) — at most one designated MASTER per zone, everything else CONTROL, **no automatic failover** (see §11). **Non-designated / legacy branches only:** a per-branch MASTER lease with a 90-second grace period and auto-election, persisted to `server/data/master-lease.json`. Heartbeat: ping every 30s, disconnect at 90s timeout.
 
 **Session Auth (middleware.ts)**  
 Cookie `syncbiz-session` is HMAC-signed (`lib/auth-session.ts`). Protected routes redirect to `/login`. Mobile user-agents redirect to `/mobile`.

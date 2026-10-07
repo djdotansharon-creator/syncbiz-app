@@ -1,7 +1,12 @@
 # VONO CONTROL ROOM — SYSTEM BLUEPRINT + PILOT ACCEPTANCE PLAN
 
 > Status: **APPROVED IN PRINCIPLE — LOCKED 2026-10-06** with the owner decisions in §0.
-> Architecture / product design only — nothing here is implemented by this document.
+> **AMENDED 2026-10-07 — MULTI-BRAND + MULTI-ZONE ARCHITECTURE LOCKED (D14–D22, §2, §2a–§2f, §23).**
+> **D18 FINAL (lifecycle rule) LOCKED 2026-10-07** — at most one designated MASTER per Zone; provisioned zones exactly
+> one; unprovisioned zones may have zero. **CLAUDE.md §11 amended accordingly (applied 2026-10-07, §24).**
+> WS room format for additional zones: **DEFERRED** to the Zone Foundation Gate audit.
+> All future Control Room work is designed around **Organization → Brand → Location → Zone → Station**.
+> Architecture / product design only — nothing here is implemented by this document (no code, no migration).
 > Governing rules: `CLAUDE.md` (constitution). Current pilot state: `docs/VONO_PILOT_BASELINE.md`.
 > Evidence labels follow CLAUDE.md §6. Model labels: **EXISTING / EXTEND / NEW**. Unproven claims are marked
 > **HYPOTHESIS / EXPECTED**.
@@ -29,19 +34,41 @@
 | D12 | **WS capacity is a HYPOTHESIS until proven** by the 300-station simulated load test (CPU, RAM, event-loop latency, reconnect waves, message throughput). |
 | D13 | **Product principle:** normal users see branch name, music state, connection state, announcements, schedule, problems — NEVER UUIDs, durable ids, room keys, socket roles, leases, `legacyKey` or the internal renderer role. Advanced technical information is admin/support-only. |
 
+### Amendment 2026-10-07 — MULTI-BRAND + MULTI-ZONE (binding for all future Control Room design)
+
+| # | Decision |
+|---|---|
+| D14 | **Hierarchy = Organization → Brand → Location → Zone → Station.** ONE ORGANIZATION · MULTIPLE BRANDS · MULTIPLE LOCATIONS · MULTIPLE AUDIO ZONES · ONE CONTROL ROOM. Target verticals: retail chains, multi-brand groups, hotels, gyms, restaurants, resorts, shopping centers. |
+| D15 | **Brand is a real first-class entity** under the Organization (not a tag, not a group, not a separate workspace). The entire Control Room can be filtered by Brand. A single-brand customer gets one auto-created brand that the UI hides. |
+| D16 | **Zone is a real physical audio destination** inside a Location (Lobby, Pool, Spa, Restaurant, Gym, Rooftop, Main Store). A Location has **one or many** zones; every Location always has at least one (auto-created default zone, hidden in the UI while it is the only one). |
+| D17 | **Region / Group / Tags are classification / filtering dimensions — NEVER zones.** Region = geography (exactly one primary per Location, D3 unchanged); Group = managed classification (zero or more, e.g. Mall / Street / Outlet / Flagship); Tags = lightweight labels (zero or more, e.g. 24/7, Premium, Kosher, Seasonal). |
+| D18 | **FINAL, LOCKED 2026-10-07. Zone is the playback-authority unit.** **At most one designated MASTER per Zone at all times. Every active / provisioned playback Zone must have exactly one designated MASTER. An unprovisioned Zone may temporarily have zero designated MASTERs.** **PROVISIONED ZONE:** a Zone with an activated / bound Station intended to provide playback. **UNPROVISIONED ZONE:** a configured Zone that does not yet have an active designated playback Station. Rules: max MASTERs per Zone = 1 · provisioned Zone = exactly 1 · unprovisioned Zone = 0 allowed · never automatic failover · a Zone may contain multiple StationDevice records; non-designated stations remain CONTROL / service / standby · standby promotion only by explicit audited admin action · no station may steal MASTER on reconnect / reboot / order of startup. A Location with a single zone uses a **default Zone** (hidden in normal UI) that preserves today's pilot behavior **exactly**. *(Applied to CLAUDE.md §11 — §24.)* |
+| D18a | **LOCKED. Zones are the final playback destination.** Future playback commands, status, announcements, schedules and campaigns **target Zones**; nothing new may assume Branch/Location is the final playback destination. A Location-level target is expanded to its zones. |
+| D19 | **Every Control Room surface respects the active filter** — top metrics, map, location list, alerts, campaigns, announcements, schedules. |
+| D20 | **Content / policy inheritance is designed for (not built):** Organization default → Brand default → Location override → Zone override, for music, playlists, schedules, announcements, campaigns, opening hours, permissions/policies. |
+| D21 | **Permission scopes must express:** HQ Admin (all) · Brand Manager (one or more brands) · Regional Manager (**brand + region**) · Location Manager (one location) · Zone operator (specific zones, if enabled later). |
+| D22 | **Onboarding is bulk-import first:** Brand, location code, location name, region, group(s), address, zones → then activation per Location/Zone → station activation code → physical VONO player. Technicians never reconstruct the hierarchy by hand. |
+
 ---
 
 ## 1. EXECUTIVE ARCHITECTURE
 
 ```
-Customer (Workspace)
- ├─ Regions (each branch has exactly ONE primary region)
- ├─ Groups (a branch may be in zero or more)
- └─ Branches
-      └─ Stations (StationDevice, bound by activation code + revocable station credential)
-           ├─ exactly one designated MASTER → MAIN + MPV output the store audio (LOCAL-first)
-           └─ CONTROL surfaces: station renderer, browsers, phones, HQ
+Organization  (= Workspace)                         ← one customer / company / network
+ ├─ classification dimensions (organization-wide, cross-brand — FILTERS, never audio destinations)
+ │    ├─ Regions   (each Location has exactly ONE primary region)
+ │    ├─ Groups    (a Location may be in zero or more)
+ │    └─ Tags      (zero or more lightweight labels)
+ └─ Brands                                          ← first-class (Golf · Golf & Co · Hotel Brand A)
+      └─ Locations (= Branch / Property)            ← physical site (Golf & Co – Ayalon Mall · Hotel Tel Aviv)
+           └─ Zones                                 ← physical AUDIO destination (Lobby · Pool · Spa · Main Store)
+                └─ Stations (StationDevice, bound by activation code + revocable station credential)
+                     ├─ at most one designated MASTER PER ZONE (exactly one once provisioned) → MAIN + MPV output that zone's audio
+                     └─ CONTROL surfaces: station renderer, browsers, phones, HQ
 ```
+
+A single-brand, single-location, single-zone customer is the same model with one auto-created brand, location and
+zone — the UI hides every level that has only one member ("My store").
 
 Three planes, strictly separated:
 
@@ -59,20 +86,153 @@ The cloud never streams LOCAL music and never sees LOCAL filesystem paths.
 
 ## 2. ENTITY HIERARCHY
 
-| Entity | Meaning | Owns | IDs → human label |
-|---|---|---|---|
-| **Workspace** (EXISTING) | one customer / chain | users, branches, regions, groups, content, schedules, audit | UUID → company name |
-| **Region** (NEW) | the branch's primary geography (e.g. "Central") | its branches (1:N) | UUID → name |
-| **BranchGroup** (NEW) | an extra grouping (e.g. "Malls", "24/7") | memberships (N:M) | UUID → name |
-| **Branch** (EXTEND) | one physical store | its stations, designation, status, opening hours, branch schedules, pads | UUID → **"Branch 014 — Dizengoff"** (`code` + `name`); `legacyKey` only for migration |
-| **StationDevice** (EXISTING→EXTEND) | a physical computer running VONO | durable device id, version, binding to one branch, station credential | `dsk-…` → "Store player" (admin/support view only) |
-| **BranchMasterDesignation** (EXISTING) | which station is the store audio station | one per branch | shown as the GREEN MASTER station |
+**Structural hierarchy (ownership — each level belongs to exactly one parent):**
 
-- **Single-branch customer:** same model, one auto-created branch, default region, no groups. The UI hides
-  regions/groups/multi-select; Control Room is just "My store".
-- **300-branch chain:** branches belong to a region and optional groups; HQ works by region, group, filter or
-  selection.
-- **Never visible to normal users:** see D13.
+| Level | Entity (code name) | Status | Meaning | Owns | Human label |
+|---|---|---|---|---|---|
+| 1 | **Organization** (`Workspace`) | EXISTING | the customer / company / network (e.g. Golf Group, a hotel group) | users, brands, regions, groups, tags, content library, org defaults, audit | company name |
+| 2 | **Brand** (`Brand`) | **NEW** | a real brand under the organization (Golf · Golf & Co · Hotel Brand A) | its locations; brand defaults (content / policy / identity) | brand name + optional logo/color |
+| 3 | **Location** (`Branch`, kept as table name) | EXISTING → EXTEND | the physical site (Golf & Co – Ayalon Mall · Hotel Tel Aviv) | its zones; timezone, address, opening hours, region/group/tag classification | **"014 — Ayalon Mall"** (`code` + `name`); UI noun per vertical: Store / Branch / Property / Club |
+| 4 | **Zone** (`Zone`) | **NEW** | a physical audio area inside the location (Lobby · Pool · Spa · Restaurant · Gym · Rooftop · Main Store) | its station(s), MASTER designation, live/durable status, zone overrides | "Pool" (hidden when the location has a single default zone) |
+| 5 | **Station** (`StationDevice`) | EXISTING → EXTEND | a physical VONO player; a zone has zero or more — at most one is the designated MASTER (exactly one once the zone is provisioned) | durable device id, version, credential, binding to ONE zone | "Store player" / "Pool player" (admin/support detail only) |
+| — | **Designation** (`BranchMasterDesignation`) | EXISTING → EXTEND | which station is the zone's audio authority | one per **zone** (today: one per branch = its single zone) | GREEN MASTER |
+
+**Classification dimensions (filters, NOT structure, NOT audio destinations — D17):**
+
+| Dimension | Status | Cardinality per Location | Examples | Defined at |
+|---|---|---|---|---|
+| **Region** | NEW | exactly one (D3) | North / Center / South | Organization (shared across brands, so "Golf & Co + Center" is a filter intersection) |
+| **Group** | NEW | zero or more | Mall / Street / Outlet / Flagship | Organization (managed list) |
+| **Tags** | NEW | zero or more | 24/7 · Premium · Kosher · Seasonal | Organization (free-form, normalized lowercase key + display label) |
+| **Zone type** | NEW | one per Zone | LOBBY · POOL · SPA · RESTAURANT · GYM · ROOFTOP · MAIN_STORE · OTHER | Organization-wide controlled vocabulary (lets "All Spa zones" work across properties even if one is named "Wellness Spa") |
+
+- **Never visible to normal users:** see D13. Default brand / default zone are invisible while they are the only one.
+- **Rule of thumb:** if it *plays audio* it is a **Zone**; if it *describes or selects* locations it is a
+  Region / Group / Tag.
+
+### 2a. ZONE = PLAYBACK-AUTHORITY UNIT (D18)
+
+- **D18 lifecycle rule (LOCKED):** *At most one designated MASTER per Zone at all times. Every active / provisioned playback Zone must have exactly one designated MASTER. An unprovisioned Zone may temporarily have zero designated MASTERs.*
+  - **PROVISIONED ZONE** — a Zone with an activated / bound Station intended to provide playback → exactly 1 MASTER.
+  - **UNPROVISIONED ZONE** — a configured Zone that does not yet have an active designated playback Station → 0 allowed;
+    shown as **⚙ Setup required** (§9). No fake StationDevice or fake MASTER record is ever created to fill it.
+  - Max MASTERs per Zone = **1**, always.
+- Each provisioned zone is an independent audio stream with its own queue, volume, schedule execution,
+  jingles/announcements and status. A hotel with Lobby + Pool + Spa (all provisioned) = three MASTERs.
+- **A zone may contain multiple StationDevice records.** At most one is designated MASTER; the others are CONTROL /
+  service / future-standby devices bound to the same zone. They are visible to admin/support ("spare"), can be
+  promoted **only** by an explicit admin designation change (D1, audited), and **never** auto-steal or auto-inherit
+  MASTER — not on reconnect, not when the MASTER is offline, not on reboot order. "Future standby" means a
+  pre-installed device an admin can switch to with one action — **not** automatic failover.
+- All permanent-MASTER rules (CLAUDE.md §11) apply per zone: no failover, reconnect never elects, another station
+  can't steal, browser/phone never MASTER, designation only by explicit admin action.
+- **Default zone = backward compatibility (LOCKED).** Every Location has a default zone (created / backfilled), hidden
+  in normal UI while it is the only zone. The existing single-branch MASTER semantics map to it **1:1**: today's
+  `BranchMasterDesignation` row, `StationDevice` binding, signed token claim, canonical WS room, pads and
+  announcement/schedule rows all resolve to the default zone. The accepted pilot behavior (Lenovo MASTER, renderer
+  CONTROL, offline boot, reconnect, LOCAL/URL playback) must remain **byte-for-byte unchanged** — this is an
+  acceptance criterion of the zone gate.
+- **Zones are the final playback destination (D18a).** New status, commands, announcements and schedules target
+  zones; a Location target is expanded to its zones.
+- **Live routing:** the **default zone keeps today's canonical branch room behavior** (`ws:<workspace>:<branch>`) —
+  backward compatible, LOCKED. The room format for **additional zones is DEFERRED** to the Zone Foundation Gate audit
+  (no multi-zone room format is locked here).
+- Station : Zone = N : 1 (one zone, zero or more stations, at most one MASTER; exactly one once provisioned). One PC driving several zones via
+  several audio outputs is a **HYPOTHESIS / later** (would need one MAIN orchestrator per output); not designed in.
+- Location-level views aggregate their zones (e.g. "3 zones · 2 playing · 1 connection lost").
+
+### 2b. CONTROL ROOM FILTERING (D19)
+
+The active filter is one expression over the hierarchy + dimensions:
+`brands ∧ regions ∧ groups ∧ tags ∧ locations ∧ zoneTypes ∧ zones` (each optional; values inside one dimension are OR-ed).
+
+| Example | Filter |
+|---|---|
+| All Brands | (empty) |
+| Golf & Co only | brands = {Golf & Co} |
+| Golf & Co + Center | brands = {Golf & Co} ∧ regions = {Center} |
+| All Hotels | brands = {all hotel brands} (or a Group "Hotels") |
+| One Property | locations = {Hotel Tel Aviv} |
+| All Spa zones | zoneTypes = {SPA} |
+| All Lobby zones | zoneTypes = {LOBBY} |
+| Selected branches / zones | explicit locations / zones (multi-select) |
+
+- **Every** top-level metric, the map, the location list, alerts, campaigns, announcement targeting and schedule
+  targeting are computed over the filter's resolved **zone set** (zone = unit of audio truth). Location counters are
+  derived ("location is playing if all its zones…" — exact rule per metric decided in Phase 3).
+- The filter is **always intersected with the user's permission scope** server-side; the UI filter can only narrow.
+- Saved filters ("My morning view") are a later convenience; the same expression is reused as a **target** for
+  announcements / campaigns / schedules.
+
+### 2c. CONTENT / POLICY INHERITANCE (D20 — designed for, NOT built)
+
+```
+Organization default → Brand default → Location override → Zone override      (most specific wins)
+```
+
+Applies later to: music / playlists, schedules, announcements, campaigns, opening hours, permissions/policies,
+volume / duck levels, jingle pads.
+
+Architecture rules so nothing blocks it:
+- Every settings/policy row is keyed by **(scopeLevel ∈ ORG | BRAND | LOCATION | ZONE, scopeId)** — never by a bare
+  `branchId` string. One generic resolver computes the effective value per zone.
+- Content (playlists, announcements, assets) stays **organization-owned** and is *assigned* at a level — never copied
+  per location.
+- Schedules / campaigns store a **target expression** (§2b) plus the level they were authored at; they are expanded
+  to zones at sync/send time (a new location in the brand/region is covered automatically).
+- Overrides are explicit rows; "no row" = inherit. Locked items (e.g. a brand-mandated campaign a location may not
+  override) are a policy flag, designed later.
+- Timezone is **not** inheritable per zone — it is a property of the physical Location; zones always use it.
+
+### 2d. PERMISSION SCOPES (D21) — COMPOSITE SCOPES LOCKED 2026-10-07 (not implemented)
+
+A scope row is a **conjunction** of optional dimension filters (same expression as §2b); a member's effective
+reach is the **union** of its scope rows, resolved at request time.
+
+| Role | Scope row(s) |
+|---|---|
+| HQ Admin | ALL |
+| Brand Manager | brands = {B1, B2} |
+| Regional Manager | brands = {Golf & Co} ∧ regions = {Center} |
+| Location Manager | locations = {L014} |
+| Zone operator (later, if enabled) | zones = {Pool@Hotel TLV} |
+
+- Capabilities (§3) are unchanged; only the scope representation generalizes. `authorize(user, capability,
+  targets)` takes **targets = zones (or locations, expanded to their zones)**.
+- WS tokens for broad scopes must carry the scope **expression or ALL**, not an ever-growing expanded id list
+  (token size at 300 locations × N zones) — exact claim design decided in the permissions gate.
+
+### 2e. DEPLOYMENT / ONBOARDING (D22)
+
+**Bulk import (CSV / XLSX), idempotent by (organization, location code):**
+
+| Column | Notes |
+|---|---|
+| Brand | created if new (admin confirms) |
+| Location code | **unique per organization** — the import key |
+| Location name | |
+| Region | exactly one |
+| Group(s) | `;`-separated, zero or more |
+| Tags | `;`-separated, optional |
+| Address / City / Country | |
+| Timezone | default from organization if empty |
+| Zones | `;`-separated, e.g. `Lobby:LOBBY;Pool:POOL;Spa:SPA` (name:type); empty = one default zone |
+| Opening hours | optional; per location, zone override later |
+
+**Activation:** import → for each Location/Zone the system issues a **station activation code** (printable sheet,
+one line per zone) → technician installs VONO, enters the code → station binds to exactly that zone → OWNER/ADMIN
+confirms designation (D1) → zone becomes PROVISIONED and shows 🟢. The technician never types brand / location / zone
+names.
+
+**Zones before hardware:** imported zones exist immediately as **UNPROVISIONED / ⚙ Setup required** (e.g. Hotel Tel
+Aviv → Lobby · Pool · Spa, all created before any PC is installed). They can already be configured (playlists,
+schedules, opening hours) but are never targeted for delivery until provisioned. **No fake StationDevice or fake
+MASTER records** are created; a zone becomes provisioned only through real activation + explicit designation.
+
+### 2f. TERMINOLOGY
+
+Docs/UI say **Location** (generic) — the UI noun adapts per vertical (Store / Branch / Property / Club). Code keeps
+the `Branch` table and `branchId` names (renaming would be a broad refactor with no product value — CLAUDE.md §3).
 
 ---
 
@@ -96,6 +256,10 @@ Extends the existing auth (`WorkspaceMember`, `UserBranchAssignment`, `AccessTyp
 **Scope:** `UserBranchAssignment` rows of type **ALL / REGION / GROUP / BRANCH**. Effective branches = **union** of
 all scope rows, resolved at request time (a new branch in a region/group is automatically covered). The member's
 capability set applies across its scope.
+> **AMENDED 2026-10-07 (D21):** a scope row is a **conjunction** of optional dimensions (brands ∧ regions ∧ groups ∧
+> tags ∧ locations ∧ zones) — single-dimension row types cannot express "Brand Manager" or "Golf & Co + Center".
+> Adds **BRAND MANAGER** (brand scope) and a later **ZONE OPERATOR** (zone scope); REGIONAL MANAGER = brand ∧ region.
+> See §2d.
 
 **Administration rules:**
 - invite / create users, change roles, assign scopes → `users.manage` (OWNER/ADMIN); nobody can grant a
@@ -144,7 +308,7 @@ Colors: 🟢 healthy / master, 🔵 control, 🟠 degraded-but-not-proven-down, 
 
 **Top strip (big, clickable filters):**
 > **300** Branches · 🟢 **287** Connected · 🟠 **10** Connection lost · 🔴 **3** Need attention · 🎵 **281** Playing ·
-> ⏸ **6** Not playing (during opening hours)
+> ⏸ **6** Not playing (during opening hours) · ⚙ **N** Setup required (unprovisioned zones — neutral)
 
 **Default view = branch cards** (list toggle for big screens). Each card shows only:
 - **Branch 014 — Dizengoff** · region tag (+ group tags, subtle)
@@ -158,7 +322,8 @@ Colors: 🟢 healthy / master, 🔵 control, 🟠 degraded-but-not-proven-down, 
 
 Behind "Details" / admin only: app version, last seen, station identity, uptime, technical info (D13).
 
-- **Filters:** Region · Group · Status (All · **Problems only** · Connection lost · Not playing · Closed).
+- **Filters:** **Brand** · Region · Group · Tags · **Zone type** · Status (All · **Problems only** · Connection lost · Not playing · Closed) — one filter expression (§2b) driving every metric, the map, the list, alerts and campaigns (D19).
+- **Multi-zone locations:** the card shows the location plus a compact zone strip (🎵 Lobby · 🎵 Pool · 🟠 Spa); single-zone locations look exactly as described here.
 - **Search:** branch code or name.
 - **Multi-select:** checkboxes, "Select region", "Select group", "Select filtered".
 - **Action bar** (with a selection): **📢 Announce** · **🎵 Change music** (later) · **📅 Schedule**.
@@ -246,6 +411,10 @@ target region/group. No cron, no timezone fields, no technical wording.
     threshold shows as escalated 🟠 "Connection lost for 2h — please check the store" (still not claiming the
     audio stopped).
 - **Not playing outside opening hours** = neutral "Closed" (D8).
+- **⚙ UNPROVISIONED / SETUP REQUIRED** (future operational state, per zone): the zone is configured but has no active
+  designated playback Station yet (D18). Neutral (not red, not "connection lost", not counted as offline); shown in
+  its own counter / filter so bulk onboarding can precede hardware installation. A location whose zones are all
+  unprovisioned shows "Setup required". Status is per **zone**; location status aggregates its provisioned zones.
 
 **In WS memory:** live sockets, rooms, last `STATE_UPDATE` per room, computed live status.
 **Persisted (NEW `BranchStatus`, one row per branch):** connection state + since, last-known audio state + time,
@@ -380,24 +549,28 @@ create/edit/delete/enable; user/role/scope changes; MASTER designation / revocat
 
 | Entity | Status | Change |
 |---|---|---|
-| Workspace | EXISTING | — |
+| Workspace (= Organization) | EXISTING | — (org defaults later via the inheritance layer, §2c) |
+| **Brand** | NEW (D15) | `id, workspaceId, name, code?, logo?/color?`; one auto-created default brand per workspace |
+| **Zone** | NEW (D16) | `id, branchId, workspaceId (denormalized), name, zoneType, isDefault, sortOrder`; exactly one `isDefault` per location (backfilled for every existing branch) |
+| **Tag / BranchTag** | NEW (D17) | org-level label + N:M to locations (or `tags String[]` on Branch — decided at the gate) |
+| **Policy / override rows** | NEW, later (D20) | generic `(scopeLevel ORG/BRAND/LOCATION/ZONE, scopeId, key, value)` — not built now |
 | WorkspaceMember | EXTEND | role = preset; `capabilityGrants Json?` (explicit grants/revokes, e.g. `schedule.edit` for a Branch Manager) |
-| UserBranchAssignment | EXTEND | `scopeType` ALL / REGION / GROUP / BRANCH; `regionId?`, `groupId?`, `branchId?` |
+| UserBranchAssignment | EXTEND | ~~`scopeType` ALL / REGION / GROUP / BRANCH~~ → **scope row = conjunction** (`brandIds[]`, `regionIds[]`, `groupIds[]`, `tagIds[]`, `branchIds[]`, `zoneIds[]`; empty = any) — AMENDED 2026-10-07 (D21) |
 | **Region** | NEW | `id, workspaceId, name, code?` |
-| Branch | EXTEND | `regionId` (exactly one primary region — D3); `code` = branch number; `openingHours Json` (D8); `legacyKey` (done); `timezone` (EXISTING) |
+| Branch (= Location) | EXTEND | **`brandId`** (required; default-brand backfill — D15); `regionId` (exactly one primary region — D3); `code` = location code, **unique per workspace** (import key — D22); address fields; `openingHours Json` (D8); `legacyKey` (done); `timezone` (EXISTING) |
 | **BranchGroup** | NEW | `id, workspaceId, name` (additional groups only — regions are NOT groups) |
 | **BranchGroupMember** | NEW | `branchId, groupId` (N:M) |
-| StationDevice | EXTEND | station credential hash, `status` active / spare / revoked, `revokedAt`, activation metadata |
-| **StationActivationCode** | NEW | `code (hashed), workspaceId, branchId, expiresAt, usedAt, createdBy` |
-| BranchMasterDesignation | EXISTING | `branchId` → canonical id (Gate 2 data migration) |
+| StationDevice | EXTEND | station credential hash, `status` active / spare / revoked, `revokedAt`, activation metadata, **`zoneId`** (null ≡ the location's default zone) |
+| **StationActivationCode** | NEW | `code (hashed), workspaceId, branchId, **zoneId**, expiresAt, usedAt, createdBy` |
+| BranchMasterDesignation | EXISTING → EXTEND | `branchId` → canonical id (Gate 2 data migration); **`zoneId`**, uniqueness moves from (workspaceId, branchId) to (workspaceId, branchId, zone) — default zone ≡ today's row (D18) |
 | Schedule (music) | EXISTING | executor moves to MAIN in a later phase |
 | Announcement | EXISTING | the asset row; `branchId` → canonical or workspace-level |
-| **AnnouncementSchedule** | NEW | `announcementId`, target (branch/region/group), `timeLocal`, `daysOfWeek`, `oneOffDate`, `startDate/endDate`, `lateGraceMin` (null = SKIP), `enabled`, `revision` |
+| **AnnouncementSchedule** | NEW | `announcementId`, target = **filter expression** (§2b: brand / region / group / tag / location / zoneType / zone), `timeLocal`, `daysOfWeek`, `oneOffDate`, `startDate/endDate`, `lateGraceMin` (null = SKIP), `enabled`, `revision` |
 | **AnnouncementSend** | NEW | one per HQ send: who, content, targets, `deliverOnReconnectMin` (null = NOW ONLY) |
-| **AnnouncementDelivery** | NEW | `sendId` or schedule run, `branchId`, `state`, timestamps, error |
-| **BranchStatus** | NEW | connection state + since, last-known audio state + time, safe title, app version, clock skew, lastSeenAt |
+| **AnnouncementDelivery** | NEW | `sendId` or schedule run, `branchId`, **`zoneId`**, `state`, timestamps, error (one row per target zone) |
+| **BranchStatus** → **ZoneStatus** | NEW | one row **per zone** (= per playback unit): connection state + since, last-known audio state + time, safe title, app version, clock skew, lastSeenAt; location status = aggregate of its zones |
 | AuditLog | EXISTING | more action types |
-| JinglePadAssignment | EXISTING | `branchId` → canonical |
+| JinglePadAssignment | EXISTING | `branchId` → canonical; later keyed by inheritance level (org / brand / location / zone) |
 | Device (legacy) | EXISTING | untouched; retire later |
 
 ---
@@ -512,3 +685,60 @@ Evidence: **R** = owner runtime on the Lenovo (real audio); **S** = server logs 
 - Escalation threshold for "Connection lost during opening hours" (default proposal: 2h).
 - Music schedules migration timing (Phase 8).
 - Signed jingle URLs (post-pilot).
+
+---
+
+## 23. MULTI-BRAND + MULTI-ZONE — WHAT EXISTS, WHAT IS MISSING, WHAT WOULD BLOCK IT (2026-10-07)
+
+Evidence: `prisma/schema.prisma`, `lib/authz.ts`, `lib/auth-ws-token.ts`, `server/branch-room.ts` (PROVEN BY CODE, read-only).
+
+**Exists today:** Workspace (= Organization) · Branch (= Location: `code`, `timezone`, `city`, `country`,
+`businessType`, `legacyKey`) · StationDevice (bound to workspace + branch) · BranchMasterDesignation (unique per
+workspace + branch) · WorkspaceMember / UserBranchAssignment · authz engine in SHADOW (presets ADMIN / HQ_CONTROL /
+REGIONAL_MANAGER — branch-scoped until a region model exists / BRANCH_MANAGER / VIEW_ONLY; scope = ALL or an explicit
+branch set) · WorkspaceBusinessProfile (org-level business defaults) · Schedule (FK to Branch) · Announcement /
+JinglePadAssignment (`branchId` plain string) · AnnouncementChannel (per workspace) · legacy `Device`.
+
+**Missing today:** Brand · Zone (+ zone-type vocabulary) · Region · Group (+ membership) · Tags · conjunctive scope
+rows / Brand-Manager and Zone-operator scopes · inheritance / override layer · location address fields · unique
+location code · zone-level designation / station binding / status / activation code · filter-expression targets.
+
+**Current choices that WOULD block Brand or Zone if left as-is — and the required adjustment:**
+
+| # | Current choice | Why it blocks | Adjustment (at the relevant gate, not now) |
+|---|---|---|---|
+| B1 | **"Exactly one designated MASTER per branch"** — CLAUDE.md §11 + `BranchMasterDesignation @@unique([workspaceId, branchId])` + token claim `designatedMasterByBranch` | a hotel needs one MASTER per zone | **D18 FINAL 2026-10-07; CLAUDE.md §11 amended (applied)** + designation keyed by zone (max 1; 0 while unprovisioned); the default zone keeps today's row / claim so the accepted pilot is untouched |
+| B2 | WS room = `ws:<workspace>:<branch>` (one playback room per branch) | commands to "the branch" become ambiguous with several MASTERs | the default zone keeps the existing key (LOCKED); additional-zone room format **DEFERRED** to the Zone Foundation Gate audit (§2a) |
+| B3 | StationDevice / activation bound to (workspace, branch) only | a station cannot say which zone it plays | add `zoneId` (null ≡ default zone) |
+| B4 | Planned scope types ALL / REGION / GROUP / BRANCH (single-dimension, union) | cannot express Brand Manager or "brand ∧ region" | conjunctive scope rows (§2d) — amend before the permissions gate is implemented |
+| B5 | `authorize(user, capability, branchIds)` and token `authorizedBranches: string[]` | zone targets not representable; expanded id lists grow with locations × zones | targets = zones; broad scopes carry ALL / the scope expression in the token |
+| B6 | Planned `BranchStatus` one row per branch | status truth is per playback unit | `ZoneStatus` per zone; location = aggregate |
+| B7 | Planned announcement / schedule targets "branch / region / group" | no brand / zone-type / zone targeting | targets = filter expression (§2b); deliveries per zone |
+| B8 | Settings keyed by bare `branchId` strings (Announcement `branchId` default "default", JinglePadAssignment; Schedule.branchId FK) | no org / brand / zone levels for inheritance | new settings use (scopeLevel, scopeId); existing rows = LOCATION level (default zone) — migrate only when each feature is touched |
+| B9 | `Branch.code` default "" and **not unique** | bulk import cannot be idempotent | unique (workspaceId, code) once codes are backfilled |
+| B10 | Region / Group not built yet; the D3 example put "24/7" in Groups | risk of re-using Groups as Zones or Tags | D17: Region / Group / Tags are classification only; Zone is a separate table |
+
+**Not blocking (verified):** Workspace = Organization fits — brands are a level *inside* it (modelling brands as
+separate workspaces would break cross-brand HQ, shared users and shared content, so it is rejected). Canonical
+Branch ids (Gate 2) are the right anchor for Location. Timezone on Branch is correct (zones inherit it). The capability
+set (§3) needs no change. The playback plane (MAIN / MPV / orchestrator) is per station and needs no change for
+zones — a zone station is just another designated station.
+
+**Sequencing:** none of this changes the current P0 playback work or the accepted pilot. Brand + Zone tables (with
+default-brand / default-zone backfill) should land **before or together with** the Region / Group permissions gate, so
+scopes, status and targets are built on zones from the start instead of being retrofitted.
+
+---
+
+## 24. CLAUDE.md CONSTITUTIONAL AMENDMENT (D18) — APPLIED 2026-10-07
+
+Approved by Dotan 2026-10-07 and applied to `CLAUDE.md` in the same docs-only commit as this blueprint lock:
+- **§11 "Permanent MASTER architecture — HARD INVARIANT"** rewritten around the Zone as the playback-authority unit,
+  with the final D18 lifecycle rule (*At most one designated MASTER per Zone at all times. Every active / provisioned playback Zone must have exactly one designated MASTER. An unprovisioned Zone may temporarily have zero designated MASTERs.*), provisioned / unprovisioned definitions, multi-station zones,
+  no-steal / no-failover / audited standby promotion, default-zone backward compatibility, zones as the final
+  playback destination, and the additional-zone WS room format DEFERRED.
+- **§2 pilot priority 3:** "permanent branch / zone MASTER identity".
+- **Architecture → WebSocket Device Registry:** designated zones (today every designated branch = its single default
+  zone), at most one designated MASTER per zone, no automatic failover.
+
+`CLAUDE.md` is the authoritative text; this section only records the change.
