@@ -17,6 +17,10 @@
 - **Phase:** PILOT HARDENING
   - **PLAYER PHASE: PILOT ACCEPTED** (owner-attested 2026-10-05)
   - **JINGLES / ANNOUNCEMENTS: PILOT ACCEPTED** (owner-attested 2026-10-05)
+- **CONTROL ROOM F1 — BRAND + ZONE FOUNDATION (SHADOW): ACCEPTED** (2026-10-07, TEST only) — commit `25d4c06`, app
+  deployment `538902e8`, migration `20261007120000_control_room_f1_brand_zone`. Default brand `11db397d…` (MAIN),
+  default zone `6739408a…` (MAIN) on canonical branch `90d2b7b8…`. Nothing reads Brand/Zone at runtime yet. **F2 NOT
+  started.** Record: `docs/CONTROL_ROOM_F1_ACCEPTANCE_2026-10-07.md`.
 - **Current active P0:** none (P0 playback hardening accepted 2026-10-07). Next architecture step: Control Room
   **Foundation Gate — Brand + Zone + composite permission scopes** (blueprint `docs/CONTROL_ROOM_BLUEPRINT.md`,
   D14–D22; no schema/runtime work started).
@@ -89,6 +93,8 @@ Lineage: `865ba81` (offline cold boot, MAIN) → `2ebdbe4` (renderer stall fix) 
 | **WS volume (2026-10-06)** | `syncbiz-ws-test-volume` (id `18b32178-da30-484f-8403-785b347baf73`) on `syncbiz-ws-test` only, mount `/data` → designation / lease / branch-alias state in `/data/ws-lease/` (proven to survive redeploy with no re-assertion) |
 | **Control Room Phase 1 deploys (2026-10-06)** | app `87a05469-b3f5-4afc-819a-c33746e0182e` (source `6b5b9a0`, file-hash verified for the changed renderer files); WS `335dad0a-e3a4-4802-b1b6-c9ae40697e51` (Gate 1 shadow code `cea1585`) |
 | **TEST DB backup before Gate 2B-2** | `D:\SyncBiz_Backups\test-env\20261006T145008Z-gate2b2\` (pg_dump sha256 `d6a5c882ceef7808ea62310db113b82f8f95e8ba370c7d6004bcff813fb1dbb7`, 241240 B; **restore test PASS** — 13 counts identical, throwaway DB dropped) + `gate2b2-manifest.json` (sha256 `f6893d7050a0813c6921a6d8a8164ade31a57786765daf3dd8d2416e644d494b`; also on TEST app volume `/data/control-room/gate2b2-manifest.json`) + `BACKUP-RECORD.txt`. Git HEAD at backup `2d2ccdf` |
+| **Control Room F1 deploys (2026-10-07)** | deploy A `bbb98798-8487-4e43-b308-a101b34e402c` (= `483fd28` + F1 migration folder only → `prisma migrate deploy`); deploy B **`538902e8-439d-46c4-a38d-ea978c7baaac`** (= `25d4c06`, clean tree, changed files hash-verified). WS NOT redeployed (`23e94c01`) |
+| **TEST DB backup before F1** | `D:\SyncBiz_Backups\test-env\20261007T094829Z-control-room-f1\` (pg_dump sha256 `4d9ea2da808c4fa19bdb0f63d40ea4ae72ccfb5564ea63dd7fd81bcf0e2bc22b`; **restore test PASS**; pre/post fingerprints) |
 | **Gate 2B-1 app deploy (2026-10-06)** | app `8273a78b-8b93-476a-9625-6d4983717d05` (SUCCESS 14:13Z; source `9e06f40`, clean tree; all 12 changed source files hash-verified). WS NOT redeployed |
 | **Gate 2A-3 WS deploy (2026-10-06)** | WS `23e94c01-38ba-4dde-9f22-336bb304bdde` (SUCCESS 11:37Z; source `384df45`, clean tree). Previous shadow WS build `335dad0a…` = rollback reference (rollback also needs the legacy WS files from the Gate 2A backup) |
 | **Canonical TEST branch** | `90d2b7b8-7bce-4d5d-a984-5f84fa8ba0d2`, code `T001`, "TEST Pilot Branch (legacy default)", `legacyKey="default"`; **since Gate 2A-3 the WS routes the TEST workspace by this canonical id** (clients still send `"default"`; content rows still `"default"` until Gate 2B) |
@@ -163,6 +169,16 @@ unchanged since `2ebdbe4` (byte-identical). Jingle MP3s on `/data` survived this
 **NOT CRYPTOGRAPHICALLY PROVEN** (no commit hash in Railway metadata).
 
 ## 7. RUNTIME ACCEPTED
+
+### CONTROL ROOM F1 — BRAND + ZONE FOUNDATION (SHADOW) — ACCEPTED (2026-10-07, TEST, branch `feature/control-room-phase1`)
+
+- **Server / DB corroborated:** Lenovo MAIN MASTER (10:03:04Z, trusted station) and renderer CONTROL in canonical room
+  `ws:31d30e23…:90d2b7b8…`; canonical branch → default brand MAIN; exactly one default zone MAIN; both stations + the
+  Lenovo designation resolve to it; no Branch id "default"; no fake station / designation rows; content fingerprint
+  0 diffs vs pre-migration; desktop token / register / ws-token 200, 0 × 409; F1 check `ok`; second backfill = no-op.
+- **Owner-attested (Lenovo, beta.12):** token/register PASS, durable station id preserved, MAIN MASTER, renderer CONTROL,
+  LOCAL / LOCAL NEXT / URL PASS, no 409, no branch conflict, no watchdog restart.
+- Commit `25d4c06` · tag `pilot-baseline/2026-10-07-control-room-f1-25d4c06` · details `docs/CONTROL_ROOM_F1_ACCEPTANCE_2026-10-07.md`.
 
 ### P0 PLAYBACK HARDENING — ACCEPTED — owner-attested 2026-10-07 (Lenovo, Desktop beta.12 + TEST renderer `3d6a70d`)
 
@@ -567,9 +583,12 @@ Not pilot blockers. Do not fix inside unrelated work.
    `lib/playback-provider.tsx`: a station powered off >24h may not auto-resume. Record only.
 5. **Explicit kill-`mpv.exe` resilience test** — manual destructive test not yet run (code path regression-tested).
 6. **Missing/corrupt LOCAL file runtime acceptance** — manual test not yet run (code path regression-tested).
-7. **STARTUP PLAYLIST CONTENT HYDRATION (UI, recorded 2026-10-06).** On VONO startup LOCAL playback begins
-   correctly, but the visible playlist / queue track stack may stay empty until the first track transition.
-   Owner: NOT a pilot blocker. Separate audit later; do NOT change playback for it now.
+7. **STARTUP QUEUE HYDRATION (UI / session restore — NON-P0, recorded 2026-10-06, re-observed 2026-10-07 after F1).**
+   After a VONO cold start / reopen: LOCAL audio resumes correctly and the current track plays correctly, but the
+   visible playlist / queue can stay empty and NEXT is unavailable at first; after the first natural track transition
+   the full LOCAL queue appears and NEXT works. **Desired:** startup restore hydrates the visible queue / session
+   immediately, **without restarting or redispatching the currently playing track.** NOT a playback-continuity P0;
+   not caused by F1. Own audit / gate; do NOT change playback for it now.
 8. **ACTIVE PLAYLIST VISUAL INDICATOR (UI, recorded 2026-10-06).** The UI previously showed which playlist was
    actively playing (especially URL playlists) with an animated LED / snake-style border around the playlist
    artwork. Owner wants an obvious "currently playing playlist" indication restored later. Not a pilot blocker.
@@ -632,6 +651,10 @@ Not pilot blockers. Do not fix inside unrelated work.
    yt-dlp runs. Own gate.
 19. **MAIN engine failure with mock status "playing" (watchdog residual, recorded 2026-10-07).** Recovery then relies
    on the 120 s startup hard max instead of the 12 s stall rule. Record only.
+
+20. **WATCHDOG MANUAL-LAUNCH RACE (Protection, NON-P0, recorded 2026-10-07).** After an intentional stop followed by a
+   manual launch, the watchdog may briefly issue a redundant launch because it still sees the old PID; single-instance
+   protection currently absorbs it (no duplicate player observed). Own audit; do NOT fix now.
 
 Carried over (still open):
 - Jingle library/pads still use `branchId:"default"`; no link to `MediaAsset`; generated-but-unsaved MP3s
@@ -704,6 +727,7 @@ Carried over (still open):
 
 | Layer | Reference |
 |---|---|
+| **Control Room F1 (2026-10-07)** | tag `pilot-baseline/2026-10-07-control-room-f1-25d4c06` → `25d4c0685517f235df69fac3fb89c555807ef698`; app deployment `538902e8`; DB backup `D:\SyncBiz_Backups\test-env\20261007T094829Z-control-room-f1\` (or drop the additive F1 objects) |
 | **CURRENT desktop baseline tag (2026-10-07)** | `pilot-baseline/2026-10-07-desktop-beta12-dc74457` → `dc744575e97279358e6794687ed37d408706677d` |
 | **CURRENT renderer baseline tag (2026-10-07)** | `pilot-baseline/2026-10-07-renderer-3d6a70d` → `3d6a70de92e54e88ba00e2f7f14dc6589e5cf644`; TEST deployment `a1028a7f-98f2-4a5f-9a82-fb47f35f03f7` |
 | **CURRENT accepted installer** | `D:\SyncBiz_Backups\pilot\2026-10-07-beta12-p0-accepted\SyncBiz-Player-Setup-2.2.8-beta.12-x64.exe`, SHA256 `3becd1c881c6c847f11c0c10f2f1549c7987be92bb1e83808b36cf8528e49429` |
