@@ -9,6 +9,27 @@
 ## 1. STATUS
 
 - **✅ P0 PLAYBACK CONTINUITY + DROP NEXT + URL→URL MIX — ACCEPTED — owner-attested 2026-10-08 (Lenovo, beta.18 + TEST app 414d3564):** ~5 h continuous run, playback never stopped, Drop Next works, URL→URL mix works well. Not independently log-verified by Claude. OPEN before the playback baseline lock: real A/V video sync (built for future external-screen output) + restart restore (Gate 2d). Control Room waits for both. Candidate record:
+- **🟡 P0 VIDEO V1 — SYNCED VIDEO (picture + sound from the SAME MPV player) — RUNTIME CANDIDATE ON TEST (2026-10-09),
+  NOT yet accepted.** Head `65c13c0` (local, NOT pushed; on top of the Gate 2d candidate `943f23f`). DESKTOP MAIN +
+  RENDERER. Owner-approved 2026-10-09 (MPV change). Opt-in per station, **OFF by default** (decks spawn with today's
+  audio-only arguments). ON: the SYNC button next to Artwork/Video (player background = Video), then restart VONO
+  (`C:\ProgramData\VONO\state\video-output.json`). Each music deck renders its picture in its own focus-less,
+  taskbar-less MPV window placed by MAIN over the player's video slot (hidden otherwise / when VONO is minimized);
+  crossfade = fade-through-black locked to the audio ramp; Auto quality 1080p → 720p → 480p → 360p (buffering stall /
+  heavy dropped frames), back up after 3 clean songs; a stall drops the picture for the rest of THAT song only (audio
+  untouched; the picture returns with the next load, never mid-song). The muted YouTube iframe is not mounted while
+  synced video is active. V0 evidence + end-to-end run on the Dev-PC (PROVEN BY local runtime, not Lenovo): 1080p H.264
+  d3d11va, 0 dropped frames; real crossfade A → black → B; per-deck audio advanced every second through load + mix,
+  0 cache stalls. Known V1 limits: fade-through-black (a true dissolve needs a Windows helper — later); the picture is
+  a native window always on top of the slot while VONO is visible (it can cover a menu that opens over the slot); the
+  slot is the right 60% of the player's video area (no fog / rounded corner over the picture). main.log: `VIDEO_OUTPUT`,
+  `VIDEO_OUTPUT_SET`, `VIDEO_QUALITY`, `VIDEO_STALL_DROP`. Tests: `desktop/scripts/verify-video-output.ts` 35/35.
+  - **Desktop candidate:** `2.2.8-beta.21` (= Gate 2d + Video V1), SHA256
+    `adced13e6f80e473a35fe4e2a57fe6449cdcc6bf6bb0a9f01e53abaa6e47316f`, 140,782,911 bytes, unsigned, NOT published,
+    TEST-pinned, clean dist. Copy: `D:\SyncBiz_Backups\pilot\2026-10-09-beta21-video-v1-65c13c0\`.
+  - **TEST app:** deployment `c11233f3-c90a-4f33-9e3b-472332dd9833` (= clean worktree `65c13c0`; audio-player /
+    mpv-video-output / background / provider hash-identical). WS unchanged `23e94c01`. **Rollback:** beta.20 + app
+    `1f66e7bf` (restart only), beta.18 + app `414d3564`.
 - **🟡 P0 GATE 2d — RESTART RESTORE — RUNTIME CANDIDATE ON TEST (2026-10-09), NOT yet accepted.** Head `943f23f` (on top of
   `a41359f`; local, NOT pushed). DESKTOP MAIN + RENDERER. Owner rule 2026-10-09: the station remembers its last source (URL
   playlist or LOCAL) across shutdown / restart / crash with NO age limit, until changed manually. MAIN (designated station
