@@ -8,6 +8,20 @@
 
 ## 1. STATUS
 
+- **🟡 P0 GATE 2a — PARTIAL RISK-REDUCTION — RUNTIME CANDIDATE ON TEST, NOT YET ACCEPTED (2026-10-08).** Head `e31b614`
+  on `playback/p0-gate1-url-transition` (local, NOT pushed): `610463c` (exact clicked track — Gate 1e regression on
+  1-arg callers; URL end-of-playlist follows the loop setting with the LOCAL rule) + `e31b614` (a MAIN-started standby
+  failure is reported once, then MAIN reports the still-audible deck again — orchestrator REPORTING-ONLY change,
+  owner-approved; the previous session is handed back after "current music kept"). Does NOT solve renderer reload /
+  URL preload / URL→URL crossfade / restart restore (Gates 2b–2d, architecture approved 2026-10-08, not started).
+  - **Desktop candidate:** `2.2.8-beta.16`, SHA256 `dfb09b107ce676586ea5df04e43fd401961cd154708f5a821a240ca29274baef`,
+    140,766,769 bytes, unsigned, NOT published, TEST-pinned (same transient edits, reverted), clean `desktop/dist`.
+    Copy: `D:\SyncBiz_Backups\pilot\2026-10-08-beta16-gate2a-e31b614\`.
+  - **TEST app:** deployment `2536177a-8b93-4e3d-b91a-7aa535c2a313` (= clean worktree `e31b614`; 10 key files incl. F3a
+    `lib/location-filter.ts` + `prisma/schema.prisma` hash-identical). WS unchanged `23e94c01`; DB unchanged.
+  - **Rollbacks:** beta.15 + app `048b920c`; beta.14 + app `4d6215d3`; beta.12 accepted + app `4d2b0f53` (all hashes
+    re-verified 2026-10-08).
+
 - **🟡 P0 GATE 1 (URL transitions) — RUNTIME CANDIDATE ON TEST, NOT YET ACCEPTED (2026-10-08).** Branch
   `playback/p0-gate1-url-transition` (local, NOT pushed) @ `4a0c3a4` on F3a baseline `31d02ad`: `33405e8` 1a (MAIN
   audible-deck protection) · `c2c43af` 1b+1c (URL failure → one safe next; one transition intent + Loading) · `51f9503`
