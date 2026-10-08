@@ -24,7 +24,9 @@ export type RemoteCommand =
   | "SET_REPEAT_MODE"
   // On-air announcement/jingle: duck current playback, play the given audio once, restore.
   // Executed on the branch MASTER via the existing desktop bridge (mpvPlayInterrupt).
-  | "PLAY_INTERRUPT";
+  | "PLAY_INTERRUPT"
+  // P0 Gate 1e: absolute jump to session item N — MAIN relays it to the station renderer (the URL session owner).
+  | "JUMP_SESSION_INDEX";
 
 export type ClientRole = "device" | "controller" | "owner_global";
 
@@ -63,6 +65,8 @@ export type StationPlaybackState = {
     editHref?: string | null;
     /** Set when playing a persisted playlist — drives CONTROL playlist-kind badge without full `UnifiedSource`. */
     playlistOriginBadge?: "dj_creator" | "ready" | "scheduled" | "my" | "branch";
+    /** Provider type of the MAIN session source (already on the wire from desktop MAIN; "local" = LOCAL session). */
+    sourceType?: string;
   } | null;
   currentTrackIndex: number;
   /** Active playlist session rows (same data MASTER Live Queue uses). */

@@ -19,7 +19,7 @@ import { GuestRecommendationModal } from "@/components/guest-recommendation-moda
 import { urlToUnifiedSource } from "@/lib/remote-control/url-to-source";
 import { payloadToUnifiedSource } from "@/lib/remote-control/payload-to-source";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
-import { routeStationTransport, resolveUrlSessionStep } from "@/lib/station-transport-routing";
+import { routeStationTransport, resolveUrlSessionStep, resolveUrlSessionJump, resolveExactUrlTarget, ownPlayableUrl, playlistShellIdOfLeaf } from "@/lib/station-transport-routing";
 import { initialUrlEofState, observeUrlEof, disarmUrlEof, type UrlEofState } from "@/lib/url-eof-advance";
 import {
   beginTransition, decideUserCommand, failTransition, isBlocking, observeTransition, targetKeyOf, tickTransition,
@@ -64,9 +64,12 @@ type DevicePlayerContextValue = {
   sendSetMaster: () => void;
   sendSetControl: () => void;
   /** Send command to master (when in CONTROL mode). */
-  sendCommandToMaster: (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number }) => void;
+  sendCommandToMaster: (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number; sessionSourceId?: string }) => void;
   /** Play source locally (MASTER) or send to master (CONTROL). */
   playSourceOrSend: (source: UnifiedSource, trackIndex?: number) => void;
+  /** P0 Gate 1e: absolute jump to item N of the MAIN-mirrored URL session — the station steps its OWN session
+   *  (exact item URL); a remote relays JUMP_SESSION_INDEX through MAIN to the station. Never a reconstructed source. */
+  jumpToSessionIndexOrSend: (trackIndex: number, sessionSourceId: string) => void;
   /** Add a song to the queue — local when this device plays, else QUEUE_NEXT to MASTER. */
   queueNextOrSend: (source: UnifiedSource) => void;
   /** Play/pause/stop/next/prev - local when MASTER, send to master when CONTROL. */
@@ -1145,7 +1148,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   }, [isActive, status, deviceMode, playStatus, sendState, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState, repeatModeState, sessionMirrorInput]);
 
   const sendCommandToMaster = useCallback(
-    (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number }) => {
+    (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number; sessionSourceId?: string }) => {
       if (!masterDeviceId) return;
       sendCommand(masterDeviceId, command, payload);
     },
@@ -1181,6 +1184,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   /** P0 Gate 1d: last consumed MAIN step-relay identity (null until the first snapshot of this mount = baseline). */
   const stepRelayConsumedRef = useRef<{ boot: string; seq: number } | null>(null);
   const relayedStepRef = useRef<(direction: "next" | "prev", seq: number) => void>(() => {});
+  const relayedJumpRef = useRef<(trackIndex: number, sessionSourceId: string | null, seq: number) => void>(() => {});
   const masterStateRef = useRef<StationPlaybackState | null>(masterState);
   masterStateRef.current = masterState;
   /** This controller can observe MAIN attempt ids directly (the designated station's co-located renderer). */
@@ -1227,6 +1231,16 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         setUrlTransition(null); // P0 Gate 1c: explicit LOCAL selection clears the URL intent (existing safe LOCAL path)
         playSource(source, trackIndex);
       } else {
+        // P0 Gate 1e — LOCKED: a non-LOCAL PLAY_SOURCE must carry the playable URL of THAT EXACT track. Resolve the
+        // exact target (a borrowed leaf id / shell + index → the parent playlist's leaf at that index); no playable
+        // target → FAIL CLOSED: send nothing, change no metadata, keep the current audio.
+        const exact = source ? resolveExactUrlTarget(source, trackIndex) : { reject: "no source" };
+        if ("reject" in exact || !unifiedSourceToPayload(exact.source).url) {
+          console.warn("[VONO url-target] selection rejected — " + ("reject" in exact ? exact.reject : "no playable URL") + " (nothing sent; current audio kept)", { id: source?.id ?? null, trackIndex });
+          return;
+        }
+        source = exact.source;
+        trackIndex = exact.trackIndex;
         // P0 Gate 1c: ONE source-transition intent — the same target while it is still pending is a duplicate.
         const selectKey = targetKeyOf(source?.id, trackIndex);
         const verdict = decideUserCommand(urlTransitionRef.current, { kind: "select", targetKey: selectKey });
@@ -1296,10 +1310,44 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       // Any step (manual NEXT / PREV or the EOF step itself) disarms: a pending natural end can never step again.
       urlEofStateRef.current = disarmUrlEof(urlEofStateRef.current);
       if ("noop" in step) return true;
+      // P0 Gate 1e: the step target must carry ITS OWN playable URL — else fail closed (nothing sent, audio kept).
+      if (!ownPlayableUrl(step.leaf)) {
+        console.warn("[VONO url-target] session step rejected — item " + step.trackIndex + " has no playable URL (nothing sent; current audio kept)");
+        return true;
+      }
       lastSentUrlLeafRef.current = step.leaf;
       // P0 Gate 1c: every session step is ONE tracked transition (manual, natural-EOF or failure step).
       beginUrlTransition(opts?.origin ?? (opts?.noWrap ? "auto-eof" : direction), targetKeyOf(step.leaf.id, step.trackIndex), opts?.failures ?? 0);
       sendCommandToMaster("PLAY_SOURCE", { source: unifiedSourceToPayload(step.leaf), trackIndex: step.trackIndex });
+      return true;
+    },
+    [canLocalExec, masterState, sendCommandToMaster, beginUrlTransition]
+  );
+
+  // P0 Gate 1e: ABSOLUTE jump to item N of the URL playlist session THIS renderer committed (twin of stepUrlSession):
+  // the exact leaf with its own URL → PLAY_SOURCE(leaf N, trackIndex N). The session baseline moves to item N, so
+  // NEXT / PREV / natural EOF / the 1b failure step continue from N. Same-item while pending = duplicate; a different
+  // item = the newest explicit selection wins. Not coherent / no URL → false (nothing sent, audio kept).
+  const jumpUrlSession = useCallback(
+    (index: number): boolean => {
+      if (!canLocalExec || localSessionOwnedRef.current) return false;
+      const j = resolveUrlSessionJump({
+        sentLeaf: lastSentUrlLeafRef.current,
+        mainSourceId: masterState?.currentSource?.id ?? null,
+        mainSessionTrackCount: masterState?.sessionTracks?.length ?? null,
+        targetIndex: index,
+      });
+      if (!j) {
+        console.warn("[VONO url-target] session jump rejected — no coherent URL session / item " + index + " has no playable URL (nothing sent; current audio kept)");
+        return false;
+      }
+      const key = targetKeyOf(j.leaf.id, j.trackIndex);
+      const verdict = decideUserCommand(urlTransitionRef.current, { kind: "select", targetKey: key });
+      if (verdict !== "accept") { console.info("[VONO intent] session jump ignored — " + verdict); return true; }
+      urlEofStateRef.current = disarmUrlEof(urlEofStateRef.current);
+      lastSentUrlLeafRef.current = j.leaf;
+      beginUrlTransition("select", key);
+      sendCommandToMaster("PLAY_SOURCE", { source: unifiedSourceToPayload(j.leaf), trackIndex: j.trackIndex });
       return true;
     },
     [canLocalExec, masterState, sendCommandToMaster, beginUrlTransition]
@@ -1395,6 +1443,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         stepRelayConsumedRef.current = { boot: reqBoot, seq: Math.max(reqSeq, last && last.boot === reqBoot ? last.seq : 0) };
         if (last && last.boot === reqBoot && reqSeq > last.seq && (st.sessionStepDirection === "next" || st.sessionStepDirection === "prev")) {
           relayedStepRef.current(st.sessionStepDirection, reqSeq);
+        } else if (last && last.boot === reqBoot && reqSeq > last.seq && st.sessionStepDirection === "jump" && typeof st.sessionStepIndex === "number") {
+          relayedJumpRef.current(st.sessionStepIndex, typeof st.sessionStepSessionId === "string" ? st.sessionStepSessionId : null, reqSeq); // P0 Gate 1e
         }
       }
       const sent = lastSentUrlLeafRef.current;
@@ -1474,6 +1524,34 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     console.info("[VONO step-relay] remote " + direction.toUpperCase() + " #" + seq + " → " + result);
   }, [transportRunsLocally, stepUrlSession, next, prev]);
   useEffect(() => { relayedStepRef.current = relayedStep; }, [relayedStep]);
+
+  // P0 Gate 1e: a remote's absolute session-row selection relayed by MAIN → the station's OWN jump (exact item URL).
+  // Only for THIS renderer's URL session (same playlist shell); LOCAL sessions / stale requests are ignored (no
+  // divergence: MAIN metadata was never changed).
+  const relayedJump = useCallback((index: number, sessionSourceId: string | null, seq: number) => {
+    let result: string;
+    const ownShell = playlistShellIdOfLeaf(lastSentUrlLeafRef.current);
+    if (!canLocalExecRef.current) result = "ignored — not the station session owner";
+    else if (transportRunsLocally()) result = "ignored — LOCAL session (unchanged)";
+    else if (!ownShell || playlistShellIdOfLeaf({ id: sessionSourceId ?? "" }) !== ownShell) result = "ignored — not this URL session";
+    else result = jumpUrlSession(index) ? "URL session jump" : "rejected (no playable target)";
+    console.info("[VONO step-relay] remote JUMP " + index + " #" + seq + " → " + result);
+  }, [transportRunsLocally, jumpUrlSession]);
+  useEffect(() => { relayedJumpRef.current = relayedJump; }, [relayedJump]);
+
+  const jumpToSessionIndexOrSend = useCallback((index: number, sessionSourceId: string) => {
+    if (isStationObserver()) {
+      if (!jumpUrlSession(index)) console.warn("[VONO url-target] station row jump not executed (see above)");
+      return;
+    }
+    // remote (browser / phone web): the station owns the URL playlist → relay an exact indexed jump through MAIN.
+    const shell = playlistShellIdOfLeaf({ id: sessionSourceId });
+    const key = shell ? targetKeyOf(`${shell}:track:r${index}`, index) : null;
+    if (decideUserCommand(urlTransitionRef.current, { kind: "select", targetKey: key }) !== "accept") { console.info("[VONO intent] session jump ignored — duplicate / pending"); return; }
+    if (typeof masterStateRef.current?.mpvAttemptId === "number") beginUrlTransition("select", key);
+    sendCommandToMaster("JUMP_SESSION_INDEX", { trackIndex: index, sessionSourceId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isStationObserver reads refs
+  }, [jumpUrlSession, beginUrlTransition, sendCommandToMaster]);
 
   // Keep the co-located MAIN's published session (title/artwork/queue/index) in sync while the renderer
   // executes a LOCAL source locally. METADATA ONLY — `unifiedSourceToPayload` strips local absolute paths,
@@ -1565,6 +1643,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       sendSetControl,
       sendCommandToMaster,
       playSourceOrSend,
+      jumpToSessionIndexOrSend,
       queueNextOrSend,
       playOrSend,
       pauseOrSend,
@@ -1602,6 +1681,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       sendSetControl,
       sendCommandToMaster,
       playSourceOrSend,
+      jumpToSessionIndexOrSend,
       queueNextOrSend,
       playOrSend,
       pauseOrSend,

@@ -212,7 +212,9 @@ function station(startIndex: number) {
     // Updated 2026-10-08 (P0 Gate 1d): fallback via sendRemoteNav (= sendCommandToMaster(NEXT/PREV) + remote feedback).
     /else if \(!stepUrlSession\("next"\)\) sendRemoteNav\("NEXT"\);/.test(ctx) && /else if \(!stepUrlSession\("prev"\)\) sendRemoteNav\("PREV"\);/.test(ctx) &&
     /const sendRemoteNav = \(cmd: "NEXT" \| "PREV"\) => \{\n[^\n]*\n    sendCommandToMaster\(cmd\);\n  \};/.test(ctx));
-  assert("S3 every step disarms (no double step) and a URL selection disarms", /urlEofStateRef\.current = disarmUrlEof\(urlEofStateRef\.current\);\n\s+if \("noop" in step\) return true;/.test(ctx) && (ctx.match(/disarmUrlEof\(urlEofStateRef\.current\)/g) ?? []).length === 2);
+  assert("S3 every step disarms (no double step) and a URL selection disarms", /urlEofStateRef\.current = disarmUrlEof\(urlEofStateRef\.current\);\n\s+if \("noop" in step\) return true;/.test(ctx) && (ctx.match(/disarmUrlEof\(urlEofStateRef\.current\)/g) ?? []).length === 3 &&
+    // Updated 2026-10-08 (P0 Gate 1e): the 3rd disarm is the absolute session jump (jumpUrlSession) — also a step.
+    /const jumpUrlSession = useCallback\([\s\S]*?urlEofStateRef\.current = disarmUrlEof\(urlEofStateRef\.current\);[\s\S]*?sendCommandToMaster\("PLAY_SOURCE"/.test(ctx));
   assert("S4 MAIN_WS_ATTEMPT_BASE parity with desktop MAIN", /export const MAIN_WS_ATTEMPT_BASE = 1_000_000_000;/.test(read("desktop", "src", "main", "main-attempt-id.ts")) && MAIN_WS_ATTEMPT_BASE === 1_000_000_000);
   // Scope of the URL-EOF commit itself (8e8895a) — bound so later, separately approved commits may touch runtime files.
   const changed = execSync(`git diff --name-only 8e8895a~1 8e8895a -- app lib components server desktop middleware.ts`, { cwd: ROOT }).toString().trim().split("\n").filter(Boolean).sort();

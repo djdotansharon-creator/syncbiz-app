@@ -609,7 +609,10 @@ export type MvpStatusSnapshot = {
    *  carries the SAME identity (consumed once) and a renderer remount baselines the current seq (never replays). */
   sessionStepBootId?: string;
   sessionStepSeq?: number;
-  sessionStepDirection?: "next" | "prev" | null;
+  sessionStepDirection?: "next" | "prev" | "jump" | null;
+  /** P0 Gate 1e: for a "jump" request — the absolute session item index + the session source id the remote saw. */
+  sessionStepIndex?: number | null;
+  sessionStepSessionId?: string | null;
 };
 
 export type MvpConfigPatch = Partial<Omit<DesktopRuntimeConfig, "deviceId">> & {

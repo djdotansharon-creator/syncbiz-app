@@ -133,7 +133,9 @@ export class DeviceWsManager {
   // P0 Gate 1d: remote NEXT / PREV relay identity (see MvpStatusSnapshot.sessionStep*).
   private readonly sessionStepBootId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   private sessionStepSeq = 0;
-  private sessionStepDirection: "next" | "prev" | null = null;
+  private sessionStepDirection: "next" | "prev" | "jump" | null = null;
+  private sessionStepIndex: number | null = null;
+  private sessionStepSessionId: string | null = null;
   private lastError: string | null = null;
   private listener: StatusListener | null = null;
   /**
@@ -297,6 +299,8 @@ export class DeviceWsManager {
       sessionStepBootId: this.sessionStepBootId,
       sessionStepSeq: this.sessionStepSeq,
       sessionStepDirection: this.sessionStepDirection,
+      sessionStepIndex: this.sessionStepIndex,
+      sessionStepSessionId: this.sessionStepSessionId,
     };
   }
 
@@ -342,6 +346,28 @@ export class DeviceWsManager {
     const moved = this.navigateCatalogStep(cmd);
     if (moved) this.lastCommandSummary = cmd;
     this.sendStateUpdateIfMaster();
+  }
+
+  /**
+   * P0 Gate 1e: WS JUMP_SESSION_INDEX (a remote's absolute session-row selection) → relay ONE indexed jump request to
+   * the station renderer (the URL session owner — it alone holds the track URLs) with the same exactly-once identity
+   * as NEXT / PREV. MAIN metadata is NOT touched; it changes only when the renderer sends the exact PLAY_SOURCE.
+   * Invalid payload or no session → ignored (no catalog change).
+   */
+  private handleRemoteJump(payload: unknown): void {
+    const j = payload as { trackIndex?: unknown; sessionSourceId?: unknown } | null | undefined;
+    const idx = typeof j?.trackIndex === "number" && Number.isInteger(j.trackIndex) && j.trackIndex >= 0 ? j.trackIndex : null;
+    const sid = typeof j?.sessionSourceId === "string" && j.sessionSourceId.trim() ? j.sessionSourceId.trim() : null;
+    if (idx === null || sid === null || !this.mock.getState().currentSource) {
+      this.lastCommandSummary = "JUMP_SESSION_INDEX ignored (invalid / no session)";
+      return;
+    }
+    this.sessionStepSeq += 1;
+    this.sessionStepDirection = "jump";
+    this.sessionStepIndex = idx;
+    this.sessionStepSessionId = sid;
+    this.lastCommandSummary = `JUMP_SESSION_INDEX ${idx} (relayed to station renderer #${this.sessionStepSeq})`;
+    console.log("[VONO step-relay] WS JUMP_SESSION_INDEX → renderer jump request", { seq: this.sessionStepSeq, trackIndex: idx });
   }
 
   /** Move mock station selection along `branchCatalog` (wraps). */
@@ -420,6 +446,18 @@ export class DeviceWsManager {
             : null;
           if (dupKey && dupKey === this.pendingWsLoadKey && orch.isMusicAttemptPending()) {
             console.log("[DeviceWsManager] PLAY_SOURCE ignored — same target already loading");
+            break;
+          }
+        }
+        // P0 Gate 1e — LOCKED: a NON-LOCAL PLAY_SOURCE without a playable URL changes NOTHING (rejected BEFORE any
+        // session / display metadata, no attempt, audible playback untouched). LOCAL (type "local", paths stripped on
+        // the wire) keeps the metadata-only sync below.
+        {
+          const rs = (payload as { source?: { type?: unknown; url?: unknown } } | null | undefined)?.source;
+          const rUrl = typeof rs?.url === "string" ? rs.url.trim() : "";
+          if (rs && rs.type !== "local" && !rUrl) {
+            console.warn("[DeviceWsManager] PLAY_SOURCE rejected — non-LOCAL source without a playable URL (metadata unchanged)");
+            this.lastCommandSummary = "PLAY_SOURCE rejected (no playable URL)";
             break;
           }
         }
@@ -683,6 +721,8 @@ export class DeviceWsManager {
         if (this.deviceRole === "MASTER") {
           if (cmd === "PREV" || cmd === "NEXT") {
             this.handleRemoteStep(cmd);
+          } else if (cmd === "JUMP_SESSION_INDEX") {
+            this.handleRemoteJump(p.payload); // P0 Gate 1e
           } else {
             this.runTransportCommand(cmd, p.payload, "ws");
             this.sendStateUpdateIfMaster();

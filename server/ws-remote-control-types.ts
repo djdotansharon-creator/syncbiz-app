@@ -22,7 +22,9 @@ export type RemoteCommand =
   | "SET_REPEAT_MODE"
   // On-air announcement/jingle: duck current playback, play the given audio once, restore.
   // Executed on the branch MASTER via the existing desktop bridge (mpvPlayInterrupt).
-  | "PLAY_INTERRUPT";
+  | "PLAY_INTERRUPT"
+  // P0 Gate 1e: absolute session jump (forwarded unchanged to the MASTER; type only — no server logic).
+  | "JUMP_SESSION_INDEX";
 
 export type ClientRole = "device" | "controller" | "owner_global";
 

@@ -8,6 +8,8 @@
  */
 import type { UnifiedSource } from "@/lib/source-types";
 import { expandPlaylistEntityToItems, playlistLeafTrackIndexForQueueItem } from "@/lib/syncbiz-playlist-queue";
+import { getPlaylistTracks } from "@/lib/playlist-types";
+import { isValidLocalFilePlaybackPath } from "@/lib/url-validation";
 
 /**
  * Where a transport command runs:
@@ -77,4 +79,76 @@ export function resolveUrlSessionStep(args: {
   const leaf = leaves[target];
   if (!leaf || leaf.type === "local") return null;
   return { leaf, trackIndex: target };
+}
+
+/**
+ * P0 Gate 1e (2026-10-08) — LOCKED INVARIANT: a NON-LOCAL PLAY_SOURCE must never change session / display metadata
+ * unless it also carries a valid playable target for THAT EXACT track.
+ */
+
+/** The source's OWN playable remote URL (never a sibling track's URL, never a local path), or "". */
+export function ownPlayableUrl(source: Pick<UnifiedSource, "url"> | null | undefined): string {
+  const u = (source?.url ?? "").trim();
+  if (!u || u.startsWith("local://") || isValidLocalFilePlaybackPath(u)) return "";
+  return u;
+}
+
+/**
+ * The exact non-LOCAL target for a (source, trackIndex) selection:
+ *  - a playlist LEAF whose own row is trackIndex, or a non-playlist source → itself (unchanged);
+ *  - a playlist shell with trackIndex > 0, or a leaf of ANOTHER row (e.g. a borrowed `:track:r0` id with trackIndex 24)
+ *    → the parent playlist's leaf AT trackIndex (its own URL) — never the current leaf's URL / id as a substitute;
+ *  - no playable URL for that exact track → reject (the caller sends nothing: fail closed).
+ * A playlist shell with trackIndex 0 keeps the existing payload rule (its url, else the first playable track).
+ */
+export function resolveExactUrlTarget(
+  source: UnifiedSource,
+  trackIndex: number,
+): { source: UnifiedSource; trackIndex: number } | { reject: string } {
+  const idx = Number.isInteger(trackIndex) && trackIndex >= 0 ? trackIndex : 0;
+  const tracks = source.playlist ? getPlaylistTracks(source.playlist) : [];
+  const shellId = playlistShellIdOfLeaf(source);
+  const isLeaf = shellId !== null && tracks.length > 0;
+  let target = source;
+  if (tracks.length > 0 && (isLeaf || idx > 0)) {
+    if (!(isLeaf && playlistLeafTrackIndexForQueueItem(source) === idx)) {
+      if (idx >= tracks.length) return { reject: `track ${idx} is not in the playlist` };
+      // Check the exact track BEFORE expanding: a mirrored / partial track list without URLs (the incident shape)
+      // has no playable target — and leaf expansion requires every track url to be a string.
+      if (!ownPlayableUrl(tracks[idx])) return { reject: `track ${idx} has no playable URL` };
+      if (!tracks.every((t) => typeof t.url === "string")) return { reject: "playlist track data incomplete (missing urls)" };
+      const leaf = expandPlaylistEntityToItems({ ...source, id: shellId ?? source.id, origin: "playlist" })[idx];
+      if (!leaf) return { reject: `track ${idx} is not in the playlist` };
+      target = leaf;
+    }
+    if (target.type === "local") return { reject: `track ${idx} is LOCAL (not a URL target)` };
+    if (!ownPlayableUrl(target)) return { reject: `track ${idx} has no playable URL` };
+    return { source: target, trackIndex: idx };
+  }
+  // non-playlist / shell at index 0: the payload's url must be non-empty (checked by the caller via the payload)
+  return { source: target, trackIndex: idx };
+}
+
+/**
+ * P0 Gate 1e: absolute jump to item `targetIndex` of the URL playlist session this renderer committed — the twin of
+ * `resolveUrlSessionStep` (same coherence rules). Returns the exact leaf (with its own URL) or null.
+ */
+export function resolveUrlSessionJump(args: {
+  sentLeaf: UnifiedSource | null | undefined;
+  mainSourceId: string | null | undefined;
+  mainSessionTrackCount: number | null | undefined;
+  targetIndex: number;
+}): { leaf: UnifiedSource; trackIndex: number } | null {
+  const sent = args.sentLeaf;
+  if (!sent?.playlist || sent.type === "local") return null;
+  const shellId = playlistShellIdOfLeaf(sent);
+  if (!shellId || !args.mainSourceId || playlistShellIdOfLeaf({ id: args.mainSourceId }) !== shellId) return null;
+  const leaves = expandPlaylistEntityToItems({ ...sent, id: shellId, origin: "playlist" });
+  const count = leaves.length;
+  if (count === 0) return null;
+  if (typeof args.mainSessionTrackCount === "number" && args.mainSessionTrackCount > 0 && args.mainSessionTrackCount !== count) return null;
+  if (!Number.isInteger(args.targetIndex) || args.targetIndex < 0 || args.targetIndex >= count) return null;
+  const leaf = leaves[args.targetIndex];
+  if (!leaf || leaf.type === "local" || !ownPlayableUrl(leaf)) return null;
+  return { leaf, trackIndex: args.targetIndex };
 }

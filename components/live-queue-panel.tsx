@@ -833,6 +833,15 @@ export function LiveQueuePanel() {
     (originalIndex: number) => {
       if (originalIndex < 0 || originalIndex >= sessionTracks.length) return;
 
+      // P0 Gate 1e: a MAIN-mirrored URL session (station renderer / remote CONTROL) jumps BY INDEX through the session
+      // owner. The mirror carries no track URLs, so a reconstructed source could only send an empty / wrong-track
+      // URL (title moves, audio does not). LOCAL mirrored sessions keep the existing path.
+      const mirrored = masterState?.currentSource;
+      if (isControlMirror && deviceCtx?.jumpToSessionIndexOrSend && mirrored?.id && mirrored.sourceType !== "local") {
+        deviceCtx.jumpToSessionIndexOrSend(originalIndex, mirrored.id);
+        return;
+      }
+
       let src = sessionForList.currentSource;
       if (!src && isControlMirror && masterState?.currentSource?.id && currentSource?.id === masterState.currentSource.id) {
         src = currentSource;
@@ -873,6 +882,7 @@ export function LiveQueuePanel() {
     },
     [
       playSessionTrack,
+      deviceCtx,
       sessionForList.currentSource,
       sessionTracks,
       isControlMirror,
