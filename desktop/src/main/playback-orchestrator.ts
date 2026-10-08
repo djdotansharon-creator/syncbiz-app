@@ -114,6 +114,12 @@ export class PlaybackOrchestrator {
    * visibility of the deck that is still playing (its natural end stays observable). Decks / MPV untouched.
    */
   private audibleBeforeStandby: { id: number; url: string; mode: "cold" | "crossfade" } | null = null;
+  /**
+   * P0 Gate 2c (owner-approved 2026-10-08): the NEXT track prepared on the standby deck — loaded PAUSED and silent
+   * while the active deck plays, so it is resolved + buffered before the mix point. Invisible to reporting (the
+   * standby deck is ignored until a crossfade is pending) until commitPreparedCrossfade() hands it over.
+   */
+  private prepared: { url: string; attemptId: number; deck: MusicDeckId; isStream: boolean } | null = null;
 
   private masterVolume = 80;
   private duckPercent = DUCK_PERCENT_DEFAULT;
@@ -130,7 +136,7 @@ export class PlaybackOrchestrator {
   private readonly interruptQueue: InterruptItem[] = [];
 
   /** Mix/crossfade duration (seconds) — synced from renderer Settings; 6s fallback. */
-  private crossfadeSec = 6;
+  private crossfadeSec = 9; // P0 Gate 2c: owner default mix length (renderer pushes the user's choice)
 
   /** Handle to the active duck-ramp timer. Cancelled before any new ramp starts. */
   private rampId: ReturnType<typeof setInterval> | null = null;
@@ -382,6 +388,7 @@ export class PlaybackOrchestrator {
   playMusic(url: string, attemptId = 0): void {
     const u = url.trim();
     if (!u) return;
+    this.discardPrepared(); // P0 Gate 2c: a cold play supersedes any prepared next track
     console.log(ORCH, "playMusic (→ active deck loadfile/replace)", { preview: redactMediaToken(u).slice(0, 200), deck: this.activeMusicDeck, attemptId });
     this.abortXfade("cold_play_request");
     // Cold play: the current attempt lives on the ACTIVE deck. Clear any prior failure.
@@ -410,6 +417,7 @@ export class PlaybackOrchestrator {
   playMusicCrossfade(url: string, fadeSec: number, attemptId = 0): void {
     const u = url.trim();
     if (!u) return;
+    this.prepared = null; // P0 Gate 2c: this load replaces the standby deck (incl. any prepared next track)
 
     const activeStatus = this.activeSt().status;
     if (activeStatus !== "playing" && activeStatus !== "paused") {
@@ -599,8 +607,85 @@ export class PlaybackOrchestrator {
     this.activeMpv().resume();
   }
 
+  // ─── P0 Gate 2c: prepared next track (standby, paused, silent) ──────────────────────────────────────────────
+
+  /** Prepare `url` on the STANDBY deck: loaded PAUSED at volume 0 while the active deck keeps playing. Only when the
+   *  active deck is audibly playing and no crossfade is in flight. Never touches the active deck. */
+  prepareStandby(url: string, attemptId: number): boolean {
+    const u = url.trim();
+    if (!u || !(attemptId > 0)) return false;
+    if (this.xfadePending || this.xfadeRampId !== null) return false;
+    if (this.activeSt().status !== "playing") return false;
+    const standby = this.standbyMpv();
+    standby.setVolume(0);
+    standby.preloadPaused(u, attemptId);
+    this.prepared = { url: u, attemptId, deck: this.standbyDeckId(), isStream: isStreamLoadTarget(u) };
+    console.log(ORCH, "prepareStandby (next track, paused + silent)", { attemptId, standbyDeck: this.prepared.deck, preview: redactMediaToken(u).slice(0, 120) });
+    fileLog("INFO", "XFADE_PREPARE", { attemptId, standbyDeck: this.prepared.deck, source: this.prepared.isStream ? "stream" : "local" });
+    return true;
+  }
+
+  /** READ-ONLY state of the prepared track: ready = loaded + duration known + no error (buffering paused at 0:00). */
+  getPrepared(): { attemptId: number; ready: boolean; failed: boolean } | null {
+    const p = this.prepared;
+    if (!p) return null;
+    if (p.deck !== this.standbyDeckId()) return { attemptId: p.attemptId, ready: false, failed: true };
+    const st = p.deck === "A" ? this.musicStA : this.musicStB;
+    const bound = st.attemptId === p.attemptId;
+    const failed = bound && (!!st.lastError || st.status === "idle" || st.status === "stopped");
+    const ready = bound && !failed && st.fileLoaded === true && st.duration > 0;
+    return { attemptId: p.attemptId, ready, failed };
+  }
+
+  /**
+   * Hand the READY prepared track over as the new current attempt and crossfade into it through the EXISTING path
+   * (readiness = real progress after resume → ramp → swap; standby load timeout; failure abort + audible restore).
+   * false = nothing ready to hand over (the caller keeps the current track / falls back).
+   */
+  commitPreparedCrossfade(fadeSec: number): boolean {
+    const p = this.prepared;
+    const info = this.getPrepared();
+    if (!p || !info?.ready || p.deck !== this.standbyDeckId() || this.xfadePending || this.xfadeRampId !== null) return false;
+    this.prepared = null;
+    const standby = this.standbyMpv();
+    this.audibleBeforeStandby = this.currentAttemptDeck === this.activeMusicDeck && !this.currentAttemptError && this.currentAttemptId > 0
+      ? { id: this.currentAttemptId, url: this.currentAttemptUrl, mode: this.currentAttemptMode }
+      : this.audibleBeforeStandby;
+    this.currentAttemptId = p.attemptId;
+    this.currentAttemptUrl = p.url;
+    this.currentAttemptDeck = p.deck;
+    this.currentAttemptMode = "crossfade";
+    this.currentAttemptError = null;
+    // NOTE: no resetCurrentAttemptDeckStatus() — the prepared deck's status is real and already bound to this attempt.
+    this.push();
+    this.xfadePending = { fadeSec };
+    // The prepared deck has ALREADY started (load bound + file-loaded are required to be ready) → a failure after the
+    // hand-over must abort at once via the existing decode-fail path (never wait for the load timeout).
+    this.xfadeStandbySawPlaying = true;
+    this.xfadeIncomingIsStream = p.isStream;
+    this.xfadeTrace = { startFile: true, fileLoaded: true, coreIdle: null, pausedForCache: null, progress: false };
+    fileLog("INFO", "XFADE_BEGIN", { attemptId: p.attemptId, activeDeck: this.activeMusicDeck, standbyDeck: p.deck, source: p.isStream ? "stream" : "local", fadeSec, prepared: true });
+    standby.resume();
+    const loadTimeoutMs = standbyLoadTimeoutMs(p.url);
+    this.xfadeStartTimeoutId = setTimeout(() => {
+      console.warn(ORCH, "prepared standby did not start — keeping current track", { loadTimeoutMs });
+      this.abortXfade("standby_load_timeout");
+    }, loadTimeoutMs);
+    return true;
+  }
+
+  /** Drop the prepared track (stops the paused standby deck; never touches the active deck or a pending crossfade). */
+  discardPrepared(): void {
+    const p = this.prepared;
+    if (!p) return;
+    this.prepared = null;
+    if (!this.xfadePending && this.xfadeRampId === null && p.deck === this.standbyDeckId()) this.standbyMpv().stop();
+    fileLog("INFO", "XFADE_PREPARE_DISCARD", { attemptId: p.attemptId });
+  }
+
   stopMusic(): void {
     console.log(ORCH, "stopMusic (→ both music decks stop)");
+    this.prepared = null; // P0 Gate 2c
     this.clearXfadeTimers();
     this.musicDeckA.stop();
     this.musicDeckB.stop();

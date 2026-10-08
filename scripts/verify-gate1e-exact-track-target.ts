@@ -334,7 +334,8 @@ const mgrSrc = rd("desktop/src/device-websocket-client/device-ws-manager.ts");
 const lqp = rd("components/live-queue-panel.tsx");
 const ps = mgrSrc.slice(mgrSrc.indexOf('case "PLAY_SOURCE": {'), mgrSrc.indexOf('case "PAUSE":', mgrSrc.indexOf('case "PLAY_SOURCE": {')));
 assert("S1 MAIN: empty-url non-LOCAL reject sits BEFORE setStationSession", ps.indexOf("PLAY_SOURCE rejected — non-LOCAL source without a playable URL") > 0 && ps.indexOf("PLAY_SOURCE rejected") < ps.indexOf("this.mock.setStationSession("));
-assert("S2 MAIN: JUMP_SESSION_INDEX → handleRemoteJump (relay only, no metadata)", /else if \(cmd === "JUMP_SESSION_INDEX"\) \{\n            this\.handleRemoteJump\(p\.payload\);/.test(mgrSrc) && !/setStationSession|navigateCatalogStep/.test(mgrSrc.slice(mgrSrc.indexOf("private handleRemoteJump"), mgrSrc.indexOf("private navigateCatalogStep"))));
+assert("S2 MAIN: JUMP_SESSION_INDEX → handleRemoteJump (relay only, no metadata)", /else if \(cmd === "JUMP_SESSION_INDEX"\) \{\n            this\.handleRemoteJump\(p\.payload\);/.test(mgrSrc) && // Updated 2026-10-08 (P0 Gate 2c): slice ends at the method's own end (new Gate 2c methods now follow it).
+  !/setStationSession|navigateCatalogStep/.test(mgrSrc.slice(mgrSrc.indexOf("private handleRemoteJump"), mgrSrc.indexOf("\n  }\n", mgrSrc.indexOf("private handleRemoteJump")))));
 assert("S3 renderer: URL select resolves the exact target + fails closed before any intent / send",
   dpc.indexOf("const exact = source ? resolveExactUrlTarget(source, trackIndex)") > 0 && dpc.indexOf("const exact = source ? resolveExactUrlTarget(source, trackIndex)") < dpc.indexOf('beginUrlTransition("select", selectKey)'));
 assert("S4 renderer: session steps fail closed on a URL-less item; jumpUrlSession uses resolveUrlSessionJump", /if \(!ownPlayableUrl\(step\.leaf\)\)/.test(dpc) && /const j = resolveUrlSessionJump\(\{/.test(dpc));

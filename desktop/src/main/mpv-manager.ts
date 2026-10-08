@@ -670,6 +670,19 @@ export class MpvManager {
   /** Load and immediately play a URL or local file path. `attemptId` binds this load to the renderer's
    *  playback attempt so late/anonymous MPV events for a superseded attempt can be ignored. */
   play(url: string, attemptId = 0): void {
+    this.loadInternal(url, attemptId, false);
+  }
+
+  /**
+   * P0 Gate 2c (owner-approved 2026-10-08): load PAUSED — the prepared NEXT track on the standby deck. MPV opens and
+   * buffers it at 0:00 without playing (silent); the orchestrator later hands it over and calls resume(). Same
+   * attempt binding / correlation as play(); the only difference is pause=true is set BEFORE the loadfile.
+   */
+  preloadPaused(url: string, attemptId = 0): void {
+    this.loadInternal(url, attemptId, true);
+  }
+
+  private loadInternal(url: string, attemptId: number, startPaused: boolean): void {
     const u = url.trim();
     if (!u) return;
     // Record the NEW attempt as PENDING only. It becomes event-facing (st.attemptId) on `start-file`
@@ -701,8 +714,10 @@ export class MpvManager {
     capAttemptMap(this.pendingLoadReqToAttempt);
     console.log(PIPELINE, "loadfile request", { pipe: this.pipePath, kind, reqId, attemptId, preview: redactMediaToken(target).slice(0, 160) });
     // DIAG (RC3 correlation, main-process → main.log): reqId/attemptId/kind only — never the url.
-    fileLog("INFO", "MPV_LOADFILE", { reqId, attemptId, kind });
+    fileLog("INFO", "MPV_LOADFILE", startPaused ? { reqId, attemptId, kind, paused: true } : { reqId, attemptId, kind });
+    if (startPaused) this.cmd(["set_property", "pause", true]); // P0 Gate 2c: in-order on the IPC socket, BEFORE the load
     this.raw(JSON.stringify({ command: ["loadfile", target, "replace"], request_id: reqId }));
+    if (startPaused) return; // prepared: stays paused (buffering) until resume()
     // A freshly loaded track MUST play — never inherit a stale `pause=true` from a
     // prior pause() on this deck. Without this, loadfile-while-paused loaded the
     // file but left it paused: position frozen at 0 while the cache filled, and

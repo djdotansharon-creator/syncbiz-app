@@ -7,6 +7,20 @@ import WebSocket from "ws";
 import { nextMainWsAttemptId } from "../main/main-attempt-id";
 import { MockPlaybackSession } from "../playback-agent";
 import type { StationSessionMeta } from "../playback-agent/mock-playback-session";
+import {
+  MAX_AUTO_FAILURES, PREPARE_LEAD_SEC, buildUrlSession, nextAutoIndex, sourceIdFor,
+  type RepeatMode, type UrlSession,
+} from "./url-auto-advance";
+import { fileLog } from "../main/file-logger";
+
+// P0 Gate 2c: the user's AUTOMIX + loop setting (pushed by the co-located renderer; module-level so a re-created
+// manager keeps them). Defaults = the renderer's defaults until the first push.
+let urlAutoMixPref = false;
+let urlRepeatModePref: RepeatMode = "playlist";
+export function setUrlPlaybackPrefs(p: { autoMix?: unknown; repeatMode?: unknown }): void {
+  if (typeof p.autoMix === "boolean") urlAutoMixPref = p.autoMix;
+  if (p.repeatMode === "playlist" || p.repeatMode === "track" || p.repeatMode === "off") urlRepeatModePref = p.repeatMode;
+}
 import type { PlaybackOrchestrator } from "../main/playback-orchestrator";
 import type {
   BranchLibraryItem,
@@ -137,6 +151,18 @@ export class DeviceWsManager {
    * failed item over the old music. Metadata only — MPV / decks / crossfade are never touched.
    */
   private preLoadSession: { attemptId: number; session: StationSessionMeta } | null = null;
+  // ── P0 Gate 2c: MAIN owns the AUTOMATIC progression of the URL session it is playing (url-auto-advance.ts) ──
+  private urlSession: UrlSession | null = null;
+  /** the next item prepared (paused + silent) on the standby deck for the attempt now playing */
+  private autoPrep: { forAttempt: number; nextIndex: number; preparedAttemptId: number } | null = null;
+  /** the last hand-over, kept until its attempt is proven — a failed hand-over rolls the session back */
+  private autoCommit: { prevAttemptId: number; prevIndex: number; attemptId: number; index: number } | null = null;
+  private autoFailed = new Set<number>();
+  private autoFailures = 0;
+  private autoEofHandledFor = 0;
+  private sessionPlayedFor = 0;
+  private autoAttemptIds: number[] = [];
+  private inAutoTick = false;
   // P0 Gate 1d: remote NEXT / PREV relay identity (see MvpStatusSnapshot.sessionStep*).
   private readonly sessionStepBootId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   private sessionStepSeq = 0;
@@ -170,6 +196,7 @@ export class DeviceWsManager {
         this.mock.syncMpvStatus(s.music);
         this.mock.setAttemptPending(this.attemptPending()); // P0 Gate 1f (read-only)
         this.settlePreLoadSession(s.music); // P0 Gate 1f
+        this.urlAutoAdvanceTick(s.music); // P0 Gate 2c
         this.push();
         this.sendStateUpdateIfMaster();
       });
@@ -311,6 +338,7 @@ export class DeviceWsManager {
       sessionStepIndex: this.sessionStepIndex,
       sessionStepSessionId: this.sessionStepSessionId,
       mpvAttemptPending: this.attemptPending(), // P0 Gate 1f (read-only)
+      mainUrlAutoAdvance: this.mainOwnsAutoAdvance(), // P0 Gate 2c
     };
   }
 
@@ -392,6 +420,185 @@ export class DeviceWsManager {
     if (music.status === "playing" && !music.lastError && this.orchestrator !== null && !this.attemptPending()) this.preLoadSession = null;
   }
 
+  // ── P0 Gate 2c: automatic URL progression ─────────────────────────────────────────────────────────────────
+
+  private resetAutoAdvance(): void {
+    this.autoPrep = null;
+    this.autoCommit = null;
+    this.autoFailed.clear();
+    this.autoFailures = 0;
+    this.autoEofHandledFor = 0;
+    this.sessionPlayedFor = 0;
+  }
+
+  private rememberAutoAttempt(id: number): void {
+    this.autoAttemptIds.push(id);
+    if (this.autoAttemptIds.length > 64) this.autoAttemptIds.shift();
+  }
+
+  /** Publish item `sess.index` as the station session (metadata only; the audio was already handed over / loaded). */
+  private publishSessionItem(sess: UrlSession): void {
+    const it = sess.items[sess.index];
+    if (!it) return;
+    const cur = this.mock.getState();
+    this.mock.setStationSession({
+      id: sourceIdFor(sess, sess.index),
+      title: it.title,
+      cover: it.cover,
+      origin: sess.origin,
+      sourceType: sess.sourceType,
+      url: it.url,
+      trackIndex: sess.index,
+      sessionTitle: cur.sessionTitle ?? sess.sessionTitle,
+      sessionPlaylistId: sess.sessionPlaylistId,
+      sessionTracks: sess.items.map((t) => ({ id: t.id, title: t.title, cover: t.cover, ...(typeof t.durationSeconds === "number" ? { durationSeconds: t.durationSeconds } : {}) })),
+    });
+    this.pendingWsLoadKey = `${sourceIdFor(sess, sess.index)}#${sess.index}`;
+  }
+
+  private urlAutoAdvanceTick(music: { attemptId?: number; status?: string; position?: number; duration?: number; lastError?: string | null }): void {
+    const orch = this.orchestrator;
+    const sess = this.urlSession;
+    if (!orch || !sess || this.inAutoTick) return;
+    this.inAutoTick = true;
+    try {
+      this.autoTick(orch, sess, music);
+    } finally {
+      this.inAutoTick = false;
+    }
+  }
+
+  private autoTick(orch: PlaybackOrchestrator, sess: UrlSession, m: { attemptId?: number; status?: string; position?: number; duration?: number; lastError?: string | null }): void {
+    const id = typeof m.attemptId === "number" ? m.attemptId : 0;
+    // (a) a hand-over failed and MAIN reports the still-audible deck again (Gate 2a) → roll back, skip that item
+    const c = this.autoCommit;
+    if (c && sess.attemptId === c.attemptId && id === c.prevAttemptId && m.status === "playing") {
+      sess.attemptId = c.prevAttemptId;
+      sess.index = c.prevIndex;
+      this.autoFailed.add(c.index);
+      this.autoFailures += 1;
+      this.autoCommit = null;
+      this.autoPrep = null;
+      fileLog("WARN", "URL_AUTO_COMMIT_FAILED", { failedIndex: c.index, failedAttemptId: c.attemptId, audibleAttemptId: id, consecutiveFailures: this.autoFailures });
+      return;
+    }
+    if (id === 0 || id !== sess.attemptId) return;
+    // (b) MAIN's OWN automatic attempt failed with nothing audible → fail forward (capped)
+    if (m.status === "idle" && m.lastError) {
+      if (this.autoAttemptIds.includes(id) && this.autoEofHandledFor !== id) {
+        this.autoEofHandledFor = id;
+        if (this.autoCommit?.attemptId === id) {
+          // A hand-over failed. If the outgoing deck is still audible, MAIN reports it right after this event (Gate 2a)
+          // and (a) rolls back + prepares the following item. Only if NOTHING is audible (an end-of-track hand-over) do we
+          // fail forward — decided once this status event has fully settled.
+          queueMicrotask(() => {
+            const o2 = this.orchestrator;
+            if (!o2 || this.urlSession !== sess || sess.attemptId !== id || o2.getState().music.attemptId !== id || this.inAutoTick) return;
+            this.inAutoTick = true;
+            try {
+              this.autoCommit = null;
+              this.autoFailed.add(sess.index);
+              this.autoFailures += 1;
+              this.autoLoadNext(o2, sess, "hand-over failed (nothing audible)");
+            } finally {
+              this.inAutoTick = false;
+            }
+          });
+          return;
+        }
+        this.autoFailed.add(sess.index);
+        this.autoFailures += 1;
+        this.autoLoadNext(orch, sess, "auto attempt failed");
+      }
+      return;
+    }
+    if (m.status === "playing" && (m.position ?? 0) > 0) {
+      this.sessionPlayedFor = id;
+      if (this.autoCommit?.attemptId === id && !orch.isMusicAttemptPending()) {
+        this.autoCommit = null; // the hand-over is proven
+        this.autoFailures = 0;
+        this.autoFailed.clear();
+      }
+    }
+    // (c) natural end with no hand-over yet (the next item was not ready in time) → continue NOW, never silence
+    if (m.status === "idle" && !m.lastError && this.sessionPlayedFor === id && this.autoEofHandledFor !== id) {
+      this.autoEofHandledFor = id;
+      const ap = this.autoPrep;
+      if (ap && ap.forAttempt === id && orch.commitPreparedCrossfade(1)) { this.afterAutoCommit(sess, ap); return; }
+      this.autoLoadNext(orch, sess, "natural end");
+      return;
+    }
+    if (m.status !== "playing" || !(typeof m.duration === "number" && m.duration > 0) || orch.isMusicAttemptPending()) return;
+    const remaining = m.duration - (m.position ?? 0);
+    // (d) prepare the next item ~PREPARE_LEAD_SEC before the end (paused + silent → resolved + buffered)
+    if (!this.autoPrep || this.autoPrep.forAttempt !== id) {
+      if (remaining <= PREPARE_LEAD_SEC && this.autoFailures < MAX_AUTO_FAILURES) {
+        const ni = nextAutoIndex(sess, urlRepeatModePref, this.autoFailed);
+        if (ni !== null) {
+          const pid = nextMainWsAttemptId();
+          if (orch.prepareStandby(sess.items[ni].url, pid)) {
+            this.autoPrep = { forAttempt: id, nextIndex: ni, preparedAttemptId: pid };
+            this.rememberAutoAttempt(pid);
+            fileLog("INFO", "URL_AUTO_PREPARE", { forAttempt: id, nextIndex: ni, attemptId: pid, remainingSec: Math.round(remaining) });
+          }
+        }
+      }
+      return;
+    }
+    const prep = orch.getPrepared();
+    if (!prep || prep.attemptId !== this.autoPrep.preparedAttemptId) { this.autoPrep = null; return; } // superseded
+    if (prep.failed) {
+      fileLog("WARN", "URL_AUTO_PREPARE_FAILED", { nextIndex: this.autoPrep.nextIndex, attemptId: prep.attemptId });
+      this.autoFailed.add(this.autoPrep.nextIndex);
+      this.autoFailures += 1;
+      orch.discardPrepared();
+      this.autoPrep = null; // the following item is prepared on the next tick (capped)
+      return;
+    }
+    // (e) mix point → hand the prepared item over (AUTOMIX on: the user's mix length; off: a quick 1 s change at the end)
+    const mixSec = urlAutoMixPref ? orch.getCrossfadeSec() : 1;
+    if (prep.ready && remaining <= mixSec) {
+      const ap = this.autoPrep;
+      if (orch.commitPreparedCrossfade(mixSec)) this.afterAutoCommit(sess, ap);
+    }
+  }
+
+  private afterAutoCommit(sess: UrlSession, ap: { forAttempt: number; nextIndex: number; preparedAttemptId: number }): void {
+    const before = this.mock.captureSession();
+    this.autoCommit = { prevAttemptId: sess.attemptId, prevIndex: sess.index, attemptId: ap.preparedAttemptId, index: ap.nextIndex };
+    sess.index = ap.nextIndex;
+    sess.attemptId = ap.preparedAttemptId;
+    this.autoPrep = null;
+    this.publishSessionItem(sess);
+    this.preLoadSession = { attemptId: ap.preparedAttemptId, session: before }; // Gate 1f: a failed hand-over restores metadata
+    fileLog("INFO", "URL_AUTO_COMMIT", { index: sess.index, attemptId: sess.attemptId });
+  }
+
+  /** Load the next item directly (no prepared item ready). Never when nothing is left or after MAX_AUTO_FAILURES. */
+  private autoLoadNext(orch: PlaybackOrchestrator, sess: UrlSession, reason: string): void {
+    if (this.autoFailures >= MAX_AUTO_FAILURES) { fileLog("WARN", "URL_AUTO_EXHAUSTED", { reason, consecutiveFailures: this.autoFailures }); return; }
+    const ni = nextAutoIndex(sess, urlRepeatModePref, this.autoFailed);
+    if (ni === null) { fileLog("INFO", "URL_AUTO_END", { reason }); return; }
+    orch.discardPrepared();
+    const pid = nextMainWsAttemptId();
+    this.rememberAutoAttempt(pid);
+    this.autoPrep = null;
+    this.autoCommit = null;
+    sess.index = ni;
+    sess.attemptId = pid;
+    this.publishSessionItem(sess);
+    orch.playMusicCrossfade(sess.items[ni].url, 1, pid);
+    fileLog("INFO", "URL_AUTO_LOAD", { reason, index: ni, attemptId: pid });
+  }
+
+  /** P0 Gate 2c: MAIN owns the automatic progression of the URL attempt now playing (the renderer must not step it). */
+  private mainOwnsAutoAdvance(): boolean {
+    const sess = this.urlSession;
+    if (!sess || !(sess.attemptId > 0) || !this.orchestrator) return false;
+    const o = this.orchestrator as { getState?: () => { music: { attemptId: number } } };
+    return typeof o.getState === "function" && o.getState().music.attemptId === sess.attemptId;
+  }
+
   /** P0 Gate 1f: read-only readiness for status reporting — never throws (status must always be reportable). */
   private attemptPending(): boolean {
     const o = this.orchestrator as { isMusicAttemptPending?: () => boolean } | null;
@@ -452,6 +659,8 @@ export class DeviceWsManager {
         // from the REAL active deck (cold only when nothing is audible). Never infer audibility from the
         // current-attempt snapshot (a pending / failed attempt reads idle while the active deck is still audible).
         if (url) {
+          this.urlSession = null; // P0 Gate 2c: a raw URL PLAY is not a session MAIN advances
+          this.resetAutoAdvance();
           orch.playMusicCrossfade(url, fadeSec, nextMainWsAttemptId());
         } else {
           const mpvStatus = orch.getState().music.status;
@@ -465,6 +674,7 @@ export class DeviceWsManager {
             if (srcUrl) {
               console.log("[DeviceWsManager] PLAY → loadfile on Channel A:", srcUrl.slice(0, 100));
               orch.playMusicCrossfade(srcUrl, fadeSec, nextMainWsAttemptId());
+              if (this.urlSession) { this.urlSession.attemptId = orch.getState().music.attemptId; this.resetAutoAdvance(); } // P0 Gate 2c
             } else {
               orch.resumeMusic();
             }
@@ -539,6 +749,7 @@ export class DeviceWsManager {
         }
         const url = (p?.source?.url ?? "").trim();
         if (!url) this.preLoadSession = null; // P0 Gate 1f: a LOCAL (metadata-only) session supersedes any pending URL standby
+        if (!url && this.urlSession) { this.urlSession = null; this.resetAutoAdvance(); } // P0 Gate 2c: LOCAL is never MAIN-advanced
         if (!url) break; // local (paths stripped on the wire) → audio handled by the co-located renderer engine
         const fadeSec = orch.getCrossfadeSec();
         // P0 Gate 1a: always the crossfade entry point (orchestrator → cold only when nothing is audible).
@@ -552,6 +763,10 @@ export class DeviceWsManager {
             ? { attemptId: m.attemptId, session: preLoadWasPending && this.preLoadSession ? this.preLoadSession.session : preLoadPrev }
             : null;
         }
+        // P0 Gate 2c: MAIN takes over the AUTOMATIC progression of this URL session (rebuilt from every selection).
+        this.urlSession = buildUrlSession(payload);
+        if (this.urlSession) this.urlSession.attemptId = orch.getState().music.attemptId;
+        this.resetAutoAdvance();
         break;
       }
       case "PAUSE": {
@@ -563,6 +778,7 @@ export class DeviceWsManager {
       }
       case "STOP":
         if (this.preLoadSession !== null && orch.isMusicAttemptPending()) this.restorePreLoadSession("stop during pending standby"); // P0 Gate 1f
+        this.resetAutoAdvance(); // P0 Gate 2c (stopMusic drops any prepared track)
         orch.stopMusic();
         orch.stopInterrupt();
         break;

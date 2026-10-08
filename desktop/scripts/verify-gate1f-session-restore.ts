@@ -113,7 +113,9 @@ function world() {
 }
 // static: metadata only — no deck / orchestrator calls in the restore path
 const src = readFileSync(path.join(__dirname, "..", "src", "device-websocket-client", "device-ws-manager.ts"), "utf-8").replace(/\r\n/g, "\n");
-const restore = src.slice(src.indexOf("private settlePreLoadSession"), src.indexOf("/** Move mock station selection"));
+// Updated 2026-10-08 (P0 Gate 2c): slice = the two restore methods only (new Gate 2c methods now sit after them).
+const methodBody = (name: string) => src.slice(src.indexOf(name), src.indexOf("\n  }\n", src.indexOf(name)));
+const restore = methodBody("private settlePreLoadSession") + methodBody("private restorePreLoadSession");
 assert("S1 restore path is metadata-only (no orchestrator / deck / play / stop calls)", !/orch\.|\.play(Music|MusicCrossfade)?\(|stopMusic|pauseMusic|setVolume/.test(restore));
 assert("S2 orchestrator untouched by Gate 1f (no new orchestrator API used)", !/orch\.(restore|setPending|settle)/.test(src));
 

@@ -57,7 +57,7 @@ import {
   refreshLocalMetadataBank,
   setLocalMetadataBankFolder,
 } from "./local-metadata-bank";
-import { DeviceWsManager } from "../device-websocket-client/device-ws-manager";
+import { DeviceWsManager, setUrlPlaybackPrefs } from "../device-websocket-client/device-ws-manager";
 import { fetchBranchLibrarySummary } from "./branch-library-fetch";
 import { ensurePlaylistProRuntimeConfig } from "./playlistpro-config";
 import { musicFolderDisplayLabel } from "../shared/playlistpro-paths";
@@ -570,6 +570,11 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     broadcast(getWindow(), manager ? manager.snapshot() : fallbackSnapshot());
   });
 
+  // P0 Gate 2c: AUTOMIX + loop setting for MAIN's automatic URL progression (module-level: survives manager re-creation).
+  ipcMain.handle(MVP_IPC.SET_PLAYBACK_PREFS, (_e, prefs: { autoMix?: unknown; repeatMode?: unknown }): void => {
+    setUrlPlaybackPrefs(prefs ?? {});
+  });
+
   ipcMain.handle(MVP_IPC.SET_MIX_DURATION, (_e, seconds: number): void => {
     if (typeof seconds === "number" && Number.isFinite(seconds)) {
       orchestratorInstance?.setCrossfadeSec(seconds);
@@ -584,7 +589,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       const fadeSec =
         typeof payload?.fadeSec === "number" && Number.isFinite(payload.fadeSec)
           ? Math.max(1, Math.min(30, payload.fadeSec))
-          : (orchestratorInstance?.getCrossfadeSec() ?? 6);
+          : (orchestratorInstance?.getCrossfadeSec() ?? 9);
       const aid = typeof payload?.attemptId === "number" && Number.isFinite(payload.attemptId) ? payload.attemptId : 0;
       console.log("[SyncBiz:desktop-mpv:ipc] MPV_PLAY_URL_CROSSFADE", {
         preview: redactMediaToken(u).slice(0, 160),

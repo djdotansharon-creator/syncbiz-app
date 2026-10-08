@@ -267,7 +267,9 @@ function world(sessionLen: number) {
   const w = world(5);
   w.station.select(0); w.station.observe(); w.playingEvents(w.cur()); w.station.observe();
   w.cur().handleEvent({ event: "end-file", reason: "eof" }); w.station.observe();
-  assert("T11 natural EOF of a confirmed attempt → no failure step (url-eof path owns it)", w.station.log.length === 0 && w.station.t?.phase === "confirmed");
+  // Updated 2026-10-08 (P0 Gate 2c): at a URL natural end MAIN continues the session itself (owner requirement: no
+  // silence) — the renderer's confirmed intent is then superseded by MAIN's next attempt; never a failure step.
+  assert("T11 natural EOF of a confirmed attempt → no failure step (MAIN continues the session)", w.station.log.length === 0 && (w.station.t === null || w.station.t.phase === "confirmed"));
   w.orch.kill();
 }
 // 13. LOCAL selection clears the URL intent via the existing LOCAL path

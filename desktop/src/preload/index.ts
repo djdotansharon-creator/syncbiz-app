@@ -65,6 +65,9 @@ const api: SyncBizDesktopMvp = {
     ipcRenderer.invoke(MVP_IPC.MPV_PLAY_URL_CROSSFADE, { url, fadeSec, attemptId }),
   setMixDuration: (seconds: number): Promise<void> =>
     ipcRenderer.invoke(MVP_IPC.SET_MIX_DURATION, seconds),
+  /** P0 Gate 2c: AUTOMIX + loop setting → MAIN (automatic URL progression). */
+  setPlaybackPrefs: (prefs: { autoMix?: boolean; repeatMode?: string }): Promise<void> =>
+    ipcRenderer.invoke(MVP_IPC.SET_PLAYBACK_PREFS, prefs),
   mpvPlayInterrupt: (url: string): Promise<void> =>
     ipcRenderer.invoke(MVP_IPC.MPV_PLAY_INTERRUPT, url),
   setDuckPercent: (n: number): Promise<void> =>

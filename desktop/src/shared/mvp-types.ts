@@ -17,6 +17,8 @@ export const MVP_IPC = {
   MPV_PLAY_URL_CROSSFADE: "mvp:mpv-play-url-crossfade",
   /** Renderer syncs Settings mix duration (3/6/9/12) to main-process orchestrator. */
   SET_MIX_DURATION: "mvp:set-mix-duration",
+  /** P0 Gate 2c: AUTOMIX + loop setting → MAIN (automatic URL progression follows the user's settings). */
+  SET_PLAYBACK_PREFS: "mvp:set-playback-prefs",
   MPV_PLAY_INTERRUPT: "mvp:mpv-play-interrupt",
   SET_DUCK_PERCENT: "mvp:set-duck-percent",
   MPV_SEEK_TO: "mvp:mpv-seek-to",
@@ -616,6 +618,9 @@ export type MvpStatusSnapshot = {
   /** P0 Gate 1f: orchestrator.isMusicAttemptPending() — false exactly from XFADE_RAMP_START (standby) / first real
    *  progress (cold). Read-only status for the co-located renderer's "Loading…" end. */
   mpvAttemptPending?: boolean;
+  /** P0 Gate 2c: MAIN owns the automatic progression (prepare / mix / natural end) of the URL attempt now playing —
+   *  the co-located renderer must not also step it at EOF. */
+  mainUrlAutoAdvance?: boolean;
 };
 
 export type MvpConfigPatch = Partial<Omit<DesktopRuntimeConfig, "deviceId">> & {

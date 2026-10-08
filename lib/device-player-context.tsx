@@ -20,6 +20,7 @@ import { urlToUnifiedSource } from "@/lib/remote-control/url-to-source";
 import { payloadToUnifiedSource } from "@/lib/remote-control/payload-to-source";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
 import { routeStationTransport, resolveUrlSessionStep, resolveUrlSessionJump, resolveExactUrlTarget, ownPlayableUrl, playlistShellIdOfLeaf } from "@/lib/station-transport-routing";
+import { expandPlaylistEntityToItems } from "@/lib/syncbiz-playlist-queue";
 import { initialUrlEofState, observeUrlEof, disarmUrlEof, type UrlEofState } from "@/lib/url-eof-advance";
 import {
   beginTransition, decideUserCommand, failTransition, holdsAudible, isBlocking, observeTransition, targetKeyOf, tickTransition,
@@ -1469,7 +1470,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         }
       }
       const sent = lastSentUrlLeafRef.current;
-      const urlSessionActive = canLocalExecRef.current && !localSessionOwnedRef.current && !!sent?.playlist && sent.type !== "local";
+      // P0 Gate 2c: when MAIN owns the automatic progression of this attempt (prepare / mix / natural end), the renderer
+      // never steps it too (older MAIN without the flag → the renderer keeps stepping at natural end, unchanged).
+      const urlSessionActive = canLocalExecRef.current && !localSessionOwnedRef.current && !!sent?.playlist && sent.type !== "local" && st?.mainUrlAutoAdvance !== true;
       const res = observeUrlEof(
         urlEofStateRef.current,
         {
@@ -1491,6 +1494,34 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     });
     return () => { if (typeof unsub === "function") unsub(); };
   }, []); // mount-only — reads refs at event time
+
+  // P0 Gate 2c: MAIN's automatic URL progression follows the user's AUTOMIX + loop setting (co-located desktop only).
+  useEffect(() => {
+    if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const desktop = (window as any).syncbizDesktop;
+    if (typeof desktop?.setPlaybackPrefs !== "function") return;
+    const push = () => { void desktop.setPlaybackPrefs({ autoMix: getAutoMix(), repeatMode: getRepeatMode() }); };
+    push();
+    const offA = onAutoMixChanged(push);
+    const offR = onRepeatModeChanged(push);
+    return () => { offA(); offR(); };
+  }, []);
+
+  // P0 Gate 2c: MAIN advanced the URL session itself (prepared next / natural end) → the session baseline follows the
+  // item MAIN now plays, so a manual NEXT / PREV / jump / failure step continues from the item actually playing.
+  useEffect(() => {
+    if (!canLocalExecRef.current || localSessionOwnedRef.current || isBlocking(urlTransitionRef.current)) return;
+    const sent = lastSentUrlLeafRef.current;
+    const mid = masterState?.currentSource?.id;
+    const midx = masterState?.currentTrackIndex;
+    if (!sent?.playlist || !mid || typeof midx !== "number" || mid === sent.id) return;
+    const shell = playlistShellIdOfLeaf(sent);
+    if (!shell || playlistShellIdOfLeaf({ id: mid }) !== shell) return;
+    const leaf = expandPlaylistEntityToItems({ ...sent, id: shell, origin: "playlist" })[midx];
+    if (leaf && leaf.id === mid) lastSentUrlLeafRef.current = leaf;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- masterState is the trigger; everything else is a ref
+  }, [masterState]);
 
   // P0 Gate 1c: while a source transition is pending, PLAY / NEXT / PREV are ignored (one intent; no restart, no
   // multi-skip). PAUSE / STOP are ALWAYS accepted and clear the pending intent.
