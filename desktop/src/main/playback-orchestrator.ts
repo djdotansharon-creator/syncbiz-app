@@ -74,6 +74,11 @@ type InterruptItem = { url: string };
 
 type MusicDeckId = "A" | "B";
 
+/** P0 Video V1: the picture follows the audio decks — REPORTING ONLY (no audio / deck / timer behavior depends on it). */
+export type VideoMixEvent =
+  | { kind: "ramp"; from: MusicDeckId; to: MusicDeckId; frac: number }
+  | { kind: "active"; deck: MusicDeckId | null; reason: "cold" | "swap" | "abort" | "stop" };
+
 // ─── Orchestrator ─────────────────────────────────────────────────────────────
 
 export class PlaybackOrchestrator {
@@ -158,6 +163,7 @@ export class PlaybackOrchestrator {
   private xfadeTrace: { startFile: boolean; fileLoaded: boolean; coreIdle: boolean | null; pausedForCache: boolean | null; progress: boolean } | null = null;
 
   private listener: StatusListener | null = null;
+  private videoMix: ((ev: VideoMixEvent) => void) | null = null;
 
   constructor() {
     this.musicDeckA = new MpvManager("syncbiz-music");
@@ -195,6 +201,27 @@ export class PlaybackOrchestrator {
 
       this.push();
     });
+  }
+
+  // ─── P0 Video V1 (opt-in, OFF by default) ─────────────────────────────────────────────────────────────────────
+
+  /** Before start(): both MUSIC decks also render the picture of what they play (the interrupt deck never does). */
+  enableVideoOutput(ytdlFormat: string): void {
+    this.musicDeckA.enableVideoOutput("VONO Video A", ytdlFormat);
+    this.musicDeckB.enableVideoOutput("VONO Video B", ytdlFormat);
+  }
+
+  getMusicDecks(): { A: MpvManager; B: MpvManager } {
+    return { A: this.musicDeckA, B: this.musicDeckB };
+  }
+
+  setVideoMixListener(cb: ((ev: VideoMixEvent) => void) | null): void {
+    this.videoMix = cb;
+  }
+
+  private emitVideo(ev: VideoMixEvent): void {
+    if (!this.videoMix) return;
+    try { this.videoMix(ev); } catch { /* the picture must never affect the audio */ }
   }
 
   // ─── Deck helpers ────────────────────────────────────────────────────────────
@@ -406,6 +433,7 @@ export class PlaybackOrchestrator {
     this.resetCurrentAttemptDeckStatus();
     this.push(); // deliver authoritative attemptId+mode to the renderer BEFORE any MPV start-file event
     this.activeMpv().play(u, attemptId);
+    this.emitVideo({ kind: "active", deck: this.activeMusicDeck, reason: "cold" }); // P0 Video V1
   }
 
   /**
@@ -490,11 +518,15 @@ export class PlaybackOrchestrator {
     console.log(ORCH, "crossfade ramp start", { fadeSec: sec, steps, stepMs, target, toDeck: this.standbyDeckId() });
     fileLog("INFO", "XFADE_RAMP_START", { attemptId: this.currentAttemptId, fromDeck: this.activeMusicDeck, toDeck: this.standbyDeckId(), targetVolume: target, fadeSec: sec });
     let step = 0;
+    const fromId = this.activeMusicDeck;
+    const toId = this.standbyDeckId();
+    this.emitVideo({ kind: "ramp", from: fromId, to: toId, frac: 0 }); // P0 Video V1: the picture mixes with the audio
     this.xfadeRampId = setInterval(() => {
       step++;
       const frac = Math.min(1, step / steps);
       outDeck.setVolume(Math.round(target * (1 - frac)));
       inDeck.setVolume(Math.round(target * frac));
+      this.emitVideo({ kind: "ramp", from: fromId, to: toId, frac });
       if (step >= steps) {
         clearInterval(this.xfadeRampId!);
         this.xfadeRampId = null;
@@ -520,6 +552,7 @@ export class PlaybackOrchestrator {
     console.log(ORCH, "crossfade complete — decks swapped", { activeDeck: this.activeMusicDeck });
     fileLog("INFO", "XFADE_COMPLETE", { attemptId: this.currentAttemptId, promotedDeck: this.activeMusicDeck, promotedVolume, pause: false });
     this.push();
+    this.emitVideo({ kind: "active", deck: this.activeMusicDeck, reason: "swap" }); // P0 Video V1
   }
 
   /** A crossfade is mid-flight and a new command arrived: settle it instantly. */
@@ -555,6 +588,7 @@ export class PlaybackOrchestrator {
     }
     console.log(ORCH, "crossfade aborted", { reason });
     fileLog("INFO", "XFADE_ABORT", { attemptId: this.currentAttemptId, reason, activeDeck: this.activeMusicDeck });
+    this.emitVideo({ kind: "active", deck: this.activeMusicDeck, reason: "abort" }); // P0 Video V1: the audible deck's picture stays
     this.push(); // the failure is reported ONCE under the failed attempt id (controllers observe it)
     this.restoreAudibleAfterFailedStandby(reason);
   }
@@ -689,6 +723,7 @@ export class PlaybackOrchestrator {
     this.clearXfadeTimers();
     this.musicDeckA.stop();
     this.musicDeckB.stop();
+    this.emitVideo({ kind: "active", deck: null, reason: "stop" }); // P0 Video V1
   }
 
   /** Seek the audible music deck to an absolute position in seconds. */

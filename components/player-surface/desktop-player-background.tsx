@@ -5,6 +5,8 @@ import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { DesktopVideoDock, type DesktopVideoState } from "@/components/player-surface/desktop-video-dock";
 import { reportPlaybackIncident, hostOnly, classifySource } from "@/lib/playback-telemetry-client";
 import type { DesktopBackgroundMode } from "@/lib/desktop-background-mode";
+import { useMpvVideoOutput } from "@/lib/mpv-video-output";
+import { MpvVideoSurface } from "@/components/player-surface/mpv-video-surface";
 
 // If the clip isn't actually playing this long after MPV is already progressing,
 // treat it as a failure and fall back to artwork.
@@ -41,6 +43,9 @@ export function DesktopPlayerBackground({
   deviceId: string | null;
   deviceMode: string | null;
 }) {
+  // P0 Video V1: with SYNCED video active the picture is MPV's own (same player as the sound) — no YouTube iframe,
+  // no iframe fallback timers / telemetry; the artwork stays underneath for songs without a picture.
+  const mpvVideoActive = useMpvVideoOutput().active;
   // ── Is MPV audio actually progressing? (never start the clip before that) ──
   const lastPosRef = useRef(-1);
   const lastAdvanceAtRef = useRef(0);
@@ -98,7 +103,7 @@ export function DesktopPlayerBackground({
 
   // Explicit player error → fall back.
   useEffect(() => {
-    if (mode === "video" && videoState.error && !videoFailed) {
+    if (!mpvVideoActive && mode === "video" && videoState.error && !videoFailed) {
       setVideoFailed(true);
       reportFailure("error", videoState);
     }
@@ -107,7 +112,7 @@ export function DesktopPlayerBackground({
 
   // Ready timeout: MPV is progressing but the clip never reached "playing".
   useEffect(() => {
-    if (mode !== "video" || !videoId || !mpvAdvancing || videoState.playing || videoFailed) return;
+    if (mpvVideoActive || mode !== "video" || !videoId || !mpvAdvancing || videoState.playing || videoFailed) return;
     const t = setTimeout(() => {
       setVideoFailed(true);
       reportFailure("timeout", { ...videoState, playing: false });
@@ -116,7 +121,8 @@ export function DesktopPlayerBackground({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, videoId, mpvAdvancing, videoState.playing, videoFailed]);
 
-  const showVideo = mode === "video" && !!videoId && mpvAdvancing && !videoFailed;
+  const showVideo = !mpvVideoActive && mode === "video" && !!videoId && mpvAdvancing && !videoFailed;
+  const showMpvVideo = mpvVideoActive && mode === "video" && (mpvStatus === "playing" || mpvStatus === "paused");
   // Artwork is the base for artwork mode AND the loading/fallback state of video mode.
   const showArtwork = mode === "artwork" || (mode === "video" && !showVideo);
 
@@ -145,6 +151,15 @@ export function DesktopPlayerBackground({
             style={{ animation: "sbBgDrift 40s ease-in-out infinite alternate", willChange: "transform" }}
           />
           <div className="absolute inset-y-0 left-0 z-[1] w-2/3 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/75 to-transparent" />
+        </div>
+      ) : null}
+
+      {showMpvVideo ? (
+        <div
+          className="pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
+          aria-hidden
+        >
+          <MpvVideoSurface className="absolute inset-y-0 right-0 w-[60%]" />
         </div>
       ) : null}
 

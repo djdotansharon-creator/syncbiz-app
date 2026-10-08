@@ -8,6 +8,8 @@ import { startHeartbeat, stopHeartbeat } from "./heartbeat-writer";
 import { startEmbeddedNextServer, type EmbeddedNextHandle } from "./embedded-next-server";
 import { flushLocalCollectionTagSnapshotWrites } from "./local-collection-snapshot";
 import { PlaybackOrchestrator } from "./playback-orchestrator";
+import { readVideoOutputConfig } from "./video-output-config";
+import { VideoOutput, setVideoOutputInstance, getVideoOutputInstance } from "./video-output";
 import { ensureRuntimeBinaries, scheduleBackgroundUpdateCheck } from "./runtime-binaries";
 import { SYNCBIZ_HOSTED_WEB_APP_URL, SYNCBIZ_ALLOWED_ORIGIN } from "./hosted-url";
 import { RendererOfflineCache, isNetworkClassLoadError, OFFLINE_ROUTE } from "./renderer-offline-cache";
@@ -508,6 +510,20 @@ async function openMainWindow(): Promise<void> {
   applyMainWindowContent(win, resolved);
   mainWindow = win;
   fileLog("INFO", "openMainWindow: mainWindow assigned");
+  // P0 Video V1: the MPV picture windows follow this window (renderer slot CSS px → zoom → DIP → screen pixels)
+  getVideoOutputInstance()?.attachWindow(win, {
+    toScreen: (r) => {
+      if (win.isDestroyed()) return null;
+      const cb = win.getContentBounds();
+      const z = win.webContents.getZoomFactor();
+      return screen.dipToScreenRect(win, {
+        x: Math.round(cb.x + r.x * z),
+        y: Math.round(cb.y + r.y * z),
+        width: Math.round(r.width * z),
+        height: Math.round(r.height * z),
+      });
+    },
+  });
 }
 
 // ─── Single-instance lock (safety net against a duplicate VONO MASTER) ─────────
@@ -620,6 +636,17 @@ app.whenReady().then(async () => {
 
   fileLog("INFO", "app.whenReady: starting PlaybackOrchestrator");
   orchestrator = new PlaybackOrchestrator();
+  // P0 Video V1 (owner-approved 2026-10-09; opt-in per station, OFF by default): picture + sound from the SAME MPV
+  // player. Read once, BEFORE the decks spawn — OFF keeps today's audio-only engine exactly.
+  if (readVideoOutputConfig().enabled) {
+    const videoOut = new VideoOutput(orchestrator.getMusicDecks());
+    orchestrator.enableVideoOutput(videoOut.initialFormat());
+    orchestrator.setVideoMixListener((ev) => videoOut.onMix(ev));
+    setVideoOutputInstance(videoOut);
+    fileLog("INFO", "VIDEO_OUTPUT", { enabled: true });
+  } else {
+    fileLog("INFO", "VIDEO_OUTPUT", { enabled: false });
+  }
   orchestrator.start(binaries);
   registerMvpIpc(getMainWindow, orchestrator);
   // (Protection startup gate — intentional-stop clear/quit — already ran above, before any side effects.)

@@ -35,6 +35,7 @@ import type {
   RefreshLocalMetadataBankResult,
   WhatsAppStatus,
   WhatsAppBounds,
+  VideoOutputState,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import { redactMediaToken } from "../shared/redact-media-token";
@@ -81,6 +82,8 @@ import {
 } from "./protection-service";
 import type { PlaybackOrchestrator } from "./playback-orchestrator";
 import { scanLocalAudioFolder } from "./scan-local-audio-folder";
+import { readVideoOutputConfig, writeVideoOutputConfig } from "./video-output-config";
+import { getVideoOutputInstance, isVideoOutputActive } from "./video-output";
 import { listMusicLibraryDir } from "./list-music-library-dir";
 import { extractEmbeddedCoverDataUrlFromAudioFile } from "./extract-local-audio-cover";
 import { extractLocalAudioTagFields, inspectLocalAudioTagsRaw } from "./extract-local-audio-tags";
@@ -582,6 +585,19 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   // P0 Gate 2c: AUTOMIX + loop setting for MAIN's automatic URL progression (module-level: survives manager re-creation).
   ipcMain.handle(MVP_IPC.SET_PLAYBACK_PREFS, (_e, prefs: { autoMix?: unknown; repeatMode?: unknown }): void => {
     setUrlPlaybackPrefs(prefs ?? {});
+  });
+
+  // P0 Video V1: per-station MPV video switch (applies at the next VONO start) + the renderer's video slot.
+  ipcMain.handle(MVP_IPC.VIDEO_OUTPUT_GET, (): VideoOutputState => ({ enabled: readVideoOutputConfig().enabled, active: isVideoOutputActive() }));
+  ipcMain.handle(MVP_IPC.VIDEO_OUTPUT_SET, (_e, enabled: unknown): VideoOutputState => {
+    writeVideoOutputConfig({ enabled: enabled === true });
+    fileLog("INFO", "VIDEO_OUTPUT_SET", { enabled: enabled === true, activeThisSession: isVideoOutputActive() });
+    return { enabled: readVideoOutputConfig().enabled, active: isVideoOutputActive() };
+  });
+  ipcMain.handle(MVP_IPC.VIDEO_DOCK_RECT, (_e, rect: unknown): void => {
+    const r = rect as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | null;
+    const ok = r && [r.x, r.y, r.width, r.height].every((v) => typeof v === "number" && Number.isFinite(v));
+    getVideoOutputInstance()?.setDockRect(ok ? { x: r!.x as number, y: r!.y as number, width: r!.width as number, height: r!.height as number } : null);
   });
 
   ipcMain.handle(MVP_IPC.SET_MIX_DURATION, (_e, seconds: number): void => {

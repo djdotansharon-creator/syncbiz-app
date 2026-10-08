@@ -160,6 +160,81 @@ export class MpvManager {
     this.pipePath = resolvePipePath(pipeName);
   }
 
+  // ─── P0 Video V1 (owner-approved 2026-10-09; opt-in per station, OFF by default) ─────────────────────────────
+  // When enabled BEFORE start(), this deck renders the picture of the SAME stream it plays (one decoder, one clock →
+  // truly synced) in its own borderless MPV window, which VideoOutput places / fades / hides over IPC. When NOT
+  // enabled, nothing below runs and the spawn arguments are exactly today's audio-only ones.
+  private video: { title: string; ytdlFormat: string } | null = null;
+  private videoCb: ((sig: MpvVideoSignal) => void) | null = null;
+  /** The picture of the CURRENT file was dropped (stall protection) — restored only at the next load (never mid-song). */
+  private videoDroppedForFile = false;
+
+  enableVideoOutput(title: string, ytdlFormat: string): void {
+    this.video = { title, ytdlFormat };
+  }
+
+  isVideoOutput(): boolean {
+    return this.video !== null;
+  }
+
+  onVideoSignal(cb: (sig: MpvVideoSignal) => void): void {
+    this.videoCb = cb;
+  }
+
+  /** Window / picture property (geometry, brightness, ontop …). No-op on an audio-only deck. */
+  setVideoProperty(name: string, value: unknown): void {
+    if (!this.video) return;
+    this.cmd(["set_property", name, value]);
+  }
+
+  /** Quality cap for the NEXT load (ytdl-format is read per load; the current file is never touched). */
+  setVideoFormat(ytdlFormat: string): void {
+    if (!this.video || this.video.ytdlFormat === ytdlFormat) return;
+    this.video.ytdlFormat = ytdlFormat;
+    this.cmd(["set_property", "ytdl-format", ytdlFormat]);
+  }
+
+  /** Stall protection: stop the picture for the rest of THIS song (audio continues untouched — proven V0). */
+  dropVideoForCurrentFile(): void {
+    if (!this.video || this.videoDroppedForFile) return;
+    this.videoDroppedForFile = true;
+    this.cmd(["set_property", "vid", "no"]);
+  }
+
+  /** Spawn arguments in video mode: the SAME network / cache settings as the audio engine + a hidden, focus-less,
+   *  borderless picture window (placed by VideoOutput) with hardware decoding. */
+  private videoSpawnArgs(): string[] {
+    const v = this.video!;
+    return [
+      "--idle",
+      `--ytdl-format=${v.ytdlFormat}`,
+      "--cache=yes",
+      "--cache-secs=30",
+      "--demuxer-max-bytes=64MiB",
+      "--network-timeout=30",
+      "--hwdec=auto-safe",
+      "--framedrop=vo",
+      "--force-window=no",
+      "--geometry=16x9+-32000+-32000",
+      "--no-border",
+      "--ontop",
+      "--focus-on=never",
+      "--show-in-taskbar=no",
+      "--auto-window-resize=no",
+      "--keepaspect-window=no",
+      "--keepaspect=yes",
+      "--audio-display=no",
+      "--no-osc",
+      "--osd-level=0",
+      "--no-input-default-bindings",
+      "--input-vo-keyboard=no",
+      "--cursor-autohide=always",
+      `--title=${v.title}`,
+      `--input-ipc-server=${this.pipePath}`,
+      ...this.ytDlpArgFragment,
+    ];
+  }
+
   /** Register a listener that fires on every MPV status change. */
   onStatus(cb: MpvStatusCallback): void {
     this.statusCb = cb;
@@ -239,7 +314,7 @@ export class MpvManager {
     //   YouTube freeze. Ignored for local files (only ytdl URLs use it).
     // - cache + generous network timeout so a slow/throttled stream buffers
     //   instead of stalling silently.
-    const mpvArgs = [
+    const mpvArgs = this.video ? this.videoSpawnArgs() : [
       "--no-video",
       "--idle",
       "--ytdl-format=bestaudio/best",
@@ -421,6 +496,12 @@ export class MpvManager {
       // Readiness signals (crossfade readiness only — they do not alter `status`).
       this.raw(JSON.stringify({ command: ["observe_property", 5, "core-idle"] }));
       this.raw(JSON.stringify({ command: ["observe_property", 6, "paused-for-cache"] }));
+      if (this.video) {
+        // P0 Video V1: picture present / dropped frames (event-driven, video mode only)
+        this.raw(JSON.stringify({ command: ["observe_property", 20, "video-params"] }));
+        this.raw(JSON.stringify({ command: ["observe_property", 21, "frame-drop-count"] }));
+        this.videoCb?.({ kind: "engine" }); // (re)connected — VideoOutput re-applies placement
+      }
 
       if (this.cmdQueue.length > 0) {
         console.log("[MpvManager]", this.pipePath, "IPC connected — flushing", this.cmdQueue.length, "queued command(s)");
@@ -571,6 +652,13 @@ export class MpvManager {
             this.st.pausedForCache = data;
             this.push();
           }
+          if (this.video && data === true) this.videoCb?.({ kind: "stall" }); // P0 Video V1
+          break;
+        case "video-params":
+          if (this.video) this.videoCb?.({ kind: "picture", present: !!data && typeof data === "object" }); // P0 Video V1
+          break;
+        case "frame-drop-count":
+          if (this.video && typeof data === "number") this.videoCb?.({ kind: "drops", count: data }); // P0 Video V1
           break;
         case "duration":
           if (typeof data === "number") {
@@ -716,6 +804,11 @@ export class MpvManager {
     // DIAG (RC3 correlation, main-process → main.log): reqId/attemptId/kind only — never the url.
     fileLog("INFO", "MPV_LOADFILE", startPaused ? { reqId, attemptId, kind, paused: true } : { reqId, attemptId, kind });
     if (startPaused) this.cmd(["set_property", "pause", true]); // P0 Gate 2c: in-order on the IPC socket, BEFORE the load
+    if (this.video && this.videoDroppedForFile) {
+      // P0 Video V1: the picture dropped for the PREVIOUS song returns with this new load (never mid-song)
+      this.videoDroppedForFile = false;
+      this.cmd(["set_property", "vid", "auto"]);
+    }
     this.raw(JSON.stringify({ command: ["loadfile", target, "replace"], request_id: reqId }));
     if (startPaused) return; // prepared: stays paused (buffering) until resume()
     // A freshly loaded track MUST play — never inherit a stale `pause=true` from a
@@ -767,3 +860,10 @@ export class MpvManager {
     return { ...this.st };
   }
 }
+
+/** P0 Video V1: picture-side signals of a video-mode deck (event-driven). */
+export type MpvVideoSignal =
+  | { kind: "engine" }
+  | { kind: "picture"; present: boolean }
+  | { kind: "stall" }
+  | { kind: "drops"; count: number };

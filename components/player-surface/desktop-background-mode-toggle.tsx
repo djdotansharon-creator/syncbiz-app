@@ -5,6 +5,7 @@ import {
   setDesktopBackgroundMode,
   type DesktopBackgroundMode,
 } from "@/lib/desktop-background-mode";
+import { useMpvVideoOutput, setMpvVideoOutputEnabled } from "@/lib/mpv-video-output";
 
 const ORDER: DesktopBackgroundMode[] = ["artwork", "video"];
 const LABEL: Record<DesktopBackgroundMode, string> = {
@@ -29,6 +30,35 @@ function ModeIcon({ mode }: { mode: DesktopBackgroundMode }) {
       <rect x="2" y="5" width="14" height="14" rx="2" />
       <path d="m22 8-6 4 6 4V8Z" />
     </svg>
+  );
+}
+
+/**
+ * P0 Video V1 — per-station switch for SYNCED video (picture + sound from the same MPV player on this station).
+ * Shown only on a desktop installer that supports it. The switch applies at the next VONO start (MPV is never
+ * restarted under playing audio); the badge shows "restart needed" until then.
+ */
+export function MpvVideoToggle({ className }: { className?: string }) {
+  const s = useMpvVideoOutput();
+  if (!s.supported) return null;
+  const pending = s.enabled !== s.active;
+  const title = s.active
+    ? `Synced video (same player as the sound): ON${pending ? " — turns OFF at the next VONO start" : ""}. Click to ${s.enabled ? "turn off" : "keep on"}.`
+    : `Synced video (same player as the sound): OFF${pending ? " — turns ON at the next VONO start" : ""}. Click to ${s.enabled ? "cancel" : "turn on"}.`;
+  return (
+    <button
+      type="button"
+      onClick={() => void setMpvVideoOutputEnabled(!s.enabled)}
+      title={title}
+      aria-label={title}
+      aria-pressed={s.enabled}
+      className={`relative inline-flex h-7 min-w-7 items-center justify-center rounded-lg border-2 px-1 text-[10px] font-bold tracking-tight transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-white/50 active:scale-[0.97] ${
+        s.enabled ? "border-[#0a84ff] bg-[#0a84ff]/20 text-white" : "border-white/60 bg-slate-900/95 text-white/70 hover:border-white"
+      } ${className ?? ""}`}
+    >
+      SYNC
+      {pending ? <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400" aria-hidden /> : null}
+    </button>
   );
 }
 

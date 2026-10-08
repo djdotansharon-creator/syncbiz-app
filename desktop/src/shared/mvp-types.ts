@@ -19,6 +19,10 @@ export const MVP_IPC = {
   SET_MIX_DURATION: "mvp:set-mix-duration",
   /** P0 Gate 2c: AUTOMIX + loop setting → MAIN (automatic URL progression follows the user's settings). */
   SET_PLAYBACK_PREFS: "mvp:set-playback-prefs",
+  /** P0 Video V1: MPV-rendered video (picture + sound from the same player) — per-station switch + the renderer's slot. */
+  VIDEO_OUTPUT_GET: "mvp:video-output-get",
+  VIDEO_OUTPUT_SET: "mvp:video-output-set",
+  VIDEO_DOCK_RECT: "mvp:video-dock-rect",
   MPV_PLAY_INTERRUPT: "mvp:mpv-play-interrupt",
   SET_DUCK_PERCENT: "mvp:set-duck-percent",
   MPV_SEEK_TO: "mvp:mpv-seek-to",
@@ -637,3 +641,9 @@ export type MvpStatusSnapshot = {
 export type MvpConfigPatch = Partial<Omit<DesktopRuntimeConfig, "deviceId">> & {
   deviceId?: string;
 };
+
+/** P0 Video V1: saved switch (applies at the next VONO start) + whether THIS session runs with MPV video. */
+export type VideoOutputState = { enabled: boolean; active: boolean };
+
+/** P0 Video V1: the renderer's video slot in CSS px (viewport), or null = no picture now. */
+export type VideoDockRect = { x: number; y: number; width: number; height: number } | null;

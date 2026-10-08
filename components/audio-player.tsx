@@ -54,7 +54,9 @@ import { PlayerDeckTransportSurface } from "@/components/player-surface/player-d
 import { PlayerVerticalVolume } from "@/components/player-surface/player-vertical-volume";
 import { DesktopVideoDock } from "@/components/player-surface/desktop-video-dock";
 import { DesktopPlayerBackground } from "@/components/player-surface/desktop-player-background";
-import { DesktopBackgroundModeToggle } from "@/components/player-surface/desktop-background-mode-toggle";
+import { DesktopBackgroundModeToggle, MpvVideoToggle } from "@/components/player-surface/desktop-background-mode-toggle";
+import { MpvVideoSurface } from "@/components/player-surface/mpv-video-surface";
+import { useMpvVideoOutput } from "@/lib/mpv-video-output";
 import { useDesktopBackgroundMode } from "@/lib/desktop-background-mode";
 import { DesktopPlaybackDiagnostic } from "@/components/desktop-playback-diagnostic";
 import { reportPlaybackIncident, hostOnly, classifySource } from "@/lib/playback-telemetry-client";
@@ -820,6 +822,7 @@ export function AudioPlayer() {
 
   // Per-device desktop player background preference (artwork default / video / static).
   const desktopBgMode = useDesktopBackgroundMode();
+  const mpvVideo = useMpvVideoOutput(); // P0 Video V1: synced MPV video on this station (feature-detected)
   /** Browser MASTER only — prewarm hidden YT containers + IFrame API; never on desktop MPV or CONTROL mirror. */
   const canPrewarmYoutubeEmbed = !isDesktopMode && !isControlMirror;
   /* ── Video dock (Spotify-style) — DISPLAY-ONLY, always on while YT plays.
@@ -5293,7 +5296,7 @@ export function AudioPlayer() {
                       : null
                   : null
               }
-              secondaryExtra={isDesktopMode ? <DesktopBackgroundModeToggle /> : undefined}
+              secondaryExtra={isDesktopMode ? <><DesktopBackgroundModeToggle /><MpvVideoToggle className="ml-1" /></> : undefined}
               labels={{
                 previousTrack: t.previousTrack,
                 stopPlayback: t.stopPlayback,
@@ -5386,7 +5389,19 @@ export function AudioPlayer() {
           the MASTER), so a MUTED YouTube iframe shows only the clip, synced to
           the mirrored position. Same audio-safe dock as desktop; same right-half
           placement + left fog. Shown only for YouTube tracks while MASTER plays. */}
-      {isControlMirror && mirrorVid && (ms?.status === "playing" || ms?.status === "paused") ? (
+      {/* P0 Video V1: on the station with SYNCED video active, the picture is MPV's own (same player as the sound),
+          placed by MAIN over this slot — the muted YouTube iframe is never mounted (no second video stream). */}
+      {isControlMirror && mpvVideo.active ? (
+        desktopBgMode === "video" && (ms?.status === "playing" || ms?.status === "paused") ? (
+          <div
+            className="pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
+            aria-hidden
+          >
+            <div className="absolute inset-y-0 left-0 z-[1] w-2/3 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/75 to-transparent" aria-hidden />
+            <MpvVideoSurface className="absolute inset-y-0 right-0 w-[60%]" />
+          </div>
+        ) : null
+      ) : isControlMirror && mirrorVid && (ms?.status === "playing" || ms?.status === "paused") ? (
         <div
           className="pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
           aria-hidden
