@@ -25,6 +25,16 @@
     2026-10-08) + TEST app deployment `4d2b0f53` (F3a).
   - **Known limit (PARKED item 22):** after a renderer reload the old URL session is not restored into the new window →
     runtime acceptance starts by explicitly selecting a URL item once.
+  - **SUPERSEDED for runtime by the Gate 1f candidate below (2026-10-08):** add `788eb5c` (1f MAIN: restore the audible
+    session metadata after a failed / abandoned standby + read-only `mpvAttemptPending`) + `f033f5b` (1f renderer: the
+    audible track stays "now playing" until the new one is ready; pending row / phone / badges = Loading; Loading ends
+    at incoming readiness = XFADE_RAMP_START, or first real progress for a cold load). Head `f033f5b`.
+  - **Desktop candidate:** `2.2.8-beta.15`, SHA256 `e064c912fe2706c2552e9cf429e1c5aaf2687d711c9c23fedca30a1a4ecb3e95`,
+    140,766,604 bytes, unsigned, NOT published, TEST-pinned (same transient edits, reverted), clean `desktop/dist`
+    (no mpv-diag). Copy: `D:\SyncBiz_Backups\pilot\2026-10-08-beta15-gate1f-f033f5b\`.
+  - **TEST app:** deployment `048b920c-3c9f-43a5-95c8-232c716d952b` (= clean worktree `f033f5b`; 13 key files incl. all
+    Gate 1f files + F3a `lib/location-filter.ts` + `prisma/schema.prisma` hash-identical). WS unchanged `23e94c01`.
+  - **Rollbacks:** beta.14 (hash re-verified) + app `4d6215d3`; beta.12 accepted (hash re-verified) + app `4d2b0f53` (F3a).
 
 - **⭐ P0 PLAYBACK HARDENING — ACCEPTED / BASELINE LOCKED (owner-attested 2026-10-07, TEST).** Desktop
   **2.2.8-beta.12** (SHA256 `3becd1c881c6c847f11c0c10f2f1549c7987be92bb1e83808b36cf8528e49429`) from `dc74457` +
