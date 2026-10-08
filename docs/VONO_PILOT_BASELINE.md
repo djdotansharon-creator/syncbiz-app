@@ -8,6 +8,20 @@
 
 ## 1. STATUS
 
+- **🟡 P0 GATE 2c — NO SILENCE BETWEEN URL TRACKS — RUNTIME CANDIDATE ON TEST, NOT YET ACCEPTED (2026-10-08).**
+  Gate 2a runtime: owner reports continuous playback, no stops (owner-attested 2026-10-08; logs not inspected by
+  Claude). Head `c135ba8` (local, NOT pushed): MAIN owns the AUTOMATIC progression of the URL session — next URL
+  prepared PAUSED on the standby deck ~60 s before the end, handed over at the mix point (AUTOMIX on: mix length,
+  default now 9 s; off: 1 s change at the end) through the existing readiness → ramp path; failures skip forward
+  (cap 3) without touching the audible deck. Manual select / NEXT / PREV / jump unchanged. Restart restore (2d) NOT
+  included. main.log markers: `XFADE_PREPARE`, `URL_AUTO_PREPARE`, `URL_AUTO_COMMIT`, `XFADE_BEGIN … prepared:true`.
+  - **Desktop candidate:** `2.2.8-beta.17`, SHA256 `642dc7d718ccb8cd5a6439c503508fcef24cb2a3380742fd7f399dc65b6929de`,
+    140,771,274 bytes, unsigned, NOT published, TEST-pinned (same transient edits, reverted), clean `desktop/dist`.
+    Copy: `D:\SyncBiz_Backups\pilot\2026-10-08-beta17-gate2c-c135ba8\`.
+  - **TEST app:** deployment `90d105f7-4322-4c85-8ddc-692c7a760311` (= clean worktree `c135ba8`; 9 key files incl. F3a
+    hash-identical). WS unchanged `23e94c01`; DB unchanged.
+  - **Rollbacks:** beta.16 + app `2536177a`; beta.12 accepted + app `4d2b0f53` (hashes re-verified 2026-10-08).
+
 - **🟡 P0 GATE 2a — PARTIAL RISK-REDUCTION — RUNTIME CANDIDATE ON TEST, NOT YET ACCEPTED (2026-10-08).** Head `e31b614`
   on `playback/p0-gate1-url-transition` (local, NOT pushed): `610463c` (exact clicked track — Gate 1e regression on
   1-arg callers; URL end-of-playlist follows the loop setting with the LOCAL rule) + `e31b614` (a MAIN-started standby
