@@ -35,13 +35,26 @@ function world() {
   for (const d of [o.musicDeckA, o.musicDeckB]) {
     d.st.engineReady = true;
     const he = d.handleEvent.bind(d);
-    d.handleEvent = (m) => { he(m); for (const f of observers) f(); };
+    d.handleEvent = (m) => { he(m); drainPushes(); };
   }
   const mgr = new DeviceWsManager({ deviceId: "dsk-test", branchId: "default", wsUrl: "", wsToken: "" } as never, orch);
+  // Updated 2026-10-08 (P0 Gate 2a): controllers observe EVERY MAIN status push in order (exactly as IPC / WS STATE_UPDATE
+  // deliver them — one deep-copied snapshot per push) instead of sampling live state after an MPV event. MAIN now
+  // pushes a failed standby ONCE and then the still-audible deck (Gate 2a item 3); assertions unchanged.
+  type Snap = ReturnType<typeof mgr.snapshot>;
+  const pushes: Array<{ snap: Snap; mirror: unknown }> = [];
+  let tap: { snap: Snap; mirror: unknown } | null = null;
+  {
+    const mm = mgr as unknown as { push: () => void; snapshot: () => Snap; mock: { getState: () => unknown } };
+    const origPush = mm.push.bind(mgr), origSnap = mm.snapshot.bind(mgr);
+    mm.push = () => { const t = tap; tap = null; pushes.push({ snap: origSnap(), mirror: JSON.parse(JSON.stringify(mm.mock.getState())) }); origPush(); tap = t; };
+    mm.snapshot = () => (tap ? tap.snap : origSnap());
+  }
+  const drainPushes = () => { while (pushes.length) { tap = pushes.shift()!; for (const f of observers) f(); } tap = null; };
   const m = mgr as unknown as { runTransportCommand: (c: string, p: unknown, s: string) => void; mock: { getState: () => StationPlaybackState } };
   const toMain = (cmd: string, p?: unknown) => m.runTransportCommand(cmd, p, "ws");
   /** STATE_UPDATE snapshot as a controller receives it (a copy — never the live object) */
-  const mirror = (): StationPlaybackState => JSON.parse(JSON.stringify(m.mock.getState()));
+  const mirror = (): StationPlaybackState => (tap ? tap.mirror : JSON.parse(JSON.stringify(m.mock.getState()))) as StationPlaybackState;
   const cur = () => (o.currentAttemptDeck === "A" ? o.musicDeckA : o.musicDeckB);
   const audibleTitle = () => (o.activeMusicDeck === "A" ? o.musicStA : o.musicStB).status === "playing";
 

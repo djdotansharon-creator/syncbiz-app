@@ -25,6 +25,7 @@ import { standbyLoadTimeoutMs, isStreamLoadTarget } from "./mpv-input-normalize"
 import { isCrossfadeIncomingReady } from "./crossfade-readiness";
 import { fileLog } from "./file-logger";
 import { mediaKey as liveMediaKey } from "./live-media-key";
+import { isMainWsAttemptId } from "./main-attempt-id";
 
 const ORCH = "[SyncBiz:desktop-mpv:orchestrator] music";
 
@@ -106,6 +107,13 @@ export class PlaybackOrchestrator {
   /** URL of the current attempt — exposed to the renderer ONLY as a hash (`currentMediaKey`) so a renderer
    *  remount can prove it is re-owning the SAME live media before adopting it. Never exposed as a raw URL. */
   private currentAttemptUrl = "";
+  /**
+   * P0 Gate 2a (REPORTING ONLY): identity of the AUDIBLE (active) deck's attempt captured when a standby load is
+   * installed as the current attempt. If that MAIN-started standby then FAILS while the active deck is still audible,
+   * the failure is reported once and the reported current attempt returns to this identity — MAIN never loses
+   * visibility of the deck that is still playing (its natural end stays observable). Decks / MPV untouched.
+   */
+  private audibleBeforeStandby: { id: number; url: string; mode: "cold" | "crossfade" } | null = null;
 
   private masterVolume = 80;
   private duckPercent = DUCK_PERCENT_DEFAULT;
@@ -430,6 +438,10 @@ export class PlaybackOrchestrator {
     // pushes the standby MpvManager's INTERNAL status; keeping it before the install keeps that push on
     // the old id (never OLD deck state under the NEW id).
     standby.setVolume(0);
+    // P0 Gate 2a: remember the audible deck's identity (reporting only) before the standby becomes "current".
+    this.audibleBeforeStandby = this.currentAttemptDeck === this.activeMusicDeck && !this.currentAttemptError && this.currentAttemptId > 0
+      ? { id: this.currentAttemptId, url: this.currentAttemptUrl, mode: this.currentAttemptMode }
+      : this.audibleBeforeStandby; // newest-wins over a still-pending standby keeps the ORIGINAL audible identity
     this.currentAttemptId = attemptId;
     this.currentAttemptUrl = u;
     this.currentAttemptDeck = this.standbyDeckId();
@@ -535,6 +547,30 @@ export class PlaybackOrchestrator {
     }
     console.log(ORCH, "crossfade aborted", { reason });
     fileLog("INFO", "XFADE_ABORT", { attemptId: this.currentAttemptId, reason, activeDeck: this.activeMusicDeck });
+    this.push(); // the failure is reported ONCE under the failed attempt id (controllers observe it)
+    this.restoreAudibleAfterFailedStandby(reason);
+  }
+
+  /**
+   * P0 Gate 2a (REPORTING ONLY): after a MAIN-started standby load FAILED while the active deck is still audible,
+   * the reported current attempt returns to that audible deck (its id / url / mode) so its status, position and
+   * natural end stay observable. No deck / MPV / volume / timer change. Renderer-started (LOCAL) attempts: unchanged.
+   */
+  private restoreAudibleAfterFailedStandby(reason: string): void {
+    // A benign abort (newest-wins / pause) keeps the captured audible identity for the next standby; only a FAILURE consumes it.
+    if (reason !== "standby_decode_failed" && reason !== "standby_load_timeout") return;
+    const prev = this.audibleBeforeStandby;
+    this.audibleBeforeStandby = null;
+    if (!prev || !isMainWsAttemptId(this.currentAttemptId)) return;
+    const active = this.activeSt();
+    if ((active.status !== "playing" && active.status !== "paused") || active.attemptId !== prev.id) return;
+    const failedId = this.currentAttemptId;
+    this.currentAttemptId = prev.id;
+    this.currentAttemptUrl = prev.url;
+    this.currentAttemptDeck = this.activeMusicDeck;
+    this.currentAttemptMode = prev.mode;
+    this.currentAttemptError = null;
+    fileLog("INFO", "XFADE_ABORT_AUDIBLE_RESTORED", { failedAttemptId: failedId, audibleAttemptId: prev.id, activeDeck: this.activeMusicDeck, reason });
     this.push();
   }
 

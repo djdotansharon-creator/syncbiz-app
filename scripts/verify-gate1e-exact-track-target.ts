@@ -68,9 +68,22 @@ function world() {
     d.stop = () => { calls.push(`${id}:stop`); st(); };
     d.setVolume = (v) => { calls.push(`${id}:vol=${v}`); sv(v); };
     d.pause = () => { calls.push(`${id}:pause`); pa(); };
-    d.handleEvent = (m) => { he(m); for (const f of observers) f(); };
+    d.handleEvent = (m) => { he(m); drainPushes(); };
   }
   const mgr = new DeviceWsManager({ deviceId: "dsk-test", branchId: "default", wsUrl: "", wsToken: "" } as never, orch);
+  // Updated 2026-10-08 (P0 Gate 2a): controllers observe EVERY MAIN status push in order (exactly as IPC / WS STATE_UPDATE
+  // deliver them — one deep-copied snapshot per push) instead of sampling live state after an MPV event. MAIN now
+  // pushes a failed standby ONCE and then the still-audible deck (Gate 2a item 3); assertions unchanged.
+  type Snap = ReturnType<typeof mgr.snapshot>;
+  const pushes: Array<{ snap: Snap; mirror: unknown }> = [];
+  let tap: { snap: Snap; mirror: unknown } | null = null;
+  {
+    const mm = mgr as unknown as { push: () => void; snapshot: () => Snap; mock: { getState: () => unknown } };
+    const origPush = mm.push.bind(mgr), origSnap = mm.snapshot.bind(mgr);
+    mm.push = () => { const t = tap; tap = null; pushes.push({ snap: origSnap(), mirror: JSON.parse(JSON.stringify(mm.mock.getState())) }); origPush(); tap = t; };
+    mm.snapshot = () => (tap ? tap.snap : origSnap());
+  }
+  const drainPushes = () => { while (pushes.length) { tap = pushes.shift()!; for (const f of observers) f(); } tap = null; };
   const m = mgr as unknown as { runTransportCommand: (c: string, p: unknown, s: string) => void; handleRemoteStep: (c: "NEXT" | "PREV") => void; handleRemoteJump: (p: unknown) => void; push: () => void; mock: { getState: () => Mirror } };
   const wsCmds: string[] = [];
   /** WS COMMAND handler (MASTER) */
@@ -81,7 +94,7 @@ function world() {
     else m.runTransportCommand(cmd, payload, "ws");
     m.push();
   };
-  const mirror = () => m.mock.getState();
+  const mirror = () => (tap ? tap.mirror : m.mock.getState()) as Mirror;
   const deck = (id: "A" | "B") => (id === "A" ? o.musicDeckA : o.musicDeckB);
   const cur = () => deck(o.currentAttemptDeck);
   const attempt = () => mgr.snapshot().mpvAttemptId;

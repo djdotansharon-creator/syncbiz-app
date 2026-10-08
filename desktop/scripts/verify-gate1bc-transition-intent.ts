@@ -42,9 +42,22 @@ function world(sessionLen: number) {
     d.pause = () => { calls.push(`${id}:pause`); pa(); };
     // every MPV event → MAIN status → each controller observes it (desktop onStatus IPC / mirrored STATE_UPDATE)
     const he = d.handleEvent.bind(d);
-    d.handleEvent = (m) => { he(m); for (const f of observers) f(); };
+    d.handleEvent = (m) => { he(m); drainPushes(); };
   }
   const mgr = new DeviceWsManager({ deviceId: "dsk-test", branchId: "default", wsUrl: "", wsToken: "" } as never, orch);
+  // Updated 2026-10-08 (P0 Gate 2a): controllers observe EVERY MAIN status push in order (exactly as IPC / WS STATE_UPDATE
+  // deliver them — one deep-copied snapshot per push) instead of sampling live state after an MPV event. MAIN now
+  // pushes a failed standby ONCE and then the still-audible deck (Gate 2a item 3); assertions unchanged.
+  type Snap = ReturnType<typeof mgr.snapshot>;
+  const pushes: Array<{ snap: Snap; mirror: unknown }> = [];
+  let tap: { snap: Snap; mirror: unknown } | null = null;
+  {
+    const mm = mgr as unknown as { push: () => void; snapshot: () => Snap; mock: { getState: () => unknown } };
+    const origPush = mm.push.bind(mgr), origSnap = mm.snapshot.bind(mgr);
+    mm.push = () => { const t = tap; tap = null; pushes.push({ snap: origSnap(), mirror: JSON.parse(JSON.stringify(mm.mock.getState())) }); origPush(); tap = t; };
+    mm.snapshot = () => (tap ? tap.snap : origSnap());
+  }
+  const drainPushes = () => { while (pushes.length) { tap = pushes.shift()!; for (const f of observers) f(); } tap = null; };
   const wsCmds: string[] = [];
   const toMain = (cmd: string, payload?: unknown) => {
     wsCmds.push(cmd);
@@ -95,6 +108,7 @@ function world(sessionLen: number) {
     selectLocal() { this.t = null; this.sentIdx = null; orch.playMusic(LOCAL, 7); },
     /** desktop onStatus → observeUrlTransition(…, true) */
     observe() {
+      if (!tap && pushes.length) drainPushes(); // strict push order (a manual observe never jumps queued pushes)
       if (!this.t) return;
       const s = mgr.snapshot();
       const ob: TransitionObservation = { attemptId: s.mpvAttemptId, sourceId: null, trackIndex: null, status: s.mockPlaybackStatus, position: s.mpvPosition, error: s.mpvLastError || null, engineReady: s.mpvEngineReady !== false };
@@ -124,9 +138,11 @@ function world(sessionLen: number) {
     sendStop() { this.t = null; toMain("STOP"); },
     /** mirrored STATE_UPDATE (source id / track index from MAIN's published session) */
     observe() {
+      if (!tap && pushes.length) drainPushes(); // strict push order (a manual observe never jumps queued pushes)
       if (!this.t) return;
       const s = mgr.snapshot();
-      const ms = (mgr as unknown as { mock: { getState: () => { currentSource?: { id?: string } | null; currentTrackIndex?: number } } }).mock.getState();
+      type MS = { currentSource?: { id?: string } | null; currentTrackIndex?: number };
+      const ms = (tap ? tap.mirror : (mgr as unknown as { mock: { getState: () => MS } }).mock.getState()) as MS;
       const res = observeTransition(this.t, { attemptId: null, sourceId: ms.currentSource?.id ?? null, trackIndex: typeof ms.currentTrackIndex === "number" ? ms.currentTrackIndex : null, status: s.mockPlaybackStatus, position: s.mpvPosition, error: s.mpvLastError || null, engineReady: s.mpvEngineReady !== false });
       if (res.event === "confirmed") this.t = null;
       else if (res.event === "failed" && res.t) this.t = failTransition(res.t, Date.now());

@@ -40,9 +40,22 @@ function world(sessionLen: number, opts: { withStation?: boolean } = {}) {
     d.stop = () => { calls.push(`${id}:stop`); st(); };
     d.setVolume = (v) => { calls.push(`${id}:vol=${v}`); sv(v); };
     d.pause = () => { calls.push(`${id}:pause`); pa(); };
-    d.handleEvent = (m) => { he(m); for (const f of observers) f(); };
+    d.handleEvent = (m) => { he(m); drainPushes(); };
   }
   const mgr = new DeviceWsManager({ deviceId: "dsk-test", branchId: "default", wsUrl: "", wsToken: "" } as never, orch);
+  // Updated 2026-10-08 (P0 Gate 2a): controllers observe EVERY MAIN status push in order (exactly as IPC / WS STATE_UPDATE
+  // deliver them — one deep-copied snapshot per push) instead of sampling live state after an MPV event. MAIN now
+  // pushes a failed standby ONCE and then the still-audible deck (Gate 2a item 3); assertions unchanged.
+  type Snap = ReturnType<typeof mgr.snapshot>;
+  const pushes: Array<{ snap: Snap; mirror: unknown }> = [];
+  let tap: { snap: Snap; mirror: unknown } | null = null;
+  {
+    const mm = mgr as unknown as { push: () => void; snapshot: () => Snap; mock: { getState: () => unknown } };
+    const origPush = mm.push.bind(mgr), origSnap = mm.snapshot.bind(mgr);
+    mm.push = () => { const t = tap; tap = null; pushes.push({ snap: origSnap(), mirror: JSON.parse(JSON.stringify(mm.mock.getState())) }); origPush(); tap = t; };
+    mm.snapshot = () => (tap ? tap.snap : origSnap());
+  }
+  const drainPushes = () => { while (pushes.length) { tap = pushes.shift()!; for (const f of observers) f(); } tap = null; };
   const m = mgr as unknown as { runTransportCommand: (c: string, p: unknown, s: string) => void; handleRemoteStep: (c: "NEXT" | "PREV") => void; push: () => void; mock: { getState: () => Mirror } };
   const wsCmds: string[] = [];
   /** the WS COMMAND handler (MASTER): NEXT/PREV → handleRemoteStep; else runTransportCommand; then push() */
@@ -51,7 +64,7 @@ function world(sessionLen: number, opts: { withStation?: boolean } = {}) {
     if (cmd === "NEXT" || cmd === "PREV") m.handleRemoteStep(cmd); else m.runTransportCommand(cmd, payload, "ws");
     m.push();
   };
-  const mirror = () => m.mock.getState();
+  const mirror = () => (tap ? tap.mirror : m.mock.getState()) as Mirror;
   const deck = (id: "A" | "B") => (id === "A" ? o.musicDeckA : o.musicDeckB);
   const cur = () => deck(o.currentAttemptDeck);
   const urlLoads = () => calls.filter((c) => /:play:https/.test(c)).length;
@@ -100,6 +113,7 @@ function world(sessionLen: number, opts: { withStation?: boolean } = {}) {
       if (last && last.boot === boot && seq > last.seq && (s.sessionStepDirection === "next" || s.sessionStepDirection === "prev")) this.relayed(s.sessionStepDirection, seq);
     },
     observe() {
+      if (!tap && pushes.length) drainPushes(); // strict push order (a manual observe never jumps queued pushes)
       if (!this.t) return;
       const s = mgr.snapshot();
       const res = observeTransition(this.t, { mode: "station", attemptId: s.mpvAttemptId, sourceId: null, trackIndex: null, status: s.mockPlaybackStatus, position: s.mpvPosition, error: s.mpvLastError || null, engineReady: s.mpvEngineReady !== false });
@@ -129,6 +143,7 @@ function world(sessionLen: number, opts: { withStation?: boolean } = {}) {
       toMain(dir === "next" ? "NEXT" : "PREV");
     },
     observe() {
+      if (!tap && pushes.length) drainPushes(); // strict push order (a manual observe never jumps queued pushes)
       if (!this.t) return;
       const ms = mirror();
       const res = observeTransition(this.t, { mode: "remote", attemptId: typeof ms.mpvAttemptId === "number" ? ms.mpvAttemptId : null, sourceId: ms.currentSource?.id ?? null, trackIndex: typeof ms.currentTrackIndex === "number" ? ms.currentTrackIndex : null, status: ms.status, position: ms.position ?? 0, error: ms.mpvEngineError ?? null, engineReady: ms.mpvEngineReady !== false });

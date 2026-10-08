@@ -1173,9 +1173,20 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const [urlTransition, setUrlTransitionState] = useState<UrlTransition | null>(null);
   const urlTransitionRef = useRef<UrlTransition | null>(null);
   const heldMasterStateRef = useRef<StationPlaybackState | null>(null);
+  /** P0 Gate 2a: the session in force when a transition began (LOCAL ownership + URL baseline) — handed back when the
+   *  transition ends WITHOUT the new item ("current music kept" / never reached MAIN), so the still-audible session
+   *  continues (LOCAL engine next / AUTOMIX, or the URL natural-end step) instead of going silent when it ends. */
+  const preTransitionSessionRef = useRef<{ localOwned: boolean; sentLeaf: UnifiedSource | null } | null>(null);
   const setUrlTransition = useCallback((t: UrlTransition | null) => {
     if (t === urlTransitionRef.current) return;
     urlTransitionRef.current = t;
+    const pre = preTransitionSessionRef.current;
+    if (pre && t && (t.phase === "failed-kept" || t.phase === "not-sent")) {
+      localSessionOwnedRef.current = pre.localOwned;
+      lastSentUrlLeafRef.current = pre.sentLeaf;
+      console.info("[VONO session-restore] previous session restored after " + t.phase + " → " + (pre.localOwned ? "LOCAL" : pre.sentLeaf ? "URL" : "none"));
+    }
+    if (!isBlocking(t)) preTransitionSessionRef.current = null;
     if (!holdsAudible(t)) heldMasterStateRef.current = null; // P0 Gate 1f: held through "current music kept"
     setUrlTransitionState(t);
   }, []);
@@ -1192,7 +1203,10 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const beginUrlTransition = useCallback((origin: TransitionOrigin, targetKey: string | null, consecutiveFailures = 0) => {
     const station = isStationObserver();
     const audibleNow = station ? lastMainSnapRef.current?.status === "playing" : masterStateRef.current?.status === "playing";
-    if (!holdsAudible(urlTransitionRef.current)) heldMasterStateRef.current = audibleNow ? masterStateRef.current : null;
+    if (!holdsAudible(urlTransitionRef.current)) {
+      heldMasterStateRef.current = audibleNow ? masterStateRef.current : null;
+      preTransitionSessionRef.current = { localOwned: localSessionOwnedRef.current, sentLeaf: lastSentUrlLeafRef.current }; // P0 Gate 2a
+    }
     const t = beginTransition({
       origin, targetKey, now: Date.now(),
       priorAttemptId: station ? (lastMainSnapRef.current?.attemptId ?? null) : (masterStateRef.current?.mpvAttemptId ?? null),
@@ -1319,9 +1333,10 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         console.warn("[VONO url-target] session step rejected — item " + step.trackIndex + " has no playable URL (nothing sent; current audio kept)");
         return true;
       }
-      lastSentUrlLeafRef.current = step.leaf;
-      // P0 Gate 1c: every session step is ONE tracked transition (manual, natural-EOF or failure step).
+      // P0 Gate 1c: every session step is ONE tracked transition (manual, natural-EOF or failure step). Gate 2a: begun
+      // BEFORE the baseline moves, so the session in force is the one captured for a failed-load hand-back.
       beginUrlTransition(opts?.origin ?? (opts?.automatic ? "auto-eof" : direction), targetKeyOf(step.leaf.id, step.trackIndex), opts?.failures ?? 0);
+      lastSentUrlLeafRef.current = step.leaf;
       sendCommandToMaster("PLAY_SOURCE", { source: unifiedSourceToPayload(step.leaf), trackIndex: step.trackIndex });
       return true;
     },
@@ -1349,8 +1364,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       const verdict = decideUserCommand(urlTransitionRef.current, { kind: "select", targetKey: key });
       if (verdict !== "accept") { console.info("[VONO intent] session jump ignored — " + verdict); return true; }
       urlEofStateRef.current = disarmUrlEof(urlEofStateRef.current);
+      beginUrlTransition("select", key); // P0 Gate 2a: before the baseline moves (failed-load hand-back)
       lastSentUrlLeafRef.current = j.leaf;
-      beginUrlTransition("select", key);
       sendCommandToMaster("PLAY_SOURCE", { source: unifiedSourceToPayload(j.leaf), trackIndex: j.trackIndex });
       return true;
     },

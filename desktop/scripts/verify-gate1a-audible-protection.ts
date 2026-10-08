@@ -55,11 +55,18 @@ function harness() {
   assert("1a WS PLAY_SOURCE with audible deck → standby load (B), active A untouched", h.o.currentAttemptDeck === "B" && h.calls.slice(mark).includes("B:play") && h.activeTouched("A", mark).length === 0, h.calls.slice(mark).join(","));
   // pos-0 failure of the standby (yt-dlp resolved, start-file, duration known, then end-file error at pos 0)
   const sb = h.deck("B");
+  // Updated 2026-10-08 (P0 Gate 2a item 3): the failure is surfaced ONCE in the status stream (controllers observe it),
+  // then MAIN reports the still-audible deck A again (it must never lose visibility of audible playback).
+  const failedId = h.orch.getState().music.attemptId;
+  const seen: Array<{ attemptId: number; status: string; lastError: string | null }> = [];
+  const ol = (h.orch as unknown as { listener?: (s: { music: { attemptId: number; status: string; lastError: string | null } }) => void }).listener;
+  (h.orch as unknown as { listener: (s: { music: { attemptId: number; status: string; lastError: string | null } }) => void }).listener = (s) => { seen.push({ ...s.music }); ol?.(s); };
   sb.handleEvent({ event: "start-file" }); sb.handleEvent({ event: "property-change", name: "duration", data: 225 });
   sb.handleEvent({ event: "end-file", reason: "error", file_error: "loading failed" });
   const st = h.orch.getState();
-  assert("1b standby fails at pos 0 → audible A keeps playing, never stopped / lowered; failure surfaced on the URL attempt",
-    h.activeTouched("A", mark).length === 0 && h.o.activeMusicDeck === "A" && (h.o as unknown as { musicStA: { status: string } }).musicStA.status === "playing" && st.music.status === "idle" && !!st.music.lastError);
+  assert("1b standby fails at pos 0 → audible A keeps playing, never stopped / lowered; failure surfaced ONCE on the URL attempt, then A reported",
+    h.activeTouched("A", mark).length === 0 && h.o.activeMusicDeck === "A" && (h.o as unknown as { musicStA: { status: string } }).musicStA.status === "playing" &&
+    seen.filter((m) => m.attemptId === failedId && m.status === "idle" && !!m.lastError).length === 1 && st.music.attemptId === 7 && st.music.status === "playing" && !st.music.lastError);
   // the OLD (pre-1a) defect: current attempt now reads idle+error although A is audible → a 2nd URL must STILL go to standby
   const mark2 = h.calls.length;
   h.playSource("pl#2", URL2, 2);
