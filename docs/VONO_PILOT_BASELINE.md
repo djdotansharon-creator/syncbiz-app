@@ -8,6 +8,16 @@
 
 ## 1. STATUS
 
+- **🟡 P0 DROP NEXT — RUNTIME CANDIDATE ON TEST, NOT YET ACCEPTED (2026-10-08).** Head `e5b2029` (local, NOT pushed).
+  Root cause: since a665e7c the station renderer is CONTROL → QUEUE_NEXT went to MAIN, which had no handler (silently
+  dropped). Fix: MAIN owns the Play Next queue (URLs only; playlist → all tracks in order); the queue plays first (prepared
+  + mixed like Gate 2c), then the playlist resumes where it stopped; during LOCAL the queued items play after the current
+  LOCAL track and LOCAL resumes; MAIN NEXT / PREV for its own URL / queued items. main.log: `QUEUE_NEXT_ADDED`, `URL_NAV`.
+  - **Desktop candidate:** `2.2.8-beta.18`, SHA256 `c358fa236e0cb6a7aa2ded4c4156522d6102202d1655863b74b5bd83f39bee60`,
+    140,773,807 bytes, unsigned, NOT published, TEST-pinned, clean dist. Copy: `D:SyncBiz_Backupspilot6-10-08-beta18-dropnext-e5b2029`.
+  - **TEST app:** deployment `414d3564-359c-48d8-a678-01f4069d830a` (= clean worktree `e5b2029`; key files incl. F3a hash-identical).
+    WS unchanged `23e94c01`. **Rollback:** beta.17 (Gate 2c accepted) + app `90d105f7`.
+
 - **✅ P0 GATE 2c — NO SILENCE BETWEEN URL TRACKS — ACCEPTED — owner-attested 2026-10-08 (Lenovo, beta.17 + TEST app 90d105f7):** "now there is a mix, much better". Not independently log-verified by Claude. The mix length used is the user's saved setting (12 s on the Lenovo; default 9 s only when nothing is saved). OPEN (separate gates, not started): Drop Next (QUEUE_NEXT has no MAIN handler since a665e7c), video/audio sync (separate muted YouTube iframe, 2 s drift tolerance; MPV audio-only), restart restore (2d). Original candidate record:
 - **(superseded) 🟡 P0 GATE 2c — RUNTIME CANDIDATE (2026-10-08).**
   Gate 2a runtime: owner reports continuous playback, no stops (owner-attested 2026-10-08; logs not inspected by
