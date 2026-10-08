@@ -8,7 +8,8 @@
 
 ## 1. STATUS
 
-- **🟡 P0 GATE 2c — NO SILENCE BETWEEN URL TRACKS — RUNTIME CANDIDATE ON TEST, NOT YET ACCEPTED (2026-10-08).**
+- **✅ P0 GATE 2c — NO SILENCE BETWEEN URL TRACKS — ACCEPTED — owner-attested 2026-10-08 (Lenovo, beta.17 + TEST app 90d105f7):** "now there is a mix, much better". Not independently log-verified by Claude. The mix length used is the user's saved setting (12 s on the Lenovo; default 9 s only when nothing is saved). OPEN (separate gates, not started): Drop Next (QUEUE_NEXT has no MAIN handler since a665e7c), video/audio sync (separate muted YouTube iframe, 2 s drift tolerance; MPV audio-only), restart restore (2d). Original candidate record:
+- **(superseded) 🟡 P0 GATE 2c — RUNTIME CANDIDATE (2026-10-08).**
   Gate 2a runtime: owner reports continuous playback, no stops (owner-attested 2026-10-08; logs not inspected by
   Claude). Head `c135ba8` (local, NOT pushed): MAIN owns the AUTOMATIC progression of the URL session — next URL
   prepared PAUSED on the standby deck ~60 s before the end, handed over at the mix point (AUTOMIX on: mix length,
