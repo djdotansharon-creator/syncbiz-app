@@ -287,8 +287,9 @@ assert("S1 device-player-context: URL select guarded by decideUserCommand + begi
 assert("S2 device-player-context: PLAY guarded, NEXT/PREV ignored while pending, PAUSE/STOP clear first",
   /decideUserCommand\(urlTransitionRef\.current, \{ kind: "play" \}\)/.test(dpc) && (dpc.match(/else if \(transitionPending\(\)\)/g) ?? []).length === 2 &&
   /const pauseOrSend = useCallback\(\(\) => \{\n    setUrlTransition\(null\);/.test(dpc) && /const stopOrSend = useCallback\(\(\) => \{\n    setUrlTransition\(null\);/.test(dpc));
-assert("S3 device-player-context: failure → ONE noWrap auto-failure step, capped, never a LOCAL fallback",
-  /failures < MAX_CONSECUTIVE_FAILURES/.test(obs) && /stepUrlSessionRef\.current\("next", \{ noWrap: true, origin: "auto-failure", failures \}\)/.test(obs) && !/playSource\(|playMusic|type === "local"/.test(obs) && /if \(!station\) \{ setUrlTransition\(failTransition/.test(obs));
+// Updated 2026-10-08 (P0 Gate 2a): the failure step is \`automatic: "failure"\` (follows loop; never retries the failing item).
+assert("S3 device-player-context: failure → ONE automatic auto-failure step, capped, never a LOCAL fallback",
+  /failures < MAX_CONSECUTIVE_FAILURES/.test(obs) && /stepUrlSessionRef\.current\("next", \{ automatic: "failure", origin: "auto-failure", failures \}\)/.test(obs) && !/playSource\(|playMusic|type === "local"/.test(obs) && /if \(!station\) \{ setUrlTransition\(failTransition/.test(obs));
 assert("S4 device-player-context: LOCAL selections clear the URL intent", (dpc.match(/setUrlTransition\(null\); \/\/ P0 Gate 1c: (an )?explicit LOCAL/g) ?? []).length === 2);
 assert("S5 station-controller-context: select / PLAY / NEXT / PREV guarded, PAUSE / STOP clear",
   /decideUserCommand\(transitionRef\.current, \{ kind: "select", targetKey: key \}\)/.test(scc) && /decideUserCommand\(transitionRef\.current, \{ kind: "play" \}\)/.test(scc) &&

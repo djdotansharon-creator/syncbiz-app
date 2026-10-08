@@ -204,10 +204,12 @@ function station(startIndex: number) {
 
   // ── static pins ─────────────────────────────────────────────────────────────────────────────────────────────
   const ctx = read("lib", "device-player-context.tsx");
-  assert("S1 context observes desktop status with the pure tracker and steps with noWrap only for EOF",
-    // Updated 2026-10-07 (P0 Gate 1b): the only OTHER noWrap step is the explicit failure step (origin "auto-failure").
-    /observeUrlEof\(/.test(ctx) && (ctx.match(/stepUrlSessionRef\.current\("next", \{ noWrap: true \}\)/g) ?? []).length === 1 &&
-    (ctx.match(/noWrap: true/g) ?? []).length === 2 && /stepUrlSessionRef\.current\("next", \{ noWrap: true, origin: "auto-failure", failures \}\)/.test(ctx));
+  // Updated 2026-10-08 (P0 Gate 2a): automatic steps follow the user's LOOP setting (owner requirement — a URL playlist
+  // must not go silent at its end when loop is on): \`noWrap\` became \`automatic: "eof" | "failure"\`. Still exactly ONE EOF
+  // step + ONE failure step; "off" still stops after the last item (pure behaviour checked in verify-gate2a-*).
+  assert("S1 context observes desktop status with the pure tracker and steps automatically only for EOF + failure",
+    /observeUrlEof\(/.test(ctx) && (ctx.match(/stepUrlSessionRef\.current\("next", \{ automatic: "eof" \}\)/g) ?? []).length === 1 &&
+    (ctx.match(/automatic: "(eof|failure)"/g) ?? []).length === 2 && /stepUrlSessionRef\.current\("next", \{ automatic: "failure", origin: "auto-failure", failures \}\)/.test(ctx) && !/noWrap/.test(ctx));
   assert("S2 manual NEXT / PREV unchanged (no noWrap, same fallbacks)",
     // Updated 2026-10-08 (P0 Gate 1d): fallback via sendRemoteNav (= sendCommandToMaster(NEXT/PREV) + remote feedback).
     /else if \(!stepUrlSession\("next"\)\) sendRemoteNav\("NEXT"\);/.test(ctx) && /else if \(!stepUrlSession\("prev"\)\) sendRemoteNav\("PREV"\);/.test(ctx) &&

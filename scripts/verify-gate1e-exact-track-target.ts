@@ -213,9 +213,12 @@ function world() {
   const sent = w.wsCmds.length;
   w.station.select(synth, 24);
   assert("I3 renderer fail-closed: reconstructed source (no track urls) for index 24 → nothing sent, metadata + audio unchanged", w.wsCmds.length === sent && w.station.log.at(-1)?.startsWith("rejected:") === true && w.coherent(0), w.station.log.at(-1));
-  // a borrowed r0 leaf WITH urls + trackIndex 24 is re-resolved to leaf 24 (never r0's URL / id)
-  w.station.select(leaves[0], 24); w.play(w.cur());
-  assert("I4 borrowed leaf r0 + trackIndex 24 → resolved to leaf r24 (its own URL + id), never r0's", w.coherent(24) && w.shown().id === `${SHELL}:track:r24`, JSON.stringify(w.shown()));
+  // Updated 2026-10-08 (P0 Gate 2a): the incident's BORROWED leaf carries NO url of its own (live-queue stand-in with the
+  // reconciled playlist attached) → resolved by index to leaf 24. A REAL leaf with its own URL is the clicked track (I5).
+  w.station.select({ ...leaves[0], url: "" } as UnifiedSource, 24); w.play(w.cur());
+  assert("I4 borrowed leaf r0 (no own url) + trackIndex 24 → resolved to leaf r24 (its own URL + id), never r0's", w.coherent(24) && w.shown().id === `${SHELL}:track:r24`, JSON.stringify(w.shown()));
+  w.station.select(leaves[7], 0); w.play(w.cur());
+  assert("I5 REAL leaf r7 (own url) + defaulted index 0 → plays r7 exactly (Gate 2a), labelled index 7", w.coherent(7) && w.shown().id === `${SHELL}:track:r7`, JSON.stringify(w.shown()));
   w.orch.kill();
 }
 // ── STATION absolute jumps 0 / 1 / 24: one attempt + one loadfile each, exact URL, UI == audio ──

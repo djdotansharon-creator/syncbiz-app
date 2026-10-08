@@ -78,7 +78,9 @@ const read = (...p: string[]) => readFileSync(path.join(__dirname, "..", "..", .
   assert("gate is fail-closed (electron AND (commandReady OR designatedStationOffline))", /const canLocalExec = isElectronShell === true && \(localMainCommandReady \|\| localMainDesignatedOffline\);/.test(dp));
   assert("commandReady + designatedStationOffline come from the co-located MAIN bridge status", /bridge\.onStatus\(apply\)/.test(dp) && /setLocalMainCommandReady\(Boolean\(s\?\.commandReady\)\)/.test(dp) && /setLocalMainDesignatedOffline\(Boolean\(s\?\.designatedStationOffline\)\)/.test(dp));
   assert("local detection is authoritative source type (not empty-url heuristic)", /currentSource\?\.type === "local"/.test(dp) && /source\?\.type === "local"/.test(dp));
-  assert("local play uses provider transport (not WS audio)", /canLocalExec && source\?\.type === "local"\) \{[\s\S]*playSource\(source, trackIndex\)/.test(dp));
+  // Updated 2026-10-08 (P0 Gate 2a): trackIndex became optional (a URL leaf's omitted index must not mean row 0); the LOCAL
+  // provider call passes \`trackIndex ?? 0\` — identical LOCAL behaviour. Invariant unchanged: LOCAL plays via the provider.
+  assert("local play uses provider transport (not WS audio)", /canLocalExec && source\?\.type === "local"\) \{[\s\S]*playSource\(source, trackIndex \?\? 0\)/.test(dp));
   assert("local transport gate on current source (play/pause/next/prev)", /const localExecCurrent = canLocalExec && currentSourceIsLocal;/.test(dp));
   assert("metadata-sync uses unifiedSourceToPayload (strips local paths → nothing local over WS)",
     /if \(!canLocalExec \|\| !currentSourceIsLocal \|\| !currentSource\) return;[\s\S]*unifiedSourceToPayload\(currentSource\)/.test(dp));

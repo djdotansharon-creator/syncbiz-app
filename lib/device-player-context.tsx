@@ -1212,13 +1212,14 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     (effectiveDeviceMode === "MASTER" && !isNativeShellStreamer) || isMobileLocalPlayback;
 
   const playSourceOrSend = useCallback(
-    (source: UnifiedSource, trackIndex = 0) => {
+    // P0 Gate 2a: trackIndex stays OPTIONAL — an omitted index must not become "row 0" for a URL leaf (LOCAL: ?? 0).
+    (source: UnifiedSource, trackIndex?: number) => {
       if (useLocalDeviceTransport) {
         localSessionOwnedRef.current = true;
         lastLocalPushKeyRef.current = null; // force a fresh MAIN session commit for the new local selection
         lastSentUrlLeafRef.current = null;
         setUrlTransition(null); // P0 Gate 1c: an explicit LOCAL / local-transport selection clears any URL intent
-        playSource(source, trackIndex);
+        playSource(source, trackIndex ?? 0);
       } else if (canLocalExec && source?.type === "local") {
         // Designated-MASTER machine + LOCAL source → drive local audio via the renderer's existing engine
         // (provider → existing desktop dispatch → mpvPlayUrl IPC → co-located MAIN orchestrator). The MAIN
@@ -1229,7 +1230,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         lastLocalPushKeyRef.current = null;   // force a fresh MAIN commit (handles URL → same-LOCAL re-selection)
         lastSentUrlLeafRef.current = null;
         setUrlTransition(null); // P0 Gate 1c: explicit LOCAL selection clears the URL intent (existing safe LOCAL path)
-        playSource(source, trackIndex);
+        playSource(source, trackIndex ?? 0);
       } else {
         // P0 Gate 1e — LOCKED: a non-LOCAL PLAY_SOURCE must carry the playable URL of THAT EXACT track. Resolve the
         // exact target (a borrowed leaf id / shell + index → the parent playlist's leaf at that index); no playable
@@ -1294,9 +1295,11 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   );
   // P0: URL playlist session NEXT / PREV on the designated station → PLAY_SOURCE of item N±1 (trackIndex N±1) of
   // the SAME session MAIN mirrors. Returns false when no coherent URL session exists (caller keeps the MAIN command).
-  // `noWrap` (natural EOF only): never wrap past the last item — end-of-session behavior is unchanged (no invented loop).
+  // P0 Gate 2a: `automatic` steps follow the user's LOOP setting exactly like the LOCAL natural end
+  // (computeSessionNextTrackIndex): natural end — "track" replays the same item, "playlist" wraps after the last item,
+  // "off" stops after the last item; failure step — never retries the failing item ("track" acts as "playlist").
   const stepUrlSession = useCallback(
-    (direction: "next" | "prev", opts?: { noWrap?: boolean; origin?: TransitionOrigin; failures?: number }): boolean => {
+    (direction: "next" | "prev", opts?: { automatic?: "eof" | "failure"; origin?: TransitionOrigin; failures?: number }): boolean => {
       if (!canLocalExec || localSessionOwnedRef.current) return false;
       const step = resolveUrlSessionStep({
         sentLeaf: lastSentUrlLeafRef.current,
@@ -1304,7 +1307,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         mainTrackIndex: masterState?.currentTrackIndex ?? null,
         mainSessionTrackCount: masterState?.sessionTracks?.length ?? null,
         direction,
-        repeatMode: opts?.noWrap ? "off" : getRepeatMode(),
+        repeatMode: opts?.automatic === "failure" ? (getRepeatMode() === "off" ? "off" : "playlist") : getRepeatMode(),
+        repeatCurrent: opts?.automatic === "eof",
       });
       if (!step) return false;
       // Any step (manual NEXT / PREV or the EOF step itself) disarms: a pending natural end can never step again.
@@ -1317,7 +1321,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       }
       lastSentUrlLeafRef.current = step.leaf;
       // P0 Gate 1c: every session step is ONE tracked transition (manual, natural-EOF or failure step).
-      beginUrlTransition(opts?.origin ?? (opts?.noWrap ? "auto-eof" : direction), targetKeyOf(step.leaf.id, step.trackIndex), opts?.failures ?? 0);
+      beginUrlTransition(opts?.origin ?? (opts?.automatic ? "auto-eof" : direction), targetKeyOf(step.leaf.id, step.trackIndex), opts?.failures ?? 0);
       sendCommandToMaster("PLAY_SOURCE", { source: unifiedSourceToPayload(step.leaf), trackIndex: step.trackIndex });
       return true;
     },
@@ -1379,7 +1383,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     const failures = (res.t.phase === "confirmed" ? 0 : res.t.consecutiveFailures) + 1;
     const before = urlTransitionRef.current;
     const stepped = failures < MAX_CONSECUTIVE_FAILURES && canLocalExecRef.current && !localSessionOwnedRef.current &&
-      stepUrlSessionRef.current("next", { noWrap: true, origin: "auto-failure", failures });
+      stepUrlSessionRef.current("next", { automatic: "failure", origin: "auto-failure", failures });
     const sent = stepped && urlTransitionRef.current !== before;
     console.info("[VONO url-failure] MAIN URL attempt failed → " + (sent ? "stepped session forward once" : "no next / exhausted — " + (res.t.audibleAtStart ? "current music kept" : "idle")), {
       attemptId: o.attemptId, consecutiveFailures: failures,
@@ -1465,7 +1469,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       );
       urlEofStateRef.current = res.state;
       if (!res.advance) return;
-      const stepped = stepUrlSessionRef.current("next", { noWrap: true });
+      const stepped = stepUrlSessionRef.current("next", { automatic: "eof" });
       console.info("[VONO url-eof] natural end of MAIN URL attempt → " + (stepped ? "stepped session forward once" : "no coherent session / last item — unchanged"), {
         attemptId: typeof st?.mpvAttemptId === "number" ? st.mpvAttemptId : null,
       });

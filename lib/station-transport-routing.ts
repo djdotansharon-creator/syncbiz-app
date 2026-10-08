@@ -54,6 +54,8 @@ export function resolveUrlSessionStep(args: {
   mainSessionTrackCount: number | null | undefined;
   direction: "next" | "prev";
   repeatMode: "playlist" | "track" | "off";
+  /** P0 Gate 2a: natural end with loop "track" replays the CURRENT item (LOCAL parity: computeSessionNextTrackIndex). */
+  repeatCurrent?: boolean;
 }): { leaf: UnifiedSource; trackIndex: number } | { noop: true } | null {
   const sent = args.sentLeaf;
   if (!sent?.playlist || sent.type === "local") return null;
@@ -69,7 +71,9 @@ export function resolveUrlSessionStep(args: {
   const cur = playlistLeafTrackIndexForQueueItem(sent);
   if (cur < 0 || cur >= count) return null;
   let target: number;
-  if (args.direction === "next") {
+  if (args.direction === "next" && args.repeatCurrent && args.repeatMode === "track") {
+    target = cur;
+  } else if (args.direction === "next") {
     if (cur + 1 < count) target = cur + 1;
     else if (args.repeatMode === "off") return { noop: true };
     else target = 0;
@@ -95,6 +99,9 @@ export function ownPlayableUrl(source: Pick<UnifiedSource, "url"> | null | undef
 
 /**
  * The exact non-LOCAL target for a (source, trackIndex) selection:
+ *  - P0 Gate 2a: a REAL playlist leaf (it carries its OWN playable URL) IS the clicked track — its own row is the
+ *    index; an omitted / defaulted 0 or any other index never redirects it to another row (Gate 1e regression:
+ *    1-arg callers clicked track K and got track 0);
  *  - a playlist LEAF whose own row is trackIndex, or a non-playlist source → itself (unchanged);
  *  - a playlist shell with trackIndex > 0, or a leaf of ANOTHER row (e.g. a borrowed `:track:r0` id with trackIndex 24)
  *    → the parent playlist's leaf AT trackIndex (its own URL) — never the current leaf's URL / id as a substitute;
@@ -103,12 +110,17 @@ export function ownPlayableUrl(source: Pick<UnifiedSource, "url"> | null | undef
  */
 export function resolveExactUrlTarget(
   source: UnifiedSource,
-  trackIndex: number,
+  trackIndex?: number,
 ): { source: UnifiedSource; trackIndex: number } | { reject: string } {
-  const idx = Number.isInteger(trackIndex) && trackIndex >= 0 ? trackIndex : 0;
   const tracks = source.playlist ? getPlaylistTracks(source.playlist) : [];
   const shellId = playlistShellIdOfLeaf(source);
   const isLeaf = shellId !== null && tracks.length > 0;
+  if (isLeaf && source.type !== "local" && ownPlayableUrl(source)) {
+    return { source, trackIndex: playlistLeafTrackIndexForQueueItem(source) };
+  }
+  const idx = typeof trackIndex === "number" && Number.isInteger(trackIndex) && trackIndex >= 0
+    ? trackIndex
+    : isLeaf ? playlistLeafTrackIndexForQueueItem(source) : 0;
   let target = source;
   if (tracks.length > 0 && (isLeaf || idx > 0)) {
     if (!(isLeaf && playlistLeafTrackIndexForQueueItem(source) === idx)) {
