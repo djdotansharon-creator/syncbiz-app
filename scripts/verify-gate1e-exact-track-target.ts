@@ -12,9 +12,6 @@
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { PlaybackOrchestrator } from "../desktop/src/main/playback-orchestrator";
-import { DeviceWsManager } from "../desktop/src/device-websocket-client/device-ws-manager";
-import type { MvpStatusSnapshot } from "../desktop/src/shared/mvp-types";
 import { resolveExactUrlTarget, resolveUrlSessionJump, resolveUrlSessionStep, ownPlayableUrl } from "../lib/station-transport-routing";
 import { unifiedSourceToPayload } from "../lib/remote-control/source-to-payload";
 import { expandPlaylistEntityToItems } from "../lib/syncbiz-playlist-queue";
@@ -24,6 +21,20 @@ import {
   targetKeyOf, type TransitionOrigin, type UrlTransition,
 } from "../lib/url-transition-intent";
 import type { UnifiedSource } from "../lib/source-types";
+
+// Desktop MAIN is loaded at RUNTIME (require), not via typed imports: the root tsconfig (and the Next.js build's type
+// check on the TEST app image) must never follow into desktop/ — desktop deps such as `ws` exist only in desktop/.
+type MvpStatusSnapshot = {
+  mpvAttemptId: number; mockPlaybackStatus: string; mpvPosition: number; mpvDuration: number; mpvLastError: string | null; mpvEngineReady: boolean;
+  sessionStepBootId?: string; sessionStepSeq?: number; sessionStepDirection?: "next" | "prev" | "jump" | null; sessionStepIndex?: number | null; sessionStepSessionId?: string | null;
+};
+type OrchLike = { kill(): void };
+type MgrLike = { snapshot(): MvpStatusSnapshot; onStatus(fn: (s: MvpStatusSnapshot) => void): void };
+const ROOT = path.join(__dirname, "..");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { PlaybackOrchestrator } = require(path.join(ROOT, "desktop", "src", "main", "playback-orchestrator")) as { PlaybackOrchestrator: new () => OrchLike };
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { DeviceWsManager } = require(path.join(ROOT, "desktop", "src", "device-websocket-client", "device-ws-manager")) as { DeviceWsManager: new (cfg: unknown, orch: OrchLike) => MgrLike };
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean, detail = ""): void {
