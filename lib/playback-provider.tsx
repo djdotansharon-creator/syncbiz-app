@@ -1553,17 +1553,29 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }
     if (mainBootSource.current === "url") {
       // MAIN restores the station's remembered URL playlist itself — the renderer must not start LOCAL over it.
-      console.info("[VONO restore] MAIN restores the remembered URL source — renderer LOCAL restore skipped");
-      hasRestoredRef.current = true;
+      // Not final: if that URL fails before it ever plays, MAIN switches to "url-pending" / "url-failed" and this restore
+      // re-runs to start LOCAL (owner rule: a failed URL restore → LOCAL, never silence).
+      console.info("[VONO restore] MAIN restores the remembered URL source — renderer LOCAL restore on hold");
       setIsRestoring(false);
-      return;
+      const unsub = subscribeLocalSourceExec(() => {
+        if (mainBootSource.current === "url") return;
+        unsub();
+        setRestoreTick((t) => t + 1);
+      });
+      return () => unsub();
     }
     let persistedV2 = loadPersistedPlaybackV2();
-    if (mainBootSource.current === "url-pending" && !persistedV2?.local) {
+    if ((mainBootSource.current === "url-pending" || mainBootSource.current === "url-failed") && !persistedV2?.local) {
       // Offline boot, remembered source = URL: play the station's last LOCAL session until MAIN brings the URL back.
       const fallback = loadPersistedPlaybackV2(LAST_LOCAL_STORAGE_KEY);
-      if (fallback?.local) persistedV2 = { ...fallback, status: "playing" };
-      console.info("[VONO restore] offline boot — LOCAL fallback " + (fallback?.local ? "found" : "missing"));
+      console.info("[VONO restore] URL source unavailable — LOCAL fallback " + (fallback?.local ? "found" : "missing"));
+      if (!fallback?.local) {
+        // nothing LOCAL to play here — never replay the remembered URL from the renderer (MAIN owns its retries)
+        hasRestoredRef.current = true;
+        setIsRestoring(false);
+        return;
+      }
+      persistedV2 = { ...fallback, status: "playing" };
     }
     const persistedV1 = loadPersistedPlayback();
     if (!persistedV2 && !persistedV1) {

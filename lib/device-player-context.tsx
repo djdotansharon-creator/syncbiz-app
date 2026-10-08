@@ -455,6 +455,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   canLocalExecRef.current = canLocalExec;
   // Authoritative source classification (NOT an empty-url heuristic): the provider source type is "local".
   const currentSourceIsLocal = currentSource?.type === "local";
+  const currentSourceIsLocalRef = useRef(currentSourceIsLocal); // P0 Gate 2d (read in the MAIN status listener)
+  currentSourceIsLocalRef.current = currentSourceIsLocal;
 
   // Notify the one-shot playback restore (PlaybackProvider) when the local-exec permission resolves or changes,
   // so an offline designated station that recovers LOCAL doesn't lose the cold-boot race (deterministic, no
@@ -1178,6 +1180,10 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // station's remembered source and cancels a pending URL restore). A boot LOCAL fallback / auto-advance sends none.
   const localUserIntentRef = useRef(false);
   const restoreTakeoverSeenRef = useRef(0);
+  // P0 Gate 2d: LOCAL rescue when a restored URL fails — the LOCAL attempt that yielded its slot + once-per-attempt guard
+  const localYieldedAttemptRef = useRef(0);
+  const localRescueFiredForRef = useRef(0);
+  const localRescueRef = useRef<(reason: string) => void>(() => {});
   // P0 (LOCAL→URL coherence): the last URL playlist leaf this renderer committed via WS PLAY_SOURCE (carries the
   // parent playlist with every track URL) — used to step the SAME session on NEXT / PREV.
   const lastSentUrlLeafRef = useRef<UnifiedSource | null>(null);
@@ -1488,6 +1494,28 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         pendingLocalReturnRef.current = false;
         console.info("[VONO restore] saved URL source took over from the LOCAL fallback — LOCAL released");
       }
+      // P0 Gate 2d (owner rule: a failed URL restore → LOCAL, never silence): while MAIN reports the URL restore pending /
+      // failed, LOCAL is the station's audio — re-own a released LOCAL session, and if the station went idle after LOCAL
+      // yielded its slot (or a MAIN URL attempt failed), continue LOCAL once (re-checked 1.5 s later: still idle).
+      const bootNow = typeof st?.bootSource === "string" ? st.bootSource : null;
+      if (canLocalExecRef.current && (bootNow === "url-pending" || bootNow === "url-failed") && currentSourceIsLocalRef.current) {
+        if (!localSessionOwnedRef.current) {
+          localSessionOwnedRef.current = true;
+          pendingLocalReturnRef.current = false;
+          lastLocalPushKeyRef.current = null;
+          console.info("[VONO restore] URL restore " + bootNow + " — LOCAL re-owned");
+        }
+        const idleNow = snapStatus === "idle" && st?.mpvAttemptPending !== true;
+        if (idleNow && localRescueFiredForRef.current !== snapAttempt && (snapAttempt >= 1_000_000_000 || snapAttempt === localYieldedAttemptRef.current)) {
+          localRescueFiredForRef.current = snapAttempt;
+          const forAttempt = snapAttempt;
+          setTimeout(() => {
+            const s2 = lastMainSnapRef.current;
+            if (!s2 || s2.attemptId !== forAttempt || s2.status !== "idle" || !localSessionOwnedRef.current) return;
+            localRescueRef.current("URL restore " + bootNow + ", station idle");
+          }, 1500);
+        }
+      }
       // P0 Drop Next (LOCAL session): MAIN took the slot for a queued item → LOCAL holds its position (transport → MAIN)
       if (canLocalExecRef.current && st?.mainQueuePlaying === true && localSessionOwnedRef.current) {
         localSessionOwnedRef.current = false;
@@ -1651,6 +1679,13 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     next();
   }, [next]);
   useEffect(() => { returnToLocalRef.current = returnToLocal; }, [returnToLocal]);
+  // P0 Gate 2d: the LOCAL rescue continues the LOCAL session with its next track (same engine path as returnToLocal)
+  useEffect(() => {
+    localRescueRef.current = (reason: string) => {
+      console.info("[VONO restore] LOCAL continues (" + reason + ")");
+      next();
+    };
+  }, [next]);
 
   // P0 Drop Next: while MAIN holds queued items for the LOCAL track now playing (or plays them), the LOCAL engine's
   // AUTOMATIC advance yields its slot (lib/auto-advance-handoff.ts). Manual LOCAL NEXT / PREV are unaffected.
@@ -1662,7 +1697,10 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       // advances on its own (until an explicit LOCAL selection re-acquires ownership).
       const restoredUrlOwns = restoreTakeoverSeenRef.current > 0 && !localSessionOwnedRef.current;
       const yieldSlot = pendingLocalReturnRef.current || s?.queueWatchesLocal === true || s?.mainQueuePlaying === true || restoredUrlOwns;
-      if (yieldSlot) console.info("[VONO drop-next] LOCAL automatic advance yields to the Play Next queue (MAIN)");
+      if (yieldSlot) {
+        localYieldedAttemptRef.current = s?.attemptId ?? 0; // P0 Gate 2d: the LOCAL attempt that handed its slot over
+        console.info("[VONO drop-next] LOCAL automatic advance yields to the Play Next queue (MAIN)");
+      }
       return yieldSlot;
     };
     return () => { autoAdvanceHandoff.current = null; };

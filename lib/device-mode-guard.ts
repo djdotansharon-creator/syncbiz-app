@@ -29,7 +29,8 @@ export const localExecResolved = { current: false };
 /**
  * P0 Gate 2d: the co-located MAIN's restart-restore decision (snapshot `bootSource`). "deciding" → the one-shot
  * restore waits; "url" → MAIN restores the station's saved URL source (the renderer must NOT start LOCAL);
- * "url-pending" → offline boot: the LOCAL fallback plays until MAIN brings the URL back; anything else → the normal
+ * "url-pending" → offline boot (or the restored URL failed): the LOCAL fallback plays until MAIN brings the URL back;
+ * "url-failed" → the remembered URL could not be restored: LOCAL plays on; anything else → the normal
  * restore. null = no MAIN value (browser / older desktop) → unchanged behavior. Notified via the same listeners.
  */
 export const mainBootSource: { current: string | null } = { current: null };

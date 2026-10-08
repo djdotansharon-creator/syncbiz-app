@@ -629,7 +629,7 @@ export type MvpStatusSnapshot = {
   /** P0 Gate 2d: what the station boots into — "deciding" (probing the network for a saved URL source), "url" (MAIN
    *  restores the URL source — the renderer must NOT start its LOCAL restore), "url-pending" (offline → LOCAL fallback,
    *  URL returns when the network is stable), "local" / "none" (the renderer's normal LOCAL restore). */
-  bootSource?: "none" | "deciding" | "url" | "url-pending" | "local";
+  bootSource?: "none" | "deciding" | "url" | "url-pending" | "url-failed" | "local";
   /** P0 Gate 2d: the MAIN attempt that took over from the LOCAL fallback (the renderer releases LOCAL ownership once). */
   restoreTakeoverAttemptId?: number;
 };

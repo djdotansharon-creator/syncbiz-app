@@ -180,7 +180,7 @@ export class DeviceWsManager {
   // ── P0 Gate 2d: restart restore — the station keeps its LAST source (no age limit) ──
   private sourcePersist = false;
   /** what the station boots into (renderer waits for this before its own LOCAL restore) */
-  private bootSource: "none" | "deciding" | "url" | "url-pending" | "local" = "none";
+  private bootSource: "none" | "deciding" | "url" | "url-pending" | "url-failed" | "local" = "none";
   /** saved URL session waiting for the network (offline boot → LOCAL fallback meanwhile) */
   private pendingRestore: SavedUrlSession | null = null;
   /** the saved URL session is armed over the LOCAL fallback: taken over at the LOCAL track's mix point */
@@ -190,6 +190,10 @@ export class DeviceWsManager {
   private restoreStartWhenReady = false;
   private restoreNetTimer: ReturnType<typeof setInterval> | null = null;
   private restoreNetOk = 0;
+  /** P0 Gate 2d (owner rule 2026-10-09): the restored URL session has not played yet. Until it does, a failure must
+   *  never leave silence — LOCAL plays and the URL is retried over it (at the LOCAL mix point), or dropped. */
+  private restoreVerifying = false;
+  private restoreFallbackTimer: ReturnType<typeof setTimeout> | null = null;
   private probeUrl = "";
   // P0 Gate 1d: remote NEXT / PREV relay identity (see MvpStatusSnapshot.sessionStep*).
   private readonly sessionStepBootId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -589,6 +593,8 @@ export class DeviceWsManager {
       this.autoPrep = null;
       this.publishQueue();
       fileLog("WARN", "URL_AUTO_COMMIT_FAILED", { target: c.target.kind, failedAttemptId: c.attemptId, audibleAttemptId: id, consecutiveFailures: this.autoFailures });
+      // P0 Gate 2d: an unproven restore whose take-over from LOCAL failed → LOCAL (still audible) stays the station's audio
+      if (this.restoreVerifying && !isMainWsAttemptId(id)) { this.restoreFailOver(orch, "take-over from LOCAL failed"); return; }
       // a failed MANUAL NEXT / PREV → try the following item ONCE more (Gate 1b rule), the audible track untouched
       if (c.manual && this.autoFailures < MAX_AUTO_FAILURES) this.navLoad(orch, this.nextTarget(true), "NEXT", "after a failed navigation");
       return;
@@ -611,7 +617,8 @@ export class DeviceWsManager {
               this.autoCommit = null;
               if (cc?.target.kind === "playlist") this.autoFailed.add(cc.target.index);
               this.autoFailures += 1;
-              this.autoLoadNext(o2, "hand-over failed (nothing audible)");
+              if (this.restoreVerifying) this.restoreFailOver(o2, "hand-over failed (nothing audible)"); // P0 Gate 2d
+              else this.autoLoadNext(o2, "hand-over failed (nothing audible)");
             } finally {
               this.inAutoTick = false;
             }
@@ -620,12 +627,19 @@ export class DeviceWsManager {
         }
         if (this.urlSession && !this.queuedNow) this.autoFailed.add(this.urlSession.index);
         this.autoFailures += 1;
-        this.autoLoadNext(orch, "attempt failed");
+        // P0 Gate 2d: an unproven restore never keeps retrying in silence → LOCAL now, the URL retried over it
+        if (this.restoreVerifying && !this.restoreDormant) this.restoreFailOver(orch, "restored item failed");
+        else this.autoLoadNext(orch, "attempt failed");
       }
       return;
     }
     if (m.status === "playing" && (m.position ?? 0) > 0) {
       this.sessionPlayedFor = id;
+      if (this.restoreVerifying && !this.restoreDormant && isMainWsAttemptId(id) && !orch.isMusicAttemptPending()) {
+        this.restoreVerifying = false; // P0 Gate 2d: the restored URL source really plays
+        this.clearRestoreFallbackTimer();
+        fileLog("INFO", "RESTORE_URL_PROVEN", { attemptId: id });
+      }
       if (this.autoCommit?.attemptId === id && !orch.isMusicAttemptPending()) {
         this.autoCommit = null; // the hand-over is proven
         this.autoFailures = 0;
@@ -674,6 +688,7 @@ export class DeviceWsManager {
       this.autoFailures += 1;
       orch.discardPrepared();
       this.autoPrep = null; // the following item is prepared on the next tick (capped)
+      if (this.restoreVerifying && this.autoFailures >= MAX_AUTO_FAILURES) this.restoreGiveUp("prepared items failed"); // P0 Gate 2d
       return;
     }
     // (e) mix point → hand the prepared item over (AUTOMIX on: the user's mix length; off: a quick 1 s change at the end)
@@ -695,10 +710,18 @@ export class DeviceWsManager {
 
   /** Load the next item directly (no prepared item ready). Never when nothing is left or after MAX_AUTO_FAILURES. */
   private autoLoadNext(orch: PlaybackOrchestrator, reason: string): void {
-    if (this.autoFailures >= MAX_AUTO_FAILURES) { fileLog("WARN", "URL_AUTO_EXHAUSTED", { reason, consecutiveFailures: this.autoFailures }); return; }
+    if (this.autoFailures >= MAX_AUTO_FAILURES) {
+      fileLog("WARN", "URL_AUTO_EXHAUSTED", { reason, consecutiveFailures: this.autoFailures });
+      if (this.restoreVerifying) this.restoreGiveUp("exhausted"); // P0 Gate 2d: LOCAL, never silence
+      return;
+    }
     const t = this.nextTarget(false);
     const url = t ? this.targetUrl(t) : "";
-    if (!t || !url) { fileLog("INFO", "URL_AUTO_END", { reason }); return; }
+    if (!t || !url) {
+      fileLog("INFO", "URL_AUTO_END", { reason });
+      if (this.restoreVerifying) this.restoreGiveUp("nothing playable left"); // P0 Gate 2d
+      return;
+    }
     orch.discardPrepared();
     const pid = nextMainWsAttemptId();
     this.rememberAutoAttempt(pid);
@@ -729,6 +752,7 @@ export class DeviceWsManager {
       t = { kind: "playlist", index: i };
     }
     if (!t) return !!sess; // nothing to step to (URL session end, loop off) → ignore; LOCAL return → relay to the renderer
+    if (this.restoreVerifying && !this.restoreDormant) { this.restoreVerifying = false; this.clearRestoreFallbackTimer(); } // P0 Gate 2d: the user navigates
     this.autoFailures = 0;
     this.autoFailed.clear();
     this.navLoad(orch, t, cmd, "user");
@@ -842,6 +866,7 @@ export class DeviceWsManager {
       // (prepared ~60 s ahead, crossfaded — the same proven hand-off as Drop Next during LOCAL)
       this.urlSession = this.sessionFromSaved(saved);
       this.restoreDormant = true;
+      this.restoreVerifying = true;
       if (this.playNext.length === 0) this.playNext = saved.playNext.slice();
       this.resetAutoAdvance();
       this.localQueueWatch = ms.attemptId;
@@ -867,6 +892,7 @@ export class DeviceWsManager {
   private beginUrlRestore(saved: SavedUrlSession, why: string): void {
     this.urlSession = this.sessionFromSaved(saved);
     this.restoreDormant = false;
+    this.restoreVerifying = true;
     this.playNext = saved.playNext.slice();
     for (const q of this.playNext) { const n = Number(q.qid.replace(/^pn-/, "")); if (Number.isFinite(n) && n > this.playNextSeq) this.playNextSeq = n; }
     this.resetAutoAdvance();
@@ -886,7 +912,7 @@ export class DeviceWsManager {
     const n = sess.items.length;
     let idx = -1;
     for (let k = 0; k < n; k++) { const i = (sess.index + k) % n; if (sess.items[i]?.url) { idx = i; break; } }
-    if (idx < 0) return;
+    if (idx < 0) { this.restoreGiveUp("no playable item"); return; }
     const pid = nextMainWsAttemptId();
     this.rememberAutoAttempt(pid);
     this.applyTarget({ kind: "playlist", index: idx }, pid);
@@ -896,13 +922,79 @@ export class DeviceWsManager {
 
   /** A manual / explicit source choice replaces any pending or armed restore. */
   private cancelRestore(why: string): void {
-    if (!this.pendingRestore && !this.restoreDormant && !this.restoreStartWhenReady && this.bootSource !== "deciding") return;
+    if (!this.pendingRestore && !this.restoreDormant && !this.restoreStartWhenReady && !this.restoreVerifying && this.bootSource !== "deciding") return;
+    this.restoreVerifying = false;
+    this.clearRestoreFallbackTimer();
     this.pendingRestore = null;
     this.restoreStartWhenReady = false;
     this.stopRestoreNetWatch();
     if (this.restoreDormant) { this.restoreDormant = false; this.urlSession = null; this.localQueueWatch = 0; this.resetAutoAdvance(); }
-    if (this.bootSource === "deciding" || this.bootSource === "url-pending") this.bootSource = "local";
+    if (this.bootSource === "deciding" || this.bootSource === "url-pending" || this.bootSource === "url-failed") this.bootSource = "local";
     fileLog("INFO", "RESTORE_CANCELLED", { why });
+  }
+
+  /**
+   * P0 Gate 2d: the unproven restored URL failed with nothing (URL) audible. Budget left → the renderer plays LOCAL now
+   * ("url-pending") and the saved session is ARMED over it again (prepared + taken over at the LOCAL mix point, nothing
+   * cut). Budget spent → give up: LOCAL simply continues.
+   */
+  private restoreFailOver(orch: PlaybackOrchestrator, why: string): void {
+    if (this.autoFailures >= MAX_AUTO_FAILURES || !this.urlSession) { this.restoreGiveUp(why); return; }
+    this.restoreDormant = true; // nextTarget below = the dormant resume rule (skips the failed items)
+    if (!this.nextTarget(false)) { this.restoreGiveUp(why); return; }
+    orch.discardPrepared();
+    this.autoPrep = null;
+    this.autoCommit = null;
+    this.preLoadSession = null;
+    this.queuedNow = null;
+    this.restoreTakeoverAttemptId = 0;
+    this.bootSource = "url-pending";
+    const ms = orch.getState().music;
+    // a LOCAL attempt still audible (a failed take-over) is watched at once; otherwise the renderer's LOCAL start is
+    this.localQueueWatch = ms.status === "playing" && !isMainWsAttemptId(ms.attemptId) ? ms.attemptId : 0;
+    this.autoEofHandledFor = 0;
+    this.sessionPlayedFor = 0;
+    fileLog("WARN", "RESTORE_URL_FAILOVER", { why, consecutiveFailures: this.autoFailures, localAudible: this.localQueueWatch > 0 });
+    // no LOCAL music starts (none on this station) → retry the URL directly rather than stay silent
+    this.clearRestoreFallbackTimer();
+    this.restoreFallbackTimer = setTimeout(() => {
+      this.restoreFallbackTimer = null;
+      const o = this.orchestrator;
+      if (!o || !this.restoreDormant || this.localQueueWatch > 0 || o.getState().music.status === "playing" || o.isMusicAttemptPending()) return;
+      this.restoreDormant = false;
+      this.bootSource = "url";
+      fileLog("INFO", "RESTORE_URL_RETRY", { why: "no LOCAL music started" });
+      this.autoLoadNext(o, "restore retry (no LOCAL)");
+      this.push();
+      this.sendStateUpdateIfMaster();
+    }, 25_000);
+    this.publishQueue();
+    this.push();
+    this.sendStateUpdateIfMaster();
+  }
+
+  /** P0 Gate 2d: the remembered URL cannot be restored now → LOCAL plays on (the saved source stays for the next boot). */
+  private restoreGiveUp(why: string): void {
+    this.restoreVerifying = false;
+    this.clearRestoreFallbackTimer();
+    this.orchestrator?.discardPrepared();
+    this.urlSession = null;
+    this.restoreDormant = false;
+    this.restoreTakeoverAttemptId = 0;
+    this.localQueueWatch = 0;
+    this.queuedNow = null;
+    this.playNext = [];
+    this.preLoadSession = null;
+    this.resetAutoAdvance();
+    this.bootSource = "url-failed";
+    this.publishQueue();
+    fileLog("WARN", "RESTORE_URL_GAVE_UP", { why });
+    this.push();
+    this.sendStateUpdateIfMaster();
+  }
+
+  private clearRestoreFallbackTimer(): void {
+    if (this.restoreFallbackTimer) { clearTimeout(this.restoreFallbackTimer); this.restoreFallbackTimer = null; }
   }
 
   /** Persist the station's source = this URL playlist (+ queue). Never while a saved session is only armed. */

@@ -229,14 +229,107 @@ async function main(): Promise<void> {
     w.orch.kill();
   }
 
+  // ── owner rule 2026-10-09: a failed URL restore → LOCAL, never silence ──
+  const failLoad = (d: Deck) => { d.handleEvent({ event: "start-file" }); d.handleEvent({ event: "end-file", reason: "error", file_error: "loading failed" }); };
+  const localFallback = (w: ReturnType<typeof world>, n = 1) => { w.orch.playMusicCrossfade(`C:\\music\\fallback${n}.mp3`, 9, 10 + n); w.startPlaying(w.active()); w.toMain("PLAY_SOURCE", localSession()); };
+  {
+    freshStore(); writePlaybackSource(savedUrlRecord(2));
+    const w = world();
+    await w.boot();
+    failLoad(w.active());
+    const snap = w.mgr.snapshot();
+    assert("E1 boot online, the restored track FAILS → no cold retry in silence: bootSource 'url-pending' (the renderer starts LOCAL now)",
+      snap.bootSource === "url-pending" && w.plays().length === 1, `${snap.bootSource} plays=${w.plays().length}`);
+    localFallback(w); w.at(w.active(), 3);
+    assert("E2 LOCAL plays → the remembered URL is armed over it (the LOCAL automatic advance yields its slot)", w.mgr.snapshot().queueWatchesLocal === true);
+    w.at(w.active(), 150);
+    assert("E3 ~60 s before the LOCAL end the NEXT remembered item is prepared (the failed one is skipped)", w.lastPrepared() === urlOf(3), String(w.lastPrepared()));
+    w.preparedLoads(w.standby()); w.at(w.active(), 192); w.resumes(w.standby()); w.finishRamp();
+    w.at(w.active(), 5);
+    const s2 = w.mgr.snapshot();
+    assert("E4 at the LOCAL mix point the URL takes over (crossfade) and is proven → bootSource 'url', MAIN owns the session",
+      w.nowTitle() === "Track 3" && s2.bootSource === "url" && s2.mainUrlAutoAdvance === true, `${w.nowTitle()} ${s2.bootSource}`);
+    w.orch.kill();
+  }
+  {
+    freshStore(); writePlaybackSource(savedUrlRecord(0));
+    const w = world();
+    await w.boot();
+    failLoad(w.active());
+    localFallback(w);
+    w.at(w.active(), 150); failLoad(w.standby()); w.at(w.active(), 151);
+    w.at(w.active(), 152); failLoad(w.standby()); w.at(w.active(), 153);
+    const s3 = w.mgr.snapshot();
+    assert("E5 every remembered URL keeps failing (3 tries) → give up: bootSource 'url-failed', LOCAL simply continues (no yield, no MAIN session)",
+      s3.bootSource === "url-failed" && s3.queueWatchesLocal === false && s3.mainUrlAutoAdvance === false, `${s3.bootSource} qwl=${s3.queueWatchesLocal}`);
+    const before = w.plays().length;
+    w.at(w.active(), 160); w.at(w.active(), 195);
+    assert("E6 … and MAIN loads nothing more over LOCAL", w.plays().length === before && w.lastPrepared() !== urlOf(3));
+    assert("E7 the remembered source is still the URL playlist (the next boot tries it again)", readPlaybackSource()?.kind === "url");
+    w.orch.kill();
+  }
+  {
+    freshStore(); writePlaybackSource(savedUrlRecord(1));
+    const w = world({ online: false });
+    await w.boot();
+    localFallback(w);
+    w.setOnline(true); w.mi.onNetworkStable();
+    for (let k = 0; k < 3; k++) { w.at(w.active(), 150 + 2 * k); failLoad(w.standby()); w.at(w.active(), 151 + 2 * k); }
+    const s4 = w.mgr.snapshot();
+    assert("E8 network back, but the remembered URL fails 3× while LOCAL plays → give up; LOCAL continues untouched",
+      s4.bootSource === "url-failed" && s4.queueWatchesLocal === false && w.active().st !== undefined && w.mi.pendingRestore === null, `${s4.bootSource}`);
+    w.orch.kill();
+  }
+  {
+    freshStore(); writePlaybackSource(savedUrlRecord(2));
+    const w = world({ online: false });
+    await w.boot();
+    localFallback(w);
+    w.setOnline(true); w.mi.onNetworkStable();
+    w.at(w.active(), 150); w.preparedLoads(w.standby()); w.at(w.active(), 192);
+    const localDeck = w.o.activeMusicDeck;
+    failLoad(w.standby());
+    const s5 = w.mgr.snapshot();
+    assert("E9 the take-over itself fails (hand-over) → LOCAL stays audible (Gate 2a) and is the station's audio again: 'url-pending', LOCAL watched",
+      w.o.activeMusicDeck === localDeck && s5.bootSource === "url-pending" && s5.restoreTakeoverAttemptId === 0, `${s5.bootSource} take=${s5.restoreTakeoverAttemptId}`);
+    w.orch.kill();
+  }
+  {
+    // no LOCAL music on this station at all → MAIN retries the URL itself after 25 s (never waits forever)
+    const realSetTimeout = global.setTimeout;
+    (global as unknown as { setTimeout: unknown }).setTimeout = ((fn: () => void, ms?: number) => realSetTimeout(fn, ms === 25_000 ? 0 : ms)) as unknown;
+    freshStore(); writePlaybackSource(savedUrlRecord(0));
+    const w = world();
+    await w.boot();
+    failLoad(w.active());
+    await tick(); await tick();
+    (global as unknown as { setTimeout: unknown }).setTimeout = realSetTimeout;
+    assert("E10 failed restore and NO LOCAL music starts → MAIN retries the next remembered item (Track 1)", w.plays().some((c) => c.endsWith(urlOf(1))) && w.mgr.snapshot().bootSource === "url", w.plays().join(" | "));
+    w.orch.kill();
+  }
+  {
+    freshStore(); writePlaybackSource(savedUrlRecord(0));
+    const w = world();
+    await w.boot();
+    w.startPlaying(w.active());
+    w.at(w.active(), 150); w.preparedLoads(w.standby()); w.at(w.active(), 192); w.resumes(w.standby()); w.finishRamp();
+    w.startPlaying(w.active());
+    const playsBefore = w.plays().length;
+    w.at(w.active(), 150); failLoad(w.standby()); w.at(w.active(), 151);
+    assert("E11 once the restored URL has played, later failures follow the normal Gate 2c rules (no LOCAL switch)", w.mgr.snapshot().bootSource === "url" && w.plays().length === playsBefore);
+    w.orch.kill();
+  }
+
   // ── static pins: renderer + wiring ──
   const rd = (p: string) => readFileSync(path.join(__dirname, "..", "..", p), "utf-8").replace(/\r\n/g, "\n");
   const prov = rd("lib/playback-provider.tsx"), dpc = rd("lib/device-player-context.tsx"), ipc = rd("desktop/src/main/ipc-mvp.ts"), mgrSrc = rd("desktop/src/device-websocket-client/device-ws-manager.ts");
   assert("S1 provider waits for MAIN's decision ('deciding') and skips its LOCAL restore when MAIN restores the URL", /mainBootSource\.current === "deciding"/.test(prov) && /if \(mainBootSource\.current === "url"\) \{/.test(prov));
-  assert("S2 provider: offline boot → the station's last LOCAL session is the fallback", /mainBootSource\.current === "url-pending" && !persistedV2\?\.local/.test(prov) && /loadPersistedPlaybackV2\(LAST_LOCAL_STORAGE_KEY\)/.test(prov));
+  assert("S2 provider: offline boot → the station's last LOCAL session is the fallback", /\(mainBootSource\.current === "url-pending" \|\| mainBootSource\.current === "url-failed"\) && !persistedV2\?\.local/.test(prov) && /loadPersistedPlaybackV2\(LAST_LOCAL_STORAGE_KEY\)/.test(prov));
   assert("S3 provider: no age limit on a desktop station", /!isDesktopStationShell\(\) && Date\.now\(\) - updatedAt > RECOVERY_TTL_MS/.test(prov));
   assert("S4 renderer tags an explicit LOCAL selection (intent 'user') and releases LOCAL on the take-over", (dpc.match(/localUserIntentRef\.current = true;/g) ?? []).length === 2 && /takeover === snapAttempt && restoreTakeoverSeenRef\.current !== takeover/.test(dpc));
   assert("S5 MAIN wiring: persistence + boot restore at startup, probe = the app server's /api/health", /manager\.enableSourcePersistence\(\{ probeUrl: stationProbeUrl\(cachedConfig\.apiBaseUrl\), bootRestore: true \}\);/.test(ipc) && /\$\{base\}\/api\/health/.test(ipc));
+  assert("S7 renderer: a pending / failed URL restore → LOCAL re-owned + continued once when the station is idle",
+    /bootNow === "url-pending" \|\| bootNow === "url-failed"/.test(dpc) && /localRescueRef\.current\("URL restore "/.test(dpc) && /mainBootSource\.current === "url-pending" \|\| mainBootSource\.current === "url-failed"/.test(prov));
   assert("S6 the network must be stable (2 consecutive probes, 30 s apart) before the URL returns", /if \(this\.restoreNetOk >= 2\) this\.onNetworkStable\(\);/.test(mgrSrc) && /\}, 30_000\);/.test(mgrSrc));
 
   setPlaybackSourcePathForTests(null);
