@@ -9,21 +9,25 @@
 ## 1. STATUS
 
 - **✅ P0 PLAYBACK CONTINUITY + DROP NEXT + URL→URL MIX — ACCEPTED — owner-attested 2026-10-08 (Lenovo, beta.18 + TEST app 414d3564):** ~5 h continuous run, playback never stopped, Drop Next works, URL→URL mix works well. Not independently log-verified by Claude. OPEN before the playback baseline lock: real A/V video sync (built for future external-screen output) + restart restore (Gate 2d). Control Room waits for both. Candidate record:
-- **🟡 P0 GATE 2d — RESTART RESTORE — RUNTIME CANDIDATE ON TEST (2026-10-09), NOT yet accepted.** Head `a41359f` (local,
-  NOT pushed). DESKTOP MAIN + RENDERER. Owner rule 2026-10-09: the station remembers its last source (URL playlist or
-  LOCAL) across shutdown / restart / crash with NO age limit, until changed manually. MAIN (designated station only)
-  keeps `C:\ProgramData\VONO\state\playback-source.json` (URLs + titles only, never a local path). Boot: probe TEST
+- **🟡 P0 GATE 2d — RESTART RESTORE — RUNTIME CANDIDATE ON TEST (2026-10-09), NOT yet accepted.** Head `943f23f` (on top of
+  `a41359f`; local, NOT pushed). DESKTOP MAIN + RENDERER. Owner rule 2026-10-09: the station remembers its last source (URL
+  playlist or LOCAL) across shutdown / restart / crash with NO age limit, until changed manually. MAIN (designated station
+  only) keeps `C:ProgramDataVONOstateplayback-source.json` (URLs + titles only, never a local path). Boot: probe TEST
   `/api/health` (4 s). Online → MAIN restores the URL playlist at the remembered track + the Play Next queue. Offline →
   the renderer plays the station's last LOCAL session (no silence); once the app server answers twice 30 s apart the
   URL source is armed and takes over at the LOCAL track's mix point (crossfade, nothing cut). A user LOCAL choice / any
   URL selection replaces the pending restore. Renderer: waits for MAIN's decision; no 24 h TTL on a desktop station.
-  Known limits: a fresh beta.19 install has no saved source yet (first URL / LOCAL choice creates it); a Drop Next queue
-  added during LOCAL is not remembered (the source stays LOCAL); if every restored URL fails (3 tries) MAIN stops as in
-  Gate 2c (no automatic LOCAL fallback after an online boot). main.log: `RESTORE_BOOT`, `RESTORE_URL_START`,
-  `RESTORE_URL_ARMED`, `RESTORE_URL_TAKEOVER`, `RESTORE_CANCELLED`. Tests: `desktop/scripts/verify-restart-restore.ts` 37/37.
-  - **Desktop candidate:** `2.2.8-beta.19`, SHA256 `9c0ae59c96ae3491abd8f77105c7996810c52bc49f9c047ba9cbc930b97c0f92`,
-    140,776,535 bytes, unsigned, NOT published, TEST-pinned, clean dist. Copy: `D:\SyncBiz_Backups\pilot\2026-10-09-beta19-restart-a41359f\`.
-  - **TEST app:** deployment `3f0d6ac6-318a-4967-a171-17cc9b0c19db` (= clean worktree `a41359f`; provider / DPC / guard
+  **943f23f (owner rule: a failed URL restore → LOCAL, never silence):** until the restored URL has really played, a
+  failure switches to LOCAL at once ("url-pending") and the URL is retried over LOCAL at its mix point; after 3 failures
+  the URL is dropped ("url-failed") and LOCAL continues; no LOCAL music on the station → MAIN retries the URL after 25 s.
+  Known limits: a fresh install has no saved source yet (first URL / LOCAL choice creates it); a Drop Next queue added
+  during LOCAL is not remembered; after a give-up the URL is not retried until the next boot or a manual choice.
+  main.log: `RESTORE_BOOT`, `RESTORE_URL_START`, `RESTORE_URL_PROVEN`, `RESTORE_URL_FAILOVER`, `RESTORE_URL_RETRY`,
+  `RESTORE_URL_ARMED`, `RESTORE_URL_TAKEOVER`, `RESTORE_URL_GAVE_UP`, `RESTORE_CANCELLED`. Tests: `verify-restart-restore.ts` 49/49.
+  - **Desktop candidate:** `2.2.8-beta.20`, SHA256 `b8b33708b34ee2bc1bee6f1929a60776b2fadf113c97e6dd5fd002ff7c89dabb`,
+    140,777,798 bytes, unsigned, NOT published, TEST-pinned, clean dist. Copy: `D:SyncBiz_Backupspilot6-10-09-beta20-restore-fallback-943f23f`.
+    (beta.19 `9c0ae59c…` / app `3f0d6ac6` = superseded first 2d candidate, never installed.)
+  - **TEST app:** deployment `1f66e7bf-f28c-4420-98ac-a00277cfcbed` (= clean worktree `943f23f`; provider / DPC / guard
     hash-identical). WS unchanged `23e94c01`. **Rollback:** beta.18 + app `414d3564`.
 - **(accepted) 🟡 P0 DROP NEXT — RUNTIME CANDIDATE ON TEST (2026-10-08).** Head `e5b2029` (local, NOT pushed).
   Root cause: since a665e7c the station renderer is CONTROL → QUEUE_NEXT went to MAIN, which had no handler (silently
