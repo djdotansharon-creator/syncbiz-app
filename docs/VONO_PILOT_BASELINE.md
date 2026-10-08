@@ -12,7 +12,7 @@
 - **🟡 P0 GATE 2d — RESTART RESTORE — RUNTIME CANDIDATE ON TEST (2026-10-09), NOT yet accepted.** Head `943f23f` (on top of
   `a41359f`; local, NOT pushed). DESKTOP MAIN + RENDERER. Owner rule 2026-10-09: the station remembers its last source (URL
   playlist or LOCAL) across shutdown / restart / crash with NO age limit, until changed manually. MAIN (designated station
-  only) keeps `C:ProgramDataVONOstateplayback-source.json` (URLs + titles only, never a local path). Boot: probe TEST
+  only) keeps `C:\ProgramData\VONO\state\playback-source.json` (URLs + titles only, never a local path). Boot: probe TEST
   `/api/health` (4 s). Online → MAIN restores the URL playlist at the remembered track + the Play Next queue. Offline →
   the renderer plays the station's last LOCAL session (no silence); once the app server answers twice 30 s apart the
   URL source is armed and takes over at the LOCAL track's mix point (crossfade, nothing cut). A user LOCAL choice / any
@@ -25,7 +25,7 @@
   main.log: `RESTORE_BOOT`, `RESTORE_URL_START`, `RESTORE_URL_PROVEN`, `RESTORE_URL_FAILOVER`, `RESTORE_URL_RETRY`,
   `RESTORE_URL_ARMED`, `RESTORE_URL_TAKEOVER`, `RESTORE_URL_GAVE_UP`, `RESTORE_CANCELLED`. Tests: `verify-restart-restore.ts` 49/49.
   - **Desktop candidate:** `2.2.8-beta.20`, SHA256 `b8b33708b34ee2bc1bee6f1929a60776b2fadf113c97e6dd5fd002ff7c89dabb`,
-    140,777,798 bytes, unsigned, NOT published, TEST-pinned, clean dist. Copy: `D:SyncBiz_Backupspilot6-10-09-beta20-restore-fallback-943f23f`.
+    140,777,798 bytes, unsigned, NOT published, TEST-pinned, clean dist. Copy: `D:\SyncBiz_Backups\pilot\2026-10-09-beta20-restore-fallback-943f23f\`.
     (beta.19 `9c0ae59c…` / app `3f0d6ac6` = superseded first 2d candidate, never installed.)
   - **TEST app:** deployment `1f66e7bf-f28c-4420-98ac-a00277cfcbed` (= clean worktree `943f23f`; provider / DPC / guard
     hash-identical). WS unchanged `23e94c01`. **Rollback:** beta.18 + app `414d3564`.
@@ -35,7 +35,7 @@
   + mixed like Gate 2c), then the playlist resumes where it stopped; during LOCAL the queued items play after the current
   LOCAL track and LOCAL resumes; MAIN NEXT / PREV for its own URL / queued items. main.log: `QUEUE_NEXT_ADDED`, `URL_NAV`.
   - **Desktop candidate:** `2.2.8-beta.18`, SHA256 `c358fa236e0cb6a7aa2ded4c4156522d6102202d1655863b74b5bd83f39bee60`,
-    140,773,807 bytes, unsigned, NOT published, TEST-pinned, clean dist. Copy: `D:SyncBiz_Backupspilot6-10-08-beta18-dropnext-e5b2029`.
+    140,773,807 bytes, unsigned, NOT published, TEST-pinned, clean dist. Copy: `D:\SyncBiz_Backups\pilot\2026-10-08-beta18-dropnext-e5b2029\`.
   - **TEST app:** deployment `414d3564-359c-48d8-a678-01f4069d830a` (= clean worktree `e5b2029`; key files incl. F3a hash-identical).
     WS unchanged `23e94c01`. **Rollback:** beta.17 (Gate 2c accepted) + app `90d105f7`.
 
