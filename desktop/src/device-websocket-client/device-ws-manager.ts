@@ -8,9 +8,15 @@ import { nextMainWsAttemptId } from "../main/main-attempt-id";
 import { MockPlaybackSession } from "../playback-agent";
 import type { StationSessionMeta } from "../playback-agent/mock-playback-session";
 import {
-  MAX_AUTO_FAILURES, PREPARE_LEAD_SEC, buildUrlSession, nextAutoIndex, sourceIdFor,
-  type RepeatMode, type UrlSession,
+  MAX_AUTO_FAILURES, PREPARE_LEAD_SEC, buildQueueItems, buildUrlSession, nextAutoIndex, sourceIdFor,
+  type QueueItem, type RepeatMode, type UrlSession,
 } from "./url-auto-advance";
+import { isMainWsAttemptId } from "../main/main-attempt-id";
+
+/** P0 Drop Next: the next thing MAIN plays automatically — a queued item, or a URL playlist index. */
+type AutoTarget = { kind: "queue"; item: QueueItem } | { kind: "playlist"; index: number };
+/** Cap for MAIN's Play Next queue (a dropped huge playlist never grows memory without bound). */
+const MAX_PLAY_NEXT = 500;
 import { fileLog } from "../main/file-logger";
 
 // P0 Gate 2c: the user's AUTOMIX + loop setting (pushed by the co-located renderer; module-level so a re-created
@@ -154,9 +160,16 @@ export class DeviceWsManager {
   // ── P0 Gate 2c: MAIN owns the AUTOMATIC progression of the URL session it is playing (url-auto-advance.ts) ──
   private urlSession: UrlSession | null = null;
   /** the next item prepared (paused + silent) on the standby deck for the attempt now playing */
-  private autoPrep: { forAttempt: number; nextIndex: number; preparedAttemptId: number } | null = null;
-  /** the last hand-over, kept until its attempt is proven — a failed hand-over rolls the session back */
-  private autoCommit: { prevAttemptId: number; prevIndex: number; attemptId: number; index: number } | null = null;
+  private autoPrep: { forAttempt: number; target: AutoTarget; preparedAttemptId: number } | null = null;
+  /** the last hand-over / MAIN navigation, kept until its attempt is proven — a failure rolls the session back */
+  private autoCommit: { prevAttemptId: number; prevIndex: number; prevQueuedNow: QueueItem | null; attemptId: number; target: AutoTarget; manual?: boolean } | null = null;
+  // ── P0 Drop Next: MAIN's Play Next queue (URLs only) ──
+  private playNext: QueueItem[] = [];
+  private playNextSeq = 0;
+  /** the queued item MAIN is playing now (null = a playlist item / LOCAL) */
+  private queuedNow: QueueItem | null = null;
+  /** LOCAL session: the attempt MAIN watches while the renderer's LOCAL track yields its next slot to the queue */
+  private localQueueWatch = 0;
   private autoFailed = new Set<number>();
   private autoFailures = 0;
   private autoEofHandledFor = 0;
@@ -339,6 +352,10 @@ export class DeviceWsManager {
       sessionStepSessionId: this.sessionStepSessionId,
       mpvAttemptPending: this.attemptPending(), // P0 Gate 1f (read-only)
       mainUrlAutoAdvance: this.mainOwnsAutoAdvance(), // P0 Gate 2c
+      // P0 Drop Next (LOCAL session): MAIN plays a queued item / the renderer must take the slot back after it
+      mainQueuePlaying: !!this.queuedNow && this.currentAttemptIs(this.watchedAttempt()),
+      queueReturnToLocal: !this.urlSession && !!this.queuedNow && this.playNext.length === 0 && this.currentAttemptIs(this.watchedAttempt()),
+      queueWatchesLocal: !this.urlSession && !this.queuedNow && this.playNext.length > 0 && this.localQueueWatch > 0 && this.currentAttemptIs(this.localQueueWatch),
     };
   }
 
@@ -374,6 +391,7 @@ export class DeviceWsManager {
    * catalog step (nothing audible to diverge from).
    */
   private handleRemoteStep(cmd: "PREV" | "NEXT"): void {
+    if (this.mainNav(cmd)) return; // P0 Drop Next: MAIN's own URL session / queued item → MAIN steps it
     if (this.mock.getState().currentSource) {
       this.sessionStepSeq += 1;
       this.sessionStepDirection = cmd === "NEXT" ? "next" : "prev";
@@ -420,7 +438,7 @@ export class DeviceWsManager {
     if (music.status === "playing" && !music.lastError && this.orchestrator !== null && !this.attemptPending()) this.preLoadSession = null;
   }
 
-  // ── P0 Gate 2c: automatic URL progression ─────────────────────────────────────────────────────────────────
+  // ── P0 Gate 2c + Drop Next: automatic progression (URL session + Play Next queue) ─────────────────────────────
 
   private resetAutoAdvance(): void {
     this.autoPrep = null;
@@ -434,6 +452,12 @@ export class DeviceWsManager {
   private rememberAutoAttempt(id: number): void {
     this.autoAttemptIds.push(id);
     if (this.autoAttemptIds.length > 64) this.autoAttemptIds.shift();
+  }
+
+  /** The attempt whose end drives the next automatic step: the URL session item / a queued item / a LOCAL renderer
+   *  attempt that yields its next slot to the Play Next queue. */
+  private watchedAttempt(): number {
+    return this.urlSession ? this.urlSession.attemptId : this.localQueueWatch;
   }
 
   /** Publish item `sess.index` as the station session (metadata only; the audio was already handed over / loaded). */
@@ -456,59 +480,114 @@ export class DeviceWsManager {
     this.pendingWsLoadKey = `${sourceIdFor(sess, sess.index)}#${sess.index}`;
   }
 
+  /** Drop Next: publish MAIN's queue to every controller (metadata only — URLs never leave MAIN through the mirror). */
+  private publishQueue(): void {
+    this.mock.setPlayNextQueue(this.playNext.map((q) => ({ id: q.qid, title: q.title, cover: q.cover })));
+  }
+
+  /** What plays next: the Play Next queue first, then the URL playlist (LOCAL parity loop rule). Manual NEXT treats
+   *  loop "track" as "playlist" (as the renderer always did). */
+  private nextTarget(manual: boolean): AutoTarget | null {
+    if (this.playNext.length > 0) return { kind: "queue", item: this.playNext[0] };
+    const sess = this.urlSession;
+    if (!sess) return null;
+    const rm: RepeatMode = manual && urlRepeatModePref === "track" ? "playlist" : urlRepeatModePref;
+    const ni = nextAutoIndex(sess, rm, this.autoFailed);
+    return ni === null ? null : { kind: "playlist", index: ni };
+  }
+
+  private targetUrl(t: AutoTarget): string {
+    return t.kind === "queue" ? t.item.url : (this.urlSession?.items[t.index]?.url ?? "");
+  }
+
+  private sameTarget(a: AutoTarget | null, b: AutoTarget | null): boolean {
+    if (!a || !b || a.kind !== b.kind) return false;
+    return a.kind === "queue" ? a.item.qid === (b as { item: QueueItem }).item.qid : a.index === (b as { index: number }).index;
+  }
+
+  /** Make `t` the item MAIN plays now (metadata + session position). A queued item leaves the queue; the playlist
+   *  position is kept so the playlist resumes exactly where it stopped once the queue is empty. */
+  private applyTarget(t: AutoTarget, attemptId: number): void {
+    if (t.kind === "queue") {
+      this.playNext = this.playNext.filter((q) => q.qid !== t.item.qid);
+      this.queuedNow = t.item;
+      this.mock.setQueuedNowPlaying({ id: t.item.qid, title: t.item.title, cover: t.item.cover, url: t.item.url });
+      this.pendingWsLoadKey = `${t.item.qid}#0`;
+    } else if (this.urlSession) {
+      this.queuedNow = null;
+      this.urlSession.index = t.index;
+      this.publishSessionItem(this.urlSession);
+    }
+    if (this.urlSession) this.urlSession.attemptId = attemptId;
+    else this.localQueueWatch = attemptId;
+    this.publishQueue();
+  }
+
   private urlAutoAdvanceTick(music: { attemptId?: number; status?: string; position?: number; duration?: number; lastError?: string | null }): void {
     const orch = this.orchestrator;
-    const sess = this.urlSession;
-    if (!orch || !sess || this.inAutoTick) return;
+    if (!orch || this.inAutoTick) return;
+    if (!this.urlSession && this.playNext.length === 0 && !this.queuedNow) return;
     this.inAutoTick = true;
     try {
-      this.autoTick(orch, sess, music);
+      this.autoTick(orch, music);
     } finally {
       this.inAutoTick = false;
     }
   }
 
-  private autoTick(orch: PlaybackOrchestrator, sess: UrlSession, m: { attemptId?: number; status?: string; position?: number; duration?: number; lastError?: string | null }): void {
+  private autoTick(orch: PlaybackOrchestrator, m: { attemptId?: number; status?: string; position?: number; duration?: number; lastError?: string | null }): void {
     const id = typeof m.attemptId === "number" ? m.attemptId : 0;
+    // (0) LOCAL session (renderer-owned): the renderer took the slot back (its own LOCAL attempt plays again) → clear
+    //     the queue context; while items are queued, watch the LOCAL attempt now playing (it yields its next slot).
+    if (!this.urlSession && id > 0 && !isMainWsAttemptId(id) && m.status === "playing" && (m.position ?? 0) > 0) {
+      if (this.queuedNow) { this.queuedNow = null; this.localQueueWatch = 0; this.autoPrep = null; }
+      if (this.playNext.length > 0 && this.localQueueWatch !== id) { this.localQueueWatch = id; this.autoPrep = null; }
+    }
+    const watched = this.watchedAttempt();
     // (a) a hand-over failed and MAIN reports the still-audible deck again (Gate 2a) → roll back, skip that item
     const c = this.autoCommit;
-    if (c && sess.attemptId === c.attemptId && id === c.prevAttemptId && m.status === "playing") {
-      sess.attemptId = c.prevAttemptId;
-      sess.index = c.prevIndex;
-      this.autoFailed.add(c.index);
+    if (c && watched === c.attemptId && id === c.prevAttemptId && m.status === "playing") {
+      if (this.urlSession) { this.urlSession.attemptId = c.prevAttemptId; this.urlSession.index = c.prevIndex; }
+      else this.localQueueWatch = c.prevAttemptId;
+      this.queuedNow = c.prevQueuedNow;
+      if (c.target.kind === "playlist") this.autoFailed.add(c.target.index); // a failed queued item already left the queue
       this.autoFailures += 1;
       this.autoCommit = null;
       this.autoPrep = null;
-      fileLog("WARN", "URL_AUTO_COMMIT_FAILED", { failedIndex: c.index, failedAttemptId: c.attemptId, audibleAttemptId: id, consecutiveFailures: this.autoFailures });
+      this.publishQueue();
+      fileLog("WARN", "URL_AUTO_COMMIT_FAILED", { target: c.target.kind, failedAttemptId: c.attemptId, audibleAttemptId: id, consecutiveFailures: this.autoFailures });
+      // a failed MANUAL NEXT / PREV → try the following item ONCE more (Gate 1b rule), the audible track untouched
+      if (c.manual && this.autoFailures < MAX_AUTO_FAILURES) this.navLoad(orch, this.nextTarget(true), "NEXT", "after a failed navigation");
       return;
     }
-    if (id === 0 || id !== sess.attemptId) return;
-    // (b) MAIN's OWN automatic attempt failed with nothing audible → fail forward (capped)
+    if (id === 0 || id !== watched) return;
+    // (b) MAIN's own automatic attempt (or the watched LOCAL attempt) failed → fail forward (capped)
     if (m.status === "idle" && m.lastError) {
-      if (this.autoAttemptIds.includes(id) && this.autoEofHandledFor !== id) {
+      const mine = this.autoAttemptIds.includes(id) || (!this.urlSession && id === this.localQueueWatch);
+      if (mine && this.autoEofHandledFor !== id) {
         this.autoEofHandledFor = id;
         if (this.autoCommit?.attemptId === id) {
           // A hand-over failed. If the outgoing deck is still audible, MAIN reports it right after this event (Gate 2a)
-          // and (a) rolls back + prepares the following item. Only if NOTHING is audible (an end-of-track hand-over) do we
-          // fail forward — decided once this status event has fully settled.
+          // and (a) rolls back. Only if NOTHING is audible do we fail forward — decided once this event has settled.
           queueMicrotask(() => {
             const o2 = this.orchestrator;
-            if (!o2 || this.urlSession !== sess || sess.attemptId !== id || o2.getState().music.attemptId !== id || this.inAutoTick) return;
+            if (!o2 || this.watchedAttempt() !== id || o2.getState().music.attemptId !== id || this.inAutoTick) return;
             this.inAutoTick = true;
             try {
+              const cc = this.autoCommit;
               this.autoCommit = null;
-              this.autoFailed.add(sess.index);
+              if (cc?.target.kind === "playlist") this.autoFailed.add(cc.target.index);
               this.autoFailures += 1;
-              this.autoLoadNext(o2, sess, "hand-over failed (nothing audible)");
+              this.autoLoadNext(o2, "hand-over failed (nothing audible)");
             } finally {
               this.inAutoTick = false;
             }
           });
           return;
         }
-        this.autoFailed.add(sess.index);
+        if (this.urlSession && !this.queuedNow) this.autoFailed.add(this.urlSession.index);
         this.autoFailures += 1;
-        this.autoLoadNext(orch, sess, "auto attempt failed");
+        this.autoLoadNext(orch, "attempt failed");
       }
       return;
     }
@@ -524,8 +603,8 @@ export class DeviceWsManager {
     if (m.status === "idle" && !m.lastError && this.sessionPlayedFor === id && this.autoEofHandledFor !== id) {
       this.autoEofHandledFor = id;
       const ap = this.autoPrep;
-      if (ap && ap.forAttempt === id && orch.commitPreparedCrossfade(1)) { this.afterAutoCommit(sess, ap); return; }
-      this.autoLoadNext(orch, sess, "natural end");
+      if (ap && ap.forAttempt === id && this.sameTarget(ap.target, this.nextTarget(false)) && orch.commitPreparedCrossfade(1)) { this.afterAutoCommit(ap); return; }
+      this.autoLoadNext(orch, "natural end");
       return;
     }
     if (m.status !== "playing" || !(typeof m.duration === "number" && m.duration > 0) || orch.isMusicAttemptPending()) return;
@@ -533,23 +612,32 @@ export class DeviceWsManager {
     // (d) prepare the next item ~PREPARE_LEAD_SEC before the end (paused + silent → resolved + buffered)
     if (!this.autoPrep || this.autoPrep.forAttempt !== id) {
       if (remaining <= PREPARE_LEAD_SEC && this.autoFailures < MAX_AUTO_FAILURES) {
-        const ni = nextAutoIndex(sess, urlRepeatModePref, this.autoFailed);
-        if (ni !== null) {
+        const t = this.nextTarget(false);
+        const url = t ? this.targetUrl(t) : "";
+        if (t && url) {
           const pid = nextMainWsAttemptId();
-          if (orch.prepareStandby(sess.items[ni].url, pid)) {
-            this.autoPrep = { forAttempt: id, nextIndex: ni, preparedAttemptId: pid };
+          if (orch.prepareStandby(url, pid)) {
+            this.autoPrep = { forAttempt: id, target: t, preparedAttemptId: pid };
             this.rememberAutoAttempt(pid);
-            fileLog("INFO", "URL_AUTO_PREPARE", { forAttempt: id, nextIndex: ni, attemptId: pid, remainingSec: Math.round(remaining) });
+            fileLog("INFO", "URL_AUTO_PREPARE", { forAttempt: id, target: t.kind, nextIndex: t.kind === "playlist" ? t.index : null, attemptId: pid, remainingSec: Math.round(remaining) });
           }
         }
       }
       return;
     }
+    // the queue changed under a prepared item (removed / a new item dropped in front of a playlist item) → re-prepare
+    if (!this.sameTarget(this.autoPrep.target, this.nextTarget(false))) {
+      orch.discardPrepared();
+      this.autoPrep = null;
+      return;
+    }
     const prep = orch.getPrepared();
     if (!prep || prep.attemptId !== this.autoPrep.preparedAttemptId) { this.autoPrep = null; return; } // superseded
     if (prep.failed) {
-      fileLog("WARN", "URL_AUTO_PREPARE_FAILED", { nextIndex: this.autoPrep.nextIndex, attemptId: prep.attemptId });
-      this.autoFailed.add(this.autoPrep.nextIndex);
+      const t = this.autoPrep.target;
+      fileLog("WARN", "URL_AUTO_PREPARE_FAILED", { target: t.kind, attemptId: prep.attemptId });
+      if (t.kind === "queue") { this.playNext = this.playNext.filter((q) => q.qid !== t.item.qid); this.publishQueue(); }
+      else this.autoFailed.add(t.index);
       this.autoFailures += 1;
       orch.discardPrepared();
       this.autoPrep = null; // the following item is prepared on the next tick (capped)
@@ -559,44 +647,96 @@ export class DeviceWsManager {
     const mixSec = urlAutoMixPref ? orch.getCrossfadeSec() : 1;
     if (prep.ready && remaining <= mixSec) {
       const ap = this.autoPrep;
-      if (orch.commitPreparedCrossfade(mixSec)) this.afterAutoCommit(sess, ap);
+      if (orch.commitPreparedCrossfade(mixSec)) this.afterAutoCommit(ap);
     }
   }
 
-  private afterAutoCommit(sess: UrlSession, ap: { forAttempt: number; nextIndex: number; preparedAttemptId: number }): void {
+  private afterAutoCommit(ap: { forAttempt: number; target: AutoTarget; preparedAttemptId: number }): void {
     const before = this.mock.captureSession();
-    this.autoCommit = { prevAttemptId: sess.attemptId, prevIndex: sess.index, attemptId: ap.preparedAttemptId, index: ap.nextIndex };
-    sess.index = ap.nextIndex;
-    sess.attemptId = ap.preparedAttemptId;
+    this.autoCommit = { prevAttemptId: this.watchedAttempt(), prevIndex: this.urlSession?.index ?? 0, prevQueuedNow: this.queuedNow, attemptId: ap.preparedAttemptId, target: ap.target };
     this.autoPrep = null;
-    this.publishSessionItem(sess);
+    this.applyTarget(ap.target, ap.preparedAttemptId);
     this.preLoadSession = { attemptId: ap.preparedAttemptId, session: before }; // Gate 1f: a failed hand-over restores metadata
-    fileLog("INFO", "URL_AUTO_COMMIT", { index: sess.index, attemptId: sess.attemptId });
+    fileLog("INFO", "URL_AUTO_COMMIT", { target: ap.target.kind, index: ap.target.kind === "playlist" ? ap.target.index : null, attemptId: ap.preparedAttemptId });
   }
 
   /** Load the next item directly (no prepared item ready). Never when nothing is left or after MAX_AUTO_FAILURES. */
-  private autoLoadNext(orch: PlaybackOrchestrator, sess: UrlSession, reason: string): void {
+  private autoLoadNext(orch: PlaybackOrchestrator, reason: string): void {
     if (this.autoFailures >= MAX_AUTO_FAILURES) { fileLog("WARN", "URL_AUTO_EXHAUSTED", { reason, consecutiveFailures: this.autoFailures }); return; }
-    const ni = nextAutoIndex(sess, urlRepeatModePref, this.autoFailed);
-    if (ni === null) { fileLog("INFO", "URL_AUTO_END", { reason }); return; }
+    const t = this.nextTarget(false);
+    const url = t ? this.targetUrl(t) : "";
+    if (!t || !url) { fileLog("INFO", "URL_AUTO_END", { reason }); return; }
     orch.discardPrepared();
     const pid = nextMainWsAttemptId();
     this.rememberAutoAttempt(pid);
     this.autoPrep = null;
     this.autoCommit = null;
-    sess.index = ni;
-    sess.attemptId = pid;
-    this.publishSessionItem(sess);
-    orch.playMusicCrossfade(sess.items[ni].url, 1, pid);
-    fileLog("INFO", "URL_AUTO_LOAD", { reason, index: ni, attemptId: pid });
+    this.applyTarget(t, pid);
+    orch.playMusicCrossfade(url, 1, pid);
+    fileLog("INFO", "URL_AUTO_LOAD", { reason, target: t.kind, index: t.kind === "playlist" ? t.index : null, attemptId: pid });
   }
 
-  /** P0 Gate 2c: MAIN owns the automatic progression of the URL attempt now playing (the renderer must not step it). */
-  private mainOwnsAutoAdvance(): boolean {
+  /**
+   * P0 Drop Next: NEXT / PREV while MAIN plays its own URL session / queued item → MAIN steps it (the queue first, then
+   * the playlist). One navigation at a time (ignored while a load is pending). false = not MAIN's to step (LOCAL →
+   * the existing relay to the renderer, which also takes the slot back after a queued item).
+   */
+  private mainNav(cmd: "PREV" | "NEXT"): boolean {
+    const orch = this.orchestrator;
     const sess = this.urlSession;
-    if (!sess || !(sess.attemptId > 0) || !this.orchestrator) return false;
+    if (!orch || (!sess && !this.queuedNow)) return false;
+    if (this.watchedAttempt() !== orch.getState().music.attemptId) return false;
+    if (orch.isMusicAttemptPending()) { console.log("[DeviceWsManager] " + cmd + " ignored — a load is already pending (one navigation)"); return true; }
+    let t: AutoTarget | null = null;
+    if (cmd === "NEXT") t = this.nextTarget(true);
+    else if (sess) {
+      const n = sess.items.length;
+      let i = this.queuedNow ? sess.index : (sess.index - 1 + n) % n; // PREV from a queued item → the playlist item it interrupted
+      for (let k = 0; k < n && !sess.items[i]?.url; k++) i = (i - 1 + n) % n;
+      t = { kind: "playlist", index: i };
+    }
+    if (!t) return !!sess; // nothing to step to (URL session end, loop off) → ignore; LOCAL return → relay to the renderer
+    this.autoFailures = 0;
+    this.autoFailed.clear();
+    this.navLoad(orch, t, cmd, "user");
+    return true;
+  }
+
+  /** Load navigation target `t` now (standby crossfade over the audible track — Gate 1a) and record it for rollback. */
+  private navLoad(orch: PlaybackOrchestrator, t: AutoTarget | null, cmd: "PREV" | "NEXT", why: string): void {
+    const sess = this.urlSession;
+    const url = t ? this.targetUrl(t) : "";
+    if (!t || !url) return;
+    const before = this.mock.captureSession();
+    orch.discardPrepared();
+    const pid = nextMainWsAttemptId();
+    this.rememberAutoAttempt(pid);
+    this.autoPrep = null;
+    this.autoEofHandledFor = 0;
+    const prev = { prevAttemptId: this.watchedAttempt(), prevIndex: sess?.index ?? 0, prevQueuedNow: this.queuedNow };
+    this.autoCommit = null;
+    this.applyTarget(t, pid);
+    orch.playMusicCrossfade(url, orch.getCrossfadeSec(), pid);
+    // registered only AFTER the load call: its first push still names the OLD (audible) attempt by design and must
+    // never be read as "the new load failed" (a failure is surfaced later; Gate 2a then reports the audible deck).
+    this.autoCommit = { ...prev, attemptId: pid, target: t, manual: true };
+    const m = orch.getState().music;
+    this.preLoadSession = m.attemptMode === "crossfade" && m.attemptId === pid ? { attemptId: pid, session: before } : null;
+    fileLog("INFO", "URL_NAV", { cmd, why, target: t.kind, index: t.kind === "playlist" ? t.index : null, attemptId: pid });
+  }
+
+  /** P0 Gate 2c: MAIN owns the automatic progression of the URL / queued attempt now playing (the renderer must not
+   *  step it). A LOCAL attempt that merely yields its next slot is still the renderer's (false). */
+  private mainOwnsAutoAdvance(): boolean {
+    const w = this.watchedAttempt();
+    if (!(w > 0) || !this.orchestrator || (!this.urlSession && !this.queuedNow)) return false;
     const o = this.orchestrator as { getState?: () => { music: { attemptId: number } } };
-    return typeof o.getState === "function" && o.getState().music.attemptId === sess.attemptId;
+    return typeof o.getState === "function" && o.getState().music.attemptId === w;
+  }
+
+  private currentAttemptIs(id: number): boolean {
+    const o = this.orchestrator as { getState?: () => { music: { attemptId: number } } } | null;
+    return !!o && typeof o.getState === "function" && id > 0 && o.getState().music.attemptId === id;
   }
 
   /** P0 Gate 1f: read-only readiness for status reporting — never throws (status must always be reportable). */
@@ -750,6 +890,7 @@ export class DeviceWsManager {
         const url = (p?.source?.url ?? "").trim();
         if (!url) this.preLoadSession = null; // P0 Gate 1f: a LOCAL (metadata-only) session supersedes any pending URL standby
         if (!url && this.urlSession) { this.urlSession = null; this.resetAutoAdvance(); } // P0 Gate 2c: LOCAL is never MAIN-advanced
+        if (!url) { this.queuedNow = null; this.localQueueWatch = 0; } // P0 Drop Next: the renderer's LOCAL session is current again
         if (!url) break; // local (paths stripped on the wire) → audio handled by the co-located renderer engine
         const fadeSec = orch.getCrossfadeSec();
         // P0 Gate 1a: always the crossfade entry point (orchestrator → cold only when nothing is audible).
@@ -767,6 +908,35 @@ export class DeviceWsManager {
         this.urlSession = buildUrlSession(payload);
         if (this.urlSession) this.urlSession.attemptId = orch.getState().music.attemptId;
         this.resetAutoAdvance();
+        this.queuedNow = null; // P0 Drop Next: an explicit selection plays now; the queue itself is kept
+        this.localQueueWatch = 0;
+        break;
+      }
+      case "QUEUE_NEXT": {
+        // P0 Drop Next: add the dropped URL / playlist (all its tracks, in order) to MAIN's Play Next queue.
+        const items = buildQueueItems(payload);
+        if (items.length === 0) { console.log("[DeviceWsManager] QUEUE_NEXT ignored — nothing playable (URLs only)"); break; }
+        for (const it of items) {
+          if (this.playNext.length >= MAX_PLAY_NEXT) break;
+          this.playNextSeq += 1;
+          this.playNext.push({ ...it, qid: `pn-${this.playNextSeq}` });
+        }
+        this.publishQueue();
+        fileLog("INFO", "QUEUE_NEXT_ADDED", { added: items.length, queued: this.playNext.length });
+        // nothing audible and nothing loading → the queue plays now
+        const ms = orch.getState().music;
+        if (ms.status !== "playing" && ms.status !== "paused" && !orch.isMusicAttemptPending() && !this.inAutoTick) {
+          this.inAutoTick = true;
+          try { this.autoFailures = 0; this.autoLoadNext(orch, "queue while idle"); } finally { this.inAutoTick = false; }
+        }
+        break;
+      }
+      case "QUEUE_REMOVE": {
+        const qid = typeof (payload as { queueItemId?: unknown } | null | undefined)?.queueItemId === "string" ? (payload as { queueItemId: string }).queueItemId : "";
+        if (!qid) break;
+        this.playNext = this.playNext.filter((q) => q.qid !== qid);
+        if (this.autoPrep?.target.kind === "queue" && this.autoPrep.target.item.qid === qid) { orch.discardPrepared(); this.autoPrep = null; }
+        this.publishQueue();
         break;
       }
       case "PAUSE": {

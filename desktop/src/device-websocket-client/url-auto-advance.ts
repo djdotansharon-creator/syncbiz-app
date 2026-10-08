@@ -101,3 +101,40 @@ export function nextAutoIndex(s: Pick<UrlSession, "items" | "index">, repeatMode
 export function sourceIdFor(s: UrlSession, i: number): string {
   return s.shell ? `${s.shell}${LEAF}r${i}` : s.sourceId;
 }
+
+/** P0 Drop Next: one Play Next queue entry (a remote URL only — never a local path). */
+export type QueueItem = UrlSessionItem & { qid: string };
+
+/**
+ * P0 Drop Next — the items a QUEUE_NEXT payload adds, in order (owner rules 2026-10-08):
+ *  - a playlist SHELL (no `:track:` in its id) carrying its tracks → ALL its tracks in order;
+ *  - a single track / leaf / URL → that one item (its own URL — a dragged leaf never enqueues its whole playlist);
+ *  - local / URL-less entries are skipped (LOCAL files never reach MAIN).
+ */
+export function buildQueueItems(payload: unknown): UrlSessionItem[] {
+  const p = payload as {
+    source?: { id?: unknown; title?: unknown; cover?: unknown; type?: unknown; url?: unknown;
+      sessionTracks?: Array<{ id?: unknown; title?: unknown; cover?: unknown; url?: unknown; durationSeconds?: unknown }> };
+  } | null | undefined;
+  const src = p?.source;
+  if (!src || typeof src.id !== "string" || !src.id.trim() || src.type === "local") return [];
+  const tracks = Array.isArray(src.sessionTracks) ? src.sessionTracks : [];
+  if (!src.id.includes(LEAF) && tracks.length > 0) {
+    return tracks
+      .filter((t) => t && typeof t.id === "string")
+      .map((t) => {
+        const u = typeof t.url === "string" ? t.url.trim() : "";
+        return {
+          id: String(t.id),
+          title: typeof t.title === "string" ? t.title : "",
+          cover: typeof t.cover === "string" ? t.cover : null,
+          url: u && !isLocalOnly(u) ? u : "",
+          ...(typeof t.durationSeconds === "number" ? { durationSeconds: t.durationSeconds } : {}),
+        };
+      })
+      .filter((t) => !!t.url);
+  }
+  const u = typeof src.url === "string" ? src.url.trim() : "";
+  if (!u || isLocalOnly(u)) return [];
+  return [{ id: src.id, title: typeof src.title === "string" ? src.title : "", cover: typeof src.cover === "string" ? src.cover : null, url: u }];
+}

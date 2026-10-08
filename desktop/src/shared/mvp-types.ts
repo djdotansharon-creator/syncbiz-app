@@ -621,6 +621,11 @@ export type MvpStatusSnapshot = {
   /** P0 Gate 2c: MAIN owns the automatic progression (prepare / mix / natural end) of the URL attempt now playing —
    *  the co-located renderer must not also step it at EOF. */
   mainUrlAutoAdvance?: boolean;
+  /** P0 Drop Next (LOCAL session): MAIN plays a queued item now / the queue is empty and the renderer must take the
+   *  slot back (resume LOCAL where it stopped) / MAIN watches the LOCAL track that yields its next slot to the queue. */
+  mainQueuePlaying?: boolean;
+  queueReturnToLocal?: boolean;
+  queueWatchesLocal?: boolean;
 };
 
 export type MvpConfigPatch = Partial<Omit<DesktopRuntimeConfig, "deviceId">> & {

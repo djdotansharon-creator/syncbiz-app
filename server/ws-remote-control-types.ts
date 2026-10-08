@@ -24,7 +24,10 @@ export type RemoteCommand =
   // Executed on the branch MASTER via the existing desktop bridge (mpvPlayInterrupt).
   | "PLAY_INTERRUPT"
   // P0 Gate 1e: absolute session jump (forwarded unchanged to the MASTER; type only — no server logic).
-  | "JUMP_SESSION_INDEX";
+  | "JUMP_SESSION_INDEX"
+  // P0 Drop Next (forwarded unchanged; type only).
+  | "QUEUE_NEXT"
+  | "QUEUE_REMOVE";
 
 export type ClientRole = "device" | "controller" | "owner_global";
 

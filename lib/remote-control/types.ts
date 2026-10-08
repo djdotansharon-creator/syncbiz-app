@@ -16,6 +16,8 @@ export type RemoteCommand =
   | "LOAD_PLAYLIST"
   | "PLAY_SOURCE"
   | "QUEUE_NEXT"
+  // P0 Drop Next: remove one item (by its queue id) from MAIN's Play Next queue.
+  | "QUEUE_REMOVE"
   | "SEEK"
   | "SET_VOLUME"
   | "SET_SHUFFLE"

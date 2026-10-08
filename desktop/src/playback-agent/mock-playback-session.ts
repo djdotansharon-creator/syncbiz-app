@@ -125,6 +125,19 @@ export class MockPlaybackSession {
   }
 
   /** P0 Gate 1f: mirror MAIN's read-only attempt readiness (orchestrator.isMusicAttemptPending()). */
+  /** P0 Drop Next: publish MAIN's Play Next queue (metadata only). */
+  setPlayNextQueue(items: Array<{ id: string; title: string; cover: string | null }>): void {
+    this.state.playNextQueue = items;
+  }
+
+  /** P0 Drop Next: a queued item is now playing — it is now playing; the playlist rows stay, none of them is current. */
+  setQueuedNowPlaying(it: { id: string; title: string; cover: string | null; url: string }): void {
+    this.state.currentSource = { id: it.id, title: it.title.trim() || "Untitled", cover: it.cover, origin: "source", url: it.url };
+    this.state.currentTrack = { title: it.title.trim() || "Untitled", cover: it.cover };
+    this.state.currentTrackIndex = -1;
+    this.state.queueIndex = -1;
+  }
+
   setAttemptPending(pending: boolean): void {
     this.state.mpvAttemptPending = pending;
   }

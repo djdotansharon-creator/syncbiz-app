@@ -31,7 +31,8 @@ import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
 import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, notifyLocalSourceExecChanged, localExecResolved } from "@/lib/device-mode-guard";
-import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, setRepeatMode, onRepeatModeChanged, type RepeatMode } from "@/lib/mix-preferences";
+import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, setRepeatMode, onRepeatModeChanged, getMixDuration, type RepeatMode } from "@/lib/mix-preferences";
+import { autoAdvanceHandoff } from "@/lib/auto-advance-handoff";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { isNativeShellStreamerMode, isStreamerDeviceMode } from "@/lib/streamer-device-mode";
 
@@ -65,7 +66,7 @@ type DevicePlayerContextValue = {
   sendSetMaster: () => void;
   sendSetControl: () => void;
   /** Send command to master (when in CONTROL mode). */
-  sendCommandToMaster: (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number; sessionSourceId?: string }) => void;
+  sendCommandToMaster: (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number; sessionSourceId?: string; queueItemId?: string }) => void;
   /** Play source locally (MASTER) or send to master (CONTROL). */
   playSourceOrSend: (source: UnifiedSource, trackIndex?: number) => void;
   /** P0 Gate 1e: absolute jump to item N of the MAIN-mirrored URL session — the station steps its OWN session
@@ -73,6 +74,8 @@ type DevicePlayerContextValue = {
   jumpToSessionIndexOrSend: (trackIndex: number, sessionSourceId: string) => void;
   /** Add a song to the queue — local when this device plays, else QUEUE_NEXT to MASTER. */
   queueNextOrSend: (source: UnifiedSource) => void;
+  /** P0 Drop Next: remove one Play Next item — local when this device plays, else QUEUE_REMOVE to MAIN. */
+  removeQueueNextOrSend: (queueItemId: string) => void;
   /** Play/pause/stop/next/prev - local when MASTER, send to master when CONTROL. */
   playOrSend: () => void;
   pauseOrSend: () => void;
@@ -396,6 +399,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     playNextQueue,
     playNextBaseline,
     isRestoring,
+    removePlayNextItem,
   } = usePlayback();
 
   // ── Approach (b): LOCAL execution on the designated-MASTER machine ───────────────────────────────────
@@ -1149,7 +1153,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   }, [isActive, status, deviceMode, playStatus, sendState, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState, repeatModeState, sessionMirrorInput]);
 
   const sendCommandToMaster = useCallback(
-    (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number; sessionSourceId?: string }) => {
+    (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number; sessionSourceId?: string; queueItemId?: string }) => {
       if (!masterDeviceId) return;
       sendCommand(masterDeviceId, command, payload);
     },
@@ -1192,7 +1196,11 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     setUrlTransitionState(t);
   }, []);
   /** Latest MAIN snapshot over desktop IPC (station only): attempt id + status when a command is sent. */
-  const lastMainSnapRef = useRef<{ attemptId: number; status: string } | null>(null);
+  const lastMainSnapRef = useRef<{ attemptId: number; status: string; mainAuto?: boolean; queueWatchesLocal?: boolean; mainQueuePlaying?: boolean; queueReturnToLocal?: boolean } | null>(null);
+  /** P0 Drop Next (LOCAL session): MAIN plays queued items; LOCAL resumes exactly where it stopped once the queue is empty. */
+  const pendingLocalReturnRef = useRef(false);
+  const localReturnFiredForRef = useRef(0);
+  const returnToLocalRef = useRef<(reason: string) => void>(() => {});
   /** P0 Gate 1d: last consumed MAIN step-relay identity (null until the first snapshot of this mount = baseline). */
   const stepRelayConsumedRef = useRef<{ boot: string; seq: number } | null>(null);
   const relayedStepRef = useRef<(direction: "next" | "prev", seq: number) => void>(() => {});
@@ -1288,6 +1296,15 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       }
     },
     [useLocalDeviceTransport, addPlayNextSources, sendCommandToMaster]
+  );
+
+  // P0 Drop Next: remove one Play Next item — local when this device plays, else from MAIN's queue.
+  const removeQueueNextOrSend = useCallback(
+    (queueItemId: string) => {
+      if (useLocalDeviceTransport) removePlayNextItem(queueItemId);
+      else sendCommandToMaster("QUEUE_REMOVE", { queueItemId });
+    },
+    [useLocalDeviceTransport, removePlayNextItem, sendCommandToMaster]
   );
 
   // For LOCAL execution on the designated-MASTER machine, transport acts on the local provider (which the
@@ -1446,7 +1463,26 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       // P0 Gate 1b/1c: latest MAIN snapshot + the pending transition (station only).
       const snapAttempt = typeof st?.mpvAttemptId === "number" ? st.mpvAttemptId : 0;
       const snapStatus = typeof st?.mockPlaybackStatus === "string" ? st.mockPlaybackStatus : "idle";
-      lastMainSnapRef.current = { attemptId: snapAttempt, status: snapStatus };
+      lastMainSnapRef.current = {
+        attemptId: snapAttempt, status: snapStatus, mainAuto: st?.mainUrlAutoAdvance === true,
+        queueWatchesLocal: st?.queueWatchesLocal === true, mainQueuePlaying: st?.mainQueuePlaying === true, queueReturnToLocal: st?.queueReturnToLocal === true,
+      };
+      // P0 Drop Next (LOCAL session): MAIN took the slot for a queued item → LOCAL holds its position (transport → MAIN)
+      if (canLocalExecRef.current && st?.mainQueuePlaying === true && localSessionOwnedRef.current) {
+        localSessionOwnedRef.current = false;
+        pendingLocalReturnRef.current = true;
+        console.info("[VONO drop-next] queued item playing on MAIN — LOCAL holds its position");
+      }
+      // … and once the queue is empty, take the slot back at the queued item's mix point (or its end) → LOCAL resumes
+      if (pendingLocalReturnRef.current && st?.queueReturnToLocal === true && localReturnFiredForRef.current !== snapAttempt) {
+        const pos = typeof st?.mpvPosition === "number" ? st.mpvPosition : 0;
+        const dur = typeof st?.mpvDuration === "number" ? st.mpvDuration : 0;
+        const mix = getAutoMix() ? getMixDuration() : 1;
+        if ((snapStatus === "playing" && dur > 0 && dur - pos <= mix) || snapStatus === "idle") {
+          localReturnFiredForRef.current = snapAttempt;
+          returnToLocalRef.current(snapStatus === "idle" ? "queued item ended" : "queued item mix point");
+        }
+      }
       if (canLocalExecRef.current) {
         observeUrlTransitionRef.current({
           mode: "station", attemptId: snapAttempt, sourceId: null, trackIndex: null, status: snapStatus,
@@ -1547,12 +1583,16 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   /** P0 Gate 1d: a remote controller's NEXT / PREV → MAIN relays it to the station renderer (the session owner).
    *  Feedback here: ONE pending nav intent bound to the next MAIN attempt (mirrored mpvAttemptId). */
   const sendRemoteNav = (cmd: "NEXT" | "PREV") => {
-    if (!isStationObserver() && typeof masterStateRef.current?.mpvAttemptId === "number") beginUrlTransition(cmd === "NEXT" ? "next" : "prev", null);
+    // P0 Drop Next: the station steps MAIN's own URL session / queued item through MAIN too → Loading for it as well
+    if (isStationObserver() || typeof masterStateRef.current?.mpvAttemptId === "number") beginUrlTransition(cmd === "NEXT" ? "next" : "prev", null);
     sendCommandToMaster(cmd);
   };
+  /** P0 Drop Next: MAIN owns the URL / queued item now playing (its NEXT / PREV include the Play Next queue). */
+  const mainOwnsNav = () => isStationObserver() && (lastMainSnapRef.current?.mainAuto === true || lastMainSnapRef.current?.mainQueuePlaying === true);
   const nextOrSend = useCallback(() => {
     if (transportRunsLocally()) next();
     else if (transitionPending()) console.info("[VONO intent] NEXT ignored — transition pending");
+    else if (mainOwnsNav()) sendRemoteNav("NEXT");
     else if (!stepUrlSession("next")) sendRemoteNav("NEXT");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- transitionPending / sendRemoteNav read refs
   }, [transportRunsLocally, stepUrlSession, next, sendCommandToMaster]);
@@ -1560,6 +1600,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const prevOrSend = useCallback(() => {
     if (transportRunsLocally()) prev();
     else if (transitionPending()) console.info("[VONO intent] PREV ignored — transition pending");
+    else if (mainOwnsNav()) sendRemoteNav("PREV");
     else if (!stepUrlSession("prev")) sendRemoteNav("PREV");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- transitionPending / sendRemoteNav read refs
   }, [transportRunsLocally, stepUrlSession, prev, sendCommandToMaster]);
@@ -1570,12 +1611,38 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const relayedStep = useCallback((direction: "next" | "prev", seq: number) => {
     let result: string;
     if (!canLocalExecRef.current) result = "ignored — not the station session owner";
+    else if (pendingLocalReturnRef.current) { returnToLocalRef.current("remote " + direction.toUpperCase() + " after the queue"); result = "LOCAL resumed"; }
     else if (transportRunsLocally()) { if (direction === "next") next(); else prev(); result = "LOCAL step"; }
     else if (isBlocking(urlTransitionRef.current)) result = "ignored — transition pending";
     else result = stepUrlSession(direction) ? "URL session step" : "no URL session step (unchanged)";
     console.info("[VONO step-relay] remote " + direction.toUpperCase() + " #" + seq + " → " + result);
   }, [transportRunsLocally, stepUrlSession, next, prev]);
   useEffect(() => { relayedStepRef.current = relayedStep; }, [relayedStep]);
+
+  // P0 Drop Next (LOCAL session): take the slot back after the queue — LOCAL resumes at the NEXT local track (exactly
+  // where it stopped), mixed in over the audible queued item through the existing LOCAL engine (MAIN standby deck).
+  const returnToLocal = useCallback((reason: string) => {
+    if (!pendingLocalReturnRef.current) return;
+    pendingLocalReturnRef.current = false;
+    localSessionOwnedRef.current = true;
+    lastLocalPushKeyRef.current = null;
+    console.info("[VONO drop-next] queue finished → LOCAL resumes where it stopped (" + reason + ")");
+    next();
+  }, [next]);
+  useEffect(() => { returnToLocalRef.current = returnToLocal; }, [returnToLocal]);
+
+  // P0 Drop Next: while MAIN holds queued items for the LOCAL track now playing (or plays them), the LOCAL engine's
+  // AUTOMATIC advance yields its slot (lib/auto-advance-handoff.ts). Manual LOCAL NEXT / PREV are unaffected.
+  useEffect(() => {
+    autoAdvanceHandoff.current = () => {
+      if (!canLocalExecRef.current) return false;
+      const s = lastMainSnapRef.current;
+      const yieldSlot = pendingLocalReturnRef.current || s?.queueWatchesLocal === true || s?.mainQueuePlaying === true;
+      if (yieldSlot) console.info("[VONO drop-next] LOCAL automatic advance yields to the Play Next queue (MAIN)");
+      return yieldSlot;
+    };
+    return () => { autoAdvanceHandoff.current = null; };
+  }, []);
 
   // P0 Gate 1e: a remote's absolute session-row selection relayed by MAIN → the station's OWN jump (exact item URL).
   // Only for THIS renderer's URL session (same playlist shell); LOCAL sessions / stale requests are ignored (no
@@ -1703,6 +1770,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       playSourceOrSend,
       jumpToSessionIndexOrSend,
       queueNextOrSend,
+      removeQueueNextOrSend,
       playOrSend,
       pauseOrSend,
       stopOrSend,
@@ -1741,6 +1809,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       playSourceOrSend,
       jumpToSessionIndexOrSend,
       queueNextOrSend,
+      removeQueueNextOrSend,
       playOrSend,
       pauseOrSend,
       stopOrSend,

@@ -212,8 +212,10 @@ function station(startIndex: number) {
     (ctx.match(/automatic: "(eof|failure)"/g) ?? []).length === 2 && /stepUrlSessionRef\.current\("next", \{ automatic: "failure", origin: "auto-failure", failures \}\)/.test(ctx) && !/noWrap/.test(ctx));
   assert("S2 manual NEXT / PREV unchanged (no noWrap, same fallbacks)",
     // Updated 2026-10-08 (P0 Gate 1d): fallback via sendRemoteNav (= sendCommandToMaster(NEXT/PREV) + remote feedback).
+    // Updated 2026-10-08 (P0 Drop Next): sendRemoteNav may also begin the station's own Loading intent (MAIN steps its own URL
+    // session) — its body still ends in exactly sendCommandToMaster(cmd).
     /else if \(!stepUrlSession\("next"\)\) sendRemoteNav\("NEXT"\);/.test(ctx) && /else if \(!stepUrlSession\("prev"\)\) sendRemoteNav\("PREV"\);/.test(ctx) &&
-    /const sendRemoteNav = \(cmd: "NEXT" \| "PREV"\) => \{\n[^\n]*\n    sendCommandToMaster\(cmd\);\n  \};/.test(ctx));
+    /const sendRemoteNav = \(cmd: "NEXT" \| "PREV"\) => \{\n(?:[^\n]*\n){1,3}    sendCommandToMaster\(cmd\);\n  \};/.test(ctx));
   assert("S3 every step disarms (no double step) and a URL selection disarms", /urlEofStateRef\.current = disarmUrlEof\(urlEofStateRef\.current\);\n\s+if \("noop" in step\) return true;/.test(ctx) && (ctx.match(/disarmUrlEof\(urlEofStateRef\.current\)/g) ?? []).length === 3 &&
     // Updated 2026-10-08 (P0 Gate 1e): the 3rd disarm is the absolute session jump (jumpUrlSession) — also a step.
     /const jumpUrlSession = useCallback\([\s\S]*?urlEofStateRef\.current = disarmUrlEof\(urlEofStateRef\.current\);[\s\S]*?sendCommandToMaster\("PLAY_SOURCE"/.test(ctx));

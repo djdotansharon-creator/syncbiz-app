@@ -25,6 +25,8 @@ export type StationPlaybackState = {
   sessionTitle?: string | null;
   /** Persisted playlist id when the session is playlist-backed. */
   sessionPlaylistId?: string | null;
+  /** P0 Drop Next: MAIN's Play Next queue (metadata only — never a URL / path). */
+  playNextQueue?: Array<{ id: string; title: string; cover: string | null }>;
   shuffle?: boolean;
   autoMix?: boolean;
   position?: number;

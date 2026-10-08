@@ -70,6 +70,7 @@ import {
   mergeCurrentIntoRecoveredQueue,
 } from "./local-recovery";
 import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, localExecResolved, subscribeLocalSourceExec } from "./device-mode-guard";
+import { autoAdvanceHandoff } from "./auto-advance-handoff";
 import { urlTimingMark } from "./url-startup-timing";
 
 export type PlaybackStatus = "idle" | "playing" | "paused" | "stopped";
@@ -1999,6 +2000,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         ? (opts as { auditTransportCase?: unknown }).auditTransportCase
         : undefined;
     const auditTransportCase: "ended_auto" | undefined = auditRaw === "ended_auto" ? "ended_auto" : undefined;
+    // P0 Drop Next: an AUTOMATIC advance yields to MAIN's Play Next queue when it holds items for this LOCAL track.
+    if (auditTransportCase === "ended_auto" && autoAdvanceHandoff.current?.()) return;
     if (auditTransportCase === "ended_auto") {
       playCommandViaRef.current = "natural";
       setLastPlayCommandVia("natural");

@@ -202,10 +202,10 @@ assert("ctx: all 5 transports route through transportRunsLocally (ownership-gate
 assert("ctx: gate includes ownership (localSessionOwnedRef) via routeStationTransport",
   /routeStationTransport\(\{\s*useLocalDeviceTransport,\s*canLocalExec,\s*currentSourceIsLocal,\s*localSessionOwned: localSessionOwnedRef\.current,/.test(tBlock));
 // Updated 2026-10-08 (P0 Gate 1d): the MAIN fallback goes through sendRemoteNav (still sendCommandToMaster(NEXT/PREV);
-// it only adds the remote Loading feedback) — the URL-session-first order is unchanged.
+// it only adds the remote Loading feedback). Updated 2026-10-08 (P0 Drop Next): its body may also begin the station's own\n// Loading intent (MAIN steps its own URL session) — still ends in exactly sendCommandToMaster(cmd). — the URL-session-first order is unchanged.
 assert("ctx: NEXT / PREV step the URL session before the MAIN fallback",
   /else if \(!stepUrlSession\("next"\)\) sendRemoteNav\("NEXT"\)/.test(tBlock) && /else if \(!stepUrlSession\("prev"\)\) sendRemoteNav\("PREV"\)/.test(tBlock) &&
-  /const sendRemoteNav = \(cmd: "NEXT" \| "PREV"\) => \{\n[^\n]*\n    sendCommandToMaster\(cmd\);\n  \};/.test(ctx));
+  /const sendRemoteNav = \(cmd: "NEXT" \| "PREV"\) => \{\n(?:[^\n]*\n){1,3}    sendCommandToMaster\(cmd\);\n  \};/.test(ctx));
 assert("ctx: URL select records the sent leaf + releases ownership; LOCAL select re-acquires + clears it",
   /localSessionOwnedRef\.current = false;[^\n]*\n\s*lastSentUrlLeafRef\.current = source;/.test(ctx) && (ctx.match(/lastSentUrlLeafRef\.current = null;/g) ?? []).length === 2);
 assert("F: ownership starts owned (cold-boot restore)", /const localSessionOwnedRef = useRef\(true\);/.test(ctx));

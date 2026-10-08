@@ -98,7 +98,13 @@ function world(sessionLen: number, opts: { withStation?: boolean } = {}) {
       return true;
     },
     /** station UI NEXT / PREV (nextOrSend) */
-    nav(dir: "next" | "prev") { if (isBlocking(this.t)) return; if (!this.step(dir)) toMain(dir === "next" ? "NEXT" : "PREV"); },
+    // Updated 2026-10-08 (P0 Drop Next): while MAIN owns the URL session the station's NEXT / PREV go to MAIN (as in
+    // lib/device-player-context.tsx mainOwnsNav → sendRemoteNav, with its own Loading intent); otherwise the old step.
+    nav(dir: "next" | "prev") {
+      if (isBlocking(this.t)) return;
+      if (mgr.snapshot().mainUrlAutoAdvance === true) { this.begin(dir, null); toMain(dir === "next" ? "NEXT" : "PREV"); return; }
+      if (!this.step(dir)) toMain(dir === "next" ? "NEXT" : "PREV");
+    },
     /** relayedStep — same path, never sends NEXT/PREV back to MAIN */
     relayed(dir: "next" | "prev", seq: number) {
       const r = isBlocking(this.t) ? "ignored-pending" : this.step(dir) ? "url-step" : "no-step";
@@ -177,9 +183,11 @@ function world(sessionLen: number, opts: { withStation?: boolean } = {}) {
 type W = ReturnType<typeof world>;
 const psCount = (w: W) => w.wsCmds.filter((c) => c === "PLAY_SOURCE").length;
 /** one real playback transition: exactly +1 PLAY_SOURCE, +1 URL load of item `want`, mirror == audio, confirmed */
+// Updated 2026-10-08 (P0 Drop Next): NEXT / PREV of MAIN's own URL session are stepped by MAIN itself (no PLAY_SOURCE
+// round-trip). The protected behaviour is unchanged: exactly ONE real audio transition to the right item, mirror == audio.
 function oneTransition(w: W, before: { ps: number; loads: number }, want: number): boolean {
   w.play(w.cur()); w.sync();
-  return psCount(w) === before.ps + 1 && w.urlLoads() === before.loads + 1 && w.lastLoadedUrl() === urlOf(want) && w.mirrorKey() === `pl#${want}` && w.station.t?.phase === "confirmed";
+  return w.urlLoads() === before.loads + 1 && w.lastLoadedUrl() === urlOf(want) && w.mirror().currentTrackIndex === want && (w.station.t === null || w.station.t.phase === "confirmed");
 }
 const mark = (w: W) => ({ ps: psCount(w), loads: w.urlLoads() });
 
@@ -195,29 +203,32 @@ for (const [label, who, dir, from, want] of [
   if (who === "station") w.station.nav(dir); else w[who].nav(dir);
   const ot = oneTransition(w, b, want);
   const remoteOk = who === "station" ? true : w[who].events.some((e) => e.startsWith("bound:")) && w[who].events.includes("confirmed") && w[who].t === null; // bound + confirmed → cleared
-  assert(`${label} → one PLAY_SOURCE, one real audio transition (item ${from} → ${want}), mirror == audio`, ot && remoteOk, `${w[who === "station" ? "station" : who] === w.station ? w.station.relayLog.join(",") : w[who as "browser"].events.join(",")}`);
+  assert(`${label} → one real audio transition (item ${from} → ${want}), mirror == audio`, ot && remoteOk, `${w[who === "station" ? "station" : who] === w.station ? w.station.relayLog.join(",") : w[who as "browser"].events.join(",")}`);
   w.orch.kill();
 }
-// 6. one relay request delivered 10× → one step
+// 6 / 7. the exactly-once relay (Updated 2026-10-08, P0 Drop Next: the relay now serves the renderer-owned LOCAL session —
+// MAIN steps its own URL sessions itself; the relay identity rules are unchanged and still proven here).
+const startLocal = (w: W) => {
+  w.orch.playMusic("C:\\music\\one.mp3", 7); w.play(w.cur());
+  w.m.runTransportCommand("PLAY_SOURCE", { source: { id: "local-pl", title: "Local", type: "local", url: "", origin: "playlist", sessionTracks: [{ id: "a", title: "A", cover: null }] }, trackIndex: 0 }, "ws");
+  w.station.consumed = null; w.m.push(); // the station renderer's baseline
+};
 {
-  const w = world(6); w.startAt(1);
-  const b = mark(w);
+  const w = world(6); startLocal(w);
   w.m.handleRemoteStep("NEXT");
   for (let i = 0; i < 10; i++) w.m.push(); // the SAME request identity re-delivered
-  assert("T6 one relay request delivered 10× → exactly 1 step", psCount(w) === b.ps + 1 && w.station.relayLog.length === 1 && w.station.sentIdx === 2, w.station.relayLog.join(","));
+  assert("T6 one relay request delivered 10× → handled exactly once by the station renderer", w.station.relayLog.length === 1, w.station.relayLog.join(","));
   w.orch.kill();
 }
-// 7. renderer remount never replays an old request
 {
-  const w = world(6); w.startAt(1);
-  w.m.handleRemoteStep("NEXT"); w.m.push(); w.play(w.cur()); w.sync(); // step #1 consumed (1 → 2)
-  const b = mark(w);
+  const w = world(6); startLocal(w);
+  w.m.handleRemoteStep("NEXT"); w.m.push(); // request #1 consumed
   w.station.consumed = null; // remount: fresh consumer, no memory
   w.station.relayLog = [];
   for (let i = 0; i < 5; i++) w.m.push(); // MAIN still carries seq #1
-  assert("T7 renderer remount: old request (seq 1) is the baseline → 0 steps", psCount(w) === b.ps && w.station.relayLog.length === 0);
+  assert("T7 renderer remount: old request (seq 1) is the baseline → not replayed", w.station.relayLog.length === 0);
   w.m.handleRemoteStep("NEXT"); w.m.push();
-  assert("T7b a NEW request after remount → exactly 1 step", psCount(w) === b.ps + 1 && w.station.relayLog.join(",") === "#2:url-step");
+  assert("T7b a NEW request after remount → handled exactly once", w.station.relayLog.length === 1 && w.station.relayLog[0].startsWith("#2:"));
   w.orch.kill();
 }
 // 8. 10 NEXT while a transition is pending → one step (controller guard AND, if bypassed, the station guard)
@@ -225,11 +236,12 @@ for (const [label, who, dir, from, want] of [
   const w = world(12); w.startAt(1);
   const b = mark(w);
   for (let i = 0; i < 10; i++) w.phone.nav("next");
-  assert("T8 phone 10× NEXT while pending → 1 NEXT sent, 1 step", w.wsCmds.filter((c) => c === "NEXT").length === 1 && psCount(w) === b.ps + 1);
+  assert("T8 phone 10× NEXT while pending → 1 NEXT sent, 1 real transition", w.wsCmds.filter((c) => c === "NEXT").length === 1 && w.urlLoads() === b.loads + 1);
   const w2 = world(12); w2.startAt(1);
   const b2 = mark(w2);
   for (let i = 0; i < 10; i++) w2.m.handleRemoteStep("NEXT"), w2.m.push(); // legacy page: raw NEXT ×10, no client guard
-  assert("T8b raw 10× NEXT (no client guard) → MAIN relays 10 requests, station steps ONCE (pending guard)", psCount(w2) === b2.ps + 1 && w2.station.relayLog.filter((r) => r.endsWith("url-step")).length === 1 && w2.station.relayLog.filter((r) => r.endsWith("ignored-pending")).length === 9);
+  // Updated 2026-10-08 (P0 Drop Next): MAIN steps its own URL session and ignores NEXT while that load is pending.
+  assert("T8b raw 10× NEXT (no client guard) → ONE real transition (MAIN: one navigation at a time)", w2.urlLoads() === b2.loads + 1 && w2.station.relayLog.length === 0);
   w.orch.kill(); w2.orch.kill();
 }
 // 9 / 10. mirrored mpvAttemptId binds browser / phone to the REAL attempt
@@ -272,7 +284,8 @@ for (const who of ["browser", "phone"] as const) {
   w.phone.nav("next"); // relayed → item 2 on standby
   const stops = w.calls.filter((c) => c === `${audible}:stop`).length;
   w.failAtZero(w.cur());
-  assert("T13 failed relayed URL → exactly ONE safe next (item 3)", w.station.log.join(",") === "stepped" && w.station.sentIdx === 3 && w.lastLoadedUrl() === urlOf(3), w.station.log.join(","));
+  // Updated 2026-10-08 (P0 Drop Next): MAIN steps its own URL session; a failed NEXT tries the following item once (1b rule).
+  assert("T13 failed NEXT (item 2) → exactly ONE safe next (item 3), stepped by MAIN", w.lastLoadedUrl() === urlOf(3) && w.mirror().currentTrackIndex === 3, String(w.lastLoadedUrl()));
   assert("T14 old audible deck survives the failed standby", (audible === "A" ? w.o.musicStA : w.o.musicStB).status === "playing" && w.calls.filter((c) => c === `${audible}:stop`).length === stops);
   w.orch.kill();
 }
@@ -282,10 +295,13 @@ for (const who of ["browser", "phone"] as const) {
   w.station.select(2); w.play(w.cur()); w.sync();
   const before = { key: w.mirrorKey(), url: w.lastLoadedUrl(), ps: psCount(w) };
   for (let i = 0; i < 3; i++) { w.m.handleRemoteStep("NEXT"); w.m.push(); w.m.handleRemoteStep("PREV"); w.m.push(); }
-  assert("T15 NEXT/PREV with no renderer to accept them → MAIN metadata unchanged (no N+1 while N plays)", w.mirrorKey() === before.key && w.lastLoadedUrl() === before.url && psCount(w) === before.ps);
+  // Updated 2026-10-08 (P0 Drop Next): MAIN steps its own URL session even with no renderer — the invariant is unchanged:
+  // the published item ALWAYS equals the loaded audio item (never N+1 shown while N plays).
+  void before;
+  assert("T15 NEXT/PREV with no renderer → MAIN steps itself; published item == loaded audio item", w.lastLoadedUrl() === urlOf(w.mirror().currentTrackIndex ?? -1));
   const w2 = world(6); w2.startAt(2);
   for (const d of ["next", "next", "prev"] as const) { w2.phone.nav(d); w2.play(w2.cur()); w2.sync(); }
-  assert("T15b after phone NEXT, NEXT, PREV: mirrored item == loaded audio item (pl#3)", w2.mirrorKey() === "pl#3" && w2.lastLoadedUrl() === urlOf(3));
+  assert("T15b after phone NEXT, NEXT, PREV: mirrored item == loaded audio item (index 3)", w2.mirror().currentTrackIndex === 3 && w2.lastLoadedUrl() === urlOf(3));
   w.orch.kill(); w2.orch.kill();
 }
 // MAIN without a station session keeps the existing catalog step (nothing audible to diverge from)

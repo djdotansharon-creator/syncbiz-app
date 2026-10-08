@@ -919,9 +919,11 @@ export function LiveQueuePanel() {
 
   const removePlayNextRow = useCallback(
     (id: string) => {
-      removePlayNextItem(id);
+      // P0 Drop Next: a CONTROL mirror removes from MAIN's queue (the one actually played)
+      if (isControlMirror && deviceCtx?.removeQueueNextOrSend) deviceCtx.removeQueueNextOrSend(id);
+      else removePlayNextItem(id);
     },
-    [removePlayNextItem],
+    [removePlayNextItem, isControlMirror, deviceCtx],
   );
 
   return (
