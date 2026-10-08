@@ -6,6 +6,7 @@
 import WebSocket from "ws";
 import { nextMainWsAttemptId } from "../main/main-attempt-id";
 import { MockPlaybackSession } from "../playback-agent";
+import type { StationSessionMeta } from "../playback-agent/mock-playback-session";
 import type { PlaybackOrchestrator } from "../main/playback-orchestrator";
 import type {
   BranchLibraryItem,
@@ -130,6 +131,12 @@ export class DeviceWsManager {
   private lastCommandSummary: string | null = null;
   /** P0 Gate 1a: (source id # trackIndex) of the last WS URL load — a duplicate PLAY_SOURCE for it is ignored while pending. */
   private pendingWsLoadKey: string | null = null;
+  /**
+   * P0 Gate 1f: the session metadata that was published (and audible) when a STANDBY URL load began. If that standby
+   * attempt fails / is abandoned while the old deck stays audible, the session is restored so no controller shows the
+   * failed item over the old music. Metadata only — MPV / decks / crossfade are never touched.
+   */
+  private preLoadSession: { attemptId: number; session: StationSessionMeta } | null = null;
   // P0 Gate 1d: remote NEXT / PREV relay identity (see MvpStatusSnapshot.sessionStep*).
   private readonly sessionStepBootId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   private sessionStepSeq = 0;
@@ -161,6 +168,8 @@ export class DeviceWsManager {
       // Sync real playback events (music channel) into tracked state and re-broadcast.
       this.orchestrator.onStatus((s) => {
         this.mock.syncMpvStatus(s.music);
+        this.mock.setAttemptPending(this.attemptPending()); // P0 Gate 1f (read-only)
+        this.settlePreLoadSession(s.music); // P0 Gate 1f
         this.push();
         this.sendStateUpdateIfMaster();
       });
@@ -301,6 +310,7 @@ export class DeviceWsManager {
       sessionStepDirection: this.sessionStepDirection,
       sessionStepIndex: this.sessionStepIndex,
       sessionStepSessionId: this.sessionStepSessionId,
+      mpvAttemptPending: this.attemptPending(), // P0 Gate 1f (read-only)
     };
   }
 
@@ -368,6 +378,32 @@ export class DeviceWsManager {
     this.sessionStepSessionId = sid;
     this.lastCommandSummary = `JUMP_SESSION_INDEX ${idx} (relayed to station renderer #${this.sessionStepSeq})`;
     console.log("[VONO step-relay] WS JUMP_SESSION_INDEX → renderer jump request", { seq: this.sessionStepSeq, trackIndex: idx });
+  }
+
+  /**
+   * P0 Gate 1f: settle the remembered pre-load session against MAIN's status for THAT standby attempt:
+   * failed (idle + error) → restore the audible session (metadata only); ready (no longer pending, playing, no error)
+   * → the new session is real (forget). Any other attempt → untouched.
+   */
+  private settlePreLoadSession(music: { attemptId?: number; status?: string; lastError?: string | null }): void {
+    const pre = this.preLoadSession;
+    if (!pre || music.attemptId !== pre.attemptId) return;
+    if (music.status === "idle" && music.lastError) { this.restorePreLoadSession("standby attempt failed"); return; }
+    if (music.status === "playing" && !music.lastError && this.orchestrator !== null && !this.attemptPending()) this.preLoadSession = null;
+  }
+
+  /** P0 Gate 1f: read-only readiness for status reporting — never throws (status must always be reportable). */
+  private attemptPending(): boolean {
+    const o = this.orchestrator as { isMusicAttemptPending?: () => boolean } | null;
+    return !!o && typeof o.isMusicAttemptPending === "function" ? o.isMusicAttemptPending() : false;
+  }
+
+  private restorePreLoadSession(reason: string): void {
+    const pre = this.preLoadSession;
+    if (!pre) return;
+    this.preLoadSession = null;
+    this.mock.restoreSession(pre.session);
+    console.log("[VONO session-restore] restored the audible session metadata — " + reason, { attemptId: pre.attemptId });
   }
 
   /** Move mock station selection along `branchCatalog` (wraps). */
@@ -461,6 +497,9 @@ export class DeviceWsManager {
             break;
           }
         }
+        // P0 Gate 1f: the session that is published BEFORE this selection (restored if its standby load fails).
+        const preLoadPrev = this.mock.captureSession();
+        const preLoadWasPending = this.preLoadSession !== null && orch.isMusicAttemptPending();
         // METADATA FIRST — always populate the station session (title/artwork/queue/index) from the
         // payload so STATE_UPDATE mirrors it to CONTROL, INCLUDING a local playlist whose track urls were
         // stripped on the wire (top-level url empty). This is metadata-only; it never triggers playback.
@@ -499,17 +538,31 @@ export class DeviceWsManager {
           });
         }
         const url = (p?.source?.url ?? "").trim();
+        if (!url) this.preLoadSession = null; // P0 Gate 1f: a LOCAL (metadata-only) session supersedes any pending URL standby
         if (!url) break; // local (paths stripped on the wire) → audio handled by the co-located renderer engine
         const fadeSec = orch.getCrossfadeSec();
         // P0 Gate 1a: always the crossfade entry point (orchestrator → cold only when nothing is audible).
         this.pendingWsLoadKey = typeof src?.id === "string" ? `${src.id}#${typeof srcMeta?.trackIndex === "number" ? srcMeta.trackIndex : 0}` : null;
         orch.playMusicCrossfade(url, fadeSec, nextMainWsAttemptId());
+        // P0 Gate 1f: remember the audible session only for a STANDBY load (something audible keeps playing). A newer
+        // selection while still pending keeps the ORIGINAL audible session (never an intermediate unproven one).
+        {
+          const m = orch.getState().music;
+          this.preLoadSession = m.attemptMode === "crossfade" && typeof m.attemptId === "number" && m.attemptId > 0
+            ? { attemptId: m.attemptId, session: preLoadWasPending && this.preLoadSession ? this.preLoadSession.session : preLoadPrev }
+            : null;
+        }
         break;
       }
-      case "PAUSE":
+      case "PAUSE": {
+        // P0 Gate 1f: PAUSE during a pending standby abandons it — the paused (old) track is what the session shows.
+        const abandon = this.preLoadSession !== null && orch.isMusicAttemptPending();
         orch.pauseMusic();
+        if (abandon) this.restorePreLoadSession("pause during pending standby");
         break;
+      }
       case "STOP":
+        if (this.preLoadSession !== null && orch.isMusicAttemptPending()) this.restorePreLoadSession("stop during pending standby"); // P0 Gate 1f
         orch.stopMusic();
         orch.stopInterrupt();
         break;

@@ -61,6 +61,8 @@ export type StationPlaybackState = {
   mpvEngineError?: string | null;
   /** P0 Gate 1d: current MAIN music attempt id (number only; passed through unchanged). */
   mpvAttemptId?: number;
+  /** P0 Gate 1f: current MAIN attempt not yet ready (passed through unchanged). */
+  mpvAttemptPending?: boolean;
 };
 
 export type PlaySourcePayload = {

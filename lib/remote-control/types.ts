@@ -105,6 +105,9 @@ export type StationPlaybackState = {
   /** P0 Gate 1d: the CURRENT MAIN music attempt id (a number — never a path / URL / token). Lets remote controllers
    *  bind a pending transition to the real attempt (requested / confirmed / failed / replaced). */
   mpvAttemptId?: number;
+  /** P0 Gate 1f: the CURRENT MAIN music attempt is still unproven (loading / standby before XFADE_RAMP_START / cold
+   *  start before first real progress). false = ready → controllers end "Loading…" (read-only status, number-free). */
+  mpvAttemptPending?: boolean;
 };
 
 /** Minimal source payload for PLAY_SOURCE command. */

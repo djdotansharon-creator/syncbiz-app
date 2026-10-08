@@ -613,6 +613,9 @@ export type MvpStatusSnapshot = {
   /** P0 Gate 1e: for a "jump" request — the absolute session item index + the session source id the remote saw. */
   sessionStepIndex?: number | null;
   sessionStepSessionId?: string | null;
+  /** P0 Gate 1f: orchestrator.isMusicAttemptPending() — false exactly from XFADE_RAMP_START (standby) / first real
+   *  progress (cold). Read-only status for the co-located renderer's "Loading…" end. */
+  mpvAttemptPending?: boolean;
 };
 
 export type MvpConfigPatch = Partial<Omit<DesktopRuntimeConfig, "deviceId">> & {

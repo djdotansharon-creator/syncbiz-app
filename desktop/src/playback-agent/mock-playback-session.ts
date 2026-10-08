@@ -8,6 +8,13 @@ import type { MpvStatus } from "../main/mpv-manager";
 
 const MVP_COMMANDS = new Set(["PLAY", "PAUSE", "STOP", "SET_VOLUME"]);
 
+/** P0 Gate 1f: the published-session metadata MAIN can snapshot / restore. */
+export type StationSessionMeta = Pick<StationPlaybackState, "currentSource" | "currentTrack" | "currentTrackIndex" | "queue" | "queueIndex"> & {
+  sessionTracks: NonNullable<StationPlaybackState["sessionTracks"]> | null;
+  sessionTitle: string | null;
+  sessionPlaylistId: string | null;
+};
+
 export class MockPlaybackSession {
   private state: StationPlaybackState;
 
@@ -92,6 +99,34 @@ export class MockPlaybackSession {
 
   getState(): StationPlaybackState {
     return this.state;
+  }
+
+  /** P0 Gate 1f: METADATA-only snapshot of the published session (source / track / queue / index / session rows). */
+  captureSession(): StationSessionMeta {
+    const s = this.state;
+    return JSON.parse(JSON.stringify({
+      currentSource: s.currentSource, currentTrack: s.currentTrack, currentTrackIndex: s.currentTrackIndex,
+      queue: s.queue, queueIndex: s.queueIndex, sessionTracks: s.sessionTracks ?? null,
+      sessionTitle: s.sessionTitle ?? null, sessionPlaylistId: s.sessionPlaylistId ?? null,
+    })) as StationSessionMeta;
+  }
+
+  /** P0 Gate 1f: put a captured session back (metadata only — never status / position / volume: MPV truth). */
+  restoreSession(m: StationSessionMeta): void {
+    const c = JSON.parse(JSON.stringify(m)) as StationSessionMeta;
+    this.state.currentSource = c.currentSource;
+    this.state.currentTrack = c.currentTrack;
+    this.state.currentTrackIndex = c.currentTrackIndex;
+    this.state.queue = c.queue;
+    this.state.queueIndex = c.queueIndex;
+    if (c.sessionTracks) this.state.sessionTracks = c.sessionTracks; else delete this.state.sessionTracks;
+    this.state.sessionTitle = c.sessionTitle;
+    this.state.sessionPlaylistId = c.sessionPlaylistId;
+  }
+
+  /** P0 Gate 1f: mirror MAIN's read-only attempt readiness (orchestrator.isMusicAttemptPending()). */
+  setAttemptPending(pending: boolean): void {
+    this.state.mpvAttemptPending = pending;
   }
 
   get status(): StationPlaybackState["status"] {
