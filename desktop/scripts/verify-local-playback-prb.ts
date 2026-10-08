@@ -95,7 +95,7 @@ const read = (...p: string[]) => readFileSync(path.join(__dirname, "..", "..", .
   const guard = read("lib", "device-mode-guard.ts");
   assert("2nd permission is fail-closed (default false)", /export const localSourceExecAllowed = \{ current: false \};/.test(guard));
   const pp = read("lib", "playback-provider.tsx");
-  assert("provider imports localSourceExecAllowed (+ reactive restore signals)", /import \{ deviceModeAllowsLocalPlayback, localSourceExecAllowed, localExecResolved, subscribeLocalSourceExec \} from "\.\/device-mode-guard"/.test(pp));
+  assert("provider imports localSourceExecAllowed (+ reactive restore signals)", /import \{ deviceModeAllowsLocalPlayback, localSourceExecAllowed, localExecResolved, subscribeLocalSourceExec(, mainBootSource)? \} from "\.\/device-mode-guard"/.test(pp)); // 2026-10-09: + optional mainBootSource (P0 Gate 2d restart restore gate)
   assert("localPlaybackPermitted = CONTROL guard OR (designated && LOCAL source)",
     /deviceModeAllowsLocalPlayback\.current \|\| \(localSourceExecAllowed\.current && unifiedSourceIsLocal\(source, playUrl\)\)/.test(pp));
   assert("local classification is authoritative source.type (plus local-path), not empty-url", /source\?\.type === "local"/.test(pp) && /isValidLocalFilePlaybackPath\(u\)/.test(pp));

@@ -292,6 +292,12 @@ function normalizeApiBase(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
+/** P0 Gate 2d: the reachability probe for the restart restore (the station's own app server). */
+function stationProbeUrl(apiBaseUrl: string | undefined): string {
+  const base = normalizeApiBase(apiBaseUrl ?? "");
+  return base ? `${base}/api/health` : "";
+}
+
 async function desktopSignInWithPassword(
   getWindow: () => BrowserWindow | null,
   email: string,
@@ -374,6 +380,9 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   manager.onStatus((s) => {
     broadcast(getWindow(), s);
   });
+  // P0 Gate 2d: the station remembers its last source (URL playlist / LOCAL) with no age limit and restores it at
+  // boot — URL when the app server answers, else the LOCAL fallback until the network is stable again.
+  manager.enableSourcePersistence({ probeUrl: stationProbeUrl(cachedConfig.apiBaseUrl), bootRestore: true });
 
   // OFFLINE COLD BOOT: the station WS must not depend on the hosted renderer loading (it never does on an offline
   // boot). If MAIN already holds persisted station auth, connect NOW with the reconciled durable identity. Offline,

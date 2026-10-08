@@ -12,6 +12,7 @@ import {
   type QueueItem, type RepeatMode, type UrlSession,
 } from "./url-auto-advance";
 import { isMainWsAttemptId } from "../main/main-attempt-id";
+import { readPlaybackSource, writePlaybackSource, type SavedUrlSession } from "../main/playback-source-store";
 
 /** P0 Drop Next: the next thing MAIN plays automatically — a queued item, or a URL playlist index. */
 type AutoTarget = { kind: "queue"; item: QueueItem } | { kind: "playlist"; index: number };
@@ -176,6 +177,20 @@ export class DeviceWsManager {
   private sessionPlayedFor = 0;
   private autoAttemptIds: number[] = [];
   private inAutoTick = false;
+  // ── P0 Gate 2d: restart restore — the station keeps its LAST source (no age limit) ──
+  private sourcePersist = false;
+  /** what the station boots into (renderer waits for this before its own LOCAL restore) */
+  private bootSource: "none" | "deciding" | "url" | "url-pending" | "local" = "none";
+  /** saved URL session waiting for the network (offline boot → LOCAL fallback meanwhile) */
+  private pendingRestore: SavedUrlSession | null = null;
+  /** the saved URL session is armed over the LOCAL fallback: taken over at the LOCAL track's mix point */
+  private restoreDormant = false;
+  /** the MAIN attempt that took over from the LOCAL fallback (the renderer then releases LOCAL ownership) */
+  private restoreTakeoverAttemptId = 0;
+  private restoreStartWhenReady = false;
+  private restoreNetTimer: ReturnType<typeof setInterval> | null = null;
+  private restoreNetOk = 0;
+  private probeUrl = "";
   // P0 Gate 1d: remote NEXT / PREV relay identity (see MvpStatusSnapshot.sessionStep*).
   private readonly sessionStepBootId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   private sessionStepSeq = 0;
@@ -209,6 +224,7 @@ export class DeviceWsManager {
         this.mock.syncMpvStatus(s.music);
         this.mock.setAttemptPending(this.attemptPending()); // P0 Gate 1f (read-only)
         this.settlePreLoadSession(s.music); // P0 Gate 1f
+        if (this.restoreStartWhenReady && s.music?.engineReady) this.startRestoredItem("boot (engine ready)"); // P0 Gate 2d
         this.urlAutoAdvanceTick(s.music); // P0 Gate 2c
         this.push();
         this.sendStateUpdateIfMaster();
@@ -355,7 +371,9 @@ export class DeviceWsManager {
       // P0 Drop Next (LOCAL session): MAIN plays a queued item / the renderer must take the slot back after it
       mainQueuePlaying: !!this.queuedNow && this.currentAttemptIs(this.watchedAttempt()),
       queueReturnToLocal: !this.urlSession && !!this.queuedNow && this.playNext.length === 0 && this.currentAttemptIs(this.watchedAttempt()),
-      queueWatchesLocal: !this.urlSession && !this.queuedNow && this.playNext.length > 0 && this.localQueueWatch > 0 && this.currentAttemptIs(this.localQueueWatch),
+      queueWatchesLocal: (!this.urlSession || this.restoreDormant) && !this.queuedNow && (this.playNext.length > 0 || this.restoreDormant) && this.localQueueWatch > 0 && this.currentAttemptIs(this.localQueueWatch),
+      bootSource: this.bootSource, // P0 Gate 2d
+      restoreTakeoverAttemptId: this.restoreTakeoverAttemptId, // P0 Gate 2d
     };
   }
 
@@ -457,7 +475,7 @@ export class DeviceWsManager {
   /** The attempt whose end drives the next automatic step: the URL session item / a queued item / a LOCAL renderer
    *  attempt that yields its next slot to the Play Next queue. */
   private watchedAttempt(): number {
-    return this.urlSession ? this.urlSession.attemptId : this.localQueueWatch;
+    return this.urlSession && !this.restoreDormant ? this.urlSession.attemptId : this.localQueueWatch;
   }
 
   /** Publish item `sess.index` as the station session (metadata only; the audio was already handed over / loaded). */
@@ -491,6 +509,12 @@ export class DeviceWsManager {
     if (this.playNext.length > 0) return { kind: "queue", item: this.playNext[0] };
     const sess = this.urlSession;
     if (!sess) return null;
+    // P0 Gate 2d: the saved URL session armed over the LOCAL fallback resumes at the item it was playing
+    if (this.restoreDormant) {
+      const n = sess.items.length;
+      for (let k = 0; k < n; k++) { const i = (sess.index + k) % n; if (sess.items[i]?.url && !this.autoFailed.has(i)) return { kind: "playlist", index: i }; }
+      return null;
+    }
     const rm: RepeatMode = manual && urlRepeatModePref === "track" ? "playlist" : urlRepeatModePref;
     const ni = nextAutoIndex(sess, rm, this.autoFailed);
     return ni === null ? null : { kind: "playlist", index: ni };
@@ -517,10 +541,19 @@ export class DeviceWsManager {
       this.queuedNow = null;
       this.urlSession.index = t.index;
       this.publishSessionItem(this.urlSession);
+      if (this.restoreDormant) {
+        // P0 Gate 2d: the saved URL session takes over from the LOCAL fallback — the renderer releases LOCAL
+        this.restoreDormant = false;
+        this.restoreTakeoverAttemptId = attemptId;
+        this.bootSource = "url"; // the LOCAL fallback stays "url-pending" (renderer keeps LOCAL) until this take-over
+        this.localQueueWatch = 0;
+        fileLog("INFO", "RESTORE_URL_TAKEOVER", { index: t.index, attemptId });
+      }
     }
-    if (this.urlSession) this.urlSession.attemptId = attemptId;
+    if (this.urlSession && !this.restoreDormant) this.urlSession.attemptId = attemptId;
     else this.localQueueWatch = attemptId;
     this.publishQueue();
+    this.persistUrl(); // P0 Gate 2d
   }
 
   private urlAutoAdvanceTick(music: { attemptId?: number; status?: string; position?: number; duration?: number; lastError?: string | null }): void {
@@ -539,9 +572,9 @@ export class DeviceWsManager {
     const id = typeof m.attemptId === "number" ? m.attemptId : 0;
     // (0) LOCAL session (renderer-owned): the renderer took the slot back (its own LOCAL attempt plays again) → clear
     //     the queue context; while items are queued, watch the LOCAL attempt now playing (it yields its next slot).
-    if (!this.urlSession && id > 0 && !isMainWsAttemptId(id) && m.status === "playing" && (m.position ?? 0) > 0) {
+    if ((!this.urlSession || this.restoreDormant) && id > 0 && !isMainWsAttemptId(id) && m.status === "playing" && (m.position ?? 0) > 0) {
       if (this.queuedNow) { this.queuedNow = null; this.localQueueWatch = 0; this.autoPrep = null; }
-      if (this.playNext.length > 0 && this.localQueueWatch !== id) { this.localQueueWatch = id; this.autoPrep = null; }
+      if ((this.playNext.length > 0 || this.restoreDormant) && this.localQueueWatch !== id) { this.localQueueWatch = id; this.autoPrep = null; }
     }
     const watched = this.watchedAttempt();
     // (a) a hand-over failed and MAIN reports the still-audible deck again (Gate 2a) → roll back, skip that item
@@ -725,11 +758,178 @@ export class DeviceWsManager {
     fileLog("INFO", "URL_NAV", { cmd, why, target: t.kind, index: t.kind === "playlist" ? t.index : null, attemptId: pid });
   }
 
+  // ── P0 Gate 2d: restart restore ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Production wiring only (ipc-mvp): persist the station's last source and, at boot, restore it. Tests never call it,
+   * so they never touch ProgramData or the network.
+   */
+  enableSourcePersistence(opts: { probeUrl: string; bootRestore: boolean }): void {
+    this.sourcePersist = true;
+    this.probeUrl = opts.probeUrl;
+    if (!opts.bootRestore) return;
+    // Only the DESIGNATED station (trusted ProgramData designation cache) restores on its own at boot — a
+    // non-designated desktop never starts audio by itself (its renderer restore stays CONTROL-blocked as before).
+    if (!this.offlineDesignated) {
+      fileLog("INFO", "RESTORE_BOOT", { source: "skipped — not the designated station" });
+      return;
+    }
+    const saved = readPlaybackSource();
+    if (!saved || saved.kind !== "url" || !saved.url) {
+      this.bootSource = "local";
+      fileLog("INFO", "RESTORE_BOOT", { source: saved?.kind ?? "none" });
+      this.push();
+      return;
+    }
+    this.bootSource = "deciding";
+    this.push();
+    const savedUrl = saved.url;
+    void this.probeNetwork().then((online) => {
+      if (this.bootSource !== "deciding") return; // a manual choice already decided
+      if (online) {
+        this.bootSource = "url";
+        fileLog("INFO", "RESTORE_BOOT", { source: "url", network: "online" });
+        this.beginUrlRestore(savedUrl, "boot (online)");
+      } else {
+        this.bootSource = "url-pending";
+        this.pendingRestore = savedUrl;
+        fileLog("INFO", "RESTORE_BOOT", { source: "url", network: "offline → LOCAL fallback until the network is stable" });
+        this.startRestoreNetWatch();
+      }
+      this.push();
+      this.sendStateUpdateIfMaster();
+    });
+  }
+
+  /** Reachability of the station's own app server (any HTTP answer within 4 s = online). */
+  private async probeNetwork(): Promise<boolean> {
+    if (!this.probeUrl) return false;
+    try {
+      await fetch(this.probeUrl, { method: "GET", cache: "no-store", signal: AbortSignal.timeout(4000) });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Offline boot: probe every 30 s; TWO consecutive successes (stable, not flapping) → bring the URL source back. */
+  private startRestoreNetWatch(): void {
+    this.stopRestoreNetWatch();
+    this.restoreNetOk = 0;
+    this.restoreNetTimer = setInterval(() => {
+      void this.probeNetwork().then((ok) => {
+        if (!this.pendingRestore) { this.stopRestoreNetWatch(); return; }
+        this.restoreNetOk = ok ? this.restoreNetOk + 1 : 0;
+        if (this.restoreNetOk >= 2) this.onNetworkStable();
+      });
+    }, 30_000);
+  }
+
+  private stopRestoreNetWatch(): void {
+    if (this.restoreNetTimer) { clearInterval(this.restoreNetTimer); this.restoreNetTimer = null; }
+  }
+
+  /** Network stable again: the saved URL source returns — never by cutting the LOCAL fallback mid-track. */
+  private onNetworkStable(): void {
+    const saved = this.pendingRestore;
+    const orch = this.orchestrator;
+    this.stopRestoreNetWatch();
+    if (!saved || !orch) return;
+    this.pendingRestore = null;
+    const ms = orch.getState().music;
+    if (ms.status === "playing" && !isMainWsAttemptId(ms.attemptId)) {
+      // the LOCAL fallback is audible → arm the saved session; it takes over at the LOCAL track's mix point
+      // (prepared ~60 s ahead, crossfaded — the same proven hand-off as Drop Next during LOCAL)
+      this.urlSession = this.sessionFromSaved(saved);
+      this.restoreDormant = true;
+      if (this.playNext.length === 0) this.playNext = saved.playNext.slice();
+      this.resetAutoAdvance();
+      this.localQueueWatch = ms.attemptId;
+      this.publishQueue();
+      fileLog("INFO", "RESTORE_URL_ARMED", { index: saved.index, overLocalAttempt: ms.attemptId });
+    } else {
+      this.bootSource = "url";
+      this.beginUrlRestore(saved, "network returned");
+    }
+    this.push();
+    this.sendStateUpdateIfMaster();
+  }
+
+  private sessionFromSaved(saved: SavedUrlSession): UrlSession {
+    return {
+      items: saved.items.map((i) => ({ id: i.id, title: i.title, cover: i.cover, url: i.url, ...(typeof i.durationSeconds === "number" ? { durationSeconds: i.durationSeconds } : {}) })),
+      index: saved.index, shell: saved.shell, sourceId: saved.sourceId, origin: saved.origin, sourceType: saved.sourceType,
+      sessionTitle: saved.sessionTitle, sessionPlaylistId: saved.sessionPlaylistId, attemptId: 0,
+    };
+  }
+
+  /** Make the saved URL session current again and start its item now (nothing audible / boot). */
+  private beginUrlRestore(saved: SavedUrlSession, why: string): void {
+    this.urlSession = this.sessionFromSaved(saved);
+    this.restoreDormant = false;
+    this.playNext = saved.playNext.slice();
+    for (const q of this.playNext) { const n = Number(q.qid.replace(/^pn-/, "")); if (Number.isFinite(n) && n > this.playNextSeq) this.playNextSeq = n; }
+    this.resetAutoAdvance();
+    this.queuedNow = null;
+    this.localQueueWatch = 0;
+    this.publishQueue();
+    this.publishSessionItem(this.urlSession);
+    if (!this.orchestrator?.getState().music.engineReady) { this.restoreStartWhenReady = true; return; }
+    this.startRestoredItem(why);
+  }
+
+  private startRestoredItem(why: string): void {
+    this.restoreStartWhenReady = false;
+    const orch = this.orchestrator;
+    const sess = this.urlSession;
+    if (!orch || !sess || this.restoreDormant) return;
+    const n = sess.items.length;
+    let idx = -1;
+    for (let k = 0; k < n; k++) { const i = (sess.index + k) % n; if (sess.items[i]?.url) { idx = i; break; } }
+    if (idx < 0) return;
+    const pid = nextMainWsAttemptId();
+    this.rememberAutoAttempt(pid);
+    this.applyTarget({ kind: "playlist", index: idx }, pid);
+    orch.playMusicCrossfade(sess.items[idx].url, orch.getCrossfadeSec(), pid);
+    fileLog("INFO", "RESTORE_URL_START", { why, index: idx, attemptId: pid });
+  }
+
+  /** A manual / explicit source choice replaces any pending or armed restore. */
+  private cancelRestore(why: string): void {
+    if (!this.pendingRestore && !this.restoreDormant && !this.restoreStartWhenReady && this.bootSource !== "deciding") return;
+    this.pendingRestore = null;
+    this.restoreStartWhenReady = false;
+    this.stopRestoreNetWatch();
+    if (this.restoreDormant) { this.restoreDormant = false; this.urlSession = null; this.localQueueWatch = 0; this.resetAutoAdvance(); }
+    if (this.bootSource === "deciding" || this.bootSource === "url-pending") this.bootSource = "local";
+    fileLog("INFO", "RESTORE_CANCELLED", { why });
+  }
+
+  /** Persist the station's source = this URL playlist (+ queue). Never while a saved session is only armed. */
+  private persistUrl(): void {
+    const sess = this.urlSession;
+    if (!this.sourcePersist || !sess || this.restoreDormant) return;
+    writePlaybackSource({
+      kind: "url",
+      url: {
+        items: sess.items.map((i) => ({ id: i.id, title: i.title, cover: i.cover, url: i.url, ...(typeof i.durationSeconds === "number" ? { durationSeconds: i.durationSeconds } : {}) })),
+        index: sess.index, shell: sess.shell, sourceId: sess.sourceId, origin: sess.origin, sourceType: sess.sourceType,
+        sessionTitle: sess.sessionTitle, sessionPlaylistId: sess.sessionPlaylistId,
+        playNext: this.playNext.map((q) => ({ qid: q.qid, id: q.id, title: q.title, cover: q.cover, url: q.url })),
+      },
+    });
+  }
+
+  private persistLocal(): void {
+    if (!this.sourcePersist) return;
+    writePlaybackSource({ kind: "local" });
+  }
+
   /** P0 Gate 2c: MAIN owns the automatic progression of the URL / queued attempt now playing (the renderer must not
    *  step it). A LOCAL attempt that merely yields its next slot is still the renderer's (false). */
   private mainOwnsAutoAdvance(): boolean {
     const w = this.watchedAttempt();
-    if (!(w > 0) || !this.orchestrator || (!this.urlSession && !this.queuedNow)) return false;
+    if (!(w > 0) || !this.orchestrator || (!this.urlSession && !this.queuedNow) || (this.restoreDormant && !this.queuedNow)) return false;
     const o = this.orchestrator as { getState?: () => { music: { attemptId: number } } };
     return typeof o.getState === "function" && o.getState().music.attemptId === w;
   }
@@ -889,7 +1089,16 @@ export class DeviceWsManager {
         }
         const url = (p?.source?.url ?? "").trim();
         if (!url) this.preLoadSession = null; // P0 Gate 1f: a LOCAL (metadata-only) session supersedes any pending URL standby
-        if (!url && this.urlSession) { this.urlSession = null; this.resetAutoAdvance(); } // P0 Gate 2c: LOCAL is never MAIN-advanced
+        // P0 Gate 2d: a LOCAL session the USER chose (renderer intent "user") replaces the station's source and cancels a
+        // pending URL restore; the LOCAL FALLBACK of an offline boot (no intent) keeps the saved URL source armed.
+        const userIntent = (payload as { intent?: unknown } | null | undefined)?.intent === "user";
+        const keepRestore = !url && !userIntent && (this.restoreDormant || this.pendingRestore !== null);
+        if (!url && !keepRestore) {
+          if (this.urlSession) { this.urlSession = null; this.resetAutoAdvance(); } // P0 Gate 2c: LOCAL is never MAIN-advanced
+          this.cancelRestore(userIntent ? "LOCAL chosen" : "LOCAL session");
+          if (this.bootSource === "url") this.bootSource = "local"; // a renderer reload now restores LOCAL again
+          this.persistLocal();
+        }
         if (!url) { this.queuedNow = null; this.localQueueWatch = 0; } // P0 Drop Next: the renderer's LOCAL session is current again
         if (!url) break; // local (paths stripped on the wire) → audio handled by the co-located renderer engine
         const fadeSec = orch.getCrossfadeSec();
@@ -905,11 +1114,13 @@ export class DeviceWsManager {
             : null;
         }
         // P0 Gate 2c: MAIN takes over the AUTOMATIC progression of this URL session (rebuilt from every selection).
+        this.cancelRestore("URL selected"); // P0 Gate 2d: an explicit selection replaces any pending restore
         this.urlSession = buildUrlSession(payload);
         if (this.urlSession) this.urlSession.attemptId = orch.getState().music.attemptId;
         this.resetAutoAdvance();
         this.queuedNow = null; // P0 Drop Next: an explicit selection plays now; the queue itself is kept
         this.localQueueWatch = 0;
+        this.persistUrl(); // P0 Gate 2d: the station's source is now this URL playlist
         break;
       }
       case "QUEUE_NEXT": {
@@ -922,6 +1133,7 @@ export class DeviceWsManager {
           this.playNext.push({ ...it, qid: `pn-${this.playNextSeq}` });
         }
         this.publishQueue();
+        this.persistUrl(); // P0 Gate 2d
         fileLog("INFO", "QUEUE_NEXT_ADDED", { added: items.length, queued: this.playNext.length });
         // nothing audible and nothing loading → the queue plays now
         const ms = orch.getState().music;
@@ -937,6 +1149,7 @@ export class DeviceWsManager {
         this.playNext = this.playNext.filter((q) => q.qid !== qid);
         if (this.autoPrep?.target.kind === "queue" && this.autoPrep.target.item.qid === qid) { orch.discardPrepared(); this.autoPrep = null; }
         this.publishQueue();
+        this.persistUrl(); // P0 Gate 2d
         break;
       }
       case "PAUSE": {

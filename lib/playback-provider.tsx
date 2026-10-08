@@ -69,7 +69,7 @@ import {
   reconstructUrlSource,
   mergeCurrentIntoRecoveredQueue,
 } from "./local-recovery";
-import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, localExecResolved, subscribeLocalSourceExec } from "./device-mode-guard";
+import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, localExecResolved, subscribeLocalSourceExec, mainBootSource } from "./device-mode-guard";
 import { autoAdvanceHandoff } from "./auto-advance-handoff";
 import { urlTimingMark } from "./url-startup-timing";
 
@@ -567,6 +567,13 @@ const STORAGE_KEY = "syncbiz-playback";
 const RECOVERY_STORAGE_KEY = "syncbiz-playback-recovery-v2";
 const RECOVERY_TTL_MS = 1000 * 60 * 60 * 24;
 const RECOVERY_AUTOPLAY_WINDOW_MS = 1000 * 60 * 30;
+/** P0 Gate 2d: the station's last LOCAL session, kept separately (device-only localStorage, never WS) so an OFFLINE
+ *  boot whose remembered source is a URL playlist still has LOCAL music to play until the network returns. */
+const LAST_LOCAL_STORAGE_KEY = "syncbiz-playback-last-local-v1";
+/** P0 Gate 2d (owner rule 2026-10-09): a desktop STATION remembers its last source with NO age limit. */
+function isDesktopStationShell(): boolean {
+  return typeof window !== "undefined" && "syncbizDesktop" in window;
+}
 
 /**
  * Appliance auto-resume signal via the load URL (only the streamer/appliance sends it):
@@ -650,17 +657,17 @@ function savePersistedPlayback(sourceId: string, trackIndex: number, status: Pla
   }
 }
 
-function loadPersistedPlaybackV2(): PersistedPlaybackV2 | null {
+function loadPersistedPlaybackV2(storageKey: string = RECOVERY_STORAGE_KEY): PersistedPlaybackV2 | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(RECOVERY_STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<PersistedPlaybackV2>;
     if (!parsed?.currentSourceId || !Array.isArray(parsed.queueIds)) return null;
     const status = parsed.status;
     if (!(status === "playing" || status === "paused")) return null;
     const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
-    if (!updatedAt || Date.now() - updatedAt > RECOVERY_TTL_MS) return null;
+    if (!updatedAt || (!isDesktopStationShell() && Date.now() - updatedAt > RECOVERY_TTL_MS)) return null; // P0 Gate 2d: no TTL on a station
     return {
       currentSourceId: parsed.currentSourceId,
       queueIds: parsed.queueIds.filter((x): x is string => typeof x === "string"),
@@ -730,6 +737,7 @@ function savePersistedPlaybackV2(payload: PersistedPlaybackV2) {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(RECOVERY_STORAGE_KEY, JSON.stringify(payload));
+    if (payload.local) localStorage.setItem(LAST_LOCAL_STORAGE_KEY, JSON.stringify(payload)); // P0 Gate 2d: offline fallback
   } catch {
     /* ignore */
   }
@@ -1531,7 +1539,32 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       if (isRestoring) setIsRestoring(false);
       return;
     }
-    const persistedV2 = loadPersistedPlaybackV2();
+    // P0 Gate 2d: on the desktop station the co-located MAIN decides the restart source first (it remembers the last
+    // source with no age limit). Wait (no timeout — event-driven) until its first snapshot and its decision exist.
+    const desktopBridge = isDesktopStationShell()
+      ? (window as unknown as { syncbizDesktop?: { onStatus?: unknown } }).syncbizDesktop
+      : undefined;
+    if (typeof desktopBridge?.onStatus === "function" && (!localExecResolved.current || mainBootSource.current === "deciding")) {
+      const unsub = subscribeLocalSourceExec(() => {
+        unsub();
+        setRestoreTick((t) => t + 1);
+      });
+      return () => unsub();
+    }
+    if (mainBootSource.current === "url") {
+      // MAIN restores the station's remembered URL playlist itself — the renderer must not start LOCAL over it.
+      console.info("[VONO restore] MAIN restores the remembered URL source — renderer LOCAL restore skipped");
+      hasRestoredRef.current = true;
+      setIsRestoring(false);
+      return;
+    }
+    let persistedV2 = loadPersistedPlaybackV2();
+    if (mainBootSource.current === "url-pending" && !persistedV2?.local) {
+      // Offline boot, remembered source = URL: play the station's last LOCAL session until MAIN brings the URL back.
+      const fallback = loadPersistedPlaybackV2(LAST_LOCAL_STORAGE_KEY);
+      if (fallback?.local) persistedV2 = { ...fallback, status: "playing" };
+      console.info("[VONO restore] offline boot — LOCAL fallback " + (fallback?.local ? "found" : "missing"));
+    }
     const persistedV1 = loadPersistedPlayback();
     if (!persistedV2 && !persistedV1) {
       setIsRestoring(false);
@@ -1707,10 +1740,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           // A headless desktop STATION (MASTER) must ALWAYS resume what it was playing before a
           // reboot — no 30-minute window. The window still guards a human browser tab reopened much
           // later. (Restore only reached here because deviceModeAllowsLocalPlayback is true → MASTER.)
-          // NOTE: RECOVERY_TTL_MS (24h) still bounds how old the snapshot may be — tracked as a P0
-          // follow-up so a station can also recover after a shutdown longer than 24h.
+          // P0 Gate 2d: RECOVERY_TTL_MS no longer applies on a desktop station (no age limit — owner rule).
           const isDesktopStation = typeof window !== "undefined" && "syncbizDesktop" in window;
           const shouldAutoplay =
+            mainBootSource.current !== "url" && // P0 Gate 2d: MAIN restores the remembered URL source itself
             autoresume !== "0" &&
             persistedV2.status === "playing" &&
             (autoresume === "1" ||

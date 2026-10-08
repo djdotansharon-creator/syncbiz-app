@@ -30,7 +30,7 @@ import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
-import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, notifyLocalSourceExecChanged, localExecResolved } from "@/lib/device-mode-guard";
+import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, notifyLocalSourceExecChanged, localExecResolved, mainBootSource } from "@/lib/device-mode-guard";
 import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, setRepeatMode, onRepeatModeChanged, getMixDuration, type RepeatMode } from "@/lib/mix-preferences";
 import { autoAdvanceHandoff } from "@/lib/auto-advance-handoff";
 import { useMobileRole } from "@/lib/mobile-role-context";
@@ -66,7 +66,7 @@ type DevicePlayerContextValue = {
   sendSetMaster: () => void;
   sendSetControl: () => void;
   /** Send command to master (when in CONTROL mode). */
-  sendCommandToMaster: (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number; sessionSourceId?: string; queueItemId?: string }) => void;
+  sendCommandToMaster: (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number; sessionSourceId?: string; queueItemId?: string; intent?: "user" }) => void;
   /** Play source locally (MASTER) or send to master (CONTROL). */
   playSourceOrSend: (source: UnifiedSource, trackIndex?: number) => void;
   /** P0 Gate 1e: absolute jump to item N of the MAIN-mirrored URL session — the station steps its OWN session
@@ -425,8 +425,14 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     }).syncbizDesktop;
     if (!bridge || typeof bridge.onStatus !== "function") return; // browser / legacy shell → stays false (fail-closed)
     let cancelled = false;
-    const apply = (s: { commandReady?: boolean; designatedStationOffline?: boolean }) => {
+    const apply = (s: { commandReady?: boolean; designatedStationOffline?: boolean; bootSource?: string }) => {
       if (cancelled) return;
+      // P0 Gate 2d: MAIN's restart-restore decision gates the one-shot provider restore (notify on change only).
+      const boot = typeof s?.bootSource === "string" ? s.bootSource : null;
+      if (boot !== mainBootSource.current) {
+        mainBootSource.current = boot;
+        notifyLocalSourceExecChanged();
+      }
       setLocalMainCommandReady(Boolean(s?.commandReady));
       setLocalMainDesignatedOffline(Boolean(s?.designatedStationOffline));
       setMainSnapResolved(true); // permission is now resolved (true or false)
@@ -1153,7 +1159,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   }, [isActive, status, deviceMode, playStatus, sendState, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState, repeatModeState, sessionMirrorInput]);
 
   const sendCommandToMaster = useCallback(
-    (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number; sessionSourceId?: string; queueItemId?: string }) => {
+    (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number; sessionSourceId?: string; queueItemId?: string; intent?: "user" }) => {
       if (!masterDeviceId) return;
       sendCommand(masterDeviceId, command, payload);
     },
@@ -1168,6 +1174,10 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // that callback's unstable identity (it is a fresh function each render — the source of the ~20x/sec flood).
   const localSessionOwnedRef = useRef(true);
   const lastLocalPushKeyRef = useRef<string | null>(null);
+  // P0 Gate 2d: the next LOCAL session push follows an explicit LOCAL selection (intent "user" → MAIN makes LOCAL the
+  // station's remembered source and cancels a pending URL restore). A boot LOCAL fallback / auto-advance sends none.
+  const localUserIntentRef = useRef(false);
+  const restoreTakeoverSeenRef = useRef(0);
   // P0 (LOCAL→URL coherence): the last URL playlist leaf this renderer committed via WS PLAY_SOURCE (carries the
   // parent playlist with every track URL) — used to step the SAME session on NEXT / PREV.
   const lastSentUrlLeafRef = useRef<UnifiedSource | null>(null);
@@ -1240,6 +1250,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       if (useLocalDeviceTransport) {
         localSessionOwnedRef.current = true;
         lastLocalPushKeyRef.current = null; // force a fresh MAIN session commit for the new local selection
+        localUserIntentRef.current = true; // P0 Gate 2d
         lastSentUrlLeafRef.current = null;
         setUrlTransition(null); // P0 Gate 1c: an explicit LOCAL / local-transport selection clears any URL intent
         playSource(source, trackIndex ?? 0);
@@ -1251,6 +1262,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         console.warn("[VONO MetaSync] select->LOCAL(provider) " + JSON.stringify({ type: source?.type ?? null, id: source?.id ?? null, title: source?.title ?? null, trackIndex }));
         localSessionOwnedRef.current = true;  // (re)acquire LOCAL ownership
         lastLocalPushKeyRef.current = null;   // force a fresh MAIN commit (handles URL → same-LOCAL re-selection)
+        localUserIntentRef.current = true;    // P0 Gate 2d: an explicit LOCAL choice is the station's new source
         lastSentUrlLeafRef.current = null;
         setUrlTransition(null); // P0 Gate 1c: explicit LOCAL selection clears the URL intent (existing safe LOCAL path)
         playSource(source, trackIndex ?? 0);
@@ -1467,6 +1479,15 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         attemptId: snapAttempt, status: snapStatus, mainAuto: st?.mainUrlAutoAdvance === true,
         queueWatchesLocal: st?.queueWatchesLocal === true, mainQueuePlaying: st?.mainQueuePlaying === true, queueReturnToLocal: st?.queueReturnToLocal === true,
       };
+      // P0 Gate 2d: the station's saved URL source took over from the boot LOCAL fallback (at the LOCAL mix point) →
+      // the renderer releases LOCAL ownership once; transport now routes to MAIN's URL session.
+      const takeover = typeof st?.restoreTakeoverAttemptId === "number" ? st.restoreTakeoverAttemptId : 0;
+      if (canLocalExecRef.current && takeover > 0 && takeover === snapAttempt && restoreTakeoverSeenRef.current !== takeover) {
+        restoreTakeoverSeenRef.current = takeover;
+        localSessionOwnedRef.current = false;
+        pendingLocalReturnRef.current = false;
+        console.info("[VONO restore] saved URL source took over from the LOCAL fallback — LOCAL released");
+      }
       // P0 Drop Next (LOCAL session): MAIN took the slot for a queued item → LOCAL holds its position (transport → MAIN)
       if (canLocalExecRef.current && st?.mainQueuePlaying === true && localSessionOwnedRef.current) {
         localSessionOwnedRef.current = false;
@@ -1637,7 +1658,10 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     autoAdvanceHandoff.current = () => {
       if (!canLocalExecRef.current) return false;
       const s = lastMainSnapRef.current;
-      const yieldSlot = pendingLocalReturnRef.current || s?.queueWatchesLocal === true || s?.mainQueuePlaying === true;
+      // P0 Gate 2d: after the saved URL source took over from the boot LOCAL fallback, the released LOCAL engine never
+      // advances on its own (until an explicit LOCAL selection re-acquires ownership).
+      const restoredUrlOwns = restoreTakeoverSeenRef.current > 0 && !localSessionOwnedRef.current;
+      const yieldSlot = pendingLocalReturnRef.current || s?.queueWatchesLocal === true || s?.mainQueuePlaying === true || restoredUrlOwns;
       if (yieldSlot) console.info("[VONO drop-next] LOCAL automatic advance yields to the Play Next queue (MAIN)");
       return yieldSlot;
     };
@@ -1694,9 +1718,12 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     lastLocalPushKeyRef.current = key;
     // [VONO MetaSync — READ-ONLY TEST] renderer pushes the LOCAL session to the MAIN (now owned + de-duped).
     console.warn("[VONO MetaSync] localSync->PLAY_SOURCE " + JSON.stringify({ type: currentSource.type ?? null, id: currentSource.id ?? null, title: currentSource.title ?? null, trackIndex: currentTrackIndex, canLocalExec, currentSourceIsLocal }));
+    const intent = localUserIntentRef.current ? ("user" as const) : undefined; // P0 Gate 2d
+    localUserIntentRef.current = false;
     sendCommandToMasterRef.current("PLAY_SOURCE", {
       source: unifiedSourceToPayload(currentSource),
       trackIndex: currentTrackIndex,
+      ...(intent ? { intent } : {}),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sendCommandToMaster read via ref (unstable identity by design)
   }, [canLocalExec, currentSourceIsLocal, currentSource, currentTrackIndex]);
