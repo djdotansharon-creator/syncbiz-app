@@ -52,6 +52,9 @@ export type UrlTransition = {
 };
 
 export type TransitionObservation = {
+  /** P0 Gate 1f: MAIN's read-only readiness of the CURRENT attempt (mpvAttemptPending). false = ready (standby:
+   *  XFADE_RAMP_START; cold: first real progress). null / absent = older MAIN → legacy advancing-position rule. */
+  pending?: boolean | null;
   /** "station" = desktop IPC (attempt ids, no mirrored source); "remote" = mirrored STATE_UPDATE. */
   mode?: "station" | "remote";
   /** MAIN attempt id (station IPC, or mirrored mpvAttemptId); null = unknown (older MAIN → legacy remote binding). */
@@ -156,6 +159,10 @@ export function observeTransition(t: UrlTransition | null, o: TransitionObservat
   if (o.status === "idle" && o.error && o.engineReady !== false) return { t: next, event: "failed" };
   if (next.phase === "confirmed") return { t: next, event };
   if (o.status === "playing" && !o.error) {
+    // P0 Gate 1f: Loading ends at MAIN's incoming READINESS (standby → XFADE_RAMP_START; cold → first real progress).
+    if (typeof o.pending === "boolean") {
+      return o.pending ? { t: next, event } : { t: { ...next, phase: "confirmed", consecutiveFailures: 0 }, event: "confirmed" };
+    }
     if (next.firstPos === null) return { t: { ...next, firstPos: o.position }, event };
     if (o.position > next.firstPos) return { t: { ...next, phase: "confirmed", consecutiveFailures: 0 }, event: "confirmed" };
   }
@@ -171,6 +178,72 @@ export function tickTransition(t: UrlTransition | null, now: number, isStation: 
   if (!isStation && !t.bound && now - t.startedAt > STATION_UNBOUND_TIMEOUT_MS) return null;
   if (!isStation && now - t.startedAt > REMOTE_UNCONFIRMED_TIMEOUT_MS) return null;
   return t;
+}
+
+/**
+ * P0 Gate 1f: the transition keeps the previously AUDIBLE item on screen as "now playing" — while loading, and during
+ * the "Couldn't play — current music kept" message (MAIN restores its session metadata; Gate 1f MAIN).
+ */
+export function holdsAudible(t: UrlTransition | null | undefined): boolean {
+  return isBlocking(t) || t?.phase === "failed-kept";
+}
+
+type SessionLike = {
+  currentSource?: { id?: string | null } | null;
+  currentTrack?: { title?: string | null } | null;
+  currentTrackIndex?: number | null;
+};
+/** Session / now-playing fields shown from the held (audible) state; everything else (volume, modes, Play Next …) is live. */
+const HELD_KEYS = [
+  "status", "currentTrack", "currentSource", "currentTrackIndex", "sessionTracks", "nextSessionTrack", "queue", "queueIndex",
+  "sessionTitle", "sessionPlaylistId", "position", "positionAt", "duration",
+] as const;
+
+export type PendingTrack = { index: number | null; title: string | null; sourceId: string | null; sameSession: boolean };
+
+function shellOf(id: string | null | undefined): string | null {
+  const s = id ?? "";
+  const i = s.indexOf(":track:");
+  return i > 0 ? s.slice(0, i) : s || null;
+}
+
+function pendingFrom(live: SessionLike, held: SessionLike | null, t: UrlTransition): PendingTrack {
+  const liveKey = targetKeyOf(live.currentSource?.id, live.currentTrackIndex);
+  const heldKey = held ? targetKeyOf(held.currentSource?.id, held.currentTrackIndex) : null;
+  if (liveKey && liveKey !== heldKey) {
+    // MAIN already published the selection (metadata-first): that is the pending item, NOT the playing one.
+    return {
+      index: typeof live.currentTrackIndex === "number" ? live.currentTrackIndex : null,
+      title: live.currentTrack?.title ?? null,
+      sourceId: live.currentSource?.id ?? null,
+      sameSession: !!held && shellOf(live.currentSource?.id) === shellOf(held.currentSource?.id),
+    };
+  }
+  const k = t.targetKey;
+  const cut = k ? k.lastIndexOf("#") : -1;
+  const idx = k && cut > 0 ? Number(k.slice(cut + 1)) : NaN;
+  const sid = k && cut > 0 ? k.slice(0, cut) : null;
+  return { index: Number.isFinite(idx) ? idx : null, title: null, sourceId: sid, sameSession: !!held && !!sid && shellOf(sid) === shellOf(held.currentSource?.id) };
+}
+
+/**
+ * P0 Gate 1f — ONE display rule for every controller surface (player, queue, phone, badges):
+ *  - shown: the item to present as NOW PLAYING — the held audible state while the transition holds it, else live;
+ *  - pending: the item being loaded (never presented as playing) while the transition is blocking;
+ *  - loading: true until MAIN reports the new attempt ready (incoming readiness / XFADE_RAMP_START).
+ */
+export function displayPlaybackState<S extends SessionLike>(
+  live: S | null | undefined,
+  held: S | null | undefined,
+  t: UrlTransition | null | undefined,
+): { shown: S | null; pending: PendingTrack | null; loading: boolean } {
+  const liveS = live ?? null;
+  const loading = isBlocking(t);
+  if (!liveS) return { shown: null, pending: null, loading };
+  if (!holdsAudible(t) || !held) return { shown: liveS, pending: loading ? pendingFrom(liveS, null, t!) : null, loading };
+  const shown = { ...liveS } as S;
+  for (const k of HELD_KEYS) (shown as Record<string, unknown>)[k] = (held as Record<string, unknown>)[k];
+  return { shown, pending: loading ? pendingFrom(liveS, held, t!) : null, loading };
 }
 
 /** User-facing status line (null = show the normal player status). */

@@ -16,7 +16,7 @@ import { GuestRecommendationModal } from "@/components/guest-recommendation-moda
 import type { UnifiedSource } from "@/lib/source-types";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
 import {
-  beginTransition, decideUserCommand, failTransition, isBlocking, observeTransition, targetKeyOf, tickTransition,
+  beginTransition, decideUserCommand, failTransition, holdsAudible, isBlocking, observeTransition, targetKeyOf, tickTransition,
   type UrlTransition,
 } from "@/lib/url-transition-intent";
 
@@ -30,6 +30,8 @@ type StationControllerContextValue = {
   remoteState: StationPlaybackState | null;
   /** P0 Gate 1c: the ONE pending source transition started from this controller (same rules as DevicePlayerContext). */
   transition: UrlTransition | null;
+  /** P0 Gate 1f: the station state that was AUDIBLE when the transition began (shown as now playing while it holds). */
+  transitionHeldState: StationPlaybackState | null;
   /** WS connection status. */
   status: "connecting" | "connected" | "disconnected" | "error";
   /** Available player devices. */
@@ -79,12 +81,20 @@ export function StationControllerProvider({ children }: { children: ReactNode })
   // rules the station / web layer uses). Observed from the mirrored STATE_UPDATE; MAIN also de-duplicates (Gate 1a).
   const [transition, setTransitionState] = useState<UrlTransition | null>(null);
   const transitionRef = useRef<UrlTransition | null>(null);
+  const remoteStateRef = useRef<StationPlaybackState | null>(remoteState);
+  const [heldState, setHeldState] = useState<StationPlaybackState | null>(null);
   const setTransition = useCallback((t: UrlTransition | null) => {
     if (t === transitionRef.current) return;
     transitionRef.current = t;
     setTransitionState(t);
+    if (!holdsAudible(t)) setHeldState(null); // P0 Gate 1f
   }, []);
-  const remoteStateRef = useRef<StationPlaybackState | null>(remoteState);
+  /** P0 Gate 1f: capture the audible state when a NEW hold begins (a hold in progress keeps the original). */
+  const captureHeld = useCallback(() => {
+    if (holdsAudible(transitionRef.current)) return;
+    const rs = remoteStateRef.current;
+    setHeldState(rs?.status === "playing" ? rs : null);
+  }, []);
   useEffect(() => {
     remoteStateRef.current = remoteState;
     const cur = transitionRef.current;
@@ -92,6 +102,7 @@ export function StationControllerProvider({ children }: { children: ReactNode })
     const res = observeTransition(cur, {
       mode: "remote",
       attemptId: typeof remoteState?.mpvAttemptId === "number" ? remoteState.mpvAttemptId : null, // P0 Gate 1d
+      pending: typeof remoteState?.mpvAttemptPending === "boolean" ? remoteState.mpvAttemptPending : null, // P0 Gate 1f
       sourceId: remoteState?.currentSource?.id ?? null,
       trackIndex: typeof remoteState?.currentTrackIndex === "number" ? remoteState.currentTrackIndex : null,
       status: remoteState?.status ?? "idle",
@@ -132,8 +143,9 @@ export function StationControllerProvider({ children }: { children: ReactNode })
   const beginNav = useCallback((origin: "next" | "prev") => {
     const prior = remoteStateRef.current?.mpvAttemptId;
     if (typeof prior !== "number") return; // older MAIN (no mirrored attempt id) → no feedback rather than a stuck Loading
+    captureHeld();
     setTransition(beginTransition({ origin, targetKey: null, now: Date.now(), priorAttemptId: prior, audibleAtStart: remoteStateRef.current?.status === "playing" }));
-  }, [setTransition]);
+  }, [setTransition, captureHeld]);
 
   const sendNext = useCallback(() => {
     if (isBlocking(transitionRef.current)) return; // P0 Gate 1c: one navigation intent
@@ -155,12 +167,13 @@ export function StationControllerProvider({ children }: { children: ReactNode })
       const key = targetKeyOf(source?.id, 0); // this path sends no trackIndex → MAIN mirrors index 0
       if (decideUserCommand(transitionRef.current, { kind: "select", targetKey: key }) !== "accept") return; // P0 Gate 1c
       const prior = remoteStateRef.current?.mpvAttemptId;
+      captureHeld(); // P0 Gate 1f
       const t = beginTransition({ origin: "select", targetKey: key, now: Date.now(), priorAttemptId: typeof prior === "number" ? prior : null, audibleAtStart: remoteStateRef.current?.status === "playing" });
       transitionRef.current = t;
       setTransitionState(t);
       sendCommand(masterDeviceId, "PLAY_SOURCE", { source: unifiedSourceToPayload(source) });
     },
-    [masterDeviceId, sendCommand]
+    [masterDeviceId, sendCommand, captureHeld]
   );
 
   // Add to queue on the MASTER — reuses the existing QUEUE_NEXT command (same
@@ -228,6 +241,7 @@ export function StationControllerProvider({ children }: { children: ReactNode })
       setSelectedDeviceId: () => {},
       remoteState,
       transition,
+      transitionHeldState: holdsAudible(transition) ? heldState : null,
       status,
       devices,
       sendPlay,
@@ -248,6 +262,7 @@ export function StationControllerProvider({ children }: { children: ReactNode })
       masterDeviceId,
       remoteState,
       transition,
+      heldState,
       status,
       devices,
       sendPlay,
@@ -292,6 +307,7 @@ export function useStationController() {
     setSelectedDeviceId: () => {},
     remoteState: null,
     transition: null,
+    transitionHeldState: null,
     status: "disconnected" as const,
     devices: [] as DeviceInfo[],
     sendPlay: () => {},

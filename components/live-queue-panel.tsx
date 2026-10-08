@@ -21,6 +21,7 @@ import type { UnifiedSource } from "@/lib/source-types";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { SuggestMetadataButton } from "@/components/suggest-metadata-button";
 import { CommunityFeedbackSummary } from "@/components/community-feedback-summary";
+import { displayPlaybackState } from "@/lib/url-transition-intent";
 
 type TrackExtra = PlaylistTrack & { durationSeconds?: number; genre?: string; artist?: string };
 
@@ -332,7 +333,16 @@ export function LiveQueuePanel() {
       deviceCtx.deviceMode === "CONTROL" &&
       !deviceCtx.isMobileLocalPlayback,
   );
-  const masterState = deviceCtx?.masterState;
+  // P0 Gate 1f: the queue shows the AUDIBLE item as now playing while a new one loads (held state); the item being
+  // loaded is a "Loading…" row (same session) or strip (another playlist) — never presented as playing.
+  const masterStateLive = deviceCtx?.masterState;
+  const heldForQueue = deviceCtx?.urlTransitionHeldState ?? null;
+  const transitionForQueue = deviceCtx?.urlTransition ?? null;
+  const queueDisplay = useMemo(
+    () => displayPlaybackState(masterStateLive, heldForQueue, transitionForQueue),
+    [masterStateLive, heldForQueue, transitionForQueue],
+  );
+  const masterState = queueDisplay.shown;
   const {
     currentSource,
     currentPlaylist,
@@ -821,6 +831,12 @@ export function LiveQueuePanel() {
 
   const playSessionTrack = deviceCtx?.playSourceOrSend ?? playSource;
 
+  // P0 Gate 1f: the pending item — a row of the shown list (same playlist, or nothing audible = the list IS the new
+  // session) gets "Loading…" instead of the now-playing bars; another playlist loading over audible music = a strip.
+  const qPending = isControlMirror ? queueDisplay.pending : null;
+  const pendingRowIndex = qPending && (qPending.sameSession || !heldForQueue) ? qPending.index : null;
+  const pendingStrip = qPending && !qPending.sameSession && heldForQueue ? qPending : null;
+
   /**
    * Queue row jump: re-invokes playSource on the displayed session source at the requested
    * underlying track index. Reuses the existing playback path (no separate "jump" code path),
@@ -953,6 +969,12 @@ export function LiveQueuePanel() {
       </header>
 
       <div className="min-h-0 flex-1 basis-0 overflow-y-auto overflow-x-hidden overscroll-contain py-1 pr-0.5">
+        {pendingStrip ? (
+          <p className="mb-1.5 flex min-w-0 items-center gap-2 rounded-[7px] border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-[12px] leading-tight text-[#a1a1a6]" aria-live="polite">
+            <span className="shrink-0 font-medium text-[#f5f5f7]">Loading…</span>
+            {pendingStrip.title ? <span dir="auto" className="min-w-0 truncate">{pendingStrip.title}</span> : null}
+          </p>
+        ) : null}
         {sessionTracks.length === 0 ? (
           <p className="text-[10px] leading-tight text-slate-500/70">Pick a playlist to start</p>
         ) : displayedSessionTracks.length === 0 ? (
@@ -968,6 +990,7 @@ export function LiveQueuePanel() {
                 (sessionTracks.length === 1 && playlistGenre ? playlistGenre : null);
               const thumb = derivePlaylistTrackCoverArt({ cover: t.cover, url: t.url, type: t.type });
               const isCurrent = i === sessionForList.highlightIndex;
+              const isPendingRow = pendingRowIndex !== null && i === pendingRowIndex; // P0 Gate 1f
               const isNextInList = markNextInOrder && nextLinear !== null && i === nextLinear;
               const rowDurationSeconds = getTrackDuration(t);
               const displayNumber = displayIndex + 1;
@@ -1033,7 +1056,11 @@ export function LiveQueuePanel() {
                   <span className="shrink-0 text-right font-mono text-sm font-medium tabular-nums text-slate-500">
                     {formatClockRow(rowDurationSeconds)}
                   </span>
-                  {isCurrent ? (
+                  {isPendingRow ? (
+                    <span className="flex h-7 shrink-0 items-center justify-end whitespace-nowrap text-[11px] font-medium text-[#a1a1a6]" aria-label="Loading">
+                      Loading…
+                    </span>
+                  ) : isCurrent ? (
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center" aria-label="Now playing">
                       <span className="queue-now-playing-bars queue-now-playing-bars--action-slot" aria-hidden>
                         <span />

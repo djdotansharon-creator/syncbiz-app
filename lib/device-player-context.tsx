@@ -22,7 +22,7 @@ import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
 import { routeStationTransport, resolveUrlSessionStep, resolveUrlSessionJump, resolveExactUrlTarget, ownPlayableUrl, playlistShellIdOfLeaf } from "@/lib/station-transport-routing";
 import { initialUrlEofState, observeUrlEof, disarmUrlEof, type UrlEofState } from "@/lib/url-eof-advance";
 import {
-  beginTransition, decideUserCommand, failTransition, isBlocking, observeTransition, targetKeyOf, tickTransition,
+  beginTransition, decideUserCommand, failTransition, holdsAudible, isBlocking, observeTransition, targetKeyOf, tickTransition,
   MAX_CONSECUTIVE_FAILURES, type TransitionObservation, type TransitionOrigin, type UrlTransition,
 } from "@/lib/url-transition-intent";
 import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
@@ -1176,7 +1176,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const setUrlTransition = useCallback((t: UrlTransition | null) => {
     if (t === urlTransitionRef.current) return;
     urlTransitionRef.current = t;
-    if (!isBlocking(t)) heldMasterStateRef.current = null;
+    if (!holdsAudible(t)) heldMasterStateRef.current = null; // P0 Gate 1f: held through "current music kept"
     setUrlTransitionState(t);
   }, []);
   /** Latest MAIN snapshot over desktop IPC (station only): attempt id + status when a command is sent. */
@@ -1192,7 +1192,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const beginUrlTransition = useCallback((origin: TransitionOrigin, targetKey: string | null, consecutiveFailures = 0) => {
     const station = isStationObserver();
     const audibleNow = station ? lastMainSnapRef.current?.status === "playing" : masterStateRef.current?.status === "playing";
-    if (!isBlocking(urlTransitionRef.current)) heldMasterStateRef.current = audibleNow ? masterStateRef.current : null;
+    if (!holdsAudible(urlTransitionRef.current)) heldMasterStateRef.current = audibleNow ? masterStateRef.current : null;
     const t = beginTransition({
       origin, targetKey, now: Date.now(),
       priorAttemptId: station ? (lastMainSnapRef.current?.attemptId ?? null) : (masterStateRef.current?.mpvAttemptId ?? null),
@@ -1396,6 +1396,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     observeUrlTransitionRef.current({
       mode: "remote",
       attemptId: typeof masterState?.mpvAttemptId === "number" ? masterState.mpvAttemptId : null, // P0 Gate 1d
+      pending: typeof masterState?.mpvAttemptPending === "boolean" ? masterState.mpvAttemptPending : null, // P0 Gate 1f
       sourceId: masterState?.currentSource?.id ?? null,
       trackIndex: typeof masterState?.currentTrackIndex === "number" ? masterState.currentTrackIndex : null,
       status: masterState?.status ?? "idle",
@@ -1429,6 +1430,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       if (canLocalExecRef.current) {
         observeUrlTransitionRef.current({
           mode: "station", attemptId: snapAttempt, sourceId: null, trackIndex: null, status: snapStatus,
+          pending: typeof st?.mpvAttemptPending === "boolean" ? st.mpvAttemptPending : null, // P0 Gate 1f: ends at readiness
           position: typeof st?.mpvPosition === "number" ? st.mpvPosition : 0,
           error: typeof st?.mpvLastError === "string" && st.mpvLastError ? st.mpvLastError : null,
           engineReady: st?.mpvEngineReady !== false,
@@ -1541,6 +1543,12 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
 
   const jumpToSessionIndexOrSend = useCallback((index: number, sessionSourceId: string) => {
     if (isStationObserver()) {
+      // P0 Gate 1f: the queue may show the HELD (audible) session while a different playlist loads — a row of a session
+      // that is not this renderer's committed URL session is never jumped by index (fail closed).
+      if (playlistShellIdOfLeaf({ id: sessionSourceId }) !== playlistShellIdOfLeaf(lastSentUrlLeafRef.current)) {
+        console.warn("[VONO url-target] station row jump ignored — the row belongs to another session (nothing sent)");
+        return;
+      }
       if (!jumpUrlSession(index)) console.warn("[VONO url-target] station row jump not executed (see above)");
       return;
     }
@@ -1635,7 +1643,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       hasExistingMaster: hasExistingMaster ?? false,
       masterState,
       urlTransition,
-      urlTransitionHeldState: isBlocking(urlTransition) ? heldMasterStateRef.current : null,
+      urlTransitionHeldState: holdsAudible(urlTransition) ? heldMasterStateRef.current : null,
       masterConfirmOpen,
       setMasterConfirmOpen,
       reportPosition,
