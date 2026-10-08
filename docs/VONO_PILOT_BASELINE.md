@@ -8,7 +8,8 @@
 
 ## 1. STATUS
 
-- **🟡 P0 DROP NEXT — RUNTIME CANDIDATE ON TEST, NOT YET ACCEPTED (2026-10-08).** Head `e5b2029` (local, NOT pushed).
+- **✅ P0 PLAYBACK CONTINUITY + DROP NEXT + URL→URL MIX — ACCEPTED — owner-attested 2026-10-08 (Lenovo, beta.18 + TEST app 414d3564):** ~5 h continuous run, playback never stopped, Drop Next works, URL→URL mix works well. Not independently log-verified by Claude. OPEN before the playback baseline lock: real A/V video sync (built for future external-screen output) + restart restore (Gate 2d). Control Room waits for both. Candidate record:
+- **(accepted) 🟡 P0 DROP NEXT — RUNTIME CANDIDATE ON TEST (2026-10-08).** Head `e5b2029` (local, NOT pushed).
   Root cause: since a665e7c the station renderer is CONTROL → QUEUE_NEXT went to MAIN, which had no handler (silently
   dropped). Fix: MAIN owns the Play Next queue (URLs only; playlist → all tracks in order); the queue plays first (prepared
   + mixed like Gate 2c), then the playlist resumes where it stopped; during LOCAL the queued items play after the current
