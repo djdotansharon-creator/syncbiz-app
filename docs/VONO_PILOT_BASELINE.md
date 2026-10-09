@@ -13,7 +13,7 @@
   load latency, Play Now, equal-power mix, station speed, now-playing frame, external screen). TEST only, PROD untouched.
   beta.21 restart: owner-attested PARTIAL 2026-10-09 (resumes the last song after a Windows restart); offline boot /
   LOCAL→URL on network return / video not yet tested → not a full PASS.
-- **🟡 CONTROL ROOM step 1 — ALL BRANCHES — TEST candidate (2026-10-09), NOT yet accepted.** Latest `3cbc57a` (owner refinement: simple scalable list — name + Online/Offline + Playing/Not playing, song as secondary line, no artwork; chevron placeholder for the next step) = TEST app deployment `090403e9-7642-40e3-9497-bd6856df9527` (view hash-identical). First version (local, NOT
+- **🟡 CONTROL ROOM step 1 — ALL BRANCHES — TEST candidate (2026-10-09), NOT yet accepted.** Latest `dcf6e6a` (+ branch number "Branch <locationCode>" under the name; GET /api/branches returns locationCode — additive) = TEST app deployment `c3f1e214-8283-4238-af76-9c0a1615f980` (view / store / types hash-identical). Before: `3cbc57a` (owner refinement: simple scalable list — name + Online/Offline + Playing/Not playing, song as secondary line, no artwork; chevron placeholder for the next step) = TEST app deployment `090403e9-7642-40e3-9497-bd6856df9527` (view hash-identical). First version (local, NOT
   pushed). RENDERER ONLY. `/owner/control-room` ("Control Room" in the menu): one card per DB branch + live status from
   the existing owner_global socket (Online/Offline, Playing/Paused/Not playing, title + artwork, counters). Read-only; no
   playback file changed. TEST app deployment `dc618344-80a9-4143-95be-e5fd2d3b8c9a` (clean worktree `14b6d24`; view /
