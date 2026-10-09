@@ -15,7 +15,9 @@ export async function GET() {
   const accountId = resolveAccountScope(user.tenantId);
   const existing = await db.getBranches(accountId);
   if (existing.length > 0) {
-    return NextResponse.json(existing);
+    // Control Room (info only): does a station (StationDevice) belong to the branch? No → "Needs installation".
+    const withStation = await db.getBranchIdsWithStation(accountId);
+    return NextResponse.json(existing.map((b) => ({ ...b, hasStation: withStation.has(b.id) })));
   }
   return NextResponse.json([
     {

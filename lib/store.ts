@@ -194,6 +194,14 @@ export const db = {
     return rows.map(rowToBranch);
   },
 
+  /** Control Room (info only): branch ids of this workspace that have at least one registered station. */
+  async getBranchIdsWithStation(accountId?: string): Promise<Set<string>> {
+    const wsId = await resolveWorkspaceId(accountId);
+    if (!wsId) return new Set();
+    const rows = await prisma.stationDevice.findMany({ where: { workspaceId: wsId }, select: { branchId: true }, distinct: ["branchId"] });
+    return new Set(rows.map((r) => r.branchId));
+  },
+
   async addBranch(
     input: Pick<Branch, "accountId" | "name"> &
       Partial<Pick<Branch, "id" | "code" | "timezone" | "city" | "country" | "status">>,

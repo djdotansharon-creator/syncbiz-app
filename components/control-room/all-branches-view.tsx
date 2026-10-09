@@ -3,33 +3,43 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
+import { BranchMap, DOT_FILL, type MapDotStatus } from "@/components/control-room/branch-map";
 
 /**
- * CONTROL ROOM — step 1: all branches in one place (read-only view), built to scale to hundreds of branches.
+ * CONTROL ROOM — all branches in one place: counters, a map of the network and the branch list (read-only view).
  *
- * Branch list = the workspace's branches from the database (`GET /api/branches`). Live status = the existing
- * owner_global WebSocket (`useRemoteOwner`): a branch is ONLINE when its station (MASTER) is connected; PLAYING comes
- * from that station's last STATE_UPDATE. Primary per row: name + one status (Playing / Online · not playing / Offline);
- * the song title is a secondary line. This view never sends a playback command and never registers as a player.
+ * Branch list = the workspace's branches from the database (`GET /api/branches`, incl. `hasStation`). Live status = the
+ * existing owner_global WebSocket (`useRemoteOwner`): ONLINE when the branch's station (MASTER) is connected, PLAYING
+ * from its last STATE_UPDATE. A branch with no registered station is "Needs installation" (never "Offline"). This view
+ * never sends a playback command and never registers as a player.
  */
 
-type DbBranch = { id: string; name: string; code?: string; city?: string; country?: string; status?: string; locationCode?: string | null };
+type DbBranch = {
+  id: string;
+  name: string;
+  code?: string;
+  city?: string;
+  country?: string;
+  status?: string;
+  locationCode?: string | null;
+  hasStation?: boolean;
+};
 
 type Row = {
   id: string;
   name: string;
   /** customer branch number (locationCode) — secondary but clear */
   branchNumber: string | null;
-  subtitle: string;
+  city: string;
+  hasStation: boolean;
   online: boolean;
   live: BranchSummary | null;
   state: StationPlaybackState | null;
 };
 
-type RowStatus = "playing" | "idle" | "offline" | "unknown";
+type RowStatus = MapDotStatus;
 
-/** Next step (branch control): the per-branch route, keyed by the branch id. Not built yet — the row's chevron will
- *  link here without changing the row structure. */
+/** Next step (branch control): the per-branch route, keyed by the branch id. Not built yet. */
 export function branchControlHref(branchId: string): string {
   return `/owner/control-room/${encodeURIComponent(branchId)}`;
 }
@@ -38,6 +48,7 @@ export function branchControlHref(branchId: string): string {
 const LIVE_REFRESH_MS = 10_000;
 
 function rowStatus(row: Row, liveKnown: boolean): RowStatus {
+  if (!row.online && !row.hasStation) return "install"; // no station yet — known from the DB, not from live status
   if (!liveKnown) return "unknown";
   if (!row.online) return "offline";
   return row.state?.status === "playing" ? "playing" : "idle";
@@ -47,6 +58,7 @@ export function AllBranchesView() {
   const { branches: liveBranches, remoteStateByDeviceId, status, refreshBranchList } = useRemoteOwner();
   const [dbBranches, setDbBranches] = useState<DbBranch[] | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,7 +92,8 @@ export function AllBranchesView() {
         id: b.id,
         name: b.name || b.code || "Branch",
         branchNumber: typeof b.locationCode === "string" && b.locationCode.trim() ? b.locationCode.trim() : null,
-        subtitle: b.city ?? "",
+        city: b.city ?? "",
+        hasStation: b.hasStation !== false,
         online: !!live,
         live,
         state: live ? remoteStateByDeviceId[live.masterDeviceId] ?? null : null,
@@ -92,17 +105,21 @@ export function AllBranchesView() {
         id: live.canonicalBranchId || live.branchId,
         name: live.branchName ?? "Connected station",
         branchNumber: null,
-        subtitle: "Not linked to a branch record",
+        city: "",
+        hasStation: true,
         online: true,
         live,
         state: remoteStateByDeviceId[live.masterDeviceId] ?? null,
       });
     }
-    return out;
-  }, [dbBranches, liveBranches, remoteStateByDeviceId]);
+    // live branches first (playing, then online), then offline, then not yet installed — by name inside a group
+    const rank: Record<RowStatus, number> = { playing: 0, idle: 1, unknown: 2, offline: 3, install: 4 };
+    return out.sort((a, b) => rank[rowStatus(a, liveKnown)] - rank[rowStatus(b, liveKnown)] || a.name.localeCompare(b.name));
+  }, [dbBranches, liveBranches, remoteStateByDeviceId, liveKnown]);
 
   const onlineCount = rows.filter((r) => r.online).length;
   const playingCount = rows.filter((r) => rowStatus(r, liveKnown) === "playing").length;
+  const installCount = rows.filter((r) => rowStatus(r, liveKnown) === "install").length;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-[color:var(--sb-border)] bg-[var(--sb-surface)]">
@@ -115,10 +132,11 @@ export function AllBranchesView() {
         </div>
       </header>
 
-      <div className="grid grid-cols-3 border-b border-[color:var(--sb-border)]">
+      <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-4">
         <Stat value={dbBranches ? rows.length : "—"} label="Branches" />
-        <Stat value={liveKnown ? onlineCount : "—"} label="Online" dot="bg-emerald-400" />
-        <Stat value={liveKnown ? playingCount : "—"} label="Playing" dot="bg-[var(--sb-accent)]" last />
+        <Stat value={liveKnown ? onlineCount : "—"} label="Online" dot={DOT_FILL.idle} />
+        <Stat value={liveKnown ? playingCount : "—"} label="Playing" dot={DOT_FILL.playing} />
+        <Stat value={dbBranches ? installCount : "—"} label="Needs installation" dot={DOT_FILL.install} valueColor={installCount > 0 ? "#fbbf24" : undefined} last />
       </div>
 
       {loadError ? (
@@ -128,60 +146,84 @@ export function AllBranchesView() {
       ) : rows.length === 0 ? (
         <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">No branches yet.</p>
       ) : (
-        <ul className="divide-y divide-[color:var(--sb-border)]">
-          {rows.map((r) => (
-            <BranchRow key={r.id} row={r} status={rowStatus(r, liveKnown)} />
-          ))}
-        </ul>
+        <div className="grid lg:grid-cols-[minmax(240px,2fr)_3fr]">
+          <div className="hidden items-center justify-center border-r border-[color:var(--sb-border)] p-6 lg:flex">
+            <BranchMap
+              branches={rows.map((r) => ({ id: r.id, name: r.name, city: r.city, status: rowStatus(r, liveKnown) }))}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
+          </div>
+          <ul className="max-h-[640px] divide-y divide-[color:var(--sb-border)] overflow-y-auto">
+            {rows.map((r) => (
+              <BranchRow
+                key={r.id}
+                row={r}
+                status={rowStatus(r, liveKnown)}
+                selected={r.id === selectedId}
+                onSelect={() => setSelectedId(r.id)}
+              />
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
 }
 
-function Stat({ value, label, dot, last }: { value: number | string; label: string; dot?: string; last?: boolean }) {
+function Stat({ value, label, dot, last, valueColor }: { value: number | string; label: string; dot?: string; last?: boolean; valueColor?: string }) {
   return (
     <div className={`px-6 py-5 ${last ? "" : "border-r border-[color:var(--sb-border)]"}`}>
-      <div className="text-4xl font-bold leading-none tracking-tight tabular-nums text-[var(--sb-text)]">{value}</div>
+      <div className="text-4xl font-bold leading-none tracking-tight tabular-nums text-[var(--sb-text)]" style={valueColor ? { color: valueColor } : undefined}>
+        {value}
+      </div>
       <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--sb-text-secondary)]">
-        {dot ? <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden /> : null}
+        {dot ? <span className="h-1.5 w-1.5 rounded-full" style={{ background: dot }} aria-hidden /> : null}
         {label}
       </div>
     </div>
   );
 }
 
-const STATUS_UI: Record<RowStatus, { label: string; dot: string; text: string }> = {
-  playing: { label: "Playing", dot: "bg-[var(--sb-accent)]", text: "text-[var(--sb-text)]" },
-  idle: { label: "Online · not playing", dot: "bg-emerald-400", text: "text-[var(--sb-text-secondary)]" },
-  offline: { label: "Offline", dot: "bg-[var(--sb-text-tertiary)]", text: "text-[var(--sb-text-tertiary)]" },
-  unknown: { label: "—", dot: "bg-white/20", text: "text-[var(--sb-text-tertiary)]" },
+const STATUS_LABEL: Record<RowStatus, { label: string; text: string }> = {
+  playing: { label: "Playing", text: "text-[var(--sb-text)]" },
+  idle: { label: "Online · not playing", text: "text-[var(--sb-text-secondary)]" },
+  offline: { label: "Offline", text: "text-[var(--sb-text-tertiary)]" },
+  install: { label: "Needs installation", text: "text-amber-300/90" },
+  unknown: { label: "—", text: "text-[var(--sb-text-tertiary)]" },
 };
 
-function BranchRow({ row, status }: { row: Row; status: RowStatus }) {
-  const ui = STATUS_UI[status];
+function BranchRow({ row, status, selected, onSelect }: { row: Row; status: RowStatus; selected: boolean; onSelect: () => void }) {
+  const ui = STATUS_LABEL[status];
   // secondary only: what plays, one muted line (no artwork — light at hundreds of branches)
   const nowPlaying = status === "playing" ? row.state?.currentTrack?.title || row.state?.currentSource?.title || "" : "";
   return (
-    <li data-branch-id={row.id} className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.3fr)_16px] items-center gap-4 px-6 py-3.5">
+    <li
+      data-branch-id={row.id}
+      onClick={onSelect}
+      className={`grid cursor-pointer grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.3fr)_16px] items-center gap-4 px-6 py-3.5 transition-colors ${
+        selected ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
+      }`}
+    >
       <div className="min-w-0">
         <div className="truncate text-sm font-semibold text-[var(--sb-text)]">{row.name}</div>
-        {row.branchNumber || row.subtitle ? (
+        {row.branchNumber || row.city ? (
           <div className="truncate text-xs text-[var(--sb-text-secondary)]">
             {row.branchNumber ? <span className="font-medium tabular-nums">Branch {row.branchNumber}</span> : null}
-            {row.branchNumber && row.subtitle ? <span className="text-[var(--sb-text-tertiary)]"> · </span> : null}
-            {row.subtitle ? <span className="text-[var(--sb-text-tertiary)]">{row.subtitle}</span> : null}
+            {row.branchNumber && row.city ? <span className="text-[var(--sb-text-tertiary)]"> · </span> : null}
+            {row.city ? <span className="text-[var(--sb-text-tertiary)]">{row.city}</span> : null}
           </div>
         ) : null}
       </div>
       <div className={`flex min-w-0 items-center gap-2 text-sm ${ui.text}`}>
-        <span className={`h-2 w-2 shrink-0 rounded-full ${ui.dot}`} aria-hidden />
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: DOT_FILL[status] }} aria-hidden />
         <span className="truncate">{ui.label}</span>
       </div>
       <DeviceType type={row.online ? row.live?.deviceType : undefined} />
       <div className="min-w-0 truncate text-sm text-[var(--sb-text-tertiary)]" title={nowPlaying || undefined}>
         {nowPlaying || "—"}
       </div>
-      {/* next step: opens full control of this branch (branchControlHref(row.id)) — not active yet */}
+      {/* next step: opens full control of this branch — not active yet */}
       <svg className="h-4 w-4 text-[var(--sb-text-tertiary)] opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="m9 18 6-6-6-6" />
       </svg>
