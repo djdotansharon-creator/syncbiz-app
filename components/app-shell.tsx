@@ -563,6 +563,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     // must fill the pane like Settings, not the narrow centered max-w-5xl.
     if (p.startsWith("/access-control")) return true;
     if (p.startsWith("/architecture")) return true;
+    // Control Room: the whole network on one screen (full width; the page scrolls on its own)
+    if (p.startsWith("/owner/control-room")) return true;
     return false;
   })();
   // Unified deck treatment: every desktop (app) route gets the media-theme

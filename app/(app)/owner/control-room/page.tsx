@@ -8,5 +8,10 @@ import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 export default async function ControlRoomPage() {
   const user = await getCurrentUserFromCookies();
   if (!user) redirect("/login?from=/owner/control-room");
-  return <AllBranchesView />;
+  // The app main area is a fixed-height region (overflow hidden on large screens) — this page scrolls on its own.
+  return (
+    <div className="h-full overflow-y-auto pb-6">
+      <AllBranchesView />
+    </div>
+  );
 }
