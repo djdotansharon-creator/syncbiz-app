@@ -5,17 +5,17 @@ import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
 
 /**
- * CONTROL ROOM — step 1: all branches in one place (read-only view).
+ * CONTROL ROOM — step 1: all branches in one place (read-only view), built to scale to hundreds of branches.
  *
  * Branch list = the workspace's branches from the database (`GET /api/branches`). Live status = the existing
- * owner_global WebSocket (`useRemoteOwner`): a branch is ONLINE when its station (MASTER) is connected, and its
- * playing state / title / artwork come from that station's last STATE_UPDATE. This view never sends a playback
- * command and never registers as a player — it cannot affect playback.
+ * owner_global WebSocket (`useRemoteOwner`): a branch is ONLINE when its station (MASTER) is connected; PLAYING comes
+ * from that station's last STATE_UPDATE. Primary per row: name + one status (Playing / Online · not playing / Offline);
+ * the song title is a secondary line. This view never sends a playback command and never registers as a player.
  */
 
 type DbBranch = { id: string; name: string; code?: string; city?: string; country?: string; status?: string };
 
-type Card = {
+type Row = {
   id: string;
   name: string;
   subtitle: string;
@@ -24,8 +24,22 @@ type Card = {
   state: StationPlaybackState | null;
 };
 
+type RowStatus = "playing" | "idle" | "offline" | "unknown";
+
+/** Next step (branch control): the per-branch route, keyed by the branch id. Not built yet — the row's chevron will
+ *  link here without changing the row structure. */
+export function branchControlHref(branchId: string): string {
+  return `/owner/control-room/${encodeURIComponent(branchId)}`;
+}
+
 /** The connected-station list is only sent on request — ask again so a station that drops shows Offline. */
 const LIVE_REFRESH_MS = 10_000;
+
+function rowStatus(row: Row, liveKnown: boolean): RowStatus {
+  if (!liveKnown) return "unknown";
+  if (!row.online) return "offline";
+  return row.state?.status === "playing" ? "playing" : "idle";
+}
 
 export function AllBranchesView() {
   const { branches: liveBranches, remoteStateByDeviceId, status, refreshBranchList } = useRemoteOwner();
@@ -54,9 +68,9 @@ export function AllBranchesView() {
 
   const liveKnown = status === "connected";
 
-  const cards: Card[] = useMemo(() => {
+  const rows: Row[] = useMemo(() => {
     const liveById = new Map(liveBranches.map((b) => [b.branchId, b] as const));
-    const out: Card[] = (dbBranches ?? []).map((b) => {
+    const out: Row[] = (dbBranches ?? []).map((b) => {
       const live = liveById.get(b.id) ?? null;
       liveById.delete(b.id);
       return {
@@ -82,146 +96,83 @@ export function AllBranchesView() {
     return out;
   }, [dbBranches, liveBranches, remoteStateByDeviceId]);
 
-  const onlineCount = cards.filter((c) => c.online).length;
-  const playingCount = cards.filter((c) => c.state?.status === "playing").length;
+  const onlineCount = rows.filter((r) => r.online).length;
+  const playingCount = rows.filter((r) => rowStatus(r, liveKnown) === "playing").length;
 
   return (
-    <div className="space-y-8">
-      <header className="flex flex-wrap items-end justify-between gap-4">
+    <div className="overflow-hidden rounded-2xl border border-[color:var(--sb-border)] bg-[var(--sb-surface)]">
+      <header className="flex items-center justify-between gap-4 border-b border-[color:var(--sb-border)] px-6 py-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-[var(--sb-text)]">Control Room</h1>
-          <p className="mt-1 text-sm text-[var(--sb-text-secondary)]">All your branches, live.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <SummaryPill label="Branches" value={dbBranches ? cards.length : "—"} />
-          <SummaryPill label="Online" value={liveKnown ? onlineCount : "—"} tone="online" />
-          <SummaryPill label="Playing" value={liveKnown ? playingCount : "—"} tone="accent" />
+          <h1 className="text-base font-semibold tracking-tight text-[var(--sb-text)]">Control Room</h1>
+          <p className="text-xs text-[var(--sb-text-tertiary)]">
+            {liveKnown ? "Your network, live" : status === "connecting" ? "Connecting to live status…" : "Live status unavailable — reconnecting…"}
+          </p>
         </div>
       </header>
 
-      {!liveKnown ? (
-        <p className="text-xs text-[var(--sb-text-tertiary)]">
-          {status === "connecting" ? "Connecting to live status…" : "Live status unavailable — reconnecting…"}
-        </p>
-      ) : null}
+      <div className="grid grid-cols-3 border-b border-[color:var(--sb-border)]">
+        <Stat value={dbBranches ? rows.length : "—"} label="Branches" />
+        <Stat value={liveKnown ? onlineCount : "—"} label="Online" dot="bg-emerald-400" />
+        <Stat value={liveKnown ? playingCount : "—"} label="Playing" dot="bg-[var(--sb-accent)]" last />
+      </div>
 
       {loadError ? (
-        <p className="text-sm text-[var(--sb-text-secondary)]">Could not load branches. Refresh the page to try again.</p>
+        <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">Could not load branches. Refresh the page to try again.</p>
       ) : dbBranches === null ? (
-        <p className="text-sm text-[var(--sb-text-secondary)]">Loading branches…</p>
+        <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">Loading branches…</p>
+      ) : rows.length === 0 ? (
+        <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">No branches yet.</p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {cards.map((c) => (
-            <BranchCard key={c.id} card={c} liveKnown={liveKnown} />
+        <ul className="divide-y divide-[color:var(--sb-border)]">
+          {rows.map((r) => (
+            <BranchRow key={r.id} row={r} status={rowStatus(r, liveKnown)} />
           ))}
-        </div>
+        </ul>
       )}
     </div>
   );
 }
 
-function SummaryPill({ label, value, tone }: { label: string; value: number | string; tone?: "online" | "accent" }) {
-  const valueColor = tone === "online" ? "text-emerald-400" : tone === "accent" ? "text-[var(--sb-accent)]" : "text-[var(--sb-text)]";
+function Stat({ value, label, dot, last }: { value: number | string; label: string; dot?: string; last?: boolean }) {
   return (
-    <div className="rounded-xl border border-[color:var(--sb-border)] bg-[var(--sb-surface)] px-3.5 py-2 text-center">
-      <div className={`text-lg font-semibold leading-none tabular-nums ${valueColor}`}>{value}</div>
-      <div className="mt-1 text-[10px] font-medium uppercase tracking-wider text-[var(--sb-text-tertiary)]">{label}</div>
+    <div className={`px-6 py-5 ${last ? "" : "border-r border-[color:var(--sb-border)]"}`}>
+      <div className="text-4xl font-bold leading-none tracking-tight tabular-nums text-[var(--sb-text)]">{value}</div>
+      <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--sb-text-secondary)]">
+        {dot ? <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden /> : null}
+        {label}
+      </div>
     </div>
   );
 }
 
-function playbackLabel(card: Card, liveKnown: boolean): { text: string; tone: "playing" | "paused" | "idle" | "unknown" } {
-  if (!liveKnown) return { text: "—", tone: "unknown" };
-  if (!card.online) return { text: "Not playing", tone: "idle" };
-  const s = card.state?.status;
-  if (s === "playing") return { text: "Playing", tone: "playing" };
-  if (s === "paused") return { text: "Paused", tone: "paused" };
-  if (s === "idle" || s === "stopped") return { text: "Not playing", tone: "idle" };
-  return { text: "Waiting for status", tone: "unknown" };
-}
+const STATUS_UI: Record<RowStatus, { label: string; dot: string; text: string }> = {
+  playing: { label: "Playing", dot: "bg-[var(--sb-accent)]", text: "text-[var(--sb-text)]" },
+  idle: { label: "Online · not playing", dot: "bg-emerald-400", text: "text-[var(--sb-text-secondary)]" },
+  offline: { label: "Offline", dot: "bg-[var(--sb-text-tertiary)]", text: "text-[var(--sb-text-tertiary)]" },
+  unknown: { label: "—", dot: "bg-white/20", text: "text-[var(--sb-text-tertiary)]" },
+};
 
-function BranchCard({ card, liveKnown }: { card: Card; liveKnown: boolean }) {
-  const pb = playbackLabel(card, liveKnown);
-  const title = card.state?.currentTrack?.title || card.state?.currentSource?.title || "";
-  const cover = card.state?.currentTrack?.cover || card.state?.currentSource?.cover || null;
-  const showNowPlaying = liveKnown && card.online && !!title && (pb.tone === "playing" || pb.tone === "paused");
+function BranchRow({ row, status }: { row: Row; status: RowStatus }) {
+  const ui = STATUS_UI[status];
+  // secondary only: what plays, one muted line (no artwork — light at hundreds of branches)
+  const nowPlaying = status === "playing" ? row.state?.currentTrack?.title || row.state?.currentSource?.title || "" : "";
   return (
-    <article
-      className={`relative overflow-hidden rounded-2xl border bg-[var(--sb-surface)] p-5 transition-colors ${
-        pb.tone === "playing" ? "border-[color:var(--sb-accent-border)]" : "border-[color:var(--sb-border)]"
-      }`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold text-[var(--sb-text)]">{card.name}</h2>
-          {card.subtitle ? <p className="mt-0.5 truncate text-xs text-[var(--sb-text-tertiary)]">{card.subtitle}</p> : null}
-        </div>
-        <ConnectionBadge online={card.online} liveKnown={liveKnown} />
+    <li data-branch-id={row.id} className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.4fr)_16px] items-center gap-4 px-6 py-3.5">
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold text-[var(--sb-text)]">{row.name}</div>
+        {row.subtitle ? <div className="truncate text-xs text-[var(--sb-text-tertiary)]">{row.subtitle}</div> : null}
       </div>
-
-      <div className="mt-5 flex items-center gap-3">
-        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-white/[0.06]">
-          {showNowPlaying && cover ? (
-            // eslint-disable-next-line @next/next/no-img-element -- remote artwork (YouTube / station covers), any host
-            <img src={cover} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center text-[var(--sb-text-tertiary)]" aria-hidden>
-              <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 18V5l12-2v13" />
-                <circle cx="6" cy="18" r="3" />
-                <circle cx="18" cy="16" r="3" />
-              </svg>
-            </div>
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <PlaybackBadge text={pb.text} tone={pb.tone} />
-          <p className="mt-1.5 truncate text-sm text-[var(--sb-text)]" title={showNowPlaying ? title : undefined}>
-            {showNowPlaying ? title : <span className="text-[var(--sb-text-tertiary)]">{card.online || !liveKnown ? "—" : "Station offline"}</span>}
-          </p>
-        </div>
+      <div className={`flex min-w-0 items-center gap-2 text-sm ${ui.text}`}>
+        <span className={`h-2 w-2 shrink-0 rounded-full ${ui.dot}`} aria-hidden />
+        <span className="truncate">{ui.label}</span>
       </div>
-    </article>
-  );
-}
-
-function ConnectionBadge({ online, liveKnown }: { online: boolean; liveKnown: boolean }) {
-  if (!liveKnown) {
-    return <span className="shrink-0 rounded-full bg-white/[0.06] px-2.5 py-1 text-[11px] font-medium text-[var(--sb-text-tertiary)]">—</span>;
-  }
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
-        online ? "bg-emerald-500/15 text-emerald-400" : "bg-white/[0.06] text-[var(--sb-text-secondary)]"
-      }`}
-    >
-      <span className={`h-1.5 w-1.5 rounded-full ${online ? "bg-emerald-400" : "bg-[var(--sb-text-tertiary)]"}`} aria-hidden />
-      {online ? "Online" : "Offline"}
-    </span>
-  );
-}
-
-function PlaybackBadge({ text, tone }: { text: string; tone: "playing" | "paused" | "idle" | "unknown" }) {
-  const cls =
-    tone === "playing"
-      ? "text-[var(--sb-accent)]"
-      : tone === "paused"
-        ? "text-amber-400"
-        : "text-[var(--sb-text-tertiary)]";
-  return (
-    <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider ${cls}`}>
-      {tone === "playing" ? <EqualizerIcon /> : null}
-      {text}
-    </span>
-  );
-}
-
-function EqualizerIcon() {
-  return (
-    <span className="inline-flex h-3 items-end gap-[2px]" aria-hidden>
-      <span className="w-[2px] animate-pulse rounded-sm bg-current" style={{ height: "60%" }} />
-      <span className="w-[2px] animate-pulse rounded-sm bg-current [animation-delay:150ms]" style={{ height: "100%" }} />
-      <span className="w-[2px] animate-pulse rounded-sm bg-current [animation-delay:300ms]" style={{ height: "45%" }} />
-    </span>
+      <div className="min-w-0 truncate text-sm text-[var(--sb-text-tertiary)]" title={nowPlaying || undefined}>
+        {nowPlaying || "—"}
+      </div>
+      {/* next step: opens full control of this branch (branchControlHref(row.id)) — not active yet */}
+      <svg className="h-4 w-4 text-[var(--sb-text-tertiary)] opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="m9 18 6-6-6-6" />
+      </svg>
+    </li>
   );
 }
