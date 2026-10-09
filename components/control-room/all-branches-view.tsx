@@ -161,7 +161,7 @@ function BranchRow({ row, status }: { row: Row; status: RowStatus }) {
   // secondary only: what plays, one muted line (no artwork — light at hundreds of branches)
   const nowPlaying = status === "playing" ? row.state?.currentTrack?.title || row.state?.currentSource?.title || "" : "";
   return (
-    <li data-branch-id={row.id} className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.4fr)_16px] items-center gap-4 px-6 py-3.5">
+    <li data-branch-id={row.id} className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.3fr)_16px] items-center gap-4 px-6 py-3.5">
       <div className="min-w-0">
         <div className="truncate text-sm font-semibold text-[var(--sb-text)]">{row.name}</div>
         {row.branchNumber || row.subtitle ? (
@@ -176,6 +176,7 @@ function BranchRow({ row, status }: { row: Row; status: RowStatus }) {
         <span className={`h-2 w-2 shrink-0 rounded-full ${ui.dot}`} aria-hidden />
         <span className="truncate">{ui.label}</span>
       </div>
+      <DeviceType type={row.online ? row.live?.deviceType : undefined} />
       <div className="min-w-0 truncate text-sm text-[var(--sb-text-tertiary)]" title={nowPlaying || undefined}>
         {nowPlaying || "—"}
       </div>
@@ -184,5 +185,25 @@ function BranchRow({ row, status }: { row: Row; status: RowStatus }) {
         <path d="m9 18 6-6-6-6" />
       </svg>
     </li>
+  );
+}
+
+const DEVICE_LABEL: Record<"computer" | "streamer" | "browser", string> = { computer: "Computer", streamer: "Streamer", browser: "Browser" };
+
+/** The kind of device playing in the branch (info only; shown while the station is online). */
+function DeviceType({ type }: { type?: "computer" | "streamer" | "browser" | "unknown" }) {
+  if (!type || type === "unknown") return <span className="text-sm text-[var(--sb-text-tertiary)]">—</span>;
+  const common = { className: "h-4 w-4 shrink-0", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  return (
+    <span className="flex min-w-0 items-center gap-1.5 text-sm text-[var(--sb-text-secondary)]">
+      {type === "computer" ? (
+        <svg {...common}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>
+      ) : type === "streamer" ? (
+        <svg {...common}><rect x="2" y="7" width="20" height="10" rx="2" /><path d="M6 12h.01M10 12h.01" /></svg>
+      ) : (
+        <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
+      )}
+      <span className="truncate">{DEVICE_LABEL[type]}</span>
+    </span>
   );
 }

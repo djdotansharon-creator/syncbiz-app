@@ -636,6 +636,15 @@ function sendInitialStateToController(ws: import("ws").WebSocket, roomKey: strin
   });
 }
 
+/** Control Room (info only): the playing station's device kind, from its registration purpose. Never used for routing. */
+function stationDeviceType(conn: DeviceConnection): "computer" | "streamer" | "browser" | "unknown" {
+  const purpose = conn.registrationIntent?.devicePurpose;
+  if (purpose === "branch_desktop_station") return "computer";
+  if (purpose === "branch_streamer_station") return "streamer";
+  if (purpose === "branch_web_station") return "browser";
+  return "unknown";
+}
+
 /** Build branch list for an owner: branches with a connected MASTER device in the owner's WORKSPACE scope. */
 function getBranchListForOwner(owner: OwnerEntry): BranchSummary[] {
   const branches: BranchSummary[] = [];
@@ -657,6 +666,7 @@ function getBranchListForOwner(owner: OwnerEntry): BranchSummary[] {
       masterDeviceId: conn.id,
       connectedAt: conn.connectedAt,
       hasDevices: deviceCount > 0,
+      deviceType: stationDeviceType(conn),
     });
   });
   return branches;

@@ -158,6 +158,8 @@ export type BranchSummary = {
   masterDeviceId: string;
   connectedAt: string;
   hasDevices: boolean;
+  /** Control Room (info only): what kind of device is the branch's playing station — from its registration purpose. */
+  deviceType?: "computer" | "streamer" | "browser" | "unknown";
 };
 
 /** Guest recommendation payload (minimal, for transport) */
