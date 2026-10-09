@@ -8,6 +8,18 @@
 
 ## 1. STATUS
 
+- **🟡 PRESENTATION LOCK (owner 2026-10-09).** 4 tracks: (1) PLAYER / STATION — FROZEN (owner-approved critical fixes
+  only); (2) CONTROL ROOM; (3) DESIGN / UX; (4) AFTER PRESENTATION (synced video always-on without the SYNC button, URL
+  load latency, Play Now, equal-power mix, station speed, now-playing frame, external screen). TEST only, PROD untouched.
+  beta.21 restart: owner-attested PARTIAL 2026-10-09 (resumes the last song after a Windows restart); offline boot /
+  LOCAL→URL on network return / video not yet tested → not a full PASS.
+- **🟡 CONTROL ROOM step 1 — ALL BRANCHES — TEST candidate (2026-10-09), NOT yet accepted.** Head `14b6d24` (local, NOT
+  pushed). RENDERER ONLY. `/owner/control-room` ("Control Room" in the menu): one card per DB branch + live status from
+  the existing owner_global socket (Online/Offline, Playing/Paused/Not playing, title + artwork, counters). Read-only; no
+  playback file changed. TEST app deployment `dc618344-80a9-4143-95be-e5fd2d3b8c9a` (clean worktree `14b6d24`; view /
+  app-shell / ws-client hash-identical). Installer unchanged (beta.21). Known: a paused station shows "Waiting for status"
+  until its next state update (server first-paint fix = separate approval).
+
 - **✅ P0 PLAYBACK CONTINUITY + DROP NEXT + URL→URL MIX — ACCEPTED — owner-attested 2026-10-08 (Lenovo, beta.18 + TEST app 414d3564):** ~5 h continuous run, playback never stopped, Drop Next works, URL→URL mix works well. Not independently log-verified by Claude. OPEN before the playback baseline lock: real A/V video sync (built for future external-screen output) + restart restore (Gate 2d). Control Room waits for both. Candidate record:
 - **🟡 P0 VIDEO V1 — SYNCED VIDEO (picture + sound from the SAME MPV player) — RUNTIME CANDIDATE ON TEST (2026-10-09),
   NOT yet accepted.** Head `65c13c0` (local, NOT pushed; on top of the Gate 2d candidate `943f23f`). DESKTOP MAIN +
