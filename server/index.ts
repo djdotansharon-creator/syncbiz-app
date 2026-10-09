@@ -645,6 +645,15 @@ function stationDeviceType(conn: DeviceConnection): "computer" | "streamer" | "b
   return "unknown";
 }
 
+/** Control Room (info only): the branch of the room this station was routed into at REGISTER — the canonical id when
+ *  its alias is active (room key = `ws:<workspace>:<branch>` / `legacy:<user>:<branch>`). Reads the existing routing
+ *  result; never resolves routing itself. */
+function roomBranchId(conn: DeviceConnection, fallback: string): string {
+  const key = conn.roomKey ?? "";
+  const i = key.lastIndexOf(":");
+  return i >= 0 && i < key.length - 1 ? key.slice(i + 1) : fallback;
+}
+
 /** Build branch list for an owner: branches with a connected MASTER device in the owner's WORKSPACE scope. */
 function getBranchListForOwner(owner: OwnerEntry): BranchSummary[] {
   const branches: BranchSummary[] = [];
@@ -667,7 +676,7 @@ function getBranchListForOwner(owner: OwnerEntry): BranchSummary[] {
       connectedAt: conn.connectedAt,
       hasDevices: deviceCount > 0,
       deviceType: stationDeviceType(conn),
-      canonicalBranchId: routingBranch(conn.workspaceId, branchId),
+      canonicalBranchId: roomBranchId(conn, branchId),
     });
   });
   return branches;
