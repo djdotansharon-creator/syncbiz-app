@@ -654,6 +654,20 @@ function roomBranchId(conn: DeviceConnection, fallback: string): string {
   return i >= 0 && i < key.length - 1 ? key.slice(i + 1) : fallback;
 }
 
+/** Control Room (info only): what is connected to this station's room — the playing station, other devices (phone /
+ *  tablet / computer / browser) and remote controllers. Role + kind only; no ids, never used for routing. */
+function roomDevicesInfo(master: DeviceConnection): NonNullable<BranchSummary["devices"]> {
+  const out: NonNullable<BranchSummary["devices"]> = [];
+  devices.forEach((d) => {
+    if (d.roomKey !== master.roomKey || d.ws.readyState !== 1) return;
+    out.push({ role: d === master ? "playing" : "control", type: d.isMobile ? "phone_tablet" : stationDeviceType(d) });
+  });
+  for (const c of controllers) {
+    if (c.roomKey === master.roomKey && c.ws.readyState === 1) out.push({ role: "control", type: "remote" });
+  }
+  return out;
+}
+
 /** Build branch list for an owner: branches with a connected MASTER device in the owner's WORKSPACE scope. */
 function getBranchListForOwner(owner: OwnerEntry): BranchSummary[] {
   const branches: BranchSummary[] = [];
@@ -677,6 +691,7 @@ function getBranchListForOwner(owner: OwnerEntry): BranchSummary[] {
       hasDevices: deviceCount > 0,
       deviceType: stationDeviceType(conn),
       canonicalBranchId: roomBranchId(conn, branchId),
+      devices: roomDevicesInfo(conn),
     });
   });
   return branches;

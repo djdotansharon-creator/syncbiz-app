@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
 import { BranchMap, DOT_FILL, type MapDotStatus } from "@/components/control-room/branch-map";
+import { BranchPanel } from "@/components/control-room/branch-panel";
 
 /**
  * CONTROL ROOM — all branches in one place: counters, a map of the network and the branch list (read-only view).
@@ -39,11 +40,6 @@ type Row = {
 
 type RowStatus = MapDotStatus;
 
-/** Next step (branch control): the per-branch route, keyed by the branch id. Not built yet. */
-export function branchControlHref(branchId: string): string {
-  return `/owner/control-room/${encodeURIComponent(branchId)}`;
-}
-
 /** The connected-station list is only sent on request — ask again so a station that drops shows Offline. */
 const LIVE_REFRESH_MS = 10_000;
 
@@ -55,10 +51,13 @@ function rowStatus(row: Row, liveKnown: boolean): RowStatus {
 }
 
 export function AllBranchesView() {
-  const { branches: liveBranches, remoteStateByDeviceId, status, refreshBranchList } = useRemoteOwner();
+  const { branches: liveBranches, remoteStateByDeviceId, status, refreshBranchList, sendCommandTo } = useRemoteOwner();
   const [dbBranches, setDbBranches] = useState<DbBranch[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** part 2: the branch whose control panel is open (row / arrow / map dot) */
+  const [openId, setOpenId] = useState<string | null>(null);
+  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); };
 
   useEffect(() => {
     let cancelled = false;
@@ -151,20 +150,36 @@ export function AllBranchesView() {
             <BranchMap
               branches={rows.map((r) => ({ id: r.id, name: r.name, city: r.city, status: rowStatus(r, liveKnown) }))}
               selectedId={selectedId}
-              onSelect={setSelectedId}
+              onSelect={openBranch}
             />
           </div>
-          <ul className="max-h-[640px] divide-y divide-[color:var(--sb-border)] overflow-y-auto">
-            {rows.map((r) => (
-              <BranchRow
-                key={r.id}
-                row={r}
-                status={rowStatus(r, liveKnown)}
-                selected={r.id === selectedId}
-                onSelect={() => setSelectedId(r.id)}
-              />
-            ))}
-          </ul>
+          {(() => {
+            const open = openId ? rows.find((r) => r.id === openId) : undefined;
+            if (open) {
+              return (
+                <div className="max-h-[640px] overflow-y-auto">
+                  <BranchPanel
+                    branch={{ id: open.id, name: open.name, branchNumber: open.branchNumber, city: open.city, status: rowStatus(open, liveKnown), live: open.live, state: open.state }}
+                    onBack={() => setOpenId(null)}
+                    sendCommandTo={sendCommandTo}
+                  />
+                </div>
+              );
+            }
+            return (
+              <ul className="max-h-[640px] divide-y divide-[color:var(--sb-border)] overflow-y-auto">
+                {rows.map((r) => (
+                  <BranchRow
+                    key={r.id}
+                    row={r}
+                    status={rowStatus(r, liveKnown)}
+                    selected={r.id === selectedId}
+                    onSelect={() => openBranch(r.id)}
+                  />
+                ))}
+              </ul>
+            );
+          })()}
         </div>
       )}
     </div>
@@ -223,8 +238,8 @@ function BranchRow({ row, status, selected, onSelect }: { row: Row; status: RowS
       <div className="min-w-0 truncate text-sm text-[var(--sb-text-tertiary)]" title={nowPlaying || undefined}>
         {nowPlaying || "—"}
       </div>
-      {/* next step: opens full control of this branch — not active yet */}
-      <svg className="h-4 w-4 text-[var(--sb-text-tertiary)] opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      {/* opens the branch control panel (the whole row is clickable) */}
+      <svg className="h-4 w-4 text-[var(--sb-text-secondary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="m9 18 6-6-6-6" />
       </svg>
     </li>

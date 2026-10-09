@@ -903,6 +903,18 @@ export function useRemoteOwner() {
     ws.send(JSON.stringify({ type: "COMMAND", targetBranchId: bid, command, payload } as ClientMessage));
   };
 
+  /** Control Room: same COMMAND as sendCommand, with an explicit target branch (the raw branchId from BRANCH_LIST). */
+  const sendCommandTo = (
+    targetBranchId: string,
+    command: RemoteCommand,
+    payload?: { volume?: number },
+  ) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== 1 || !targetBranchId) return false;
+    ws.send(JSON.stringify({ type: "COMMAND", targetBranchId, command, payload } as ClientMessage));
+    return true;
+  };
+
   const selectedBranch = branches.find((b) => b.branchId === selectedBranchId);
   const remoteState = selectedBranch ? remoteStateByDeviceId[selectedBranch.masterDeviceId] ?? null : null;
 
@@ -916,6 +928,7 @@ export function useRemoteOwner() {
     remoteStateByDeviceId,
     status,
     sendCommand,
+    sendCommandTo,
     refreshBranchList,
   };
 }

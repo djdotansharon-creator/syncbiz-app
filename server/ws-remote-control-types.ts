@@ -104,6 +104,8 @@ export type BranchSummary = {
   /** Control Room (info only): the branch's canonical id (the DB Branch.id) when the station registered with a legacy
    *  alias (e.g. "default"). branchId stays the raw id used by COMMAND routing — unchanged. */
   canonicalBranchId?: string;
+  /** Control Room (info only): devices connected to the branch room — role + kind only (no ids). */
+  devices?: Array<{ role: "playing" | "control"; type: "computer" | "streamer" | "browser" | "phone_tablet" | "remote" | "unknown" }>;
 };
 
 export type GuestRecommendationPayload = {
