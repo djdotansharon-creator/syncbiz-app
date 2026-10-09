@@ -133,6 +133,8 @@ export type ClientMessage =
   | { type: "BRANCH_LIST_REQUEST" }
   | {
       type: "COMMAND";
+      /** Control Room: ask for a COMMAND_DELIVERY (owner_global only). Without it the server behaves exactly as before. */
+      requestId?: string;
       targetDeviceId?: string;
       targetBranchId?: string;
       command: RemoteCommand;
@@ -198,4 +200,7 @@ export type ServerMessage =
       action?: "created" | "updated" | "deleted";
       entityId?: string;
     }
-  | { type: "ERROR"; message: string };
+  | { type: "ERROR"; message: string }
+  /** Control Room broadcast: per-command delivery result for an owner COMMAND that carried `requestId` (info only).
+   *  delivered = the command was handed to the branch's station socket — NOT that it played. */
+  | { type: "COMMAND_DELIVERY"; requestId: string; targetBranchId: string; delivered: boolean; reason?: "not_authorized" | "no_station" };

@@ -705,6 +705,8 @@ export function useRemoteOwner() {
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const statusRef = useRef(status);
   const lastAuthFailureAtRef = useRef<number>(0);
+  /** Control Room broadcast: COMMAND_DELIVERY waiters by requestId */
+  const ackWaitersRef = useRef(new Map<string, (r: { delivered: boolean; reason?: string }) => void>());
   statusRef.current = status;
 
   const tryReconnect = () => {
@@ -820,6 +822,10 @@ export function useRemoteOwner() {
           setSelectedBranchId((prev) => (prev ? prev : data.branches[0]?.branchId ?? null));
         } else if (data.type === "STATE_UPDATE") {
           setRemoteStateByDeviceId((prev) => ({ ...prev, [data.deviceId]: data.state }));
+        } else if (data.type === "COMMAND_DELIVERY") {
+          // Control Room broadcast: per-branch delivery result
+          const done = ackWaitersRef.current.get(data.requestId);
+          if (done) { ackWaitersRef.current.delete(data.requestId); done({ delivered: data.delivered, reason: data.reason }); }
         } else if (data.type === "LIBRARY_UPDATED") {
           if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("library-updated"));
         }
@@ -830,6 +836,9 @@ export function useRemoteOwner() {
 
     ws.onclose = (ev) => {
       if (ev.code === 4005 || ev.code === 4004) tryAuthRecovery();
+      // pending broadcast answers can no longer arrive on this socket
+      for (const done of ackWaitersRef.current.values()) done({ delivered: false, reason: "not_connected" });
+      ackWaitersRef.current.clear();
       setStatus("disconnected");
       setBranches([]);
       setRemoteStateByDeviceId({});
@@ -903,6 +912,29 @@ export function useRemoteOwner() {
     ws.send(JSON.stringify({ type: "COMMAND", targetBranchId: bid, command, payload } as ClientMessage));
   };
 
+  /**
+   * Control Room broadcast: send a COMMAND and wait for the server's per-branch COMMAND_DELIVERY.
+   * delivered = handed to the branch's station (NOT "played"). No answer within timeoutMs → not delivered.
+   */
+  const sendCommandWithAck = (
+    targetBranchId: string,
+    command: RemoteCommand,
+    payload?: { url?: string },
+    timeoutMs = 6000,
+  ): Promise<{ delivered: boolean; reason?: string }> => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== 1 || !targetBranchId) return Promise.resolve({ delivered: false, reason: "not_connected" });
+    const requestId = `cr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        ackWaitersRef.current.delete(requestId);
+        resolve({ delivered: false, reason: "no_response" });
+      }, timeoutMs);
+      ackWaitersRef.current.set(requestId, (r) => { clearTimeout(timer); resolve(r); });
+      ws.send(JSON.stringify({ type: "COMMAND", requestId, targetBranchId, command, payload } as ClientMessage));
+    });
+  };
+
   /** Control Room: same COMMAND as sendCommand, with an explicit target branch (the raw branchId from BRANCH_LIST). */
   const sendCommandTo = (
     targetBranchId: string,
@@ -929,6 +961,7 @@ export function useRemoteOwner() {
     status,
     sendCommand,
     sendCommandTo,
+    sendCommandWithAck,
     refreshBranchList,
   };
 }

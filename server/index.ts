@@ -1568,11 +1568,21 @@ wss.on("connection", (ws) => {
       let masterId: string | null = null;
       // The command may ONLY reach a MASTER in this exact room (workspace+branch) — never cross rooms.
       let expectedRoomKey: string | null = null;
+      // Control Room broadcast: an owner COMMAND with a requestId gets a COMMAND_DELIVERY instead of a socket-closing ERROR,
+      // so one unavailable branch never stops the others. Without requestId nothing changes.
+      const ackId = role === "owner_global" && typeof msg.requestId === "string" && msg.requestId.trim() ? msg.requestId.trim().slice(0, 64) : null;
+      const ackBranch = (msg.targetBranchId ?? "").trim() || DEFAULT_BRANCH_ID;
+      const sendAck = (delivered: boolean, reason?: "not_authorized" | "no_station") => {
+        if (ackId && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: "COMMAND_DELIVERY", requestId: ackId, targetBranchId: ackBranch, delivered, ...(reason ? { reason } : {}) } as ServerMessage));
+        }
+      };
       if (role === "owner_global") {
         const owner = owners.find((o) => o.ws === ws);
         const targetBranchId = (msg.targetBranchId ?? "").trim() || DEFAULT_BRANCH_ID;
         // Phase 1: an owner may only target a branch present in its token claim.
         if (!owner || !isBranchAllowed(targetBranchId, owner.authorizedBranches)) {
+          if (ackId) { sendAck(false, "not_authorized"); return; }
           ws.send(JSON.stringify({ type: "ERROR", message: "Branch not authorized" } as ServerMessage));
           return;
         }
@@ -1591,6 +1601,7 @@ wss.on("connection", (ws) => {
       // Room-isolation guard: target must be a MASTER whose room === expectedRoomKey (blocks cross-room
       // targetDeviceId escape). expectedRoomKey null (no room) → rejected.
       if (!expectedRoomKey || !commandTargetInRoom(expectedRoomKey, target)) {
+        if (ackId) { sendAck(false, "no_station"); return; }
         ws.send(JSON.stringify({ type: "ERROR", message: "No MASTER device" } as ServerMessage));
         return;
       }
@@ -1605,6 +1616,9 @@ wss.on("connection", (ws) => {
         (role === "device" && deviceId && target!.id === masterId);
       if (canSend && target!.ws.readyState === 1) {
         target!.ws.send(JSON.stringify(cmd));
+        sendAck(true);
+      } else {
+        sendAck(false, "no_station");
       }
     }
   });

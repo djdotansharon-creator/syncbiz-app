@@ -5,6 +5,7 @@ import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
 import { BranchMap, DOT_FILL, type MapDotStatus } from "@/components/control-room/branch-map";
 import { BranchPanel } from "@/components/control-room/branch-panel";
+import { BroadcastPanel } from "@/components/control-room/broadcast-panel";
 
 /**
  * CONTROL ROOM — all branches in one place: counters, a map of the network and the branch list (read-only view).
@@ -51,13 +52,14 @@ function rowStatus(row: Row, liveKnown: boolean): RowStatus {
 }
 
 export function AllBranchesView() {
-  const { branches: liveBranches, remoteStateByDeviceId, status, refreshBranchList, sendCommandTo } = useRemoteOwner();
+  const { branches: liveBranches, remoteStateByDeviceId, status, refreshBranchList, sendCommandTo, sendCommandWithAck } = useRemoteOwner();
   const [dbBranches, setDbBranches] = useState<DbBranch[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** part 2: the branch whose control panel is open (row / arrow / map dot) */
   const [openId, setOpenId] = useState<string | null>(null);
-  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); };
+  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setBroadcastOpen(false); };
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,6 +131,17 @@ export function AllBranchesView() {
             {liveKnown ? "Your network, live" : status === "connecting" ? "Connecting to live status…" : "Live status unavailable — reconnecting…"}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => { setOpenId(null); setBroadcastOpen(true); }}
+          disabled={!liveKnown || !dbBranches}
+          className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black transition-transform active:scale-95 disabled:opacity-40"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="12" cy="12" r="2" /><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14" />
+          </svg>
+          Broadcast
+        </button>
       </header>
 
       <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-4">
@@ -154,6 +167,20 @@ export function AllBranchesView() {
             />
           </div>
           {(() => {
+            if (broadcastOpen) {
+              return (
+                <div className="max-h-[640px] overflow-y-auto">
+                  <BroadcastPanel
+                    targets={rows.map((r) => {
+                      const st = rowStatus(r, liveKnown);
+                      return { id: r.id, name: r.name, branchNumber: r.branchNumber, status: st, liveBranchId: r.live && (st === "playing" || st === "idle") ? r.live.branchId : null };
+                    })}
+                    onClose={() => setBroadcastOpen(false)}
+                    sendCommandWithAck={sendCommandWithAck}
+                  />
+                </div>
+              );
+            }
             const open = openId ? rows.find((r) => r.id === openId) : undefined;
             if (open) {
               return (
