@@ -37,8 +37,10 @@ function rowToBranch(row: {
   id: string; workspaceId: string; name: string; code: string;
   timezone: string; city: string; country: string; status: string;
   devicesOnline: number; devicesTotal: number;
+  locationCode?: string | null;
 }): Branch {
   return {
+    locationCode: row.locationCode ?? null,
     id: row.id,
     accountId: row.workspaceId,
     name: row.name,

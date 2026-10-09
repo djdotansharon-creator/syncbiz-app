@@ -13,11 +13,13 @@ import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/t
  * the song title is a secondary line. This view never sends a playback command and never registers as a player.
  */
 
-type DbBranch = { id: string; name: string; code?: string; city?: string; country?: string; status?: string };
+type DbBranch = { id: string; name: string; code?: string; city?: string; country?: string; status?: string; locationCode?: string | null };
 
 type Row = {
   id: string;
   name: string;
+  /** customer branch number (locationCode) — secondary but clear */
+  branchNumber: string | null;
   subtitle: string;
   online: boolean;
   live: BranchSummary | null;
@@ -76,7 +78,8 @@ export function AllBranchesView() {
       return {
         id: b.id,
         name: b.name || b.code || "Branch",
-        subtitle: [b.code, b.city].filter(Boolean).join(" · "),
+        branchNumber: typeof b.locationCode === "string" && b.locationCode.trim() ? b.locationCode.trim() : null,
+        subtitle: b.city ?? "",
         online: !!live,
         live,
         state: live ? remoteStateByDeviceId[live.masterDeviceId] ?? null : null,
@@ -87,6 +90,7 @@ export function AllBranchesView() {
       out.push({
         id: live.branchId,
         name: live.branchName ?? "Connected station",
+        branchNumber: null,
         subtitle: "Not linked to a branch record",
         online: true,
         live,
@@ -160,7 +164,13 @@ function BranchRow({ row, status }: { row: Row; status: RowStatus }) {
     <li data-branch-id={row.id} className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.4fr)_16px] items-center gap-4 px-6 py-3.5">
       <div className="min-w-0">
         <div className="truncate text-sm font-semibold text-[var(--sb-text)]">{row.name}</div>
-        {row.subtitle ? <div className="truncate text-xs text-[var(--sb-text-tertiary)]">{row.subtitle}</div> : null}
+        {row.branchNumber || row.subtitle ? (
+          <div className="truncate text-xs text-[var(--sb-text-secondary)]">
+            {row.branchNumber ? <span className="font-medium tabular-nums">Branch {row.branchNumber}</span> : null}
+            {row.branchNumber && row.subtitle ? <span className="text-[var(--sb-text-tertiary)]"> · </span> : null}
+            {row.subtitle ? <span className="text-[var(--sb-text-tertiary)]">{row.subtitle}</span> : null}
+          </div>
+        ) : null}
       </div>
       <div className={`flex min-w-0 items-center gap-2 text-sm ${ui.text}`}>
         <span className={`h-2 w-2 shrink-0 rounded-full ${ui.dot}`} aria-hidden />

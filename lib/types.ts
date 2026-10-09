@@ -73,6 +73,8 @@ export type Branch = {
   status: BranchStatus;
   devicesOnline: number;
   devicesTotal: number;
+  /** Stable customer branch number (Control Room identifier, e.g. "T001"); null when not set. */
+  locationCode?: string | null;
 };
 
 export type Device = {
