@@ -109,6 +109,16 @@ function IconLogs() {
     </svg>
   );
 }
+function IconControlRoom() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </svg>
+  );
+}
 function IconOwner() {
   return (
     <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -232,6 +242,7 @@ const mainMenuIconMap: Record<string, () => React.ReactElement> = {
   favorites: IconFavorites,
   remote: IconRemote,
   owner: IconOwner,
+  controlRoom: IconControlRoom,
   schedules: IconSchedules,
   logs: IconLogs,
   settings: IconSettings,
@@ -244,6 +255,7 @@ const navKeys = [
   "radio",
   "favorites",
   "remote",
+  "controlRoom",
   "owner",
   "schedules",
   "logs",
@@ -252,7 +264,7 @@ const navKeys = [
   "architecture",
 ] as const;
 const navItems = navKeys.map((key) => ({
-  href: key === "dashboard" ? "/dashboard" : key === "remote" ? "/mobile" : key === "owner" ? "/owner" : `/${key}`,
+  href: key === "dashboard" ? "/dashboard" : key === "remote" ? "/mobile" : key === "owner" ? "/owner" : key === "controlRoom" ? "/owner/control-room" : `/${key}`,
   labelKey: key === "sources" ? "library" : key,
 }));
 
@@ -778,7 +790,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       const isActive =
         item.href === "/dashboard"
           ? pathname === "/dashboard"
-          : pathname.startsWith(item.href);
+          : item.href === "/owner"
+            ? pathname.startsWith("/owner") && !pathname.startsWith("/owner/control-room") // Control Room has its own entry
+            : pathname.startsWith(item.href);
       return {
         key: item.href,
         href: item.href,

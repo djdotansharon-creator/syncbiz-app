@@ -912,6 +912,8 @@ export function useRemoteOwner() {
     setSelectedBranchId,
     selectedBranch,
     remoteState,
+    /** Control Room: last STATE_UPDATE per MASTER device (all authorised branches) — read-only view of existing state. */
+    remoteStateByDeviceId,
     status,
     sendCommand,
     refreshBranchList,
