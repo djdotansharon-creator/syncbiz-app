@@ -101,6 +101,9 @@ export type BranchSummary = {
   hasDevices: boolean;
   /** Control Room (info only): what kind of device is the branch's playing station — from its registration purpose. */
   deviceType?: "computer" | "streamer" | "browser" | "unknown";
+  /** Control Room (info only): the branch's canonical id (the DB Branch.id) when the station registered with a legacy
+   *  alias (e.g. "default"). branchId stays the raw id used by COMMAND routing — unchanged. */
+  canonicalBranchId?: string;
 };
 
 export type GuestRecommendationPayload = {

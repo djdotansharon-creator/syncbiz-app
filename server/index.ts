@@ -667,6 +667,7 @@ function getBranchListForOwner(owner: OwnerEntry): BranchSummary[] {
       connectedAt: conn.connectedAt,
       hasDevices: deviceCount > 0,
       deviceType: stationDeviceType(conn),
+      canonicalBranchId: routingBranch(conn.workspaceId, branchId),
     });
   });
   return branches;

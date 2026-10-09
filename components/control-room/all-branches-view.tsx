@@ -71,7 +71,8 @@ export function AllBranchesView() {
   const liveKnown = status === "connected";
 
   const rows: Row[] = useMemo(() => {
-    const liveById = new Map(liveBranches.map((b) => [b.branchId, b] as const));
+    // join on the canonical branch id (a station may register with a legacy alias such as "default")
+    const liveById = new Map(liveBranches.map((b) => [b.canonicalBranchId || b.branchId, b] as const));
     const out: Row[] = (dbBranches ?? []).map((b) => {
       const live = liveById.get(b.id) ?? null;
       liveById.delete(b.id);
@@ -88,7 +89,7 @@ export function AllBranchesView() {
     // a connected station whose branch is not in the list (legacy id) — still shown, never hidden
     for (const live of liveById.values()) {
       out.push({
-        id: live.branchId,
+        id: live.canonicalBranchId || live.branchId,
         name: live.branchName ?? "Connected station",
         branchNumber: null,
         subtitle: "Not linked to a branch record",
