@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { useDesktopActivation } from "@/lib/use-desktop-activation";
+import { StationActivationGate } from "@/components/station-activation-gate";
 import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
 import { useLibraryTheme } from "@/lib/library-theme-context";
@@ -1349,6 +1350,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       data-control-room={isControlRoomMode ? "true" : undefined}
       data-native-fullscreen={isNativeFullscreen ? "true" : undefined}
     >
+      {/* Station B1: desktop-only "Activate this station" (never shown on a designated station) */}
+      <StationActivationGate />
       {/*
        * Desktop sidebar intentionally removed. All its navigation entries now
        * live in the top bar (Library + Radio pinned) and in the floating

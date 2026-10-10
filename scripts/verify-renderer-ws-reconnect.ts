@@ -111,9 +111,13 @@ assert("online is an immediate retry trigger; focus/visibility/pageshow kept",
   /window\.addEventListener\("focus", onFocus\);/.test(hook) && /document\.addEventListener\("visibilitychange", onVisible\);/.test(hook));
 assert("controller / owner hooks untouched by this change", !/reconnectSchedulerRef|createReconnectScheduler\(/.test(ws.slice(hookEnd)));
 
-// ── H: REGISTER payload unchanged (embedded renderer = CONTROL-only, branch "default") ───────────────────────
+// ── H: REGISTER payload (embedded renderer = CONTROL-only). Station B1 (2026-10-11, owner-approved): the branch is
+// the station branch identity (lib/station-branch.ts) — "default" for every never-activated station (the Lenovo) and
+// every browser, exactly as before; an activated station uses its own branch. (Regex adjusted, invariant kept.)
+const stationBranchSrc = read("lib", "station-branch.ts");
 assert("H device REGISTER still flags the packaged desktop renderer as embeddedRenderer (server forces CONTROL)",
-  /embeddedRenderer: options\?\.isDesktopApp === true,/.test(hook) && /branchId: "default",/.test(hook));
+  /embeddedRenderer: options\?\.isDesktopApp === true,/.test(hook) && /branchId: stationBranch,/.test(hook) &&
+  /export const LEGACY_STATION_BRANCH = "default";/.test(stationBranchSrc) && /if \(!hasDesktopBridge\(\)\) return LEGACY_STATION_BRANCH;/.test(stationBranchSrc));
 const server = read("server", "index.ts");
 assert("H server still forces an embedded renderer to CONTROL",
   /embeddedRenderer/.test(server) && /permanent designation: embedded renderer -> CONTROL/.test(server));

@@ -15,6 +15,7 @@ import {
   registrationIntentOwnerGlobal,
 } from "@/lib/syncbiz-device-model";
 import { isPhoneUa, isTabletUa } from "@/lib/ua-detection";
+import { useStationBranchId } from "@/lib/station-branch";
 
 export function getWsUrl(): string {
   if (typeof window === "undefined") return "";
@@ -171,6 +172,8 @@ export function useRemoteControlWs(
   // armed only by a NON-intentional socket close; it reconnects only when no socket is OPEN/CONNECTING.
   // Created per mount (StrictMode-safe) and declared BEFORE the socket effect so it exists when that runs.
   const reconnectSchedulerRef = useRef<ReturnType<typeof createReconnectScheduler> | null>(null);
+  // Station B1: the branch room of THIS screen (= this computer's MAIN branch; "default" when never activated).
+  const stationBranch = useStationBranchId();
   useEffect(() => {
     const scheduler = createReconnectScheduler({
       onFire: () => {
@@ -194,6 +197,7 @@ export function useRemoteControlWs(
   // auth error, which is listed in deps explicitly.
   useEffect(() => {
     if (role === "device" && !deviceId) return;
+    if (!stationBranch) return; // desktop bridge not answered yet (≤3 s) — never register a guessed branch
     const authToken = options?.authToken?.trim();
     if (!authToken) {
       if (process.env.NODE_ENV === "development") {
@@ -235,7 +239,7 @@ export function useRemoteControlWs(
               authToken,
               deviceId: deviceId ?? undefined,
               isMobile,
-              branchId: "default",
+              branchId: stationBranch,
               registrationIntent,
               // Packaged-Electron hosted renderer = CONTROL/mirror only, never a station MASTER.
               embeddedRenderer: options?.isDesktopApp === true,
@@ -244,7 +248,7 @@ export function useRemoteControlWs(
               type: "REGISTER",
               role: "controller",
               authToken,
-              branchId: "default",
+              branchId: stationBranch,
               registrationIntent: registrationIntentBranchController(isPhone),
             };
       ws.send(JSON.stringify(msg));
@@ -353,7 +357,7 @@ export function useRemoteControlWs(
   // transitions present ↔ absent (e.g. real auth error + `setWsToken(null)`
   // in `onAuthError` + refetch) or `reconnectTrigger` below.
   // The latest JWT is read from `options?.authToken` when this effect body runs.
-  }, [role, deviceId, !!options?.authToken, reconnectTrigger]);
+  }, [role, deviceId, !!options?.authToken, reconnectTrigger, stationBranch]);
 
   // Branch device: reconnect when the user returns to the app (also mirrors
   // `useRemoteController` / owner).
@@ -470,6 +474,7 @@ export function useRemoteController(options?: {
   const onGuestRecommendationRef = useRef(options?.onGuestRecommendation);
   statusRef.current = status;
   onGuestRecommendationRef.current = options?.onGuestRecommendation;
+  const stationBranch = useStationBranchId(); // Station B1: same branch identity as the device socket
 
   useEffect(() => {
     let cancelled = false;
@@ -539,6 +544,7 @@ export function useRemoteController(options?: {
     const url = getWsUrl();
     const authToken = (wsToken ?? "").trim();
     if (!url) return;
+    if (!stationBranch) return;
     if (!authToken) {
       if (process.env.NODE_ENV === "development") {
         console.info("[SyncBiz WS client] reconnect aborted because token unavailable", { role: "controller" });
@@ -561,7 +567,7 @@ export function useRemoteController(options?: {
           type: "REGISTER",
           role: "controller",
           authToken,
-          branchId: "default",
+          branchId: stationBranch,
           registrationIntent: registrationIntentBranchController(isPhone),
         } as ClientMessage)
       );
@@ -615,7 +621,7 @@ export function useRemoteController(options?: {
       ws.close();
       wsRef.current = null;
     };
-  }, [reconnectTrigger, !!wsToken]);
+  }, [reconnectTrigger, !!wsToken, stationBranch]);
 
   useEffect(() => {
     if (status !== "connected" || !wsToken) return;
