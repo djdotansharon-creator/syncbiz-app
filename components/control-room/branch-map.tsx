@@ -7,7 +7,7 @@ import { cityLngLat } from "@/lib/control-room-geo";
 /**
  * CONTROL ROOM — the light network map (owner decision 2026-10-11): ONE small SVG, no tiles, no roads / POI / labels,
  * no zoom or pan controls, no network traffic, near-zero CPU / GPU. A dark land silhouette + one marker per branch at its
- * stored latitude / longitude (Google Places / geocoding = the source of truth), colored by live status, auto-fitted to
+ * stored latitude / longitude (Google Places / geocoding = the source of truth), colored by live status, shown on the whole country (Control Room) or fitted to
  * the organization's branches; click → open the branch. Branches without coordinates fall back to their city (older
  * records) or are simply not drawn (they stay in the list).
  */
@@ -60,12 +60,15 @@ export function BranchMap({
   selectedId,
   onSelect,
   height,
+  fit = "country",
 }: {
   branches: MapBranch[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   /** CSS height of the map box (default: fills its column up to 560 px) */
   height?: number;
+  /** "country" (Control Room, owner 2026-10-11): always the whole country, the zoom never depends on the branches; "branches": fit to the markers (Add / Edit preview) */
+  fit?: "country" | "branches";
 }) {
   const placed = useMemo(
     () =>
@@ -77,15 +80,15 @@ export function BranchMap({
         .filter((d): d is MapBranch & { at: LngLat } => d !== null),
     [branches],
   );
-  // auto-fit: re-fit only when WHERE the branches are changes (live status updates never move the map)
+  // "branches": re-fit only when WHERE the branches are changes (live status updates never move the map)
   const fitKey = placed.map((d) => `${d.at[0].toFixed(4)},${d.at[1].toFixed(4)}`).sort().join("|");
   const project = useMemo(() => {
-    if (!placed.length) return fitProjection(landBounds());
+    if (fit === "country" || !placed.length) return fitProjection(landBounds());
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const d of placed) { minX = Math.min(minX, d.at[0]); maxX = Math.max(maxX, d.at[0]); minY = Math.min(minY, d.at[1]); maxY = Math.max(maxY, d.at[1]); }
     return fitProjection([minX, minY, maxX, maxY]);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fitKey captures the positions
-  }, [fitKey]);
+  }, [fit, fitKey]);
   const land = useMemo(
     () => LAND_RINGS.map((r) => r.map((p, i) => `${i ? "L" : "M"}${project(p).map((v) => v.toFixed(1)).join(",")}`).join("") + "Z").join(""),
     [project],

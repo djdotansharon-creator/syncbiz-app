@@ -147,6 +147,7 @@ export function BranchForm({
               selectedId="preview"
               onSelect={() => {}}
               height={200}
+              fit="branches"
             />
           </div>
         ) : null}
