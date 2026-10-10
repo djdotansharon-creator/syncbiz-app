@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { loadGoogleMaps, useMapsConfig, type GoogleNS } from "@/lib/google-maps-client";
-import { GoogleBranchMap } from "@/components/control-room/google-branch-map";
+import { BranchMap } from "@/components/control-room/branch-map";
 
 /**
  * CONTROL ROOM — add / edit a branch (owner). Name, branch number and ONE Location field with Google Places Autocomplete
@@ -142,18 +142,12 @@ export function BranchForm({
         {picked ? (
           <div className="space-y-2">
             <p className="text-sm text-[var(--sb-text)]" dir="auto">📍 {picked.label}</p>
-            {cfg?.browserKey ? (
-              <GoogleBranchMap
-                branches={[{ id: "preview", name: name || "New branch", city: "", status: "idle", latitude: picked.latitude, longitude: picked.longitude }]}
-                selectedId="preview"
-                onSelect={() => {}}
-                browserKey={cfg.browserKey}
-                mapId={cfg.mapId}
-                onFailed={() => setGoogleError(true)}
-                height={200}
-                fitZoomSingle={16}
-              />
-            ) : null}
+            <BranchMap
+              branches={[{ id: "preview", name: name || "New branch", city: "", status: "idle", latitude: picked.latitude, longitude: picked.longitude }]}
+              selectedId="preview"
+              onSelect={() => {}}
+              height={200}
+            />
           </div>
         ) : null}
 
