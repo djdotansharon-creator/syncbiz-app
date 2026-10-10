@@ -80,6 +80,9 @@ export type Branch = {
   houseNumber?: string;
   latitude?: number | null;
   longitude?: number | null;
+  /** Control Room: the Google place picked for the branch (verified server-side) + its formatted address. */
+  formattedAddress?: string | null;
+  googlePlaceId?: string | null;
 };
 
 export type Device = {

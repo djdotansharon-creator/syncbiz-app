@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireBranchManager } from "@/lib/control-room-auth";
 import { BranchInputError, updateBranch } from "@/lib/branch-management";
 
-/** Control Room — edit a branch (owner only). The address is geocoded again when it changes (exact or error). */
+/** Control Room — edit a branch (owner only). The location changes only when a new Google place was picked. */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireBranchManager();
   if (!auth.ok) return auth.response;
@@ -15,7 +15,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   try {
     await updateBranch(auth.workspaceId, id, {
-      name: body.name, branchNumber: body.branchNumber, country: body.country, city: body.city, street: body.street, houseNumber: body.houseNumber,
+      name: body.name, branchNumber: body.branchNumber, placeId: body.placeId, language: body.language,
     });
     return NextResponse.json({ ok: true });
   } catch (e) {

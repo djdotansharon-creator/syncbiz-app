@@ -1,13 +1,15 @@
 /**
  * Control Room — branch management (owner-approved 2026-10-10, Step A: management side only).
- * Add / edit a branch with a real address (geocoded → exact map position), the organization's Station ID prefix, and
- * one-time station activation codes. Never touches stations, designations, the WS server or playback.
- * Every function is scoped to ONE workspace id resolved by the caller from the signed-in user.
+ * Add / edit a branch: name, branch number and a LOCATION picked from Google (Places Autocomplete — a mall / commercial
+ * centre without a street number is valid). The server resolves the picked Place ID itself (Google Places API (New),
+ * server key) and stores Place ID + formatted address + city + latitude / longitude. Text that was not picked from Google
+ * is never saved — no guessed location. Also: the organization's Station ID prefix and one-time activation codes.
+ * Never touches stations, designations, the WS server or playback. Every function is scoped to ONE workspace id.
  */
 import { prisma } from "./prisma";
 import { ensureDefaultBrandId, defaultZoneData } from "./control-room-foundation";
 import { enforceCanAddBranch } from "./entitlement-limits";
-import { geocodeBranchAddress, geocodeErrorMessage, type GeocodeResult, type BranchAddress } from "./branch-geocode";
+import { resolveGooglePlace, placeErrorMessage, type PlaceResult } from "./branch-place";
 import {
   ACTIVATION_CODE_TTL_MS,
   generateActivationCode,
@@ -26,38 +28,46 @@ export class BranchInputError extends Error {
 export type BranchInput = {
   name: unknown;
   branchNumber: unknown;
-  country: unknown;
-  city: unknown;
-  street: unknown;
-  houseNumber: unknown;
+  /** the Google Place ID the owner picked (required on create; on edit only when the location changes) */
+  placeId?: unknown;
+  /** UI language — Google answers the address in it ("he" / "en") */
+  language?: unknown;
 };
-
-type CleanInput = { name: string; branchNumber: string; country: string; city: string; street: string; houseNumber: string };
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
-function clean(input: BranchInput): CleanInput {
+function cleanNameNumber(input: BranchInput) {
   const name = str(input.name, 80);
   if (!name) throw new BranchInputError("Branch name is required.");
   const branchNumber = normalizeBranchNumber(input.branchNumber);
   if (!branchNumber) throw new BranchInputError("Branch number is required (letters and digits only, up to 12).");
-  const city = str(input.city, 80);
-  const street = str(input.street, 120);
-  const houseNumber = str(input.houseNumber, 12);
-  if (!city || !street || !houseNumber) throw new BranchInputError("City, street and house number are required.");
-  return { name, branchNumber, country: str(input.country, 60) || "Israel", city, street, houseNumber };
+  return { name, branchNumber };
 }
 
-let geocoder: (a: BranchAddress) => Promise<GeocodeResult> = geocodeBranchAddress;
-/** Tests only: replace the address service (never the network in tests). */
-export function setGeocoderForTests(fn: ((a: BranchAddress) => Promise<GeocodeResult>) | null): void {
-  geocoder = fn ?? geocodeBranchAddress;
+let placeResolver: (placeId: unknown, language: "he" | "en") => Promise<PlaceResult> = resolveGooglePlace;
+/** Tests only: replace the Google place lookup (never the network in tests). */
+export function setPlaceResolverForTests(fn: ((placeId: unknown, language: "he" | "en") => Promise<PlaceResult>) | null): void {
+  placeResolver = fn ?? resolveGooglePlace;
 }
 
-async function geocodeOrThrow(c: CleanInput) {
-  const g = await geocoder({ country: c.country, city: c.city, street: c.street, houseNumber: c.houseNumber });
-  if (!g.ok) throw new BranchInputError(geocodeErrorMessage(g.reason), 422); // never guess a location
-  return g;
+async function resolvePlaceOrThrow(input: BranchInput) {
+  const r = await placeResolver(input.placeId, input.language === "en" ? "en" : "he");
+  if (!r.ok) throw new BranchInputError(placeErrorMessage(r.reason), r.reason === "invalid_id" ? 400 : 422); // never guess
+  return r.place;
+}
+
+function placeFields(pl: Awaited<ReturnType<typeof resolvePlaceOrThrow>>) {
+  return {
+    googlePlaceId: pl.placeId,
+    formattedAddress: pl.formattedAddress,
+    city: pl.city,
+    country: pl.country,
+    street: pl.street,
+    houseNumber: pl.houseNumber,
+    latitude: pl.latitude,
+    longitude: pl.longitude,
+    geocodedAt: new Date(),
+  };
 }
 
 async function assertNumberFree(workspaceId: string, branchNumber: string, exceptBranchId?: string) {
@@ -65,12 +75,12 @@ async function assertNumberFree(workspaceId: string, branchNumber: string, excep
   if (clash) throw new BranchInputError(`Branch number ${branchNumber} is already used in this organization.`, 409);
 }
 
-/** Create a branch: validate → geocode (exact or error) → branch + default Brand + default Zone in one transaction. */
+/** Create a branch: name + number + a Google-picked place (resolved on the server) → branch + default Brand + Zone. */
 export async function createBranch(workspaceId: string, input: BranchInput) {
-  const c = clean(input);
+  const c = cleanNameNumber(input);
   await enforceCanAddBranch(workspaceId);
   await assertNumberFree(workspaceId, c.branchNumber);
-  const g = await geocodeOrThrow(c);
+  const place = await resolvePlaceOrThrow(input);
   return prisma.$transaction(async (tx) => {
     const brandId = await ensureDefaultBrandId(tx, workspaceId);
     const created = await tx.branch.create({
@@ -79,13 +89,7 @@ export async function createBranch(workspaceId: string, input: BranchInput) {
         name: c.name,
         code: c.branchNumber,
         locationCode: c.branchNumber,
-        country: c.country,
-        city: c.city,
-        street: c.street,
-        houseNumber: c.houseNumber,
-        latitude: g.latitude,
-        longitude: g.longitude,
-        geocodedAt: new Date(),
+        ...placeFields(place),
         timezone: "Asia/Jerusalem",
         status: "active",
         brandId,
@@ -96,26 +100,17 @@ export async function createBranch(workspaceId: string, input: BranchInput) {
   });
 }
 
-/** Edit a branch: same validation; the address is geocoded again only when it changed (exact or error). */
+/** Edit a branch: name / number; the location changes only when a NEW Google place was picked (resolved on the server). */
 export async function updateBranch(workspaceId: string, branchId: string, input: BranchInput) {
-  const c = clean(input);
+  const c = cleanNameNumber(input);
   const cur = await prisma.branch.findFirst({ where: { id: branchId, workspaceId } });
   if (!cur) throw new BranchInputError("Branch not found.", 404);
   await assertNumberFree(workspaceId, c.branchNumber, branchId);
-  const addressChanged =
-    cur.city !== c.city || cur.street !== c.street || cur.houseNumber !== c.houseNumber || cur.country !== c.country || cur.latitude === null;
-  const g = addressChanged ? await geocodeOrThrow(c) : null;
+  const newPlace = input.placeId !== undefined && input.placeId !== null && input.placeId !== "" && input.placeId !== cur.googlePlaceId;
+  const place = newPlace ? await resolvePlaceOrThrow(input) : null;
   return prisma.branch.update({
     where: { id: branchId },
-    data: {
-      name: c.name,
-      locationCode: c.branchNumber,
-      country: c.country,
-      city: c.city,
-      street: c.street,
-      houseNumber: c.houseNumber,
-      ...(g ? { latitude: g.latitude, longitude: g.longitude, geocodedAt: new Date() } : {}),
-    },
+    data: { name: c.name, locationCode: c.branchNumber, ...(place ? placeFields(place) : {}) },
   });
 }
 

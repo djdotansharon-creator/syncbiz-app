@@ -39,6 +39,7 @@ function rowToBranch(row: {
   devicesOnline: number; devicesTotal: number;
   locationCode?: string | null;
   street?: string; houseNumber?: string; latitude?: number | null; longitude?: number | null;
+  formattedAddress?: string | null; googlePlaceId?: string | null;
 }): Branch {
   return {
     locationCode: row.locationCode ?? null,
@@ -46,6 +47,8 @@ function rowToBranch(row: {
     houseNumber: row.houseNumber ?? "",
     latitude: row.latitude ?? null,
     longitude: row.longitude ?? null,
+    formattedAddress: row.formattedAddress ?? null,
+    googlePlaceId: row.googlePlaceId ?? null,
     id: row.id,
     accountId: row.workspaceId,
     name: row.name,

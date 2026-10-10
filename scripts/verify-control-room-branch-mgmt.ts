@@ -12,6 +12,7 @@ import {
   normalizeBranchNumber, normalizeStationIdPrefix, stationIdFor,
 } from "../lib/branch-activation";
 import { cityMatches, countryCodeFor, normalizeHouseNumber, pickExactAddressMatch, pickGoogleExactMatch } from "../lib/branch-geocode";
+import { isPlausiblePlaceId, parsePlaceDetails } from "../lib/branch-place";
 import Module from "node:module";
 
 // test-process stub: server-only (lib/branch-management → entitlement-limits) — same pattern as verify-control-room-f1.ts
@@ -76,6 +77,22 @@ process.env.SYNCBIZ_ACTIVATION_SECRET = process.env.SYNCBIZ_ACTIVATION_SECRET ||
     countryCodeFor("Israel") === "IL" && countryCodeFor("איטליה") === "IT" && countryCodeFor("Atlantis") === null);
 }
 
+{
+  // Google Places API (New) place details → stored fields (a mall without a street number is a valid location)
+  const mall = { id: "ChIJbilu_center_0001", formattedAddress: "Bilu Center, Kiryat Ekron, Israel", location: { latitude: 31.86, longitude: 34.82 },
+    addressComponents: [{ longText: "Kiryat Ekron", types: ["locality", "political"] }, { longText: "Israel", types: ["country", "political"] }] };
+  const r = parsePlaceDetails("ChIJbilu_center_0001", mall);
+  assert("P1 a commercial centre without a street number → valid (city + coordinates + formatted address)",
+    r.ok && r.place.city === "Kiryat Ekron" && r.place.country === "Israel" && r.place.street === "" && r.place.houseNumber === "" && r.place.latitude === 31.86);
+  const street = { ...mall, id: "ChIJherzl_25_ta_0001", addressComponents: [
+    { longText: "25", types: ["street_number"] }, { longText: "Herzl", types: ["route"] }, { longText: "Tel Aviv-Yafo", types: ["locality"] }] };
+  const r2 = parsePlaceDetails("ChIJherzl_25_ta_0001", street);
+  assert("P2 a street address → street + house number kept", r2.ok && r2.place.street === "Herzl" && r2.place.houseNumber === "25");
+  assert("P3 Google returned a DIFFERENT place id → rejected", !parsePlaceDetails("ChIJsomething_else_01", mall).ok);
+  assert("P4 no coordinates → rejected", !parsePlaceDetails("ChIJbilu_center_0001", { ...mall, location: {} }).ok);
+  assert("P5 typed text is not a Place ID → rejected before any lookup", !isPlausiblePlaceId("בילו סנטר") && !isPlausiblePlaceId("") && isPlausiblePlaceId("ChIJbilu_center_0001"));
+}
+
 // ── Part 2: real DB (throwaway only) ──
 async function dbPart(): Promise<void> {
   const url = process.env.CR_VERIFY_DATABASE_URL;
@@ -87,23 +104,41 @@ async function dbPart(): Promise<void> {
   const m = await import("../lib/branch-management");
   const ws = await prisma.workspace.create({ data: { name: "CR verify", slug: `cr-verify-${Date.now()}`, owner: { create: { email: `cr-verify-${Date.now()}@example.test` } } } as never });
   const other = await prisma.workspace.create({ data: { name: "CR other", slug: `cr-other-${Date.now()}`, owner: { create: { email: `cr-other-${Date.now()}@example.test` } } } as never });
-  m.setGeocoderForTests(async (a) => a.street === "Nowhere" ? { ok: false, reason: "not_found" } : { ok: true, latitude: 31.8, longitude: 34.65, displayName: "test" });
-  const base = { name: "Aroma Ashdod", branchNumber: "192", country: "Israel", city: "Ashdod", street: "Herzl", houseNumber: "10" };
+  const places: Record<string, { lat: number; lng: number; city: string; addr: string }> = {
+    ChIJashdod_herzl_10_xx: { lat: 31.8, lng: 34.65, city: "Ashdod", addr: "Herzl 10, Ashdod, Israel" },
+    ChIJbilu_center_0001: { lat: 31.86, lng: 34.82, city: "Kiryat Ekron", addr: "Bilu Center, Kiryat Ekron, Israel" },
+  };
+  m.setPlaceResolverForTests(async (id) => {
+    if (typeof id !== "string" || !/^[A-Za-z0-9_-]{10,}$/.test(id)) return { ok: false, reason: "invalid_id" };
+    const pl = places[id];
+    return pl ? { ok: true, place: { placeId: id, formattedAddress: pl.addr, city: pl.city, country: "Israel", street: "", houseNumber: "", latitude: pl.lat, longitude: pl.lng } } : { ok: false, reason: "not_found" };
+  });
+  const base = { name: "Aroma Ashdod", branchNumber: "192", placeId: "ChIJashdod_herzl_10_xx" };
 
   const b = await m.createBranch(ws.id, base);
   const zones = await prisma.zone.count({ where: { branchId: b.id, isDefault: true } });
-  assert("D1 create → saved with exact coordinates + default zone + brand", b.latitude === 31.8 && b.longitude === 34.65 && !!b.geocodedAt && zones === 1 && !!b.brandId && b.locationCode === "192");
+  assert("D1 create → saved with Place ID + formatted address + city + coordinates + default zone + brand",
+    b.googlePlaceId === "ChIJashdod_herzl_10_xx" && b.formattedAddress === "Herzl 10, Ashdod, Israel" && b.city === "Ashdod" && b.latitude === 31.8 && b.longitude === 34.65 && zones === 1 && !!b.brandId && b.locationCode === "192");
   const dup = await m.createBranch(ws.id, { ...base, name: "Other" }).then(() => null, (e: Error) => e.message);
   assert("D2 duplicate branch number in the same organization → refused", !!dup && /already used/.test(dup), String(dup));
   const before = await prisma.branch.count({ where: { workspaceId: ws.id } });
-  const nf = await m.createBranch(ws.id, { ...base, branchNumber: "193", street: "Nowhere" }).then(() => null, (e: Error) => e.message);
-  assert("D3 address not found → clear error and NOTHING saved", !!nf && /not found/i.test(nf) && (await prisma.branch.count({ where: { workspaceId: ws.id } })) === before, String(nf));
-  await m.updateBranch(ws.id, b.id, { ...base, name: "Aroma Ashdod Port" });
+  const nf = await m.createBranch(ws.id, { ...base, branchNumber: "193", placeId: "ChIJunknown_place_00" }).then(() => null, (e: Error) => e.message);
+  assert("D3 a place Google cannot confirm → clear error and NOTHING saved", !!nf && /could not confirm/i.test(nf) && (await prisma.branch.count({ where: { workspaceId: ws.id } })) === before, String(nf));
+  const typed = await m.createBranch(ws.id, { ...base, branchNumber: "194", placeId: "בילו סנטר" }).then(() => null, (e: Error) => e.message);
+  assert("D3b typed text that was not picked from Google → refused, nothing saved", !!typed && /suggestions/i.test(typed) && (await prisma.branch.count({ where: { workspaceId: ws.id } })) === before);
+  const noPlace = await m.createBranch(ws.id, { name: "X", branchNumber: "195" }).then(() => null, (e: Error) => e.message);
+  assert("D3c no location picked → refused", !!noPlace);
+  const mall = await m.createBranch(ws.id, { name: "Bilu", branchNumber: "196", placeId: "ChIJbilu_center_0001" });
+  assert("D3d a commercial centre (no street number) is a valid branch location", mall.city === "Kiryat Ekron" && mall.latitude === 31.86 && mall.street === "");
+  await m.updateBranch(ws.id, b.id, { name: "Aroma Ashdod Port", branchNumber: "192" });
   const nameOnly = await prisma.branch.findUniqueOrThrow({ where: { id: b.id } });
   assert("D4 edit name only → saved, location kept", nameOnly.name === "Aroma Ashdod Port" && nameOnly.latitude === 31.8);
-  const badEdit = await m.updateBranch(ws.id, b.id, { ...base, street: "Nowhere" }).then(() => null, (e: Error) => e.message);
+  const badEdit = await m.updateBranch(ws.id, b.id, { ...base, placeId: "ChIJunknown_place_00" }).then(() => null, (e: Error) => e.message);
   const afterBad = await prisma.branch.findUniqueOrThrow({ where: { id: b.id } });
-  assert("D5 edit to an address that is not found → refused, old address + location kept", !!badEdit && afterBad.street === "Herzl" && afterBad.latitude === 31.8);
+  assert("D5 edit to a place Google cannot confirm → refused, old location kept", !!badEdit && afterBad.googlePlaceId === "ChIJashdod_herzl_10_xx" && afterBad.latitude === 31.8);
+  await m.updateBranch(ws.id, b.id, { name: "Aroma Ashdod Port", branchNumber: "192", placeId: "ChIJbilu_center_0001" });
+  const moved = await prisma.branch.findUniqueOrThrow({ where: { id: b.id } });
+  assert("D5b edit with a NEW picked place → location replaced (Place ID, address, city, coordinates)", moved.googlePlaceId === "ChIJbilu_center_0001" && moved.city === "Kiryat Ekron" && moved.latitude === 31.86);
   const cross = await m.updateBranch(other.id, b.id, base).then(() => null, (e: Error) => e.message);
   assert("D6 another organization cannot edit this branch", !!cross && /not found/i.test(cross));
 
@@ -131,7 +166,7 @@ async function dbPart(): Promise<void> {
   const crossCode = await m.createActivationCode(other.id, b.id, "u2").then(() => null, (e: Error) => e.message);
   assert("C10 another organization cannot create codes for this branch", !!crossCode && /not found/i.test(crossCode));
 
-  m.setGeocoderForTests(null);
+  m.setPlaceResolverForTests(null);
   await prisma.$disconnect();
 }
 

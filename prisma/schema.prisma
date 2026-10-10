@@ -510,6 +510,9 @@ model Branch {
   latitude      Float?
   longitude     Float?
   geocodedAt    DateTime?
+  /// Control Room: the Google place the owner picked (Places Autocomplete) — verified server-side by Place ID.
+  googlePlaceId    String?
+  formattedAddress String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 

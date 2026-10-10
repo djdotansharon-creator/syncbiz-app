@@ -3,7 +3,7 @@ import { requireBranchManager } from "@/lib/control-room-auth";
 import { BranchInputError, createBranch } from "@/lib/branch-management";
 import { EntitlementLimitError } from "@/lib/entitlement-limits";
 
-/** Control Room — add a branch (owner only): name, branch number, real address → geocoded exact location. */
+/** Control Room — add a branch (owner only): name, branch number and a Google-picked place (resolved on the server). */
 export async function POST(req: NextRequest) {
   const auth = await requireBranchManager();
   if (!auth.ok) return auth.response;
@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   }
   try {
     const b = await createBranch(auth.workspaceId, {
-      name: body.name, branchNumber: body.branchNumber, country: body.country, city: body.city, street: body.street, houseNumber: body.houseNumber,
+      name: body.name, branchNumber: body.branchNumber, placeId: body.placeId, language: body.language,
     });
     return NextResponse.json({ id: b.id }, { status: 201 });
   } catch (e) {

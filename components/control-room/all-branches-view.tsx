@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
-import { BranchMap, DOT_FILL, type MapDotStatus } from "@/components/control-room/branch-map";
+import { DOT_FILL, type MapDotStatus } from "@/components/control-room/branch-map";
+import { NetworkMap } from "@/components/control-room/network-map";
 import { BranchPanel } from "@/components/control-room/branch-panel";
 import { BroadcastPanel } from "@/components/control-room/broadcast-panel";
 import { BranchForm } from "@/components/control-room/branch-form";
@@ -27,6 +28,8 @@ type DbBranch = {
   status?: string;
   locationCode?: string | null;
   hasStation?: boolean;
+  formattedAddress?: string | null;
+  googlePlaceId?: string | null;
   street?: string;
   houseNumber?: string;
   latitude?: number | null;
@@ -40,6 +43,8 @@ type Row = {
   branchNumber: string | null;
   city: string;
   country: string;
+  formattedAddress: string | null;
+  googlePlaceId: string | null;
   street: string;
   houseNumber: string;
   latitude: number | null;
@@ -110,6 +115,8 @@ export function AllBranchesView() {
         branchNumber: typeof b.locationCode === "string" && b.locationCode.trim() ? b.locationCode.trim() : null,
         city: b.city ?? "",
         country: b.country ?? "",
+        formattedAddress: b.formattedAddress ?? null,
+        googlePlaceId: b.googlePlaceId ?? null,
         street: b.street ?? "",
         houseNumber: b.houseNumber ?? "",
         latitude: typeof b.latitude === "number" ? b.latitude : null,
@@ -128,6 +135,8 @@ export function AllBranchesView() {
         branchNumber: null,
         city: "",
         country: "",
+        formattedAddress: null,
+        googlePlaceId: null,
         street: "",
         houseNumber: "",
         latitude: null,
@@ -196,7 +205,7 @@ export function AllBranchesView() {
       ) : (
         <div className="grid lg:grid-cols-[minmax(240px,2fr)_3fr]">
           <div className="hidden items-center justify-center border-r border-[color:var(--sb-border)] p-6 lg:flex">
-            <BranchMap
+            <NetworkMap
               branches={rows.map((r) => ({ id: r.id, name: r.name, city: r.city, latitude: r.latitude, longitude: r.longitude, status: rowStatus(r, liveKnown) }))}
               selectedId={selectedId}
               onSelect={openBranch}
@@ -211,7 +220,7 @@ export function AllBranchesView() {
                     key={form.mode === "edit" ? form.id : "add"}
                     mode={form.mode}
                     branchId={editing?.id}
-                    initial={editing ? { name: editing.name, branchNumber: editing.branchNumber ?? "", country: editing.country, city: editing.city, street: editing.street, houseNumber: editing.houseNumber } : undefined}
+                    initial={editing ? { name: editing.name, branchNumber: editing.branchNumber ?? "", currentLocation: editing.formattedAddress || [editing.street, editing.houseNumber, editing.city].filter(Boolean).join(" ") || null } : undefined}
                     onCancel={() => setForm(null)}
                     onDone={(id) => {
                       setForm(null);
