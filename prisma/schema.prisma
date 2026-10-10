@@ -290,10 +290,14 @@ model Workspace {
   name      String
   slug      String   @unique
   ownerId   String
+  /// Control Room: organization-level Station ID prefix (Station ID = "<prefix>-<Branch.locationCode>", e.g. AROMA-192).
+  /// Globally unique — a Station ID must resolve to exactly one organization. Null until the owner sets it.
+  stationIdPrefix String? @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   owner               User                   @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  branchActivationCodes BranchActivationCode[]
   members             WorkspaceMember[]
   branchAssignments   UserBranchAssignment[]
   branches            Branch[]
@@ -499,11 +503,19 @@ model Branch {
   addressLine2  String?
   postalCode    String?
   stateProvince String?
+  /// Control Room branch management: real address (city = the existing `city`) + automatic geocoding.
+  /// latitude / longitude are INTERNAL (set only by geocoding the address; never typed by a user).
+  street        String       @default("")
+  houseNumber   String       @default("")
+  latitude      Float?
+  longitude     Float?
+  geocodedAt    DateTime?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   brand     Brand?     @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  activationCodes BranchActivationCode[]
   region    Region?    @relation(fields: [regionId], references: [id], onDelete: NoAction)
   devices   Device[]
   schedules Schedule[]
@@ -519,6 +531,31 @@ model Branch {
   @@index([workspaceId])
   @@index([brandId])
   @@index([regionId])
+}
+
+/// Control Room — one-time station activation code for a branch (install a station / replace the main station).
+/// The code itself is NEVER stored: only an HMAC hash. Random 6 digits, valid 60 minutes, single use; generating a new
+/// code revokes the branch's previous active code. Redemption (the station side) is Step B — not built yet.
+model BranchActivationCode {
+  id                    String    @id @default(uuid())
+  workspaceId           String
+  branchId              String
+  codeHash              String
+  /// "install" (the branch has no station yet) | "replace" (replace the current main station)
+  purpose               String
+  createdByUserId       String
+  createdAt             DateTime  @default(now())
+  expiresAt             DateTime
+  usedAt                DateTime?
+  usedByDurableDeviceId String?
+  revokedAt             DateTime?
+  failedAttempts        Int       @default(0)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, branchId])
+  @@index([branchId, expiresAt])
 }
 
 /// Control Room F3a (SHADOW) — ONE primary geographic / operational region per Location. Organization-level (never

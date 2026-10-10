@@ -75,6 +75,11 @@ export type Branch = {
   devicesTotal: number;
   /** Stable customer branch number (Control Room identifier, e.g. "T001"); null when not set. */
   locationCode?: string | null;
+  /** Control Room: real address + internal coordinates from geocoding (null = not geocoded). */
+  street?: string;
+  houseNumber?: string;
+  latitude?: number | null;
+  longitude?: number | null;
 };
 
 export type Device = {

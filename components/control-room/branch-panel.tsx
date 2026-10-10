@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { BranchSummary, RemoteCommand, StationPlaybackState } from "@/lib/remote-control/types";
 import { DOT_FILL, type MapDotStatus } from "@/components/control-room/branch-map";
+import { StationActivation } from "@/components/control-room/station-activation";
 
 /**
  * CONTROL ROOM — part 2: one branch, full control. Now playing, Previous / Play-Pause / Next, volume and the devices
@@ -19,6 +20,8 @@ export type PanelBranch = {
   status: MapDotStatus;
   live: BranchSummary | null;
   state: StationPlaybackState | null;
+  /** a station is registered to the branch (decides "install" vs "replace" wording; the server decides the purpose) */
+  hasStation: boolean;
 };
 
 const STATUS_TEXT: Record<MapDotStatus, string> = {
@@ -35,10 +38,13 @@ const VOLUME_SEND_MS = 200;
 export function BranchPanel({
   branch,
   onBack,
+  onEdit,
   sendCommandTo,
 }: {
   branch: PanelBranch;
   onBack: () => void;
+  /** owner: edit the branch (name, number, address) */
+  onEdit?: () => void;
   sendCommandTo: (targetBranchId: string, command: RemoteCommand, payload?: { volume?: number }) => boolean;
 }) {
   const live = branch.live;
@@ -96,6 +102,11 @@ export function BranchPanel({
           <span className="h-2 w-2 rounded-full" style={{ background: DOT_FILL[branch.status] }} aria-hidden />
           {STATUS_TEXT[branch.status]}
         </span>
+        {onEdit ? (
+          <button type="button" onClick={onEdit} className="shrink-0 rounded-full border border-[color:var(--sb-border)] px-3 py-1 text-xs text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]">
+            Edit
+          </button>
+        ) : null}
       </div>
 
       {!canControl ? (
@@ -172,6 +183,8 @@ export function BranchPanel({
           </section>
         </>
       )}
+
+      <StationActivation branchId={branch.id} hasMainStation={branch.hasStation} />
     </div>
   );
 }

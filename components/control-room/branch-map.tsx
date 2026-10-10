@@ -7,7 +7,8 @@ import { ISRAEL_OUTLINE, cityLngLat, makeProjection } from "@/lib/control-room-g
 
 export type MapDotStatus = "playing" | "idle" | "offline" | "install" | "unknown";
 
-export type MapBranch = { id: string; name: string; city: string; status: MapDotStatus };
+/** latitude / longitude (from geocoding the real address) win; the city table is only a fallback for older records. */
+export type MapBranch = { id: string; name: string; city: string; status: MapDotStatus; latitude?: number | null; longitude?: number | null };
 
 const W = 260;
 const H = 520;
@@ -38,7 +39,8 @@ export function BranchMap({
     () =>
       branches
         .map((b) => {
-          const at = cityLngLat(b.city);
+          const at: [number, number] | null =
+            typeof b.latitude === "number" && typeof b.longitude === "number" ? [b.longitude, b.latitude] : cityLngLat(b.city);
           return at ? { ...b, xy: project(at) } : null;
         })
         .filter((d): d is MapBranch & { xy: [number, number] } => d !== null),

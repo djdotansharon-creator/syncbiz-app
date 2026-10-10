@@ -6,6 +6,8 @@ import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/t
 import { BranchMap, DOT_FILL, type MapDotStatus } from "@/components/control-room/branch-map";
 import { BranchPanel } from "@/components/control-room/branch-panel";
 import { BroadcastPanel } from "@/components/control-room/broadcast-panel";
+import { BranchForm } from "@/components/control-room/branch-form";
+import { NetworkCode } from "@/components/control-room/network-code";
 
 /**
  * CONTROL ROOM — all branches in one place: counters, a map of the network and the branch list (read-only view).
@@ -25,6 +27,10 @@ type DbBranch = {
   status?: string;
   locationCode?: string | null;
   hasStation?: boolean;
+  street?: string;
+  houseNumber?: string;
+  latitude?: number | null;
+  longitude?: number | null;
 };
 
 type Row = {
@@ -33,6 +39,11 @@ type Row = {
   /** customer branch number (locationCode) — secondary but clear */
   branchNumber: string | null;
   city: string;
+  country: string;
+  street: string;
+  houseNumber: string;
+  latitude: number | null;
+  longitude: number | null;
   hasStation: boolean;
   online: boolean;
   live: BranchSummary | null;
@@ -55,10 +66,14 @@ export function AllBranchesView() {
   const { branches: liveBranches, remoteStateByDeviceId, status, refreshBranchList, sendCommandTo, sendCommandWithAck } = useRemoteOwner();
   const [dbBranches, setDbBranches] = useState<DbBranch[] | null>(null);
   const [loadError, setLoadError] = useState(false);
+  /** bump to reload the branch list (after add / edit) */
+  const [reloadKey, setReloadKey] = useState(0);
+  /** owner: add / edit branch form in the right column */
+  const [form, setForm] = useState<{ mode: "add" } | { mode: "edit"; id: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** part 2: the branch whose control panel is open (row / arrow / map dot) */
   const [openId, setOpenId] = useState<string | null>(null);
-  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setBroadcastOpen(false); };
+  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setBroadcastOpen(false); setForm(null); };
   const [broadcastOpen, setBroadcastOpen] = useState(false);
 
   useEffect(() => {
@@ -71,7 +86,7 @@ export function AllBranchesView() {
       })
       .catch(() => { if (!cancelled) setLoadError(true); });
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
 
   useEffect(() => {
     if (status !== "connected") return;
@@ -94,6 +109,11 @@ export function AllBranchesView() {
         name: b.name || b.code || "Branch",
         branchNumber: typeof b.locationCode === "string" && b.locationCode.trim() ? b.locationCode.trim() : null,
         city: b.city ?? "",
+        country: b.country ?? "",
+        street: b.street ?? "",
+        houseNumber: b.houseNumber ?? "",
+        latitude: typeof b.latitude === "number" ? b.latitude : null,
+        longitude: typeof b.longitude === "number" ? b.longitude : null,
         hasStation: b.hasStation !== false,
         online: !!live,
         live,
@@ -107,6 +127,11 @@ export function AllBranchesView() {
         name: live.branchName ?? "Connected station",
         branchNumber: null,
         city: "",
+        country: "",
+        street: "",
+        houseNumber: "",
+        latitude: null,
+        longitude: null,
         hasStation: true,
         online: true,
         live,
@@ -131,9 +156,19 @@ export function AllBranchesView() {
             {liveKnown ? "Your network, live" : status === "connecting" ? "Connecting to live status…" : "Live status unavailable — reconnecting…"}
           </p>
         </div>
+        <div className="flex items-center gap-4">
+        <NetworkCode />
         <button
           type="button"
-          onClick={() => { setOpenId(null); setBroadcastOpen(true); }}
+          onClick={() => { setOpenId(null); setBroadcastOpen(false); setForm({ mode: "add" }); }}
+          disabled={!dbBranches}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-[color:var(--sb-border-strong)] px-3.5 py-2 text-sm font-medium text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40"
+        >
+          <span aria-hidden>+</span> Add branch
+        </button>
+        <button
+          type="button"
+          onClick={() => { setOpenId(null); setForm(null); setBroadcastOpen(true); }}
           disabled={!liveKnown || !dbBranches}
           className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black transition-transform active:scale-95 disabled:opacity-40"
         >
@@ -142,6 +177,7 @@ export function AllBranchesView() {
           </svg>
           Broadcast
         </button>
+        </div>
       </header>
 
       <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-4">
@@ -161,12 +197,31 @@ export function AllBranchesView() {
         <div className="grid lg:grid-cols-[minmax(240px,2fr)_3fr]">
           <div className="hidden items-center justify-center border-r border-[color:var(--sb-border)] p-6 lg:flex">
             <BranchMap
-              branches={rows.map((r) => ({ id: r.id, name: r.name, city: r.city, status: rowStatus(r, liveKnown) }))}
+              branches={rows.map((r) => ({ id: r.id, name: r.name, city: r.city, latitude: r.latitude, longitude: r.longitude, status: rowStatus(r, liveKnown) }))}
               selectedId={selectedId}
               onSelect={openBranch}
             />
           </div>
           {(() => {
+            if (form) {
+              const editing = form.mode === "edit" ? rows.find((r) => r.id === form.id) : undefined;
+              return (
+                <div className="max-h-[640px] overflow-y-auto">
+                  <BranchForm
+                    key={form.mode === "edit" ? form.id : "add"}
+                    mode={form.mode}
+                    branchId={editing?.id}
+                    initial={editing ? { name: editing.name, branchNumber: editing.branchNumber ?? "", country: editing.country, city: editing.city, street: editing.street, houseNumber: editing.houseNumber } : undefined}
+                    onCancel={() => setForm(null)}
+                    onDone={(id) => {
+                      setForm(null);
+                      setReloadKey((k) => k + 1);
+                      if (id) { setSelectedId(id); setOpenId(id); }
+                    }}
+                  />
+                </div>
+              );
+            }
             if (broadcastOpen) {
               return (
                 <div className="max-h-[640px] overflow-y-auto">
@@ -186,8 +241,9 @@ export function AllBranchesView() {
               return (
                 <div className="max-h-[640px] overflow-y-auto">
                   <BranchPanel
-                    branch={{ id: open.id, name: open.name, branchNumber: open.branchNumber, city: open.city, status: rowStatus(open, liveKnown), live: open.live, state: open.state }}
+                    branch={{ id: open.id, name: open.name, branchNumber: open.branchNumber, city: open.city, status: rowStatus(open, liveKnown), live: open.live, state: open.state, hasStation: open.hasStation }}
                     onBack={() => setOpenId(null)}
+                    onEdit={() => setForm({ mode: "edit", id: open.id })}
                     sendCommandTo={sendCommandTo}
                   />
                 </div>

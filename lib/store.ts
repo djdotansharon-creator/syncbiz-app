@@ -38,9 +38,14 @@ function rowToBranch(row: {
   timezone: string; city: string; country: string; status: string;
   devicesOnline: number; devicesTotal: number;
   locationCode?: string | null;
+  street?: string; houseNumber?: string; latitude?: number | null; longitude?: number | null;
 }): Branch {
   return {
     locationCode: row.locationCode ?? null,
+    street: row.street ?? "",
+    houseNumber: row.houseNumber ?? "",
+    latitude: row.latitude ?? null,
+    longitude: row.longitude ?? null,
     id: row.id,
     accountId: row.workspaceId,
     name: row.name,
@@ -192,6 +197,11 @@ export const db = {
     if (!wsId) return [];
     const rows = await prisma.branch.findMany({ where: { workspaceId: wsId } });
     return rows.map(rowToBranch);
+  },
+
+  /** Control Room branch management: the workspace id for an account scope (id or slug) — same rule as getBranches. */
+  async resolveWorkspaceIdForAccount(accountId?: string): Promise<string | null> {
+    return resolveWorkspaceId(accountId);
   },
 
   /** Control Room (info only): branch ids of this workspace that have at least one registered station. */
