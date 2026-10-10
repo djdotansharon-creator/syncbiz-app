@@ -11,7 +11,7 @@ import {
   ACTIVATION_CODE_TTL_MS, activationCodeMatches, generateActivationCode, hashActivationCode,
   normalizeBranchNumber, normalizeStationIdPrefix, stationIdFor,
 } from "../lib/branch-activation";
-import { cityMatches, normalizeHouseNumber, pickExactAddressMatch } from "../lib/branch-geocode";
+import { cityMatches, countryCodeFor, normalizeHouseNumber, pickExactAddressMatch, pickGoogleExactMatch } from "../lib/branch-geocode";
 import Module from "node:module";
 
 // test-process stub: server-only (lib/branch-management → entitlement-limits) — same pattern as verify-control-room-f1.ts
@@ -56,6 +56,24 @@ process.env.SYNCBIZ_ACTIVATION_SECRET = process.env.SYNCBIZ_ACTIVATION_SECRET ||
   assert("G6 'Tel Aviv' matches 'Tel Aviv-Yafo'; 'תל אביב' matches 'תל־אביב–יפו'",
     cityMatches({ city: "Tel Aviv-Yafo" }, "Tel Aviv") && cityMatches({ city: "תל־אביב–יפו" }, "תל אביב"));
   assert("G7 house number '12 א' equals '12א'", normalizeHouseNumber("12 א") === normalizeHouseNumber("12א"));
+}
+{
+  // Google Geocoding response shape (used when GOOGLE_MAPS_API_KEY is set)
+  const g = (num: string, route: string, city: string, locationType = "ROOFTOP", partial = false) => ({
+    formatted_address: "x", partial_match: partial || undefined,
+    geometry: { location: { lat: 32.81, lng: 34.99 }, location_type: locationType },
+    address_components: [
+      { long_name: num, types: ["street_number"] }, { long_name: route, types: ["route"] }, { long_name: city, types: ["locality", "political"] },
+    ],
+  });
+  const want = { country: "ישראל", city: "חיפה", street: "הרצל", houseNumber: "10" };
+  assert("GG1 Google: precise (ROOFTOP) + same number + same city → accepted", pickGoogleExactMatch([g("10", "הרצל", "חיפה")], want).ok);
+  assert("GG2 Google: city Hadera for 'חיפה' → rejected", !pickGoogleExactMatch([g("10", "הרצל", "חדרה")], want).ok);
+  assert("GG3 Google: approximate location (GEOMETRIC_CENTER) → rejected", !pickGoogleExactMatch([g("10", "הרצל", "חיפה", "GEOMETRIC_CENTER")], want).ok);
+  assert("GG4 Google: partial match → rejected", !pickGoogleExactMatch([g("10", "הרצל", "חיפה", "ROOFTOP", true)], want).ok);
+  assert("GG5 Google: other house number → rejected", !pickGoogleExactMatch([g("12", "הרצל", "חיפה")], want).ok);
+  assert("GG6 country names → ISO codes (Israel / Italy, Hebrew too); unknown → none",
+    countryCodeFor("Israel") === "IL" && countryCodeFor("איטליה") === "IT" && countryCodeFor("Atlantis") === null);
 }
 
 // ── Part 2: real DB (throwaway only) ──

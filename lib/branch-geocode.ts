@@ -1,7 +1,9 @@
 /**
  * Control Room — branch address → exact map location (server only; owner-approved 2026-10-10).
  *
- * Uses OpenStreetMap Nominatim (structured search, no API key). STRICT: a location is accepted only when the result
+ * Provider: Google Geocoding when GOOGLE_MAPS_API_KEY is set on the server (owner decision 2026-10-10 — precise house
+ * numbers in Israel and abroad); otherwise OpenStreetMap Nominatim (no key). The key is server-only, never logged.
+ * STRICT for both providers: a location is accepted only when the result
  * matches the SAME house number (and a street) — a street-level or city-level match is NOT a guess we keep; the
  * caller shows a clear "address not found — please correct it" error instead. Latitude / longitude are internal.
  *
@@ -64,6 +66,70 @@ export function pickExactAddressMatch(items: NominatimItem[], input: BranchAddre
   return { ok: false, reason: "not_exact" };
 }
 
+// ── Google Geocoding (when GOOGLE_MAPS_API_KEY is set) ──────────────────────────────────────────────────────────────
+
+type GoogleComponent = { long_name?: string; short_name?: string; types?: string[] };
+type GoogleResult = {
+  address_components?: GoogleComponent[];
+  formatted_address?: string;
+  geometry?: { location?: { lat?: number; lng?: number }; location_type?: string };
+  partial_match?: boolean;
+};
+
+/** Common country names → ISO code (restricts Google to that country). Unknown → no restriction. */
+const COUNTRY_CODES: Record<string, string> = {
+  israel: "IL", "ישראל": "IL", italy: "IT", italia: "IT", "איטליה": "IT", france: "FR", "צרפת": "FR",
+  germany: "DE", "גרמניה": "DE", spain: "ES", "ספרד": "ES", "united kingdom": "GB", uk: "GB", "בריטניה": "GB",
+  "united states": "US", usa: "US", "ארצות הברית": "US", cyprus: "CY", "קפריסין": "CY", greece: "GR", "יוון": "GR",
+};
+export function countryCodeFor(country: string): string | null {
+  return COUNTRY_CODES[country.trim().toLowerCase()] ?? null;
+}
+
+/** Pure: Google result accepted only when precise (ROOFTOP / RANGE_INTERPOLATED), not a partial match, with the same
+ *  house number, a street, and the same city. */
+export function pickGoogleExactMatch(results: GoogleResult[], input: BranchAddress): GeocodeResult {
+  if (!Array.isArray(results) || results.length === 0) return { ok: false, reason: "not_found" };
+  const wanted = normalizeHouseNumber(input.houseNumber);
+  for (const r of results) {
+    if (r.partial_match) continue;
+    const lt = r.geometry?.location_type;
+    if (lt !== "ROOFTOP" && lt !== "RANGE_INTERPOLATED") continue;
+    const comp = (t: string) => (r.address_components ?? []).find((c) => (c.types ?? []).includes(t));
+    const house = normalizeHouseNumber(comp("street_number")?.long_name ?? "");
+    const route = comp("route")?.long_name ?? "";
+    const city = comp("locality")?.long_name ?? comp("postal_town")?.long_name ?? "";
+    const lat = r.geometry?.location?.lat;
+    const lng = r.geometry?.location?.lng;
+    if (!house || house !== wanted || !route || typeof lat !== "number" || typeof lng !== "number") continue;
+    if (!cityMatches({ city }, input.city)) continue;
+    return { ok: true, latitude: lat, longitude: lng, displayName: r.formatted_address ?? "" };
+  }
+  return { ok: false, reason: "not_exact" };
+}
+
+async function geocodeWithGoogle(input: BranchAddress, key: string): Promise<GeocodeResult> {
+  const lang = /[\u0590-\u05FF]/.test(input.city) ? "he" : "en";
+  const params = new URLSearchParams({ address: [`${input.street} ${input.houseNumber}`, input.city, input.country].filter((x) => x.trim()).join(", "), language: lang, key });
+  const cc = countryCodeFor(input.country);
+  if (cc) params.set("components", `country:${cc}`);
+  try {
+    const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`, { cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!res.ok) return { ok: false, reason: "unavailable" };
+    const data = (await res.json()) as { status?: string; results?: GoogleResult[] };
+    if (data.status === "ZERO_RESULTS") return { ok: false, reason: "not_found" };
+    if (data.status !== "OK") {
+      console.warn("[branch-geocode] Google status", data.status); // never the key / the address
+      return { ok: false, reason: "unavailable" };
+    }
+    return pickGoogleExactMatch(data.results ?? [], input);
+  } catch {
+    return { ok: false, reason: "unavailable" };
+  }
+}
+
+// ── OpenStreetMap Nominatim (no key) ──────────────────────────────────────────────────────────────────────────────
+
 async function nominatim(params: URLSearchParams, lang: string): Promise<NominatimItem[] | null> {
   try {
     const res = await fetch(`${ENDPOINT}?${params.toString()}`, {
@@ -90,6 +156,8 @@ export async function geocodeBranchAddress(input: BranchAddress): Promise<Geocod
   const houseNumber = input.houseNumber.trim();
   const country = input.country.trim();
   if (!city || !street || !houseNumber) return { ok: false, reason: "missing_fields" };
+  const googleKey = (process.env.GOOGLE_MAPS_API_KEY ?? "").trim();
+  if (googleKey) return geocodeWithGoogle({ country, city, street, houseNumber }, googleKey);
   // names come back in the input's language so the city check compares like with like
   const lang = /[\u0590-\u05FF]/.test(city) ? "he" : "en";
   const strict = { country, city, street, houseNumber };
