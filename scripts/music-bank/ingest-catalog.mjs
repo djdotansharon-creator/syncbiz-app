@@ -136,6 +136,18 @@ async function main() {
   };
   console.log(JSON.stringify(report, null, 1));
   if (failures.length) console.log("FAILURES:", JSON.stringify(failures.slice(0, 10)));
+  // --export <file> (dry run only, no failures): the exact FINAL rows the existing ingest produced, for an atomic
+  // replay inside the target environment when its DB is not reachable from this machine (dry-run ids dropped).
+  const expIdx = argv.indexOf("--export");
+  if (mem && expIdx >= 0 && !failures.length) {
+    const strip = ({ id, ...r }) => r;
+    fs.writeFileSync(argv[expIdx + 1], JSON.stringify({
+      generatedAt: new Date().toISOString(), bucket: cfg.bucket,
+      logicalAssetSource: mem.tables.logicalAssetSource.map(strip),
+      mediaAsset: mem.tables.mediaAsset.map(strip),
+    }, (k, v) => (typeof v === "bigint" ? v.toString() : v)));
+    console.log("exported final rows →", argv[expIdx + 1]);
+  }
   if (prisma) await prisma.$disconnect();
   if (failures.length) process.exitCode = 1;
 }
