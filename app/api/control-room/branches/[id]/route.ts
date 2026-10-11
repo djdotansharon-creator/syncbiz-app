@@ -15,7 +15,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   try {
     await updateBranch(auth.workspaceId, id, {
-      name: body.name, branchNumber: body.branchNumber, placeId: body.placeId, language: body.language,
+      name: body.name, branchNumber: body.branchNumber, placeId: body.placeId, language: body.language, brandId: body.brandId,
     });
     return NextResponse.json({ ok: true });
   } catch (e) {

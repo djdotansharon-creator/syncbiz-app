@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   }
   try {
     const b = await createBranch(auth.workspaceId, {
-      name: body.name, branchNumber: body.branchNumber, placeId: body.placeId, language: body.language,
+      name: body.name, branchNumber: body.branchNumber, placeId: body.placeId, language: body.language, brandId: body.brandId,
     });
     return NextResponse.json({ id: b.id }, { status: 201 });
   } catch (e) {

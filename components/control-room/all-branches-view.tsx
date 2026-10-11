@@ -9,6 +9,9 @@ import { BranchPanel } from "@/components/control-room/branch-panel";
 import { BroadcastPanel } from "@/components/control-room/broadcast-panel";
 import { BranchForm } from "@/components/control-room/branch-form";
 import { NetworkCode } from "@/components/control-room/network-code";
+import { BrandManager, BrandBadge, DEFAULT_BRAND_COLOR, type BrandRow } from "@/components/control-room/brand-manager";
+
+type BrandsData = { brands: BrandRow[]; defaultBrandId: string; branchBrand: Record<string, string> };
 
 /**
  * CONTROL ROOM — all branches in one place: counters, a map of the network and the branch list (read-only view).
@@ -53,6 +56,8 @@ type Row = {
   online: boolean;
   live: BranchSummary | null;
   state: StationPlaybackState | null;
+  /** brand of the branch — the default Brand when unassigned (null only while brands are unavailable) */
+  brandId: string | null;
 };
 
 type RowStatus = MapDotStatus;
@@ -78,8 +83,22 @@ export function AllBranchesView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** part 2: the branch whose control panel is open (row / arrow / map dot) */
   const [openId, setOpenId] = useState<string | null>(null);
-  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setBroadcastOpen(false); setForm(null); };
+  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setBroadcastOpen(false); setForm(null); setBrandsOpen(false); };
   const [broadcastOpen, setBroadcastOpen] = useState(false);
+  /** Organization → Brand → Branch (owner): brands + which brand each branch belongs to */
+  const [brandsData, setBrandsData] = useState<BrandsData | null>(null);
+  const [brandsOpen, setBrandsOpen] = useState(false);
+  const [brandFilter, setBrandFilter] = useState<string>("all");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/control-room/brands", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: BrandsData) => { if (!cancelled && Array.isArray(d?.brands)) setBrandsData(d); })
+      .catch(() => { /* brands unavailable → the view works exactly as before (no badges / filter) */ });
+    return () => { cancelled = true; };
+  }, [reloadKey]);
+  const brandById = useMemo(() => new Map((brandsData?.brands ?? []).map((b) => [b.id, b] as const)), [brandsData]);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,6 +144,7 @@ export function AllBranchesView() {
         online: !!live,
         live,
         state: live ? remoteStateByDeviceId[live.masterDeviceId] ?? null : null,
+        brandId: brandsData ? brandsData.branchBrand[b.id] ?? brandsData.defaultBrandId : null,
       };
     });
     // a connected station whose branch is not in the list (legacy id) — still shown, never hidden
@@ -145,16 +165,22 @@ export function AllBranchesView() {
         online: true,
         live,
         state: remoteStateByDeviceId[live.masterDeviceId] ?? null,
+        brandId: brandsData?.defaultBrandId ?? null,
       });
     }
     // live branches first (playing, then online), then offline, then not yet installed — by name inside a group
     const rank: Record<RowStatus, number> = { playing: 0, idle: 1, unknown: 2, offline: 3, install: 4 };
     return out.sort((a, b) => rank[rowStatus(a, liveKnown)] - rank[rowStatus(b, liveKnown)] || a.name.localeCompare(b.name));
-  }, [dbBranches, liveBranches, remoteStateByDeviceId, liveKnown]);
+  }, [dbBranches, liveBranches, remoteStateByDeviceId, liveKnown, brandsData]);
 
-  const onlineCount = rows.filter((r) => r.online).length;
-  const playingCount = rows.filter((r) => rowStatus(r, liveKnown) === "playing").length;
-  const installCount = rows.filter((r) => rowStatus(r, liveKnown) === "install").length;
+  // brand filter: the map, the list and the counters show the chosen brand only ("All brands" = every branch)
+  const activeFilter = brandFilter !== "all" && brandById.has(brandFilter) ? brandFilter : "all";
+  const visibleRows = activeFilter === "all" ? rows : rows.filter((r) => r.brandId === activeFilter);
+  const colorOf = (brandId: string | null) => (brandId ? brandById.get(brandId)?.color ?? DEFAULT_BRAND_COLOR : null);
+
+  const onlineCount = visibleRows.filter((r) => r.online).length;
+  const playingCount = visibleRows.filter((r) => rowStatus(r, liveKnown) === "playing").length;
+  const installCount = visibleRows.filter((r) => rowStatus(r, liveKnown) === "install").length;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-[color:var(--sb-border)] bg-[var(--sb-surface)]">
@@ -169,7 +195,15 @@ export function AllBranchesView() {
         <NetworkCode />
         <button
           type="button"
-          onClick={() => { setOpenId(null); setBroadcastOpen(false); setForm({ mode: "add" }); }}
+          onClick={() => { setOpenId(null); setBroadcastOpen(false); setForm(null); setBrandsOpen(true); }}
+          disabled={!brandsData}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-[color:var(--sb-border-strong)] px-3.5 py-2 text-sm font-medium text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40"
+        >
+          Brands
+        </button>
+        <button
+          type="button"
+          onClick={() => { setOpenId(null); setBroadcastOpen(false); setBrandsOpen(false); setForm({ mode: "add" }); }}
           disabled={!dbBranches}
           className="inline-flex items-center gap-1.5 rounded-xl border border-[color:var(--sb-border-strong)] px-3.5 py-2 text-sm font-medium text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40"
         >
@@ -177,7 +211,7 @@ export function AllBranchesView() {
         </button>
         <button
           type="button"
-          onClick={() => { setOpenId(null); setForm(null); setBroadcastOpen(true); }}
+          onClick={() => { setOpenId(null); setForm(null); setBrandsOpen(false); setBroadcastOpen(true); }}
           disabled={!liveKnown || !dbBranches}
           className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black transition-transform active:scale-95 disabled:opacity-40"
         >
@@ -190,11 +224,30 @@ export function AllBranchesView() {
       </header>
 
       <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-4">
-        <Stat value={dbBranches ? rows.length : "—"} label="Branches" />
+        <Stat value={dbBranches ? visibleRows.length : "—"} label="Branches" />
         <Stat value={liveKnown ? onlineCount : "—"} label="Online" dot={DOT_FILL.idle} />
         <Stat value={liveKnown ? playingCount : "—"} label="Playing" dot={DOT_FILL.playing} />
         <Stat value={dbBranches ? installCount : "—"} label="Needs installation" dot={DOT_FILL.install} valueColor={installCount > 0 ? "#fbbf24" : undefined} last />
       </div>
+
+      {brandsData && brandsData.brands.length > 1 ? (
+        <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--sb-border)] px-6 py-3">
+          <span className="text-xs text-[var(--sb-text-tertiary)]">Brand</span>
+          {[{ id: "all", name: "All brands", color: null as string | null }, ...brandsData.brands].map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => setBrandFilter(b.id)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                activeFilter === b.id ? "border-white bg-white text-black" : "border-[color:var(--sb-border)] text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]"
+              }`}
+            >
+              {b.id !== "all" ? <span className="h-2 w-2 rounded-full" style={{ background: b.color ?? DEFAULT_BRAND_COLOR }} aria-hidden /> : null}
+              <span dir="auto">{b.name}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {loadError ? (
         <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">Could not load branches. Refresh the page to try again.</p>
@@ -206,7 +259,7 @@ export function AllBranchesView() {
         <div className="grid lg:grid-cols-[minmax(240px,2fr)_3fr]">
           <div className="hidden items-center justify-center border-r border-[color:var(--sb-border)] p-6 lg:flex">
             <NetworkMap
-              branches={rows.map((r) => ({ id: r.id, name: r.name, city: r.city, latitude: r.latitude, longitude: r.longitude, status: rowStatus(r, liveKnown) }))}
+              branches={visibleRows.map((r) => ({ id: r.id, name: r.name, city: r.city, latitude: r.latitude, longitude: r.longitude, status: rowStatus(r, liveKnown), brandColor: colorOf(r.brandId) }))}
               selectedId={selectedId}
               onSelect={openBranch}
             />
@@ -220,7 +273,8 @@ export function AllBranchesView() {
                     key={form.mode === "edit" ? form.id : "add"}
                     mode={form.mode}
                     branchId={editing?.id}
-                    initial={editing ? { name: editing.name, branchNumber: editing.branchNumber ?? "", currentLocation: editing.formattedAddress || [editing.street, editing.houseNumber, editing.city].filter(Boolean).join(" ") || null } : undefined}
+                    initial={editing ? { name: editing.name, branchNumber: editing.branchNumber ?? "", currentLocation: editing.formattedAddress || [editing.street, editing.houseNumber, editing.city].filter(Boolean).join(" ") || null, brandId: editing.brandId } : activeFilter !== "all" ? { brandId: activeFilter } : undefined}
+                    brands={brandsData?.brands ?? null}
                     onCancel={() => setForm(null)}
                     onDone={(id) => {
                       setForm(null);
@@ -231,14 +285,22 @@ export function AllBranchesView() {
                 </div>
               );
             }
+            if (brandsOpen && brandsData) {
+              return (
+                <div className="max-h-[640px] overflow-y-auto">
+                  <BrandManager brands={brandsData.brands} onClose={() => setBrandsOpen(false)} onChanged={() => setReloadKey((k) => k + 1)} />
+                </div>
+              );
+            }
             if (broadcastOpen) {
               return (
                 <div className="max-h-[640px] overflow-y-auto">
                   <BroadcastPanel
                     targets={rows.map((r) => {
                       const st = rowStatus(r, liveKnown);
-                      return { id: r.id, name: r.name, branchNumber: r.branchNumber, status: st, liveBranchId: r.live && (st === "playing" || st === "idle") ? r.live.branchId : null };
+                      return { id: r.id, name: r.name, branchNumber: r.branchNumber, status: st, liveBranchId: r.live && (st === "playing" || st === "idle") ? r.live.branchId : null, brandId: r.brandId };
                     })}
+                    brands={(brandsData?.brands ?? []).map((b) => ({ id: b.id, name: b.name, color: b.color }))}
                     onClose={() => setBroadcastOpen(false)}
                     sendCommandWithAck={sendCommandWithAck}
                   />
@@ -260,10 +322,12 @@ export function AllBranchesView() {
             }
             return (
               <ul className="max-h-[640px] divide-y divide-[color:var(--sb-border)] overflow-y-auto">
-                {rows.map((r) => (
+                {visibleRows.length === 0 ? <li className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">No branches in this brand yet.</li> : null}
+                {visibleRows.map((r) => (
                   <BranchRow
                     key={r.id}
                     row={r}
+                    brand={r.brandId ? brandById.get(r.brandId) ?? null : null}
                     status={rowStatus(r, liveKnown)}
                     selected={r.id === selectedId}
                     onSelect={() => openBranch(r.id)}
@@ -300,7 +364,7 @@ const STATUS_LABEL: Record<RowStatus, { label: string; text: string }> = {
   unknown: { label: "—", text: "text-[var(--sb-text-tertiary)]" },
 };
 
-function BranchRow({ row, status, selected, onSelect }: { row: Row; status: RowStatus; selected: boolean; onSelect: () => void }) {
+function BranchRow({ row, brand, status, selected, onSelect }: { row: Row; brand: BrandRow | null; status: RowStatus; selected: boolean; onSelect: () => void }) {
   const ui = STATUS_LABEL[status];
   // secondary only: what plays, one muted line (no artwork — light at hundreds of branches)
   const nowPlaying = status === "playing" ? row.state?.currentTrack?.title || row.state?.currentSource?.title || "" : "";
@@ -313,7 +377,10 @@ function BranchRow({ row, status, selected, onSelect }: { row: Row; status: RowS
       }`}
     >
       <div className="min-w-0">
-        <div className="truncate text-sm font-semibold text-[var(--sb-text)]">{row.name}</div>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-semibold text-[var(--sb-text)]">{row.name}</span>
+          {brand ? <BrandBadge name={brand.name} color={brand.color} /> : null}
+        </div>
         {row.branchNumber || row.city ? (
           <div className="truncate text-xs text-[var(--sb-text-secondary)]">
             {row.branchNumber ? <span className="font-medium tabular-nums">Branch {row.branchNumber}</span> : null}

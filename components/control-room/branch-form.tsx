@@ -11,7 +11,8 @@ import { BranchMap } from "@/components/control-room/branch-map";
  * city and latitude / longitude. Text that was not picked from Google is never saved (no guessed location).
  */
 
-export type BranchFormValues = { name: string; branchNumber: string; currentLocation?: string | null };
+export type BranchFormValues = { name: string; branchNumber: string; currentLocation?: string | null; brandId?: string | null };
+export type FormBrand = { id: string; name: string; color: string | null; isDefault: boolean };
 type Picked = { placeId: string; label: string; latitude: number; longitude: number };
 
 function usePlaceAutocomplete(hostRef: React.RefObject<HTMLDivElement | null>, browserKey: string | null, onPick: (p: Picked) => void, onError: () => void) {
@@ -54,12 +55,15 @@ export function BranchForm({
   mode,
   branchId,
   initial,
+  brands,
   onDone,
   onCancel,
 }: {
   mode: "add" | "edit";
   branchId?: string;
   initial?: Partial<BranchFormValues>;
+  /** the organization's brands (null = not loaded / not available → the brand field is hidden and nothing is sent) */
+  brands?: FormBrand[] | null;
   onDone: (branchId: string | null) => void;
   onCancel: () => void;
 }) {
@@ -67,6 +71,12 @@ export function BranchForm({
   const [name, setName] = useState(initial?.name ?? "");
   const [branchNumber, setBranchNumber] = useState(initial?.branchNumber ?? "");
   const [picked, setPicked] = useState<Picked | null>(null);
+  const [brandId, setBrandId] = useState<string>(initial?.brandId ?? brands?.find((b) => b.isDefault)?.id ?? brands?.[0]?.id ?? "");
+  // brands may arrive after the form opened → pick the branch's brand (edit) or the default (add) once they do
+  useEffect(() => {
+    if (brandId || !brands?.length) return;
+    setBrandId(initial?.brandId ?? brands.find((b) => b.isDefault)?.id ?? brands[0].id);
+  }, [brands, brandId, initial?.brandId]);
   const [changingLocation, setChangingLocation] = useState(mode === "add" || !initial?.currentLocation);
   const [googleError, setGoogleError] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -84,7 +94,7 @@ export function BranchForm({
       const res = await fetch(mode === "add" ? "/api/control-room/branches" : `/api/control-room/branches/${encodeURIComponent(branchId ?? "")}`, {
         method: mode === "add" ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, branchNumber, ...(picked ? { placeId: picked.placeId } : {}), language: "he" }),
+        body: JSON.stringify({ name, branchNumber, ...(picked ? { placeId: picked.placeId } : {}), ...(brands?.length && brandId ? { brandId } : {}), language: "he" }),
       });
       const data = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
       if (!res.ok) { setError(data.error ?? `Could not save (HTTP ${res.status}).`); return; }
@@ -119,6 +129,18 @@ export function BranchForm({
             <input value={branchNumber} onChange={(e) => setBranchNumber(e.target.value)} placeholder="e.g. 192" dir="auto" disabled={saving} className={input} />
           </label>
         </div>
+
+        {brands && brands.length > 0 ? (
+          <label className="block">
+            <span className="text-xs text-[var(--sb-text-tertiary)]">Brand</span>
+            <div className="mt-1 flex items-center gap-2">
+              <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: brands.find((b) => b.id === brandId)?.color ?? "#8e8e93" }} aria-hidden />
+              <select value={brandId} onChange={(e) => setBrandId(e.target.value)} disabled={saving} className={`${input} mt-0`}>
+                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}{b.isDefault ? " (default)" : ""}</option>)}
+              </select>
+            </div>
+          </label>
+        ) : null}
 
         <div>
           <span className="text-xs text-[var(--sb-text-tertiary)]">Location</span>

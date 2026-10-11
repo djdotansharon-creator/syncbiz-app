@@ -9,6 +9,8 @@ import { DOT_FILL, type MapDotStatus } from "@/components/control-room/branch-ma
  * Each branch gets the EXISTING remote PLAY_INTERRUPT (the station ducks the music, plays the jingle, restores the
  * music — accepted jingle path). The server answers per branch: "Delivered to station" (handed to the station — NOT
  * "played") or "Not delivered". One unavailable branch never stops the others. Schedule / automation = later.
+ * Recipients (owner 2026-10-11): All branches · one Brand · Selected branches. "All" and "Brand" include EVERY branch of
+ * the scope — online ones get the command, offline / not installed ones are reported "Not delivered" (no command sent).
  */
 
 type Jingle = { id: string; title: string; url: string; durationSec: number | null };
@@ -20,7 +22,12 @@ export type BroadcastTarget = {
   status: MapDotStatus;
   /** raw branch id the server routes on — present only while the station is online */
   liveBranchId: string | null;
+  /** brand of the branch (the default Brand when unassigned) */
+  brandId: string | null;
 };
+
+export type BroadcastBrand = { id: string; name: string; color: string | null };
+type Mode = "all" | "brand" | "selected";
 
 type Result = { delivered: boolean; reason?: string };
 
@@ -33,10 +40,12 @@ const REASON_TEXT: Record<string, string> = {
 
 export function BroadcastPanel({
   targets,
+  brands,
   onClose,
   sendCommandWithAck,
 }: {
   targets: BroadcastTarget[];
+  brands: BroadcastBrand[];
   onClose: () => void;
   sendCommandWithAck: (targetBranchId: string, command: RemoteCommand, payload?: { url?: string }) => Promise<Result>;
 }) {
@@ -44,6 +53,8 @@ export function BroadcastPanel({
   const [jingleError, setJingleError] = useState(false);
   const [jingleId, setJingleId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [mode, setMode] = useState<Mode>("all");
+  const [brandId, setBrandId] = useState<string>(brands[0]?.id ?? "");
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<Record<string, Result> | null>(null);
 
@@ -67,7 +78,9 @@ export function BroadcastPanel({
     return next;
   });
   const jingle = jingles?.find((j) => j.id === jingleId) ?? null;
-  const chosen = online.filter((t) => selected.has(t.id));
+  // recipients: All / Brand = every branch of the scope (offline → Not delivered); Selected = the checked online ones
+  const chosen = mode === "all" ? targets : mode === "brand" ? targets.filter((t) => t.brandId === brandId) : online.filter((t) => selected.has(t.id));
+  const listed = mode === "selected" ? targets : chosen;
   const canSend = !!jingle && chosen.length > 0 && !sending;
 
   const send = async () => {
@@ -134,8 +147,34 @@ export function BroadcastPanel({
 
       {/* 2. branches */}
       <section className="flex-1 border-b border-[color:var(--sb-border)] px-6 py-5">
-        <div className="flex items-center justify-between">
-          <div className="text-xs text-[var(--sb-text-tertiary)]">2 · Branches</div>
+        <div className="text-xs text-[var(--sb-text-tertiary)]">2 · Branches</div>
+        <div className="mt-3 inline-flex rounded-full border border-[color:var(--sb-border)] p-0.5" role="tablist">
+          {(["all", "brand", "selected"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="tab"
+              aria-selected={mode === m}
+              disabled={sending}
+              onClick={() => { setMode(m); setResults(null); }}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${mode === m ? "bg-white text-black" : "text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]"}`}
+            >
+              {m === "all" ? "All branches" : m === "brand" ? "Brand" : "Selected"}
+            </button>
+          ))}
+        </div>
+        {mode === "brand" ? (
+          <select
+            value={brandId}
+            disabled={sending}
+            onChange={(e) => { setBrandId(e.target.value); setResults(null); }}
+            className="mt-3 block w-full rounded-lg border border-[color:var(--sb-border)] bg-[var(--sb-surface)] px-3 py-2 text-sm text-[var(--sb-text)]"
+            aria-label="Brand"
+          >
+            {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        ) : null}
+        <div className={`mt-3 items-center justify-end ${mode === "selected" ? "flex" : "hidden"}`}>
           <button
             type="button"
             disabled={online.length === 0}
@@ -145,20 +184,23 @@ export function BroadcastPanel({
             {allOnlineSelected ? "Clear" : `All online (${online.length})`}
           </button>
         </div>
+        {listed.length === 0 ? <p className="mt-3 text-sm text-[var(--sb-text-secondary)]">No branches in this brand.</p> : null}
         <ul className="mt-3 max-h-64 space-y-1 overflow-y-auto">
-          {targets.map((t) => {
+          {listed.map((t) => {
             const isOnline = !!t.liveBranchId;
             const r = results?.[t.id];
             return (
               <li key={t.id}>
-                <label className={`flex items-center gap-3 rounded-lg px-2 py-2 ${isOnline ? "cursor-pointer hover:bg-white/[0.04]" : "opacity-50"}`}>
-                  <input
-                    type="checkbox"
-                    disabled={!isOnline || sending}
-                    checked={isOnline && selected.has(t.id)}
-                    onChange={() => { toggle(t.id); setResults(null); }}
-                    className="h-4 w-4 accent-[var(--sb-accent)]"
-                  />
+                <label className={`flex items-center gap-3 rounded-lg px-2 py-2 ${mode === "selected" ? (isOnline ? "cursor-pointer hover:bg-white/[0.04]" : "opacity-50") : isOnline ? "" : "opacity-60"}`}>
+                  {mode === "selected" ? (
+                    <input
+                      type="checkbox"
+                      disabled={!isOnline || sending}
+                      checked={isOnline && selected.has(t.id)}
+                      onChange={() => { toggle(t.id); setResults(null); }}
+                      className="h-4 w-4 accent-[var(--sb-accent)]"
+                    />
+                  ) : null}
                   <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: DOT_FILL[t.status] }} aria-hidden />
                   <span className="min-w-0 flex-1 truncate text-sm text-[var(--sb-text)]">
                     {t.name}
@@ -188,7 +230,7 @@ export function BroadcastPanel({
           {results
             ? `${deliveredCount} delivered to station${notDeliveredCount ? ` · ${notDeliveredCount} not delivered` : ""}`
             : chosen.length > 0
-              ? `${chosen.length} branch${chosen.length === 1 ? "" : "es"} selected`
+              ? `${chosen.length} branch${chosen.length === 1 ? "" : "es"} · ${chosen.filter((t) => !!t.liveBranchId).length} online`
               : "Select a jingle and branches"}
         </p>
         <button

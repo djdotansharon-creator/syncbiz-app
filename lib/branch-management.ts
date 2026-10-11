@@ -32,7 +32,17 @@ export type BranchInput = {
   placeId?: unknown;
   /** UI language — Google answers the address in it ("he" / "en") */
   language?: unknown;
+  /** Brand of THIS organization (optional; omitted on create → the default Brand; omitted on edit → unchanged) */
+  brandId?: unknown;
 };
+
+/** A brand id safe to store on a branch of THIS workspace — never another organization's, never archived. */
+async function assignableBrandId(workspaceId: string, brandId: unknown): Promise<string> {
+  if (typeof brandId !== "string" || !brandId.trim()) throw new BranchInputError("Pick a brand.");
+  const b = await prisma.brand.findFirst({ where: { id: brandId.trim(), workspaceId, archivedAt: null }, select: { id: true } });
+  if (!b) throw new BranchInputError("Brand not found.", 404);
+  return b.id;
+}
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
@@ -81,8 +91,9 @@ export async function createBranch(workspaceId: string, input: BranchInput) {
   await enforceCanAddBranch(workspaceId);
   await assertNumberFree(workspaceId, c.branchNumber);
   const place = await resolvePlaceOrThrow(input);
+  const pickedBrandId = input.brandId === undefined || input.brandId === null || input.brandId === "" ? null : await assignableBrandId(workspaceId, input.brandId);
   return prisma.$transaction(async (tx) => {
-    const brandId = await ensureDefaultBrandId(tx, workspaceId);
+    const brandId = pickedBrandId ?? (await ensureDefaultBrandId(tx, workspaceId));
     const created = await tx.branch.create({
       data: {
         workspaceId,
@@ -108,9 +119,10 @@ export async function updateBranch(workspaceId: string, branchId: string, input:
   await assertNumberFree(workspaceId, c.branchNumber, branchId);
   const newPlace = input.placeId !== undefined && input.placeId !== null && input.placeId !== "" && input.placeId !== cur.googlePlaceId;
   const place = newPlace ? await resolvePlaceOrThrow(input) : null;
+  const brandId = input.brandId === undefined ? undefined : await assignableBrandId(workspaceId, input.brandId);
   return prisma.branch.update({
     where: { id: branchId },
-    data: { name: c.name, locationCode: c.branchNumber, ...(place ? placeFields(place) : {}) },
+    data: { name: c.name, locationCode: c.branchNumber, ...(place ? placeFields(place) : {}), ...(brandId ? { brandId } : {}) },
   });
 }
 

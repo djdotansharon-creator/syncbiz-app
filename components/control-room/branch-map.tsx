@@ -14,7 +14,11 @@ import { cityLngLat } from "@/lib/control-room-geo";
 
 export type MapDotStatus = "playing" | "idle" | "offline" | "install" | "unknown";
 
-export type MapBranch = { id: string; name: string; city: string; status: MapDotStatus; latitude?: number | null; longitude?: number | null };
+export type MapBranch = {
+  id: string; name: string; city: string; status: MapDotStatus; latitude?: number | null; longitude?: number | null;
+  /** brand color (#rrggbb): the marker CENTER shows the brand, a RING around it shows the status. Absent → status-only dot. */
+  brandColor?: string | null;
+};
 
 export const DOT_FILL: Record<MapDotStatus, string> = {
   playing: "var(--sb-accent)",
@@ -112,14 +116,21 @@ export function BranchMap({
         return (
           <g key={d.id} className="cursor-pointer" onClick={() => onSelect(d.id)}>
             <title>{d.name}</title>
-            {selected ? <circle cx={x} cy={y} r={10} fill="none" stroke="#fff" strokeWidth={1.5} /> : null}
+            {selected ? <circle cx={x} cy={y} r={d.brandColor ? 12 : 10} fill="none" stroke="#fff" strokeWidth={1.5} /> : null}
             {d.status === "playing" && pulsing ? (
               <circle cx={x} cy={y} r={5} fill={DOT_FILL.playing} opacity={0.35}>
                 <animate attributeName="r" values="5;12;5" dur="2.4s" repeatCount="indefinite" />
                 <animate attributeName="opacity" values="0.35;0;0.35" dur="2.4s" repeatCount="indefinite" />
               </circle>
             ) : null}
-            <circle cx={x} cy={y} r={5.5} fill={DOT_FILL[d.status]} stroke="rgba(10,10,12,0.9)" strokeWidth={1.5} />
+            {d.brandColor ? (
+              <>
+                <circle cx={x} cy={y} r={7.5} fill="rgba(10,10,12,0.9)" stroke={DOT_FILL[d.status]} strokeWidth={2.4} />
+                <circle cx={x} cy={y} r={4.6} fill={d.brandColor} />
+              </>
+            ) : (
+              <circle cx={x} cy={y} r={5.5} fill={DOT_FILL[d.status]} stroke="rgba(10,10,12,0.9)" strokeWidth={1.5} />
+            )}
           </g>
         );
       })}
