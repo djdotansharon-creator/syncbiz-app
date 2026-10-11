@@ -170,8 +170,9 @@ export function BroadcastPanel({
             onChange={(e) => { setBrandId(e.target.value); setResults(null); }}
             className="mt-3 block w-full rounded-lg border border-[color:var(--sb-border)] bg-[var(--sb-surface)] px-3 py-2 text-sm text-[var(--sb-text)]"
             aria-label="Brand"
+            style={{ colorScheme: "dark" }}
           >
-            {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            {brands.map((b) => <option key={b.id} value={b.id} className="bg-[#1c1c1e] text-white">{b.name}</option>)}
           </select>
         ) : null}
         <div className={`mt-3 items-center justify-end ${mode === "selected" ? "flex" : "hidden"}`}>

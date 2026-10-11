@@ -135,8 +135,8 @@ export function BranchForm({
             <span className="text-xs text-[var(--sb-text-tertiary)]">Brand</span>
             <div className="mt-1 flex items-center gap-2">
               <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: brands.find((b) => b.id === brandId)?.color ?? "#8e8e93" }} aria-hidden />
-              <select value={brandId} onChange={(e) => setBrandId(e.target.value)} disabled={saving} className={`${input} mt-0`}>
-                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}{b.isDefault ? " (default)" : ""}</option>)}
+              <select value={brandId} onChange={(e) => setBrandId(e.target.value)} disabled={saving} className={`${input} mt-0`} style={{ colorScheme: "dark" }}>
+                {brands.map((b) => <option key={b.id} value={b.id} className="bg-[#1c1c1e] text-white">{b.name}{b.isDefault ? " (default)" : ""}</option>)}
               </select>
             </div>
           </label>
