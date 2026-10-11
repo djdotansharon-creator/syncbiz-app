@@ -68,6 +68,7 @@ import { sanitizeApplyDesktopAuth } from "../shared/desktop-auth-payload";
 import { reconcileDeviceIdentity, stripDeviceIdFromPatch } from "./device-identity-reconcile";
 import { readDesignationRecord, isDesignatedStationOffline } from "./designation-cache";
 import { fileLog } from "./file-logger";
+import { initStationMediaToken, refreshStationMediaToken } from "./media-token-provider";
 import {
   StationDeviceRegistrar,
   pickRegistrationRelevant,
@@ -401,6 +402,8 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   // Phase 0.2A trigger (A) — STARTUP: fire-and-forget cloud registration if a token is present. Never awaited,
   // so it can never delay playback / window / WS startup. Skips silently when no token (returning-user path).
   getStationRegistrar().trigger("startup");
+  // beta.22: the station fetches its OWN Music Bank media token (station identity, never over WS). Background only.
+  initStationMediaToken({ getConfig: () => getEffectiveRuntimeConfig(), log: (level, msg, data) => fileLog(level, msg, data) });
 
   ipcMain.handle(MVP_IPC.GET_CONFIG, (): DesktopRuntimeConfig => {
     cachedConfig = loadEffectiveRuntimeConfig();
@@ -560,6 +563,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       if (!alreadyRegistered) manager.connect();
       // Ensure the cloud StationDevice registration reflects this token scope (idempotent; server already did it).
       getStationRegistrar().trigger("signin");
+      refreshStationMediaToken("desktop-auth"); // beta.22: new station token → new media token
       broadcast(getWindow(), manager.snapshot());
       fileLog("INFO", "APPLY_DESKTOP_AUTH: desktop token applied", { hasExpiry: Boolean(s.expiresAtIso), reconnected: !alreadyRegistered });
       return { ok: true };

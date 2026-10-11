@@ -164,6 +164,8 @@ export type DesktopAccessClaims = {
   userId: string;
   workspaceId: string | null;
   authorizedBranches: string[] | null;
+  /** The durable station id the token is BOUND to (signed at mint after the StationDevice binding); null if unbound. */
+  stationDeviceId: string | null;
 };
 
 /**
@@ -187,6 +189,7 @@ function verifyDesktopAccessPayload(token: string): DesktopAccessClaims | null {
     exp?: number;
     workspaceId?: unknown;
     authorizedBranches?: unknown;
+    stationDeviceId?: unknown;
   };
   try {
     payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
@@ -206,7 +209,19 @@ function verifyDesktopAccessPayload(token: string): DesktopAccessClaims | null {
   const authorizedBranches = Array.isArray(payload.authorizedBranches)
     ? (payload.authorizedBranches as string[])
     : null;
-  return { userId, workspaceId, authorizedBranches };
+  const stationDeviceId =
+    typeof payload.stationDeviceId === "string" && payload.stationDeviceId.trim() ? payload.stationDeviceId.trim() : null;
+  return { userId, workspaceId, authorizedBranches, stationDeviceId };
+}
+
+/**
+ * Station identity from a `desktop_access` token (beta.22 media authorization): the signed workspace + the durable
+ * station id the token is bound to. Null unless BOTH are present — an unbound desktop token is not a station.
+ */
+export function verifyDesktopStationToken(token: string): { userId: string; workspaceId: string; stationDeviceId: string } | null {
+  const c = verifyDesktopAccessPayload(token);
+  if (!c || !c.workspaceId || !c.stationDeviceId) return null;
+  return { userId: c.userId, workspaceId: c.workspaceId, stationDeviceId: c.stationDeviceId };
 }
 
 /**
