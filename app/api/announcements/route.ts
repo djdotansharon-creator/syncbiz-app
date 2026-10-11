@@ -1,36 +1,20 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { db } from "@/lib/store";
-import type { Announcement } from "@/lib/types";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 
+/**
+ * Legacy announcements list. Security hotfix (2026-10-11):
+ *  GET  → signed-in only, and ONLY the caller's own workspace (same account mapping as /api/devices).
+ *  POST → closed (405): it was unauthenticated, wrote to a fake "system" workspace and had no caller in the app.
+ *         Jingles use the authenticated /api/jingles/library.
+ */
 export async function GET() {
-  return NextResponse.json(await db.getAnnouncements());
+  const user = await getCurrentUserFromCookies();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const accountId = user.tenantId === "tnt-default" ? "acct-demo-001" : user.tenantId;
+  return NextResponse.json(await db.getAnnouncements(accountId));
 }
 
-export async function POST(req: NextRequest) {
-  const data = (await req.json()) as Partial<Announcement>;
-
-  if (!data.title || !data.message || !data.branchId || !data.windowStart || !data.windowEnd) {
-    return NextResponse.json(
-      {
-        error:
-          "title, message, branchId, windowStart, and windowEnd are required for creating an announcement",
-      },
-      { status: 400 },
-    );
-  }
-
-  const announcement = await db.addAnnouncement({
-    title: data.title,
-    message: data.message,
-    branchId: data.branchId,
-    scheduleId: data.scheduleId,
-    status: data.status ?? "draft",
-    priority: data.priority ?? "normal",
-    ttsEnabled: data.ttsEnabled ?? false,
-    windowStart: data.windowStart,
-    windowEnd: data.windowEnd,
-  });
-
-  return NextResponse.json(announcement, { status: 201 });
+export async function POST() {
+  return NextResponse.json({ error: "Method Not Allowed" }, { status: 405, headers: { Allow: "GET" } });
 }
-

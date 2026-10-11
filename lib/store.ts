@@ -527,8 +527,12 @@ export const db = {
 
   // ─── ANNOUNCEMENTS ────────────────────────────────────────────────────────
 
-  async getAnnouncements(accountId?: string): Promise<Announcement[]> {
-    const base = accountId ? { workspaceId: (await resolveWorkspaceId(accountId)) ?? "" } : {};
+  async getAnnouncements(accountId: string): Promise<Announcement[]> {
+    // Security (2026-10-11): ALWAYS one workspace. No / unknown account → nothing (never "every workspace").
+    if (typeof accountId !== "string" || !accountId.trim()) return [];
+    const wsId = await resolveWorkspaceId(accountId);
+    if (!wsId) return [];
+    const base = { workspaceId: wsId };
     // Exclude cloud Jingle Library rows (announcementType "jingle") — they share the Announcement
     // table but belong to the Jingles feature, not the scheduled-announcements list. An explicit
     // NULL-inclusive OR is required: under PostgreSQL three-valued logic `NOT (type = 'jingle')`
