@@ -3,13 +3,15 @@ import {
   DENSE_ADMIN_ANNOUNCEMENTS_TABLE_HEADER_CLASS,
   DENSE_ADMIN_ANNOUNCEMENTS_TABLE_ROW_GRID_CLASS,
 } from "@/lib/player-surface/dense-data-row-constants";
+import { headers } from "next/headers";
 import { getApiBase } from "@/lib/api-base";
 import type { Announcement } from "@/lib/types";
 
 async function getAnnouncements(): Promise<Announcement[]> {
   try {
     const base = getApiBase();
-    const res = await fetch(`${base}/api/announcements`, { cache: "no-store" });
+    const cookie = (await headers()).get("cookie");
+    const res = await fetch(`${base}/api/announcements`, { cache: "no-store", headers: cookie ? { cookie } : {} });
     if (!res.ok) {
       console.error("[announcements] API error:", res.status, await res.text());
       return [];
