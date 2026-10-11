@@ -19,6 +19,12 @@ export type StationPlaybackState = {
   currentTrackIndex: number;
   queue: Array<{ id: string; title: string; cover: string | null }>;
   queueIndex: number;
+  /** Full ordered playlist session rows (same shape CONTROL mirrors render). Metadata only — never a playback trigger. */
+  sessionTracks?: Array<{ id: string; title: string; cover: string | null; durationSeconds?: number }>;
+  /** Display title for the active session (playlist name or source title). */
+  sessionTitle?: string | null;
+  /** Persisted playlist id when the session is playlist-backed. */
+  sessionPlaylistId?: string | null;
   shuffle?: boolean;
   autoMix?: boolean;
   position?: number;

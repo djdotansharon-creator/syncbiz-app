@@ -1,15 +1,16 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { app, BrowserWindow, screen, shell } from "electron";
+import { app, BrowserWindow, net, protocol, screen, session, shell } from "electron";
 
 import { initFileLogger, fileLog, getLogFilePath } from "./file-logger";
-import { registerMvpIpc, getEffectiveRuntimeConfig, getProtectionService } from "./ipc-mvp";
+import { registerMvpIpc, getEffectiveRuntimeConfig, getProtectionService, shutdownStationWs } from "./ipc-mvp";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat-writer";
 import { startEmbeddedNextServer, type EmbeddedNextHandle } from "./embedded-next-server";
 import { flushLocalCollectionTagSnapshotWrites } from "./local-collection-snapshot";
 import { PlaybackOrchestrator } from "./playback-orchestrator";
 import { ensureRuntimeBinaries, scheduleBackgroundUpdateCheck } from "./runtime-binaries";
 import { SYNCBIZ_HOSTED_WEB_APP_URL, SYNCBIZ_ALLOWED_ORIGIN } from "./hosted-url";
+import { RendererOfflineCache, isNetworkClassLoadError, OFFLINE_ROUTE } from "./renderer-offline-cache";
 
 // ─── Process-level crash guards (must be registered as early as possible) ────
 process.on("uncaughtException", (err) => {
@@ -29,6 +30,12 @@ let mainWindow: BrowserWindow | null = null;
 let embeddedNext: EmbeddedNextHandle | null = null;
 let orchestrator: PlaybackOrchestrator | undefined;
 let desktopQuitAfterTagSnapshotFlush = false;
+// OFFLINE COLD BOOT: last-known-good hosted-renderer cache (used ONLY after a network-class main-frame failure).
+let offlineCache: RendererOfflineCache | null = null;
+// No-valid-cache fallback: lightweight reachability retry while the error page is shown (single timer, no storms).
+let networkRetryTimer: ReturnType<typeof setInterval> | null = null;
+let networkRetryInFlight = false;
+const NETWORK_RETRY_MS = 30_000;
 
 function getMainWindow(): BrowserWindow | null {
   return mainWindow;
@@ -190,6 +197,9 @@ function attachRemoteSecurity(win: BrowserWindow, allowedOrigin: string): void {
  */
 function buildOfflineErrorHtml(targetUrl: string, logPath: string): string {
   const safeUrl = targetUrl.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Retry must navigate to the HOSTED app again. (location.reload() on this data: page only reloaded the error page
+  // itself — a dead end even after the internet returned.) JSON-encoded + "<" escaped → safe inside the attribute.
+  const retryTarget = JSON.stringify(targetUrl).replace(/</g, "\\u003c").replace(/"/g, "&quot;");
   const safeLog = logPath.replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -214,9 +224,49 @@ function buildOfflineErrorHtml(targetUrl: string, logPath: string): string {
   <p>Could not load the SyncBiz web app.<br>
      Please check your internet connection and try again.</p>
   <p>Connecting to: <code>${safeUrl}</code></p>
-  <button onclick="location.reload()">Retry</button>
+  <button onclick="location.href=${retryTarget}">Retry</button>
+  <p class="log">VONO retries automatically when the connection returns.</p>
   <p class="log">Error log: <code>${safeLog}</code></p>
 </body></html>`;
+}
+
+function stopNetworkRetry(): void {
+  if (networkRetryTimer) {
+    clearInterval(networkRetryTimer);
+    networkRetryTimer = null;
+  }
+}
+
+/**
+ * No-valid-cache fallback while the error page is shown: every NETWORK_RETRY_MS probe the hosted origin (a tiny
+ * static file, bypassing any interceptor). On the first success navigate ONCE to the hosted app. Single timer +
+ * in-flight guard → no reload storms; never touches MPV, playback or the station WS.
+ */
+function startNetworkRetry(win: BrowserWindow, targetUrl: string): void {
+  if (networkRetryTimer) return;
+  const probeUrl = `${new URL(targetUrl).origin}/manifest.webmanifest`;
+  networkRetryTimer = setInterval(() => {
+    if (networkRetryInFlight) return;
+    if (win.isDestroyed()) {
+      stopNetworkRetry();
+      return;
+    }
+    networkRetryInFlight = true;
+    void net
+      .fetch(probeUrl, { cache: "no-store", bypassCustomProtocolHandlers: true })
+      .then((r) => {
+        if (!r.ok || win.isDestroyed()) return;
+        stopNetworkRetry();
+        fileLog("INFO", "network retry: hosted origin reachable — loading hosted app", { url: targetUrl });
+        void win.webContents.loadURL(targetUrl);
+      })
+      .catch(() => {
+        /* still offline — keep waiting */
+      })
+      .finally(() => {
+        networkRetryInFlight = false;
+      });
+  }, NETWORK_RETRY_MS);
 }
 
 function createBrowserWindow(): BrowserWindow {
@@ -377,14 +427,58 @@ async function openMainWindow(): Promise<void> {
     // Show a user-friendly offline error page when the initial load fails.
     // -3 (ERR_ABORTED) is a normal cancellation (e.g. during redirect) — ignore it.
     const targetUrl = resolved.url;
+
+    // OFFLINE COLD BOOT: the cache object only OBSERVES while online (passive webRequest.onCompleted) and refreshes
+    // a last-known-good copy after an authenticated /sources load. It never intercepts unless a network-class
+    // main-frame failure happens below. The normal online load (applyMainWindowContent → loadURL(targetUrl)) is
+    // unchanged.
+    if (!offlineCache && targetUrl.startsWith("https://")) {
+      offlineCache = new RendererOfflineCache({
+        ses: session.defaultSession,
+        protocol,
+        net,
+        userData: app.getPath("userData"),
+        hostedUrl: targetUrl,
+        log: (level, msg, data) => fileLog(level, msg, data),
+      });
+      offlineCache.attachObserver();
+    }
+
     win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame) return;
       if (errorCode === -3) return; // ERR_ABORTED — redirect or navigation cancelled
+      // Network-class failure + a fully VALID cache → serve the SAME hosted origin from the cache and load /sources.
+      // The renderer then runs its existing (unchanged) restore path. HTTP errors never reach did-fail-load, so a
+      // 5xx page is NOT silently replaced by the cache.
+      const cache = offlineCache;
+      if (cache && !cache.isServingOffline && isNetworkClassLoadError(errorCode)) {
+        const v = cache.validate();
+        if (v.ok) {
+          fileLog("WARN", "openMainWindow: main-frame network failure — loading last-known-good renderer (same origin)", {
+            errorCode, errorDescription,
+          });
+          cache.enableOfflineServing(v);
+          stopNetworkRetry();
+          void win.webContents.loadURL(cache.origin + OFFLINE_ROUTE);
+          return;
+        }
+        fileLog("WARN", "openMainWindow: no valid offline renderer cache", { reason: v.reason });
+      }
       fileLog("ERROR", "openMainWindow: main-frame load failed — showing offline error page", {
         errorCode, errorDescription, validatedURL,
       });
       const html = buildOfflineErrorHtml(targetUrl, getLogFilePath() ?? "(log unavailable)");
       void win.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      startNetworkRetry(win, targetUrl);
+    });
+
+    // A real hosted page committed → stop the fallback retry; online /sources → background cache refresh;
+    // /login → cache cleared (logout / session loss). Ignored while serving from the cache.
+    win.webContents.on("did-finish-load", () => {
+      const current = win.webContents.getURL();
+      if (!/^https?:\/\//.test(current)) return; // the data: error page
+      stopNetworkRetry();
+      offlineCache?.onMainFrameLoaded(current);
     });
   }
 
@@ -572,6 +666,7 @@ app.on("before-quit", (e) => {
     void flushLocalCollectionTagSnapshotWrites()
       .catch(() => undefined)
       .finally(() => {
+        shutdownStationWs(); // intentional shutdown → cancel station WS auto-reconnect
         stopHeartbeat();
         orchestrator?.kill();
         shutdownEmbeddedNext();
@@ -580,6 +675,7 @@ app.on("before-quit", (e) => {
     return;
   }
   fileLog("INFO", "before-quit: final quit");
+  shutdownStationWs(); // intentional shutdown → cancel station WS auto-reconnect
   stopHeartbeat();
   orchestrator?.kill();
   shutdownEmbeddedNext();

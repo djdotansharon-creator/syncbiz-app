@@ -65,3 +65,14 @@ export function vonoProtectionStatePath(): string {
 export function vonoControlPath(): string {
   return path.join(vonoStateDir(), "control.json");
 }
+
+/**
+ * Absolute path to the LAST-KNOWN-TRUSTED permanent-designation record (`…\VONO\state\designation.json`).
+ * Written ONLY after an online, server-verified SET_DEVICE_MODE { mode:"MASTER", designated:true } event, and
+ * cleared on any CONTROL / designated:false. Holds { schemaVersion, workspaceId, branchId, durableDeviceId,
+ * designatedAt } — no tokens/URLs/secrets. Lets the designated station prove its role OFFLINE (local playback
+ * only) when the WS can't connect. Same ProgramData authority dir (survives userData loss / reinstall).
+ */
+export function vonoDesignationPath(): string {
+  return path.join(vonoStateDir(), "designation.json");
+}

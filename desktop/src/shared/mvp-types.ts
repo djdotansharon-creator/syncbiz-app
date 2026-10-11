@@ -553,6 +553,12 @@ export type MvpStatusSnapshot = {
   deviceRole: MvpDeviceRole;
   /** Registered, connected, and MASTER — remote COMMAND messages are delivered here. */
   commandReady: boolean;
+  /**
+   * Offline permanent-designation authority (approach b): true when this station is the trusted designated
+   * MASTER per the ProgramData cache (written only after a verified online SET_DEVICE_MODE{MASTER,designated:true}).
+   * Lets the co-located renderer execute LOCAL playback with no WS. Never true unless the server designated it.
+   */
+  designatedStationOffline: boolean;
   /** Mock/local playback until MPV — mirrors what we send in STATE_UPDATE when MASTER. */
   mockPlaybackStatus: "idle" | "playing" | "paused" | "stopped";
   mockVolume: number;
