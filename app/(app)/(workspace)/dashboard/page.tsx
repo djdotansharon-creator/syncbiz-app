@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { getApiBase } from "@/lib/api-base";
 import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
@@ -7,11 +8,13 @@ import type { Announcement, Device, LogEntry, Schedule } from "@/lib/types";
 async function getData() {
   try {
     const base = getApiBase();
+    const cookie = (await headers()).get("cookie");
+    const withSession: Record<string, string> = cookie ? { cookie } : {};
     const [schedulesRes, devicesRes, announcementsRes, logsRes] = await Promise.all([
       fetch(`${base}/api/schedules`, { cache: "no-store" }),
       fetch(`${base}/api/devices`, { cache: "no-store" }),
-      fetch(`${base}/api/announcements`, { cache: "no-store" }),
-      fetch(`${base}/api/logs`, { cache: "no-store" }),
+      fetch(`${base}/api/announcements`, { cache: "no-store", headers: withSession }),
+      fetch(`${base}/api/logs`, { cache: "no-store", headers: withSession }),
     ]);
     const [schedules, devices, announcements, logs] = (await Promise.all([
       schedulesRes.ok ? schedulesRes.json() : [],

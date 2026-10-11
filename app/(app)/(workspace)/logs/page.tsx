@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { getApiBase } from "@/lib/api-base";
 import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
@@ -6,8 +7,9 @@ import type { Device, LogEntry } from "@/lib/types";
 async function getData(): Promise<{ logs: LogEntry[]; devices: Device[] }> {
   try {
     const base = getApiBase();
+    const cookie = (await headers()).get("cookie");
     const [logsRes, devicesRes] = await Promise.all([
-      fetch(`${base}/api/logs`, { cache: "no-store" }),
+      fetch(`${base}/api/logs`, { cache: "no-store", headers: cookie ? { cookie } : {} }),
       fetch(`${base}/api/devices`, { cache: "no-store" }),
     ]);
     const [logs, devices] = (await Promise.all([
