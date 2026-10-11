@@ -3410,3 +3410,25 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   .workspace-rail-grid[data-left-rail="open"] { --rail-left: 280px; }
   .workspace-rail-grid[data-right-rail="open"] { --rail-right: 280px; }
 }
+
+/* ── MANAGEMENT MODE (owner 2026-10-11) — Dashboard / Control Room / Access Control take the whole screen ──
+   UI only: the player row keeps its single AudioPlayer instance mounted (no remount → playback continues).
+   Browser: a tiny transparent off-flow box (YouTube iframes keep playing — same pattern as the streamer / mobile shells).
+   Desktop app: display:none — the MPV video slot then reports no rect, so MAIN never shows a stray native video window. */
+[data-management="true"] .library-player-route-bridge.mgmt-deck-hidden,
+[data-management="true"] .mgmt-deck-hidden {
+  position: fixed !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 320px !important;
+  height: 180px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  z-index: 0 !important;
+}
+[data-management="true"][data-desktop-app="true"] .library-player-route-bridge.mgmt-deck-hidden,
+[data-management="true"][data-desktop-app="true"] .mgmt-deck-hidden {
+  display: none !important;
+}

@@ -59,7 +59,8 @@ export default async function DashboardPage() {
   ).slice(0, 8);
 
   return (
-    <div className="space-y-8">
+    // Management Mode: full screen, outside the player workspace rails — this page scrolls on its own (like Control Room)
+    <div className="h-full space-y-8 overflow-y-auto pb-6">
       <div>
         <h1 className="text-xl font-semibold text-slate-50">{t.dashboard}</h1>
         <p className="mt-1 text-sm text-slate-400">{t.dashboardOverview}</p>

@@ -10,7 +10,8 @@ import { AccessControlConsole } from "@/components/access-control-console";
 
 export default function AccessControlPage() {
   return (
-    <div className="p-4 sm:p-6">
+    // Management Mode: full screen, outside the player workspace rails — this page scrolls on its own (like Control Room)
+    <div className="h-full overflow-y-auto p-4 sm:p-6">
       <AccessControlConsole />
     </div>
   );

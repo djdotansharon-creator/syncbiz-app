@@ -568,6 +568,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (p.startsWith("/owner/control-room")) return true;
     return false;
   })();
+  // MANAGEMENT MODE (owner 2026-10-11): Dashboard / Control Room / Access Control take the whole screen. UI ONLY — the
+  // player row is hidden with a CSS class (same JSX tree → the single AudioPlayer instance is never remounted, playback
+  // and every provider keep running). Desktop: display:none (MPV video slot reports no rect → no stray native window);
+  // browser: a tiny transparent box so YouTube iframes keep playing (same pattern as the streamer / mobile branches).
+  const isManagementRoute = /^\/(dashboard|access-control|owner\/control-room)(\/|$)/.test(pathname ?? "");
   // Unified deck treatment: every desktop (app) route gets the media-theme
   // player shell — hero card + Command Pads aside + library-theme tokens —
   // so the top bar looks identical on /library, /radio, /owner, /schedules,
@@ -1349,6 +1354,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       }${isNativeFullscreen ? " is-native-fullscreen" : ""}`}
       data-control-room={isControlRoomMode ? "true" : undefined}
       data-native-fullscreen={isNativeFullscreen ? "true" : undefined}
+      data-management={isManagementRoute ? "true" : undefined}
+      data-desktop-app={inDesktopApp ? "true" : undefined}
     >
       {/* Station B1: desktop-only "Activate this station" (never shown on a designated station) */}
       <StationActivationGate />
@@ -1402,6 +1409,37 @@ export function AppShell({ children }: { children: ReactNode }) {
                 All items always use font-medium + fixed px-3.5 so width never shifts.
                 The underline span is always in the DOM (opacity changes only).
                 Explicit sort guarantees display order: Library → Schedules → Radio → Settings */}
+            {isManagementRoute ? (
+              <nav className="flex shrink-0 items-end gap-1 pb-0" aria-label="Management">
+                {([
+                  { href: "/dashboard", label: "Dashboard", active: pathname === "/dashboard" || pathname.startsWith("/dashboard/") },
+                  { href: "/owner/control-room", label: "Control Room", active: pathname.startsWith("/owner/control-room") },
+                  { href: "/access-control", label: "Access Control", active: pathname.startsWith("/access-control") },
+                ] as const).map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={item.active ? "page" : undefined}
+                    className={`relative px-3.5 pb-[6px] pt-[4px] text-[13px] font-medium transition-colors duration-150 focus:outline-none ${
+                      item.active ? "text-slate-50" : "text-slate-500 hover:text-slate-200"
+                    }`}
+                  >
+                    {item.label}
+                    <span
+                      className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-[#f5f5f7] transition-opacity duration-200 ${item.active ? "opacity-100" : "opacity-0"}`}
+                      aria-hidden
+                    />
+                  </Link>
+                ))}
+                <Link
+                  href="/library"
+                  className="mb-[3px] ml-3 inline-flex items-center gap-1.5 rounded-lg border border-white/[0.12] px-2.5 py-[3px] text-[12px] font-medium text-slate-300 transition-colors hover:border-white/[0.22] hover:text-slate-50"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+                  Back to Player
+                </Link>
+              </nav>
+            ) : (
             <nav className="flex shrink-0 items-end pb-0" aria-label="Main">
               {(() => {
                 /* Top nav = the operator's PINNED categories (gear menu toggles),
@@ -1445,6 +1483,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   );
                 })}
             </nav>
+            )}
 
             {/* ── RIGHT: meta chip + operational controls — flex-1 basis-0 justify-end ── */}
             <div className="flex flex-1 basis-0 items-center justify-end gap-2.5 min-w-0">
@@ -1564,8 +1603,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           {/* Row 3: Player — keep a single AudioPlayer instance across routes (media vs non-media); swapping branches remounts embeds */}
           <div
-            className={isMediaThemeRoute ? "library-theme library-player-route-bridge shrink-0 overflow-x-hidden px-3 pb-2 sm:px-4" : undefined}
+            className={`${isMediaThemeRoute ? "library-theme library-player-route-bridge shrink-0 overflow-x-hidden px-3 pb-2 sm:px-4" : ""}${isManagementRoute ? " mgmt-deck-hidden" : ""}`}
             {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
+            inert={isManagementRoute}
+            aria-hidden={isManagementRoute ? true : undefined}
           >
             {/*
              * Deck row: unified [Live Queue | Player | Command Pads] card, height-capped at xl+ so
