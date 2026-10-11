@@ -32,19 +32,22 @@ async function pure(): Promise<void> {
     b.normalizeBrandColor("#FF375F") === "#ff375f" && b.normalizeBrandColor("red") === null && b.normalizeBrandColor("#fff") === null &&
     b.normalizeBrandColor("#ff375f;background:url(x)") === null && b.normalizeBrandColor(42) === null);
   assert("P2 code: upper-cased letters / digits / - _ (1–24)", b.normalizeBrandCode(" be ") === "BE" && b.normalizeBrandCode("yesh-hesed") === "YESH-HESED" && b.normalizeBrandCode("") === null && b.normalizeBrandCode("a b") === null && b.normalizeBrandCode("x".repeat(25)) === null);
-  // broadcast recipients (mirror of broadcast-panel.tsx `chosen`)
+  // broadcast recipients: the brand chosen at the top scopes the list (view: visibleRows), the panel sends to it
   type T = { id: string; brandId: string; liveBranchId: string | null };
-  const targets: T[] = [{ id: "1", brandId: "BE", liveBranchId: "r1" }, { id: "2", brandId: "BE", liveBranchId: null }, { id: "3", brandId: "YH", liveBranchId: "r3" }];
-  const chosen = (mode: "all" | "brand" | "selected", brand: string, selected: Set<string>) =>
-    mode === "all" ? targets : mode === "brand" ? targets.filter((t) => t.brandId === brand) : targets.filter((t) => !!t.liveBranchId && selected.has(t.id));
+  const rows: T[] = [{ id: "1", brandId: "BE", liveBranchId: "r1" }, { id: "2", brandId: "BE", liveBranchId: null }, { id: "3", brandId: "YH", liveBranchId: "r3" }];
+  const scoped = (brand: string) => (brand === "all" ? rows : rows.filter((r) => r.brandId === brand));
+  const chosen = (targets: T[], mode: "all" | "selected", selected: Set<string>) => (mode === "all" ? targets : targets.filter((t) => !!t.liveBranchId && selected.has(t.id)));
   const plan = (ts: T[]) => ts.map((t) => (t.liveBranchId ? `send:${t.id}` : `not_delivered:${t.id}`)).join(",");
-  assert("P3 Brand: every branch of the brand — online → command, offline → Not delivered (no command)", plan(chosen("brand", "BE", new Set())) === "send:1,not_delivered:2");
-  assert("P4 Brand never includes another brand's branch", !chosen("brand", "BE", new Set()).some((t) => t.brandId !== "BE"));
-  assert("P5 All = every branch; Selected = only checked online ones", chosen("all", "", new Set()).length === 3 && plan(chosen("selected", "", new Set(["2", "3"]))) === "send:3");
+  assert("P3 brand at the top → every branch of that brand: online → command, offline → Not delivered (no command)", plan(chosen(scoped("BE"), "all", new Set())) === "send:1,not_delivered:2");
+  assert("P4 a brand scope never includes another brand's branch", !chosen(scoped("BE"), "all", new Set()).some((t) => t.brandId !== "BE"));
+  assert("P5 All brands = every branch; Selected = only checked online ones of the scope", chosen(scoped("all"), "all", new Set()).length === 3 && plan(chosen(scoped("BE"), "selected", new Set(["1", "3"]))) === "send:1");
   const src = (await import("node:fs")).readFileSync("components/control-room/broadcast-panel.tsx", "utf8");
-  assert("P6 the panel uses exactly this recipient rule + the existing per-branch send",
-    /const chosen = mode === "all" \? targets : mode === "brand" \? targets\.filter\(\(t\) => t\.brandId === brandId\) : online\.filter\(\(t\) => selected\.has\(t\.id\)\);/.test(src) &&
-    /t\.liveBranchId \? await sendCommandWithAck\(t\.liveBranchId, "PLAY_INTERRUPT", \{ url: jingle\.url \}\) : \{ delivered: false, reason: "no_station" \}/.test(src));
+  const view = (await import("node:fs")).readFileSync("components/control-room/all-branches-view.tsx", "utf8");
+  assert("P6 panel rule + the existing per-branch send; the view passes the brand-scoped rows and remounts per brand",
+    src.includes(`const chosen = mode === "all" ? targets : online.filter((t) => selected.has(t.id));`) &&
+    src.includes(`t.liveBranchId ? await sendCommandWithAck(t.liveBranchId, "PLAY_INTERRUPT", { url: jingle.url }) : { delivered: false, reason: "no_station" }`) &&
+    view.includes(`const visibleRows = activeFilter === "all" ? rows : rows.filter((r) => r.brandId === activeFilter);`) &&
+    /key=\{activeFilter\}\s*\n\s*targets=\{visibleRows\.map/.test(view));
 }
 
 async function dbPart(): Promise<void> {

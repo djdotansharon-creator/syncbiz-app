@@ -93,7 +93,7 @@ export function StationActivation({ branchId, hasMainStation }: { branchId: stri
       ) : showFresh ? (
         <div className="mt-3 rounded-xl border border-[color:var(--sb-accent-border)] bg-[var(--sb-accent-soft)] p-4">
           <div className="text-xs text-[var(--sb-text-secondary)]">
-            {fresh!.purpose === "replace" ? "Code to replace the main station" : "Code to install the station"} — shown only now
+            {fresh!.purpose === "replace" ? "Code to replace the main station" : "Code to install the station"} · shown only now
           </div>
           <div className="mt-2 flex items-end justify-between gap-4">
             <div>
@@ -107,7 +107,7 @@ export function StationActivation({ branchId, hasMainStation }: { branchId: stri
         </div>
       ) : status?.active && activeLeft !== "expired" ? (
         <p className="mt-3 text-sm text-[var(--sb-text-secondary)]">
-          An activation code is active ({activeLeft} left). It cannot be shown again — create a new one if needed.
+          An activation code is active ({activeLeft} left). It cannot be shown again. Create a new one if needed.
         </p>
       ) : (
         <p className="mt-3 text-sm text-[var(--sb-text-secondary)]">
@@ -123,7 +123,7 @@ export function StationActivation({ branchId, hasMainStation }: { branchId: stri
             onClick={() => void generate()}
             className="rounded-full border border-[color:var(--sb-border-strong)] px-4 py-1.5 text-sm text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40"
           >
-            {hasMainStation ? "Replace main station — new code" : status.active || fresh ? "New code" : "Create activation code"}
+            {hasMainStation ? "Replace main station" : status.active || fresh ? "New code" : "Create activation code"}
           </button>
           {status.active || showFresh ? (
             <button type="button" disabled={busy} onClick={() => void revoke()} className="rounded-full px-3 py-1.5 text-sm text-[var(--sb-text-tertiary)] hover:text-[var(--sb-text)] disabled:opacity-40">

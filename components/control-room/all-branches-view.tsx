@@ -188,7 +188,7 @@ export function AllBranchesView() {
         <div>
           <h1 className="text-base font-semibold tracking-tight text-[var(--sb-text)]">Control Room</h1>
           <p className="text-xs text-[var(--sb-text-tertiary)]">
-            {liveKnown ? "Your network, live" : status === "connecting" ? "Connecting to live status…" : "Live status unavailable — reconnecting…"}
+            {liveKnown ? "Your network, live" : status === "connecting" ? "Connecting to live status…" : "Live status unavailable. Reconnecting…"}
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -224,29 +224,33 @@ export function AllBranchesView() {
       </header>
 
       <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-4">
-        <Stat value={dbBranches ? visibleRows.length : "—"} label="Branches" />
-        <Stat value={liveKnown ? onlineCount : "—"} label="Online" dot={DOT_FILL.idle} />
-        <Stat value={liveKnown ? playingCount : "—"} label="Playing" dot={DOT_FILL.playing} />
-        <Stat value={dbBranches ? installCount : "—"} label="Needs installation" dot={DOT_FILL.install} valueColor={installCount > 0 ? "#fbbf24" : undefined} last />
+        <Stat value={dbBranches ? visibleRows.length : "-"} label="Branches" />
+        <Stat value={liveKnown ? onlineCount : "-"} label="Online" dot={DOT_FILL.idle} />
+        <Stat value={liveKnown ? playingCount : "-"} label="Playing" dot={DOT_FILL.playing} />
+        <Stat value={dbBranches ? installCount : "-"} label="Needs installation" dot={DOT_FILL.install} valueColor={installCount > 0 ? "#fbbf24" : undefined} last />
       </div>
 
       {brandsData && brandsData.brands.length > 1 ? (
-        <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--sb-border)] px-6 py-3">
-          <span className="text-xs text-[var(--sb-text-tertiary)]">Brand</span>
-          {[{ id: "all", name: "All brands", color: null as string | null }, ...brandsData.brands].map((b) => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => setBrandFilter(b.id)}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                activeFilter === b.id ? "border-white bg-white text-black" : "border-[color:var(--sb-border)] text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]"
-              }`}
-            >
-              {b.id !== "all" ? <span className="h-2 w-2 rounded-full" style={{ background: b.color ?? DEFAULT_BRAND_COLOR }} aria-hidden /> : null}
-              <span dir="auto">{b.name}</span>
-            </button>
-          ))}
-        </div>
+        <nav className="flex items-end gap-6 overflow-x-auto border-b border-[color:var(--sb-border)] px-6" aria-label="Brands">
+          {[{ id: "all", name: "All brands", color: null as string | null }, ...brandsData.brands].map((b) => {
+            const on = activeFilter === b.id;
+            const count = b.id === "all" ? rows.length : rows.filter((r) => r.brandId === b.id).length;
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => setBrandFilter(b.id)}
+                aria-pressed={on}
+                className={`-mb-px flex shrink-0 items-center gap-2 border-b-2 py-3 text-sm transition-colors ${on ? "font-medium text-[var(--sb-text)]" : "border-transparent text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]"}`}
+                style={on ? { borderBottomColor: b.color ?? "#ffffff" } : undefined}
+              >
+                {b.id !== "all" ? <span className="h-2 w-2 rounded-full" style={{ background: b.color ?? DEFAULT_BRAND_COLOR }} aria-hidden /> : null}
+                <span dir="auto">{b.name}</span>
+                <span className="text-xs tabular-nums text-[var(--sb-text-tertiary)]">{count}</span>
+              </button>
+            );
+          })}
+        </nav>
       ) : null}
 
       {loadError ? (
@@ -296,11 +300,12 @@ export function AllBranchesView() {
               return (
                 <div className="max-h-[640px] overflow-y-auto">
                   <BroadcastPanel
-                    targets={rows.map((r) => {
+                    key={activeFilter}
+                    targets={visibleRows.map((r) => {
                       const st = rowStatus(r, liveKnown);
                       return { id: r.id, name: r.name, branchNumber: r.branchNumber, status: st, liveBranchId: r.live && (st === "playing" || st === "idle") ? r.live.branchId : null, brandId: r.brandId };
                     })}
-                    brands={(brandsData?.brands ?? []).map((b) => ({ id: b.id, name: b.name, color: b.color }))}
+                    scope={activeFilter !== "all" && brandById.has(activeFilter) ? { name: brandById.get(activeFilter)!.name, color: brandById.get(activeFilter)!.color } : null}
                     onClose={() => setBroadcastOpen(false)}
                     sendCommandWithAck={sendCommandWithAck}
                   />
@@ -361,7 +366,7 @@ const STATUS_LABEL: Record<RowStatus, { label: string; text: string }> = {
   idle: { label: "Online · not playing", text: "text-[var(--sb-text-secondary)]" },
   offline: { label: "Offline", text: "text-[var(--sb-text-tertiary)]" },
   install: { label: "Needs installation", text: "text-amber-300/90" },
-  unknown: { label: "—", text: "text-[var(--sb-text-tertiary)]" },
+  unknown: { label: "-", text: "text-[var(--sb-text-tertiary)]" },
 };
 
 function BranchRow({ row, brand, status, selected, onSelect }: { row: Row; brand: BrandRow | null; status: RowStatus; selected: boolean; onSelect: () => void }) {
@@ -395,7 +400,7 @@ function BranchRow({ row, brand, status, selected, onSelect }: { row: Row; brand
       </div>
       <DeviceType type={row.online ? row.live?.deviceType : undefined} />
       <div className="min-w-0 truncate text-sm text-[var(--sb-text-tertiary)]" title={nowPlaying || undefined}>
-        {nowPlaying || "—"}
+        {nowPlaying || ""}
       </div>
       {/* opens the branch control panel (the whole row is clickable) */}
       <svg className="h-4 w-4 text-[var(--sb-text-secondary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -409,7 +414,7 @@ const DEVICE_LABEL: Record<"computer" | "streamer" | "browser", string> = { comp
 
 /** The kind of device playing in the branch (info only; shown while the station is online). */
 function DeviceType({ type }: { type?: "computer" | "streamer" | "browser" | "unknown" }) {
-  if (!type || type === "unknown") return <span className="text-sm text-[var(--sb-text-tertiary)]">—</span>;
+  if (!type || type === "unknown") return <span className="text-sm text-[var(--sb-text-tertiary)]" />;
   const common = { className: "h-4 w-4 shrink-0", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-sm text-[var(--sb-text-secondary)]">

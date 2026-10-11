@@ -29,7 +29,7 @@ const STATUS_TEXT: Record<MapDotStatus, string> = {
   idle: "Online · not playing",
   offline: "Offline",
   install: "Needs installation",
-  unknown: "—",
+  unknown: "-",
 };
 
 /** Volume sends: at most one every VOLUME_SEND_MS while dragging, plus the final value. */
@@ -165,7 +165,7 @@ export function BranchPanel({
             <div className="text-xs text-[var(--sb-text-tertiary)]">Connected devices</div>
             <ul className="mt-3 space-y-2">
               {(live?.devices ?? []).length === 0 ? (
-                <li className="text-sm text-[var(--sb-text-tertiary)]">—</li>
+                <li className="text-sm text-[var(--sb-text-tertiary)]">None</li>
               ) : (
                 (live?.devices ?? []).map((d, i) => (
                   <li key={i} className="flex items-center justify-between gap-3 text-sm">

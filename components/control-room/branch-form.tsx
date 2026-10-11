@@ -38,7 +38,7 @@ function usePlaceAutocomplete(hostRef: React.RefObject<HTMLDivElement | null>, b
           if (!place.id || typeof lat !== "number" || typeof lng !== "number") return;
           const name = typeof place.displayName === "string" ? place.displayName : place.displayName?.text;
           const addr = place.formattedAddress ?? "";
-          onPickRef.current({ placeId: place.id, label: name && !addr.startsWith(name) ? `${name} — ${addr}` : addr || name || "", latitude: lat, longitude: lng });
+          onPickRef.current({ placeId: place.id, label: name && !addr.startsWith(name) ? `${name}, ${addr}` : addr || name || "", latitude: lat, longitude: lng });
         };
         // current API: "gmp-select" with placePrediction; older: "gmp-placeselect" with place
         el.addEventListener("gmp-select", (ev: Event) => { const pp = (ev as unknown as { placePrediction?: GoogleNS }).placePrediction; if (pp) void handle(pp.toPlace()); });
