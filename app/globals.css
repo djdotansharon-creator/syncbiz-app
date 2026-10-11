@@ -3432,3 +3432,9 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 [data-management="true"][data-desktop-app="true"] .mgmt-deck-hidden {
   display: none !important;
 }
+
+/* Control Room regional map: the hovered region rises gently (owner 2026-10-11) */
+@keyframes vono-region-rise {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

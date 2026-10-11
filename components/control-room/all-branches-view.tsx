@@ -10,6 +10,8 @@ import { BroadcastPanel } from "@/components/control-room/broadcast-panel";
 import { BranchForm } from "@/components/control-room/branch-form";
 import { NetworkCode } from "@/components/control-room/network-code";
 import { BrandManager, BrandBadge, DEFAULT_BRAND_COLOR, type BrandRow } from "@/components/control-room/brand-manager";
+import { REGIONS, branchRegion, regionName, type RegionId } from "@/lib/control-room-regions";
+import { applyControlRoomFilters } from "@/lib/control-room-filters";
 
 type BrandsData = { brands: BrandRow[]; defaultBrandId: string; branchBrand: Record<string, string> };
 
@@ -58,7 +60,11 @@ type Row = {
   state: StationPlaybackState | null;
   /** brand of the branch — the default Brand when unassigned (null only while brands are unavailable) */
   brandId: string | null;
+  /** operational region from the stored lat/lng (null: no location / outside the regions — never hidden from All Israel) */
+  regionId: RegionId | null;
+  regionReason: "ok" | "no_location" | "outside";
 };
+
 
 type RowStatus = MapDotStatus;
 
@@ -89,6 +95,9 @@ export function AllBranchesView() {
   const [brandsData, setBrandsData] = useState<BrandsData | null>(null);
   const [brandsOpen, setBrandsOpen] = useState(false);
   const [brandFilter, setBrandFilter] = useState<string>("all");
+  /** regional map: the focused region (null = All Israel) + branch search — combined with the brand filter */
+  const [regionFocus, setRegionFocus] = useState<RegionId | null>(null);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -145,6 +154,7 @@ export function AllBranchesView() {
         live,
         state: live ? remoteStateByDeviceId[live.masterDeviceId] ?? null : null,
         brandId: brandsData ? brandsData.branchBrand[b.id] ?? brandsData.defaultBrandId : null,
+        ...(() => { const g = branchRegion(typeof b.latitude === "number" ? b.latitude : null, typeof b.longitude === "number" ? b.longitude : null); return { regionId: g.regionId, regionReason: g.reason }; })(),
       };
     });
     // a connected station whose branch is not in the list (legacy id) — still shown, never hidden
@@ -166,6 +176,8 @@ export function AllBranchesView() {
         live,
         state: remoteStateByDeviceId[live.masterDeviceId] ?? null,
         brandId: brandsData?.defaultBrandId ?? null,
+        regionId: null,
+        regionReason: "no_location",
       });
     }
     // live branches first (playing, then online), then offline, then not yet installed — by name inside a group
@@ -175,7 +187,10 @@ export function AllBranchesView() {
 
   // brand filter: the map, the list and the counters show the chosen brand only ("All brands" = every branch)
   const activeFilter = brandFilter !== "all" && brandById.has(brandFilter) ? brandFilter : "all";
-  const visibleRows = activeFilter === "all" ? rows : rows.filter((r) => r.brandId === activeFilter);
+  // Brand → Search → Region, all together (none replaces another). Broadcast keeps the BRAND scope only (its "All <brand>").
+  const { brandRows, visibleRows, regionCounts, noLocationCount, outsideCount, filtersActive } =
+    applyControlRoomFilters(rows, { brand: activeFilter, query: search, region: regionFocus });
+  const clearFilters = () => { setBrandFilter("all"); setSearch(""); setRegionFocus(null); };
   const colorOf = (brandId: string | null) => (brandId ? brandById.get(brandId)?.color ?? DEFAULT_BRAND_COLOR : null);
 
   const onlineCount = visibleRows.filter((r) => r.online).length;
@@ -253,6 +268,36 @@ export function AllBranchesView() {
         </nav>
       ) : null}
 
+      {dbBranches && rows.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-3 border-b border-[color:var(--sb-border)] px-6 py-3">
+          <label className="relative flex min-w-[220px] max-w-md flex-1 items-center">
+            <svg className="pointer-events-none absolute left-3 h-4 w-4 text-[var(--sb-text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={regionFocus ? `Search in ${regionName(regionFocus)}` : "Search branches: name, number or city"}
+              aria-label="Search branches"
+              dir="auto"
+              className="w-full rounded-lg border border-[color:var(--sb-border)] bg-white/[0.04] py-2 pl-9 pr-8 text-sm text-[var(--sb-text)] placeholder:text-[var(--sb-text-tertiary)] focus:border-[color:var(--sb-accent)] focus:outline-none"
+            />
+            {search ? (
+              <button type="button" onClick={() => setSearch("")} className="absolute right-2 inline-flex h-6 w-6 items-center justify-center rounded text-[var(--sb-text-tertiary)] hover:text-[var(--sb-text)]" aria-label="Clear search">
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M18 6 6 18M6 6l12 12" /></svg>
+              </button>
+            ) : null}
+          </label>
+          <span className="text-xs text-[var(--sb-text-secondary)]">
+            Showing <span className="tabular-nums text-[var(--sb-text)]">{visibleRows.length}</span> of <span className="tabular-nums">{rows.length}</span>
+          </span>
+          {filtersActive ? (
+            <button type="button" onClick={clearFilters} className="text-xs font-medium text-[var(--sb-accent)] hover:underline">
+              Clear filters
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       {loadError ? (
         <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">Could not load branches. Refresh the page to try again.</p>
       ) : dbBranches === null ? (
@@ -261,12 +306,42 @@ export function AllBranchesView() {
         <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">No branches yet.</p>
       ) : (
         <div className="grid lg:grid-cols-[minmax(240px,2fr)_3fr]">
-          <div className="hidden items-center justify-center border-r border-[color:var(--sb-border)] p-6 lg:flex">
-            <NetworkMap
-              branches={visibleRows.map((r) => ({ id: r.id, name: r.name, city: r.city, latitude: r.latitude, longitude: r.longitude, status: rowStatus(r, liveKnown), brandColor: colorOf(r.brandId) }))}
-              selectedId={selectedId}
-              onSelect={openBranch}
-            />
+          <div className="hidden min-h-[560px] flex-col border-r border-[color:var(--sb-border)] lg:flex">
+            <div className="flex items-center justify-between gap-3 px-6 pb-1 pt-4">
+              {regionFocus ? (
+                <div className="min-w-0">
+                  <button type="button" onClick={() => setRegionFocus(null)} className="inline-flex items-center gap-1 text-xs font-medium text-[var(--sb-accent)] hover:underline">
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+                    All Israel
+                  </button>
+                  <div className="mt-1 truncate text-base font-semibold text-[var(--sb-text)]">{regionName(regionFocus)}</div>
+                  <div className="text-xs text-[var(--sb-text-secondary)]">{visibleRows.length} branch{visibleRows.length === 1 ? "" : "es"}</div>
+                </div>
+              ) : (
+                <div className="min-w-0">
+                  <div className="text-base font-semibold text-[var(--sb-text)]">All Israel</div>
+                  <div className="text-xs text-[var(--sb-text-secondary)]">
+                    {visibleRows.length} branch{visibleRows.length === 1 ? "" : "es"} · {REGIONS.length} regions · hover a region, click to focus
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center px-6 pb-2">
+              <NetworkMap
+                branches={visibleRows.map((r) => ({ id: r.id, name: r.name, city: r.city, latitude: r.latitude, longitude: r.longitude, status: rowStatus(r, liveKnown), brandColor: colorOf(r.brandId) }))}
+                selectedId={selectedId}
+                onSelect={openBranch}
+                regions={{ counts: regionCounts, focus: regionFocus, onFocus: (id) => setRegionFocus(id) }}
+              />
+            </div>
+            {!regionFocus && (noLocationCount > 0 || outsideCount > 0) ? (
+              <p className="px-6 pb-4 text-xs text-[var(--sb-text-tertiary)]">
+                {noLocationCount > 0 ? `${noLocationCount} branch${noLocationCount === 1 ? "" : "es"} without a location (not on the map, still in the list)` : ""}
+                {noLocationCount > 0 && outsideCount > 0 ? " · " : ""}
+                {outsideCount > 0 ? `${outsideCount} outside the regions (shown on All Israel only)` : ""}
+              </p>
+            ) : null}
+            <p className="px-6 pb-4 text-[10px] text-[var(--sb-text-tertiary)]">Regions follow Israel&apos;s administrative district boundaries.</p>
           </div>
           {(() => {
             if (form) {
@@ -301,7 +376,7 @@ export function AllBranchesView() {
                 <div className="max-h-[640px] overflow-y-auto">
                   <BroadcastPanel
                     key={activeFilter}
-                    targets={visibleRows.map((r) => {
+                    targets={brandRows.map((r) => {
                       const st = rowStatus(r, liveKnown);
                       return { id: r.id, name: r.name, branchNumber: r.branchNumber, status: st, liveBranchId: r.live && (st === "playing" || st === "idle") ? r.live.branchId : null, brandId: r.brandId };
                     })}
@@ -327,7 +402,12 @@ export function AllBranchesView() {
             }
             return (
               <ul className="max-h-[640px] divide-y divide-[color:var(--sb-border)] overflow-y-auto">
-                {visibleRows.length === 0 ? <li className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">No branches in this brand yet.</li> : null}
+                {visibleRows.length === 0 ? (
+                  <li className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">
+                    {filtersActive ? "No branches match these filters." : "No branches yet."}{" "}
+                    {filtersActive ? <button type="button" onClick={clearFilters} className="font-medium text-[var(--sb-accent)] hover:underline">Clear filters</button> : null}
+                  </li>
+                ) : null}
                 {visibleRows.map((r) => (
                   <BranchRow
                     key={r.id}
@@ -391,7 +471,10 @@ function BranchRow({ row, brand, status, selected, onSelect }: { row: Row; brand
             {row.branchNumber ? <span className="font-medium tabular-nums">Branch {row.branchNumber}</span> : null}
             {row.branchNumber && row.city ? <span className="text-[var(--sb-text-tertiary)]"> · </span> : null}
             {row.city ? <span className="text-[var(--sb-text-tertiary)]">{row.city}</span> : null}
+            {row.regionReason === "no_location" ? <span className="text-amber-300/80"> · No location</span> : null}
           </div>
+        ) : row.regionReason === "no_location" ? (
+          <div className="truncate text-xs text-amber-300/80">No location</div>
         ) : null}
       </div>
       <div className={`flex min-w-0 items-center gap-2 text-sm ${ui.text}`}>

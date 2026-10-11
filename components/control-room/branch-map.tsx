@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LAND_RINGS } from "@/lib/control-room-land";
+import { REGIONS, type RegionId } from "@/lib/control-room-regions";
 import { cityLngLat } from "@/lib/control-room-geo";
 
 /**
@@ -59,12 +60,37 @@ function fitProjection(b: [number, number, number, number]) {
   return ([lng, lat]: LngLat): [number, number] => [offX + (lng - minLng) * kx * scale, offY + (maxLat - lat) * scale];
 }
 
+/** Region layer (Control Room only): Israel's six districts as VONO operational regions — hover lifts a region, click focuses it. */
+export type MapRegions = {
+  /** branches per region under the current brand / search filters (hover label) */
+  counts: Partial<Record<RegionId, number>>;
+  /** the focused region (the map zooms into it) or null = All Israel */
+  focus: RegionId | null;
+  onFocus: (id: RegionId) => void;
+};
+
+type ViewBox = { x: number; y: number; w: number; h: number };
+const FULL_VIEW: ViewBox = { x: 0, y: 0, w: W, h: H };
+const ZOOM_MS = 520;
+const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+/** Area centroid of a projected ring (label anchor that stays inside ordinary shapes). */
+function centroid(pts: [number, number][]): [number, number] {
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const f = pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+    a += f; cx += (pts[j][0] + pts[i][0]) * f; cy += (pts[j][1] + pts[i][1]) * f;
+  }
+  return a ? [cx / (3 * a), cy / (3 * a)] : pts[0];
+}
+
 export function BranchMap({
   branches,
   selectedId,
   onSelect,
   height,
   fit = "country",
+  regions,
 }: {
   branches: MapBranch[];
   selectedId: string | null;
@@ -73,6 +99,8 @@ export function BranchMap({
   height?: number;
   /** "country" (Control Room, owner 2026-10-11): always the whole country, the zoom never depends on the branches; "branches": fit to the markers (Add / Edit preview) */
   fit?: "country" | "branches";
+  /** Control Room: the region layer (absent → the plain map, e.g. the Add / Edit preview) */
+  regions?: MapRegions;
 }) {
   const placed = useMemo(
     () =>
@@ -99,41 +127,164 @@ export function BranchMap({
   );
   const pulsing = placed.filter((d) => d.status === "playing").length <= MAX_PULSING;
 
+  // region shapes in the SAME projection as the land (static: built once per projection)
+  const regionShapes = useMemo(() => {
+    if (!regions) return [];
+    return REGIONS.map((r) => {
+      const rings = r.rings.map((ring) => ring.map((pt) => project(pt)));
+      const d = rings.map((ring) => ring.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join("") + "Z").join("");
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const ring of rings) for (const [x, y] of ring) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+      const main = rings.reduce((a, b) => (b.length > a.length ? b : a), rings[0]);
+      return { id: r.id as RegionId, name: r.name, d, bbox: { minX, minY, maxX, maxY }, label: centroid(main) };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- shapes depend only on the projection
+  }, [project, !!regions]);
+
+  // focused region → animated zoom (viewBox interpolation; markers keep their on-screen size)
+  const focus = regions?.focus ?? null;
+  const target = useMemo<ViewBox>(() => {
+    const sh = focus ? regionShapes.find((r) => r.id === focus) : null;
+    if (!sh) return FULL_VIEW;
+    const pad = 28;
+    let w = sh.bbox.maxX - sh.bbox.minX + 2 * pad, h = sh.bbox.maxY - sh.bbox.minY + 2 * pad;
+    if (w / h > W / H) h = (w * H) / W; else w = (h * W) / H; // keep the map's aspect ratio
+    const cx = (sh.bbox.minX + sh.bbox.maxX) / 2, cy = (sh.bbox.minY + sh.bbox.maxY) / 2;
+    return { x: cx - w / 2, y: cy - h / 2, w, h };
+  }, [focus, regionShapes]);
+  const [view, setView] = useState<ViewBox>(target);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  useEffect(() => {
+    const from = viewRef.current;
+    if (from.x === target.x && from.y === target.y && from.w === target.w) return;
+    const reduce = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) { setView(target); return; }
+    let raf = 0;
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - t0) / ZOOM_MS), e = ease(t);
+      setView({ x: from.x + (target.x - from.x) * e, y: from.y + (target.y - from.y) * e, w: from.w + (target.w - from.w) * e, h: from.h + (target.h - from.h) * e });
+      if (t < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target]);
+  const k = W / view.w; // zoom factor: divide sizes by k so markers / strokes keep their on-screen size
+
+  const [hover, setHover] = useState<RegionId | null>(null);
+  const hovered = !focus && hover ? regionShapes.find((r) => r.id === hover) ?? null : null;
+
   return (
     <svg
-      viewBox={`0 0 ${W} ${H}`}
+      viewBox={`${view.x.toFixed(2)} ${view.y.toFixed(2)} ${view.w.toFixed(2)} ${view.h.toFixed(2)}`}
       className="w-full overflow-hidden"
       style={{ height: height ?? "100%", maxHeight: height ?? 560 }}
       preserveAspectRatio="xMidYMid meet"
       role="img"
       aria-label="Branch map"
+      onMouseLeave={() => setHover(null)}
     >
+      {regions ? (
+        <defs>
+          <filter id="vono-region-lift" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy={3 / k} stdDeviation={5 / k} floodColor="#000" floodOpacity="0.65" />
+          </filter>
+        </defs>
+      ) : null}
       {/* land: one OPAQUE neutral silhouette, no stroke — overlapping rings never show internal borders */}
       <path d={land} fill="#1b1b1f" />
+      {regionShapes.map((r) => {
+        const isFocus = r.id === focus;
+        const dim = !!focus && !isFocus;
+        const count = regions?.counts[r.id] ?? 0;
+        return (
+          <path
+            key={r.id}
+            d={r.d}
+            fill={isFocus ? "rgba(255,255,255,0.045)" : dim ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.018)"}
+            stroke={isFocus ? "rgba(255,255,255,0.42)" : dim ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.24)"}
+            strokeWidth={(isFocus ? 1.4 : 1) / k}
+            strokeLinejoin="round"
+            className={focus ? undefined : "cursor-pointer"}
+            style={{ pointerEvents: focus ? "none" : "auto", transition: "fill 160ms ease", outline: "none" }}
+            role={focus ? undefined : "button"}
+            tabIndex={focus ? -1 : 0}
+            aria-label={focus ? undefined : `${r.name}, ${count} branch${count === 1 ? "" : "es"}`}
+            onMouseEnter={() => setHover(r.id)}
+            onFocus={() => setHover(r.id)}
+            onBlur={() => setHover(null)}
+            onClick={(e) => { (e.currentTarget as SVGPathElement).blur(); regions?.onFocus(r.id); }}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); regions?.onFocus(r.id); } }}
+          />
+        );
+      })}
+      {/* hovered region lifted above the others: a gentle raise + shadow (All Israel only) */}
+      {hovered ? (
+        <path
+          d={hovered.d}
+          fill="rgba(255,255,255,0.075)"
+          stroke="rgba(255,255,255,0.55)"
+          strokeWidth={1.2 / k}
+          strokeLinejoin="round"
+          filter="url(#vono-region-lift)"
+          style={{ transform: `translateY(${-3 / k}px)`, pointerEvents: "none", animation: "vono-region-rise 170ms ease-out" }}
+        />
+      ) : null}
       {placed.map((d) => {
         const [x, y] = project(d.at);
         const selected = d.id === selectedId;
+        const s = 1 / k;
         return (
-          <g key={d.id} className="cursor-pointer" onClick={() => onSelect(d.id)}>
+          <g key={d.id} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); onSelect(d.id); }}>
             <title>{d.name}</title>
-            {selected ? <circle cx={x} cy={y} r={d.brandColor ? 12 : 10} fill="none" stroke="#fff" strokeWidth={1.5} /> : null}
+            {selected ? <circle cx={x} cy={y} r={(d.brandColor ? 12 : 10) * s} fill="none" stroke="#fff" strokeWidth={1.5 * s} /> : null}
             {d.status === "playing" && pulsing ? (
-              <circle cx={x} cy={y} r={5} fill={DOT_FILL.playing} opacity={0.35}>
-                <animate attributeName="r" values="5;12;5" dur="2.4s" repeatCount="indefinite" />
+              <circle cx={x} cy={y} r={5 * s} fill={DOT_FILL.playing} opacity={0.35}>
+                <animate attributeName="r" values={`${5 * s};${12 * s};${5 * s}`} dur="2.4s" repeatCount="indefinite" />
                 <animate attributeName="opacity" values="0.35;0;0.35" dur="2.4s" repeatCount="indefinite" />
               </circle>
             ) : null}
             {d.brandColor ? (
               <>
-                <circle cx={x} cy={y} r={7.5} fill="rgba(10,10,12,0.9)" stroke={DOT_FILL[d.status]} strokeWidth={2.4} />
-                <circle cx={x} cy={y} r={4.6} fill={d.brandColor} />
+                <circle cx={x} cy={y} r={7.5 * s} fill="rgba(10,10,12,0.9)" stroke={DOT_FILL[d.status]} strokeWidth={2.4 * s} />
+                <circle cx={x} cy={y} r={4.6 * s} fill={d.brandColor} />
               </>
             ) : (
-              <circle cx={x} cy={y} r={5.5} fill={DOT_FILL[d.status]} stroke="rgba(10,10,12,0.9)" strokeWidth={1.5} />
+              <circle cx={x} cy={y} r={5.5 * s} fill={DOT_FILL[d.status]} stroke="rgba(10,10,12,0.9)" strokeWidth={1.5 * s} />
             )}
           </g>
         );
       })}
+      {hovered ? (
+        <g style={{ pointerEvents: "none" }}>
+          <text
+            x={hovered.label[0]}
+            y={hovered.label[1]}
+            textAnchor="middle"
+            fontSize={13 / k}
+            fontWeight={600}
+            fill="#f5f5f7"
+            stroke="rgba(10,10,12,0.85)"
+            strokeWidth={3 / k}
+            paintOrder="stroke"
+          >
+            {hovered.name}
+          </text>
+          <text
+            x={hovered.label[0]}
+            y={hovered.label[1] + 16 / k}
+            textAnchor="middle"
+            fontSize={11 / k}
+            fill="#a1a1a6"
+            stroke="rgba(10,10,12,0.85)"
+            strokeWidth={3 / k}
+            paintOrder="stroke"
+          >
+            {`${regions?.counts[hovered.id] ?? 0} branch${(regions?.counts[hovered.id] ?? 0) === 1 ? "" : "es"}`}
+          </text>
+        </g>
+      ) : null}
     </svg>
   );
 }
