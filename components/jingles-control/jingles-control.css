@@ -2464,3 +2464,78 @@
 /* Create never squeezes into itself: natural height, a real text box; on a short screen the studio area scrolls */
 .jc-workspace-panel .jcx-active-workspace > .jcx-create { flex: 0 0 auto; height: auto; }
 .jc-workspace-panel .jcx-create-main { min-height: 10rem; }
+
+/* ── FRAMELESS (owner 2026-10-12, round 2): no boxes, no frames — like the map / KPI cells. Controls are flat surfaces
+   that only get lighter on hover; a focused field gets the underline indicator; the ONE filled primary stays.
+   The panel close ✕ is hidden: the Jingles launcher toggles the panel and any other module replaces it. ── */
+.jc-workspace-panel { border: 0; background: transparent; padding-left: 0; padding-right: 0; }
+.jc-workspace-panel .jc-ws-header .jc-icon-btn { display: none; }
+.jc-workspace-panel .jc-ws-header-status-mini { border: 0; background: transparent; padding: 0; }
+.jc-workspace-panel .jc-status-mini-label { font-size: var(--vx-fs-label); letter-spacing: 0.08em; color: var(--vx-text-3); }
+
+/* fields: a soft flat surface, no border; hover lighter; focus = underline indicator */
+.jc-workspace-panel input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.jc-workspace-panel select,
+.jc-workspace-panel textarea,
+.jc-modal input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.jc-modal select,
+.jc-modal textarea {
+  border: 0;
+  border-radius: 0;
+  background-color: rgba(255, 255, 255, 0.04);
+  box-shadow: none;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.jc-workspace-panel input:hover, .jc-workspace-panel select:hover, .jc-workspace-panel textarea:hover,
+.jc-modal input:hover, .jc-modal select:hover, .jc-modal textarea:hover { background-color: rgba(255, 255, 255, 0.07); }
+.jc-workspace-panel input:focus, .jc-workspace-panel select:focus, .jc-workspace-panel textarea:focus,
+.jc-modal input:focus, .jc-modal select:focus, .jc-modal textarea:focus {
+  background-color: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 calc(-1 * var(--vx-indicator)) 0 var(--vx-indicator-color);
+}
+.jc-workspace-panel select option, .jc-modal select option { background: #111114; color: var(--vx-text); }
+
+/* secondary buttons: text on a flat surface, no border; hover lighter. Primary stays filled. Danger = red text. */
+.jc-workspace-panel .jc-btn, .jc-modal .jc-btn,
+.jc-workspace-panel .jcx-result-play, .jc-workspace-panel .jcx-result-dismiss,
+.jc-workspace-panel .jc-script-ai-btn {
+  border: 0;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--vx-text);
+  box-shadow: none;
+  background-image: none;
+}
+.jc-workspace-panel .jc-btn:hover:not(:disabled), .jc-modal .jc-btn:hover:not(:disabled),
+.jc-workspace-panel .jcx-result-play:hover:not(:disabled), .jc-workspace-panel .jcx-result-dismiss:hover,
+.jc-workspace-panel .jc-script-ai-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border: 0;
+  color: #fff;
+}
+.jc-workspace-panel .jc-btn--ghost, .jc-modal .jc-btn--ghost { color: var(--vx-text); }
+.jc-workspace-panel .jc-btn--primary, .jc-modal .jc-btn--primary { background: #f5f5f7; color: #0b0b0d; }
+.jc-workspace-panel .jc-btn--primary:hover:not(:disabled), .jc-modal .jc-btn--primary:hover:not(:disabled) { background: #fff; color: #0b0b0d; }
+.jc-workspace-panel .jc-btn--danger, .jc-modal .jc-btn--danger { background: transparent; color: #fda4af; }
+.jc-workspace-panel .jc-btn--danger:hover:not(:disabled), .jc-modal .jc-btn--danger:hover:not(:disabled) { background: rgba(253, 164, 175, 0.08); color: #fecdd3; }
+.jc-workspace-panel .jcx-result-play { min-height: 44px; padding: 0 1rem; font-size: var(--vx-fs-secondary); font-weight: 600; }
+.jc-workspace-panel .jcx-result-play:disabled { opacity: 0.4; }
+.jc-workspace-panel .jcx-result-dismiss { background: transparent; color: var(--vx-text-3); }
+
+/* Library row actions: no frames at all — quiet text actions that light up on hover */
+.jc-workspace-panel .jc-lib-actions .jc-btn { background: transparent; color: var(--vx-text-2); }
+.jc-workspace-panel .jc-lib-actions .jc-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); color: var(--vx-text); }
+.jc-workspace-panel .jc-lib-actions .jc-btn--primary { background: rgba(255, 255, 255, 0.06); color: var(--vx-text); }
+
+/* result placeholder: the tiny microphone goes; the line itself is readable */
+.jc-workspace-panel .jcx-result-empty-icon { display: none; }
+.jcx-create-main .jcx-result-empty p { font-size: var(--vx-fs-primary); color: var(--vx-text-3); }
+
+/* modals: frameless surface + hairlines only between header / body / footer */
+.jc-modal { border: 0; border-radius: 0; }
+.jc-modal .jc-icon-btn { border: 0; background: transparent; }
+.jc-modal .jc-icon-btn:hover { background: rgba(255, 255, 255, 0.07); }
+/* settings row: the selects keep their full text; only the title field gives way */
+.jc-workspace-panel .jcx-settings-bar .jcx-set:not(.jcx-set--title) { flex: 0 0 auto; }
+.jc-workspace-panel .jcx-settings-bar select { max-width: none; width: auto; }
+.jc-workspace-panel .jcx-settings-bar .jcx-set--title { flex: 1 1 8rem; min-width: 7rem; }
