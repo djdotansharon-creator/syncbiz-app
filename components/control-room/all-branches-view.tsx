@@ -380,6 +380,15 @@ export function AllBranchesView() {
                 ))}
                 <li className="mt-0.5 text-xs text-[var(--sb-text-tertiary)]">{L.t("map.colorIsBrand")}</li>
               </ul>
+              {/* a region with nothing matching the brand / status / search: say so, and offer the way out (owner) */}
+              {regionFocus && visibleRows.length === 0 ? (
+                <div className="absolute inset-x-6 top-1/2 z-20 mx-auto max-w-sm -translate-y-1/2 rounded-2xl border border-[color:var(--sb-border-strong)] bg-[rgba(18,18,22,0.96)] p-5 text-center shadow-xl">
+                  <p className="text-base font-medium text-[var(--sb-text)]">{L.t("map.emptyInRegion", { region: L.region(regionFocus) })}</p>
+                  <button type="button" onClick={() => setRegionFocus(null)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-2.5 text-base font-semibold text-black active:scale-95">
+                    {L.t("map.showAllIsrael")}
+                  </button>
+                </div>
+              ) : null}
               {/* the branch count of the place on screen — big, right side of the map (opposite the legend) */}
               <div className="pointer-events-none absolute right-6 top-2 z-10 text-right" aria-live="polite">
                 <div className="text-5xl font-bold leading-none tabular-nums text-[var(--sb-text)]" dir="ltr">{visibleRows.length}</div>
