@@ -3476,3 +3476,102 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+   VONO DESIGN LANGUAGE (owner 2026-10-12) — Flat Swiss-style Management UI: hairline dividers, zero / minimal radius,
+   strong typography, clear spacing, an active-state underline indicator. Premium, clean, sharp (not brutalist).
+   Colour = identity or status, never decoration. Almost no shadows / gradients. Lines between areas, not boxes in boxes.
+   Shared by Control Room / Jingles / Access Control / Dashboard (React primitives: components/management/primitives.tsx).
+   These classes are opt-in (.vx-*): adding them here changes nothing until a screen uses them.
+   ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════ */
+:root {
+  --vx-line: rgba(255, 255, 255, 0.08);          /* hairline dividers */
+  --vx-line-strong: rgba(255, 255, 255, 0.16);   /* outlined secondary buttons / fields */
+  --vx-bg: #0e0e11;                              /* cell / panel surface */
+  --vx-hover: rgba(255, 255, 255, 0.03);
+  --vx-active: rgba(255, 255, 255, 0.06);        /* selected cell */
+  --vx-indicator: 3px;                           /* the active-state underline */
+  --vx-indicator-color: var(--sb-accent, #0a84ff);
+  --vx-radius: 0;                                /* panels / cells / tabs */
+  --vx-radius-control: 2px;                      /* fields + buttons: minimal */
+  --vx-text: var(--sb-text, #f5f5f7);
+  --vx-text-2: var(--sb-text-secondary, #a1a1a6);
+  --vx-text-3: var(--sb-text-tertiary, #6e6e73);
+  --vx-fs-title: 20px;                           /* section titles 18–22 */
+  --vx-fs-primary: 16px;                         /* primary information */
+  --vx-fs-secondary: 14px;                       /* secondary (never smaller in management) */
+  --vx-fs-label: 12px;                           /* eyebrow labels only */
+}
+
+/* Tabs — the selected one carries the underline (like Brands / KPIs / regions) */
+.vx-tabs { display: flex; border-bottom: 1px solid var(--vx-line); }
+.vx-tab {
+  position: relative; display: inline-flex; align-items: center; gap: 0.5rem;
+  min-height: 44px; padding: 0 1rem; border: 0; border-radius: var(--vx-radius); background: transparent;
+  font-size: var(--vx-fs-primary); font-weight: 500; color: var(--vx-text-2); cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.vx-tab:hover { color: var(--vx-text); background: var(--vx-hover); }
+.vx-tab.is-active, .vx-tab[aria-selected="true"], .vx-tab[aria-pressed="true"] { color: var(--vx-text); font-weight: 600; }
+.vx-tab::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: var(--vx-indicator);
+  background: var(--vx-indicator-color); opacity: 0; transition: opacity 0.15s ease;
+}
+.vx-tab.is-active::after, .vx-tab[aria-selected="true"]::after, .vx-tab[aria-pressed="true"]::after { opacity: 1; }
+
+/* Hairline grid — cells separated by 1px lines, no outer frame (KPIs / pads) */
+.vx-hairline-grid { display: grid; gap: 1px; background: var(--vx-line); }
+.vx-hairline-grid > * { background: var(--vx-bg); border-radius: var(--vx-radius); }
+
+/* Section — a strong title over a hairline, instead of a card */
+.vx-section { border-top: 1px solid var(--vx-line); padding: 1.25rem 0; }
+.vx-section-title { font-size: var(--vx-fs-title); font-weight: 600; letter-spacing: -0.01em; color: var(--vx-text); margin: 0; }
+.vx-section-sub { font-size: var(--vx-fs-secondary); color: var(--vx-text-2); margin: 0.25rem 0 0; }
+.vx-label { font-size: var(--vx-fs-label); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--vx-text-3); }
+
+/* Lists — clean rows with a thin divider; no card per row */
+.vx-list { border-top: 1px solid var(--vx-line); }
+.vx-row {
+  display: flex; align-items: center; gap: 1rem; min-height: 56px; padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--vx-line); transition: background-color 0.15s ease;
+}
+.vx-row:hover { background: var(--vx-hover); }
+.vx-row.is-active, .vx-row[aria-selected="true"] { background: var(--vx-active); }
+.vx-row-title { font-size: var(--vx-fs-primary); font-weight: 600; color: var(--vx-text); }
+.vx-row-meta { font-size: var(--vx-fs-secondary); color: var(--vx-text-2); }
+
+/* Buttons — primary may be filled; secondary flat / outlined; never a pill */
+.vx-btn, .vx-btn-primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  min-height: 40px; padding: 0 1rem; border-radius: var(--vx-radius-control);
+  font-size: var(--vx-fs-secondary); font-weight: 600; cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.vx-btn { border: 1px solid var(--vx-line-strong); background: transparent; color: var(--vx-text); }
+.vx-btn:hover { background: var(--vx-hover); border-color: rgba(255, 255, 255, 0.28); }
+.vx-btn-primary { border: 1px solid #f5f5f7; background: #f5f5f7; color: #0b0b0d; }
+.vx-btn-primary:hover { background: #ffffff; }
+.vx-btn:disabled, .vx-btn-primary:disabled { opacity: 0.4; cursor: default; }
+.vx-btn-ghost { border-color: transparent; }
+
+/* Fields — square, flat */
+.vx-field {
+  width: 100%; min-height: 44px; padding: 0 0.875rem; border: 1px solid var(--vx-line-strong);
+  border-radius: var(--vx-radius-control); background: transparent; color: var(--vx-text);
+  font-size: var(--vx-fs-primary);
+}
+.vx-field::placeholder { color: var(--vx-text-3); }
+.vx-field:focus { outline: none; border-color: var(--vx-indicator-color); }
+
+/* Badge — status / identity, no glow */
+.vx-badge {
+  display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.125rem 0.5rem;
+  border: 1px solid var(--vx-line-strong); border-radius: var(--vx-radius-control);
+  font-size: var(--vx-fs-label); font-weight: 600; letter-spacing: 0.04em; color: var(--vx-text-2);
+}
+.vx-badge--ok { color: #6ee7b7; border-color: rgba(110, 231, 183, 0.35); }
+.vx-badge--warn { color: #fcd34d; border-color: rgba(252, 211, 77, 0.35); }
+.vx-badge--danger { color: #fda4af; border-color: rgba(253, 164, 175, 0.35); }
+
+/* the underline indicator as a standalone element (bottom LED) */
+.vx-indicator { position: absolute; left: 0; right: 0; bottom: 0; height: var(--vx-indicator); background: var(--vx-indicator-color); }

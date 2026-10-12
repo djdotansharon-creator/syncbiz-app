@@ -69,3 +69,12 @@ assert("U2 order statuses → brands → search; map area = header toolbar (size
   order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])) && view.includes("absolute left-6 top-2 z-10 flex flex-col") && view.includes("controlsSlot={zoomSlot}") && !view.includes("rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5") && view.includes('<RegionChip label={L.t("map.allIsrael")}') && view.includes('className="flex overflow-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("map.regionsAria")}') && view.includes('absolute right-6 top-2 z-10 text-right') &&
   view.includes("regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id)") && /bar=\{b\.color \?\? "#f5f5f7"\}/.test(view));
 console.log(`(+L3) ${pass} passed, ${fail} failed`);
+// Design language step 1 (owner 2026-10-12): shared tokens + opt-in .vx-* classes; Control Room primitives moved, unchanged
+const prim = readFileSync("components/management/primitives.tsx", "utf8");
+assert("D1 shared primitives (Stat / FilterTab / RegionChip) live in components/management/primitives.tsx and the Control Room uses them",
+  /export function Stat\(/.test(prim) && /export function FilterTab\(/.test(prim) && /export function RegionChip\(/.test(prim) &&
+  view.includes('import { FilterTab, RegionChip, Stat } from "@/components/management/primitives";') && !/^function (Stat|FilterTab|RegionChip)\(/m.test(view));
+assert("D2 VONO design tokens + .vx-* classes exist (hairline / zero radius / underline indicator)",
+  /--vx-line: rgba\(255, 255, 255, 0\.08\)/.test(css) && /--vx-radius: 0;/.test(css) && /--vx-indicator: 3px;/.test(css) &&
+  /\.vx-tab::after \{/.test(css) && /\.vx-hairline-grid \{/.test(css) && /\.vx-row \{/.test(css) && /\.vx-btn-primary/.test(css));
+console.log(`(+D) ${pass} passed, ${fail} failed`);
