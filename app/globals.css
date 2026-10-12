@@ -3433,6 +3433,30 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   display: none !important;
 }
 
+/* ── MANAGEMENT READABILITY (owner 2026-10-12) — Dashboard / Control Room / Access Control only (.mgmt-type on each
+   page root; the player and every other screen are untouched). Secondary text ≥ 14 px, stronger contrast, every
+   button / field has a ≥ 44 px hit area WITHOUT changing its look (an invisible extension, no layout shift). */
+.mgmt-type {
+  --sb-text-secondary: #b8b8be;
+  --sb-text-tertiary: #929298;
+}
+.mgmt-type .text-xs { font-size: 14px; line-height: 20px; }
+.mgmt-type .text-xs.uppercase { font-size: 12.5px; line-height: 18px; letter-spacing: 0.06em; } /* eyebrow labels */
+.mgmt-type .text-\[11px\] { font-size: 13px; line-height: 18px; } /* badges / chips */
+.mgmt-type .text-\[10px\] { font-size: 12px; line-height: 16px; } /* attribution / tiny badges */
+.mgmt-type .text-slate-500 { color: #9aa5b8; }
+.mgmt-type .text-slate-600 { color: #8794a8; }
+.mgmt-type :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select) { min-height: 44px; }
+.mgmt-type :is(button, [role="button"]):not(.absolute):not(.fixed):not(.sticky) { position: relative; }
+.mgmt-type :is(button, [role="button"])::after {
+  content: "";
+  position: absolute;
+  top: min(0px, calc(50% - 22px));
+  bottom: min(0px, calc(50% - 22px));
+  left: min(0px, calc(50% - 22px));
+  right: min(0px, calc(50% - 22px));
+}
+
 /* Control Room regional map: the hovered region rises gently (owner 2026-10-11) */
 @keyframes vono-region-rise {
   from { opacity: 0; }

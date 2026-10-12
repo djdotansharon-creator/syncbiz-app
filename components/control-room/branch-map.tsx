@@ -29,6 +29,22 @@ export const DOT_FILL: Record<MapDotStatus, string> = {
   unknown: "rgba(255,255,255,0.2)",
 };
 
+/** status by SHAPE as well as color (accessibility, owner 2026-10-12): the ring is solid (playing / online),
+ *  dashed (offline), dotted (needs installation) or thin (unknown); playing also pulses and has a filled centre */
+export const STATUS_DASH: Record<MapDotStatus, string | undefined> = { playing: undefined, idle: undefined, offline: "3 2.2", install: "1.2 1.8", unknown: "1.5 2.5" };
+export const STATUS_LABEL_SHORT: Record<MapDotStatus, string> = { playing: "Playing", idle: "Online · not playing", offline: "Offline", install: "Needs installation", unknown: "Status unknown" };
+
+/** the status mark used in the list and the legend (same ring language as the map) */
+export function StatusGlyph({ status, size = 12 }: { status: MapDotStatus; size?: number }) {
+  const solid = status === "playing" || status === "idle";
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" className="shrink-0" aria-hidden>
+      <circle cx="6" cy="6" r="4.6" fill="none" stroke={DOT_FILL[status]} strokeWidth={status === "unknown" ? 1.2 : 1.8} strokeDasharray={STATUS_DASH[status]} />
+      {solid ? <circle cx="6" cy="6" r={status === "playing" ? 2.6 : 2.2} fill={DOT_FILL[status]} /> : null}
+    </svg>
+  );
+}
+
 const W = 520;
 const H = 560;
 const PAD = 36;
@@ -321,7 +337,7 @@ export function BranchMap({
         const s = 1 / k;
         return (
           <g key={d.id} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); onSelect(d.id); }}>
-            <title>{d.name}</title>
+            <title>{`${d.name} · ${STATUS_LABEL_SHORT[d.status]}`}</title>
             {selected ? <circle cx={x} cy={y} r={(d.brandColor ? 12 : 10) * s} fill="none" stroke="#fff" strokeWidth={1.5 * s} /> : null}
             {d.status === "playing" && pulsing ? (
               <circle cx={x} cy={y} r={5 * s} fill={DOT_FILL.playing} opacity={0.35}>
@@ -331,11 +347,15 @@ export function BranchMap({
             ) : null}
             {d.brandColor ? (
               <>
-                <circle cx={x} cy={y} r={7.5 * s} fill="rgba(10,10,12,0.9)" stroke={DOT_FILL[d.status]} strokeWidth={2.4 * s} />
+                <circle cx={x} cy={y} r={7.5 * s} fill="rgba(10,10,12,0.9)" stroke={DOT_FILL[d.status]} strokeWidth={2.4 * s} strokeDasharray={STATUS_DASH[d.status]?.split(" ").map((v) => Number(v) * 1.6 * s).join(" ")} />
                 <circle cx={x} cy={y} r={4.6 * s} fill={d.brandColor} />
               </>
             ) : (
-              <circle cx={x} cy={y} r={5.5 * s} fill={DOT_FILL[d.status]} stroke="rgba(10,10,12,0.9)" strokeWidth={1.5 * s} />
+              d.status === "playing" || d.status === "idle" ? (
+                <circle cx={x} cy={y} r={5.5 * s} fill={DOT_FILL[d.status]} stroke="rgba(10,10,12,0.9)" strokeWidth={1.5 * s} />
+              ) : (
+                <circle cx={x} cy={y} r={5 * s} fill="rgba(10,10,12,0.9)" stroke={DOT_FILL[d.status]} strokeWidth={2 * s} strokeDasharray={STATUS_DASH[d.status]?.split(" ").map((v) => Number(v) * 1.4 * s).join(" ")} />
+              )
             )}
           </g>
         );

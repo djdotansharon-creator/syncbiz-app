@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
-import { DOT_FILL, type MapDotStatus } from "@/components/control-room/branch-map";
+import { DOT_FILL, StatusGlyph, type MapDotStatus } from "@/components/control-room/branch-map";
 import { NetworkMap } from "@/components/control-room/network-map";
 import { BranchPanel } from "@/components/control-room/branch-panel";
 import { BroadcastPanel } from "@/components/control-room/broadcast-panel";
@@ -224,7 +224,7 @@ export function AllBranchesView() {
     <div className="overflow-hidden rounded-2xl border border-[color:var(--sb-border)] bg-[var(--sb-surface)]">
       <header className="flex items-center justify-between gap-4 border-b border-[color:var(--sb-border)] px-6 py-4">
         <div>
-          <h1 className="text-base font-semibold tracking-tight text-[var(--sb-text)]">Control Room</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-[var(--sb-text)]">Control Room</h1>
           <p className="text-xs text-[var(--sb-text-tertiary)]">
             {liveKnown ? "Your network, live" : status === "connecting" ? "Connecting to live status…" : "Live status unavailable. Reconnecting…"}
           </p>
@@ -340,12 +340,12 @@ export function AllBranchesView() {
                     <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
                     All Israel
                   </button>
-                  <div className="mt-1 truncate text-base font-semibold text-[var(--sb-text)]">{regionName(regionFocus)}</div>
+                  <div className="mt-1 truncate text-lg font-semibold text-[var(--sb-text)]">{regionName(regionFocus)}</div>
                   <div className="text-xs text-[var(--sb-text-secondary)]">{visibleRows.length} branch{visibleRows.length === 1 ? "" : "es"}</div>
                 </div>
               ) : (
                 <div className="min-w-0">
-                  <div className="text-base font-semibold text-[var(--sb-text)]">All Israel</div>
+                  <div className="text-lg font-semibold text-[var(--sb-text)]">All Israel</div>
                   <div className="text-xs text-[var(--sb-text-secondary)]">
                     {visibleRows.length} branch{visibleRows.length === 1 ? "" : "es"} · {REGIONS.length} regions · hover a region, click to focus
                   </div>
@@ -378,6 +378,12 @@ export function AllBranchesView() {
                 height={size.height}
               />
             </div>
+            <ul className="flex flex-wrap items-center gap-x-5 gap-y-2 px-6 pb-3 text-xs text-[var(--sb-text-secondary)]" aria-label="Map legend">
+              {(["playing", "idle", "offline", "install"] as const).map((s) => (
+                <li key={s} className="flex items-center gap-2"><StatusGlyph status={s} size={14} />{STATUS_LABEL[s].label}</li>
+              ))}
+              <li className="flex items-center gap-2 text-[var(--sb-text-tertiary)]">Center = brand color</li>
+            </ul>
             {!regionFocus && (noLocationCount > 0 || outsideCount > 0) ? (
               <p className="px-6 pb-4 text-xs text-[var(--sb-text-tertiary)]">
                 {noLocationCount > 0 ? `${noLocationCount} branch${noLocationCount === 1 ? "" : "es"} without a location (not on the map, still in the list)` : ""}
@@ -507,7 +513,7 @@ function BranchRow({ row, brand, status, selected, onSelect }: { row: Row; brand
     >
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-semibold text-[var(--sb-text)]">{row.name}</span>
+          <span className="truncate text-base font-semibold text-[var(--sb-text)]">{row.name}</span>
           {brand ? <BrandBadge name={brand.name} color={brand.color} /> : null}
         </div>
         {row.branchNumber || row.city ? (
@@ -522,7 +528,7 @@ function BranchRow({ row, brand, status, selected, onSelect }: { row: Row; brand
         ) : null}
       </div>
       <div className={`flex min-w-0 items-center gap-2 text-sm ${ui.text}`}>
-        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: DOT_FILL[status] }} aria-hidden />
+        <StatusGlyph status={status} />
         <span className="truncate">{ui.label}</span>
       </div>
       <DeviceType type={row.online ? row.live?.deviceType : undefined} />
