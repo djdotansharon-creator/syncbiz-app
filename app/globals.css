@@ -3575,3 +3575,33 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 
 /* the underline indicator as a standalone element (bottom LED) */
 .vx-indicator { position: absolute; left: 0; right: 0; bottom: 0; height: var(--vx-indicator); background: var(--vx-indicator-color); }
+
+/* ── PLAYER AREA in the VONO language (owner 2026-10-12) — DISPLAY ONLY (no queue / playback / tile logic) ──
+   Queue rows + playlist tiles: no card frames — clean rows on hairlines, hover = soft highlight,
+   the current / active row = soft fill + the underline indicator. */
+.queue-row {
+  border: 0 !important;
+  border-bottom: 1px solid var(--vx-line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+.queue-row:hover { background: var(--vx-hover) !important; }
+.queue-row:focus { box-shadow: none; }
+.queue-row:focus-visible { background: var(--vx-active) !important; }
+.queue-row-current {
+  background: var(--vx-active) !important;
+  box-shadow: inset 0 calc(-1 * var(--vx-indicator)) 0 var(--vx-indicator-color);
+}
+.queue-row-current-bar { display: none; }
+/* the queue list itself: rows touch (lines between them), no card stack gaps */
+.vx-queue-list { gap: 0 !important; border-top: 1px solid var(--vx-line); }
+
+/* playlist tiles (left rail) — a clean row instead of a rounded card */
+.vx-tile-row {
+  border-radius: 0;
+  border-bottom: 1px solid var(--vx-line);
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+.vx-tile-row:hover { background: var(--vx-hover); }
+.vx-tile-list { border-top: 1px solid var(--vx-line); }

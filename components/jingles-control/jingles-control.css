@@ -2539,3 +2539,40 @@
 .jc-workspace-panel .jcx-settings-bar .jcx-set:not(.jcx-set--title) { flex: 0 0 auto; }
 .jc-workspace-panel .jcx-settings-bar select { max-width: none; width: auto; }
 .jc-workspace-panel .jcx-settings-bar .jcx-set--title { flex: 1 1 8rem; min-width: 7rem; }
+
+/* ── round 3 (owner 2026-10-12): selects belong to the language; the result reads as one clean column ── */
+/* selects: dark native list (no white Windows popup), one quiet chevron, aligned like the fields */
+.jc-workspace-panel select,
+.jc-modal select {
+  color-scheme: dark;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1a6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 14px 14px;
+  padding-right: 2rem;
+  cursor: pointer;
+}
+[dir="rtl"] .jc-workspace-panel select, [dir="rtl"] .jc-modal select { background-position: left 0.6rem center; padding-right: 0.875rem; padding-left: 2rem; }
+.jc-workspace-panel select option,
+.jc-modal select option { background: #111114; color: #f5f5f7; }
+
+/* result: title + meta, then the actions as clean full-width rows separated by hairlines */
+.jc-workspace-panel .jcx-result { justify-content: flex-start; gap: 0; padding-top: 0.25rem; }
+.jc-workspace-panel .jcx-result-head { gap: 0.25rem; padding: 0 2.5rem 0.875rem 0; border-bottom: 1px solid var(--vx-line); }
+.jc-workspace-panel .jcx-result-play {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 48px;
+  padding: 0 0.75rem;
+  background: transparent;
+  border-bottom: 1px solid var(--vx-line);
+  font-size: var(--vx-fs-primary);
+}
+.jc-workspace-panel .jcx-result-play:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
+.jc-workspace-panel .jcx-result-dismiss {
+  position: absolute; top: 0; right: 0;
+  width: 2rem; height: 2rem; min-height: 0; padding: 0;
+  font-size: 14px; color: var(--vx-text-3);
+}

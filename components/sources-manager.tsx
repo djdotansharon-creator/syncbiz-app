@@ -2629,7 +2629,7 @@ function SourcesManagerInner({
                   {playlistTileDropMessage}
                 </p>
               ) : null}
-              <div className="space-y-2">
+              <div className="vx-tile-list">
                 {FIXED_DAYPART_PADS.map((pad) => (
                   (() => {
                     const assignedPlaylistKey = daypartPlaylistAssignments[pad.key];
@@ -2662,7 +2662,7 @@ function SourcesManagerInner({
                     }}
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
-                    className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
+                    className="vx-tile-row px-3 py-2.5"
                     title={t.playlistTileDropBindPlaylistTitle}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -2760,7 +2760,7 @@ function SourcesManagerInner({
                     }}
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
-                    className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
+                    className="vx-tile-row px-3 py-2.5"
                     title={t.playlistTileDropBindPlaylistTitle}
                   >
                     <div className="flex items-center justify-between gap-2">

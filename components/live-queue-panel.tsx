@@ -982,7 +982,7 @@ export function LiveQueuePanel() {
         ) : displayedSessionTracks.length === 0 ? (
           <p className="text-[10px] leading-tight text-slate-500/70">All session rows hidden</p>
         ) : (
-          <ul className="flex w-full min-w-0 flex-col gap-1.5">
+          <ul className="vx-queue-list flex w-full min-w-0 flex-col gap-1.5">
             {displayedSessionTracks.map(({ track: t, originalIndex: i }, displayIndex) => {
               const tr = t as TrackExtra;
               const title = t.name ?? t.title ?? t.url ?? "Track";
@@ -1018,7 +1018,7 @@ export function LiveQueuePanel() {
                   }`}
                 >
                   {isCurrent ? (
-                    <span className="pointer-events-none absolute bottom-1 left-0 top-1 w-[2px] rounded-full bg-amber-500/70" aria-hidden />
+                    <span className="queue-row-current-bar pointer-events-none absolute bottom-1 left-0 top-1 w-[2px] rounded-full bg-amber-500/70" aria-hidden />
                   ) : null}
                   <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-slate-800/80 ring-1 ring-white/[0.06]">
                     {thumb ? (
