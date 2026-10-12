@@ -2311,3 +2311,156 @@
 /* the taller pads must never squeeze the Create form into itself: it keeps its natural height and the
    existing workspace area scrolls instead (fixes the Generate button overlapping the text box) */
 .jcx-active-workspace > .jcx-create { flex-shrink: 0; }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+   JINGLES STUDIO — VONO design language (owner 2026-10-12, step 2). DISPLAY ONLY: same tabs / fields / buttons /
+   rows / modals and the same handlers — only their look. Uses the shared --vx-* tokens (app/globals.css).
+   Flat Swiss-style: hairline dividers, zero / minimal radius, no card-per-row, no gradients / glow, strong type
+   (16 primary / 14 secondary), the active tab carries the underline. The Quick Pads block above is NOT touched.
+   ═════════════════════════════════════════════════════════════════════════════════════════════════════════════ */
+.jc-workspace-panel {
+  background: #0b0b0e;
+  border: 1px solid var(--vx-line);
+  border-radius: var(--vx-radius);
+  box-shadow: none;
+  gap: 1rem;
+}
+.jc-workspace-panel .jc-drawer-title,
+.jc-workspace-panel .jc-ws-header-title { font-size: var(--vx-fs-title); font-weight: 600; letter-spacing: -0.01em; color: var(--vx-text); }
+
+/* tabs — underline on the active one */
+.jc-workspace-panel .jc-ws-tabs { border-bottom: 1px solid var(--vx-line); gap: 0; }
+.jc-workspace-panel .jc-ws-tab {
+  position: relative; min-height: 44px; padding: 0 1rem; margin-bottom: -1px;
+  font-size: var(--vx-fs-primary); font-weight: 500; letter-spacing: 0; color: var(--vx-text-2);
+  border-bottom: var(--vx-indicator) solid transparent; border-radius: var(--vx-radius);
+}
+.jc-workspace-panel .jc-ws-tab:hover { color: var(--vx-text); background: var(--vx-hover); }
+.jc-workspace-panel .jc-ws-tab--active { color: var(--vx-text); font-weight: 600; border-bottom-color: var(--vx-indicator-color); }
+
+/* eyebrow labels (quick pads / sections / field labels) */
+.jc-workspace-panel .jc-ws-section-label,
+.jc-workspace-panel .jcx-quickpads-head,
+.jc-workspace-panel .jc-field > span,
+.jc-modal .jc-field > span {
+  font-size: var(--vx-fs-label); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--vx-text-3);
+}
+.jc-workspace-panel .jc-ws-section-label--accent { color: var(--vx-text-2); }
+.jc-workspace-panel .jc-hint,
+.jc-workspace-panel .jc-history-empty { font-size: var(--vx-fs-secondary); color: var(--vx-text-2); line-height: 1.5; }
+
+/* fields — square, flat, 16 px */
+.jc-workspace-panel input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.jc-workspace-panel select,
+.jc-workspace-panel textarea,
+.jc-modal input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.jc-modal select,
+.jc-modal textarea {
+  min-height: 44px;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid var(--vx-line-strong);
+  border-radius: var(--vx-radius-control);
+  background: transparent;
+  color: var(--vx-text);
+  font-size: var(--vx-fs-primary);
+  box-shadow: none;
+}
+.jc-workspace-panel select, .jc-modal select { padding-right: 2rem; background-color: #0b0b0e; }
+.jc-workspace-panel textarea, .jc-modal textarea { line-height: 1.5; }
+.jc-workspace-panel input:focus, .jc-workspace-panel select:focus, .jc-workspace-panel textarea:focus,
+.jc-modal input:focus, .jc-modal select:focus, .jc-modal textarea:focus {
+  outline: none; border-color: var(--vx-indicator-color); box-shadow: none;
+}
+.jc-workspace-panel ::placeholder, .jc-modal ::placeholder { color: var(--vx-text-3); }
+/* AI helper inside the script box — flat outlined, no glow */
+.jc-workspace-panel .jc-script-ai-btn {
+  border: 1px solid var(--vx-line-strong); border-radius: var(--vx-radius-control);
+  background: #0b0b0e; color: var(--vx-text-2); box-shadow: none; font-size: var(--vx-fs-label);
+}
+.jc-workspace-panel .jc-script-ai-btn:hover { color: var(--vx-text); border-color: rgba(255, 255, 255, 0.28); }
+
+/* buttons — square; ONE filled primary (Generate); the rest flat / outlined; danger = text only */
+.jc-workspace-panel .jc-btn, .jc-modal .jc-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+  min-height: 40px; padding: 0 1rem;
+  border: 1px solid var(--vx-line-strong); border-radius: var(--vx-radius-control);
+  background: transparent; color: var(--vx-text);
+  font-size: var(--vx-fs-secondary); font-weight: 600; box-shadow: none;
+}
+.jc-workspace-panel .jc-btn:hover:not(:disabled), .jc-modal .jc-btn:hover:not(:disabled) { background: var(--vx-hover); border-color: rgba(255, 255, 255, 0.28); box-shadow: none; }
+.jc-workspace-panel .jc-btn--ghost, .jc-modal .jc-btn--ghost { color: var(--vx-text-2); }
+.jc-workspace-panel .jc-btn--ghost:hover:not(:disabled), .jc-modal .jc-btn--ghost:hover:not(:disabled) { color: var(--vx-text); }
+.jc-workspace-panel .jc-btn--primary, .jc-modal .jc-btn--primary {
+  background: #f5f5f7; border-color: #f5f5f7; color: #0b0b0d;
+}
+.jc-workspace-panel .jc-btn--primary:hover:not(:disabled), .jc-modal .jc-btn--primary:hover:not(:disabled) { background: #fff; border-color: #fff; color: #0b0b0d; }
+.jc-workspace-panel .jc-btn--danger, .jc-modal .jc-btn--danger { border-color: transparent; color: #fda4af; }
+.jc-workspace-panel .jc-btn--danger:hover:not(:disabled), .jc-modal .jc-btn--danger:hover:not(:disabled) { background: rgba(253, 164, 175, 0.08); border-color: transparent; }
+.jc-workspace-panel .jc-btn--small { min-height: 36px; padding: 0 0.75rem; }
+.jc-workspace-panel .jc-btn--lg { min-height: 48px; padding: 0 1.5rem; font-size: var(--vx-fs-primary); }
+.jc-workspace-panel .jc-btn:disabled, .jc-modal .jc-btn:disabled { opacity: 0.4; }
+.jc-workspace-panel .jcx-generate-cta { font-size: var(--vx-fs-primary); }
+
+/* Library + Schedule — clean rows with a hairline, no card per row */
+.jc-workspace-panel .jc-lib,
+.jc-workspace-panel .jc-sched-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--vx-line); }
+.jc-workspace-panel .jc-lib-row,
+.jc-workspace-panel .jc-sched-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: nowrap;
+  min-height: 64px; padding: 0.75rem 0.5rem;
+  border: 0; border-bottom: 1px solid var(--vx-line); border-radius: var(--vx-radius); background: transparent;
+  transition: background-color 0.15s ease;
+}
+.jc-workspace-panel .jc-sched-row:last-of-type { border-bottom: 1px solid var(--vx-line); }
+.jc-workspace-panel .jc-lib-row:hover,
+.jc-workspace-panel .jc-sched-row:hover { background: var(--vx-hover); }
+.jc-workspace-panel .jcx-lib-drag { min-width: 0; flex: 1 1 auto; }
+.jc-workspace-panel .jc-lib-title { font-size: var(--vx-fs-primary); font-weight: 600; color: var(--vx-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jc-workspace-panel .jc-lib-meta { font-size: var(--vx-fs-secondary); color: var(--vx-text-2); margin-top: 0.25rem; }
+.jc-workspace-panel .jc-lib-actions { flex: none; flex-wrap: nowrap; gap: 0.5rem; align-items: center; }
+.jc-workspace-panel .jc-sched-list { font-size: var(--vx-fs-primary); color: var(--vx-text-2); }
+.jc-workspace-panel .jc-sched-text { font-size: var(--vx-fs-primary); color: var(--vx-text-2); }
+.jc-workspace-panel .jc-sched-text strong { color: var(--vx-text); font-weight: 600; }
+.jc-workspace-panel .jc-ws-divider { height: 0; border-top: 1px solid var(--vx-line); background: none; margin: 0.75rem 0; }
+
+/* Create — result pane flat, readable */
+.jc-workspace-panel .jcx-result-title { font-size: 18px; font-weight: 600; color: var(--vx-text); }
+.jc-workspace-panel .jcx-result-meta { font-size: var(--vx-fs-label); color: var(--vx-text-3); }
+.jc-workspace-panel .jcx-result-play,
+.jc-workspace-panel .jcx-result-dismiss { border-radius: var(--vx-radius-control); box-shadow: none; background-image: none; }
+.jcx-create-main .jcx-result-empty p { font-size: var(--vx-fs-secondary); color: var(--vx-text-2); }
+.jc-workspace-panel .jc-err-msg { font-size: var(--vx-fs-secondary); }
+
+/* header status chips — flat */
+.jc-workspace-panel .jc-ws-header-status-mini { border-radius: var(--vx-radius-control); box-shadow: none; background: transparent; border: 1px solid var(--vx-line); }
+.jc-workspace-panel .jc-icon-btn, .jc-modal .jc-icon-btn { border-radius: var(--vx-radius-control); box-shadow: none; }
+
+/* modals — one flat surface, hairlines, strong title */
+.jc-modal {
+  border: 1px solid var(--vx-line-strong);
+  border-radius: var(--vx-radius-control);
+  background: #111114;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+.jc-modal-header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--vx-line); }
+.jc-modal-title { font-size: 18px; font-weight: 600; letter-spacing: 0; color: var(--vx-text); }
+.jc-modal-body { padding: 1rem 1.25rem; gap: 0.875rem; font-size: var(--vx-fs-primary); color: var(--vx-text-2); }
+.jc-modal-footer { padding: 0.875rem 1.25rem; border-top: 1px solid var(--vx-line); gap: 0.5rem; }
+/* Assign-to-Pad picker inside the modal — hairline rows */
+.jc-modal .jc-pad-picker-btn {
+  border-radius: var(--vx-radius); box-shadow: none; background: transparent;
+  border: 0; border-bottom: 1px solid var(--vx-line); min-height: 48px; font-size: var(--vx-fs-primary); color: var(--vx-text);
+}
+.jc-modal .jc-pad-picker-btn:hover { background: var(--vx-hover); }
+/* Create settings row (title + type / language / voice / speed / bell) stays ONE clean row: compact 14 px selects,
+   the title field takes the rest. */
+.jc-workspace-panel .jcx-settings-bar { flex-wrap: nowrap; gap: 0.5rem; }
+.jc-workspace-panel .jcx-settings-bar .jcx-set { min-width: 0; flex: 0 1 auto; }
+.jc-workspace-panel .jcx-settings-bar .jcx-set--title { flex: 1 1 12rem; min-width: 9rem; }
+.jc-workspace-panel .jcx-settings-bar select {
+  min-height: 40px; padding: 0 1.6rem 0 0.625rem; font-size: var(--vx-fs-secondary); max-width: 11rem;
+}
+.jc-workspace-panel .jcx-settings-bar .jcx-set--title input { min-height: 40px; padding: 0 0.75rem; }
+/* Create never squeezes into itself: natural height, a real text box; on a short screen the studio area scrolls */
+.jc-workspace-panel .jcx-active-workspace > .jcx-create { flex: 0 0 auto; height: auto; }
+.jc-workspace-panel .jcx-create-main { min-height: 10rem; }
