@@ -66,6 +66,6 @@ assert("U1 one scroll, on the right-hand table only: screen fills the page; list
   (view.match(/min-h-0 min-w-0 overflow-y-auto/g) ?? []).length === 4 && view.includes("min-h-0 min-w-0 divide-y divide-[color:var(--sb-border)] overflow-y-auto") &&
   !view.includes("lg:sticky") && !view.includes("max-h-[640px]") && !bc.includes("overflow-y-auto"));
 assert("U2 order statuses → brands → search; map area = header toolbar (sizes + zoom, no frames) → regions strip (no separate back button); legend stacked on the left of the map; brands + regions are big tabs with a bar under the chosen one; region clicked again → All Israel",
-  order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])) && view.includes("absolute left-6 top-2 z-10 flex flex-col") && view.includes("controlsSlot={zoomSlot}") && !view.includes("rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5") && view.includes('<FilterTab label={L.t("map.allIsrael")}') &&
+  order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])) && view.includes("absolute left-6 top-2 z-10 flex flex-col") && view.includes("controlsSlot={zoomSlot}") && !view.includes("rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5") && view.includes('<RegionChip label={L.t("map.allIsrael")}') && view.includes('absolute right-6 top-2 z-10 text-right') &&
   view.includes("regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id)") && /bar=\{b\.color \?\? "#f5f5f7"\}/.test(view));
 console.log(`(+L3) ${pass} passed, ${fail} failed`);

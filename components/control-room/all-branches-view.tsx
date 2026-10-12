@@ -222,7 +222,6 @@ export function AllBranchesView() {
   const activeStatus: StatusFilter = liveKnown || statusFilter === "install" ? statusFilter : "all";
   const { brandRows, visibleRows, regionCounts, statusCounts, noLocationCount, outsideCount, filtersActive } =
     applyControlRoomFilters(rows, { brand: activeFilter, query: search, region: regionFocus, status: activeStatus, statusOf: (r) => rowStatus(r, liveKnown) });
-  const regionAllCount = Object.values(regionCounts).reduce((n, c) => n + (c ?? 0), 0) + noLocationCount + outsideCount;
   const clearFilters = () => { setBrandFilter("all"); setSearch(""); setRegionFocus(null); setStatusFilter("all"); };
   const toggleStatus = (s: StatusFilter) => setStatusFilter((cur) => (s === "all" || cur === s ? "all" : s));
   const colorOf = (brandId: string | null) => (brandId ? brandById.get(brandId)?.color ?? DEFAULT_BRAND_COLOR : null);
@@ -340,7 +339,6 @@ export function AllBranchesView() {
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-[color:var(--sb-border)] px-6 pt-1">
               <div className="flex min-w-0 items-baseline gap-3 py-2" title={L.t("map.regionsHint", { branches: L.branches(visibleRows.length), regions: REGIONS.length })}>
                 <div className="truncate text-xl font-semibold text-[var(--sb-text)]">{regionFocus ? L.region(regionFocus) : L.t("map.allIsrael")}</div>
-                <div className="shrink-0 text-sm text-[var(--sb-text-secondary)]">{L.branches(visibleRows.length)}</div>
               </div>
               <div className="flex items-center" role="toolbar" aria-label={L.t("map.sizeAria")}>
                 <div className="flex items-center" role="radiogroup" aria-label={L.t("map.sizeAria")}>
@@ -366,10 +364,10 @@ export function AllBranchesView() {
               </div>
             </div>
             {/* regions: a strip right under the map header (All Israel is the first tab — no separate back button) */}
-            <div className="flex flex-wrap border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("map.regionsAria")}>
-              <FilterTab label={L.t("map.allIsrael")} count={regionAllCount} active={!regionFocus} onClick={() => setRegionFocus(null)} />
+            <div className="flex overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)] [scrollbar-width:none]" role="group" aria-label={L.t("map.regionsAria")}>
+              <RegionChip label={L.t("map.allIsrael")} active={!regionFocus} onClick={() => setRegionFocus(null)} />
               {REGIONS.map((r) => (
-                <FilterTab key={r.id} label={L.region(r.id)} count={regionCounts[r.id] ?? 0} active={regionFocus === r.id} onClick={() => (regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id))} />
+                <RegionChip key={r.id} label={L.region(r.id)} title={L.branches(regionCounts[r.id] ?? 0)} active={regionFocus === r.id} onClick={() => (regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id))} />
               ))}
             </div>
             <div className="relative flex min-h-0 flex-1 items-stretch justify-center px-6 pb-5">
@@ -380,6 +378,11 @@ export function AllBranchesView() {
                 ))}
                 <li className="mt-0.5 text-xs text-[var(--sb-text-tertiary)]">{L.t("map.colorIsBrand")}</li>
               </ul>
+              {/* the branch count of the place on screen — big, right side of the map (opposite the legend) */}
+              <div className="pointer-events-none absolute right-6 top-2 z-10 text-right" aria-live="polite">
+                <div className="text-5xl font-bold leading-none tabular-nums text-[var(--sb-text)]" dir="ltr">{visibleRows.length}</div>
+                <div className="mt-1 text-sm text-[var(--sb-text-secondary)]">{L.t("map.branchesLabel")}</div>
+              </div>
               <p className="pointer-events-none absolute bottom-1 start-6 text-[10px] text-[var(--sb-text-tertiary)]">{L.t("map.attribution")}</p>
               <NetworkMap
                 branches={visibleRows.map((r) => ({ id: r.id, name: r.name, city: r.city, latitude: r.latitude, longitude: r.longitude, status: rowStatus(r, liveKnown), brandColor: colorOf(r.brandId) }))}
@@ -480,6 +483,24 @@ export function AllBranchesView() {
         </div>
       )}
     </div>
+  );
+}
+
+/** a region chip — one compact row (all regions fit), LED bar under the chosen one; the count lives on the map */
+function RegionChip({ label, active, onClick, title }: { label: string; active: boolean; onClick: () => void; title?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={title}
+      className={`relative flex-auto whitespace-nowrap px-2.5 py-2.5 text-[13px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] ${
+        active ? "bg-white/[0.06] font-semibold text-[var(--sb-text)]" : "font-medium text-[var(--sb-text-secondary)] hover:bg-white/[0.03] hover:text-[var(--sb-text)]"
+      }`}
+    >
+      {label}
+      <span className={`absolute inset-x-1 bottom-0 h-[3px] rounded-full bg-[var(--sb-accent)] transition-opacity ${active ? "opacity-100" : "opacity-0"}`} aria-hidden />
+    </button>
   );
 }
 
