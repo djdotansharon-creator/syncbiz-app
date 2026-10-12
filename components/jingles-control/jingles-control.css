@@ -2188,3 +2188,125 @@
   outline-offset: 1px;
   background: rgba(56, 189, 248, 0.12);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   QUICK PADS — Control Room language (owner 2026-10-12). DISPLAY ONLY: same
+   pads, same clicks / drops / edit; scoped to the workspace strip (.jcx-quickpads).
+   Larger card pads, one color identity per pad (the existing pad color, softened),
+   a thin LED bar along the bottom edge. States: rest · hover · selected
+   (keyboard focus / drop target) · on-air (gentle pulse).
+   ════════════════════════════════════════════════════════════════════════ */
+.jcx-quickpads-head { font-size: 0.75rem; letter-spacing: 0.1em; color: #8e8e93; margin-bottom: 0.6rem; }
+.jcx-quickpads .jc-trigger-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)); /* two even rows of 4 — big, readable cards */
+  gap: 0.5rem;
+  overflow: visible;
+  padding-bottom: 0;
+}
+.jcx-quickpads .jc-trigger-pad-wrap { flex: none; min-width: 0; }
+.jcx-quickpads .jc-trigger-pad {
+  min-width: 0;
+  min-height: 4.25rem;
+  padding: 0.6rem 0.85rem 0.8rem;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 0.2rem;
+  text-align: start;
+  border-radius: 14px;
+  border: 1px solid rgba(var(--pad-lit, 148, 163, 184), 0.22);
+  background:
+    linear-gradient(180deg, rgba(var(--pad-lit, 148, 163, 184), 0.10) 0%, rgba(var(--pad-lit, 148, 163, 184), 0.03) 100%),
+    #17171b;
+  color: #f5f5f7;
+  box-shadow: none;
+  transform: none;
+}
+/* the pad's color identity: a small swatch top-start (instead of the old LED dot) */
+.jcx-quickpads .jc-pad-led {
+  top: 0.65rem; left: 0.9rem; transform: none;
+  width: 0.7rem; height: 0.7rem; border-radius: 4px;
+  background: rgb(var(--pad-lit, 148, 163, 184));
+  box-shadow: none;
+  animation: none;
+}
+.jcx-quickpads .jc-trigger-pad--empty .jc-pad-led { opacity: 0.35; }
+.jcx-quickpads .jc-trigger-pad-label {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.25;
+  text-shadow: none;
+  -webkit-line-clamp: 2;
+}
+/* the new state line + bar exist only in the workspace strip (the drawer pads stay as they were) */
+.jcx-pad-sub, .jcx-pad-bar { display: none; }
+.jcx-quickpads .jcx-pad-sub { display: block; font-size: 0.75rem; color: #a1a1a6; line-height: 1.2; }
+.jcx-quickpads .jcx-pad-bar { display: block; }
+.jcx-quickpads .jc-trigger-pad--empty .jc-trigger-pad-label { color: #b8b8be; font-weight: 500; }
+/* LED bar along the bottom edge — dim when ready, faint when empty, bright when on air */
+.jcx-quickpads .jcx-pad-bar {
+  position: absolute; left: 0.6rem; right: 0.6rem; bottom: 0; height: 3px; border-radius: 3px;
+  background: rgb(var(--pad-lit, 148, 163, 184));
+  opacity: 0.45;
+  transition: opacity 0.18s ease, box-shadow 0.18s ease;
+}
+.jcx-quickpads .jc-trigger-pad--empty .jcx-pad-bar { opacity: 0.12; }
+/* hover */
+.jcx-quickpads .jc-trigger-pad:hover,
+.jcx-quickpads .jc-trigger-pad--assigned:hover,
+.jcx-quickpads .jc-trigger-pad--empty:hover {
+  border-color: rgba(var(--pad-lit, 148, 163, 184), 0.45);
+  background:
+    linear-gradient(180deg, rgba(var(--pad-lit, 148, 163, 184), 0.16) 0%, rgba(var(--pad-lit, 148, 163, 184), 0.05) 100%),
+    #1b1b20;
+  color: #fff;
+  transform: none;
+  box-shadow: none;
+}
+.jcx-quickpads .jc-trigger-pad:hover .jcx-pad-bar { opacity: 0.75; }
+/* selected — keyboard focus / drop target: soft frame + a clear bar */
+.jcx-quickpads .jc-trigger-pad:focus-visible,
+.jcx-quickpads .jc-trigger-pad-wrap--drop .jc-trigger-pad {
+  outline: none;
+  border-color: rgba(var(--pad-lit, 148, 163, 184), 0.75);
+  box-shadow: 0 0 0 3px rgba(var(--pad-lit, 148, 163, 184), 0.18);
+}
+.jcx-quickpads .jc-trigger-pad:focus-visible .jcx-pad-bar,
+.jcx-quickpads .jc-trigger-pad-wrap--drop .jcx-pad-bar { opacity: 1; }
+/* on air — stronger highlight + a gentle pulse of the bar */
+.jcx-quickpads .jc-trigger-pad--playing,
+.jcx-quickpads .jc-trigger-pad--assigned.jc-trigger-pad--playing {
+  border-color: rgba(var(--pad-lit, 148, 163, 184), 0.95) !important;
+  background:
+    linear-gradient(180deg, rgba(var(--pad-lit, 148, 163, 184), 0.28) 0%, rgba(var(--pad-lit, 148, 163, 184), 0.10) 100%),
+    #1d1d22 !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 3px rgba(var(--pad-lit, 148, 163, 184), 0.22), 0 0 24px rgba(var(--pad-lit, 148, 163, 184), 0.18) !important;
+}
+.jcx-quickpads .jc-trigger-pad--playing .jcx-pad-bar {
+  opacity: 1;
+  box-shadow: 0 0 10px rgba(var(--pad-lit, 148, 163, 184), 0.8);
+  animation: jcx-pad-onair 1.6s ease-in-out infinite;
+}
+.jcx-quickpads .jc-trigger-pad--playing .jcx-pad-sub { color: rgb(var(--pad-lit, 148, 163, 184)); font-weight: 600; }
+@keyframes jcx-pad-onair { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .jcx-quickpads .jc-trigger-pad--playing .jcx-pad-bar { animation: none; } }
+/* the "scheduled" dot moves to the top-end corner, away from the swatch */
+.jcx-quickpads .jc-pad-sched-dot { top: 0.85rem; right: 2.3rem; left: auto; }
+/* softer, premium colorways (the same 9 pad colors, lower saturation on the face) */
+.jcx-quickpads .jc-trigger-pad--color-default { --pad-lit: 94, 196, 160; }
+.jcx-quickpads .jc-trigger-pad--color-sky { --pad-lit: 100, 180, 240; }
+.jcx-quickpads .jc-trigger-pad--color-violet { --pad-lit: 165, 145, 240; }
+.jcx-quickpads .jc-trigger-pad--color-indigo { --pad-lit: 130, 140, 235; }
+.jcx-quickpads .jc-trigger-pad--color-pink { --pad-lit: 235, 130, 185; }
+.jcx-quickpads .jc-trigger-pad--color-rose { --pad-lit: 240, 125, 140; }
+.jcx-quickpads .jc-trigger-pad--color-amber { --pad-lit: 240, 190, 80; }
+.jcx-quickpads .jc-trigger-pad--color-lime { --pad-lit: 170, 215, 90; }
+.jcx-quickpads .jc-trigger-pad--color-teal { --pad-lit: 80, 200, 185; }
+/* the edit pencil stays reachable in the top-end corner */
+.jcx-quickpads .jc-trigger-pad-edit { top: 0.45rem; right: 0.45rem; }
+/* the taller pads must never squeeze the Create form into itself: it keeps its natural height and the
+   existing workspace area scrolls instead (fixes the Generate button overlapping the text box) */
+.jcx-active-workspace > .jcx-create { flex-shrink: 0; }

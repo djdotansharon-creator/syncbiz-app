@@ -948,6 +948,9 @@ function TriggerPads({
                   aria-hidden
                 />
                 <span className="jc-trigger-pad-label">{p.label}</span>
+                {/* display only (2026-10-12): a short state line + an LED bar along the bottom edge */}
+                <span className="jcx-pad-sub" aria-hidden>{isFlashing ? "On air" : assigned ? (isScheduled ? "Ready · scheduled" : "Ready") : "Tap to assign"}</span>
+                <span className="jcx-pad-bar" aria-hidden />
                 {isScheduled ? <span className="jc-pad-sched-dot" aria-hidden /> : null}
               </button>
               <button
