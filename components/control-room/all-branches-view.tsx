@@ -73,11 +73,13 @@ type RowStatus = MapDotStatus;
 /** map size (owner 2026-10-12): the map's share of the width + its height; remembered per viewer */
 type MapSize = "compact" | "balanced" | "focus";
 const MAP_SIZES: { id: MapSize; label: MgmtKey; width: string }[] = [
-  { id: "compact", label: "map.compact", width: "35%" },
+  { id: "compact", label: "map.compact", width: "40%" },
   { id: "balanced", label: "map.balanced", width: "50%" },
   { id: "focus", label: "map.focus", width: "68%" },
 ];
 const MAP_SIZE_KEY = "vono.controlRoom.mapSize";
+/** the map column is never narrower than the one-row region strip (owner: no scrolling there, ever) */
+const REGION_ROW_MIN_PX = 680;
 
 /** The connected-station list is only sent on request — ask again so a station that drops shows Offline. */
 const LIVE_REFRESH_MS = 10_000;
@@ -332,7 +334,7 @@ export function AllBranchesView() {
       ) : (
         <div
           className="grid min-h-0 flex-1 transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none lg:grid-cols-[var(--cr-map-w)_minmax(0,1fr)]"
-          style={{ "--cr-map-w": size.width } as CSSProperties}
+          style={{ "--cr-map-w": `max(${size.width}, ${REGION_ROW_MIN_PX}px)` } as CSSProperties}
         >
           <div className="hidden min-h-0 min-w-0 flex-col overflow-hidden border-e border-[color:var(--sb-border)] lg:flex">
             {/* map header: the place (All Israel / region) + ONE toolbar — map size (LED under the chosen one) and zoom */}
@@ -364,7 +366,7 @@ export function AllBranchesView() {
               </div>
             </div>
             {/* regions: a strip right under the map header (All Israel is the first tab — no separate back button) */}
-            <div className="flex overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)] [scrollbar-width:none]" role="group" aria-label={L.t("map.regionsAria")}>
+            <div className="flex overflow-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("map.regionsAria")}>
               <RegionChip label={L.t("map.allIsrael")} active={!regionFocus} onClick={() => setRegionFocus(null)} />
               {REGIONS.map((r) => (
                 <RegionChip key={r.id} label={L.region(r.id)} title={L.branches(regionCounts[r.id] ?? 0)} active={regionFocus === r.id} onClick={() => (regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id))} />
@@ -494,7 +496,7 @@ function RegionChip({ label, active, onClick, title }: { label: string; active: 
       onClick={onClick}
       aria-pressed={active}
       title={title}
-      className={`relative flex-auto whitespace-nowrap px-2.5 py-2.5 text-[13px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] ${
+      className={`relative flex-auto whitespace-nowrap px-1.5 py-2.5 text-[12px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] ${
         active ? "bg-white/[0.06] font-semibold text-[var(--sb-text)]" : "font-medium text-[var(--sb-text-secondary)] hover:bg-white/[0.03] hover:text-[var(--sb-text)]"
       }`}
     >

@@ -14,8 +14,8 @@ const map = readFileSync("components/control-room/branch-map.tsx", "utf8");
 const css = readFileSync("app/globals.css", "utf8");
 const page = (p: string) => readFileSync(p, "utf8");
 
-assert("M1 three map sizes: Compact 35% / Balanced 50% / Map focus 68%",
-  /id: "compact"[^}]*width: "35%"/.test(view) && /id: "balanced"[^}]*width: "50%"/.test(view) && /id: "focus"[^}]*width: "68%"/.test(view));
+assert("M1 three map sizes: Compact 40% (owner 2026-10-12, was 35%) / Balanced 50% / Map focus 68%",
+  /id: "compact"[^}]*width: "40%"/.test(view) && /id: "balanced"[^}]*width: "50%"/.test(view) && /id: "focus"[^}]*width: "68%"/.test(view));
 assert("M2 Balanced is the default; the choice is remembered per viewer (storage errors never break the view)",
   /useState<MapSize>\("balanced"\)/.test(view) && /try \{\s*const v = window\.localStorage\.getItem\(MAP_SIZE_KEY\)/.test(view) && /try \{ window\.localStorage\.setItem/.test(view));
 assert("M3 entering a region keeps the chosen map size (owner 2026-10-12: Compact stays Compact)",
@@ -66,6 +66,6 @@ assert("U1 one scroll, on the right-hand table only: screen fills the page; list
   (view.match(/min-h-0 min-w-0 overflow-y-auto/g) ?? []).length === 4 && view.includes("min-h-0 min-w-0 divide-y divide-[color:var(--sb-border)] overflow-y-auto") &&
   !view.includes("lg:sticky") && !view.includes("max-h-[640px]") && !bc.includes("overflow-y-auto"));
 assert("U2 order statuses → brands → search; map area = header toolbar (sizes + zoom, no frames) → regions strip (no separate back button); legend stacked on the left of the map; brands + regions are big tabs with a bar under the chosen one; region clicked again → All Israel",
-  order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])) && view.includes("absolute left-6 top-2 z-10 flex flex-col") && view.includes("controlsSlot={zoomSlot}") && !view.includes("rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5") && view.includes('<RegionChip label={L.t("map.allIsrael")}') && view.includes('absolute right-6 top-2 z-10 text-right') &&
+  order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])) && view.includes("absolute left-6 top-2 z-10 flex flex-col") && view.includes("controlsSlot={zoomSlot}") && !view.includes("rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5") && view.includes('<RegionChip label={L.t("map.allIsrael")}') && view.includes('className="flex overflow-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("map.regionsAria")}') && view.includes('absolute right-6 top-2 z-10 text-right') &&
   view.includes("regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id)") && /bar=\{b\.color \?\? "#f5f5f7"\}/.test(view));
 console.log(`(+L3) ${pass} passed, ${fail} failed`);
