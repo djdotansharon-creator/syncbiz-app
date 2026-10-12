@@ -7,7 +7,7 @@ import { cityLngLat } from "@/lib/control-room-geo";
 
 /**
  * CONTROL ROOM — the light network map (owner decision 2026-10-11): ONE small SVG, no tiles, no roads / POI / labels,
- * no zoom or pan controls, no network traffic, near-zero CPU / GPU. A dark land silhouette + one marker per branch at its
+ * no network traffic, near-zero CPU / GPU. Control Room only: + / − / Fit, Ctrl/Cmd + scroll zoom, drag to pan while zoomed. A dark land silhouette + one marker per branch at its
  * stored latitude / longitude (Google Places / geocoding = the source of truth), colored by live status, shown on the whole country (Control Room) or fitted to
  * the organization's branches; click → open the branch. Branches without coordinates fall back to their city (older
  * records) or are simply not drawn (they stay in the list).
@@ -72,6 +72,14 @@ export type MapRegions = {
 type ViewBox = { x: number; y: number; w: number; h: number };
 const FULL_VIEW: ViewBox = { x: 0, y: 0, w: W, h: H };
 const ZOOM_MS = 520;
+/** manual zoom: closest = 1/14 of the full map; each + / − step = ×1.6 */
+const MIN_VIEW_W = W / 14;
+const ZOOM_STEP = 1.6;
+/** keep the centre of a manual view over the map */
+function clampView(v: ViewBox): ViewBox {
+  const cx = Math.max(0, Math.min(W, v.x + v.w / 2)), cy = Math.max(0, Math.min(H, v.y + v.h / 2));
+  return { x: cx - v.w / 2, y: cy - v.h / 2, w: v.w, h: v.h };
+}
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
 /** Area centroid of a projected ring (label anchor that stays inside ordinary shapes). */
@@ -96,7 +104,7 @@ export function BranchMap({
   selectedId: string | null;
   onSelect: (id: string) => void;
   /** CSS height of the map box (default: fills its column up to 560 px) */
-  height?: number;
+  height?: number | string;
   /** "country" (Control Room, owner 2026-10-11): always the whole country, the zoom never depends on the branches; "branches": fit to the markers (Add / Edit preview) */
   fit?: "country" | "branches";
   /** Control Room: the region layer (absent → the plain map, e.g. the Add / Edit preview) */
@@ -158,14 +166,19 @@ export function BranchMap({
     return { x: cx - w / 2, y: cy - h / 2, w, h };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fitKey captures where the branches are
   }, [focus, regionShapes, fitKey]);
+  // manual zoom / pan on top of the target (whole country / focused region); a new focus drops the manual view
+  const [manual, setManual] = useState<{ focus: RegionId | null; vb: ViewBox; instant: boolean } | null>(null);
+  const goal = manual && manual.focus === focus ? manual.vb : target;
+  const instant = !!manual && manual.focus === focus && manual.instant;
   const [view, setView] = useState<ViewBox>(target);
   const viewRef = useRef(view);
   viewRef.current = view;
   useEffect(() => {
     const from = viewRef.current;
-    if (from.x === target.x && from.y === target.y && from.w === target.w) return;
+    if (from.x === goal.x && from.y === goal.y && from.w === goal.w) return;
     const reduce = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (reduce) { setView(target); return; }
+    if (reduce || instant) { setView(goal); return; }
+    const target = goal;
     let raf = 0;
     const t0 = performance.now();
     const step = (now: number) => {
@@ -175,21 +188,86 @@ export function BranchMap({
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [target]);
+  }, [goal, instant]);
+
+  /** zoom by `factor` (>1 = in) around the SVG point (cx, cy), from the view on screen now */
+  const zoomAt = (factor: number, cx: number, cy: number, inst: boolean) => {
+    const v = viewRef.current;
+    const w = Math.max(MIN_VIEW_W, Math.min(W, v.w / factor));
+    if (w >= W - 0.5 && !focus) { setManual(null); return; } // all the way out → the whole country
+    const h = (w * H) / W;
+    setManual({ focus, vb: clampView({ x: cx - (cx - v.x) * (w / v.w), y: cy - (cy - v.y) * (h / v.h), w, h }), instant: inst });
+  };
+  const zoomStep = (dir: 1 | -1) => { const v = viewRef.current; zoomAt(dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP, v.x + v.w / 2, v.y + v.h / 2, false); };
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const toSvg = (clientX: number, clientY: number): [number, number] | null => {
+    const m = svgRef.current?.getScreenCTM();
+    if (!m) return null;
+    const pt = new DOMPoint(clientX, clientY).matrixTransform(m.inverse());
+    return [pt.x, pt.y];
+  };
+  // Ctrl / Cmd + scroll (and trackpad pinch) → zoom around the cursor; a plain scroll keeps scrolling the page
+  const zoomAtRef = useRef(zoomAt);
+  zoomAtRef.current = zoomAt;
+  const zoomable = !!regions;
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el || !zoomable) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const m = el.getScreenCTM();
+      if (!m) return;
+      const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+      zoomAtRef.current(Math.exp(-Math.max(-60, Math.min(60, e.deltaY)) * 0.006), pt.x, pt.y, true);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoomable]);
+  // drag to pan while zoomed in (a drag never counts as a click on a region / branch)
+  const drag = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
+  const zoomedIn = view.w < W - 0.5;
   const k = W / view.w; // zoom factor: divide sizes by k so markers / strokes keep their on-screen size
 
   const [hover, setHover] = useState<RegionId | null>(null);
   const hovered = !focus && hover ? regionShapes.find((r) => r.id === hover) ?? null : null;
 
-  return (
+  const svg = (
     <svg
+      ref={svgRef}
       viewBox={`${view.x.toFixed(2)} ${view.y.toFixed(2)} ${view.w.toFixed(2)} ${view.h.toFixed(2)}`}
-      className="w-full overflow-hidden"
-      style={{ height: height ?? "100%", maxHeight: height ?? 560 }}
+      className={`w-full overflow-hidden ${zoomable && zoomedIn ? "cursor-grab active:cursor-grabbing" : ""}`}
+      style={{ height: height ?? "100%", maxHeight: height ?? 560, touchAction: zoomable && zoomedIn ? "none" : undefined }}
       preserveAspectRatio="xMidYMid meet"
       role="img"
       aria-label="Branch map"
       onMouseLeave={() => setHover(null)}
+      onPointerDown={zoomable ? (e) => { if (e.button === 0 && zoomedIn) drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false }; } : undefined}
+      onPointerMove={zoomable ? (e) => {
+        const d = drag.current;
+        if (!d || d.id !== e.pointerId) return;
+        if (!d.moved) {
+          if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5) return;
+          d.moved = true;
+          try { (e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+        }
+        const a = toSvg(d.x, d.y), b = toSvg(e.clientX, e.clientY);
+        d.x = e.clientX; d.y = e.clientY;
+        if (!a || !b) return;
+        const v = viewRef.current;
+        setManual({ focus, vb: clampView({ ...v, x: v.x - (b[0] - a[0]), y: v.y - (b[1] - a[1]) }), instant: true });
+      } : undefined}
+      onPointerUp={zoomable ? (e) => {
+        const d = drag.current;
+        drag.current = null;
+        if (!d?.moved) return;
+        suppressClick.current = true;
+        setTimeout(() => { suppressClick.current = false; }, 0);
+        try { (e.currentTarget as SVGSVGElement).releasePointerCapture(e.pointerId); } catch { /* already released */ }
+      } : undefined}
+      onPointerCancel={zoomable ? () => { drag.current = null; } : undefined}
+      onClickCapture={zoomable ? (e) => { if (suppressClick.current) { e.stopPropagation(); e.preventDefault(); } } : undefined}
     >
       {regions ? (
         <defs>
@@ -292,5 +370,25 @@ export function BranchMap({
         </g>
       ) : null}
     </svg>
+  );
+  if (!zoomable) return svg;
+  const btn = "flex h-11 w-11 items-center justify-center text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--sb-text)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] disabled:opacity-35 disabled:hover:bg-transparent";
+  const atMin = view.w <= MIN_VIEW_W + 0.5;
+  const fitted = goal === target && Math.abs(view.w - target.w) < 0.5 && Math.abs(view.x - target.x) < 0.5 && Math.abs(view.y - target.y) < 0.5;
+  return (
+    <div className="relative flex h-full w-full items-center justify-center">
+      {svg}
+      <div className="absolute bottom-2 right-2 flex flex-col overflow-hidden rounded-xl border border-[color:var(--sb-border)] bg-[rgba(18,18,22,0.92)] shadow-lg" role="group" aria-label="Map zoom">
+        <button type="button" className={btn} onClick={() => zoomStep(1)} disabled={atMin} aria-label="Zoom in" title="Zoom in · Ctrl / ⌘ + scroll">
+          <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
+        </button>
+        <button type="button" className={`${btn} border-t border-[color:var(--sb-border)]`} onClick={() => zoomStep(-1)} disabled={!zoomedIn} aria-label="Zoom out" title="Zoom out">
+          <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M5 12h14" /></svg>
+        </button>
+        <button type="button" className={`${btn} border-t border-[color:var(--sb-border)]`} onClick={() => setManual(null)} disabled={fitted} aria-label={focus ? "Fit the region" : "Fit all Israel"} title={focus ? "Fit the region" : "Fit all Israel"}>
+          <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
+        </button>
+      </div>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
 import { DOT_FILL, type MapDotStatus } from "@/components/control-room/branch-map";
@@ -68,6 +68,15 @@ type Row = {
 
 type RowStatus = MapDotStatus;
 
+/** map size (owner 2026-10-12): the map's share of the width + its height; remembered per viewer */
+type MapSize = "compact" | "balanced" | "focus";
+const MAP_SIZES: { id: MapSize; label: string; width: string; height: string }[] = [
+  { id: "compact", label: "Compact", width: "35%", height: "min(540px, 68vh)" },
+  { id: "balanced", label: "Balanced", width: "50%", height: "min(640px, 74vh)" },
+  { id: "focus", label: "Map focus", width: "68%", height: "min(780px, 80vh)" },
+];
+const MAP_SIZE_KEY = "vono.controlRoom.mapSize";
+
 /** The connected-station list is only sent on request — ask again so a station that drops shows Offline. */
 const LIVE_REFRESH_MS = 10_000;
 
@@ -97,6 +106,20 @@ export function AllBranchesView() {
   const [brandFilter, setBrandFilter] = useState<string>("all");
   /** regional map: the focused region (null = All Israel) + branch search — combined with the brand filter */
   const [regionFocus, setRegionFocus] = useState<RegionId | null>(null);
+  const [mapSize, setMapSizeState] = useState<MapSize>("balanced");
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem(MAP_SIZE_KEY);
+      if (v === "compact" || v === "balanced" || v === "focus") setMapSizeState(v);
+    } catch { /* storage unavailable → Balanced */ }
+  }, []);
+  const setMapSize = (v: MapSize) => {
+    setMapSizeState(v);
+    try { window.localStorage.setItem(MAP_SIZE_KEY, v); } catch { /* not remembered */ }
+  };
+  /** entering a region from Compact opens the map to at least Balanced */
+  const focusRegion = (id: RegionId) => { setRegionFocus(id); if (mapSize === "compact") setMapSize("balanced"); };
+  const size = MAP_SIZES.find((m) => m.id === mapSize) ?? MAP_SIZES[1];
   const [search, setSearch] = useState("");
 
   useEffect(() => {
@@ -305,8 +328,11 @@ export function AllBranchesView() {
       ) : rows.length === 0 ? (
         <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">No branches yet.</p>
       ) : (
-        <div className="grid lg:grid-cols-[minmax(240px,2fr)_3fr]">
-          <div className="hidden min-h-[560px] flex-col border-r border-[color:var(--sb-border)] lg:flex">
+        <div
+          className="grid transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none lg:grid-cols-[var(--cr-map-w)_minmax(0,1fr)]"
+          style={{ "--cr-map-w": size.width } as CSSProperties}
+        >
+          <div className="hidden min-w-0 flex-col border-r border-[color:var(--sb-border)] lg:flex">
             <div className="flex items-center justify-between gap-3 px-6 pb-1 pt-4">
               {regionFocus ? (
                 <div className="min-w-0">
@@ -325,13 +351,31 @@ export function AllBranchesView() {
                   </div>
                 </div>
               )}
+              <div className="flex shrink-0 rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5" role="radiogroup" aria-label="Map size">
+                {MAP_SIZES.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={mapSize === m.id}
+                    onClick={() => setMapSize(m.id)}
+                    title={`Map size: ${m.label}`}
+                    className={`relative rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors before:absolute before:-inset-y-1.5 before:inset-x-0 before:content-[''] ${
+                      mapSize === m.id ? "bg-white/[0.10] text-[var(--sb-text)]" : "text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 pb-2">
               <NetworkMap
                 branches={visibleRows.map((r) => ({ id: r.id, name: r.name, city: r.city, latitude: r.latitude, longitude: r.longitude, status: rowStatus(r, liveKnown), brandColor: colorOf(r.brandId) }))}
                 selectedId={selectedId}
                 onSelect={openBranch}
-                regions={{ counts: regionCounts, focus: regionFocus, onFocus: (id) => setRegionFocus(id) }}
+                regions={{ counts: regionCounts, focus: regionFocus, onFocus: focusRegion }}
+                height={size.height}
               />
             </div>
             {!regionFocus && (noLocationCount > 0 || outsideCount > 0) ? (
