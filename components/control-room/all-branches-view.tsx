@@ -267,6 +267,15 @@ export function AllBranchesView() {
         </div>
       </header>
 
+      {/* the KPI counters ARE the status filter (combined with Brand + Region + Search) */}
+      <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-5" role="group" aria-label={L.t("cr.kpiAria")}>
+        <Stat value={dbBranches ? statusCounts.all : "-"} L={L} label={L.t("status.all")} active={activeStatus === "all"} onClick={() => toggleStatus("all")} disabled={!dbBranches} />
+        <Stat value={liveKnown ? statusCounts.playing : "-"} L={L} label={L.t("status.playing")} status="playing" active={activeStatus === "playing"} onClick={() => toggleStatus("playing")} disabled={!liveKnown} />
+        <Stat value={liveKnown ? statusCounts.online : "-"} L={L} label={L.t("status.online")} status="idle" active={activeStatus === "online"} onClick={() => toggleStatus("online")} disabled={!liveKnown} />
+        <Stat value={liveKnown ? statusCounts.offline : "-"} L={L} label={L.t("status.offline")} status="offline" active={activeStatus === "offline"} onClick={() => toggleStatus("offline")} disabled={!liveKnown} />
+        <Stat value={dbBranches ? statusCounts.install : "-"} L={L} label={L.t("status.install")} status="install" active={activeStatus === "install"} onClick={() => toggleStatus("install")} disabled={!dbBranches} valueColor={statusCounts.install > 0 ? "#fbbf24" : undefined} last />
+      </div>
+
       {brandsData && brandsData.brands.length > 1 ? (
         <div className="flex overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("cr.brandsAria")}>
           {[{ id: "all", name: L.t("cr.allBrands"), color: null as string | null }, ...brandsData.brands].map((b) => (
@@ -282,15 +291,6 @@ export function AllBranchesView() {
           ))}
         </div>
       ) : null}
-
-      {/* the KPI counters ARE the status filter (combined with Brand + Region + Search) */}
-      <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-5" role="group" aria-label={L.t("cr.kpiAria")}>
-        <Stat value={dbBranches ? statusCounts.all : "-"} L={L} label={L.t("status.all")} active={activeStatus === "all"} onClick={() => toggleStatus("all")} disabled={!dbBranches} />
-        <Stat value={liveKnown ? statusCounts.playing : "-"} L={L} label={L.t("status.playing")} status="playing" active={activeStatus === "playing"} onClick={() => toggleStatus("playing")} disabled={!liveKnown} />
-        <Stat value={liveKnown ? statusCounts.online : "-"} L={L} label={L.t("status.online")} status="idle" active={activeStatus === "online"} onClick={() => toggleStatus("online")} disabled={!liveKnown} />
-        <Stat value={liveKnown ? statusCounts.offline : "-"} L={L} label={L.t("status.offline")} status="offline" active={activeStatus === "offline"} onClick={() => toggleStatus("offline")} disabled={!liveKnown} />
-        <Stat value={dbBranches ? statusCounts.install : "-"} L={L} label={L.t("status.install")} status="install" active={activeStatus === "install"} onClick={() => toggleStatus("install")} disabled={!dbBranches} valueColor={statusCounts.install > 0 ? "#fbbf24" : undefined} last />
-      </div>
 
       {dbBranches && rows.length > 0 ? (
         <div className="flex overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("map.regionsAria")}>
@@ -380,13 +380,14 @@ export function AllBranchesView() {
                 ))}
               </div>
             </div>
-            <ul className="flex flex-wrap items-center gap-x-5 gap-y-1 px-6 pb-1 pt-2 text-sm text-[var(--sb-text-secondary)]" aria-label={L.t("map.legendAria")}>
-              {(["idle", "playing", "offline", "install"] as const).map((st) => (
-                <li key={st} className="flex items-center gap-2"><StatusGlyph status={st} size={12} />{L.t(st === "idle" ? "status.online" : STATUS_KEY[st])}</li>
-              ))}
-              <li className="text-[var(--sb-text-tertiary)]">{L.t("map.colorIsBrand")}</li>
-            </ul>
             <div className="relative flex min-h-0 flex-1 items-stretch justify-center px-6 pb-5">
+              {/* legend: one under the other, on the left side of the map (owner) */}
+              <ul className="pointer-events-none absolute left-6 top-2 z-10 flex flex-col gap-1.5 text-sm text-[var(--sb-text-secondary)]" aria-label={L.t("map.legendAria")}>
+                {(["idle", "playing", "offline", "install"] as const).map((st) => (
+                  <li key={st} className="flex items-center gap-2"><StatusGlyph status={st} size={12} />{L.t(st === "idle" ? "status.online" : STATUS_KEY[st])}</li>
+                ))}
+                <li className="mt-0.5 text-xs text-[var(--sb-text-tertiary)]">{L.t("map.colorIsBrand")}</li>
+              </ul>
               <p className="pointer-events-none absolute bottom-1 start-6 text-[10px] text-[var(--sb-text-tertiary)]">{L.t("map.attribution")}</p>
               <NetworkMap
                 branches={visibleRows.map((r) => ({ id: r.id, name: r.name, city: r.city, latitude: r.latitude, longitude: r.longitude, status: rowStatus(r, liveKnown), brandColor: colorOf(r.brandId) }))}
