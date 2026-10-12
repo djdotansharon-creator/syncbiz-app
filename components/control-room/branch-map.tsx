@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LAND_RINGS } from "@/lib/control-room-land";
-import { REGION_DRAW_ORDER, regionDrawRings, regionForPoint, regionName, type RegionId } from "@/lib/control-room-regions";
+import { REGION_DRAW_ORDER, regionDrawRings, regionForPoint, type RegionId } from "@/lib/control-room-regions";
 import { cityLngLat } from "@/lib/control-room-geo";
+import { useMgmt } from "@/lib/i18n/use-mgmt";
+import type { MgmtKey } from "@/lib/i18n/management";
 
 /**
  * CONTROL ROOM — the light network map (owner decision 2026-10-11): ONE small SVG, no tiles, no roads / POI / labels,
@@ -17,7 +19,7 @@ export type MapDotStatus = "playing" | "idle" | "offline" | "install" | "unknown
 
 export type MapBranch = {
   id: string; name: string; city: string; status: MapDotStatus; latitude?: number | null; longitude?: number | null;
-  /** brand color (#rrggbb): the marker CENTER shows the brand, a RING around it shows the status. Absent → status-only dot. */
+  /** brand color (#rrggbb): the marker IS the brand color; the status changes its brightness / motion (see MARKER). */
   brandColor?: string | null;
 };
 
@@ -29,18 +31,31 @@ export const DOT_FILL: Record<MapDotStatus, string> = {
   unknown: "rgba(255,255,255,0.2)",
 };
 
-/** status by SHAPE as well as color (accessibility, owner 2026-10-12): the ring is solid (playing / online),
- *  dashed (offline), dotted (needs installation) or thin (unknown); playing also pulses and has a filled centre */
-export const STATUS_DASH: Record<MapDotStatus, string | undefined> = { playing: undefined, idle: undefined, offline: "3 2.2", install: "1.2 1.8", unknown: "1.5 2.5" };
-export const STATUS_LABEL_SHORT: Record<MapDotStatus, string> = { playing: "Playing", idle: "Online · not playing", offline: "Offline", install: "Needs installation", unknown: "Status unknown" };
+/**
+ * MARKER (owner decision 2026-10-12, final): ONE clean circle per branch — no rings, no badges (300+ branches).
+ *  - Online:  the brand color, clear
+ *  - Playing: like Online + a slow, gentle breathing (CSS, off for reduced motion) — never a blink, never a ring
+ *  - Offline: the brand color, dark / muted
+ *  - Needs installation: amber
+ * Without brands the marker uses one neutral light color with the same rules.
+ */
+export const INSTALL_COLOR = "#fbbf24";
+export const NEUTRAL_MARKER = "#e5e5ea";
+export const STATUS_KEY: Record<MapDotStatus, MgmtKey> = { playing: "status.playing", idle: "status.idle", offline: "status.offline", install: "status.install", unknown: "status.unknown" };
+export function markerLook(status: MapDotStatus, brandColor?: string | null): { fill: string; opacity: number; breathing: boolean } {
+  if (status === "install") return { fill: INSTALL_COLOR, opacity: 1, breathing: false };
+  const fill = brandColor || NEUTRAL_MARKER;
+  if (status === "offline") return { fill, opacity: 0.3, breathing: false };
+  if (status === "unknown") return { fill, opacity: 0.55, breathing: false };
+  return { fill, opacity: 1, breathing: status === "playing" };
+}
 
-/** the status mark used in the list and the legend (same ring language as the map) */
-export function StatusGlyph({ status, size = 12 }: { status: MapDotStatus; size?: number }) {
-  const solid = status === "playing" || status === "idle";
+/** the status mark in the list / legend / KPIs — the same single-circle language as the map (neutral color) */
+export function StatusGlyph({ status, size = 12, color }: { status: MapDotStatus; size?: number; color?: string | null }) {
+  const m = markerLook(status, color);
   return (
-    <svg width={size} height={size} viewBox="0 0 12 12" className="shrink-0" aria-hidden>
-      <circle cx="6" cy="6" r="4.6" fill="none" stroke={DOT_FILL[status]} strokeWidth={status === "unknown" ? 1.2 : 1.8} strokeDasharray={STATUS_DASH[status]} />
-      {solid ? <circle cx="6" cy="6" r={status === "playing" ? 2.6 : 2.2} fill={DOT_FILL[status]} /> : null}
+    <svg width={size} height={size} viewBox="0 0 12 12" className="shrink-0 overflow-visible" aria-hidden>
+      <circle cx="6" cy="6" r="4.4" fill={m.fill} fillOpacity={m.opacity} className={m.breathing ? "vono-breathe" : undefined} />
     </svg>
   );
 }
@@ -126,6 +141,7 @@ export function BranchMap({
   /** Control Room: the region layer (absent → the plain map, e.g. the Add / Edit preview) */
   regions?: MapRegions;
 }) {
+  const L = useMgmt();
   const placed = useMemo(
     () =>
       branches
@@ -163,7 +179,7 @@ export function BranchMap({
       for (const ring of rings) for (const [x, y] of ring) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
       const area = (ring: [number, number][]) => { let a = 0; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1]; return Math.abs(a); };
       const main = rings.reduce((a, b) => (area(b) > area(a) ? b : a), rings[0]);
-      return { id, name: regionName(id), d, bbox: { minX, minY, maxX, maxY }, label: centroid(main) };
+      return { id, d, bbox: { minX, minY, maxX, maxY }, label: centroid(main) };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shapes depend only on the projection
   }, [project, !!regions]);
@@ -257,7 +273,7 @@ export function BranchMap({
       style={{ height: height ?? "100%", maxHeight: height ?? 560, touchAction: zoomable && zoomedIn ? "none" : undefined }}
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label="Branch map"
+      aria-label={L.t("map.aria")}
       onMouseLeave={() => setHover(null)}
       onPointerDown={zoomable ? (e) => { if (e.button === 0 && zoomedIn) drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false }; } : undefined}
       onPointerMove={zoomable ? (e) => {
@@ -309,7 +325,7 @@ export function BranchMap({
             style={{ pointerEvents: focus ? "none" : "auto", transition: "fill 160ms ease", outline: "none" }}
             role={focus ? undefined : "button"}
             tabIndex={focus ? -1 : 0}
-            aria-label={focus ? undefined : `${r.name}, ${count} branch${count === 1 ? "" : "es"}`}
+            aria-label={focus ? undefined : `${L.region(r.id)}, ${L.branches(count)}`}
             onMouseEnter={() => setHover(r.id)}
             onFocus={() => setHover(r.id)}
             onBlur={() => setHover(null)}
@@ -337,26 +353,24 @@ export function BranchMap({
         const s = 1 / k;
         return (
           <g key={d.id} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); onSelect(d.id); }}>
-            <title>{`${d.name} · ${STATUS_LABEL_SHORT[d.status]}`}</title>
-            {selected ? <circle cx={x} cy={y} r={(d.brandColor ? 12 : 10) * s} fill="none" stroke="#fff" strokeWidth={1.5 * s} /> : null}
-            {d.status === "playing" && pulsing ? (
-              <circle cx={x} cy={y} r={5 * s} fill={DOT_FILL.playing} opacity={0.35}>
-                <animate attributeName="r" values={`${5 * s};${12 * s};${5 * s}`} dur="2.4s" repeatCount="indefinite" />
-                <animate attributeName="opacity" values="0.35;0;0.35" dur="2.4s" repeatCount="indefinite" />
-              </circle>
-            ) : null}
-            {d.brandColor ? (
-              <>
-                <circle cx={x} cy={y} r={7.5 * s} fill="rgba(10,10,12,0.9)" stroke={DOT_FILL[d.status]} strokeWidth={2.4 * s} strokeDasharray={STATUS_DASH[d.status]?.split(" ").map((v) => Number(v) * 1.6 * s).join(" ")} />
-                <circle cx={x} cy={y} r={4.6 * s} fill={d.brandColor} />
-              </>
-            ) : (
-              d.status === "playing" || d.status === "idle" ? (
-                <circle cx={x} cy={y} r={5.5 * s} fill={DOT_FILL[d.status]} stroke="rgba(10,10,12,0.9)" strokeWidth={1.5 * s} />
-              ) : (
-                <circle cx={x} cy={y} r={5 * s} fill="rgba(10,10,12,0.9)" stroke={DOT_FILL[d.status]} strokeWidth={2 * s} strokeDasharray={STATUS_DASH[d.status]?.split(" ").map((v) => Number(v) * 1.4 * s).join(" ")} />
-              )
-            )}
+            <title>{`${d.name} · ${L.t(STATUS_KEY[d.status])}`}</title>
+            {/* selection outline (not a status) */}
+            {selected ? <circle cx={x} cy={y} r={10.5 * s} fill="none" stroke="#fff" strokeWidth={1.5 * s} /> : null}
+            {(() => {
+              const m = markerLook(d.status, d.brandColor);
+              return (
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={6 * s}
+                  fill={m.fill}
+                  fillOpacity={m.opacity}
+                  stroke="rgba(10,10,12,0.85)"
+                  strokeWidth={1.3 * s}
+                  className={m.breathing && pulsing ? "vono-breathe" : undefined}
+                />
+              );
+            })()}
           </g>
         );
       })}
@@ -373,7 +387,7 @@ export function BranchMap({
             strokeWidth={3 / k}
             paintOrder="stroke"
           >
-            {hovered.name}
+            {L.region(hovered.id)}
           </text>
           <text
             x={hovered.label[0]}
@@ -385,7 +399,7 @@ export function BranchMap({
             strokeWidth={3 / k}
             paintOrder="stroke"
           >
-            {`${regions?.counts[hovered.id] ?? 0} branch${(regions?.counts[hovered.id] ?? 0) === 1 ? "" : "es"}`}
+            {L.branches(regions?.counts[hovered.id] ?? 0)}
           </text>
         </g>
       ) : null}
@@ -396,16 +410,16 @@ export function BranchMap({
   const atMin = view.w <= MIN_VIEW_W + 0.5;
   const fitted = goal === target && Math.abs(view.w - target.w) < 0.5 && Math.abs(view.x - target.x) < 0.5 && Math.abs(view.y - target.y) < 0.5;
   return (
-    <div className="relative flex h-full w-full items-center justify-center">
+    <div className="relative flex h-full w-full items-center justify-center" dir="ltr">
       {svg}
-      <div className="absolute bottom-2 right-2 flex flex-col overflow-hidden rounded-xl border border-[color:var(--sb-border)] bg-[rgba(18,18,22,0.92)] shadow-lg" role="group" aria-label="Map zoom">
-        <button type="button" className={btn} onClick={() => zoomStep(1)} disabled={atMin} aria-label="Zoom in" title="Zoom in · Ctrl / ⌘ + scroll">
+      <div className="absolute bottom-2 right-2 flex flex-col overflow-hidden rounded-xl border border-[color:var(--sb-border)] bg-[rgba(18,18,22,0.92)] shadow-lg" role="group" aria-label={L.t("map.zoomAria")}>
+        <button type="button" className={btn} onClick={() => zoomStep(1)} disabled={atMin} aria-label={L.t("map.zoomIn")} title={L.t("map.zoomInTitle")}>
           <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
         </button>
-        <button type="button" className={`${btn} border-t border-[color:var(--sb-border)]`} onClick={() => zoomStep(-1)} disabled={!zoomedIn} aria-label="Zoom out" title="Zoom out">
+        <button type="button" className={`${btn} border-t border-[color:var(--sb-border)]`} onClick={() => zoomStep(-1)} disabled={!zoomedIn} aria-label={L.t("map.zoomOut")} title={L.t("map.zoomOut")}>
           <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M5 12h14" /></svg>
         </button>
-        <button type="button" className={`${btn} border-t border-[color:var(--sb-border)]`} onClick={() => setManual(null)} disabled={fitted} aria-label={focus ? "Fit the region" : "Fit all Israel"} title={focus ? "Fit the region" : "Fit all Israel"}>
+        <button type="button" className={`${btn} border-t border-[color:var(--sb-border)]`} onClick={() => setManual(null)} disabled={fitted} aria-label={L.t(focus ? "map.fitRegion" : "map.fitAll")} title={L.t(focus ? "map.fitRegion" : "map.fitAll")}>
           <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
         </button>
       </div>

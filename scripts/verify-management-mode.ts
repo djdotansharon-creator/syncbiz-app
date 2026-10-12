@@ -25,7 +25,8 @@ assert("M3 the player row is the SAME element: only class + inert + aria-hidden 
   shell.includes('${isManagementRoute ? " mgmt-deck-hidden" : ""}') && shell.includes("inert={isManagementRoute}") &&
   !/isManagementRoute \? null|isManagementRoute && <AudioPlayer|!isManagementRoute \? \(\s*<div\s+className=\{`\$\{isMediaThemeRoute/.test(shell));
 assert("M4 management nav: Dashboard | Control Room | Access Control + Back to Player",
-  /aria-label="Management"/.test(shell) && shell.includes('label: "Dashboard"') && shell.includes('label: "Control Room"') && shell.includes('label: "Access Control"') && /href="\/library"[\s\S]{0,1200}Back to Player/.test(shell));
+  // 2026-10-12: labels come from the EN / HE management dictionary (same nav, same order, same Back to Player link)
+  shell.includes('aria-label={mgmt(locale).t("nav.aria")}') && shell.includes('t("nav.dashboard")') && shell.includes('t("nav.controlRoom")') && shell.includes('t("nav.accessControl")') && /href="\/library"[\s\S]{0,1200}t\("nav\.backToPlayer"\)/.test(shell));
 const browserRule = css.match(/\[data-management="true"\] \.mgmt-deck-hidden \{([\s\S]*?)\}/)?.[1] ?? "";
 assert("M5 CSS: browser = tiny transparent fixed box (YouTube keeps playing); desktop app = display:none (no MPV slot rect)",
   browserRule.includes("position: fixed !important;") && browserRule.includes("opacity: 0 !important;") && browserRule.includes("width: 320px !important;") && !browserRule.includes("display: none") &&

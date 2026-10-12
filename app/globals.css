@@ -3457,6 +3457,20 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   right: min(0px, calc(50% - 22px));
 }
 
+/* Control Room marker (owner 2026-10-12): Playing = a slow, gentle breathing of the same circle (no blink, no ring) */
+@keyframes vono-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.22); opacity: 0.72; }
+}
+.vono-breathe {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: vono-breathe 3.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vono-breathe { animation: none; }
+}
+
 /* Control Room regional map: the hovered region rises gently (owner 2026-10-11) */
 @keyframes vono-region-rise {
   from { opacity: 0; }

@@ -10,6 +10,7 @@ import { useDesktopActivation } from "@/lib/use-desktop-activation";
 import { StationActivationGate } from "@/components/station-activation-gate";
 import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
+import { mgmt } from "@/lib/i18n/management";
 import { useLibraryTheme } from "@/lib/library-theme-context";
 import { AudioPlayer } from "@/components/audio-player";
 import { LiveQueuePanel } from "@/components/live-queue-panel";
@@ -1410,11 +1411,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 The underline span is always in the DOM (opacity changes only).
                 Explicit sort guarantees display order: Library → Schedules → Radio → Settings */}
             {isManagementRoute ? (
-              <nav className="flex shrink-0 items-end gap-1 pb-0" aria-label="Management">
+              <nav className="flex shrink-0 items-end gap-1 pb-0" aria-label={mgmt(locale).t("nav.aria")} dir={mgmt(locale).dir}>
                 {([
-                  { href: "/dashboard", label: "Dashboard", active: pathname === "/dashboard" || pathname.startsWith("/dashboard/") },
-                  { href: "/owner/control-room", label: "Control Room", active: pathname.startsWith("/owner/control-room") },
-                  { href: "/access-control", label: "Access Control", active: pathname.startsWith("/access-control") },
+                  { href: "/dashboard", label: mgmt(locale).t("nav.dashboard"), active: pathname === "/dashboard" || pathname.startsWith("/dashboard/") },
+                  { href: "/owner/control-room", label: mgmt(locale).t("nav.controlRoom"), active: pathname.startsWith("/owner/control-room") },
+                  { href: "/access-control", label: mgmt(locale).t("nav.accessControl"), active: pathname.startsWith("/access-control") },
                 ] as const).map((item) => (
                   <Link
                     key={item.href}
@@ -1433,10 +1434,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 ))}
                 <Link
                   href="/library"
-                  className="mb-[3px] ml-3 inline-flex items-center gap-1.5 rounded-lg border border-white/[0.12] px-2.5 py-[3px] text-[12px] font-medium text-slate-300 transition-colors hover:border-white/[0.22] hover:text-slate-50"
+                  className="mb-[3px] ms-3 inline-flex items-center gap-1.5 rounded-lg border border-white/[0.12] px-2.5 py-[3px] text-[12px] font-medium text-slate-300 transition-colors hover:border-white/[0.22] hover:text-slate-50"
                 >
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
-                  Back to Player
+                  <svg className="h-3.5 w-3.5 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+                  {mgmt(locale).t("nav.backToPlayer")}
                 </Link>
               </nav>
             ) : (

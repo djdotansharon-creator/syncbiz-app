@@ -20,8 +20,8 @@ assert("M2 Balanced is the default; the choice is remembered per viewer (storage
   /useState<MapSize>\("balanced"\)/.test(view) && /try \{\s*const v = window\.localStorage\.getItem\(MAP_SIZE_KEY\)/.test(view) && /try \{ window\.localStorage\.setItem/.test(view));
 assert("M3 entering a region from Compact opens at least Balanced",
   /const focusRegion = \(id: RegionId\) => \{ setRegionFocus\(id\); if \(mapSize === "compact"\) setMapSize\("balanced"\); \}/.test(view) && /onFocus: focusRegion/.test(view));
-assert("M4 zoom controls: + / − / Fit with accessible names, 44 px",
-  /aria-label="Zoom in"/.test(map) && /aria-label="Zoom out"/.test(map) && /"Fit the region" : "Fit all Israel"/.test(map) && /h-11 w-11/.test(map));
+assert("M4 zoom controls: + / − / Fit with accessible names (EN / HE), 44 px",
+  map.includes('aria-label={L.t("map.zoomIn")}') && map.includes('aria-label={L.t("map.zoomOut")}') && map.includes('"map.fitRegion" : "map.fitAll"') && /h-11 w-11/.test(map));
 assert("M5 Ctrl / Cmd + scroll zooms (non-passive listener); a plain scroll still scrolls the page",
   /if \(!e\.ctrlKey && !e\.metaKey\) return;\s*e\.preventDefault\(\);/.test(map) && /addEventListener\("wheel", onWheel, \{ passive: false \}\)/.test(map));
 assert("M6 drag pans only while zoomed; a drag never becomes a click; pointer capture can never throw",
@@ -33,7 +33,21 @@ assert("A1 readability layer is scoped to the 3 Management pages only",
 assert("A2 secondary text ≥ 14 px; hit areas ≥ 44 px without layout change",
   /\.mgmt-type \.text-xs \{ font-size: 14px;/.test(css) && /top: min\(0px, calc\(50% - 22px\)\)/.test(css) && /min-height: 44px/.test(css));
 assert("A3 branch name 16 px; section titles 18–22 px",
-  /truncate text-base font-semibold text-\[var\(--sb-text\)\]">\{row\.name\}/.test(view) && /text-xl font-semibold tracking-tight text-\[var\(--sb-text\)\]">Control Room/.test(view) && /text-lg font-semibold text-\[var\(--sb-text\)\]">All Israel/.test(view));
-assert("A4 status is never color only: shape glyph in the list + legend, dashed / dotted rings on the map",
-  /<StatusGlyph status=\{status\} \/>/.test(view) && /aria-label="Map legend"/.test(view) && /offline: "3 2\.2", install: "1\.2 1\.8"/.test(map) && /strokeDasharray=\{STATUS_DASH\[d\.status\]/.test(map));
+  view.includes('truncate text-base font-semibold text-[var(--sb-text)]" dir="auto">{row.name}') && view.includes('text-xl font-semibold tracking-tight text-[var(--sb-text)]">{L.t("cr.title")}') &&
+  view.includes('text-lg font-semibold text-[var(--sb-text)]">{L.t("map.allIsrael")}'));
+// 2026-10-12 owner decision (final): ONE circle per branch — no rings, no badges (300+ branches); status = brand color
+// clear (Online) / + slow breathing (Playing) / muted (Offline) / amber (Needs installation), always with a text label
+const legendAt = view.indexOf('aria-label={L.t("map.legendAria")}'), mapAt = view.indexOf("<NetworkMap");
+assert("A4 single-circle marker (no rings / badges); Playing breathes (off for reduced motion); legend at the TOP of the map",
+  /if \(status === "install"\) return \{ fill: INSTALL_COLOR, opacity: 1, breathing: false \}/.test(map) && /if \(status === "offline"\) return \{ fill, opacity: 0\.3/.test(map) &&
+  /breathing: status === "playing"/.test(map) && !/strokeDasharray/.test(map) && !/<animate /.test(map) &&
+  /@media \(prefers-reduced-motion: reduce\) \{\s*\.vono-breathe \{ animation: none; \}/.test(css) && legendAt > 0 && mapAt > legendAt);
+// 2026-10-12 EN / HE + RTL (management only): one dictionary, Hebrew complete, the map never flips
+const dict = readFileSync("lib/i18n/management.ts", "utf8");
+assert("L1 EN / HE management dictionary: Hebrew typed against English (Record<MgmtKey, string>); owner terms",
+  /export const MGMT_HE: Record<MgmtKey, string>/.test(dict) && dict.includes('"nav.accessControl": "הרשאות"') && dict.includes('"map.focus": "מיקוד מפה"') &&
+  dict.includes('"region.sharon-shomron": "השרון והשומרון"') && dict.includes('"status.offline": "לא מחובר"') && dict.includes('"cr.clearFilters": "נקה סינונים"'));
+assert("L2 RTL only in management (Control Room root dir), the map box stays LTR, back arrows flip",
+  view.includes('<div dir={L.dir} className="overflow-hidden rounded-2xl') && map.includes('items-center justify-center" dir="ltr">') && /rtl:rotate-180/.test(view) &&
+  readFileSync("lib/locale-context.tsx", "utf8").includes('document.documentElement.dir = "ltr"'));
 console.log(`\n${pass} passed, ${fail} failed`);

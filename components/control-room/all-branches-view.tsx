@@ -4,14 +4,16 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { applyControlRoomFilters, type StatusFilter } from "@/lib/control-room-filters";
 import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
-import { DOT_FILL, StatusGlyph, type MapDotStatus } from "@/components/control-room/branch-map";
+import { DOT_FILL, StatusGlyph, STATUS_KEY, type MapDotStatus } from "@/components/control-room/branch-map";
 import { NetworkMap } from "@/components/control-room/network-map";
 import { BranchPanel } from "@/components/control-room/branch-panel";
 import { BroadcastPanel } from "@/components/control-room/broadcast-panel";
 import { BranchForm } from "@/components/control-room/branch-form";
 import { NetworkCode } from "@/components/control-room/network-code";
 import { BrandManager, BrandBadge, DEFAULT_BRAND_COLOR, type BrandRow } from "@/components/control-room/brand-manager";
-import { REGIONS, branchRegion, regionName, type RegionId } from "@/lib/control-room-regions";
+import { REGIONS, branchRegion, type RegionId } from "@/lib/control-room-regions";
+import { useMgmt } from "@/lib/i18n/use-mgmt";
+import type { Mgmt, MgmtKey } from "@/lib/i18n/management";
 
 type BrandsData = { brands: BrandRow[]; defaultBrandId: string; branchBrand: Record<string, string> };
 
@@ -70,10 +72,10 @@ type RowStatus = MapDotStatus;
 
 /** map size (owner 2026-10-12): the map's share of the width + its height; remembered per viewer */
 type MapSize = "compact" | "balanced" | "focus";
-const MAP_SIZES: { id: MapSize; label: string; width: string; height: string }[] = [
-  { id: "compact", label: "Compact", width: "35%", height: "min(540px, 68vh)" },
-  { id: "balanced", label: "Balanced", width: "50%", height: "min(640px, 74vh)" },
-  { id: "focus", label: "Map focus", width: "68%", height: "min(780px, 80vh)" },
+const MAP_SIZES: { id: MapSize; label: MgmtKey; width: string; height: string }[] = [
+  { id: "compact", label: "map.compact", width: "35%", height: "min(540px, 68vh)" },
+  { id: "balanced", label: "map.balanced", width: "50%", height: "min(640px, 74vh)" },
+  { id: "focus", label: "map.focus", width: "68%", height: "min(780px, 80vh)" },
 ];
 const MAP_SIZE_KEY = "vono.controlRoom.mapSize";
 
@@ -88,6 +90,7 @@ function rowStatus(row: Row, liveKnown: boolean): RowStatus {
 }
 
 export function AllBranchesView() {
+  const L = useMgmt();
   const { branches: liveBranches, remoteStateByDeviceId, status, refreshBranchList, sendCommandTo, sendCommandWithAck } = useRemoteOwner();
   const [dbBranches, setDbBranches] = useState<DbBranch[] | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -223,12 +226,12 @@ export function AllBranchesView() {
 
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-[color:var(--sb-border)] bg-[var(--sb-surface)]">
+    <div dir={L.dir} className="overflow-hidden rounded-2xl border border-[color:var(--sb-border)] bg-[var(--sb-surface)]">
       <header className="flex items-center justify-between gap-4 border-b border-[color:var(--sb-border)] px-6 py-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-[var(--sb-text)]">Control Room</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-[var(--sb-text)]">{L.t("cr.title")}</h1>
           <p className="text-xs text-[var(--sb-text-tertiary)]">
-            {liveKnown ? "Your network, live" : status === "connecting" ? "Connecting to live status…" : "Live status unavailable. Reconnecting…"}
+            {L.t(liveKnown ? "cr.live" : status === "connecting" ? "cr.connecting" : "cr.liveUnavailable")}
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -239,7 +242,7 @@ export function AllBranchesView() {
           disabled={!brandsData}
           className="inline-flex items-center gap-1.5 rounded-xl border border-[color:var(--sb-border-strong)] px-3.5 py-2 text-sm font-medium text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40"
         >
-          Brands
+          {L.t("cr.brands")}
         </button>
         <button
           type="button"
@@ -247,7 +250,7 @@ export function AllBranchesView() {
           disabled={!dbBranches}
           className="inline-flex items-center gap-1.5 rounded-xl border border-[color:var(--sb-border-strong)] px-3.5 py-2 text-sm font-medium text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40"
         >
-          <span aria-hidden>+</span> Add branch
+          <span aria-hidden>+</span> {L.t("cr.addBranch")}
         </button>
         <button
           type="button"
@@ -258,23 +261,23 @@ export function AllBranchesView() {
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <circle cx="12" cy="12" r="2" /><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14" />
           </svg>
-          Broadcast
+          {L.t("cr.broadcast")}
         </button>
         </div>
       </header>
 
       {/* the KPI counters ARE the status filter (combined with Brand + Region + Search) */}
-      <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-5" role="group" aria-label="Filter by status">
-        <Stat value={dbBranches ? statusCounts.all : "-"} label="All branches" active={activeStatus === "all"} onClick={() => toggleStatus("all")} disabled={!dbBranches} />
-        <Stat value={liveKnown ? statusCounts.playing : "-"} label="Playing" status="playing" active={activeStatus === "playing"} onClick={() => toggleStatus("playing")} disabled={!liveKnown} />
-        <Stat value={liveKnown ? statusCounts.online : "-"} label="Online" status="idle" active={activeStatus === "online"} onClick={() => toggleStatus("online")} disabled={!liveKnown} />
-        <Stat value={liveKnown ? statusCounts.offline : "-"} label="Offline" status="offline" active={activeStatus === "offline"} onClick={() => toggleStatus("offline")} disabled={!liveKnown} />
-        <Stat value={dbBranches ? statusCounts.install : "-"} label="Needs installation" status="install" active={activeStatus === "install"} onClick={() => toggleStatus("install")} disabled={!dbBranches} valueColor={statusCounts.install > 0 ? "#fbbf24" : undefined} last />
+      <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-5" role="group" aria-label={L.t("cr.kpiAria")}>
+        <Stat value={dbBranches ? statusCounts.all : "-"} L={L} label={L.t("status.all")} active={activeStatus === "all"} onClick={() => toggleStatus("all")} disabled={!dbBranches} />
+        <Stat value={liveKnown ? statusCounts.playing : "-"} L={L} label={L.t("status.playing")} status="playing" active={activeStatus === "playing"} onClick={() => toggleStatus("playing")} disabled={!liveKnown} />
+        <Stat value={liveKnown ? statusCounts.online : "-"} L={L} label={L.t("status.online")} status="idle" active={activeStatus === "online"} onClick={() => toggleStatus("online")} disabled={!liveKnown} />
+        <Stat value={liveKnown ? statusCounts.offline : "-"} L={L} label={L.t("status.offline")} status="offline" active={activeStatus === "offline"} onClick={() => toggleStatus("offline")} disabled={!liveKnown} />
+        <Stat value={dbBranches ? statusCounts.install : "-"} L={L} label={L.t("status.install")} status="install" active={activeStatus === "install"} onClick={() => toggleStatus("install")} disabled={!dbBranches} valueColor={statusCounts.install > 0 ? "#fbbf24" : undefined} last />
       </div>
 
       {brandsData && brandsData.brands.length > 1 ? (
-        <nav className="flex items-end gap-6 overflow-x-auto border-b border-[color:var(--sb-border)] px-6" aria-label="Brands">
-          {[{ id: "all", name: "All brands", color: null as string | null }, ...brandsData.brands].map((b) => {
+        <nav className="flex items-end gap-6 overflow-x-auto border-b border-[color:var(--sb-border)] px-6" aria-label={L.t("cr.brandsAria")}>
+          {[{ id: "all", name: L.t("cr.allBrands"), color: null as string | null }, ...brandsData.brands].map((b) => {
             const on = activeFilter === b.id;
             const count = b.id === "all" ? rows.length : rows.filter((r) => r.brandId === b.id).length;
             return (
@@ -288,7 +291,7 @@ export function AllBranchesView() {
               >
                 {b.id !== "all" ? <span className="h-2 w-2 rounded-full" style={{ background: b.color ?? DEFAULT_BRAND_COLOR }} aria-hidden /> : null}
                 <span dir="auto">{b.name}</span>
-                <span className="text-xs tabular-nums text-[var(--sb-text-tertiary)]">{count}</span>
+                <span className="text-xs tabular-nums text-[var(--sb-text-tertiary)]" dir="ltr">{count}</span>
               </button>
             );
           })}
@@ -298,64 +301,64 @@ export function AllBranchesView() {
       {dbBranches && rows.length > 0 ? (
         <div className="flex flex-wrap items-center gap-3 border-b border-[color:var(--sb-border)] px-6 py-3">
           <label className="relative flex min-w-[220px] max-w-md flex-1 items-center">
-            <svg className="pointer-events-none absolute left-3 h-4 w-4 text-[var(--sb-text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            <svg className="pointer-events-none absolute start-3 h-4 w-4 text-[var(--sb-text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
             <input
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={regionFocus ? `Search in ${regionName(regionFocus)}` : "Search branches: name, number or city"}
-              aria-label="Search branches"
+              placeholder={regionFocus ? L.t("cr.searchIn", { region: L.region(regionFocus) }) : L.t("cr.searchPlaceholder")}
+              aria-label={L.t("cr.searchAria")}
               dir="auto"
-              className="w-full rounded-lg border border-[color:var(--sb-border)] bg-white/[0.04] py-2 pl-9 pr-8 text-sm text-[var(--sb-text)] placeholder:text-[var(--sb-text-tertiary)] focus:border-[color:var(--sb-accent)] focus:outline-none"
+              className="w-full rounded-lg border border-[color:var(--sb-border)] bg-white/[0.04] py-2 ps-9 pe-8 text-sm text-[var(--sb-text)] placeholder:text-[var(--sb-text-tertiary)] focus:border-[color:var(--sb-accent)] focus:outline-none"
             />
             {search ? (
-              <button type="button" onClick={() => setSearch("")} className="absolute right-2 inline-flex h-6 w-6 items-center justify-center rounded text-[var(--sb-text-tertiary)] hover:text-[var(--sb-text)]" aria-label="Clear search">
+              <button type="button" onClick={() => setSearch("")} className="absolute end-2 inline-flex h-6 w-6 items-center justify-center rounded text-[var(--sb-text-tertiary)] hover:text-[var(--sb-text)]" aria-label={L.t("cr.clearSearch")}>
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M18 6 6 18M6 6l12 12" /></svg>
               </button>
             ) : null}
           </label>
           <span className="text-xs text-[var(--sb-text-secondary)]">
-            Showing <span className="tabular-nums text-[var(--sb-text)]">{visibleRows.length}</span> of <span className="tabular-nums">{rows.length}</span>
+            {L.t("cr.showing", { n: visibleRows.length, total: rows.length })}
           </span>
           {filtersActive ? (
             <button type="button" onClick={clearFilters} className="text-xs font-medium text-[var(--sb-accent)] hover:underline">
-              Clear filters
+              {L.t("cr.clearFilters")}
             </button>
           ) : null}
         </div>
       ) : null}
 
       {loadError ? (
-        <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">Could not load branches. Refresh the page to try again.</p>
+        <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">{L.t("cr.loadError")}</p>
       ) : dbBranches === null ? (
-        <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">Loading branches…</p>
+        <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">{L.t("cr.loading")}</p>
       ) : rows.length === 0 ? (
-        <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">No branches yet.</p>
+        <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">{L.t("cr.noBranches")}</p>
       ) : (
         <div
           className="grid transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none lg:grid-cols-[var(--cr-map-w)_minmax(0,1fr)]"
           style={{ "--cr-map-w": size.width } as CSSProperties}
         >
-          <div className="hidden min-w-0 flex-col border-r border-[color:var(--sb-border)] lg:flex">
+          <div className="hidden min-w-0 flex-col border-e border-[color:var(--sb-border)] lg:flex">
             <div className="flex items-center justify-between gap-3 px-6 pb-1 pt-4">
               {regionFocus ? (
                 <div className="min-w-0">
                   <button type="button" onClick={() => setRegionFocus(null)} className="inline-flex items-center gap-1 text-xs font-medium text-[var(--sb-accent)] hover:underline">
-                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
-                    All Israel
+                    <svg className="h-3.5 w-3.5 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+                    {L.t("map.allIsrael")}
                   </button>
-                  <div className="mt-1 truncate text-lg font-semibold text-[var(--sb-text)]">{regionName(regionFocus)}</div>
-                  <div className="text-xs text-[var(--sb-text-secondary)]">{visibleRows.length} branch{visibleRows.length === 1 ? "" : "es"}</div>
+                  <div className="mt-1 truncate text-lg font-semibold text-[var(--sb-text)]">{L.region(regionFocus)}</div>
+                  <div className="text-xs text-[var(--sb-text-secondary)]">{L.branches(visibleRows.length)}</div>
                 </div>
               ) : (
                 <div className="min-w-0">
-                  <div className="text-lg font-semibold text-[var(--sb-text)]">All Israel</div>
+                  <div className="text-lg font-semibold text-[var(--sb-text)]">{L.t("map.allIsrael")}</div>
                   <div className="text-xs text-[var(--sb-text-secondary)]">
-                    {visibleRows.length} branch{visibleRows.length === 1 ? "" : "es"} · {REGIONS.length} regions · hover a region, click to focus
+                    {L.t("map.regionsHint", { branches: L.branches(visibleRows.length), regions: REGIONS.length })}
                   </div>
                 </div>
               )}
-              <div className="flex shrink-0 rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5" role="radiogroup" aria-label="Map size">
+              <div className="flex shrink-0 rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5" role="radiogroup" aria-label={L.t("map.sizeAria")}>
                 {MAP_SIZES.map((m) => (
                   <button
                     key={m.id}
@@ -363,16 +366,22 @@ export function AllBranchesView() {
                     role="radio"
                     aria-checked={mapSize === m.id}
                     onClick={() => setMapSize(m.id)}
-                    title={`Map size: ${m.label}`}
+                    title={L.t("map.sizeTitle", { label: L.t(m.label) })}
                     className={`relative rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors before:absolute before:-inset-y-1.5 before:inset-x-0 before:content-[''] ${
                       mapSize === m.id ? "bg-white/[0.10] text-[var(--sb-text)]" : "text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]"
                     }`}
                   >
-                    {m.label}
+                    {L.t(m.label)}
                   </button>
                 ))}
               </div>
             </div>
+            <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 px-6 pb-1 pt-2 text-xs text-[var(--sb-text-secondary)]" aria-label={L.t("map.legendAria")}>
+              {(["idle", "playing", "offline", "install"] as const).map((st) => (
+                <li key={st} className="flex items-center gap-1.5"><StatusGlyph status={st} size={11} />{L.t(st === "idle" ? "status.online" : STATUS_KEY[st])}</li>
+              ))}
+              <li className="text-[var(--sb-text-tertiary)]">{L.t("map.colorIsBrand")}</li>
+            </ul>
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 pb-2">
               <NetworkMap
                 branches={visibleRows.map((r) => ({ id: r.id, name: r.name, city: r.city, latitude: r.latitude, longitude: r.longitude, status: rowStatus(r, liveKnown), brandColor: colorOf(r.brandId) }))}
@@ -382,20 +391,14 @@ export function AllBranchesView() {
                 height={size.height}
               />
             </div>
-            <ul className="flex flex-wrap items-center gap-x-5 gap-y-2 px-6 pb-3 text-xs text-[var(--sb-text-secondary)]" aria-label="Map legend">
-              {(["playing", "idle", "offline", "install"] as const).map((s) => (
-                <li key={s} className="flex items-center gap-2"><StatusGlyph status={s} size={14} />{STATUS_LABEL[s].label}</li>
-              ))}
-              <li className="flex items-center gap-2 text-[var(--sb-text-tertiary)]">Center = brand color</li>
-            </ul>
             {!regionFocus && (noLocationCount > 0 || outsideCount > 0) ? (
               <p className="px-6 pb-4 text-xs text-[var(--sb-text-tertiary)]">
-                {noLocationCount > 0 ? `${noLocationCount} branch${noLocationCount === 1 ? "" : "es"} without a location (not on the map, still in the list)` : ""}
+                {noLocationCount > 0 ? (noLocationCount === 1 ? L.t("map.noLocationOne") : L.t("map.noLocationMany", { n: noLocationCount })) : ""}
                 {noLocationCount > 0 && outsideCount > 0 ? " · " : ""}
-                {outsideCount > 0 ? `${outsideCount} outside Israel (shown on All Israel only)` : ""}
+                {outsideCount > 0 ? L.t("map.outside", { n: outsideCount }) : ""}
               </p>
             ) : null}
-            <p className="px-6 pb-4 text-[10px] text-[var(--sb-text-tertiary)]">VONO Operational Regions · based on official sub-district boundaries · © OpenStreetMap contributors</p>
+            <p className="px-6 pb-4 text-[10px] text-[var(--sb-text-tertiary)]">{L.t("map.attribution")}</p>
           </div>
           {(() => {
             if (form) {
@@ -458,8 +461,8 @@ export function AllBranchesView() {
               <ul className="max-h-[640px] divide-y divide-[color:var(--sb-border)] overflow-y-auto">
                 {visibleRows.length === 0 ? (
                   <li className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">
-                    {filtersActive ? "No branches match these filters." : "No branches yet."}{" "}
-                    {filtersActive ? <button type="button" onClick={clearFilters} className="font-medium text-[var(--sb-accent)] hover:underline">Clear filters</button> : null}
+                    {L.t(filtersActive ? "cr.noMatch" : "cr.noBranches")}{" "}
+                    {filtersActive ? <button type="button" onClick={clearFilters} className="font-medium text-[var(--sb-accent)] hover:underline">{L.t("cr.clearFilters")}</button> : null}
                   </li>
                 ) : null}
                 {visibleRows.map((r) => (
@@ -468,6 +471,7 @@ export function AllBranchesView() {
                     row={r}
                     brand={r.brandId ? brandById.get(r.brandId) ?? null : null}
                     status={rowStatus(r, liveKnown)}
+                    L={L}
                     selected={r.id === selectedId}
                     onSelect={() => openBranch(r.id)}
                   />
@@ -482,19 +486,19 @@ export function AllBranchesView() {
 }
 
 /** a KPI counter that is also a status filter (pressed = the active filter; a bar in the status color marks it) */
-function Stat({ value, label, status, last, valueColor, active, onClick, disabled }: { value: number | string; label: string; status?: MapDotStatus; last?: boolean; valueColor?: string; active: boolean; onClick: () => void; disabled?: boolean }) {
+function Stat({ L, value, label, status, last, valueColor, active, onClick, disabled }: { L: Mgmt; value: number | string; label: string; status?: MapDotStatus; last?: boolean; valueColor?: string; active: boolean; onClick: () => void; disabled?: boolean }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
       aria-pressed={active}
-      title={active && status ? `Showing ${label.toLowerCase()} only · click again to show all` : `Show ${label.toLowerCase()}`}
-      className={`relative px-6 py-5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] disabled:cursor-default ${
-        last ? "" : "border-r border-[color:var(--sb-border)]"
+      title={active && status ? L.t("cr.kpiShowingOnly", { label }) : L.t("cr.kpiShow", { label })}
+      className={`relative px-6 py-5 text-start transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] disabled:cursor-default ${
+        last ? "" : "border-e border-[color:var(--sb-border)]"
       } ${active ? "bg-white/[0.05]" : "hover:bg-white/[0.025]"}`}
     >
-      <div className="text-4xl font-bold leading-none tracking-tight tabular-nums text-[var(--sb-text)]" style={valueColor ? { color: valueColor } : undefined}>
+      <div className="text-4xl font-bold leading-none tracking-tight tabular-nums text-[var(--sb-text)]" dir="ltr" style={valueColor ? { color: valueColor } : undefined}>
         {value}
       </div>
       <div className={`mt-2 flex items-center gap-2 text-xs ${active ? "font-medium text-[var(--sb-text)]" : "text-[var(--sb-text-secondary)]"}`}>
@@ -506,16 +510,15 @@ function Stat({ value, label, status, last, valueColor, active, onClick, disable
   );
 }
 
-const STATUS_LABEL: Record<RowStatus, { label: string; text: string }> = {
-  playing: { label: "Playing", text: "text-[var(--sb-text)]" },
-  idle: { label: "Online · not playing", text: "text-[var(--sb-text-secondary)]" },
-  offline: { label: "Offline", text: "text-[var(--sb-text-tertiary)]" },
-  install: { label: "Needs installation", text: "text-amber-300/90" },
-  unknown: { label: "-", text: "text-[var(--sb-text-tertiary)]" },
+const STATUS_TEXT_CLASS: Record<RowStatus, string> = {
+  playing: "text-[var(--sb-text)]",
+  idle: "text-[var(--sb-text-secondary)]",
+  offline: "text-[var(--sb-text-tertiary)]",
+  install: "text-amber-300/90",
+  unknown: "text-[var(--sb-text-tertiary)]",
 };
 
-function BranchRow({ row, brand, status, selected, onSelect }: { row: Row; brand: BrandRow | null; status: RowStatus; selected: boolean; onSelect: () => void }) {
-  const ui = STATUS_LABEL[status];
+function BranchRow({ L, row, brand, status, selected, onSelect }: { L: Mgmt; row: Row; brand: BrandRow | null; status: RowStatus; selected: boolean; onSelect: () => void }) {
   // secondary only: what plays, one muted line (no artwork — light at hundreds of branches)
   const nowPlaying = status === "playing" ? row.state?.currentTrack?.title || row.state?.currentSource?.title || "" : "";
   return (
@@ -528,40 +531,38 @@ function BranchRow({ row, brand, status, selected, onSelect }: { row: Row; brand
     >
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-base font-semibold text-[var(--sb-text)]">{row.name}</span>
+          <span className="truncate text-base font-semibold text-[var(--sb-text)]" dir="auto">{row.name}</span>
           {brand ? <BrandBadge name={brand.name} color={brand.color} /> : null}
         </div>
         {row.branchNumber || row.city ? (
           <div className="truncate text-xs text-[var(--sb-text-secondary)]">
-            {row.branchNumber ? <span className="font-medium tabular-nums">Branch {row.branchNumber}</span> : null}
+            {row.branchNumber ? <span className="font-medium tabular-nums">{L.t("common.branchNumber", { n: row.branchNumber })}</span> : null}
             {row.branchNumber && row.city ? <span className="text-[var(--sb-text-tertiary)]"> · </span> : null}
             {row.city ? <span className="text-[var(--sb-text-tertiary)]">{row.city}</span> : null}
-            {row.regionReason === "no_location" ? <span className="text-amber-300/80"> · No location</span> : null}
+            {row.regionReason === "no_location" ? <span className="text-amber-300/80"> · {L.t("cr.noLocation")}</span> : null}
           </div>
         ) : row.regionReason === "no_location" ? (
-          <div className="truncate text-xs text-amber-300/80">No location</div>
+          <div className="truncate text-xs text-amber-300/80">{L.t("cr.noLocation")}</div>
         ) : null}
       </div>
-      <div className={`flex min-w-0 items-center gap-2 text-sm ${ui.text}`}>
+      <div className={`flex min-w-0 items-center gap-2 text-sm ${STATUS_TEXT_CLASS[status]}`}>
         <StatusGlyph status={status} />
-        <span className="truncate">{ui.label}</span>
+        <span className="truncate">{L.t(STATUS_KEY[status])}</span>
       </div>
-      <DeviceType type={row.online ? row.live?.deviceType : undefined} />
+      <DeviceType L={L} type={row.online ? row.live?.deviceType : undefined} />
       <div className="min-w-0 truncate text-sm text-[var(--sb-text-tertiary)]" title={nowPlaying || undefined}>
         {nowPlaying || ""}
       </div>
       {/* opens the branch control panel (the whole row is clickable) */}
-      <svg className="h-4 w-4 text-[var(--sb-text-secondary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <svg className="h-4 w-4 text-[var(--sb-text-secondary)] rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="m9 18 6-6-6-6" />
       </svg>
     </li>
   );
 }
 
-const DEVICE_LABEL: Record<"computer" | "streamer" | "browser", string> = { computer: "Computer", streamer: "Streamer", browser: "Browser" };
-
 /** The kind of device playing in the branch (info only; shown while the station is online). */
-function DeviceType({ type }: { type?: "computer" | "streamer" | "browser" | "unknown" }) {
+function DeviceType({ L, type }: { L: Mgmt; type?: "computer" | "streamer" | "browser" | "unknown" }) {
   if (!type || type === "unknown") return <span className="text-sm text-[var(--sb-text-tertiary)]" />;
   const common = { className: "h-4 w-4 shrink-0", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
   return (
@@ -573,7 +574,7 @@ function DeviceType({ type }: { type?: "computer" | "streamer" | "browser" | "un
       ) : (
         <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
       )}
-      <span className="truncate">{DEVICE_LABEL[type]}</span>
+      <span className="truncate">{L.t(`device.${type}`)}</span>
     </span>
   );
 }

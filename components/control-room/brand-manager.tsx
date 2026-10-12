@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useMgmt } from "@/lib/i18n/use-mgmt";
 
 /**
  * CONTROL ROOM — brands (owner). Organization → Brand → Branch. Add / edit a brand: name, code, color. The default
@@ -17,6 +18,7 @@ export const DEFAULT_BRAND_COLOR = "#8e8e93";
 type Draft = { id: string | null; name: string; code: string; color: string };
 
 export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[]; onClose: () => void; onChanged: () => void }) {
+  const L = useMgmt();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,11 +41,11 @@ export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[
         body: JSON.stringify({ name: draft.name, code: draft.code, color: draft.color }),
       });
       const d = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) { setError(d.error ?? `Could not save (HTTP ${res.status}).`); return; }
+      if (!res.ok) { setError(d.error ?? L.t("common.saveFailedHttp", { status: res.status })); return; }
       setDraft(null);
       onChanged();
     } catch {
-      setError("Could not reach the server. Please try again.");
+      setError(L.t("common.serverRetry"));
     } finally {
       setSaving(false);
     }
@@ -55,17 +57,17 @@ export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between gap-3 border-b border-[color:var(--sb-border)] px-6 py-4">
         <div className="flex items-center gap-3">
-          <button type="button" onClick={draft ? () => setDraft(null) : onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--sb-text)]" aria-label="Back">
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+          <button type="button" onClick={draft ? () => setDraft(null) : onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--sb-text)]" aria-label={L.t("common.back")}>
+            <svg className="h-4 w-4 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
           </button>
           <div>
-            <h2 className="text-base font-semibold text-[var(--sb-text)]">{draft ? (draft.id ? "Edit brand" : "Add brand") : "Brands"}</h2>
-            {!draft ? <p className="text-xs text-[var(--sb-text-secondary)]">Group your branches by brand</p> : null}
+            <h2 className="text-base font-semibold text-[var(--sb-text)]">{L.t(draft ? (draft.id ? "brand.edit" : "brand.add") : "brand.title")}</h2>
+            {!draft ? <p className="text-xs text-[var(--sb-text-secondary)]">{L.t("brand.subtitle")}</p> : null}
           </div>
         </div>
         {!draft ? (
           <button type="button" onClick={startAdd} className="rounded-xl border border-[color:var(--sb-border-strong)] px-3.5 py-2 text-sm font-medium text-[var(--sb-text)] hover:bg-white/[0.06]">
-            + Add brand
+            + {L.t("brand.add")}
           </button>
         ) : null}
       </div>
@@ -74,16 +76,16 @@ export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[
         <div className="space-y-4 px-6 py-5">
           <div className="grid grid-cols-[2fr_1fr] gap-3">
             <label className="block">
-              <span className="text-xs text-[var(--sb-text-tertiary)]">Brand name</span>
-              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. יש חסד" dir="auto" disabled={saving} className={input} />
+              <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("brand.name")}</span>
+              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder={L.t("common.eg", { x: "יש חסד" })} dir="auto" disabled={saving} className={input} />
             </label>
             <label className="block">
-              <span className="text-xs text-[var(--sb-text-tertiary)]">Code</span>
-              <input value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value.toUpperCase() })} placeholder="e.g. YH" disabled={saving} className={`${input} font-mono`} />
+              <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("brand.code")}</span>
+              <input value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value.toUpperCase() })} placeholder={L.t("common.eg", { x: "YH" })} dir="ltr" disabled={saving} className={`${input} font-mono`} />
             </label>
           </div>
           <div>
-            <span className="text-xs text-[var(--sb-text-tertiary)]">Color</span>
+            <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("brand.color")}</span>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {BRAND_PALETTE.map((c) => (
                 <button
@@ -93,23 +95,23 @@ export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[
                   disabled={saving}
                   className={`h-7 w-7 rounded-full transition-transform ${draft.color.toLowerCase() === c ? "scale-110 ring-2 ring-white ring-offset-2 ring-offset-[var(--sb-surface)]" : "hover:scale-105"}`}
                   style={{ background: c }}
-                  aria-label={`Color ${c}`}
+                  aria-label={L.t("brand.colorAria", { c })}
                 />
               ))}
-              <label className="ml-1 inline-flex items-center gap-2 text-xs text-[var(--sb-text-secondary)]">
+              <label className="ms-1 inline-flex items-center gap-2 text-xs text-[var(--sb-text-secondary)]">
                 <input type="color" value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} disabled={saving} className="h-7 w-9 cursor-pointer rounded border border-[color:var(--sb-border)] bg-transparent" />
-                Other
+                {L.t("brand.other")}
               </label>
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm text-[var(--sb-text-secondary)]">
-            Preview <BrandBadge name={draft.name || "Brand"} color={draft.color} />
+            {L.t("brand.preview")} <BrandBadge name={draft.name || L.t("brand.placeholder")} color={draft.color} />
           </div>
           {error ? <p className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-200" role="alert">{error}</p> : null}
           <div className="flex items-center justify-end gap-3 pt-2">
-            <button type="button" onClick={() => setDraft(null)} disabled={saving} className="rounded-full px-4 py-2 text-sm text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]">Cancel</button>
+            <button type="button" onClick={() => setDraft(null)} disabled={saving} className="rounded-full px-4 py-2 text-sm text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]">{L.t("common.cancel")}</button>
             <button type="button" onClick={() => void save()} disabled={saving || !draft.name.trim() || !draft.code.trim()} className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition-transform active:scale-95 disabled:opacity-40">
-              {saving ? "Saving…" : draft.id ? "Save" : "Add brand"}
+              {saving ? L.t("common.saving") : L.t(draft.id ? "common.save" : "brand.add")}
             </button>
           </div>
         </div>
@@ -121,10 +123,10 @@ export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold text-[var(--sb-text)]" dir="auto">{b.name}</div>
                 <div className="text-xs text-[var(--sb-text-tertiary)]">
-                  <span className="font-mono">{b.code}</span> · {b.branchCount} branch{b.branchCount === 1 ? "" : "es"}{b.isDefault ? " · default (unassigned branches)" : ""}
+                  <span className="font-mono" dir="ltr">{b.code}</span> · {L.branches(b.branchCount)}{b.isDefault ? ` · ${L.t("brand.defaultNote")}` : ""}
                 </div>
               </div>
-              <button type="button" onClick={() => startEdit(b)} className="rounded-full border border-[color:var(--sb-border)] px-3 py-1 text-xs text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]">Edit</button>
+              <button type="button" onClick={() => startEdit(b)} className="rounded-full border border-[color:var(--sb-border)] px-3 py-1 text-xs text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]">{L.t("common.edit")}</button>
             </li>
           ))}
         </ul>

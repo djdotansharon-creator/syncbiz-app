@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { loadGoogleMaps, useMapsConfig, type GoogleNS } from "@/lib/google-maps-client";
 import { BranchMap } from "@/components/control-room/branch-map";
+import { useMgmt } from "@/lib/i18n/use-mgmt";
 
 /**
  * CONTROL ROOM — add / edit a branch (owner). Name, branch number and ONE Location field with Google Places Autocomplete
@@ -67,6 +68,7 @@ export function BranchForm({
   onDone: (branchId: string | null) => void;
   onCancel: () => void;
 }) {
+  const L = useMgmt();
   const cfg = useMapsConfig();
   const [name, setName] = useState(initial?.name ?? "");
   const [branchNumber, setBranchNumber] = useState(initial?.branchNumber ?? "");
@@ -97,10 +99,10 @@ export function BranchForm({
         body: JSON.stringify({ name, branchNumber, ...(picked ? { placeId: picked.placeId } : {}), ...(brands?.length && brandId ? { brandId } : {}), language: "he" }),
       });
       const data = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
-      if (!res.ok) { setError(data.error ?? `Could not save (HTTP ${res.status}).`); return; }
+      if (!res.ok) { setError(data.error ?? L.t("common.saveFailedHttp", { status: res.status })); return; }
       onDone(mode === "add" ? data.id ?? null : branchId ?? null);
     } catch {
-      setError("Could not reach the server. Please try again.");
+      setError(L.t("common.serverRetry"));
     } finally {
       setSaving(false);
     }
@@ -112,51 +114,51 @@ export function BranchForm({
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 border-b border-[color:var(--sb-border)] px-6 py-4">
-        <button type="button" onClick={onCancel} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--sb-text)]" aria-label="Cancel">
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+        <button type="button" onClick={onCancel} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--sb-text)]" aria-label={L.t("common.cancel")}>
+          <svg className="h-4 w-4 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
         </button>
-        <h2 className="text-base font-semibold text-[var(--sb-text)]">{mode === "add" ? "Add branch" : "Edit branch"}</h2>
+        <h2 className="text-base font-semibold text-[var(--sb-text)]">{L.t(mode === "add" ? "form.add" : "form.edit")}</h2>
       </div>
 
       <div className="space-y-4 px-6 py-5">
         <div className="grid grid-cols-[2fr_1fr] gap-3">
           <label className="block">
-            <span className="text-xs text-[var(--sb-text-tertiary)]">Branch name</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Universe Club Ashdod" dir="auto" disabled={saving} className={input} />
+            <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("form.name")}</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={L.t("common.eg", { x: "Universe Club Ashdod" })} dir="auto" disabled={saving} className={input} />
           </label>
           <label className="block">
-            <span className="text-xs text-[var(--sb-text-tertiary)]">Branch number</span>
-            <input value={branchNumber} onChange={(e) => setBranchNumber(e.target.value)} placeholder="e.g. 192" dir="auto" disabled={saving} className={input} />
+            <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("form.number")}</span>
+            <input value={branchNumber} onChange={(e) => setBranchNumber(e.target.value)} placeholder={L.t("common.eg", { x: "192" })} dir="ltr" disabled={saving} className={input} />
           </label>
         </div>
 
         {brands && brands.length > 0 ? (
           <label className="block">
-            <span className="text-xs text-[var(--sb-text-tertiary)]">Brand</span>
+            <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("form.brand")}</span>
             <div className="mt-1 flex items-center gap-2">
               <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: brands.find((b) => b.id === brandId)?.color ?? "#8e8e93" }} aria-hidden />
               <select value={brandId} onChange={(e) => setBrandId(e.target.value)} disabled={saving} className={`${input} mt-0`} style={{ colorScheme: "dark" }}>
-                {brands.map((b) => <option key={b.id} value={b.id} className="bg-[#1c1c1e] text-white">{b.name}{b.isDefault ? " (default)" : ""}</option>)}
+                {brands.map((b) => <option key={b.id} value={b.id} className="bg-[#1c1c1e] text-white">{b.name}{b.isDefault ? ` ${L.t("form.defaultBrand")}` : ""}</option>)}
               </select>
             </div>
           </label>
         ) : null}
 
         <div>
-          <span className="text-xs text-[var(--sb-text-tertiary)]">Location</span>
+          <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("form.location")}</span>
           {!changingLocation ? (
             <div className="mt-1 flex items-center justify-between gap-3 rounded-lg border border-[color:var(--sb-border)] bg-white/[0.02] px-3 py-2">
               <span className="truncate text-sm text-[var(--sb-text)]" dir="auto">{initial?.currentLocation}</span>
-              <button type="button" onClick={() => setChangingLocation(true)} className="shrink-0 text-xs text-[var(--sb-accent)] hover:underline">Change</button>
+              <button type="button" onClick={() => setChangingLocation(true)} className="shrink-0 text-xs text-[var(--sb-accent)] hover:underline">{L.t("common.change")}</button>
             </div>
           ) : !googleReady ? (
             <p className="mt-1 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-200">
-              {cfg === null ? "Loading location search…" : "Location search needs Google Maps to be configured (browser key). Branches can be added once it is set."}
+              {cfg === null ? L.t("form.loadingSearch") : L.t("form.googleMissing")}
             </p>
           ) : (
             <>
               <div ref={acHostRef} className="mt-1" />
-              <p className="mt-1 text-xs text-[var(--sb-text-tertiary)]">Search a mall, centre or street address and choose a suggestion.</p>
+              <p className="mt-1 text-xs text-[var(--sb-text-tertiary)]">{L.t("form.locationHint")}</p>
             </>
           )}
         </div>
@@ -165,7 +167,7 @@ export function BranchForm({
           <div className="space-y-2">
             <p className="text-sm text-[var(--sb-text)]" dir="auto">📍 {picked.label}</p>
             <BranchMap
-              branches={[{ id: "preview", name: name || "New branch", city: "", status: "idle", latitude: picked.latitude, longitude: picked.longitude }]}
+              branches={[{ id: "preview", name: name || L.t("form.newBranch"), city: "", status: "idle", latitude: picked.latitude, longitude: picked.longitude }]}
               selectedId="preview"
               onSelect={() => {}}
               height={200}
@@ -178,9 +180,9 @@ export function BranchForm({
       </div>
 
       <div className="mt-auto flex items-center justify-end gap-3 border-t border-[color:var(--sb-border)] px-6 py-4">
-        <button type="button" onClick={onCancel} disabled={saving} className="rounded-full px-4 py-2 text-sm text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]">Cancel</button>
+        <button type="button" onClick={onCancel} disabled={saving} className="rounded-full px-4 py-2 text-sm text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]">{L.t("common.cancel")}</button>
         <button type="button" onClick={() => void save()} disabled={!complete || saving} className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition-transform active:scale-95 disabled:opacity-40">
-          {saving ? "Saving…" : mode === "add" ? "Add branch" : "Save"}
+          {saving ? L.t("common.saving") : L.t(mode === "add" ? "form.add" : "common.save")}
         </button>
       </div>
     </div>

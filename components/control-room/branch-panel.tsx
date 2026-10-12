@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { BranchSummary, RemoteCommand, StationPlaybackState } from "@/lib/remote-control/types";
-import { DOT_FILL, type MapDotStatus } from "@/components/control-room/branch-map";
+import { StatusGlyph, STATUS_KEY, type MapDotStatus } from "@/components/control-room/branch-map";
+import { useMgmt } from "@/lib/i18n/use-mgmt";
 import { StationActivation } from "@/components/control-room/station-activation";
 
 /**
@@ -24,14 +25,6 @@ export type PanelBranch = {
   hasStation: boolean;
 };
 
-const STATUS_TEXT: Record<MapDotStatus, string> = {
-  playing: "Playing",
-  idle: "Online · not playing",
-  offline: "Offline",
-  install: "Needs installation",
-  unknown: "-",
-};
-
 /** Volume sends: at most one every VOLUME_SEND_MS while dragging, plus the final value. */
 const VOLUME_SEND_MS = 200;
 
@@ -47,6 +40,7 @@ export function BranchPanel({
   onEdit?: () => void;
   sendCommandTo: (targetBranchId: string, command: RemoteCommand, payload?: { volume?: number }) => boolean;
 }) {
+  const L = useMgmt();
   const live = branch.live;
   const state = branch.state;
   const canControl = !!live && (branch.status === "playing" || branch.status === "idle");
@@ -88,23 +82,23 @@ export function BranchPanel({
           type="button"
           onClick={onBack}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--sb-text)]"
-          aria-label="Back to all branches"
+          aria-label={L.t("common.backToBranches")}
         >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+          <svg className="h-4 w-4 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
         </button>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base font-semibold text-[var(--sb-text)]">{branch.name}</h2>
+          <h2 className="truncate text-base font-semibold text-[var(--sb-text)]" dir="auto">{branch.name}</h2>
           <p className="truncate text-xs text-[var(--sb-text-secondary)]">
-            {[branch.branchNumber ? `Branch ${branch.branchNumber}` : "", branch.city].filter(Boolean).join(" · ")}
+            {[branch.branchNumber ? L.t("common.branchNumber", { n: branch.branchNumber }) : "", branch.city].filter(Boolean).join(" · ")}
           </p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-2 text-sm text-[var(--sb-text-secondary)]">
-          <span className="h-2 w-2 rounded-full" style={{ background: DOT_FILL[branch.status] }} aria-hidden />
-          {STATUS_TEXT[branch.status]}
+          <StatusGlyph status={branch.status} />
+          {L.t(STATUS_KEY[branch.status])}
         </span>
         {onEdit ? (
           <button type="button" onClick={onEdit} className="shrink-0 rounded-full border border-[color:var(--sb-border)] px-3 py-1 text-xs text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]">
-            Edit
+            {L.t("common.edit")}
           </button>
         ) : null}
       </div>
@@ -112,15 +106,15 @@ export function BranchPanel({
       {!canControl ? (
         <div className="px-6 py-10 text-sm text-[var(--sb-text-secondary)]">
           {branch.status === "install"
-            ? "No station installed in this branch yet."
+            ? L.t("panel.noStation")
             : branch.status === "offline"
-              ? "The branch station is offline. Controls return as soon as it reconnects."
-              : "Waiting for live status…"}
+              ? L.t("panel.offline")
+              : L.t("panel.waiting")}
         </div>
       ) : (
         <>
           <section className="border-b border-[color:var(--sb-border)] px-6 py-5">
-            <div className="text-xs text-[var(--sb-text-tertiary)]">Now playing</div>
+            <div className="text-xs text-[var(--sb-text-tertiary)]">{L.t("panel.nowPlaying")}</div>
             <div className="mt-3 flex items-center gap-4">
               <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-white/[0.06]">
                 {cover ? (
@@ -129,17 +123,17 @@ export function BranchPanel({
                 ) : null}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-lg font-semibold text-[var(--sb-text)]">{title || "Nothing playing"}</div>
+                <div className="truncate text-lg font-semibold text-[var(--sb-text)]">{title || L.t("panel.nothing")}</div>
                 {source ? <div className="truncate text-xs text-[var(--sb-text-tertiary)]">{source}</div> : null}
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <RoundButton label="Previous" onClick={() => send("PREV")}>
+              <div className="flex shrink-0 items-center gap-2" dir="ltr">
+                <RoundButton label={L.t("panel.prev")} onClick={() => send("PREV")}>
                   <path d="M19 20 9 12l10-8v16Z" /><path d="M5 19V5" />
                 </RoundButton>
-                <RoundButton label={playing ? "Pause" : "Play"} primary onClick={() => send(playing ? "PAUSE" : "PLAY")}>
+                <RoundButton label={L.t(playing ? "panel.pause" : "panel.play")} primary onClick={() => send(playing ? "PAUSE" : "PLAY")}>
                   {playing ? <><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></> : <path d="M7 4v16l13-8L7 4Z" />}
                 </RoundButton>
-                <RoundButton label="Next" onClick={() => send("NEXT")}>
+                <RoundButton label={L.t("panel.next")} onClick={() => send("NEXT")}>
                   <path d="m5 4 10 8-10 8V4Z" /><path d="M19 5v14" />
                 </RoundButton>
               </div>
@@ -155,26 +149,27 @@ export function BranchPanel({
                 value={volume}
                 onChange={(e) => onVolume(Number(e.target.value))}
                 className="h-1 w-full cursor-pointer accent-[var(--sb-accent)]"
-                aria-label="Branch volume"
+                dir="ltr"
+                aria-label={L.t("panel.volume")}
               />
-              <span className="w-8 shrink-0 text-right text-xs tabular-nums text-[var(--sb-text-secondary)]">{volume}</span>
+              <span className="w-8 shrink-0 text-end text-xs tabular-nums text-[var(--sb-text-secondary)]">{volume}</span>
             </div>
           </section>
 
           <section className="px-6 py-5">
-            <div className="text-xs text-[var(--sb-text-tertiary)]">Connected devices</div>
+            <div className="text-xs text-[var(--sb-text-tertiary)]">{L.t("panel.devices")}</div>
             <ul className="mt-3 space-y-2">
               {(live?.devices ?? []).length === 0 ? (
-                <li className="text-sm text-[var(--sb-text-tertiary)]">None</li>
+                <li className="text-sm text-[var(--sb-text-tertiary)]">{L.t("panel.none")}</li>
               ) : (
                 (live?.devices ?? []).map((d, i) => (
                   <li key={i} className="flex items-center justify-between gap-3 text-sm">
                     <span className="flex items-center gap-2 text-[var(--sb-text)]">
                       <DeviceIcon type={d.type} />
-                      {DEVICE_LABEL[d.type]}
+                      {L.t(`device.${d.type}`)}
                     </span>
                     <span className={d.role === "playing" ? "text-[var(--sb-accent)]" : "text-[var(--sb-text-tertiary)]"}>
-                      {d.role === "playing" ? "Playing station" : "Control"}
+                      {L.t(d.role === "playing" ? "panel.playingStation" : "panel.control")}
                     </span>
                   </li>
                 ))
@@ -208,14 +203,6 @@ function RoundButton({ label, primary, onClick, children }: { label: string; pri
 }
 
 type DeviceKind = NonNullable<BranchSummary["devices"]>[number]["type"];
-const DEVICE_LABEL: Record<DeviceKind, string> = {
-  computer: "Computer",
-  streamer: "Streamer",
-  browser: "Browser",
-  phone_tablet: "Phone / Tablet",
-  remote: "Remote control",
-  unknown: "Device",
-};
 
 function DeviceIcon({ type }: { type: DeviceKind }) {
   const common = { className: "h-4 w-4 shrink-0 text-[var(--sb-text-secondary)]", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
