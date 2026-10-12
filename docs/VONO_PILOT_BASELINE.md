@@ -13,6 +13,7 @@
   load latency, Play Now, equal-power mix, station speed, now-playing frame, external screen). TEST only, PROD untouched.
   beta.21 restart: owner-attested PARTIAL 2026-10-09 (resumes the last song after a Windows restart); offline boot /
   LOCAL→URL on network return / video not yet tested → not a full PASS.
+- **🟡 CONTROL ROOM UX ROUND 6 — TEST candidate (2026-10-12).** RENDERER ONLY. Commit `ded9674`, deploy `45ac3116-0346-48da-8612-947708c61ba3`: region row never scrolls (overflow hidden, 12 px); Compact 40%; map column min 680 px so the row always fits (measured 1280 + 1440).
 - **🟡 CONTROL ROOM UX ROUND 5 — TEST candidate (2026-10-12).** RENDERER ONLY. Commit `153d9d2`, deploy `cb65e898-0140-4e10-8598-3205ad571e68`: regions = one compact row (13 px, no counts, fits Compact at 1440); big branch count on the right of the map (follows the chosen region).
 - **🟡 CONTROL ROOM UX ROUND 4 — TEST candidate (2026-10-12).** RENDERER ONLY. Commit `62dac32`, deploy `936687a1-ad95-4fb7-ab5d-659c64ae9339`: map header = place + one frameless toolbar (sizes with LED, + / − / Fit via a portal from BranchMap); regions strip under it inside the map area; no separate "All Israel" back button.
 - **🟡 CONTROL ROOM UX ROUND 3 — TEST candidate (2026-10-12).** RENDERER ONLY. Commit `30c1d35`, deploy `23b6263b-9339-432c-ba7c-583cd9ccb0b6`: legend stacked on the left side of the map; order statuses → brands → regions → search.
