@@ -2202,8 +2202,8 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.08); /* lines BETWEEN the cells only — no outer frame (like the KPI row) */
+  border: 0;
   overflow: hidden;
   padding: 0;
 }
@@ -2258,10 +2258,9 @@
   display: block;
   position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
   background: rgb(var(--pad-lit, 148, 163, 184));
-  opacity: 0.35;
+  opacity: 0; /* like the Control Room tabs: a bar ONLY under the selected / on-air pad */
   transition: opacity 0.18s ease;
 }
-.jcx-quickpads .jc-trigger-pad--empty .jcx-pad-bar { opacity: 0; }
 /* hover */
 .jcx-quickpads .jc-trigger-pad:hover,
 .jcx-quickpads .jc-trigger-pad--assigned:hover,
@@ -2272,7 +2271,6 @@
   transform: none;
   box-shadow: none;
 }
-.jcx-quickpads .jc-trigger-pad:hover .jcx-pad-bar { opacity: 0.65; }
 /* selected — keyboard focus / drop target */
 .jcx-quickpads .jc-trigger-pad:focus-visible,
 .jcx-quickpads .jc-trigger-pad-wrap--drop .jc-trigger-pad {
