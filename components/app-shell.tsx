@@ -1416,13 +1416,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Link
                   href="/library"
                   title={mgmt(locale).t("nav.exitTitle")}
-                  className="mb-[4px] me-4 inline-flex h-9 items-center gap-2 rounded-xl border border-white/[0.16] bg-white/[0.06] px-3.5 text-[14px] font-semibold text-slate-100 transition-colors hover:border-white/[0.28] hover:bg-white/[0.12] hover:text-white"
+                  className="group relative me-2 inline-flex items-center gap-2 px-4 pb-[7px] pt-[5px] text-[15px] font-medium text-slate-300 transition-colors duration-150 hover:text-slate-50 focus:outline-none"
                 >
                   <svg className="h-4 w-4 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
                   {mgmt(locale).t("nav.backToPlayer")}
+                  <span className="absolute bottom-0 left-2 right-2 h-[3px] rounded-full bg-[var(--sb-accent)] opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden />
                 </Link>
-                <span className="mb-[10px] me-2 h-5 w-px bg-white/[0.12]" aria-hidden />
+                <span className="mb-[9px] me-2 h-5 w-px bg-white/[0.12]" aria-hidden />
                 {([
                   { href: "/dashboard", label: mgmt(locale).t("nav.dashboard"), active: pathname === "/dashboard" || pathname.startsWith("/dashboard/") },
                   { href: "/owner/control-room", label: mgmt(locale).t("nav.controlRoom"), active: pathname.startsWith("/owner/control-room") },

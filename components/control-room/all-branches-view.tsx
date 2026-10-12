@@ -72,10 +72,10 @@ type RowStatus = MapDotStatus;
 
 /** map size (owner 2026-10-12): the map's share of the width + its height; remembered per viewer */
 type MapSize = "compact" | "balanced" | "focus";
-const MAP_SIZES: { id: MapSize; label: MgmtKey; width: string; height: string }[] = [
-  { id: "compact", label: "map.compact", width: "35%", height: "min(520px, 58vh)" },
-  { id: "balanced", label: "map.balanced", width: "50%", height: "min(600px, 62vh)" },
-  { id: "focus", label: "map.focus", width: "68%", height: "min(720px, 66vh)" },
+const MAP_SIZES: { id: MapSize; label: MgmtKey; width: string }[] = [
+  { id: "compact", label: "map.compact", width: "35%" },
+  { id: "balanced", label: "map.balanced", width: "50%" },
+  { id: "focus", label: "map.focus", width: "68%" },
 ];
 const MAP_SIZE_KEY = "vono.controlRoom.mapSize";
 
@@ -121,7 +121,7 @@ export function AllBranchesView() {
     try { window.localStorage.setItem(MAP_SIZE_KEY, v); } catch { /* not remembered */ }
   };
   /** entering a region from Compact opens the map to at least Balanced */
-  const focusRegion = (id: RegionId) => { setRegionFocus(id); if (mapSize === "compact") setMapSize("balanced"); };
+  const focusRegion = (id: RegionId) => setRegionFocus(id); // the chosen map size stays (owner: Compact stays Compact)
   const size = MAP_SIZES.find((m) => m.id === mapSize) ?? MAP_SIZES[1];
   const [search, setSearch] = useState("");
   /** KPI counters = the status filter (owner 2026-10-12): click → map + list; click again / All branches → clear */
@@ -227,7 +227,7 @@ export function AllBranchesView() {
 
 
   return (
-    <div dir={L.dir} className="overflow-clip rounded-2xl border border-[color:var(--sb-border)] bg-[var(--sb-surface)]">
+    <div dir={L.dir} className="flex h-full min-h-[680px] flex-col overflow-hidden rounded-2xl border border-[color:var(--sb-border)] bg-[var(--sb-surface)]">
       <header className="flex items-center justify-between gap-4 border-b border-[color:var(--sb-border)] px-6 py-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-[var(--sb-text)]">{L.t("cr.title")}</h1>
@@ -267,6 +267,22 @@ export function AllBranchesView() {
         </div>
       </header>
 
+      {brandsData && brandsData.brands.length > 1 ? (
+        <div className="flex overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("cr.brandsAria")}>
+          {[{ id: "all", name: L.t("cr.allBrands"), color: null as string | null }, ...brandsData.brands].map((b) => (
+            <FilterTab
+              key={b.id}
+              label={b.name}
+              count={b.id === "all" ? rows.length : rows.filter((r) => r.brandId === b.id).length}
+              active={activeFilter === b.id}
+              dot={b.id === "all" ? null : b.color ?? DEFAULT_BRAND_COLOR}
+              bar={b.color ?? "#f5f5f7"}
+              onClick={() => setBrandFilter(b.id)}
+            />
+          ))}
+        </div>
+      ) : null}
+
       {/* the KPI counters ARE the status filter (combined with Brand + Region + Search) */}
       <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-5" role="group" aria-label={L.t("cr.kpiAria")}>
         <Stat value={dbBranches ? statusCounts.all : "-"} L={L} label={L.t("status.all")} active={activeStatus === "all"} onClick={() => toggleStatus("all")} disabled={!dbBranches} />
@@ -276,31 +292,17 @@ export function AllBranchesView() {
         <Stat value={dbBranches ? statusCounts.install : "-"} L={L} label={L.t("status.install")} status="install" active={activeStatus === "install"} onClick={() => toggleStatus("install")} disabled={!dbBranches} valueColor={statusCounts.install > 0 ? "#fbbf24" : undefined} last />
       </div>
 
-      {brandsData && brandsData.brands.length > 1 ? (
-        <nav className="flex items-end gap-8 overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)] px-6" aria-label={L.t("cr.brandsAria")}>
-          {[{ id: "all", name: L.t("cr.allBrands"), color: null as string | null }, ...brandsData.brands].map((b) => {
-            const on = activeFilter === b.id;
-            const count = b.id === "all" ? rows.length : rows.filter((r) => r.brandId === b.id).length;
-            return (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => setBrandFilter(b.id)}
-                aria-pressed={on}
-                className={`flex min-h-[52px] shrink-0 items-center gap-2.5 border-b-[3px] pt-1 text-base transition-colors ${on ? "font-semibold text-[var(--sb-text)]" : "border-transparent font-medium text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]"}`}
-                style={on ? { borderBottomColor: b.color ?? "#ffffff" } : undefined}
-              >
-                {b.id !== "all" ? <span className="h-3 w-3 rounded-full" style={{ background: b.color ?? DEFAULT_BRAND_COLOR }} aria-hidden /> : null}
-                <span dir="auto">{b.name}</span>
-                <span className={`rounded-full px-2 py-0.5 text-sm tabular-nums ${on ? "bg-white/[0.12] text-[var(--sb-text)]" : "bg-white/[0.05] text-[var(--sb-text-secondary)]"}`} dir="ltr">{count}</span>
-              </button>
-            );
-          })}
-        </nav>
+      {dbBranches && rows.length > 0 ? (
+        <div className="flex overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("map.regionsAria")}>
+          <FilterTab label={L.t("map.allIsrael")} count={regionAllCount} active={!regionFocus} onClick={() => setRegionFocus(null)} />
+          {REGIONS.map((r) => (
+            <FilterTab key={r.id} label={L.region(r.id)} count={regionCounts[r.id] ?? 0} active={regionFocus === r.id} onClick={() => (regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id))} />
+          ))}
+        </div>
       ) : null}
 
       {dbBranches && rows.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-3 border-b border-[color:var(--sb-border)] px-6 py-3">
+        <div className="flex flex-wrap items-center gap-3 border-b border-[color:var(--sb-border)] px-6 py-2.5">
           <label className="relative flex min-w-[220px] max-w-md flex-1 items-center">
             <svg className="pointer-events-none absolute start-3.5 h-[18px] w-[18px] text-[var(--sb-text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
             <input
@@ -310,7 +312,7 @@ export function AllBranchesView() {
               placeholder={regionFocus ? L.t("cr.searchIn", { region: L.region(regionFocus) }) : L.t("cr.searchPlaceholder")}
               aria-label={L.t("cr.searchAria")}
               dir="auto"
-              className="w-full rounded-xl border border-[color:var(--sb-border)] bg-white/[0.04] py-2.5 ps-10 pe-9 text-base text-[var(--sb-text)] placeholder:text-[var(--sb-text-tertiary)] focus:border-[color:var(--sb-accent)] focus:outline-none"
+              className="w-full rounded-xl border border-[color:var(--sb-border)] bg-white/[0.04] py-2 ps-10 pe-9 text-base text-[var(--sb-text)] placeholder:text-[var(--sb-text-tertiary)] focus:border-[color:var(--sb-accent)] focus:outline-none"
             />
             {search ? (
               <button type="button" onClick={() => setSearch("")} className="absolute end-2 inline-flex h-6 w-6 items-center justify-center rounded text-[var(--sb-text-tertiary)] hover:text-[var(--sb-text)]" aria-label={L.t("cr.clearSearch")}>
@@ -329,15 +331,6 @@ export function AllBranchesView() {
         </div>
       ) : null}
 
-      {dbBranches && rows.length > 0 ? (
-        <div className="flex overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("map.regionsAria")}>
-          <RegionTab label={L.t("map.allIsrael")} count={regionAllCount} active={!regionFocus} onClick={() => setRegionFocus(null)} />
-          {REGIONS.map((r) => (
-            <RegionTab key={r.id} label={L.region(r.id)} count={regionCounts[r.id] ?? 0} active={regionFocus === r.id} onClick={() => (regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id))} />
-          ))}
-        </div>
-      ) : null}
-
       {loadError ? (
         <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">{L.t("cr.loadError")}</p>
       ) : dbBranches === null ? (
@@ -346,11 +339,11 @@ export function AllBranchesView() {
         <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">{L.t("cr.noBranches")}</p>
       ) : (
         <div
-          className="grid transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none lg:grid-cols-[var(--cr-map-w)_minmax(0,1fr)]"
+          className="grid min-h-0 flex-1 transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none lg:grid-cols-[var(--cr-map-w)_minmax(0,1fr)]"
           style={{ "--cr-map-w": size.width } as CSSProperties}
         >
-          <div className="hidden min-w-0 flex-col self-start border-e border-[color:var(--sb-border)] lg:sticky lg:top-0 lg:flex">
-            <div className="flex items-center justify-between gap-3 px-6 pb-1 pt-4">
+          <div className="hidden min-h-0 min-w-0 flex-col overflow-hidden border-e border-[color:var(--sb-border)] lg:flex">
+            <div className="flex items-center justify-between gap-3 px-6 pb-1 pt-3">
               {regionFocus ? (
                 <div className="flex min-w-0 items-center gap-3">
                   {/* the way back is big and obvious (also: the "All Israel" tab above, or click the region tab again) */}
@@ -364,11 +357,9 @@ export function AllBranchesView() {
                   </div>
                 </div>
               ) : (
-                <div className="min-w-0">
+                <div className="flex min-w-0 items-baseline gap-3" title={L.t("map.regionsHint", { branches: L.branches(visibleRows.length), regions: REGIONS.length })}>
                   <div className="text-xl font-semibold text-[var(--sb-text)]">{L.t("map.allIsrael")}</div>
-                  <div className="text-sm text-[var(--sb-text-secondary)]">
-                    {L.t("map.regionsHint", { branches: L.branches(visibleRows.length), regions: REGIONS.length })}
-                  </div>
+                  <div className="text-sm text-[var(--sb-text-secondary)]">{L.branches(visibleRows.length)}</div>
                 </div>
               )}
               <div className="flex shrink-0 rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5" role="radiogroup" aria-label={L.t("map.sizeAria")}>
@@ -395,29 +386,29 @@ export function AllBranchesView() {
               ))}
               <li className="text-[var(--sb-text-tertiary)]">{L.t("map.colorIsBrand")}</li>
             </ul>
-            <div className="flex min-h-0 flex-1 items-center justify-center px-6 pb-2">
+            <div className="relative flex min-h-0 flex-1 items-stretch justify-center px-6 pb-5">
+              <p className="pointer-events-none absolute bottom-1 start-6 text-[10px] text-[var(--sb-text-tertiary)]">{L.t("map.attribution")}</p>
               <NetworkMap
                 branches={visibleRows.map((r) => ({ id: r.id, name: r.name, city: r.city, latitude: r.latitude, longitude: r.longitude, status: rowStatus(r, liveKnown), brandColor: colorOf(r.brandId) }))}
                 selectedId={selectedId}
                 onSelect={openBranch}
                 regions={{ counts: regionCounts, focus: regionFocus, onFocus: focusRegion }}
-                height={size.height}
+                height="100%"
               />
             </div>
             {!regionFocus && (noLocationCount > 0 || outsideCount > 0) ? (
-              <p className="px-6 pb-4 text-xs text-[var(--sb-text-tertiary)]">
+              <p className="px-6 pb-2 text-xs text-[var(--sb-text-tertiary)]">
                 {noLocationCount > 0 ? (noLocationCount === 1 ? L.t("map.noLocationOne") : L.t("map.noLocationMany", { n: noLocationCount })) : ""}
                 {noLocationCount > 0 && outsideCount > 0 ? " · " : ""}
                 {outsideCount > 0 ? L.t("map.outside", { n: outsideCount }) : ""}
               </p>
             ) : null}
-            <p className="px-6 pb-4 text-[10px] text-[var(--sb-text-tertiary)]">{L.t("map.attribution")}</p>
           </div>
           {(() => {
             if (form) {
               const editing = form.mode === "edit" ? rows.find((r) => r.id === form.id) : undefined;
               return (
-                <div className="min-w-0">
+                <div className="min-h-0 min-w-0 overflow-y-auto">
                   <BranchForm
                     key={form.mode === "edit" ? form.id : "add"}
                     mode={form.mode}
@@ -436,14 +427,14 @@ export function AllBranchesView() {
             }
             if (brandsOpen && brandsData) {
               return (
-                <div className="min-w-0">
+                <div className="min-h-0 min-w-0 overflow-y-auto">
                   <BrandManager brands={brandsData.brands} onClose={() => setBrandsOpen(false)} onChanged={() => setReloadKey((k) => k + 1)} />
                 </div>
               );
             }
             if (broadcastOpen) {
               return (
-                <div className="min-w-0">
+                <div className="min-h-0 min-w-0 overflow-y-auto">
                   <BroadcastPanel
                     key={activeFilter}
                     targets={brandRows.map((r) => {
@@ -460,7 +451,7 @@ export function AllBranchesView() {
             const open = openId ? rows.find((r) => r.id === openId) : undefined;
             if (open) {
               return (
-                <div className="min-w-0">
+                <div className="min-h-0 min-w-0 overflow-y-auto">
                   <BranchPanel
                     branch={{ id: open.id, name: open.name, branchNumber: open.branchNumber, city: open.city, status: rowStatus(open, liveKnown), live: open.live, state: open.state, hasStation: open.hasStation }}
                     onBack={() => setOpenId(null)}
@@ -471,7 +462,7 @@ export function AllBranchesView() {
               );
             }
             return (
-              <ul className="min-w-0 divide-y divide-[color:var(--sb-border)]">
+              <ul className="min-h-0 min-w-0 divide-y divide-[color:var(--sb-border)] overflow-y-auto">
                 {visibleRows.length === 0 ? (
                   <li className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">
                     {L.t(filtersActive ? "cr.noMatch" : "cr.noBranches")}{" "}
@@ -498,20 +489,23 @@ export function AllBranchesView() {
   );
 }
 
-/** a region tab — the same language as the KPI cards: big, clear, a bar under the chosen one */
-function RegionTab({ label, count, active, onClick }: { label: string; count: number; active: boolean; onClick: () => void }) {
+/** a filter tab (brands / regions) — the same language as the KPI cards: big, clear, a bar under the chosen one */
+function FilterTab({ label, count, active, onClick, dot, bar }: { label: string; count: number; active: boolean; onClick: () => void; dot?: string | null; bar?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`relative flex min-w-[124px] flex-1 shrink-0 flex-col items-start px-5 py-3 text-start transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] ${
+      className={`relative flex min-w-[124px] flex-1 shrink-0 flex-col items-start px-5 py-2.5 text-start transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] ${
         active ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
       }`}
     >
-      <span className={`whitespace-nowrap text-base ${active ? "font-semibold text-[var(--sb-text)]" : "font-medium text-[var(--sb-text-secondary)]"}`}>{label}</span>
+      <span className={`flex items-center gap-2 whitespace-nowrap text-base ${active ? "font-semibold text-[var(--sb-text)]" : "font-medium text-[var(--sb-text-secondary)]"}`}>
+        {dot ? <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: dot }} aria-hidden /> : null}
+        <span dir="auto">{label}</span>
+      </span>
       <span className="text-sm tabular-nums text-[var(--sb-text-tertiary)]" dir="ltr">{count}</span>
-      <span className={`absolute inset-x-0 bottom-0 h-[3px] bg-[var(--sb-accent)] transition-opacity ${active ? "opacity-100" : "opacity-0"}`} aria-hidden />
+      <span className={`absolute inset-x-0 bottom-0 h-[3px] transition-opacity ${active ? "opacity-100" : "opacity-0"}`} style={{ background: bar ?? "var(--sb-accent)" }} aria-hidden />
     </button>
   );
 }
@@ -525,11 +519,11 @@ function Stat({ L, value, label, status, last, valueColor, active, onClick, disa
       disabled={disabled}
       aria-pressed={active}
       title={active && status ? L.t("cr.kpiShowingOnly", { label }) : L.t("cr.kpiShow", { label })}
-      className={`relative px-6 py-5 text-start transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] disabled:cursor-default ${
+      className={`relative px-6 py-3.5 text-start transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] disabled:cursor-default ${
         last ? "" : "border-e border-[color:var(--sb-border)]"
       } ${active ? "bg-white/[0.05]" : "hover:bg-white/[0.025]"}`}
     >
-      <div className="text-4xl font-bold leading-none tracking-tight tabular-nums text-[var(--sb-text)]" dir="ltr" style={valueColor ? { color: valueColor } : undefined}>
+      <div className="text-[34px] font-bold leading-none tracking-tight tabular-nums text-[var(--sb-text)]" dir="ltr" style={valueColor ? { color: valueColor } : undefined}>
         {value}
       </div>
       <div className={`mt-2 flex items-center gap-2 text-base ${active ? "font-semibold text-[var(--sb-text)]" : "text-[var(--sb-text-secondary)]"}`}>

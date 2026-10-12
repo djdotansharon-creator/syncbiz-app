@@ -412,14 +412,14 @@ export function BranchMap({
   return (
     <div className="relative flex h-full w-full items-center justify-center" dir="ltr">
       {svg}
-      <div className="absolute bottom-2 right-2 flex flex-col overflow-hidden rounded-xl border border-[color:var(--sb-border)] bg-[rgba(18,18,22,0.92)] shadow-lg" role="group" aria-label={L.t("map.zoomAria")}>
+      <div className="absolute right-2 top-2 flex flex-row overflow-hidden rounded-xl border border-[color:var(--sb-border)] bg-[rgba(18,18,22,0.92)] shadow-lg" role="group" aria-label={L.t("map.zoomAria")}>
         <button type="button" className={btn} onClick={() => zoomStep(1)} disabled={atMin} aria-label={L.t("map.zoomIn")} title={L.t("map.zoomInTitle")}>
           <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
         </button>
-        <button type="button" className={`${btn} border-t border-[color:var(--sb-border)]`} onClick={() => zoomStep(-1)} disabled={!zoomedIn} aria-label={L.t("map.zoomOut")} title={L.t("map.zoomOut")}>
+        <button type="button" className={`${btn} border-s border-[color:var(--sb-border)]`} onClick={() => zoomStep(-1)} disabled={!zoomedIn} aria-label={L.t("map.zoomOut")} title={L.t("map.zoomOut")}>
           <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M5 12h14" /></svg>
         </button>
-        <button type="button" className={`${btn} border-t border-[color:var(--sb-border)]`} onClick={() => setManual(null)} disabled={fitted} aria-label={L.t(focus ? "map.fitRegion" : "map.fitAll")} title={L.t(focus ? "map.fitRegion" : "map.fitAll")}>
+        <button type="button" className={`${btn} border-s border-[color:var(--sb-border)]`} onClick={() => setManual(null)} disabled={fitted} aria-label={L.t(focus ? "map.fitRegion" : "map.fitAll")} title={L.t(focus ? "map.fitRegion" : "map.fitAll")}>
           <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
         </button>
       </div>

@@ -10,7 +10,7 @@ export default async function ControlRoomPage() {
   if (!user) redirect("/login?from=/owner/control-room");
   // The app main area is a fixed-height region (overflow hidden on large screens) — this page scrolls on its own.
   return (
-    <div className="mgmt-type h-full overflow-y-auto pb-6">
+    <div className="mgmt-type h-full overflow-y-auto">
       <AllBranchesView />
     </div>
   );

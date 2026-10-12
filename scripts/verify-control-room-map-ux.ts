@@ -18,8 +18,8 @@ assert("M1 three map sizes: Compact 35% / Balanced 50% / Map focus 68%",
   /id: "compact"[^}]*width: "35%"/.test(view) && /id: "balanced"[^}]*width: "50%"/.test(view) && /id: "focus"[^}]*width: "68%"/.test(view));
 assert("M2 Balanced is the default; the choice is remembered per viewer (storage errors never break the view)",
   /useState<MapSize>\("balanced"\)/.test(view) && /try \{\s*const v = window\.localStorage\.getItem\(MAP_SIZE_KEY\)/.test(view) && /try \{ window\.localStorage\.setItem/.test(view));
-assert("M3 entering a region from Compact opens at least Balanced",
-  /const focusRegion = \(id: RegionId\) => \{ setRegionFocus\(id\); if \(mapSize === "compact"\) setMapSize\("balanced"\); \}/.test(view) && /onFocus: focusRegion/.test(view));
+assert("M3 entering a region keeps the chosen map size (owner 2026-10-12: Compact stays Compact)",
+  view.includes("const focusRegion = (id: RegionId) => setRegionFocus(id);") && !view.includes('setMapSize("balanced")') && /onFocus: focusRegion/.test(view));
 assert("M4 zoom controls: + / − / Fit with accessible names (EN / HE), 44 px",
   map.includes('aria-label={L.t("map.zoomIn")}') && map.includes('aria-label={L.t("map.zoomOut")}') && map.includes('"map.fitRegion" : "map.fitAll"') && /h-11 w-11/.test(map));
 assert("M5 Ctrl / Cmd + scroll zooms (non-passive listener); a plain scroll still scrolls the page",
@@ -48,7 +48,7 @@ assert("L1 EN / HE management dictionary: Hebrew typed against English (Record<M
   /export const MGMT_HE: Record<MgmtKey, string>/.test(dict) && dict.includes('"nav.accessControl": "הרשאות"') && dict.includes('"map.focus": "מיקוד מפה"') &&
   dict.includes('"region.sharon-shomron": "השרון והשומרון"') && dict.includes('"status.offline": "לא מחובר"') && dict.includes('"cr.clearFilters": "נקה סינונים"'));
 assert("L2 RTL only in management (Control Room root dir), the map box stays LTR, back arrows flip",
-  view.includes('<div dir={L.dir} className="overflow-clip rounded-2xl') && map.includes('items-center justify-center" dir="ltr">') && /rtl:rotate-180/.test(view) &&
+  view.includes('<div dir={L.dir} className="flex h-full min-h-[680px] flex-col overflow-hidden rounded-2xl') && map.includes('items-center justify-center" dir="ltr">') && /rtl:rotate-180/.test(view) &&
   readFileSync("lib/locale-context.tsx", "utf8").includes('document.documentElement.dir = "ltr"'));
 console.log(`\n${pass} passed, ${fail} failed`);
 // Stage 2 (2026-10-12): Access Control + Dashboard — same dictionary, RTL in Hebrew, owner naming
@@ -59,9 +59,13 @@ assert("L3 Access Control: every screen state has dir={L.dir}; Hebrew heading \"
 // UX round 2026-10-12: ONE scroll (the page) — no inner scroll windows in the Control Room; the map column is sticky;
 // a region bar in the KPI language; the brand row cannot grow a vertical scrollbar
 const bc = readFileSync("components/control-room/broadcast-panel.tsx", "utf8");
-assert("U1 one scroll only: no max-h / overflow-y-auto windows in the Control Room view or Broadcast; map column sticky; brands overflow-y-hidden",
-  !view.includes("overflow-y-auto") && !view.includes("max-h-[640px]") && !bc.includes("overflow-y-auto") && view.includes("lg:sticky lg:top-0") &&
-  view.includes("overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)] px-6") && view.includes("overflow-clip rounded-2xl"));
-assert("U2 region bar: All Israel + 7 regions as big tabs with a bar under the chosen one; the chosen region clicked again → All Israel",
-  view.includes('<RegionTab label={L.t("map.allIsrael")}') && view.includes("regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id)") && view.includes("h-[3px] bg-[var(--sb-accent)]"));
+// owner 2026-10-12 (round 2): the screen fills the page; ONLY the right-hand table / panel scrolls; map column fixed
+const order = ['aria-label={L.t("cr.brandsAria")}', 'aria-label={L.t("cr.kpiAria")}', 'aria-label={L.t("map.regionsAria")}', 'aria-label={L.t("cr.searchAria")}'].map((k) => view.indexOf(k));
+assert("U1 one scroll, on the right-hand table only: screen fills the page; list / panels scroll; map column not scrolling; no nested lists in Broadcast",
+  view.includes('className="flex h-full min-h-[680px] flex-col overflow-hidden rounded-2xl') && view.includes("grid min-h-0 flex-1") &&
+  (view.match(/min-h-0 min-w-0 overflow-y-auto/g) ?? []).length === 4 && view.includes("min-h-0 min-w-0 divide-y divide-[color:var(--sb-border)] overflow-y-auto") &&
+  !view.includes("lg:sticky") && !view.includes("max-h-[640px]") && !bc.includes("overflow-y-auto"));
+assert("U2 order brands → statuses → regions → search; brands + regions are big tabs with a bar under the chosen one; region clicked again → All Israel",
+  order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])) && view.includes('<FilterTab label={L.t("map.allIsrael")}') &&
+  view.includes("regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id)") && /bar=\{b\.color \?\? "#f5f5f7"\}/.test(view));
 console.log(`(+L3) ${pass} passed, ${fail} failed`);
