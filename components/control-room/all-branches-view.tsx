@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { applyControlRoomFilters, type StatusFilter } from "@/lib/control-room-filters";
 import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
 import { DOT_FILL, StatusGlyph, type MapDotStatus } from "@/components/control-room/branch-map";
@@ -11,7 +12,6 @@ import { BranchForm } from "@/components/control-room/branch-form";
 import { NetworkCode } from "@/components/control-room/network-code";
 import { BrandManager, BrandBadge, DEFAULT_BRAND_COLOR, type BrandRow } from "@/components/control-room/brand-manager";
 import { REGIONS, branchRegion, regionName, type RegionId } from "@/lib/control-room-regions";
-import { applyControlRoomFilters } from "@/lib/control-room-filters";
 
 type BrandsData = { brands: BrandRow[]; defaultBrandId: string; branchBrand: Record<string, string> };
 
@@ -121,6 +121,8 @@ export function AllBranchesView() {
   const focusRegion = (id: RegionId) => { setRegionFocus(id); if (mapSize === "compact") setMapSize("balanced"); };
   const size = MAP_SIZES.find((m) => m.id === mapSize) ?? MAP_SIZES[1];
   const [search, setSearch] = useState("");
+  /** KPI counters = the status filter (owner 2026-10-12): click → map + list; click again / All branches → clear */
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -211,14 +213,14 @@ export function AllBranchesView() {
   // brand filter: the map, the list and the counters show the chosen brand only ("All brands" = every branch)
   const activeFilter = brandFilter !== "all" && brandById.has(brandFilter) ? brandFilter : "all";
   // Brand → Search → Region, all together (none replaces another). Broadcast keeps the BRAND scope only (its "All <brand>").
-  const { brandRows, visibleRows, regionCounts, noLocationCount, outsideCount, filtersActive } =
-    applyControlRoomFilters(rows, { brand: activeFilter, query: search, region: regionFocus });
-  const clearFilters = () => { setBrandFilter("all"); setSearch(""); setRegionFocus(null); };
+  // live statuses need live data: without it only "Needs installation" (from the DB) can filter
+  const activeStatus: StatusFilter = liveKnown || statusFilter === "install" ? statusFilter : "all";
+  const { brandRows, visibleRows, regionCounts, statusCounts, noLocationCount, outsideCount, filtersActive } =
+    applyControlRoomFilters(rows, { brand: activeFilter, query: search, region: regionFocus, status: activeStatus, statusOf: (r) => rowStatus(r, liveKnown) });
+  const clearFilters = () => { setBrandFilter("all"); setSearch(""); setRegionFocus(null); setStatusFilter("all"); };
+  const toggleStatus = (s: StatusFilter) => setStatusFilter((cur) => (s === "all" || cur === s ? "all" : s));
   const colorOf = (brandId: string | null) => (brandId ? brandById.get(brandId)?.color ?? DEFAULT_BRAND_COLOR : null);
 
-  const onlineCount = visibleRows.filter((r) => r.online).length;
-  const playingCount = visibleRows.filter((r) => rowStatus(r, liveKnown) === "playing").length;
-  const installCount = visibleRows.filter((r) => rowStatus(r, liveKnown) === "install").length;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-[color:var(--sb-border)] bg-[var(--sb-surface)]">
@@ -261,11 +263,13 @@ export function AllBranchesView() {
         </div>
       </header>
 
-      <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-4">
-        <Stat value={dbBranches ? visibleRows.length : "-"} label="Branches" />
-        <Stat value={liveKnown ? onlineCount : "-"} label="Online" dot={DOT_FILL.idle} />
-        <Stat value={liveKnown ? playingCount : "-"} label="Playing" dot={DOT_FILL.playing} />
-        <Stat value={dbBranches ? installCount : "-"} label="Needs installation" dot={DOT_FILL.install} valueColor={installCount > 0 ? "#fbbf24" : undefined} last />
+      {/* the KPI counters ARE the status filter (combined with Brand + Region + Search) */}
+      <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-5" role="group" aria-label="Filter by status">
+        <Stat value={dbBranches ? statusCounts.all : "-"} label="All branches" active={activeStatus === "all"} onClick={() => toggleStatus("all")} disabled={!dbBranches} />
+        <Stat value={liveKnown ? statusCounts.playing : "-"} label="Playing" status="playing" active={activeStatus === "playing"} onClick={() => toggleStatus("playing")} disabled={!liveKnown} />
+        <Stat value={liveKnown ? statusCounts.online : "-"} label="Online" status="idle" active={activeStatus === "online"} onClick={() => toggleStatus("online")} disabled={!liveKnown} />
+        <Stat value={liveKnown ? statusCounts.offline : "-"} label="Offline" status="offline" active={activeStatus === "offline"} onClick={() => toggleStatus("offline")} disabled={!liveKnown} />
+        <Stat value={dbBranches ? statusCounts.install : "-"} label="Needs installation" status="install" active={activeStatus === "install"} onClick={() => toggleStatus("install")} disabled={!dbBranches} valueColor={statusCounts.install > 0 ? "#fbbf24" : undefined} last />
       </div>
 
       {brandsData && brandsData.brands.length > 1 ? (
@@ -477,17 +481,28 @@ export function AllBranchesView() {
   );
 }
 
-function Stat({ value, label, dot, last, valueColor }: { value: number | string; label: string; dot?: string; last?: boolean; valueColor?: string }) {
+/** a KPI counter that is also a status filter (pressed = the active filter; a bar in the status color marks it) */
+function Stat({ value, label, status, last, valueColor, active, onClick, disabled }: { value: number | string; label: string; status?: MapDotStatus; last?: boolean; valueColor?: string; active: boolean; onClick: () => void; disabled?: boolean }) {
   return (
-    <div className={`px-6 py-5 ${last ? "" : "border-r border-[color:var(--sb-border)]"}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      title={active && status ? `Showing ${label.toLowerCase()} only · click again to show all` : `Show ${label.toLowerCase()}`}
+      className={`relative px-6 py-5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] disabled:cursor-default ${
+        last ? "" : "border-r border-[color:var(--sb-border)]"
+      } ${active ? "bg-white/[0.05]" : "hover:bg-white/[0.025]"}`}
+    >
       <div className="text-4xl font-bold leading-none tracking-tight tabular-nums text-[var(--sb-text)]" style={valueColor ? { color: valueColor } : undefined}>
         {value}
       </div>
-      <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--sb-text-secondary)]">
-        {dot ? <span className="h-1.5 w-1.5 rounded-full" style={{ background: dot }} aria-hidden /> : null}
+      <div className={`mt-2 flex items-center gap-2 text-xs ${active ? "font-medium text-[var(--sb-text)]" : "text-[var(--sb-text-secondary)]"}`}>
+        {status ? <StatusGlyph status={status} /> : null}
         {label}
       </div>
-    </div>
+      <span className={`absolute inset-x-0 bottom-0 h-[2px] transition-opacity ${active ? "opacity-100" : "opacity-0"}`} style={{ background: status ? DOT_FILL[status] : "#f5f5f7" }} aria-hidden />
+    </button>
   );
 }
 

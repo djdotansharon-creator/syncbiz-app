@@ -48,7 +48,8 @@ async function pure(): Promise<void> {
     src.includes(`t.liveBranchId ? await sendCommandWithAck(t.liveBranchId, "PLAY_INTERRUPT", { url: jingle.url }) : { delivered: false, reason: "no_station" }`) &&
     // 2026-10-11 regional map: the brand scope now comes from applyControlRoomFilters().brandRows (brand only — never cut
     // by region / search; covered by verify-control-room-regions F8). Same invariant, new wording.
-    view.includes(`applyControlRoomFilters(rows, { brand: activeFilter, query: search, region: regionFocus })`) &&
+    // 2026-10-12 status filter: the call gained status / statusOf (brandRows stays brand-only — verify-control-room-regions F8 / S-tests).
+    view.includes(`applyControlRoomFilters(rows, { brand: activeFilter, query: search, region: regionFocus, status: activeStatus`) &&
     /key=\{activeFilter\}\s*\n\s*targets=\{brandRows\.map/.test(view));
 }
 

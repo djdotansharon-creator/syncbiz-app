@@ -83,6 +83,22 @@ import("../lib/control-room-filters").then(({ applyControlRoomFilters, matchesBr
   assert("F9 clearing everything → the full network; filtersActive reflects any filter",
     !run("all", "  ", null).filtersActive && run("all", "", "south").filtersActive && run("BE", "", null).filtersActive && run("all", "", null).visibleRows.length === 8);
   assert("F11 Judea & Samaria branch belongs to Sharon & Shomron (never Outside)", names(run("BE", "", "sharon-shomron")) === "BE Ariel");
+  // ── Status filter (KPI counters, owner 2026-10-12) — combined with Brand + Region + Search ──
+  type S = "playing" | "idle" | "offline" | "install" | "unknown";
+  const st: Record<string, S> = { "BE Rishon Gold": "playing", "BE Rishon West": "offline", "Universe Rishon": "idle", "BE Haifa": "offline", "BE Jerusalem": "install", "BE No Location": "unknown", "BE Ariel": "idle", "BE Rome": "offline" };
+  const srows = [...rows, mk("BE Eilat", "BE", "Eilat", 29.5577, 34.9519, "108"), mk("BE Beersheba", "BE", "Beersheba", 31.2518, 34.7913, "109"), mk("UNV Eilat", "UNV", "Eilat", 29.55, 34.95, "031")];
+  Object.assign(st, { "BE Eilat": "offline", "BE Beersheba": "playing", "UNV Eilat": "offline" });
+  const runS = (brand: string, query: string, region: RegionId | null, status: "all" | "playing" | "online" | "offline" | "install") =>
+    applyControlRoomFilters(srows, { brand, query, region, status, statusOf: (r) => st[r.name] });
+  assert("S1 BE + South + Offline → only BE branches in the South that are offline", names(runS("BE", "", "south", "offline")) === "BE Eilat");
+  assert("S2 Online = connected (playing or idle); Offline ≠ Needs installation",
+    names(runS("all", "", null, "online")) === "BE Rishon Gold,Universe Rishon,BE Ariel,BE Beersheba" && names(runS("all", "", null, "install")) === "BE Jerusalem" && !runS("all", "", null, "offline").visibleRows.some((r) => r.name === "BE Jerusalem"));
+  const k = runS("BE", "", "south", "offline").statusCounts;
+  assert("S3 KPI counts follow brand + region + search but not the chosen status (every KPI keeps its number)",
+    k.all === 2 && k.offline === 1 && k.playing === 1 && k.online === 1 && k.install === 0);
+  assert("S4 status all = no status filter; status is part of filtersActive; Broadcast scope stays brand only",
+    runS("all", "", null, "all").visibleRows.length === srows.length && runS("all", "", null, "offline").filtersActive && runS("BE", "", "south", "offline").brandRows.length === 9);
+  assert("S5 region hover counts follow the status filter", runS("all", "", null, "offline").regionCounts.south === 2 && runS("all", "", null, "offline").regionCounts["gush-dan"] === 1);
   assert("F10 multi-word search: every word must match", matchesBranchSearch({ name: "BE Rishon Gold", branchNumber: "101", city: "Rishon LeZion", formattedAddress: null }, "gold 101") &&
     !matchesBranchSearch({ name: "BE Rishon Gold", branchNumber: "101", city: "Rishon LeZion", formattedAddress: null }, "gold haifa"));
   console.log(`\n${pass} passed, ${fail} failed`);
