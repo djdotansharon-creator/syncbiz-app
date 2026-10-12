@@ -34,7 +34,7 @@ assert("A2 secondary text ≥ 14 px; hit areas ≥ 44 px without layout change",
   /\.mgmt-type \.text-xs \{ font-size: 14px;/.test(css) && /top: min\(0px, calc\(50% - 22px\)\)/.test(css) && /min-height: 44px/.test(css));
 assert("A3 branch name 18 px (UX round 2026-10-12, was 16); section titles 18–22 px",
   view.includes('truncate text-lg font-semibold text-[var(--sb-text)]" dir="auto">{row.name}') && view.includes('text-xl font-semibold tracking-tight text-[var(--sb-text)]">{L.t("cr.title")}') &&
-  view.includes('text-xl font-semibold text-[var(--sb-text)]">{L.t("map.allIsrael")}'));
+  view.includes('truncate text-xl font-semibold text-[var(--sb-text)]">{regionFocus ? L.region(regionFocus) : L.t("map.allIsrael")}'));
 // 2026-10-12 owner decision (final): ONE circle per branch — no rings, no badges (300+ branches); status = brand color
 // clear (Online) / + slow breathing (Playing) / muted (Offline) / amber (Needs installation), always with a text label
 const legendAt = view.indexOf('aria-label={L.t("map.legendAria")}'), mapAt = view.indexOf("<NetworkMap");
@@ -60,12 +60,12 @@ assert("L3 Access Control: every screen state has dir={L.dir}; Hebrew heading \"
 // a region bar in the KPI language; the brand row cannot grow a vertical scrollbar
 const bc = readFileSync("components/control-room/broadcast-panel.tsx", "utf8");
 // owner 2026-10-12 (round 2): the screen fills the page; ONLY the right-hand table / panel scrolls; map column fixed
-const order = ['aria-label={L.t("cr.kpiAria")}', 'aria-label={L.t("cr.brandsAria")}', 'aria-label={L.t("map.regionsAria")}', 'aria-label={L.t("cr.searchAria")}'].map((k) => view.indexOf(k));
+const order = ['aria-label={L.t("cr.kpiAria")}', 'aria-label={L.t("cr.brandsAria")}', 'aria-label={L.t("cr.searchAria")}', 'role="toolbar"', 'aria-label={L.t("map.regionsAria")}'].map((k) => view.indexOf(k));
 assert("U1 one scroll, on the right-hand table only: screen fills the page; list / panels scroll; map column not scrolling; no nested lists in Broadcast",
   view.includes('className="flex h-full min-h-[680px] flex-col overflow-hidden rounded-2xl') && view.includes("grid min-h-0 flex-1") &&
   (view.match(/min-h-0 min-w-0 overflow-y-auto/g) ?? []).length === 4 && view.includes("min-h-0 min-w-0 divide-y divide-[color:var(--sb-border)] overflow-y-auto") &&
   !view.includes("lg:sticky") && !view.includes("max-h-[640px]") && !bc.includes("overflow-y-auto"));
-assert("U2 order statuses → brands → regions → search (owner: brands one row down); legend stacked on the left of the map; brands + regions are big tabs with a bar under the chosen one; region clicked again → All Israel",
-  order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])) && view.includes("absolute left-6 top-2 z-10 flex flex-col") && view.includes('<FilterTab label={L.t("map.allIsrael")}') &&
+assert("U2 order statuses → brands → search; map area = header toolbar (sizes + zoom, no frames) → regions strip (no separate back button); legend stacked on the left of the map; brands + regions are big tabs with a bar under the chosen one; region clicked again → All Israel",
+  order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])) && view.includes("absolute left-6 top-2 z-10 flex flex-col") && view.includes("controlsSlot={zoomSlot}") && !view.includes("rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5") && view.includes('<FilterTab label={L.t("map.allIsrael")}') &&
   view.includes("regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id)") && /bar=\{b\.color \?\? "#f5f5f7"\}/.test(view));
 console.log(`(+L3) ${pass} passed, ${fail} failed`);

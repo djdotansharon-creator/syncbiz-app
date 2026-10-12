@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { LAND_RINGS } from "@/lib/control-room-land";
 import { REGION_DRAW_ORDER, regionDrawRings, regionForPoint, type RegionId } from "@/lib/control-room-regions";
 import { cityLngLat } from "@/lib/control-room-geo";
@@ -130,6 +131,7 @@ export function BranchMap({
   height,
   fit = "country",
   regions,
+  controlsSlot,
 }: {
   branches: MapBranch[];
   selectedId: string | null;
@@ -140,6 +142,8 @@ export function BranchMap({
   fit?: "country" | "branches";
   /** Control Room: the region layer (absent → the plain map, e.g. the Add / Edit preview) */
   regions?: MapRegions;
+  /** Control Room: render + / − / Fit into this element (the map header toolbar) instead of over the map */
+  controlsSlot?: HTMLElement | null;
 }) {
   const L = useMgmt();
   const placed = useMemo(
@@ -409,20 +413,28 @@ export function BranchMap({
   const btn = "flex h-11 w-11 items-center justify-center text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--sb-text)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] disabled:opacity-35 disabled:hover:bg-transparent";
   const atMin = view.w <= MIN_VIEW_W + 0.5;
   const fitted = goal === target && Math.abs(view.w - target.w) < 0.5 && Math.abs(view.x - target.x) < 0.5 && Math.abs(view.y - target.y) < 0.5;
-  return (
-    <div className="relative flex h-full w-full items-center justify-center" dir="ltr">
-      {svg}
-      <div className="absolute right-2 top-2 flex flex-row overflow-hidden rounded-xl border border-[color:var(--sb-border)] bg-[rgba(18,18,22,0.92)] shadow-lg" role="group" aria-label={L.t("map.zoomAria")}>
-        <button type="button" className={btn} onClick={() => zoomStep(1)} disabled={atMin} aria-label={L.t("map.zoomIn")} title={L.t("map.zoomInTitle")}>
+  // in the header toolbar: the same tab language as the rest of the screen (no frame); otherwise a small overlay
+  const inSlot = !!controlsSlot;
+  const cls = inSlot
+    ? "flex h-11 w-11 items-center justify-center rounded-lg text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.05] hover:text-[var(--sb-text)] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] disabled:opacity-30 disabled:hover:bg-transparent"
+    : btn;
+  const controls = (
+      <div className={inSlot ? "flex items-center" : "absolute right-2 top-2 flex flex-row overflow-hidden rounded-xl border border-[color:var(--sb-border)] bg-[rgba(18,18,22,0.92)] shadow-lg"} role="group" aria-label={L.t("map.zoomAria")} dir="ltr">
+        <button type="button" className={cls} onClick={() => zoomStep(1)} disabled={atMin} aria-label={L.t("map.zoomIn")} title={L.t("map.zoomInTitle")}>
           <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
         </button>
-        <button type="button" className={`${btn} border-s border-[color:var(--sb-border)]`} onClick={() => zoomStep(-1)} disabled={!zoomedIn} aria-label={L.t("map.zoomOut")} title={L.t("map.zoomOut")}>
+        <button type="button" className={inSlot ? cls : `${btn} border-s border-[color:var(--sb-border)]`} onClick={() => zoomStep(-1)} disabled={!zoomedIn} aria-label={L.t("map.zoomOut")} title={L.t("map.zoomOut")}>
           <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M5 12h14" /></svg>
         </button>
-        <button type="button" className={`${btn} border-s border-[color:var(--sb-border)]`} onClick={() => setManual(null)} disabled={fitted} aria-label={L.t(focus ? "map.fitRegion" : "map.fitAll")} title={L.t(focus ? "map.fitRegion" : "map.fitAll")}>
+        <button type="button" className={inSlot ? cls : `${btn} border-s border-[color:var(--sb-border)]`} onClick={() => setManual(null)} disabled={fitted} aria-label={L.t(focus ? "map.fitRegion" : "map.fitAll")} title={L.t(focus ? "map.fitRegion" : "map.fitAll")}>
           <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
         </button>
       </div>
+  );
+  return (
+    <div className="relative flex h-full w-full items-center justify-center" dir="ltr">
+      {svg}
+      {inSlot ? createPortal(controls, controlsSlot!) : controls}
     </div>
   );
 }

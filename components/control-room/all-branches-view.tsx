@@ -110,6 +110,8 @@ export function AllBranchesView() {
   /** regional map: the focused region (null = All Israel) + branch search — combined with the brand filter */
   const [regionFocus, setRegionFocus] = useState<RegionId | null>(null);
   const [mapSize, setMapSizeState] = useState<MapSize>("balanced");
+  /** the map header toolbar hosts the map's + / − / Fit */
+  const [zoomSlot, setZoomSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
     try {
       const v = window.localStorage.getItem(MAP_SIZE_KEY);
@@ -293,15 +295,6 @@ export function AllBranchesView() {
       ) : null}
 
       {dbBranches && rows.length > 0 ? (
-        <div className="flex overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("map.regionsAria")}>
-          <FilterTab label={L.t("map.allIsrael")} count={regionAllCount} active={!regionFocus} onClick={() => setRegionFocus(null)} />
-          {REGIONS.map((r) => (
-            <FilterTab key={r.id} label={L.region(r.id)} count={regionCounts[r.id] ?? 0} active={regionFocus === r.id} onClick={() => (regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id))} />
-          ))}
-        </div>
-      ) : null}
-
-      {dbBranches && rows.length > 0 ? (
         <div className="flex flex-wrap items-center gap-3 border-b border-[color:var(--sb-border)] px-6 py-2.5">
           <label className="relative flex min-w-[220px] max-w-md flex-1 items-center">
             <svg className="pointer-events-none absolute start-3.5 h-[18px] w-[18px] text-[var(--sb-text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
@@ -343,42 +336,41 @@ export function AllBranchesView() {
           style={{ "--cr-map-w": size.width } as CSSProperties}
         >
           <div className="hidden min-h-0 min-w-0 flex-col overflow-hidden border-e border-[color:var(--sb-border)] lg:flex">
-            <div className="flex items-center justify-between gap-3 px-6 pb-1 pt-3">
-              {regionFocus ? (
-                <div className="flex min-w-0 items-center gap-3">
-                  {/* the way back is big and obvious (also: the "All Israel" tab above, or click the region tab again) */}
-                  <button type="button" onClick={() => setRegionFocus(null)} className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[color:var(--sb-border-strong)] bg-white/[0.04] px-3.5 py-2 text-sm font-semibold text-[var(--sb-text)] hover:bg-white/[0.08]">
-                    <svg className="h-4 w-4 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
-                    {L.t("map.allIsrael")}
-                  </button>
-                  <div className="min-w-0">
-                    <div className="truncate text-xl font-semibold text-[var(--sb-text)]">{L.region(regionFocus)}</div>
-                    <div className="text-sm text-[var(--sb-text-secondary)]">{L.branches(visibleRows.length)}</div>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex min-w-0 items-baseline gap-3" title={L.t("map.regionsHint", { branches: L.branches(visibleRows.length), regions: REGIONS.length })}>
-                  <div className="text-xl font-semibold text-[var(--sb-text)]">{L.t("map.allIsrael")}</div>
-                  <div className="text-sm text-[var(--sb-text-secondary)]">{L.branches(visibleRows.length)}</div>
-                </div>
-              )}
-              <div className="flex shrink-0 rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5" role="radiogroup" aria-label={L.t("map.sizeAria")}>
-                {MAP_SIZES.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={mapSize === m.id}
-                    onClick={() => setMapSize(m.id)}
-                    title={L.t("map.sizeTitle", { label: L.t(m.label) })}
-                    className={`relative rounded-md px-3 py-2 text-sm font-medium transition-colors before:absolute before:-inset-y-1 before:inset-x-0 before:content-[''] ${
-                      mapSize === m.id ? "bg-white/[0.10] text-[var(--sb-text)]" : "text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]"
-                    }`}
-                  >
-                    {L.t(m.label)}
-                  </button>
-                ))}
+            {/* map header: the place (All Israel / region) + ONE toolbar — map size (LED under the chosen one) and zoom */}
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-[color:var(--sb-border)] px-6 pt-1">
+              <div className="flex min-w-0 items-baseline gap-3 py-2" title={L.t("map.regionsHint", { branches: L.branches(visibleRows.length), regions: REGIONS.length })}>
+                <div className="truncate text-xl font-semibold text-[var(--sb-text)]">{regionFocus ? L.region(regionFocus) : L.t("map.allIsrael")}</div>
+                <div className="shrink-0 text-sm text-[var(--sb-text-secondary)]">{L.branches(visibleRows.length)}</div>
               </div>
+              <div className="flex items-center" role="toolbar" aria-label={L.t("map.sizeAria")}>
+                <div className="flex items-center" role="radiogroup" aria-label={L.t("map.sizeAria")}>
+                  {MAP_SIZES.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={mapSize === m.id}
+                      onClick={() => setMapSize(m.id)}
+                      title={L.t("map.sizeTitle", { label: L.t(m.label) })}
+                      className={`relative flex h-11 items-center whitespace-nowrap px-3 text-sm transition-colors ${
+                        mapSize === m.id ? "font-semibold text-[var(--sb-text)]" : "font-medium text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]"
+                      }`}
+                    >
+                      {L.t(m.label)}
+                      <span className={`absolute inset-x-2 bottom-0 h-[3px] rounded-full bg-[var(--sb-accent)] transition-opacity ${mapSize === m.id ? "opacity-100" : "opacity-0"}`} aria-hidden />
+                    </button>
+                  ))}
+                </div>
+                <span className="mx-1 h-5 w-px bg-white/[0.12]" aria-hidden />
+                <span ref={setZoomSlot} className="flex items-center" />
+              </div>
+            </div>
+            {/* regions: a strip right under the map header (All Israel is the first tab — no separate back button) */}
+            <div className="flex flex-wrap border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("map.regionsAria")}>
+              <FilterTab label={L.t("map.allIsrael")} count={regionAllCount} active={!regionFocus} onClick={() => setRegionFocus(null)} />
+              {REGIONS.map((r) => (
+                <FilterTab key={r.id} label={L.region(r.id)} count={regionCounts[r.id] ?? 0} active={regionFocus === r.id} onClick={() => (regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id))} />
+              ))}
             </div>
             <div className="relative flex min-h-0 flex-1 items-stretch justify-center px-6 pb-5">
               {/* legend: one under the other, on the left side of the map (owner) */}
@@ -395,6 +387,7 @@ export function AllBranchesView() {
                 onSelect={openBranch}
                 regions={{ counts: regionCounts, focus: regionFocus, onFocus: focusRegion }}
                 height="100%"
+                controlsSlot={zoomSlot}
               />
             </div>
             {!regionFocus && (noLocationCount > 0 || outsideCount > 0) ? (
@@ -497,7 +490,7 @@ function FilterTab({ label, count, active, onClick, dot, bar }: { label: string;
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`relative flex min-w-[124px] flex-1 shrink-0 flex-col items-start px-5 py-2.5 text-start transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] ${
+      className={`relative flex flex-auto flex-col items-start px-4 py-2 text-start transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] ${
         active ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
       }`}
     >
