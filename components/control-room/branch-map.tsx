@@ -355,14 +355,14 @@ export function BranchMap({
           <g key={d.id} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); onSelect(d.id); }}>
             <title>{`${d.name} · ${L.t(STATUS_KEY[d.status])}`}</title>
             {/* selection outline (not a status) */}
-            {selected ? <circle cx={x} cy={y} r={10.5 * s} fill="none" stroke="#fff" strokeWidth={1.5 * s} /> : null}
+            {selected ? <circle cx={x} cy={y} r={9.5 * s} fill="none" stroke="#fff" strokeWidth={1.5 * s} /> : null}
             {(() => {
               const m = markerLook(d.status, d.brandColor);
               return (
                 <circle
                   cx={x}
                   cy={y}
-                  r={6 * s}
+                  r={5 * s}
                   fill={m.fill}
                   fillOpacity={m.opacity}
                   stroke="rgba(10,10,12,0.85)"

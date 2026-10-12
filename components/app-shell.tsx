@@ -1412,6 +1412,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                 Explicit sort guarantees display order: Library → Schedules → Radio → Settings */}
             {isManagementRoute ? (
               <nav className="flex shrink-0 items-end gap-1 pb-0" aria-label={mgmt(locale).t("nav.aria")} dir={mgmt(locale).dir}>
+                {/* exit management: first in the bar, a clear button (not another tab) — back arrow + music note */}
+                <Link
+                  href="/library"
+                  title={mgmt(locale).t("nav.exitTitle")}
+                  className="mb-[4px] me-4 inline-flex h-9 items-center gap-2 rounded-xl border border-white/[0.16] bg-white/[0.06] px-3.5 text-[14px] font-semibold text-slate-100 transition-colors hover:border-white/[0.28] hover:bg-white/[0.12] hover:text-white"
+                >
+                  <svg className="h-4 w-4 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+                  {mgmt(locale).t("nav.backToPlayer")}
+                </Link>
+                <span className="mb-[10px] me-2 h-5 w-px bg-white/[0.12]" aria-hidden />
                 {([
                   { href: "/dashboard", label: mgmt(locale).t("nav.dashboard"), active: pathname === "/dashboard" || pathname.startsWith("/dashboard/") },
                   { href: "/owner/control-room", label: mgmt(locale).t("nav.controlRoom"), active: pathname.startsWith("/owner/control-room") },
@@ -1421,24 +1432,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                     key={item.href}
                     href={item.href}
                     aria-current={item.active ? "page" : undefined}
-                    className={`relative px-3.5 pb-[6px] pt-[4px] text-[13px] font-medium transition-colors duration-150 focus:outline-none ${
-                      item.active ? "text-slate-50" : "text-slate-500 hover:text-slate-200"
+                    className={`relative px-4 pb-[7px] pt-[5px] text-[15px] transition-colors duration-150 focus:outline-none ${
+                      item.active ? "font-semibold text-slate-50" : "font-medium text-slate-400 hover:text-slate-100"
                     }`}
                   >
                     {item.label}
                     <span
-                      className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-[#f5f5f7] transition-opacity duration-200 ${item.active ? "opacity-100" : "opacity-0"}`}
+                      className={`absolute bottom-0 left-2 right-2 h-[3px] rounded-full bg-[#f5f5f7] transition-opacity duration-200 ${item.active ? "opacity-100" : "opacity-0"}`}
                       aria-hidden
                     />
                   </Link>
                 ))}
-                <Link
-                  href="/library"
-                  className="mb-[3px] ms-3 inline-flex items-center gap-1.5 rounded-lg border border-white/[0.12] px-2.5 py-[3px] text-[12px] font-medium text-slate-300 transition-colors hover:border-white/[0.22] hover:text-slate-50"
-                >
-                  <svg className="h-3.5 w-3.5 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
-                  {mgmt(locale).t("nav.backToPlayer")}
-                </Link>
               </nav>
             ) : (
             <nav className="flex shrink-0 items-end pb-0" aria-label="Main">

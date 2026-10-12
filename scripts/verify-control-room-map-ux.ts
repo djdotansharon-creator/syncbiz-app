@@ -32,9 +32,9 @@ assert("A1 readability layer is scoped to the 3 Management pages only",
   page("app/(app)/access-control/page.tsx").includes(`className="mgmt-type `) && (css.match(/^\.mgmt-type/gm) ?? []).length >= 6 && !/^\s*\.text-xs\s*\{/m.test(css));
 assert("A2 secondary text ≥ 14 px; hit areas ≥ 44 px without layout change",
   /\.mgmt-type \.text-xs \{ font-size: 14px;/.test(css) && /top: min\(0px, calc\(50% - 22px\)\)/.test(css) && /min-height: 44px/.test(css));
-assert("A3 branch name 16 px; section titles 18–22 px",
-  view.includes('truncate text-base font-semibold text-[var(--sb-text)]" dir="auto">{row.name}') && view.includes('text-xl font-semibold tracking-tight text-[var(--sb-text)]">{L.t("cr.title")}') &&
-  view.includes('text-lg font-semibold text-[var(--sb-text)]">{L.t("map.allIsrael")}'));
+assert("A3 branch name 18 px (UX round 2026-10-12, was 16); section titles 18–22 px",
+  view.includes('truncate text-lg font-semibold text-[var(--sb-text)]" dir="auto">{row.name}') && view.includes('text-xl font-semibold tracking-tight text-[var(--sb-text)]">{L.t("cr.title")}') &&
+  view.includes('text-xl font-semibold text-[var(--sb-text)]">{L.t("map.allIsrael")}'));
 // 2026-10-12 owner decision (final): ONE circle per branch — no rings, no badges (300+ branches); status = brand color
 // clear (Online) / + slow breathing (Playing) / muted (Offline) / amber (Needs installation), always with a text label
 const legendAt = view.indexOf('aria-label={L.t("map.legendAria")}'), mapAt = view.indexOf("<NetworkMap");
@@ -48,7 +48,7 @@ assert("L1 EN / HE management dictionary: Hebrew typed against English (Record<M
   /export const MGMT_HE: Record<MgmtKey, string>/.test(dict) && dict.includes('"nav.accessControl": "הרשאות"') && dict.includes('"map.focus": "מיקוד מפה"') &&
   dict.includes('"region.sharon-shomron": "השרון והשומרון"') && dict.includes('"status.offline": "לא מחובר"') && dict.includes('"cr.clearFilters": "נקה סינונים"'));
 assert("L2 RTL only in management (Control Room root dir), the map box stays LTR, back arrows flip",
-  view.includes('<div dir={L.dir} className="overflow-hidden rounded-2xl') && map.includes('items-center justify-center" dir="ltr">') && /rtl:rotate-180/.test(view) &&
+  view.includes('<div dir={L.dir} className="overflow-clip rounded-2xl') && map.includes('items-center justify-center" dir="ltr">') && /rtl:rotate-180/.test(view) &&
   readFileSync("lib/locale-context.tsx", "utf8").includes('document.documentElement.dir = "ltr"'));
 console.log(`\n${pass} passed, ${fail} failed`);
 // Stage 2 (2026-10-12): Access Control + Dashboard — same dictionary, RTL in Hebrew, owner naming
@@ -56,4 +56,12 @@ const ac = readFileSync("components/access-control-console.tsx", "utf8"), dash =
 assert("L3 Access Control: every screen state has dir={L.dir}; Hebrew heading \"ניהול הרשאות\"; never \"בקרת גישה\" / \"הרשאות גישה\"; Dashboard RTL",
   (ac.match(/dir=\{L\.dir\}/g) ?? []).length >= 4 && dict.includes('"ac.title": "ניהול הרשאות"') && !/בקרת גישה|הרשאות גישה/.test(dict + ac) &&
   dash.includes("dir={L.dir}") && dash.includes("const L = mgmt(locale)"));
+// UX round 2026-10-12: ONE scroll (the page) — no inner scroll windows in the Control Room; the map column is sticky;
+// a region bar in the KPI language; the brand row cannot grow a vertical scrollbar
+const bc = readFileSync("components/control-room/broadcast-panel.tsx", "utf8");
+assert("U1 one scroll only: no max-h / overflow-y-auto windows in the Control Room view or Broadcast; map column sticky; brands overflow-y-hidden",
+  !view.includes("overflow-y-auto") && !view.includes("max-h-[640px]") && !bc.includes("overflow-y-auto") && view.includes("lg:sticky lg:top-0") &&
+  view.includes("overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)] px-6") && view.includes("overflow-clip rounded-2xl"));
+assert("U2 region bar: All Israel + 7 regions as big tabs with a bar under the chosen one; the chosen region clicked again → All Israel",
+  view.includes('<RegionTab label={L.t("map.allIsrael")}') && view.includes("regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id)") && view.includes("h-[3px] bg-[var(--sb-accent)]"));
 console.log(`(+L3) ${pass} passed, ${fail} failed`);

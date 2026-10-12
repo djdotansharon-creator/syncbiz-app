@@ -129,7 +129,7 @@ export function BroadcastPanel({
         ) : jingles.length === 0 ? (
           <p className="mt-3 text-sm text-[var(--sb-text-secondary)]">{L.t("bc.empty")}</p>
         ) : (
-          <ul className="mt-2 max-h-44 overflow-y-auto">
+          <ul className="mt-2">
             {jingles.map((j) => (
               <li key={j.id}>
                 <button
@@ -179,7 +179,7 @@ export function BroadcastPanel({
           </button>
         </div>
         {listed.length === 0 ? <p className="mt-3 text-sm text-[var(--sb-text-secondary)]">{L.t("bc.noBranches")}</p> : null}
-        <ul className="mt-3 max-h-64 space-y-1 overflow-y-auto">
+        <ul className="mt-3 space-y-1">
           {listed.map((t) => {
             const isOnline = !!t.liveBranchId;
             const r = results?.[t.id];
