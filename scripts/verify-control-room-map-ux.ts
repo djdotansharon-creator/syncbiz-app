@@ -51,3 +51,9 @@ assert("L2 RTL only in management (Control Room root dir), the map box stays LTR
   view.includes('<div dir={L.dir} className="overflow-hidden rounded-2xl') && map.includes('items-center justify-center" dir="ltr">') && /rtl:rotate-180/.test(view) &&
   readFileSync("lib/locale-context.tsx", "utf8").includes('document.documentElement.dir = "ltr"'));
 console.log(`\n${pass} passed, ${fail} failed`);
+// Stage 2 (2026-10-12): Access Control + Dashboard — same dictionary, RTL in Hebrew, owner naming
+const ac = readFileSync("components/access-control-console.tsx", "utf8"), dash = page("app/(app)/dashboard/page.tsx");
+assert("L3 Access Control: every screen state has dir={L.dir}; Hebrew heading \"ניהול הרשאות\"; never \"בקרת גישה\" / \"הרשאות גישה\"; Dashboard RTL",
+  (ac.match(/dir=\{L\.dir\}/g) ?? []).length >= 4 && dict.includes('"ac.title": "ניהול הרשאות"') && !/בקרת גישה|הרשאות גישה/.test(dict + ac) &&
+  dash.includes("dir={L.dir}") && dash.includes("const L = mgmt(locale)"));
+console.log(`(+L3) ${pass} passed, ${fail} failed`);

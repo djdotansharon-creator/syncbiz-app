@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { getApiBase } from "@/lib/api-base";
 import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
+import { mgmt } from "@/lib/i18n/management";
 import type { Announcement, Device, LogEntry, Schedule } from "@/lib/types";
 
 async function getData() {
@@ -47,6 +48,7 @@ function isScheduleActiveToday(schedule: Schedule): boolean {
 export default async function DashboardPage() {
   const locale = await getLocale();
   const t = getTranslations(locale);
+  const L = mgmt(locale); // management screens: RTL in Hebrew
   const { schedules, devices, announcements, logs } = await getData();
 
   const onlineCount = devices.filter((d) => d.status === "online").length;
@@ -60,7 +62,7 @@ export default async function DashboardPage() {
 
   return (
     // Management Mode: full screen, outside the player workspace rails — this page scrolls on its own (like Control Room)
-    <div className="mgmt-type h-full space-y-8 overflow-y-auto pb-6">
+    <div dir={L.dir} className="mgmt-type h-full space-y-8 overflow-y-auto pb-6">
       <div>
         <h1 className="text-xl font-semibold text-slate-50">{t.dashboard}</h1>
         <p className="mt-1 text-sm text-slate-400">{t.dashboardOverview}</p>
@@ -112,7 +114,7 @@ export default async function DashboardPage() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
-          <h2 className="text-sm font-semibold text-slate-50">{t.deviceHealthSummary}</h2>
+          <h2 className="text-lg font-semibold text-slate-50">{t.deviceHealthSummary}</h2>
           <p className="mt-1 text-xs text-slate-500">{t.statusOfConnectedAgents}</p>
           {devices.length === 0 ? (
             <p className="mt-4 text-sm text-slate-500">{t.noDevicesYet}</p>
@@ -123,7 +125,7 @@ export default async function DashboardPage() {
                   key={d.id}
                   className="flex items-center justify-between rounded-lg border border-slate-800/60 bg-slate-900/40 px-3 py-2 text-sm"
                 >
-                  <Link href={`/devices/${d.id}`} className="font-medium text-slate-200 hover:text-sky-300">
+                  <Link href={`/devices/${d.id}`} className="font-medium text-slate-200 hover:text-sky-300" dir="auto">
                     {d.name}
                   </Link>
                   <div className="flex items-center gap-2">
@@ -136,7 +138,7 @@ export default async function DashboardPage() {
                             : "bg-slate-500"
                       }`}
                     />
-                    <span className="capitalize text-slate-400">{d.status}</span>
+                    <span className="text-slate-400">{d.status === "online" ? L.t("dash.statusOnline") : d.status === "maintenance" ? L.t("dash.maintenance") : d.status === "offline" ? L.t("dash.statusOffline") : d.status}</span>
                   </div>
                 </div>
               ))}
@@ -145,7 +147,7 @@ export default async function DashboardPage() {
         </div>
 
         <div className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
-          <h2 className="text-sm font-semibold text-slate-50">{t.recentActivity}</h2>
+          <h2 className="text-lg font-semibold text-slate-50">{t.recentActivity}</h2>
           <p className="mt-1 text-xs text-slate-500">{t.playbackAndControlEvents}</p>
           {recentLogs.length === 0 ? (
             <p className="mt-4 text-sm text-slate-500">{t.noRecentActivity}</p>
@@ -171,7 +173,7 @@ export default async function DashboardPage() {
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-slate-200">{log.message}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">
+                      <p className="mt-0.5 text-xs text-slate-500" dir="ltr">
                         {new Date(log.timestamp).toLocaleString(undefined, {
                           month: "short",
                           day: "numeric",
@@ -190,7 +192,7 @@ export default async function DashboardPage() {
             href="/logs"
             className="mt-4 inline-block text-sm text-sky-400 hover:text-sky-300"
           >
-            {t.logs} →
+            {t.logs} {L.dir === "rtl" ? "←" : "→"}
           </Link>
         </div>
       </div>
