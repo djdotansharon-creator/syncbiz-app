@@ -1274,10 +1274,23 @@ model Announcement {
   windowStart          String   @default("")
   windowEnd            String   @default("")
   createdAt            DateTime @default(now())
+  /// Jingles Stage 1 (owner 2026-10-12). `branchId` above stays LEGACY and is never used for origin / audience.
+  /// ORIGIN — the branch that really created the jingle; NULL when HQ created it.
+  originBranchId       String?
+  /// AUDIENCE — who may receive it: UNASSIGNED | LOCAL | BRAND | REGION | BRAND_REGION | NETWORK (NULL = not a jingle).
+  audience             String?
+  /// LOCAL target branch (LOCAL only).
+  audienceBranchId     String?
+  /// BRAND / BRAND_REGION.
+  audienceBrandId      String?
+  /// REGION / BRAND_REGION — stable operational region key (north, haifa, sharon-shomron, gush-dan, shfela,
+  /// jerusalem-modiin, south); a branch's region is computed from its lat / lng with the map's code (one source of truth).
+  audienceRegion       String?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
+  @@index([workspaceId, audience])
 }
 
 model AnnouncementChannel {
