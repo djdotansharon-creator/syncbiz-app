@@ -12,6 +12,8 @@ import { BranchForm } from "@/components/control-room/branch-form";
 import { NetworkCode } from "@/components/control-room/network-code";
 import { BrandManager, BrandBadge, DEFAULT_BRAND_COLOR, type BrandRow } from "@/components/control-room/brand-manager";
 import { FilterTab, RegionChip, Stat } from "@/components/management/primitives";
+import { BranchJingles, JinglesHqPanel } from "@/components/control-room/jingles-panels";
+import { suggestAudience, type AudienceDeps } from "@/components/control-room/jingle-audience";
 import { REGIONS, branchRegion, type RegionId } from "@/lib/control-room-regions";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
 import type { Mgmt, MgmtKey } from "@/lib/i18n/management";
@@ -104,11 +106,23 @@ export function AllBranchesView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** part 2: the branch whose control panel is open (row / arrow / map dot) */
   const [openId, setOpenId] = useState<string | null>(null);
-  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setBroadcastOpen(false); setForm(null); setBrandsOpen(false); };
+  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setBroadcastOpen(false); setForm(null); setBrandsOpen(false); setJinglesOpen(false); };
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   /** Organization → Brand → Branch (owner): brands + which brand each branch belongs to */
   const [brandsData, setBrandsData] = useState<BrandsData | null>(null);
   const [brandsOpen, setBrandsOpen] = useState(false);
+  /** Control Room → Jingles (HQ): the jingles panel in the right column (the map / filters stay = the context stays) */
+  const [jinglesOpen, setJinglesOpen] = useState(false);
+  /** HQ = access type OWNER (the existing permission mechanism) — HQ-only jingle actions are shown only to HQ */
+  const [isHQ, setIsHQ] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { accessType?: string } | null) => { if (!cancelled) setIsHQ(d?.accessType === "OWNER"); })
+      .catch(() => { /* not HQ */ });
+    return () => { cancelled = true; };
+  }, []);
   const [brandFilter, setBrandFilter] = useState<string>("all");
   /** regional map: the focused region (null = All Israel) + branch search — combined with the brand filter */
   const [regionFocus, setRegionFocus] = useState<RegionId | null>(null);
@@ -225,6 +239,10 @@ export function AllBranchesView() {
   const activeStatus: StatusFilter = liveKnown || statusFilter === "install" ? statusFilter : "all";
   const { brandRows, visibleRows, regionCounts, statusCounts, noLocationCount, outsideCount, filtersActive } =
     applyControlRoomFilters(rows, { brand: activeFilter, query: search, region: regionFocus, status: activeStatus, statusOf: (r) => rowStatus(r, liveKnown) });
+  const jingleDeps: AudienceDeps = {
+    brands: (brandsData?.brands ?? []).map((b) => ({ id: b.id, name: b.name, color: b.color })),
+    branches: rows.map((r) => ({ id: r.id, brandId: r.brandId, regionId: r.regionId, name: r.name, branchNumber: r.branchNumber })),
+  };
   const clearFilters = () => { setBrandFilter("all"); setSearch(""); setRegionFocus(null); setStatusFilter("all"); };
   const toggleStatus = (s: StatusFilter) => setStatusFilter((cur) => (s === "all" || cur === s ? "all" : s));
   const colorOf = (brandId: string | null) => (brandId ? brandById.get(brandId)?.color ?? DEFAULT_BRAND_COLOR : null);
@@ -243,7 +261,7 @@ export function AllBranchesView() {
         <NetworkCode />
         <button
           type="button"
-          onClick={() => { setOpenId(null); setBroadcastOpen(false); setForm(null); setBrandsOpen(true); }}
+          onClick={() => { setOpenId(null); setBroadcastOpen(false); setForm(null); setJinglesOpen(false); setBrandsOpen(true); }}
           disabled={!brandsData}
           className="inline-flex items-center gap-1.5 rounded-xl border border-[color:var(--sb-border-strong)] px-3.5 py-2 text-sm font-medium text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40"
         >
@@ -251,15 +269,27 @@ export function AllBranchesView() {
         </button>
         <button
           type="button"
-          onClick={() => { setOpenId(null); setBroadcastOpen(false); setBrandsOpen(false); setForm({ mode: "add" }); }}
+          onClick={() => { setOpenId(null); setBroadcastOpen(false); setBrandsOpen(false); setJinglesOpen(false); setForm({ mode: "add" }); }}
           disabled={!dbBranches}
           className="inline-flex items-center gap-1.5 rounded-xl border border-[color:var(--sb-border-strong)] px-3.5 py-2 text-sm font-medium text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40"
         >
           <span aria-hidden>+</span> {L.t("cr.addBranch")}
         </button>
+        {isHQ ? (
+          <button
+            type="button"
+            onClick={() => { setForm(null); setBrandsOpen(false); setBroadcastOpen(false); setJinglesOpen(true); }}
+            disabled={!dbBranches}
+            aria-pressed={jinglesOpen}
+            className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-sm font-medium text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40 ${jinglesOpen ? "border-[color:var(--sb-accent)]" : "border-[color:var(--sb-border-strong)]"}`}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+            {L.t("jg.title")}
+          </button>
+        ) : null}
         <button
           type="button"
-          onClick={() => { setOpenId(null); setForm(null); setBrandsOpen(false); setBroadcastOpen(true); }}
+          onClick={() => { setOpenId(null); setForm(null); setBrandsOpen(false); setJinglesOpen(false); setBroadcastOpen(true); }}
           disabled={!liveKnown || !dbBranches}
           className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black transition-transform active:scale-95 disabled:opacity-40"
         >
@@ -434,6 +464,18 @@ export function AllBranchesView() {
                 </div>
               );
             }
+            if (jinglesOpen && isHQ) {
+              return (
+                <div className="min-h-0 min-w-0 overflow-y-auto">
+                  <JinglesHqPanel
+                    deps={jingleDeps}
+                    L={L}
+                    suggestion={suggestAudience({ brandId: activeFilter !== "all" ? activeFilter : null, region: regionFocus, branchId: openId })}
+                    onClose={() => setJinglesOpen(false)}
+                  />
+                </div>
+              );
+            }
             if (brandsOpen && brandsData) {
               return (
                 <div className="min-h-0 min-w-0 overflow-y-auto">
@@ -448,7 +490,7 @@ export function AllBranchesView() {
                     key={activeFilter}
                     targets={brandRows.map((r) => {
                       const st = rowStatus(r, liveKnown);
-                      return { id: r.id, name: r.name, branchNumber: r.branchNumber, status: st, liveBranchId: r.live && (st === "playing" || st === "idle") ? r.live.branchId : null, brandId: r.brandId };
+                      return { id: r.id, name: r.name, branchNumber: r.branchNumber, status: st, liveBranchId: r.live && (st === "playing" || st === "idle") ? r.live.branchId : null, brandId: r.brandId, regionId: r.regionId };
                     })}
                     scope={activeFilter !== "all" && brandById.has(activeFilter) ? { name: brandById.get(activeFilter)!.name, color: brandById.get(activeFilter)!.color } : null}
                     onClose={() => setBroadcastOpen(false)}
@@ -466,6 +508,15 @@ export function AllBranchesView() {
                     onBack={() => setOpenId(null)}
                     onEdit={() => setForm({ mode: "edit", id: open.id })}
                     sendCommandTo={sendCommandTo}
+                  />
+                  {/* the branch's jingles: "Branch jingles" + "Available to this branch" (same library, server-filtered) */}
+                  <BranchJingles
+                    key={open.id}
+                    branch={{ id: open.id, name: open.name, branchNumber: open.branchNumber, liveBranchId: open.live && (rowStatus(open, liveKnown) === "playing" || rowStatus(open, liveKnown) === "idle") ? open.live.branchId : null }}
+                    deps={jingleDeps}
+                    isHQ={isHQ}
+                    L={L}
+                    sendCommandWithAck={sendCommandWithAck}
                   />
                 </div>
               );

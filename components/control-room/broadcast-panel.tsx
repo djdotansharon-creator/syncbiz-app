@@ -5,6 +5,8 @@ import type { RemoteCommand } from "@/lib/remote-control/types";
 import { StatusGlyph, type MapDotStatus } from "@/components/control-room/branch-map";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
 import type { MgmtKey } from "@/lib/i18n/management";
+import { isEligibleForBranch, isPlayable, rowAudience } from "@/lib/jingles/audience";
+import type { RegionId } from "@/lib/control-room-regions";
 
 /**
  * CONTROL ROOM — Broadcast (owner-approved 2026-10-09): pick a jingle → pick one / several / all online branches → Send.
@@ -16,7 +18,10 @@ import type { MgmtKey } from "@/lib/i18n/management";
  * "Not delivered" (no command sent). "Selected" = the checked online branches of that scope.
  */
 
-type Jingle = { id: string; title: string; url: string; durationSec: number | null };
+type Jingle = {
+  id: string; title: string; url: string; durationSec: number | null;
+  audience: string | null; audienceBranchId: string | null; audienceBrandId: string | null; audienceRegion: string | null;
+};
 
 export type BroadcastTarget = {
   id: string;
@@ -27,6 +32,8 @@ export type BroadcastTarget = {
   liveBranchId: string | null;
   /** brand of the branch (the default Brand when unassigned) */
   brandId: string | null;
+  /** operational region from lat / lng (the map's resolver) — for jingle eligibility */
+  regionId: RegionId | null;
 };
 
 /** the brand chosen at the top of the Control Room (null = all brands) */
@@ -35,7 +42,7 @@ type Mode = "all" | "selected";
 
 type Result = { delivered: boolean; reason?: string };
 
-const REASONS = new Set(["no_station", "not_authorized", "no_response", "not_connected"]);
+const REASONS = new Set(["no_station", "not_authorized", "no_response", "not_connected", "not_eligible"]);
 const reasonKey = (r?: string): MgmtKey | null => (r && REASONS.has(r) ? (`bc.reason.${r}` as MgmtKey) : null);
 
 export function BroadcastPanel({
@@ -78,9 +85,19 @@ export function BroadcastPanel({
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const jingle = jingles?.find((j) => j.id === jingleId) ?? null;
   // recipients: All = every branch of the scope (offline → Not delivered); Selected = the checked online ones
   const chosen = mode === "all" ? targets : online.filter((t) => selected.has(t.id));
+  // BROADCAST SAFETY: a jingle is offered only if it is playable (never UNASSIGNED) AND every recipient branch is
+  // eligible for it (same rules as the server). "All" without a brand → effectively NETWORK only; Brand A never sees
+  // a Brand B jingle. With nothing selected yet, the online branches of the scope decide.
+  const recipients = chosen.length ? chosen : mode === "all" ? targets : online;
+  const eligibleFor = (j: Jingle, t: BroadcastTarget) => isEligibleForBranch(rowAudience(j), { id: t.id, brandId: t.brandId, regionId: t.regionId });
+  const offered = useMemo(
+    () => (jingles ?? []).filter((j) => isPlayable(rowAudience(j)) && recipients.length > 0 && recipients.every((t) => eligibleFor(j, t))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- recipients derives from targets / mode / selected
+    [jingles, mode, selected, targets],
+  );
+  const jingle = offered.find((j) => j.id === jingleId) ?? null;
   const listed = targets; // the parent re-mounts this panel when the brand at the top changes (fresh selection)
   const canSend = !!jingle && chosen.length > 0 && !sending;
 
@@ -90,7 +107,12 @@ export function BroadcastPanel({
     setResults(null);
     // all branches in parallel: each answers on its own, a failure never blocks the others
     const settled = await Promise.all(
-      chosen.map(async (t) => [t.id, t.liveBranchId ? await sendCommandWithAck(t.liveBranchId, "PLAY_INTERRUPT", { url: jingle.url }) : { delivered: false, reason: "no_station" }] as const),
+      chosen.map(async (t) => [
+        t.id,
+        !eligibleFor(jingle, t)
+          ? { delivered: false, reason: "not_eligible" }
+          : t.liveBranchId ? await sendCommandWithAck(t.liveBranchId, "PLAY_INTERRUPT", { url: jingle.url }) : { delivered: false, reason: "no_station" },
+      ] as const),
     );
     setResults(Object.fromEntries(settled));
     setSending(false);
@@ -122,15 +144,16 @@ export function BroadcastPanel({
       {/* 1. jingle */}
       <section className="border-b border-[color:var(--sb-border)] px-6 py-5">
         <div className="text-xs text-[var(--sb-text-tertiary)]">{L.t("bc.stepJingle")}</div>
+        <p className="mt-1 text-xs text-[var(--sb-text-tertiary)]">{L.t("bc.eligibleHint")}</p>
         {jingleError ? (
           <p className="mt-3 text-sm text-[var(--sb-text-secondary)]">{L.t("bc.loadError")}</p>
         ) : jingles === null ? (
           <p className="mt-3 text-sm text-[var(--sb-text-secondary)]">{L.t("bc.loading")}</p>
-        ) : jingles.length === 0 ? (
+        ) : offered.length === 0 ? (
           <p className="mt-3 text-sm text-[var(--sb-text-secondary)]">{L.t("bc.empty")}</p>
         ) : (
           <ul className="mt-2">
-            {jingles.map((j) => (
+            {offered.map((j) => (
               <li key={j.id}>
                 <button
                   type="button"

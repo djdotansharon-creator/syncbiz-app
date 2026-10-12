@@ -765,11 +765,11 @@ async function fetchCloudLibrary(): Promise<JingleAsset[]> {
   const data = (await res.json()) as { items?: CloudJingle[] };
   return (data.items ?? []).map(cloudItemToAsset).slice(0, LIBRARY_MAX_ITEMS);
 }
-async function saveJingleToCloud(a: JingleAsset): Promise<JingleAsset> {
+async function saveJingleToCloud(a: JingleAsset, audience?: Record<string, unknown> | null): Promise<JingleAsset> {
   const res = await fetch("/api/jingles/library", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title: a.title, url: a.url, voiceId: a.voiceId, script: a.script, durationSec: durationLabelToSec(a.durationLabel) }),
+    body: JSON.stringify({ title: a.title, url: a.url, voiceId: a.voiceId, script: a.script, durationSec: durationLabelToSec(a.durationLabel), ...(audience ?? {}) }),
   });
   if (!res.ok) throw new Error(`library POST ${res.status}`);
   const data = (await res.json()) as { item: CloudJingle };
@@ -1059,7 +1059,19 @@ function ResultStrip({
 // ─── JinglesWorkspacePanel — center-area workspace ──────────────────────────
 
 /** Controller-style workspace: 3 tabs, persistent trigger pads, popups for detail actions. */
-export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): React.ReactElement {
+/** Control Room surface (HQ): the SAME Studio with Create only + the Audience chosen before Save. No local On-Air,
+ *  no Pads, no local Schedule — playback from the Control Room always goes to an explicit target elsewhere. */
+export type StudioControlRoomSurface = {
+  /** the Audience card rendered above the actions (owned by the Control Room) */
+  audienceCard: React.ReactNode;
+  /** the complete audience, or null while it is still being chosen (Save is blocked until then) */
+  audience: Record<string, unknown> | null;
+  onSaved?: () => void;
+  saveBlockedText: string;
+};
+
+export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () => void; controlRoom?: StudioControlRoomSurface }): React.ReactElement {
+  const isCR = !!controlRoom;
   // Core state
   const [pads, setPads] = useState<SamplerPadItem[]>(() => loadPads());
   const [flashPadId, setFlashPadId] = useState<string | null>(null);
@@ -1371,8 +1383,10 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
 
   const handleResultSaveToLibrary = useCallback(async () => {
     if (!resultCard) return;
+    if (controlRoom && !controlRoom.audience) { setGenerateError(controlRoom.saveBlockedText); return; }
     try {
-      const saved = await saveJingleToCloud(resultCard);
+      const saved = await saveJingleToCloud(resultCard, controlRoom ? controlRoom.audience : undefined);
+      controlRoom?.onSaved?.();
       // Cloud is authoritative — refetch so this client shows the same list every other client sees.
       try {
         setSavedAssets(await fetchCloudLibrary());
@@ -1385,7 +1399,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
       // Never claim a successful save. Surface the failure; keep the transient result for retry.
       setGenerateError("Couldn't save to the cloud library — check your connection and try again.");
     }
-  }, [resultCard]);
+  }, [resultCard, controlRoom]);
 
   const editingPad = editPadId ? pads.find((p) => p.id === editPadId) ?? null : null;
 
@@ -1427,6 +1441,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
       <div className="jc-ws-body">
         {/* Content scroll area: tabs + panels */}
         <div className="jc-ws-content">
+          {!isCR ? (
           <nav className="jc-ws-tabs" role="tablist">
             {(
               [
@@ -1448,7 +1463,10 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
             ))}
           </nav>
 
+          ) : null}
+
           {/* ── Quick Pads — horizontal quick-action strip (top) ────── */}
+          {!isCR ? (
           <div className="jcx-quickpads">
             <TriggerPads
               pads={pads}
@@ -1471,6 +1489,8 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
               }
             />
           </div>
+
+          ) : null}
 
           {/* Active workspace — the ONLY scroll region; header/tabs/pads stay fixed above */}
           <div className="jcx-active-workspace">
@@ -1595,7 +1615,8 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                       >
                         {!isDesktop && preview.previewUrl === resultCard.url ? "■ Stop" : "▶ Preview"}
                       </button>
-                      {isDesktop ? (
+                      {/* local On-Air never on the Control Room surface (HQ plays only to an explicit target) */}
+                      {isDesktop && !isCR ? (
                         <button
                           type="button"
                           className="jcx-result-play"
@@ -1633,6 +1654,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
               {generateError ? (
                 <div className="jc-err-msg jcx-action-err" role="alert">{generateError}</div>
               ) : null}
+              {controlRoom ? <div className="jcx-cr-audience">{controlRoom.audienceCard}</div> : null}
               <div className="jcx-action-bar">
                 <button
                   type="button"
@@ -1645,8 +1667,8 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                 {resultCard ? (
                   <>
                     <button type="button" className="jc-btn jc-btn--ghost" onClick={handleResultSaveToLibrary}>Save</button>
-                    <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setAssignForAsset(resultCard)}>Add to Pad</button>
-                    <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setScheduleForAsset(resultCard)}>Schedule</button>
+                    {!isCR ? <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setAssignForAsset(resultCard)}>Add to Pad</button> : null}
+                    {!isCR ? <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setScheduleForAsset(resultCard)}>Schedule</button> : null}
                   </>
                 ) : null}
               </div>
