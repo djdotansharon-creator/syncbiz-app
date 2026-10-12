@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LAND_RINGS } from "@/lib/control-room-land";
-import { REGIONS, type RegionId } from "@/lib/control-room-regions";
+import { REGION_DRAW_ORDER, regionDrawRings, regionForPoint, regionName, type RegionId } from "@/lib/control-room-regions";
 import { cityLngLat } from "@/lib/control-room-geo";
 
 /**
@@ -130,13 +130,16 @@ export function BranchMap({
   // region shapes in the SAME projection as the land (static: built once per projection)
   const regionShapes = useMemo(() => {
     if (!regions) return [];
-    return REGIONS.map((r) => {
-      const rings = r.rings.map((ring) => ring.map((pt) => project(pt)));
+    // operational regions: their sub-districts + municipal exceptions, in draw order (an exception is drawn with its
+    // region, after the region it cuts into)
+    return REGION_DRAW_ORDER.map((id) => {
+      const rings = regionDrawRings(id).map((ring) => ring.map((pt) => project(pt)));
       const d = rings.map((ring) => ring.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join("") + "Z").join("");
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const ring of rings) for (const [x, y] of ring) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
-      const main = rings.reduce((a, b) => (b.length > a.length ? b : a), rings[0]);
-      return { id: r.id as RegionId, name: r.name, d, bbox: { minX, minY, maxX, maxY }, label: centroid(main) };
+      const area = (ring: [number, number][]) => { let a = 0; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1]; return Math.abs(a); };
+      const main = rings.reduce((a, b) => (area(b) > area(a) ? b : a), rings[0]);
+      return { id, name: regionName(id), d, bbox: { minX, minY, maxX, maxY }, label: centroid(main) };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- shapes depend only on the projection
   }, [project, !!regions]);
@@ -146,12 +149,15 @@ export function BranchMap({
   const target = useMemo<ViewBox>(() => {
     const sh = focus ? regionShapes.find((r) => r.id === focus) : null;
     if (!sh) return FULL_VIEW;
+    const b = { ...sh.bbox };
+    for (const d of placed) { if (regionForPoint(d.at[0], d.at[1]) !== focus) continue; const [x, y] = project(d.at); b.minX = Math.min(b.minX, x); b.maxX = Math.max(b.maxX, x); b.minY = Math.min(b.minY, y); b.maxY = Math.max(b.maxY, y); }
     const pad = 28;
-    let w = sh.bbox.maxX - sh.bbox.minX + 2 * pad, h = sh.bbox.maxY - sh.bbox.minY + 2 * pad;
+    let w = b.maxX - b.minX + 2 * pad, h = b.maxY - b.minY + 2 * pad;
     if (w / h > W / H) h = (w * H) / W; else w = (h * W) / H; // keep the map's aspect ratio
-    const cx = (sh.bbox.minX + sh.bbox.maxX) / 2, cy = (sh.bbox.minY + sh.bbox.maxY) / 2;
+    const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2;
     return { x: cx - w / 2, y: cy - h / 2, w, h };
-  }, [focus, regionShapes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fitKey captures where the branches are
+  }, [focus, regionShapes, fitKey]);
   const [view, setView] = useState<ViewBox>(target);
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -199,13 +205,12 @@ export function BranchMap({
         const dim = !!focus && !isFocus;
         const count = regions?.counts[r.id] ?? 0;
         return (
+          <g key={r.id}>
+          <path d={r.d} fill="none" stroke={isFocus ? "rgba(255,255,255,0.55)" : dim ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.30)"} strokeWidth={(isFocus ? 2.6 : 2) / k} strokeLinejoin="round" style={{ pointerEvents: "none" }} />
           <path
-            key={r.id}
             d={r.d}
-            fill={isFocus ? "rgba(255,255,255,0.045)" : dim ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.018)"}
-            stroke={isFocus ? "rgba(255,255,255,0.42)" : dim ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.24)"}
-            strokeWidth={(isFocus ? 1.4 : 1) / k}
-            strokeLinejoin="round"
+            fill={isFocus ? "#24242a" : dim ? "#141417" : "#1f1f24"}
+            stroke="none"
             className={focus ? undefined : "cursor-pointer"}
             style={{ pointerEvents: focus ? "none" : "auto", transition: "fill 160ms ease", outline: "none" }}
             role={focus ? undefined : "button"}
@@ -217,14 +222,15 @@ export function BranchMap({
             onClick={(e) => { (e.currentTarget as SVGPathElement).blur(); regions?.onFocus(r.id); }}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); regions?.onFocus(r.id); } }}
           />
+          </g>
         );
       })}
       {/* hovered region lifted above the others: a gentle raise + shadow (All Israel only) */}
       {hovered ? (
         <path
           d={hovered.d}
-          fill="rgba(255,255,255,0.075)"
-          stroke="rgba(255,255,255,0.55)"
+          fill="#2a2a31"
+          stroke="rgba(255,255,255,0.6)"
           strokeWidth={1.2 / k}
           strokeLinejoin="round"
           filter="url(#vono-region-lift)"

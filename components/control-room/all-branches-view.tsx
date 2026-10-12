@@ -60,7 +60,7 @@ type Row = {
   state: StationPlaybackState | null;
   /** brand of the branch — the default Brand when unassigned (null only while brands are unavailable) */
   brandId: string | null;
-  /** operational region from the stored lat/lng (null: no location / outside the regions — never hidden from All Israel) */
+  /** operational region from the stored lat/lng (null: no location / outside Israel — never hidden from All Israel) */
   regionId: RegionId | null;
   regionReason: "ok" | "no_location" | "outside";
 };
@@ -338,10 +338,10 @@ export function AllBranchesView() {
               <p className="px-6 pb-4 text-xs text-[var(--sb-text-tertiary)]">
                 {noLocationCount > 0 ? `${noLocationCount} branch${noLocationCount === 1 ? "" : "es"} without a location (not on the map, still in the list)` : ""}
                 {noLocationCount > 0 && outsideCount > 0 ? " · " : ""}
-                {outsideCount > 0 ? `${outsideCount} outside the regions (shown on All Israel only)` : ""}
+                {outsideCount > 0 ? `${outsideCount} outside Israel (shown on All Israel only)` : ""}
               </p>
             ) : null}
-            <p className="px-6 pb-4 text-[10px] text-[var(--sb-text-tertiary)]">Regions follow Israel&apos;s administrative district boundaries.</p>
+            <p className="px-6 pb-4 text-[10px] text-[var(--sb-text-tertiary)]">VONO Operational Regions · based on official sub-district boundaries · © OpenStreetMap contributors</p>
           </div>
           {(() => {
             if (form) {
