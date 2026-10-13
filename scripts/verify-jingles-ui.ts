@@ -50,4 +50,14 @@ assert("U11 CREATE context: brand + region → BRAND_REGION, open branch → LOC
 assert("U12 users never see technical names: badges = NETWORK / brand / region / brand · region / LOCAL · branch",
   /case "BRAND_REGION":\s*return `\$\{brand\(a\.audienceBrandId\)\} · \$\{region\(a\.audienceRegion\)\}`/.test(aud) && !/>BRAND_REGION</.test(aud + panels));
 assert("U13 promote / assign = PATCH the SAME row (no copy)", /fetch\(`\/api\/jingles\/library\/\$\{encodeURIComponent\(id\)\}`, \{ method: "PATCH"/.test(aud) && !/method: "POST"/.test(aud + panels));
+const vx = readFileSync("components/management/vx-select.tsx", "utf8");
+const settings = studio.slice(studio.indexOf('<div className="jcx-settings-bar">'), studio.indexOf('<div className="jcx-create-main">'));
+assert("U14 STEP 1 VxSelect: no native <select> in the Studio settings row (Type / Language / Voice / Speed / Bell) or the audience editor (Brand / Region / Branch)",
+  settings.length > 0 && !/<select/.test(settings) && (settings.match(/<VxSelect/g) ?? []).length === 5 && !/<select/.test(aud) && (aud.match(/<VxSelect/g) ?? []).length === 3);
+assert("U15 same logic: Language still resets the voice; Bell still maps off → preRoll false; audience fields still null when empty",
+  /voice: VOICE_PRESETS_BY_LANG\[v as JingleLanguage\]\[0\]\.voiceId/.test(settings) && /preRoll: v !== "off"/.test(settings) &&
+  /audienceBrandId: v \|\| null/.test(aud) && /audienceRegion: \(v \|\| null\) as RegionId \| null/.test(aud) && /audienceBranchId: v \|\| null/.test(aud));
+assert("U16 VxSelect is accessible: combobox + listbox + option, aria-expanded / activedescendant / selected; Escape / Home / End / type-ahead",
+  /role="combobox"/.test(vx) && /role="listbox"/.test(vx) && /role="option"/.test(vx) && /aria-activedescendant=/.test(vx) && /aria-selected=/.test(vx) &&
+  /case "Escape"/.test(vx) && /case "Home"/.test(vx) && /case "End"/.test(vx) && /typeahead\(/.test(vx));
 console.log(`\n${pass} passed, ${fail} failed`);

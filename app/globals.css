@@ -3576,6 +3576,42 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 /* the underline indicator as a standalone element (bottom LED) */
 .vx-indicator { position: absolute; left: 0; right: 0; bottom: 0; height: var(--vx-indicator); background: var(--vx-indicator-color); }
 
+/* VxSelect (owner 2026-10-13) — dark frameless select: flat surface, hairline underline, accent underline when
+   focused / open; the list is a dark flat panel with hairline rows, subtle hover, the chosen row marked by the LED bar.
+   No native (white) popup, no shadow / glow / gradient, minimal radius. (components/management/vx-select.tsx) */
+.vx-select {
+  display: inline-flex; align-items: center; gap: 0.5rem; width: 100%; min-width: 0;
+  padding: 0 0.75rem; border: 0; border-bottom: 2px solid var(--vx-line-strong); border-radius: var(--vx-radius-control);
+  background: rgba(255, 255, 255, 0.04); color: var(--vx-text); font-size: var(--vx-fs-primary); text-align: start;
+  cursor: pointer; transition: background-color 0.12s, border-color 0.12s;
+}
+.vx-select--md { min-height: 44px; }
+.vx-select--sm { min-height: 40px; font-size: var(--vx-fs-secondary); }
+.vx-select:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); }
+.vx-select:focus { outline: none; }
+.vx-select:focus-visible, .vx-select.is-open { border-bottom-color: var(--vx-indicator-color); }
+.vx-select:disabled { opacity: 0.4; cursor: not-allowed; }
+.vx-select-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vx-select-value.is-placeholder { color: var(--vx-text-3); }
+.vx-select-chevron { flex: none; width: 14px; height: 14px; color: var(--vx-text-2); transition: transform 0.12s; }
+.vx-select.is-open .vx-select-chevron { transform: rotate(180deg); }
+.vx-select-list {
+  position: fixed; z-index: 1000; margin: 0; padding: 0; list-style: none; overflow-y: auto;
+  background: #141418; border: 1px solid var(--vx-line-strong); border-radius: var(--vx-radius-control);
+  color: var(--vx-text); font-size: var(--vx-fs-secondary); color-scheme: dark; outline: none;
+}
+.vx-select-option {
+  position: relative; display: flex; align-items: center; min-height: 40px; padding: 0 0.875rem;
+  border-bottom: 1px solid var(--vx-line); color: var(--vx-text-2); cursor: pointer; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.vx-select-option:last-child { border-bottom: 0; }
+.vx-select-option.is-active { background: var(--vx-active); color: var(--vx-text); }
+.vx-select-option.is-selected { color: var(--vx-text); font-weight: 600; }
+.vx-select-option.is-selected::before {
+  content: ""; position: absolute; inset-inline-start: 0; top: 0; bottom: 0; width: var(--vx-indicator); background: var(--vx-indicator-color);
+}
+
 /* ── PLAYER AREA in the VONO language (owner 2026-10-12) — DISPLAY ONLY (no queue / playback / tile logic) ──
    Queue rows + playlist tiles: no card frames — clean rows on hairlines, hover = soft highlight,
    the current / active row = soft fill + the underline indicator. */

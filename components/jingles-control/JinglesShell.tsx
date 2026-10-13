@@ -33,6 +33,7 @@ import { fetchCloudPads, savePadToCloud, padsFromCloud } from "./cloud-pads";
 import { loadJingleSchedule, persistJingleSchedule, JINGLE_SCHEDULE_EVENT } from "./schedule-storage";
 import { useAudioPreview } from "./use-audio-preview";
 import { useDevicePlayer } from "@/lib/device-player-context";
+import { VxSelect } from "@/components/management/vx-select";
 
 type State = {
   drawerOpen: boolean;
@@ -1508,68 +1509,82 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                     placeholder="e.g. Weekend fresh produce"
                   />
                 </label>
-                <label className="jc-field jcx-set">
-                  <span>Type</span>
-                  <select
+                {/* VxSelect (owner 2026-10-13): dark list instead of the native white popup — same values, same setDraft logic */}
+                <div className="jc-field jcx-set">
+                  <span id="jcx-set-type">Type</span>
+                  <VxSelect
+                    size="sm"
+                    labelledBy="jcx-set-type"
                     value={draft.kind}
-                    onChange={(e) => setDraft((d) => ({ ...d, kind: e.target.value as AnnouncementDraft["kind"] }))}
-                  >
-                    <option value="jingle">Jingle</option>
-                    <option value="announcement">Announcement</option>
-                    <option value="broadcast">Broadcast</option>
-                  </select>
-                </label>
-                <label className="jc-field jcx-set">
-                  <span>Language</span>
-                  <select
+                    options={[
+                      { value: "jingle", label: "Jingle" },
+                      { value: "announcement", label: "Announcement" },
+                      { value: "broadcast", label: "Broadcast" },
+                    ]}
+                    onChange={(v) => setDraft((d) => ({ ...d, kind: v as AnnouncementDraft["kind"] }))}
+                  />
+                </div>
+                <div className="jc-field jcx-set">
+                  <span id="jcx-set-lang">Language</span>
+                  <VxSelect
+                    size="sm"
+                    labelledBy="jcx-set-lang"
                     value={draft.language}
-                    onChange={(e) =>
+                    options={[
+                      { value: "en", label: "English" },
+                      { value: "he", label: "עברית" },
+                    ]}
+                    onChange={(v) =>
                       setDraft((d) => ({
                         ...d,
-                        language: e.target.value as JingleLanguage,
-                        voice: VOICE_PRESETS_BY_LANG[e.target.value as JingleLanguage][0].voiceId,
+                        language: v as JingleLanguage,
+                        voice: VOICE_PRESETS_BY_LANG[v as JingleLanguage][0].voiceId,
                       }))
                     }
-                  >
-                    <option value="en">English</option>
-                    <option value="he">עברית</option>
-                  </select>
-                </label>
-                <label className="jc-field jcx-set">
-                  <span>Voice</span>
-                  <select value={draft.voice} onChange={(e) => setDraft((d) => ({ ...d, voice: e.target.value }))}>
-                    {VOICE_PRESETS_BY_LANG[draft.language].map((v) => (
-                      <option key={v.voiceId} value={v.voiceId}>{v.label}</option>
-                    ))}
-                  </select>
-                </label>
+                  />
+                </div>
+                <div className="jc-field jcx-set">
+                  <span id="jcx-set-voice">Voice</span>
+                  <VxSelect
+                    size="sm"
+                    labelledBy="jcx-set-voice"
+                    value={draft.voice}
+                    options={VOICE_PRESETS_BY_LANG[draft.language].map((v) => ({ value: v.voiceId, label: v.label }))}
+                    onChange={(v) => setDraft((d) => ({ ...d, voice: v }))}
+                  />
+                </div>
                 {draft.language !== "he" ? (
-                  <label className="jc-field jcx-set">
-                    <span>Speed</span>
-                    <select value={draft.speed} onChange={(e) => setDraft((d) => ({ ...d, speed: e.target.value as JingleSpeed }))}>
-                      <option value="slow">Slow</option>
-                      <option value="normal">Normal</option>
-                      <option value="fast">Fast</option>
-                    </select>
-                  </label>
+                  <div className="jc-field jcx-set">
+                    <span id="jcx-set-speed">Speed</span>
+                    <VxSelect
+                      size="sm"
+                      labelledBy="jcx-set-speed"
+                      value={draft.speed}
+                      options={[
+                        { value: "slow", label: "Slow" },
+                        { value: "normal", label: "Normal" },
+                        { value: "fast", label: "Fast" },
+                      ]}
+                      onChange={(v) => setDraft((d) => ({ ...d, speed: v as JingleSpeed }))}
+                    />
+                  </div>
                 ) : null}
-                <label className="jc-field jcx-set">
-                  <span>Bell</span>
-                  <select
+                <div className="jc-field jcx-set">
+                  <span id="jcx-set-bell">Bell</span>
+                  <VxSelect
+                    size="sm"
+                    labelledBy="jcx-set-bell"
                     value={draft.preRoll ? draft.bellStyle : "off"}
-                    onChange={(e) =>
+                    options={BELL_PRESETS}
+                    onChange={(v) =>
                       setDraft((d) => ({
                         ...d,
-                        preRoll: e.target.value !== "off",
-                        bellStyle: e.target.value === "off" ? d.bellStyle : (e.target.value as JingleBellStyle),
+                        preRoll: v !== "off",
+                        bellStyle: v === "off" ? d.bellStyle : (v as JingleBellStyle),
                       }))
                     }
-                  >
-                    {BELL_PRESETS.map((b) => (
-                      <option key={b.value} value={b.value}>{b.label}</option>
-                    ))}
-                  </select>
-                </label>
+                  />
+                </div>
               </div>
 
               {/* Main: Script hero (left) + Result (right) — fills remaining height */}

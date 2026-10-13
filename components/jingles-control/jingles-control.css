@@ -2576,3 +2576,8 @@
   width: 2rem; height: 2rem; min-height: 0; padding: 0;
   font-size: 14px; color: var(--vx-text-3);
 }
+
+/* VxSelect in the Studio settings row (owner 2026-10-13): sizes to its text like the native select did */
+.jc-workspace-panel .jcx-settings-bar .vx-select { width: auto; min-width: 6.5rem; }
+/* a narrow column (the Control Room right pane): the row wraps instead of clipping the last field */
+.jc-workspace-panel .jcx-settings-bar { flex-wrap: wrap; }

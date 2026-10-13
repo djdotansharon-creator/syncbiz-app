@@ -9,6 +9,8 @@
 import { isEligibleForBranch, type Audience, type BranchFacts, type JingleAudience } from "@/lib/jingles/audience";
 import { REGIONS, type RegionId } from "@/lib/control-room-regions";
 import type { Mgmt, MgmtKey } from "@/lib/i18n/management";
+import { useId } from "react";
+import { VxSelect } from "@/components/management/vx-select";
 
 export type JingleItem = JingleAudience & {
   id: string;
@@ -110,7 +112,7 @@ export function AudienceEditor({ value, onChange, deps, L, types }: { value: Aud
   const needBranch = value.audience === "LOCAL";
   const complete = draftAudience(value);
   const n = reachCount(complete, deps);
-  const field = "vx-field min-h-[44px] text-base";
+  const uid = useId();
   return (
     <div className="space-y-3">
       <div className="vx-tabs flex-wrap" role="radiogroup" aria-label={L.t("jg.audience")}>
@@ -123,31 +125,40 @@ export function AudienceEditor({ value, onChange, deps, L, types }: { value: Aud
       {needBrand || needRegion || needBranch ? (
         <div className="grid gap-2 sm:grid-cols-2">
           {needBrand ? (
-            <label className="block">
-              <span className="vx-label">{L.t("jg.brand")}</span>
-              <select className={field} style={{ colorScheme: "dark" }} value={value.audienceBrandId ?? ""} onChange={(e) => onChange({ ...value, audienceBrandId: e.target.value || null })}>
-                <option value="">{L.t("jg.pick")}</option>
-                {deps.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            </label>
+            <div className="block">
+              <span id={`${uid}-brand`} className="vx-label">{L.t("jg.brand")}</span>
+              <VxSelect
+                labelledBy={`${uid}-brand`}
+                placeholder={L.t("jg.pick")}
+                value={value.audienceBrandId ?? ""}
+                options={deps.brands.map((b) => ({ value: b.id, label: b.name }))}
+                onChange={(v) => onChange({ ...value, audienceBrandId: v || null })}
+              />
+            </div>
           ) : null}
           {needRegion ? (
-            <label className="block">
-              <span className="vx-label">{L.t("jg.region")}</span>
-              <select className={field} style={{ colorScheme: "dark" }} value={value.audienceRegion ?? ""} onChange={(e) => onChange({ ...value, audienceRegion: (e.target.value || null) as RegionId | null })}>
-                <option value="">{L.t("jg.pick")}</option>
-                {REGIONS.map((r) => <option key={r.id} value={r.id}>{L.region(r.id)}</option>)}
-              </select>
-            </label>
+            <div className="block">
+              <span id={`${uid}-region`} className="vx-label">{L.t("jg.region")}</span>
+              <VxSelect
+                labelledBy={`${uid}-region`}
+                placeholder={L.t("jg.pick")}
+                value={value.audienceRegion ?? ""}
+                options={REGIONS.map((r) => ({ value: r.id, label: L.region(r.id) }))}
+                onChange={(v) => onChange({ ...value, audienceRegion: (v || null) as RegionId | null })}
+              />
+            </div>
           ) : null}
           {needBranch ? (
-            <label className="block sm:col-span-2">
-              <span className="vx-label">{L.t("jg.branch")}</span>
-              <select className={field} style={{ colorScheme: "dark" }} value={value.audienceBranchId ?? ""} onChange={(e) => onChange({ ...value, audienceBranchId: e.target.value || null })}>
-                <option value="">{L.t("jg.pick")}</option>
-                {deps.branches.map((b) => <option key={b.id} value={b.id}>{b.name}{b.branchNumber ? ` · ${b.branchNumber}` : ""}</option>)}
-              </select>
-            </label>
+            <div className="block sm:col-span-2">
+              <span id={`${uid}-branch`} className="vx-label">{L.t("jg.branch")}</span>
+              <VxSelect
+                labelledBy={`${uid}-branch`}
+                placeholder={L.t("jg.pick")}
+                value={value.audienceBranchId ?? ""}
+                options={deps.branches.map((b) => ({ value: b.id, label: `${b.name}${b.branchNumber ? ` · ${b.branchNumber}` : ""}` }))}
+                onChange={(v) => onChange({ ...value, audienceBranchId: v || null })}
+              />
+            </div>
           ) : null}
         </div>
       ) : null}
