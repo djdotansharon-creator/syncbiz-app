@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { getControlBranch, setControlBranch } from "@/lib/control-branch";
 import type { BranchSummary, RemoteCommand, StationPlaybackState } from "@/lib/remote-control/types";
-import { StatusGlyph, STATUS_KEY, type MapDotStatus } from "@/components/control-room/branch-map";
+import { StatusLed, STATUS_KEY, type MapDotStatus } from "@/components/control-room/branch-map";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
 import { StationActivation } from "@/components/control-room/station-activation";
 
@@ -127,7 +127,7 @@ export function BranchPanel({
           </p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-2 text-sm text-[var(--sb-text-secondary)]">
-          <StatusGlyph status={branch.status} />
+          <StatusLed status={branch.status} />
           {L.t(STATUS_KEY[branch.status])}
         </span>
         <ControlThisBranchButton branch={branch} label={L.t("ctl.controlThis")} />

@@ -3470,6 +3470,16 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 @media (prefers-reduced-motion: reduce) {
   .vono-breathe { animation: none; }
 }
+/* Control Room LIST LED (owner 2026-10-13): a playing branch blinks green (on / dim), no glow */
+@keyframes vono-led-blink {
+  0%, 55% { opacity: 1; }
+  70%, 90% { opacity: 0.25; }
+  100% { opacity: 1; }
+}
+.vono-led-blink { animation: vono-led-blink 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .vono-led-blink { animation: none; }
+}
 
 /* Control Room regional map: the hovered region rises gently (owner 2026-10-11) */
 @keyframes vono-region-rise {

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { RemoteCommand } from "@/lib/remote-control/types";
-import { StatusGlyph, type MapDotStatus } from "@/components/control-room/branch-map";
+import { StatusLed, type MapDotStatus } from "@/components/control-room/branch-map";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
 import type { MgmtKey } from "@/lib/i18n/management";
 import { isEligibleForBranch, isPlayable, rowAudience } from "@/lib/jingles/audience";
@@ -141,6 +141,31 @@ export function BroadcastPanel({
         </div>
       </div>
 
+      {/* 3. review + send — MOVED to the top (owner 2026-10-13) */}
+      <div className="flex items-center justify-between gap-4 border-b border-[color:var(--sb-border)] px-6 py-4">
+        <div>
+          <div className="text-xs text-[var(--sb-text-tertiary)]">{L.t("bc.stepReview")}</div>
+          <p className="text-xs text-[var(--sb-text-secondary)]">
+            {results
+              ? `${L.t("bc.summary", { n: deliveredCount })}${notDeliveredCount ? ` · ${L.t("bc.summaryNot", { n: notDeliveredCount })}` : ""}`
+              : chosen.length > 0
+                ? L.t("bc.chosen", { branches: L.branches(chosen.length), n: chosen.filter((t) => !!t.liveBranchId).length })
+                : L.t("bc.pick")}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={!canSend}
+          onClick={() => void send()}
+          className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition-transform active:scale-95 disabled:opacity-40"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="12" cy="12" r="2" /><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14" />
+          </svg>
+          {L.t(sending ? "bc.sending" : "bc.send")}
+        </button>
+      </div>
+
       {/* 1. jingle */}
       <section className="border-b border-[color:var(--sb-border)] px-6 py-5">
         <div className="text-xs text-[var(--sb-text-tertiary)]">{L.t("bc.stepJingle")}</div>
@@ -218,7 +243,7 @@ export function BroadcastPanel({
                       className="h-4 w-4 accent-[var(--sb-accent)]"
                     />
                   ) : null}
-                  <StatusGlyph status={t.status} />
+                  <StatusLed status={t.status} />
                   <span className="min-w-0 flex-1 truncate text-sm text-[var(--sb-text)]">
                     <span dir="auto">{t.name}</span>
                     {t.branchNumber ? <span className="ms-2 text-xs text-[var(--sb-text-tertiary)]">{L.t("common.branchNumber", { n: t.branchNumber })}</span> : null}
@@ -241,30 +266,6 @@ export function BroadcastPanel({
         </ul>
       </section>
 
-      {/* 3. review + send */}
-      <div className="flex items-center justify-between gap-4 px-6 py-4">
-        <div>
-          <div className="text-xs text-[var(--sb-text-tertiary)]">{L.t("bc.stepReview")}</div>
-          <p className="text-xs text-[var(--sb-text-secondary)]">
-            {results
-              ? `${L.t("bc.summary", { n: deliveredCount })}${notDeliveredCount ? ` · ${L.t("bc.summaryNot", { n: notDeliveredCount })}` : ""}`
-              : chosen.length > 0
-                ? L.t("bc.chosen", { branches: L.branches(chosen.length), n: chosen.filter((t) => !!t.liveBranchId).length })
-                : L.t("bc.pick")}
-          </p>
-        </div>
-        <button
-          type="button"
-          disabled={!canSend}
-          onClick={() => void send()}
-          className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition-transform active:scale-95 disabled:opacity-40"
-        >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <circle cx="12" cy="12" r="2" /><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14" />
-          </svg>
-          {L.t(sending ? "bc.sending" : "bc.send")}
-        </button>
-      </div>
     </div>
   );
 }

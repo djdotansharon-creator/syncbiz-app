@@ -51,6 +51,24 @@ export function markerLook(status: MapDotStatus, brandColor?: string | null): { 
   return { fill, opacity: 1, breathing: status === "playing" };
 }
 
+/** LED colours for the branch LIST / panels (owner 2026-10-13) — status only, no brand colour. */
+export const LED_FILL: Record<MapDotStatus, string> = {
+  playing: "#30d158", //  green, blinking
+  idle: "#30d158", //     green, steady (online, not playing)
+  offline: "#ff453a", //  red
+  install: "#fbbf24", //  yellow (needs installation)
+  unknown: "rgba(255,255,255,0.3)",
+};
+
+/** the branch LIST / panel status LED: playing blinks, everything else is steady (reduced-motion → steady). */
+export function StatusLed({ status, size = 12 }: { status: MapDotStatus; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" className="shrink-0 overflow-visible" aria-hidden>
+      <circle cx="6" cy="6" r="4.4" fill={LED_FILL[status]} className={status === "playing" ? "vono-led-blink" : undefined} />
+    </svg>
+  );
+}
+
 /** the status mark in the list / legend / KPIs — the same single-circle language as the map (neutral color) */
 export function StatusGlyph({ status, size = 12, color }: { status: MapDotStatus; size?: number; color?: string | null }) {
   const m = markerLook(status, color);

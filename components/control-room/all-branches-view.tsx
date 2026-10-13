@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { applyControlRoomFilters, type StatusFilter } from "@/lib/control-room-filters";
 import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
-import { StatusGlyph, STATUS_KEY, type MapDotStatus } from "@/components/control-room/branch-map";
+import { StatusGlyph, StatusLed, STATUS_KEY, type MapDotStatus } from "@/components/control-room/branch-map";
 import { NetworkMap } from "@/components/control-room/network-map";
 import { BranchPanel } from "@/components/control-room/branch-panel";
 import { BroadcastPanel } from "@/components/control-room/broadcast-panel";
@@ -585,7 +585,7 @@ function BranchRow({ L, row, brand, status, selected, onSelect }: { L: Mgmt; row
         ) : null}
       </div>
       <div className={`flex min-w-0 items-center gap-2 text-base ${STATUS_TEXT_CLASS[status]}`}>
-        <StatusGlyph status={status} size={13} />
+        <StatusLed status={status} size={13} />
         <span className="truncate">{L.t(STATUS_KEY[status])}</span>
       </div>
       <DeviceType L={L} type={row.online ? row.live?.deviceType : undefined} />
