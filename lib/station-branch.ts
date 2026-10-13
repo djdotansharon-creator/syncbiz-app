@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getControlBranch } from "@/lib/control-branch";
 
 /**
  * STATION BRANCH IDENTITY (Step B1, owner 2026-10-11) — the ONE place the renderer learns which branch THIS screen
@@ -9,7 +10,9 @@ import { useEffect, useState } from "react";
  *
  *  - Packaged desktop: MAIN's runtime config branchId (set by station activation). A station that was never activated
  *    — the existing Lenovo included — has "default" (or nothing) → "default", EXACTLY as before.
- *  - Browser / phone / streamer page: always "default" (unchanged).
+ *  - Browser / phone / streamer page: "default" — unless a manager chose a branch in Control Room ("Control this
+ *    branch's player", lib/control-branch.ts, owner 2026-10-13): then THAT branch, as CONTROL (the server never lets a
+ *    browser be the designated MASTER).
  *  - Bridge error or no answer within 3 s → "default" (= today's behaviour; never blocks the socket forever).
  */
 export const LEGACY_STATION_BRANCH = "default";
@@ -24,12 +27,12 @@ function hasDesktopBridge(): boolean {
 
 /** Synchronous value when known: "default" off-desktop; null while the desktop bridge has not answered yet. */
 export function stationBranchIdNow(): string | null {
-  if (!hasDesktopBridge()) return LEGACY_STATION_BRANCH;
+  if (!hasDesktopBridge()) return getControlBranch()?.branchId ?? LEGACY_STATION_BRANCH;
   return resolved;
 }
 
 export function resolveStationBranchId(): Promise<string> {
-  if (!hasDesktopBridge()) return Promise.resolve(LEGACY_STATION_BRANCH);
+  if (!hasDesktopBridge()) return Promise.resolve(getControlBranch()?.branchId ?? LEGACY_STATION_BRANCH);
   if (resolved) return Promise.resolve(resolved);
   if (!pending) {
     const fromBridge = window

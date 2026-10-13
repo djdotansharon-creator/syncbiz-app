@@ -57,6 +57,7 @@ import {
 import { SYNCBIZ_MUSIC_LIBRARY_DRAG_MIME, type MusicLibraryDragPayload } from "@/lib/music-library-drag";
 import { derivePlaylistUnifiedCoverArt, unifiedPlaylistSourceId } from "@/lib/playlist-utils";
 import { VonoBrand } from "@/components/brand/vono-brand";
+import { clearControlBranch, getControlBranch } from "@/lib/control-branch";
 
 const pillLink =
   "rounded-xl border border-slate-700/80 bg-slate-900/90 px-3.5 py-2 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] transition-all duration-100 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950";
@@ -540,6 +541,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       } | null) => {
         if (cancelled || !data) return;
         setCanManage(data.accessType === "OWNER");
+        // a branch-control choice belongs to a manager; never carry it over to another kind of user on this browser
+        if (data.accessType && data.accessType !== "OWNER") clearControlBranch();
         const displayName = (data.name ?? "").trim() || (data.email ?? "").trim() || null;
         setSessionName(displayName);
         setSessionAccountName((data.accountName ?? "").trim() || null);
@@ -560,6 +563,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
   // hydration-safe: false on the server, the real value on the client
   const isDesktopApp = useSyncExternalStore(() => () => {}, () => "syncbizDesktop" in window, () => false);
+  const controlBranchLabel = useSyncExternalStore(() => () => {}, () => getControlBranch()?.label ?? null, () => null);
 
   const timeStr = now.toLocaleTimeString(locale === "he" ? "he-IL" : "en-US", {
     hour: "2-digit",
@@ -1413,6 +1417,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
               {/* MASTER / On Air / device mode indicators */}
               <HeaderDeviceIndicators />
+              {/* browser manager: which branch this player controls (never a silent "default") */}
+              {canManage && !isDesktopApp && !isManagementRoute ? (
+                <Link
+                  href="/owner/control-room"
+                  title={mgmt(locale).t("ctl.change")}
+                  className="hidden min-w-0 max-w-[260px] shrink truncate rounded-full border border-[color:var(--sb-border)] px-3 py-1 text-xs text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)] md:inline-block"
+                  dir="auto"
+                >
+                  {mgmt(locale).t("ctl.controlling", { label: controlBranchLabel ?? mgmt(locale).t("ctl.default") })}
+                </Link>
+              ) : null}
               {/* Agents healthy — quiet chip, small green dot */}
               <span
                 className="hidden items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-[5px] text-[11px] font-medium text-[#a1a1a6] sm:flex"

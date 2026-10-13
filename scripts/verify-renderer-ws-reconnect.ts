@@ -117,7 +117,10 @@ assert("controller / owner hooks untouched by this change", !/reconnectScheduler
 const stationBranchSrc = read("lib", "station-branch.ts");
 assert("H device REGISTER still flags the packaged desktop renderer as embeddedRenderer (server forces CONTROL)",
   /embeddedRenderer: options\?\.isDesktopApp === true,/.test(hook) && /branchId: stationBranch,/.test(hook) &&
-  /export const LEGACY_STATION_BRANCH = "default";/.test(stationBranchSrc) && /if \(!hasDesktopBridge\(\)\) return LEGACY_STATION_BRANCH;/.test(stationBranchSrc));
+  /export const LEGACY_STATION_BRANCH = "default";/.test(stationBranchSrc) &&
+  // 2026-10-13 (owner): a browser defaults to "default" unless a manager chose a branch to control (lib/control-branch.ts;
+  // still CONTROL — the server never lets a browser be the designated MASTER). Behaviour verified in verify-browser-control-branch.ts.
+  /if \(!hasDesktopBridge\(\)\) return getControlBranch\(\)\?\.branchId \?\? LEGACY_STATION_BRANCH;/.test(stationBranchSrc));
 const server = read("server", "index.ts");
 assert("H server still forces an embedded renderer to CONTROL",
   /embeddedRenderer/.test(server) && /permanent designation: embedded renderer -> CONTROL/.test(server));

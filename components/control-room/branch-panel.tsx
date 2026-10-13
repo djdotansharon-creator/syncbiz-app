@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { getControlBranch, setControlBranch } from "@/lib/control-branch";
 import type { BranchSummary, RemoteCommand, StationPlaybackState } from "@/lib/remote-control/types";
 import { StatusGlyph, STATUS_KEY, type MapDotStatus } from "@/components/control-room/branch-map";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
@@ -24,6 +25,39 @@ export type PanelBranch = {
   /** a station is registered to the branch (decides "install" vs "replace" wording; the server decides the purpose) */
   hasStation: boolean;
 };
+
+/**
+ * BROWSER ONLY (owner 2026-10-13): make THIS browser's player control this branch (CONTROL in the branch room; the
+ * branch's designated station stays the MASTER). Label = Station ID ("UNV-030") + name. A full page load follows so
+ * every socket re-joins the chosen room. Hidden in the VONO desktop app.
+ */
+function ControlThisBranchButton({ branch, label }: { branch: PanelBranch; label: string }) {
+  const isDesktopApp = useSyncExternalStore(() => () => {}, () => "syncbizDesktop" in window, () => true);
+  const current = useSyncExternalStore(() => () => {}, () => getControlBranch()?.branchId ?? "", () => "");
+  const target = branch.live?.branchId ?? branch.id;
+  if (isDesktopApp) return null;
+  const active = current === target || current === branch.id;
+  const choose = async () => {
+    let prefix = "";
+    try {
+      const r = await fetch("/api/control-room/network", { cache: "no-store" });
+      if (r.ok) prefix = (((await r.json()) as { stationIdPrefix?: string | null }).stationIdPrefix ?? "").trim();
+    } catch { /* label without the Station ID */ }
+    const stationId = prefix && branch.branchNumber ? `${prefix}-${branch.branchNumber}` : branch.branchNumber ?? "";
+    setControlBranch({ branchId: target, label: [stationId, branch.name].filter(Boolean).join(" · ") });
+    window.location.assign("/sources");
+  };
+  return (
+    <button
+      type="button"
+      onClick={() => void choose()}
+      aria-pressed={active}
+      className={`shrink-0 rounded-full border px-3 py-1 text-xs transition-colors ${active ? "border-[color:var(--sb-accent)] text-[var(--sb-text)]" : "border-[color:var(--sb-border)] text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]"}`}
+    >
+      {label}
+    </button>
+  );
+}
 
 /** Volume sends: at most one every VOLUME_SEND_MS while dragging, plus the final value. */
 const VOLUME_SEND_MS = 200;
@@ -96,6 +130,7 @@ export function BranchPanel({
           <StatusGlyph status={branch.status} />
           {L.t(STATUS_KEY[branch.status])}
         </span>
+        <ControlThisBranchButton branch={branch} label={L.t("ctl.controlThis")} />
         {onEdit ? (
           <button type="button" onClick={onEdit} className="shrink-0 rounded-full border border-[color:var(--sb-border)] px-3 py-1 text-xs text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]">
             {L.t("common.edit")}
