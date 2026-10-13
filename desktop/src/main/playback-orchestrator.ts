@@ -26,6 +26,7 @@ import { isCrossfadeIncomingReady } from "./crossfade-readiness";
 import { fileLog } from "./file-logger";
 import { mediaKey as liveMediaKey } from "./live-media-key";
 import { isMainWsAttemptId } from "./main-attempt-id";
+import { InterruptChannel } from "./interrupt-channel";
 
 const ORCH = "[SyncBiz:desktop-mpv:orchestrator] music";
 
@@ -70,7 +71,6 @@ export type OrchestratorState = {
 
 type StatusListener = (state: OrchestratorState) => void;
 
-type InterruptItem = { url: string };
 
 type MusicDeckId = "A" | "B";
 
@@ -85,6 +85,8 @@ export class PlaybackOrchestrator {
   private readonly musicDeckA: MpvManager;
   private readonly musicDeckB: MpvManager;
   private readonly interruptMpv: MpvManager;
+  /** P0 STEP 0 (owner 2026-10-13): Channel B queue / failure recovery — ONE idempotent cleanup path (interrupt-channel.ts). */
+  private readonly interrupt: InterruptChannel;
 
   private musicStA: MpvStatus = createInitialMpvStatus();
   private musicStB: MpvStatus = createInitialMpvStatus();
@@ -131,14 +133,6 @@ export class PlaybackOrchestrator {
   private isDucked = false;
   private preDuckVolume = 80;
   private killed = false;
-  private interruptBusy = false;
-  /**
-   * True only after Channel B has fired start-file (status reached "playing").
-   * Guards against MPV's spurious `end-file reason=replace` that fires before
-   * the clip starts playing when `loadfile` replaces the idle/previous state.
-   */
-  private interruptHasStarted = false;
-  private readonly interruptQueue: InterruptItem[] = [];
 
   /** Mix/crossfade duration (seconds) — synced from renderer Settings; 6s fallback. */
   private crossfadeSec = 9; // P0 Gate 2c: owner default mix length (renderer pushes the user's choice)
@@ -169,6 +163,22 @@ export class PlaybackOrchestrator {
     this.musicDeckA = new MpvManager("syncbiz-music");
     this.musicDeckB = new MpvManager("syncbiz-music-b");
     this.interruptMpv = new MpvManager("syncbiz-interrupt");
+    // Channel B ONLY: the ports touch the interrupt deck + the duck — never music playback, never the global STOP.
+    this.interrupt = new InterruptChannel(
+      {
+        load: (url, attemptId) => this.interruptMpv.play(url, attemptId),
+        halt: () => this.interruptMpv.stop(),
+        status: () => this.interruptSt,
+        duck: () => this.duckMusic(),
+        unduck: (immediate) => (immediate ? this.unduckMusicNow() : this.unduckMusic()),
+        changed: () => this.push(),
+        log: (event, data) => { console.log(ORCH, event, data); fileLog("INFO", event, data); },
+        setTimer: (fn, ms) => setTimeout(() => { if (!this.killed) fn(); }, ms),
+        clearTimer: (h) => { if (h) clearTimeout(h as ReturnType<typeof setTimeout>); },
+        now: () => Date.now(),
+      },
+      DUCK_STEPS * DUCK_STEP_MS + 50, // next clip after the unduck ramp (unchanged gap)
+    );
 
     this.musicDeckA.onStatus((s) => {
       this.musicStA = s;
@@ -183,22 +193,9 @@ export class PlaybackOrchestrator {
 
     this.interruptMpv.onStatus((s) => {
       this.interruptSt = s;
-
-      if (this.interruptBusy) {
-        // Step 1: wait for the clip to actually start playing.
-        // MPV fires `end-file reason=replace` BEFORE `start-file` when loadfile
-        // replaces the current (idle) state. We must not treat that as clip-end.
-        if (s.status === "playing") {
-          this.interruptHasStarted = true;
-        }
-
-        // Step 2: only detect end AFTER the clip confirmed it started.
-        if (this.interruptHasStarted && (s.status === "idle" || s.status === "stopped")) {
-          this.interruptHasStarted = false;
-          this.onInterruptEnd();
-        }
-      }
-
+      // Start / progress / end / failure of the current clip — attempt-bound (a late event of a previous load, e.g.
+      // MPV's end-file reason=replace, carries the OLD attemptId and is ignored).
+      this.interrupt.onStatus(s);
       this.push();
     });
   }
@@ -336,6 +333,7 @@ export class PlaybackOrchestrator {
       this.rampId = null;
     }
     this.clearXfadeTimers();
+    this.interrupt.dispose();
     this.musicDeckA.kill();
     this.musicDeckB.kill();
     this.interruptMpv.kill();
@@ -375,8 +373,8 @@ export class PlaybackOrchestrator {
       masterVolume: this.masterVolume,
       duckTargetVolume: Math.max(0, Math.round((this.masterVolume * this.duckPercent) / 100)),
       duckPercent: this.duckPercent,
-      interruptBusy: this.interruptBusy,
-      interruptQueueDepth: this.interruptQueue.length,
+      interruptBusy: this.interrupt.busy,
+      interruptQueueDepth: this.interrupt.queueDepth,
       currentMediaKey: liveMediaKey(this.currentAttemptUrl),
     };
   }
@@ -761,13 +759,8 @@ export class PlaybackOrchestrator {
    * Clips play sequentially; music is ducked for the duration.
    */
   playInterrupt(url: string): void {
-    const u = url.trim();
-    if (!u) return;
-    // Deduplicate: if this exact URL is already waiting in the queue, don't stack another copy.
-    // Rapid repeated button clicks should enqueue the clip once, not N times.
-    if (this.interruptQueue.some((item) => item.url === u)) return;
-    this.interruptQueue.push({ url: u });
-    this.processQueue();
+    // Deduplicate (inside the channel): a URL already WAITING in the queue is not stacked again.
+    this.interrupt.enqueue(url);
   }
 
   /**
@@ -775,10 +768,11 @@ export class PlaybackOrchestrator {
    * If music was ducked, restore it right away (no ramp).
    */
   stopInterrupt(): void {
-    this.interruptQueue.length = 0;
-    this.interruptBusy = false;
-    this.interruptHasStarted = false;
-    this.interruptMpv.stop();
+    this.interrupt.stopAll(); // same cleanup path: Channel B halted, queue cleared, volume restored at once
+  }
+
+  /** Restore the music volume immediately (no ramp) — explicit stop of Channel B. */
+  private unduckMusicNow(): void {
     if (this.isDucked) {
       if (this.rampId !== null) {
         clearInterval(this.rampId);
@@ -787,27 +781,9 @@ export class PlaybackOrchestrator {
       this.isDucked = false;
       this.activeMpv().setVolume(this.preDuckVolume);
     }
-    this.push();
   }
 
   // ─── Ducking ─────────────────────────────────────────────────────────────────
-
-  private processQueue(): void {
-    if (this.interruptBusy || this.interruptQueue.length === 0) return;
-    const item = this.interruptQueue.shift()!;
-    this.interruptBusy = true;
-    this.interruptHasStarted = false; // reset: must see start-file before detecting end
-    this.duckMusic();
-    this.interruptMpv.play(item.url);
-  }
-
-  private onInterruptEnd(): void {
-    this.interruptBusy = false;
-    this.unduckMusic();
-    // If more clips are queued, play the next one after a short gap so the
-    // unduck ramp doesn't collide with the next duck ramp.
-    setTimeout(() => { if (!this.killed) this.processQueue(); }, DUCK_STEPS * DUCK_STEP_MS + 50);
-  }
 
   private duckMusic(): void {
     if (this.isDucked) return;
