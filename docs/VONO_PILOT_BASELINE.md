@@ -13,6 +13,10 @@
   load latency, Play Now, equal-power mix, station speed, now-playing frame, external screen). TEST only, PROD untouched.
   beta.21 restart: owner-attested PARTIAL 2026-10-09 (resumes the last song after a Windows restart); offline boot /
   LOCAL→URL on network return / video not yet tested → not a full PASS.
+- **🟡 JINGLES STEP 1 (VxSelect) — 2026-10-13. RENDERER ONLY, TEST. AWAITING OWNER CHECK.** Commit `2ddd83e`, Railway deploy `79243ebb-aa9e-49c2-93f6-ca51fc392dba` (SUCCESS; 5 changed files hash MATCH).
+  - New `components/management/vx-select.tsx` (+ `.vx-select*` in globals.css): dark frameless select-only combobox (ARIA combobox/listbox/option; ↓↑ Home End PgUp/PgDn Enter Space Esc Tab + type-ahead; portalled fixed list, RTL-aware). No native white popup, no shadow/glow/gradient.
+  - Used ONLY in Jingles: Studio Type / Language / Voice / Speed / Bell + audience editor Brand / Region / Branch (Create target, Assign, Change target). Same values + same logic (verify-jingles-ui U14–U16, 16/16). Studio settings row may wrap in the narrow Control Room column. Other screens untouched.
+  - Local runtime (mocked APIs): keyboard + mouse choose, Esc keeps value, Language→voice reset + Speed hidden, Assign PATCH body = BRAND_REGION yh/south on the same row.
 - **🟡 JINGLES STEP 0 (Control Room Create / Save / Preview audit) — 2026-10-13. RENDERER ONLY, TEST.** Commit `23c249e`, Railway deploy `3760939b-1e50-4d91-9a45-5bfa2c4b58e2` (SUCCESS; JinglesShell.tsx / jingles-panels.tsx / management.ts hash MATCH).
   - Generate: PROVEN BY RUNTIME (TEST logs `[jingles/generate] saved …mp3`). Save: PROVEN BY RUNTIME (TEST DB rows with BRAND_REGION / NETWORK / BRAND audiences; one legacy row still UNASSIGNED). Audio served 200 audio/mpeg.
   - Fixed: no confirmation after Save → back to the list, 'Saved: <name>' banner, new row first + highlighted.
