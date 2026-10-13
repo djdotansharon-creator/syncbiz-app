@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUserFromCookies, getAccessTypeForUser } from "@/lib/auth-helpers";
+import { isManagementLockedForRequest, managementLockedResponse } from "@/lib/management-access";
 import { db } from "@/lib/store";
 
 /** Same account-scope rule as /api/branches. */
@@ -18,6 +19,8 @@ export async function requireBranchManager(): Promise<
   if (!user) return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   const accessType = await getAccessTypeForUser(user.id, user.tenantId);
   if (accessType !== "OWNER") return { ok: false, response: NextResponse.json({ error: "Only the owner can manage branches." }, { status: 403 }) };
+  // security hotfix 2026-10-13: on a desktop STATION the management lock must be open too (browsers: never locked)
+  if (await isManagementLockedForRequest()) return { ok: false, response: managementLockedResponse() };
   const workspaceId = await db.resolveWorkspaceIdForAccount(resolveAccountScope(user.tenantId));
   if (!workspaceId) return { ok: false, response: NextResponse.json({ error: "Workspace not found" }, { status: 404 }) };
   return { ok: true, userId: user.id, workspaceId };

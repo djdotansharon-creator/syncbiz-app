@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUserFromApiRequest } from "@/lib/auth-helpers";
+import { isManagementLockedForRequest, managementLockedResponse } from "@/lib/management-access";
 import { actorFor, loadWorkspaceFacts, updateJingleAudience } from "@/lib/jingles/library-service";
 import { extractClientIp, writeTenantAuditLog } from "@/lib/admin/tenant-audit";
 import { prisma } from "@/lib/prisma";
@@ -15,6 +16,7 @@ export const dynamic = "force-dynamic";
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUserFromApiRequest(req);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (await isManagementLockedForRequest()) return managementLockedResponse(); // security hotfix 2026-10-13
   const { id } = await ctx.params;
 
   let body: Record<string, unknown>;

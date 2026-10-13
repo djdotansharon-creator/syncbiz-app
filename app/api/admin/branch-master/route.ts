@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { shadowAuthorize } from "@/lib/authz";
+import { isManagementLockedForRequest, managementLockedResponse } from "@/lib/management-access";
 import { getCurrentUserFromCookies, isOwner } from "@/lib/auth-helpers";
 import { prismaStationDeviceRepo } from "@/lib/station-device-prisma";
 import {
@@ -22,6 +23,7 @@ async function requireOwner() {
   const user = await getCurrentUserFromCookies();
   if (!user) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   if (!(await isOwner(user.id, user.tenantId))) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  if (await isManagementLockedForRequest()) return { error: managementLockedResponse() }; // security hotfix 2026-10-13
   return { user };
 }
 

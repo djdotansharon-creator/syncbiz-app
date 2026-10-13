@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -266,6 +266,8 @@ const navKeys = [
   "access-control",
   "architecture",
 ] as const;
+/** management entries — shown only to managers (security hotfix 2026-10-13) */
+const MANAGEMENT_NAV_KEYS = new Set<string>(["dashboard", "controlRoom", "access-control", "owner"]);
 const navItems = navKeys.map((key) => ({
   href: key === "dashboard" ? "/dashboard" : key === "remote" ? "/mobile" : key === "owner" ? "/owner" : key === "controlRoom" ? "/owner/control-room" : `/${key}`,
   labelKey: key === "sources" ? "library" : key,
@@ -496,6 +498,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Electron-only: after one normal login, auto-provision MAIN's bound desktop_access token. No-op in a browser.
   useDesktopActivation();
   const pathname = usePathname();
+  const shellRouter = useRouter(); // management "Lock" → back to the player (client navigation, never a reload)
   // Read ?return= from window.location.search instead of useSearchParams() to avoid
   // the Suspense boundary that Next.js injects around useSearchParams() in layout-level
   // Client Components. That boundary briefly shows an empty fallback on navigation,
@@ -512,6 +515,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [sessionAccountName, setSessionAccountName] = useState<string | null>(null);
   const [workspaceList, setWorkspaceList] = useState<Array<{ id: string; name: string }> | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  /** security hotfix 2026-10-13: management entries (Dashboard / Control Room / Access Control) only for managers.
+   *  Cosmetic — the server gate (components/management/management-gate.tsx + the API guards) is the real enforcement. */
+  const [canManage, setCanManage] = useState(false);
   const greeting = getTimeBasedGreeting(now.getHours(), t);
   const headerSubtitle = t.headerSubtitle ?? labels.headerSubtitle?.en ?? "Schedule playback and send commands to endpoint devices";
 
@@ -530,8 +536,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         accountName?: string | null;
         workspaces?: Array<{ id: string; name: string }>;
         tenantId?: string | null;
+        accessType?: string | null;
       } | null) => {
         if (cancelled || !data) return;
+        setCanManage(data.accessType === "OWNER");
         const displayName = (data.name ?? "").trim() || (data.email ?? "").trim() || null;
         setSessionName(displayName);
         setSessionAccountName((data.accountName ?? "").trim() || null);
@@ -541,6 +549,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
+    try {
+      if (sessionStorage.getItem("vono-mgmt-run") === "1") return; // a reload inside the same app run keeps the unlock
+      sessionStorage.setItem("vono-mgmt-run", "1");
+    } catch { /* ignore */ }
+    void fetch("/api/auth/management-unlock", { method: "DELETE", credentials: "include" }).catch(() => {});
+  }, []);
+  // hydration-safe: false on the server, the real value on the client
+  const isDesktopApp = useSyncExternalStore(() => () => {}, () => "syncbizDesktop" in window, () => false);
 
   const timeStr = now.toLocaleTimeString(locale === "he" ? "he-IL" : "en-US", {
     hour: "2-digit",
@@ -793,7 +812,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       (item) =>
         item.labelKey !== "library" &&
         item.labelKey !== "radio" &&
-        item.labelKey !== "favorites",
+        item.labelKey !== "favorites" &&
+        (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey)),
     )
     .map((item) => {
       const Icon = mainMenuIconMap[item.labelKey] ?? mainMenuIconMap.dashboard;
@@ -1441,6 +1461,21 @@ export function AppShell({ children }: { children: ReactNode }) {
                     />
                   </Link>
                 ))}
+                {isDesktopApp ? (
+                  <button
+                    type="button"
+                    title="Lock management on this station"
+                    onClick={() => {
+                      void fetch("/api/auth/management-unlock", { method: "DELETE", credentials: "include" })
+                        .catch(() => {})
+                        .finally(() => shellRouter.push("/sources"));
+                    }}
+                    className="ms-2 inline-flex items-center gap-1.5 px-3 pb-[7px] pt-[5px] text-[15px] font-medium text-slate-400 transition-colors hover:text-slate-50"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="4" y="11" width="16" height="10" rx="1" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+                    Lock
+                  </button>
+                ) : null}
               </nav>
             ) : (
             <nav className="flex shrink-0 items-end pb-0" aria-label="Main">
@@ -1453,7 +1488,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   "dashboard", "owner", "logs", "access-control", "architecture", "remote",
                 ] as const;
                 return navItems
-                  .filter((item) => pinnedSet.has(item.labelKey))
+                  .filter((item) => pinnedSet.has(item.labelKey) && (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey)))
                   .sort((a, b) => {
                     const ia = (NAV_ORDER as readonly string[]).indexOf(a.labelKey);
                     const ib = (NAV_ORDER as readonly string[]).indexOf(b.labelKey);

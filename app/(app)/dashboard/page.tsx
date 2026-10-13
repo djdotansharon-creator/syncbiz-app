@@ -5,6 +5,7 @@ import { getLocale } from "@/lib/locale-server";
 import { getTranslations } from "@/lib/translations";
 import { mgmt } from "@/lib/i18n/management";
 import type { Announcement, Device, LogEntry, Schedule } from "@/lib/types";
+import { ManagementGate } from "@/components/management/management-gate";
 
 async function getData() {
   try {
@@ -45,7 +46,16 @@ function isScheduleActiveToday(schedule: Schedule): boolean {
   return schedule.enabled && schedule.daysOfWeek.includes(today);
 }
 
-export default async function DashboardPage() {
+/** Management area (security hotfix 2026-10-13): managers only; locked on a desktop station until unlocked. */
+export default function DashboardPage() {
+  return (
+    <ManagementGate from="/dashboard">
+      <DashboardContent />
+    </ManagementGate>
+  );
+}
+
+async function DashboardContent() {
   const locale = await getLocale();
   const t = getTranslations(locale);
   const L = mgmt(locale); // management screens: RTL in Hebrew

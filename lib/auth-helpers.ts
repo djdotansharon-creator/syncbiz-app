@@ -209,6 +209,9 @@ export async function requireWorkspaceAdmin(): Promise<WorkspaceAdminCaller | nu
   const user = await getCurrentUserFromCookies();
   const ws = (user?.tenantId ?? "").trim();
   if (!user || !ws) return null;
+  // security hotfix 2026-10-13: a locked desktop STATION never reaches user management (browsers: never locked)
+  const { isManagementLockedForRequest } = await import("@/lib/management-access");
+  if (await isManagementLockedForRequest()) return null;
   const [membership, workspace, row] = await Promise.all([
     prisma.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: ws, userId: user.id } }, select: { role: true, status: true } }),
     prisma.workspace.findUnique({ where: { id: ws }, select: { id: true, ownerId: true } }),
