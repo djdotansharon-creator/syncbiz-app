@@ -3470,13 +3470,14 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 @media (prefers-reduced-motion: reduce) {
   .vono-breathe { animation: none; }
 }
-/* Control Room LIST LED (owner 2026-10-13): a playing branch blinks green (on / dim), no glow */
+/* Control Room LIST LED (owner 2026-10-13/14): a playing branch blinks green — slow, classic on / off
+   (about 1 s on, 1 s off, soft edges), no glow */
 @keyframes vono-led-blink {
-  0%, 55% { opacity: 1; }
-  70%, 90% { opacity: 0.25; }
+  0%, 42% { opacity: 1; }
+  50%, 92% { opacity: 0.18; }
   100% { opacity: 1; }
 }
-.vono-led-blink { animation: vono-led-blink 1.4s ease-in-out infinite; }
+.vono-led-blink { animation: vono-led-blink 2.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .vono-led-blink { animation: none; }
 }
