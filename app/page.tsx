@@ -1,16 +1,12 @@
 import Link from "next/link";
+import { VonoBrand } from "@/components/brand/vono-brand";
 
 export default function HomePage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 px-4">
       <div className="flex max-w-lg flex-col items-center text-center">
-        <div className="mb-8 flex items-center gap-2">
-          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/10 text-xl font-semibold text-sky-400 ring-1 ring-sky-500/40">
-            SB
-          </span>
-          <span className="text-2xl font-semibold tracking-tight text-slate-50">
-            SyncBiz
-          </span>
+        <div className="mb-8 flex items-center">
+          <VonoBrand size="xl" />
         </div>
         <p className="mb-2 text-sm font-medium uppercase tracking-widest text-sky-400/90">
           Media control & scheduling
@@ -21,8 +17,8 @@ export default function HomePage() {
           on your devices.
         </h1>
         <p className="mb-10 max-w-md text-slate-400">
-          SyncBiz is a controller and scheduler. It sends playback commands to
-          customer-owned endpoint devices through a local agent. SyncBiz does
+          VONO is a controller and scheduler. It sends playback commands to
+          customer-owned endpoint devices through a local agent. VONO does
           not store or host media – you own your sources and licensing.
         </p>
         <div className="flex flex-col gap-3 sm:flex-row">

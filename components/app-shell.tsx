@@ -56,6 +56,7 @@ import {
 } from "@/lib/local-audio-path";
 import { SYNCBIZ_MUSIC_LIBRARY_DRAG_MIME, type MusicLibraryDragPayload } from "@/lib/music-library-drag";
 import { derivePlaylistUnifiedCoverArt, unifiedPlaylistSourceId } from "@/lib/playlist-utils";
+import { VonoBrand } from "@/components/brand/vono-brand";
 
 const pillLink =
   "rounded-xl border border-slate-700/80 bg-slate-900/90 px-3.5 py-2 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] transition-all duration-100 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950";
@@ -1386,13 +1387,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             {/* ── LEFT: Logo + device state (MASTER / Agents) — flex-1 basis-0 anchors the balance ── */}
             <div className="flex flex-1 basis-0 items-center gap-3 min-w-0">
-              <Link href="/library" className="flex shrink-0 items-center gap-2" aria-label="SyncBiz">
-                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-[13px] font-semibold text-sky-400 ring-1 ring-sky-500/30">
-                  SB
-                </span>
-                <span className="hidden text-[13px] font-semibold tracking-tight text-slate-50 sm:block">
-                  SyncBiz
-                </span>
+              {/* VONO brand (owner 2026-10-13, variant B): official symbol square + wordmark; click → the main player screen */}
+              <Link href="/sources" className="flex h-8 shrink-0 items-center" aria-label="VONO">
+                <VonoBrand size="header" hideWordmarkOnMobile />
               </Link>
               {/* MASTER / On Air / device mode indicators */}
               <HeaderDeviceIndicators />
@@ -1414,7 +1411,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <nav className="flex shrink-0 items-end gap-1 pb-0" aria-label={mgmt(locale).t("nav.aria")} dir={mgmt(locale).dir}>
                 {/* exit management: first in the bar, a clear button (not another tab) — back arrow + music note */}
                 <Link
-                  href="/library"
+                  href="/sources"
                   title={mgmt(locale).t("nav.exitTitle")}
                   className="group relative me-2 inline-flex items-center gap-2 px-4 pb-[7px] pt-[5px] text-[15px] font-medium text-slate-300 transition-colors duration-150 hover:text-slate-50 focus:outline-none"
                 >

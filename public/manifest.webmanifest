@@ -1,6 +1,6 @@
 {
-  "name": "SyncBiz",
-  "short_name": "SyncBiz",
+  "name": "VONO",
+  "short_name": "VONO",
   "description": "Media control and scheduling for business playback.",
   "id": "/mobile/home",
   "start_url": "/mobile/home",

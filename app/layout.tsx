@@ -15,18 +15,20 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SyncBiz – Media Control & Scheduling",
+  title: "VONO",
   description:
-    "Controller and scheduler for business playback. Sends commands to customer-owned endpoint devices. SyncBiz does not store or host media.",
+    "Controller and scheduler for business playback. Sends commands to customer-owned endpoint devices. VONO does not store or host media.",
   // PWA: installable + registers as a Web Share Target (see public/manifest.webmanifest).
   manifest: "/manifest.webmanifest",
-  applicationName: "SyncBiz",
+  applicationName: "VONO",
   appleWebApp: {
     capable: true,
-    title: "SyncBiz",
+    title: "VONO",
     statusBarStyle: "black-translucent",
   },
+  // VONO (owner 2026-10-13): favicon.ico (16/32/48) comes from app/favicon.ico; a crisp PNG for high-DPI tabs / shortcuts
   icons: {
+    icon: [{ url: "/icons/icon-192.png", type: "image/png", sizes: "192x192" }],
     apple: "/icons/apple-touch-icon.png",
   },
 };
