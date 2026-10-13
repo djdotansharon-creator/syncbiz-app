@@ -29,7 +29,22 @@ function silentWav(seconds: number): Buffer {
   return b;
 }
 
+/** SAFETY (2026-10-13 incident): the orchestrator uses the FIXED pipe names (\\.\pipe\syncbiz-music / -music-b /
+ *  -interrupt). With a VONO station running on the same machine the test's IPC clients can attach to the LIVE
+ *  player's MPV (Windows allows several instances of one pipe name). Refuse to run unless no mpv / VONO runs. */
+function assertNoLivePlayer(): void {
+  if (process.platform !== "win32") return;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const out = String(require("node:child_process").execSync("tasklist /FO CSV /NH", { encoding: "utf8" })).toLowerCase();
+  if (out.includes("\"mpv.exe\"") || out.includes("\"syncbiz player.exe\"")) {
+    console.error("REFUSED: a VONO player / mpv.exe is running on this machine — close VONO first (shared MPV pipe names).");
+    app.exit(3);
+    throw new Error("live player running");
+  }
+}
+
 async function run(): Promise<void> {
+  assertNoLivePlayer();
   const dir = mkdtempSync(path.join(os.tmpdir(), "vono-itest-"));
   const corrupt = path.join(dir, "corrupt.mp3");
   writeFileSync(corrupt, Buffer.from("ID3 not audio ".repeat(300)));
