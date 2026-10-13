@@ -50,12 +50,12 @@ function useJingles(url: string) {
 }
 
 /** one jingle row: name · badge · duration · Preview · (actions) */
-function JingleRow({ j, deps, L, preview, isDesktop, actions, below }: {
-  j: JingleItem; deps: AudienceDeps; L: Mgmt; preview: ReturnType<typeof useAudioPreview>; isDesktop: boolean; actions?: ReactNode; below?: ReactNode;
+function JingleRow({ j, deps, L, preview, isDesktop, actions, below, highlight }: {
+  j: JingleItem; deps: AudienceDeps; L: Mgmt; preview: ReturnType<typeof useAudioPreview>; isDesktop: boolean; actions?: ReactNode; below?: ReactNode; highlight?: boolean;
 }) {
   const playing = preview.previewUrl === j.url;
   return (
-    <li className="border-b border-[color:var(--vx-line)]">
+    <li className={`border-b border-[color:var(--vx-line)] ${highlight ? "bg-white/[0.05] shadow-[inset_0_-3px_0_var(--sb-accent)]" : ""}`}>
       <div className="flex min-h-[64px] items-center gap-3 px-1 py-2.5">
         <div className="min-w-0 flex-1">
           <div className="truncate text-base font-semibold text-[var(--sb-text)]" dir="auto">{j.title || "—"}</div>
@@ -193,12 +193,14 @@ export function JinglesHqPanel({ deps, L, suggestion, onClose }: { deps: Audienc
   const isDesktop = useIsDesktop();
   const [editing, setEditing] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  /** the jingle just saved from the Studio — confirmed + highlighted at the top of the list */
+  const [justSaved, setJustSaved] = useState<{ id: string; title: string } | null>(null);
   const [draft, setDraft] = useState<AudienceDraft>(suggestion);
   const stopPreview = preview.stop; // stable (useCallback) — stop the local audition when the panel closes
   useEffect(() => () => stopPreview(), [stopPreview]);
 
   const pending = (items ?? []).filter((j) => j.audience === "UNASSIGNED");
-  const library = (items ?? []).filter((j) => j.audience !== "UNASSIGNED");
+  const library = (items ?? []).filter((j) => j.audience !== "UNASSIGNED").sort((a, b) => (a.id === justSaved?.id ? -1 : b.id === justSaved?.id ? 1 : 0));
   const complete = draftAudience(draft);
 
   const backBtn = (onClick: () => void) => (
@@ -227,7 +229,8 @@ export function JinglesHqPanel({ deps, L, suggestion, onClose }: { deps: Audienc
               ),
               audience: complete,
               saveBlockedText: L.t("jg.choose"),
-              onSaved: () => reload(),
+              // saved for real → back to the list, confirmed, the new jingle first + highlighted
+              onSaved: (saved) => { setJustSaved(saved); setCreating(false); reload(); },
             }}
           />
         </div>
@@ -243,6 +246,7 @@ export function JinglesHqPanel({ deps, L, suggestion, onClose }: { deps: Audienc
       L={L}
       preview={preview}
       isDesktop={isDesktop}
+      highlight={j.id === justSaved?.id}
       actions={editing !== j.id ? (
         <button type="button" className="vx-btn vx-btn-ghost shrink-0" onClick={() => setEditing(j.id)}>
           {j.audience === "UNASSIGNED" ? L.t("jg.assign") : j.audience === "LOCAL" ? L.t("jg.share") : L.t("jg.audience")}
@@ -271,6 +275,11 @@ export function JinglesHqPanel({ deps, L, suggestion, onClose }: { deps: Audienc
         <button type="button" className="vx-btn-primary" onClick={() => { setDraft(suggestion); setCreating(true); }}>+ {L.t("jg.create")}</button>
       </div>
       <div className="px-6 py-4">
+        {justSaved ? (
+          <p className="mb-4 border-b border-[color:var(--vx-line)] pb-3 text-base text-emerald-300" role="status" dir="auto">
+            {L.t("jg.savedOk", { name: justSaved.title })}
+          </p>
+        ) : null}
         {error ? <p className="text-sm text-[var(--sb-text-secondary)]">{L.t("jg.loadError")}</p> : items === null ? <p className="text-sm text-[var(--sb-text-secondary)]">{L.t("jg.loading")}</p> : (
           <>
             {pending.length ? (

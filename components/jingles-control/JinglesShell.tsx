@@ -1066,7 +1066,8 @@ export type StudioControlRoomSurface = {
   audienceCard: React.ReactNode;
   /** the complete audience, or null while it is still being chosen (Save is blocked until then) */
   audience: Record<string, unknown> | null;
-  onSaved?: () => void;
+  /** called with the saved library item (id + title) after a SUCCESSFUL save */
+  onSaved?: (saved: { id: string; title: string }) => void;
   saveBlockedText: string;
 };
 
@@ -1386,7 +1387,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
     if (controlRoom && !controlRoom.audience) { setGenerateError(controlRoom.saveBlockedText); return; }
     try {
       const saved = await saveJingleToCloud(resultCard, controlRoom ? controlRoom.audience : undefined);
-      controlRoom?.onSaved?.();
+      controlRoom?.onSaved?.({ id: saved.id, title: saved.title });
       // Cloud is authoritative — refetch so this client shows the same list every other client sees.
       try {
         setSavedAssets(await fetchCloudLibrary());
