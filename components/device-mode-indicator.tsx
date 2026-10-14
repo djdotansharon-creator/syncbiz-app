@@ -42,7 +42,7 @@ export function DeviceModeIndicator() {
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#30d158]" />
           <span className="text-[11px] font-semibold uppercase tracking-wider text-[#7ee2a0]">MASTER</span>
         </div>
-        <span className="hidden text-[11px] text-[#a1a1a6] sm:inline">{badge.subline}</span>
+        {/* the "Store audio station" / "Playing store audio" subline is not shown (owner 2026-10-14 — clean header) */}
       </div>
     );
   }
