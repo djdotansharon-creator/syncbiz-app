@@ -1428,14 +1428,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                   {mgmt(locale).t("ctl.controlling", { label: controlBranchLabel ?? mgmt(locale).t("ctl.default") })}
                 </Link>
               ) : null}
-              {/* Agents healthy — quiet chip, small green dot */}
-              <span
-                className="hidden items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-[5px] text-[11px] font-medium text-[#a1a1a6] sm:flex"
-                title={t.agentsHealthy}
-              >
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#30d158]" aria-hidden />
-                <span className="hidden md:inline">{t.agentsHealthy}</span>
-              </span>
             </div>
 
             {/* ── CENTER: Nav tabs — perfectly centered between left and right columns ──
