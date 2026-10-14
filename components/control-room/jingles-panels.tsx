@@ -187,7 +187,7 @@ export function BranchJingles({ branch, deps, isHQ, L, sendCommandWithAck }: {
   );
 }
 
-export function JinglesHqPanel({ deps, L, suggestion, onClose }: { deps: AudienceDeps; L: Mgmt; suggestion: AudienceDraft; onClose: () => void }) {
+export function JinglesHqPanel({ deps, L, suggestion, onClose, onCreatingChange }: { deps: AudienceDeps; L: Mgmt; suggestion: AudienceDraft; onClose: () => void; /** the Create Studio is open (the Control Room widens this column) */ onCreatingChange?: (creating: boolean) => void }) {
   const { items, error, reload } = useJingles("/api/jingles/library");
   const preview = useAudioPreview();
   const isDesktop = useIsDesktop();
@@ -196,6 +196,9 @@ export function JinglesHqPanel({ deps, L, suggestion, onClose }: { deps: Audienc
   /** the jingle just saved from the Studio — confirmed + highlighted at the top of the list */
   const [justSaved, setJustSaved] = useState<{ id: string; title: string } | null>(null);
   const [draft, setDraft] = useState<AudienceDraft>(suggestion);
+  // tell the Control Room when the Create Studio opens / closes (it slides this column to 2/3 of the screen), and reset on close
+  useEffect(() => { onCreatingChange?.(creating); }, [creating, onCreatingChange]);
+  useEffect(() => () => onCreatingChange?.(false), [onCreatingChange]);
   const stopPreview = preview.stop; // stable (useCallback) — stop the local audition when the panel closes
   useEffect(() => () => stopPreview(), [stopPreview]);
 

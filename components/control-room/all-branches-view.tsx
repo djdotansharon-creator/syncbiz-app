@@ -113,6 +113,9 @@ export function AllBranchesView() {
   const [brandsOpen, setBrandsOpen] = useState(false);
   /** Control Room → Jingles (HQ): the jingles panel in the right column (the map / filters stay = the context stays) */
   const [jinglesOpen, setJinglesOpen] = useState(false);
+  /** Create Jingle open → the jingles column slides to 2/3 of the screen, the map to 1/3 (owner 2026-10-14, "curtain") */
+  const [jingleCreating, setJingleCreating] = useState(false);
+  const wideJingles = jinglesOpen && jingleCreating;
   /** HQ = access type OWNER (the existing permission mechanism) — HQ-only jingle actions are shown only to HQ */
   const [isHQ, setIsHQ] = useState(false);
   useEffect(() => {
@@ -365,7 +368,7 @@ export function AllBranchesView() {
       ) : (
         <div
           className="grid min-h-0 flex-1 transition-[grid-template-columns] duration-300 ease-out motion-reduce:transition-none lg:grid-cols-[var(--cr-map-w)_minmax(0,1fr)]"
-          style={{ "--cr-map-w": `max(${size.width}, ${REGION_ROW_MIN_PX}px)` } as CSSProperties}
+          style={{ "--cr-map-w": wideJingles ? "max(33.333%, 320px)" : `max(${size.width}, ${REGION_ROW_MIN_PX}px)` } as CSSProperties}
         >
           <div className="hidden min-h-0 min-w-0 flex-col overflow-hidden border-e border-[color:var(--sb-border)] lg:flex">
             {/* map header: the place (All Israel / region) + ONE toolbar — map size (LED under the chosen one) and zoom */}
@@ -472,6 +475,7 @@ export function AllBranchesView() {
                     L={L}
                     suggestion={suggestAudience({ brandId: activeFilter !== "all" ? activeFilter : null, region: regionFocus, branchId: openId })}
                     onClose={() => setJinglesOpen(false)}
+                    onCreatingChange={setJingleCreating}
                   />
                 </div>
               );
