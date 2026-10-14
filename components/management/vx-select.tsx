@@ -59,7 +59,8 @@ export function VxSelect<V extends string = string>({
     const below = window.innerHeight - b.bottom - 8;
     const above = b.top - 8;
     const up = below < 180 && above > below;
-    setPos({ left: b.left, right: window.innerWidth - b.right, rtl, top: up ? b.top : b.bottom, width: b.width, maxH: Math.max(120, Math.min(320, up ? above : below)), up });
+    const GAP = 6; // the menu floats a little away from the field (Apple-style)
+    setPos({ left: b.left, right: window.innerWidth - b.right, rtl, top: up ? b.top - GAP : b.bottom + GAP, width: b.width, maxH: Math.max(120, Math.min(320, (up ? above : below) - GAP)), up });
   }, []);
 
   const openList = useCallback((at?: number) => {
@@ -199,7 +200,8 @@ export function VxSelect<V extends string = string>({
                   onMouseMove={() => { if (i !== active) setActive(i); }}
                   onClick={() => choose(i)}
                 >
-                  {o.label}
+                  <svg className="vx-select-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M20 6 9 17l-5-5" /></svg>
+                  <span className="min-w-0 truncate">{o.label}</span>
                 </li>
               ))}
             </ul>,
