@@ -135,12 +135,12 @@ export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[
   );
 }
 
-/** Small brand pill (list / preview). */
+/** Small brand label (list / preview) — frameless (owner 2026-10-14, Mac-clean): the brand colour dot + the name. */
 export function BrandBadge({ name, color }: { name: string; color: string | null }) {
   const c = color ?? DEFAULT_BRAND_COLOR;
   return (
-    <span className="inline-flex max-w-[12rem] items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium" style={{ borderColor: `${c}66`, background: `${c}1f`, color: "var(--sb-text)" }}>
-      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: c }} aria-hidden />
+    <span className="inline-flex max-w-[12rem] items-center gap-1.5 text-xs font-medium text-[var(--sb-text-secondary)]">
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c }} aria-hidden />
       <span className="truncate" dir="auto">{name}</span>
     </span>
   );
