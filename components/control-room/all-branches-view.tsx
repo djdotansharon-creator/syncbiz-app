@@ -253,13 +253,43 @@ export function AllBranchesView() {
 
   return (
     <div dir={L.dir} className="flex h-full min-h-[680px] flex-col overflow-hidden rounded-2xl border border-[color:var(--sb-border)] bg-[var(--sb-surface)]">
-      <header className="flex items-center justify-between gap-4 border-b border-[color:var(--sb-border)] px-6 py-4">
+      <header className="flex items-center justify-between gap-6 border-b border-[color:var(--sb-border)] px-6 py-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-[var(--sb-text)]">{L.t("cr.title")}</h1>
           <p className="text-xs text-[var(--sb-text-tertiary)]">
             {L.t(liveKnown ? "cr.live" : status === "connecting" ? "cr.connecting" : "cr.liveUnavailable")}
           </p>
         </div>
+        {/* search lives in the header (owner 2026-10-16) — no separate row */}
+        {dbBranches && rows.length > 0 ? (
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-3">
+          <label className="relative flex min-w-[220px] max-w-md flex-1 items-center">
+            <svg className="pointer-events-none absolute start-3.5 h-[18px] w-[18px] text-[var(--sb-text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={regionFocus ? L.t("cr.searchIn", { region: L.region(regionFocus) }) : L.t("cr.searchPlaceholder")}
+              aria-label={L.t("cr.searchAria")}
+              dir="auto"
+              className="w-full rounded-xl border border-[color:var(--sb-border)] bg-white/[0.04] py-2 ps-10 pe-9 text-base text-[var(--sb-text)] placeholder:text-[var(--sb-text-tertiary)] focus:border-[color:var(--sb-accent)] focus:outline-none"
+            />
+            {search ? (
+              <button type="button" onClick={() => setSearch("")} className="absolute end-2 inline-flex h-6 w-6 items-center justify-center rounded text-[var(--sb-text-tertiary)] hover:text-[var(--sb-text)]" aria-label={L.t("cr.clearSearch")}>
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M18 6 6 18M6 6l12 12" /></svg>
+              </button>
+            ) : null}
+          </label>
+          <span className="text-sm text-[var(--sb-text-secondary)]">
+            {L.t("cr.showing", { n: visibleRows.length, total: rows.length })}
+          </span>
+          {filtersActive ? (
+            <button type="button" onClick={clearFilters} className="rounded-lg border border-[color:var(--sb-accent-border)] px-3 py-1.5 text-sm font-medium text-[var(--sb-accent)] hover:bg-[var(--sb-accent-soft)]">
+              {L.t("cr.clearFilters")}
+            </button>
+          ) : null}
+        </div>
+        ) : <div className="flex-1" />}
         <div className="flex items-center gap-4">
         <NetworkCode />
         <button
@@ -315,7 +345,7 @@ export function AllBranchesView() {
               active={activeFilter === b.id}
               dot={b.id === "all" ? null : b.color ?? DEFAULT_BRAND_COLOR}
               logo={b.logoUrl ?? null}
-              bar={b.id === "all" ? "rgba(255,255,255,0.22)" : b.color ?? DEFAULT_BRAND_COLOR}
+              bar={b.color ?? "#f5f5f7"}
               onClick={() => setBrandFilter(b.id)}
             />
           ))}
@@ -332,35 +362,6 @@ export function AllBranchesView() {
       </div>
 
 
-      {dbBranches && rows.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-3 border-b border-[color:var(--sb-border)] px-6 py-2.5">
-          <label className="relative flex min-w-[220px] max-w-md flex-1 items-center">
-            <svg className="pointer-events-none absolute start-3.5 h-[18px] w-[18px] text-[var(--sb-text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={regionFocus ? L.t("cr.searchIn", { region: L.region(regionFocus) }) : L.t("cr.searchPlaceholder")}
-              aria-label={L.t("cr.searchAria")}
-              dir="auto"
-              className="w-full rounded-xl border border-[color:var(--sb-border)] bg-white/[0.04] py-2 ps-10 pe-9 text-base text-[var(--sb-text)] placeholder:text-[var(--sb-text-tertiary)] focus:border-[color:var(--sb-accent)] focus:outline-none"
-            />
-            {search ? (
-              <button type="button" onClick={() => setSearch("")} className="absolute end-2 inline-flex h-6 w-6 items-center justify-center rounded text-[var(--sb-text-tertiary)] hover:text-[var(--sb-text)]" aria-label={L.t("cr.clearSearch")}>
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M18 6 6 18M6 6l12 12" /></svg>
-              </button>
-            ) : null}
-          </label>
-          <span className="text-sm text-[var(--sb-text-secondary)]">
-            {L.t("cr.showing", { n: visibleRows.length, total: rows.length })}
-          </span>
-          {filtersActive ? (
-            <button type="button" onClick={clearFilters} className="rounded-lg border border-[color:var(--sb-accent-border)] px-3 py-1.5 text-sm font-medium text-[var(--sb-accent)] hover:bg-[var(--sb-accent-soft)]">
-              {L.t("cr.clearFilters")}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
 
       {loadError ? (
         <p className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">{L.t("cr.loadError")}</p>
