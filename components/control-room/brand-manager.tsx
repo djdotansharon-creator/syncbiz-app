@@ -9,13 +9,13 @@ import { useMgmt } from "@/lib/i18n/use-mgmt";
  * in Add / Edit branch.
  */
 
-export type BrandRow = { id: string; name: string; code: string; color: string | null; isDefault: boolean; branchCount: number };
+export type BrandRow = { id: string; name: string; code: string; color: string | null; logoUrl?: string | null; isDefault: boolean; branchCount: number };
 
 /** Distinct colors that read well on the dark map (owner can still pick any color). */
 export const BRAND_PALETTE = ["#0a84ff", "#ff375f", "#ff9f0a", "#30d158", "#bf5af2", "#64d2ff", "#ffd60a", "#ff6482", "#5e5ce6", "#ac8e68", "#66d4cf", "#e5e5ea"];
 export const DEFAULT_BRAND_COLOR = "#8e8e93";
 
-type Draft = { id: string | null; name: string; code: string; color: string };
+type Draft = { id: string | null; name: string; code: string; color: string; logoUrl: string | null };
 
 export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[]; onClose: () => void; onChanged: () => void }) {
   const L = useMgmt();
@@ -25,10 +25,46 @@ export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[
 
   const startAdd = () => {
     const used = new Set(brands.map((b) => (b.color ?? "").toLowerCase()));
-    setDraft({ id: null, name: "", code: "", color: BRAND_PALETTE.find((c) => !used.has(c)) ?? BRAND_PALETTE[0] });
+    setDraft({ id: null, name: "", code: "", color: BRAND_PALETTE.find((c) => !used.has(c)) ?? BRAND_PALETTE[0], logoUrl: null });
     setError(null);
   };
-  const startEdit = (b: BrandRow) => { setDraft({ id: b.id, name: b.name, code: b.code, color: b.color ?? DEFAULT_BRAND_COLOR }); setError(null); };
+  const startEdit = (b: BrandRow) => { setDraft({ id: b.id, name: b.name, code: b.code, color: b.color ?? DEFAULT_BRAND_COLOR, logoUrl: b.logoUrl ?? null }); setError(null); };
+
+  // LOGO (owner 2026-10-15): uploaded / removed immediately for an existing brand (the server checks the real file type)
+  const [logoBusy, setLogoBusy] = useState(false);
+  const uploadLogo = async (file: File) => {
+    if (!draft?.id) return;
+    setLogoBusy(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/control-room/brands/${encodeURIComponent(draft.id)}/logo`, { method: "POST", body: fd });
+      const d = (await res.json().catch(() => ({}))) as { error?: string; logoUrl?: string };
+      if (!res.ok || !d.logoUrl) { setError(d.error ?? L.t("common.saveFailedHttp", { status: res.status })); return; }
+      setDraft((cur) => (cur ? { ...cur, logoUrl: d.logoUrl ?? null } : cur));
+      onChanged();
+    } catch {
+      setError(L.t("common.serverRetry"));
+    } finally {
+      setLogoBusy(false);
+    }
+  };
+  const removeLogo = async () => {
+    if (!draft?.id) return;
+    setLogoBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/control-room/brands/${encodeURIComponent(draft.id)}/logo`, { method: "DELETE" });
+      if (!res.ok) { setError(L.t("common.saveFailedHttp", { status: res.status })); return; }
+      setDraft((cur) => (cur ? { ...cur, logoUrl: null } : cur));
+      onChanged();
+    } catch {
+      setError(L.t("common.serverRetry"));
+    } finally {
+      setLogoBusy(false);
+    }
+  };
 
   const save = async () => {
     if (!draft) return;
@@ -104,8 +140,35 @@ export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[
               </label>
             </div>
           </div>
+          <div>
+            <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("brand.logo")}</span>
+            {draft.id ? (
+              <div className="mt-2 flex flex-wrap items-center gap-4">
+                {draft.logoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={draft.logoUrl} alt="" className="h-10 w-auto max-w-[160px] object-contain" />
+                ) : null}
+                <label className={`cursor-pointer text-sm font-medium text-[var(--sb-text)] hover:underline ${logoBusy || saving ? "pointer-events-none opacity-40" : ""}`}>
+                  {logoBusy ? L.t("brand.logoUploading") : L.t(draft.logoUrl ? "brand.logoReplace" : "brand.logoUpload")}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    className="sr-only"
+                    disabled={logoBusy || saving}
+                    onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void uploadLogo(f); }}
+                  />
+                </label>
+                {draft.logoUrl ? (
+                  <button type="button" onClick={() => void removeLogo()} disabled={logoBusy || saving} className="text-sm text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)] disabled:opacity-40">{L.t("brand.logoRemove")}</button>
+                ) : null}
+                <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("brand.logoHint")}</span>
+              </div>
+            ) : (
+              <p className="mt-1 text-xs text-[var(--sb-text-tertiary)]">{L.t("brand.logoAfterSave")}</p>
+            )}
+          </div>
           <div className="flex items-center gap-2 text-sm text-[var(--sb-text-secondary)]">
-            {L.t("brand.preview")} <BrandBadge name={draft.name || L.t("brand.placeholder")} color={draft.color} />
+            {L.t("brand.preview")} <BrandBadge name={draft.name || L.t("brand.placeholder")} color={draft.color} logoUrl={draft.logoUrl} />
           </div>
           {error ? <p className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-200" role="alert">{error}</p> : null}
           <div className="flex items-center justify-end gap-3 pt-2">
@@ -119,7 +182,12 @@ export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[
         <ul className="divide-y divide-[color:var(--sb-border)]">
           {brands.map((b) => (
             <li key={b.id} className="flex items-center gap-3 px-6 py-3.5">
-              <span className="h-3.5 w-3.5 shrink-0 rounded-full" style={{ background: b.color ?? DEFAULT_BRAND_COLOR }} aria-hidden />
+              {b.logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={b.logoUrl} alt="" aria-hidden className="h-6 w-10 shrink-0 object-contain" />
+              ) : (
+                <span className="h-3.5 w-3.5 shrink-0 rounded-full" style={{ background: b.color ?? DEFAULT_BRAND_COLOR }} aria-hidden />
+              )}
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold text-[var(--sb-text)]" dir="auto">{b.name}</div>
                 <div className="text-xs text-[var(--sb-text-tertiary)]">
@@ -136,11 +204,16 @@ export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[
 }
 
 /** Small brand label (list / preview) — frameless (owner 2026-10-14, Mac-clean): the brand colour dot + the name. */
-export function BrandBadge({ name, color }: { name: string; color: string | null }) {
+export function BrandBadge({ name, color, logoUrl }: { name: string; color: string | null; logoUrl?: string | null }) {
   const c = color ?? DEFAULT_BRAND_COLOR;
   return (
     <span className="inline-flex max-w-[12rem] items-center gap-1.5 text-xs font-medium text-[var(--sb-text-secondary)]">
-      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c }} aria-hidden />
+      {logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={logoUrl} alt="" aria-hidden className="h-4 w-auto max-w-[56px] shrink-0 object-contain" />
+      ) : (
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c }} aria-hidden />
+      )}
       <span className="truncate" dir="auto">{name}</span>
     </span>
   );

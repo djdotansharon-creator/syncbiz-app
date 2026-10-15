@@ -60,12 +60,13 @@ assert("L3 Access Control: every screen state has dir={L.dir}; Hebrew heading \"
 // a region bar in the KPI language; the brand row cannot grow a vertical scrollbar
 const bc = readFileSync("components/control-room/broadcast-panel.tsx", "utf8");
 // owner 2026-10-12 (round 2): the screen fills the page; ONLY the right-hand table / panel scrolls; map column fixed
-const order = ['aria-label={L.t("cr.kpiAria")}', 'aria-label={L.t("cr.brandsAria")}', 'aria-label={L.t("cr.searchAria")}', 'role="toolbar"', 'aria-label={L.t("map.regionsAria")}'].map((k) => view.indexOf(k));
+// owner 2026-10-15: the brands row is the header of the screen → brands ABOVE the status counters
+const order = ['aria-label={L.t("cr.brandsAria")}', 'aria-label={L.t("cr.kpiAria")}', 'aria-label={L.t("cr.searchAria")}', 'role="toolbar"', 'aria-label={L.t("map.regionsAria")}'].map((k) => view.indexOf(k));
 assert("U1 one scroll, on the right-hand table only: screen fills the page; list / panels scroll; map column not scrolling; no nested lists in Broadcast",
   view.includes('className="flex h-full min-h-[680px] flex-col overflow-hidden rounded-2xl') && view.includes("grid min-h-0 flex-1") &&
   (view.match(/min-h-0 min-w-0 overflow-y-auto/g) ?? []).length === 5 && view.includes("min-h-0 min-w-0 divide-y divide-[color:var(--sb-border)] overflow-y-auto") &&
   !view.includes("lg:sticky") && !view.includes("max-h-[640px]") && !bc.includes("overflow-y-auto"));
-assert("U2 order statuses → brands → search; map area = header toolbar (sizes + zoom, no frames) → regions strip (no separate back button); legend stacked on the left of the map; brands + regions are big tabs with a bar under the chosen one; region clicked again → All Israel",
+assert("U2 order brands → statuses → search; map area = header toolbar (sizes + zoom, no frames) → regions strip (no separate back button); legend stacked on the left of the map; brands + regions are big tabs with a bar under the chosen one; region clicked again → All Israel",
   order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])) && view.includes("absolute left-6 top-2 z-10 flex flex-col") && view.includes("controlsSlot={zoomSlot}") && !view.includes("rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5") && view.includes('<RegionChip label={L.t("map.allIsrael")}') && view.includes('className="flex overflow-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("map.regionsAria")}') && view.includes('absolute right-6 top-2 z-10 text-right') &&
   view.includes("regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id)") && /bar=\{b\.color \?\? "#f5f5f7"\}/.test(view));
 console.log(`(+L3) ${pass} passed, ${fail} failed`);

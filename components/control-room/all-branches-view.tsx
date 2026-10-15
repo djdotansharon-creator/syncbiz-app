@@ -304,6 +304,24 @@ export function AllBranchesView() {
         </div>
       </header>
 
+      {/* brands = the header of the screen (owner 2026-10-15), above the counters */}
+      {brandsData && brandsData.brands.length > 1 ? (
+        <div className="flex overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("cr.brandsAria")}>
+          {[{ id: "all", name: L.t("cr.allBrands"), color: null as string | null, logoUrl: null as string | null }, ...brandsData.brands].map((b) => (
+            <FilterTab
+              key={b.id}
+              label={b.name}
+              count={b.id === "all" ? rows.length : rows.filter((r) => r.brandId === b.id).length}
+              active={activeFilter === b.id}
+              dot={b.id === "all" ? null : b.color ?? DEFAULT_BRAND_COLOR}
+              logo={b.logoUrl ?? null}
+              bar={b.color ?? "#f5f5f7"}
+              onClick={() => setBrandFilter(b.id)}
+            />
+          ))}
+        </div>
+      ) : null}
+
       {/* the KPI counters ARE the status filter (combined with Brand + Region + Search) */}
       <div className="grid grid-cols-2 border-b border-[color:var(--sb-border)] md:grid-cols-5" role="group" aria-label={L.t("cr.kpiAria")}>
         <Stat value={dbBranches ? statusCounts.all : "-"} L={L} label={L.t("status.all")} active={activeStatus === "all"} onClick={() => toggleStatus("all")} disabled={!dbBranches} />
@@ -313,21 +331,6 @@ export function AllBranchesView() {
         <Stat value={dbBranches ? statusCounts.install : "-"} L={L} label={L.t("status.install")} status="install" active={activeStatus === "install"} onClick={() => toggleStatus("install")} disabled={!dbBranches} valueColor={statusCounts.install > 0 ? "#fbbf24" : undefined} last />
       </div>
 
-      {brandsData && brandsData.brands.length > 1 ? (
-        <div className="flex overflow-x-auto overflow-y-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("cr.brandsAria")}>
-          {[{ id: "all", name: L.t("cr.allBrands"), color: null as string | null }, ...brandsData.brands].map((b) => (
-            <FilterTab
-              key={b.id}
-              label={b.name}
-              count={b.id === "all" ? rows.length : rows.filter((r) => r.brandId === b.id).length}
-              active={activeFilter === b.id}
-              dot={b.id === "all" ? null : b.color ?? DEFAULT_BRAND_COLOR}
-              bar={b.color ?? "#f5f5f7"}
-              onClick={() => setBrandFilter(b.id)}
-            />
-          ))}
-        </div>
-      ) : null}
 
       {dbBranches && rows.length > 0 ? (
         <div className="flex flex-wrap items-center gap-3 border-b border-[color:var(--sb-border)] px-6 py-2.5">
@@ -575,7 +578,7 @@ function BranchRow({ L, row, brand, status, selected, onSelect }: { L: Mgmt; row
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-lg font-semibold text-[var(--sb-text)]" dir="auto">{row.name}</span>
-          {brand ? <BrandBadge name={brand.name} color={brand.color} /> : null}
+          {brand ? <BrandBadge name={brand.name} color={brand.color} logoUrl={brand.logoUrl} /> : null}
         </div>
         {row.branchNumber || row.city ? (
           <div className="truncate text-xs text-[var(--sb-text-secondary)]">

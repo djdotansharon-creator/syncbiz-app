@@ -28,7 +28,7 @@ export function RegionChip({ label, active, onClick, title }: { label: string; a
 }
 
 /** a filter tab (brands / regions) — the same language as the KPI cards: big, clear, a bar under the chosen one */
-export function FilterTab({ label, count, active, onClick, dot, bar }: { label: string; count: number; active: boolean; onClick: () => void; dot?: string | null; bar?: string }) {
+export function FilterTab({ label, count, active, onClick, dot, bar, logo }: { label: string; count: number; active: boolean; onClick: () => void; dot?: string | null; bar?: string; /** brand logo (replaces the dot) */ logo?: string | null }) {
   return (
     <button
       type="button"
@@ -39,7 +39,10 @@ export function FilterTab({ label, count, active, onClick, dot, bar }: { label: 
       }`}
     >
       <span className={`flex items-center gap-2 whitespace-nowrap text-base ${active ? "font-semibold text-[var(--sb-text)]" : "font-medium text-[var(--sb-text-secondary)]"}`}>
-        {dot ? <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: dot }} aria-hidden /> : null}
+        {logo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={logo} alt="" aria-hidden className="h-5 w-auto max-w-[72px] shrink-0 object-contain" draggable={false} />
+        ) : dot ? <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: dot }} aria-hidden /> : null}
         <span dir="auto">{label}</span>
       </span>
       <span className="text-sm tabular-nums text-[var(--sb-text-tertiary)]" dir="ltr">{count}</span>

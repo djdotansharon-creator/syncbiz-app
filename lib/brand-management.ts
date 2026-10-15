@@ -10,7 +10,7 @@ import { ensureDefaultBrandId } from "./control-room-foundation";
 import { BranchInputError } from "./branch-management";
 
 export type BrandInput = { name: unknown; code: unknown; color: unknown };
-export type BrandView = { id: string; name: string; code: string; color: string | null; isDefault: boolean; branchCount: number };
+export type BrandView = { id: string; name: string; code: string; color: string | null; logoUrl: string | null; isDefault: boolean; branchCount: number };
 
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const CODE_RE = /^[A-Z0-9][A-Z0-9_-]{0,23}$/;
@@ -43,7 +43,7 @@ async function assertCodeFree(workspaceId: string, code: string, exceptId?: stri
 export async function listBrands(workspaceId: string): Promise<{ brands: BrandView[]; defaultBrandId: string; branchBrand: Record<string, string> }> {
   const defaultBrandId = await prisma.$transaction((tx) => ensureDefaultBrandId(tx, workspaceId));
   const [brands, branches] = await Promise.all([
-    prisma.brand.findMany({ where: { workspaceId, archivedAt: null }, orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { createdAt: "asc" }], select: { id: true, name: true, code: true, color: true, isDefault: true } }),
+    prisma.brand.findMany({ where: { workspaceId, archivedAt: null }, orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }, { createdAt: "asc" }], select: { id: true, name: true, code: true, color: true, logoUrl: true, isDefault: true } }),
     prisma.branch.findMany({ where: { workspaceId }, select: { id: true, brandId: true } }),
   ]);
   const branchBrand: Record<string, string> = {};
