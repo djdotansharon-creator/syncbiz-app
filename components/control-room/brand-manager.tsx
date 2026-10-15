@@ -206,14 +206,16 @@ export function BrandManager({ brands, onClose, onChanged }: { brands: BrandRow[
 /** Small brand label (list / preview) — frameless (owner 2026-10-14, Mac-clean): the brand colour dot + the name. */
 export function BrandBadge({ name, color, logoUrl }: { name: string; color: string | null; logoUrl?: string | null }) {
   const c = color ?? DEFAULT_BRAND_COLOR;
+  // owner 2026-10-16: a brand WITH a logo shows only the logo (the name = tooltip / accessible name); without → dot + name
+  if (logoUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={logoUrl} alt={name} title={name} className="inline-block h-5 w-auto max-w-[72px] shrink-0 object-contain" />
+    );
+  }
   return (
     <span className="inline-flex max-w-[12rem] items-center gap-1.5 text-xs font-medium text-[var(--sb-text-secondary)]">
-      {logoUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={logoUrl} alt="" aria-hidden className="h-4 w-auto max-w-[56px] shrink-0 object-contain" />
-      ) : (
-        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c }} aria-hidden />
-      )}
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c }} aria-hidden />
       <span className="truncate" dir="auto">{name}</span>
     </span>
   );
