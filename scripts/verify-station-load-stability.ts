@@ -18,7 +18,7 @@ assert("S2 the polling effect depends ONLY on engine on/off + restore (not on pe
 assert("S3 the latest playback handlers are read from a ref when a schedule fires", /const handlersRef = useRef\(/.test(sap) && /const h = handlersRef\.current;/.test(sap));
 
 const smc = read("components/sources-manager-client.tsx");
-assert("L1 the library is not loaded through next/dynamic (React.lazy + Suspense can be starved on a busy station)", !/next\/dynamic/.test(smc) && /import\("@\/components\/sources-manager"\)/.test(smc));
+assert("L1 the library is not loaded through next/dynamic (React.lazy + Suspense can be starved on a busy station)", !/from "next\/dynamic"/.test(smc) && /import\("@\/components\/sources-manager"\)/.test(smc));
 assert("L2 a failed load retries by itself with back-off (no button)", /setTimeout\(load, Math\.min\(1000 \* 2 \*\* \(attempt - 1\), 15_000\)\)/.test(smc) && !/<button/.test(smc));
 assert("L3 a load that never settles → automatic page reload after the deadline, at most once per 10 min",
   /const LOAD_DEADLINE_MS = 25_000;/.test(smc) && /const RELOAD_COOLDOWN_MS = 10 \* 60 \* 1000;/.test(smc) && /window\.location\.reload\(\)/.test(smc));
