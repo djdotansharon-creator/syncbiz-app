@@ -6,15 +6,15 @@
  *   - signed with SYNCBIZ_SESSION_SECRET, DOMAIN-SEPARATED from the session cookie ("vono-mgmt-unlock:" prefix in
  *     the signing input) so a session cookie can never be replayed as an unlock and vice versa;
  *   - bound to the signed-in email (a different account's unlock is ignored);
- *   - exp = now + 15 min, extended ONLY by real user activity (the client "touch") — background polling never extends;
+ *   - exp = now + 60 min, extended ONLY by real user activity (the client "touch") — background polling never extends;
  *   - set WITHOUT Max-Age / Expires (a session cookie) → closing the app drops it; the desktop also clears it on its
  *     first page of every app run (belt and braces).
  * FAIL-CLOSED: no / short secret → no unlock is ever valid.
  */
 
 export const MGMT_UNLOCK_COOKIE = "vono-mgmt-unlock";
-/** Inactivity window: management locks after this long without user activity. */
-export const MGMT_IDLE_SEC = 15 * 60;
+/** Inactivity window: management locks after this long without user activity (owner 2026-10-15: one hour). */
+export const MGMT_IDLE_SEC = 60 * 60;
 const VERSION = "mu1";
 const DOMAIN = "vono-mgmt-unlock:";
 

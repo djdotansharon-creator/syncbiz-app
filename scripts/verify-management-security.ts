@@ -29,8 +29,8 @@ async function main() {
   // ── unlock token ──
   const now = 1_800_000_000;
   const { value, exp } = await mu.createUnlockValue("Boss@Shop.com", now);
-  assert("S3 unlock valid for its own account for 15 min", exp === now + 900 && (await mu.verifyUnlockValue(value, "boss@shop.com", now)) === exp && (await mu.verifyUnlockValue(value, "boss@shop.com", now + 899)) === exp);
-  assert("S4 expired after 15 min of inactivity (no touch)", (await mu.verifyUnlockValue(value, "boss@shop.com", now + 900)) === null);
+  assert("S3 unlock valid for its own account for 60 min", exp === now + 3600 && (await mu.verifyUnlockValue(value, "boss@shop.com", now)) === exp && (await mu.verifyUnlockValue(value, "boss@shop.com", now + 3599)) === exp);
+  assert("S4 expired after 60 min of inactivity (no touch)", (await mu.verifyUnlockValue(value, "boss@shop.com", now + 3600)) === null);
   assert("S5 another account's unlock is ignored", (await mu.verifyUnlockValue(value, "employee@shop.com", now)) === null);
   const parts = value.split(".");
   const forged = `${parts[0]}.${Buffer.from(JSON.stringify({ email: "boss@shop.com", exp: now + 99999 })).toString("base64url")}.${parts[2]}`;
@@ -94,8 +94,8 @@ async function main() {
     /attemptKeys\("login", normEmail, req\.headers\)/.test(read("app/api/auth/login/route.ts")) && /attemptKeys\("reauth", email, req\.headers\)/.test(read("app/api/auth/verify-password/route.ts")));
   const lock = read("components/management/management-lock.tsx");
   assert("W10 lock screen: Back to Player is a plain link to /sources (no password)", /<Link href="\/sources"[^>]*>← Back to Player<\/Link>/.test(lock));
-  assert("W11 inactivity: 15 min idle → lock; real activity extends at most once a minute (polling never)",
-    /const IDLE_MS = 15 \* 60 \* 1000;/.test(lock) && /const TOUCH_EVERY_MS = 60 \* 1000;/.test(lock) && /\["pointerdown", "keydown", "wheel", "touchstart"\]/.test(lock));
+  assert("W11 inactivity: 60 min idle → lock; real activity extends at most once a minute (polling never)",
+    /const IDLE_MS = 60 \* 60 \* 1000;/.test(lock) && /const TOUCH_EVERY_MS = 60 \* 1000;/.test(lock) && /\["pointerdown", "keydown", "wheel", "touchstart"\]/.test(lock));
   const shell = read("components/app-shell.tsx");
   assert("W12 header: management entries only for managers (gear menu + pinned nav)",
     /const MANAGEMENT_NAV_KEYS = new Set<string>\(\["dashboard", "controlRoom", "access-control", "owner"\]\);/.test(shell) &&

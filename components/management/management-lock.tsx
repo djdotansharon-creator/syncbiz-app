@@ -5,14 +5,14 @@
  *   ManagementLockScreen  — "Management is locked": manager password → unlock (server re-auth, rate-limited) ·
  *                           "Back to Player" always open (no password).
  *   ManagementActivity    — real user activity (pointer / key / wheel / touch) extends the unlock (at most once a
- *                           minute); 15 min without activity → lock now. Background polling never extends it.
+ *                           minute); 60 min without activity → lock now. Background polling never extends it.
  * Never touches playback: locking only swaps the management page for the lock screen.
  */
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-const IDLE_MS = 15 * 60 * 1000;
+const IDLE_MS = 60 * 60 * 1000; // owner 2026-10-15: lock after one hour without activity
 const TOUCH_EVERY_MS = 60 * 1000;
 
 export function ManagementLockScreen() {
