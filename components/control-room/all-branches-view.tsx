@@ -315,7 +315,7 @@ export function AllBranchesView() {
               active={activeFilter === b.id}
               dot={b.id === "all" ? null : b.color ?? DEFAULT_BRAND_COLOR}
               logo={b.logoUrl ?? null}
-              bar={b.color ?? "#f5f5f7"}
+              bar={b.id === "all" ? "rgba(255,255,255,0.22)" : b.color ?? DEFAULT_BRAND_COLOR}
               onClick={() => setBrandFilter(b.id)}
             />
           ))}

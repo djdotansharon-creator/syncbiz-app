@@ -68,7 +68,7 @@ assert("U1 one scroll, on the right-hand table only: screen fills the page; list
   !view.includes("lg:sticky") && !view.includes("max-h-[640px]") && !bc.includes("overflow-y-auto"));
 assert("U2 order brands → statuses → search; map area = header toolbar (sizes + zoom, no frames) → regions strip (no separate back button); legend stacked on the left of the map; brands + regions are big tabs with a bar under the chosen one; region clicked again → All Israel",
   order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])) && view.includes("absolute left-6 top-2 z-10 flex flex-col") && view.includes("controlsSlot={zoomSlot}") && !view.includes("rounded-lg border border-[color:var(--sb-border)] bg-white/[0.03] p-0.5") && view.includes('<RegionChip label={L.t("map.allIsrael")}') && view.includes('className="flex overflow-hidden border-b border-[color:var(--sb-border)]" role="group" aria-label={L.t("map.regionsAria")}') && view.includes('absolute right-6 top-2 z-10 text-right') &&
-  view.includes("regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id)") && /bar=\{b\.color \?\? "#f5f5f7"\}/.test(view));
+  view.includes("regionFocus === r.id ? setRegionFocus(null) : focusRegion(r.id)") && /bar=\{b\.id === "all" \? "rgba\(255,255,255,0\.22\)" : b\.color \?\? DEFAULT_BRAND_COLOR\}/.test(view) /* 2026-10-15: brand colour = permanent top strip */);
 console.log(`(+L3) ${pass} passed, ${fail} failed`);
 // Design language step 1 (owner 2026-10-12): shared tokens + opt-in .vx-* classes; Control Room primitives moved, unchanged
 const prim = readFileSync("components/management/primitives.tsx", "utf8");
