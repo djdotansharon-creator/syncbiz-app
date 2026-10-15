@@ -341,7 +341,6 @@ export function AllBranchesView() {
             <FilterTab
               key={b.id}
               label={b.name}
-              count={b.id === "all" ? rows.length : rows.filter((r) => r.brandId === b.id).length}
               active={activeFilter === b.id}
               dot={b.id === "all" ? null : b.color ?? DEFAULT_BRAND_COLOR}
               logo={b.logoUrl ?? null}
