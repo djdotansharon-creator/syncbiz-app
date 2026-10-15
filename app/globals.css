@@ -3607,14 +3607,14 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 .vx-select-value.is-placeholder { color: var(--vx-text-3); }
 .vx-select-chevron { flex: none; width: 13px; height: 13px; color: var(--vx-text-2); transition: transform 0.18s ease; }
 .vx-select.is-open .vx-select-chevron { transform: rotate(180deg); }
-@keyframes vx-select-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
 .vx-select-list {
   position: fixed; z-index: 1000; margin: 0; padding: 5px; list-style: none; overflow-y: auto;
-  background: rgba(30, 30, 34, 0.84); -webkit-backdrop-filter: blur(22px) saturate(170%); backdrop-filter: blur(22px) saturate(170%);
+  /* SOLID (no backdrop-filter): on some Windows stations (GPU off / software rendering) a blurred, animated layer is
+     drawn fully transparent → the menu opened but was invisible (owner 2026-10-15, new branch PC) */
+  background: #1d1d21;
   border: 1px solid rgba(255, 255, 255, 0.10); border-radius: 11px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
   color: var(--vx-text); font-size: var(--vx-fs-secondary); color-scheme: dark; outline: none;
-  animation: vx-select-in 0.14s ease-out;
 }
 .vx-select-option {
   position: relative; display: flex; align-items: center; gap: 0.5rem; min-height: 34px; padding: 0 0.75rem 0 0.5rem;
@@ -3624,7 +3624,6 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 .vx-select-option.is-selected .vx-select-check { opacity: 1; }
 .vx-select-option.is-selected { color: #f5f5f7; font-weight: 600; }
 .vx-select-option.is-active { background: rgba(255, 255, 255, 0.11); color: #fff; }
-@media (prefers-reduced-motion: reduce) { .vx-select-list { animation: none; } }
 
 /* ── PLAYER AREA in the VONO language (owner 2026-10-12) — DISPLAY ONLY (no queue / playback / tile logic) ──
    Queue rows + playlist tiles: no card frames — clean rows on hairlines, hover = soft highlight,
