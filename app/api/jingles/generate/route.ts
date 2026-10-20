@@ -17,12 +17,15 @@ const MODEL_BY_LANG: Record<"en" | "he", string> = {
   en: "eleven_turbo_v2_5",
   he: "eleven_multilingual_v2",
 };
-// Per-voice model override (takes precedence over MODEL_BY_LANG). The two professional
-// Hebrew voices were verified ONLY on eleven_v3, so they are pinned to it regardless of
-// language. No global Hebrew→v3 switch — every other voice keeps MODEL_BY_LANG exactly.
+// Per-voice model override (takes precedence over MODEL_BY_LANG). The VONO Hebrew voices are
+// Voice Design voices made for eleven_v3, so they are pinned to it regardless of language.
+// No global Hebrew→v3 switch — every other voice keeps MODEL_BY_LANG exactly.
 const MODEL_BY_VOICE: Record<string, string> = {
-  JXH3lbmtWF1cUL9JEL4S: "eleven_v3", // Professional Announcer
-  "9sc3z1AF9BP2mmepHnXH": "eleven_v3", // Radio Announcer
+  "3FkAarM52pFyMPwrjibn": "eleven_v3", // VONO ARIK (promo)
+  PrXG2tarAqfndr3EoSEJ: "eleven_v3", // VONO ARIK Calm (announcements)
+  TMWQTwRNEzBaAxVppnW3: "eleven_v3", // VONO NOA
+  CqGwkZu0hf7cvRYmyKMz: "eleven_v3", // VONO Ayala
+  aw3sjQ0zB8LAt39aeeTR: "eleven_v3", // VONO Neomi
 };
 // Speed presets → ElevenLabs `speed` param (turbo model) / stability nudge (multilingual).
 const SPEED_VALUES: Record<"slow" | "normal" | "fast", number> = {
