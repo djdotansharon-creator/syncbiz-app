@@ -10,8 +10,7 @@
 import type { Playlist } from "@/lib/playlist-types";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { prisma } from "@/lib/prisma";
-// Fallback path (used when tenantId is unavailable on the user object)
-import { hasBranchAccess, getAssignedBranchIdsForUser } from "@/lib/auth-helpers";
+import { expandLegacyBranchEquivalents } from "@/lib/branch-resolver";
 
 const DEFAULT_BRANCH_ID = "default";
 
@@ -91,37 +90,25 @@ export async function gatePlaylistAccess(
     // Branch-scoped check
     const branchId = resolveMediaBranchId(playlist);
     const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
+    // Gate 2A-1: legacy "default" ≡ the workspace's canonical branch (same workspace alias only).
     const assignedIds = new Set(
-      assignments.map((a) => (a.branchId ?? "").trim() || DEFAULT_BRANCH_ID),
+      await expandLegacyBranchEquivalents(
+        workspaceId,
+        assignments.map((a) => (a.branchId ?? "").trim() || DEFAULT_BRANCH_ID),
+      ),
     );
-    // If user has no explicit assignments, default branch is implied
-    const effectiveIds = assignedIds.size > 0 ? assignedIds : new Set([DEFAULT_BRANCH_ID]);
+    // If user has no explicit assignments, default branch is implied (Gate 2B-1: with its same-workspace
+    // canonical alias, so a canonical content row is the same branch — nothing broader).
+    const effectiveIds =
+      assignedIds.size > 0
+        ? assignedIds
+        : new Set(await expandLegacyBranchEquivalents(workspaceId, [DEFAULT_BRANCH_ID]));
     if (!effectiveIds.has(normalized)) {
       return { allow: false, httpStatus: 403, message: "Forbidden: no access to this branch" };
     }
     return { allow: true, user };
   }
 
-  // Fallback: tenantId unavailable — use legacy helper (rare, e.g. guest/token auth)
-  const allowedBranchIds = await getAssignedBranchIdsForUser(user.id);
-  const isUnrestricted = allowedBranchIds.includes("*");
-
-  const scope = playlist.playlistOwnershipScope ?? "branch";
-  if (scope === "owner_personal") {
-    if (!isUnrestricted) {
-      return { allow: false, httpStatus: 403, message: "Forbidden: owner personal playlist" };
-    }
-    return { allow: true, user };
-  }
-
-  if (isUnrestricted) {
-    return { allow: true, user };
-  }
-
-  const branchId = resolveMediaBranchId(playlist);
-  const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
-  if (!(await hasBranchAccess(user.id, normalized))) {
-    return { allow: false, httpStatus: 403, message: "Forbidden: no access to this branch" };
-  }
-  return { allow: true, user };
+  // Gate 3B-1: no active session workspace → FAIL CLOSED (never authorize from the user's primary workspace).
+  return { allow: false, httpStatus: 403, message: "Forbidden: no active workspace" };
 }

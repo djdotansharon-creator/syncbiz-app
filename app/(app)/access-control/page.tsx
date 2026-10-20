@@ -7,11 +7,16 @@
  * Electron desktop wrapper (which loads the same Next.js page).
  */
 import { AccessControlConsole } from "@/components/access-control-console";
+import { ManagementGate } from "@/components/management/management-gate";
 
 export default function AccessControlPage() {
   return (
-    <div className="p-4 sm:p-6">
-      <AccessControlConsole />
-    </div>
+    // Management Mode: full screen, outside the player workspace rails — this page scrolls on its own (like Control Room)
+    // Security hotfix 2026-10-13: managers only; locked on a desktop station until unlocked.
+    <ManagementGate from="/access-control">
+      <div className="mgmt-type h-full overflow-y-auto p-4 sm:p-6">
+        <AccessControlConsole />
+      </div>
+    </ManagementGate>
   );
 }

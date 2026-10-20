@@ -22,7 +22,12 @@ export type RemoteCommand =
   | "SET_REPEAT_MODE"
   // On-air announcement/jingle: duck current playback, play the given audio once, restore.
   // Executed on the branch MASTER via the existing desktop bridge (mpvPlayInterrupt).
-  | "PLAY_INTERRUPT";
+  | "PLAY_INTERRUPT"
+  // P0 Gate 1e: absolute session jump (forwarded unchanged to the MASTER; type only — no server logic).
+  | "JUMP_SESSION_INDEX"
+  // P0 Drop Next (forwarded unchanged; type only).
+  | "QUEUE_NEXT"
+  | "QUEUE_REMOVE";
 
 export type ClientRole = "device" | "controller" | "owner_global";
 
@@ -57,6 +62,10 @@ export type StationPlaybackState = {
   activePlaybackEngineType?: string;
   mpvEngineReady?: boolean;
   mpvEngineError?: string | null;
+  /** P0 Gate 1d: current MAIN music attempt id (number only; passed through unchanged). */
+  mpvAttemptId?: number;
+  /** P0 Gate 1f: current MAIN attempt not yet ready (passed through unchanged). */
+  mpvAttemptPending?: boolean;
 };
 
 export type PlaySourcePayload = {
@@ -90,6 +99,13 @@ export type BranchSummary = {
   masterDeviceId: string;
   connectedAt: string;
   hasDevices: boolean;
+  /** Control Room (info only): what kind of device is the branch's playing station — from its registration purpose. */
+  deviceType?: "computer" | "streamer" | "browser" | "unknown";
+  /** Control Room (info only): the branch's canonical id (the DB Branch.id) when the station registered with a legacy
+   *  alias (e.g. "default"). branchId stays the raw id used by COMMAND routing — unchanged. */
+  canonicalBranchId?: string;
+  /** Control Room (info only): devices connected to the branch room — role + kind only (no ids). */
+  devices?: Array<{ role: "playing" | "control"; type: "computer" | "streamer" | "browser" | "phone_tablet" | "remote" | "unknown" }>;
 };
 
 export type GuestRecommendationPayload = {
@@ -117,6 +133,8 @@ export type ClientMessage =
   | { type: "BRANCH_LIST_REQUEST" }
   | {
       type: "COMMAND";
+      /** Control Room: ask for a COMMAND_DELIVERY (owner_global only). Without it the server behaves exactly as before. */
+      requestId?: string;
       targetDeviceId?: string;
       targetBranchId?: string;
       command: RemoteCommand;
@@ -170,7 +188,7 @@ export type ServerMessage =
         mode?: "playlist" | "track" | "off";
       };
     }
-  | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string; secondaryDesktop?: boolean }
+  | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string; secondaryDesktop?: boolean; designated?: boolean }
   | { type: "GUEST_RECOMMEND_RECEIVED"; recommendation: GuestRecommendationPayload }
   | { type: "GUEST_RECOMMEND_RESULT"; recommendationId: string; status: "approved" | "rejected" }
   | { type: "GUEST_RECOMMEND_SENT"; recommendationId: string }
@@ -182,4 +200,7 @@ export type ServerMessage =
       action?: "created" | "updated" | "deleted";
       entityId?: string;
     }
-  | { type: "ERROR"; message: string };
+  | { type: "ERROR"; message: string }
+  /** Control Room broadcast: per-command delivery result for an owner COMMAND that carried `requestId` (info only).
+   *  delivered = the command was handed to the branch's station socket — NOT that it played. */
+  | { type: "COMMAND_DELIVERY"; requestId: string; targetBranchId: string; delivered: boolean; reason?: "not_authorized" | "no_station" };

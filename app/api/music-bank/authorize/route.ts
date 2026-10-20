@@ -3,6 +3,8 @@ import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { mintMediaSessionToken, mediaTokenDefaultTtlSec } from "@/lib/media/media-token";
 import { allPreviewGenreIds, pocMediaFallbackAllowed } from "@/lib/media/media-assets";
 import { getReadyMediaAssetGenreIds } from "@/lib/media/media-asset-db";
+import { verifyDesktopStationToken } from "@/lib/auth-ws-token";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -20,9 +22,27 @@ export const runtime = "nodejs";
  * The token is returned to the client to hold IN MEMORY only and append to `/api/media/<logicalId>` at
  * playback time.
  */
+/**
+ * beta.22 — STATION media authorization: the station's Electron MAIN calls this itself with
+ * `Authorization: Bearer <desktop_access>` (the signed, station-bound token MAIN already holds). The token must
+ * carry the bound station id + workspace AND that station must be a registered StationDevice of that workspace.
+ * The media token is returned to MAIN only (never over WS) and scoped to that station. No user cookie involved.
+ */
+async function stationFromBearer(req: NextRequest): Promise<{ workspaceId: string; stationDeviceId: string } | "invalid" | null> {
+  const h = req.headers.get("authorization") ?? "";
+  if (!/^Bearer\s+/i.test(h)) return null; // not a station request → cookie path
+  const claims = verifyDesktopStationToken(h.replace(/^Bearer\s+/i, "").trim());
+  if (!claims) return "invalid";
+  const station = await prisma.stationDevice.findUnique({ where: { durableDeviceId: claims.stationDeviceId }, select: { workspaceId: true } });
+  if (!station || station.workspaceId !== claims.workspaceId) return "invalid";
+  return { workspaceId: claims.workspaceId, stationDeviceId: claims.stationDeviceId };
+}
+
 export async function POST(req: NextRequest) {
-  const user = await getCurrentUserFromCookies();
-  if (!user) return NextResponse.json({ error: "Please sign in." }, { status: 401 });
+  const station = await stationFromBearer(req);
+  if (station === "invalid") return NextResponse.json({ error: "Station not authorized." }, { status: 401 });
+  const user = station ? null : await getCurrentUserFromCookies();
+  if (!station && !user) return NextResponse.json({ error: "Please sign in." }, { status: 401 });
 
   let body: { deviceId?: string } = {};
   try { body = await req.json(); } catch { /* body is optional */ }
@@ -34,9 +54,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No media catalog is available on this server." }, { status: 503 });
   }
 
-  const deviceId =
-    typeof body.deviceId === "string" && body.deviceId.trim() ? body.deviceId.trim().slice(0, 64) : "web-preview";
-  const workspaceId = String(user.id ?? "unknown"); // POC scope record (not a DB-enforced claim yet)
+  const deviceId = station
+    ? station.stationDeviceId
+    : typeof body.deviceId === "string" && body.deviceId.trim() ? body.deviceId.trim().slice(0, 64) : "web-preview";
+  const workspaceId = station ? station.workspaceId : String(user!.id ?? "unknown"); // POC scope record (not a DB-enforced claim yet)
 
   try {
     const minted = mintMediaSessionToken({ workspaceId, deviceId, accessMode: "preview", allowedGenres });

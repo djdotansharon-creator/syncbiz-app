@@ -46,6 +46,11 @@ export type WsTokenClaims = {
    * its presence tells the WS server a branch is permanently designated (suppress grace/auto-election).
    */
   stationDeviceId?: string | null;
+  /**
+   * Gate 2A-1 (additive, signed): the canonical branch the bound station belongs to, derived server-side from the
+   * StationDevice binding. Not yet consumed by the WS server (Gate 2A-3 makes it the station's room authority).
+   */
+  stationBranchId?: string | null;
   designatedMasterByBranch?: Record<string, string>;
 };
 
@@ -64,6 +69,7 @@ function mintToken(
     workspaceId?: string;
     authorizedBranches?: string[];
     stationDeviceId?: string;
+    stationBranchId?: string;
     designatedMasterByBranch?: Record<string, string>;
   } = {
     purpose,
@@ -75,6 +81,8 @@ function mintToken(
   if (claims?.workspaceId) payload.workspaceId = claims.workspaceId;
   if (Array.isArray(claims?.authorizedBranches)) payload.authorizedBranches = claims!.authorizedBranches;
   if (claims?.stationDeviceId) payload.stationDeviceId = claims.stationDeviceId;
+  // Only meaningful together with a bound station (never emitted on its own).
+  if (claims?.stationDeviceId && claims?.stationBranchId) payload.stationBranchId = claims.stationBranchId;
   if (claims?.designatedMasterByBranch && Object.keys(claims.designatedMasterByBranch).length > 0) {
     payload.designatedMasterByBranch = claims.designatedMasterByBranch;
   }
@@ -106,6 +114,15 @@ export function createDesktopAccessToken(userId: string, claims?: WsTokenClaims)
  * Returns userId or null.
  */
 export function verifyWsToken(token: string): string | null {
+  return verifyWsTokenClaims(token)?.userId ?? null;
+}
+
+/**
+ * Gate 3B-1: same verification as `verifyWsToken` (both purposes, same TTL rules) but returns the SIGNED
+ * `workspaceId` claim too (null when the token carries none), so bearer API auth can scope to the token's workspace
+ * instead of the user's primary workspace. Token format unchanged.
+ */
+export function verifyWsTokenClaims(token: string): { userId: string; workspaceId: string | null } | null {
   const secret = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
   if (!secret || secret.length < 16) return null;
   if (!token || typeof token !== "string") return null;
@@ -114,7 +131,7 @@ export function verifyWsToken(token: string): string | null {
   const [payloadB64, sigB64] = parts;
   const expectedSig = createHmac("sha256", secret).update(payloadB64).digest("base64url");
   if (expectedSig !== sigB64) return null;
-  let payload: { purpose?: string; userId?: string; iat?: number; exp?: number };
+  let payload: { purpose?: string; userId?: string; iat?: number; exp?: number; workspaceId?: unknown };
   try {
     payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
   } catch {
@@ -126,15 +143,17 @@ export function verifyWsToken(token: string): string | null {
 
   const userId = typeof payload.userId === "string" ? payload.userId.trim() : "";
   if (!userId) return null;
+  const workspaceId =
+    typeof payload.workspaceId === "string" && payload.workspaceId.trim() ? payload.workspaceId.trim() : null;
 
   if (payload.purpose === PURPOSE_WS_REGISTER) {
     if (payload.exp > now + 120) return null;
-    return userId;
+    return { userId, workspaceId };
   }
   if (payload.purpose === PURPOSE_DESKTOP_ACCESS) {
     if (payload.exp - payload.iat > MAX_DESKTOP_TTL_SEC) return null;
     if (payload.exp > now + MAX_DESKTOP_TTL_SEC) return null;
-    return userId;
+    return { userId, workspaceId };
   }
   return null;
 }
@@ -145,6 +164,8 @@ export type DesktopAccessClaims = {
   userId: string;
   workspaceId: string | null;
   authorizedBranches: string[] | null;
+  /** The durable station id the token is BOUND to (signed at mint after the StationDevice binding); null if unbound. */
+  stationDeviceId: string | null;
 };
 
 /**
@@ -168,6 +189,7 @@ function verifyDesktopAccessPayload(token: string): DesktopAccessClaims | null {
     exp?: number;
     workspaceId?: unknown;
     authorizedBranches?: unknown;
+    stationDeviceId?: unknown;
   };
   try {
     payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
@@ -187,7 +209,19 @@ function verifyDesktopAccessPayload(token: string): DesktopAccessClaims | null {
   const authorizedBranches = Array.isArray(payload.authorizedBranches)
     ? (payload.authorizedBranches as string[])
     : null;
-  return { userId, workspaceId, authorizedBranches };
+  const stationDeviceId =
+    typeof payload.stationDeviceId === "string" && payload.stationDeviceId.trim() ? payload.stationDeviceId.trim() : null;
+  return { userId, workspaceId, authorizedBranches, stationDeviceId };
+}
+
+/**
+ * Station identity from a `desktop_access` token (beta.22 media authorization): the signed workspace + the durable
+ * station id the token is bound to. Null unless BOTH are present — an unbound desktop token is not a station.
+ */
+export function verifyDesktopStationToken(token: string): { userId: string; workspaceId: string; stationDeviceId: string } | null {
+  const c = verifyDesktopAccessPayload(token);
+  if (!c || !c.workspaceId || !c.stationDeviceId) return null;
+  return { userId: c.userId, workspaceId: c.workspaceId, stationDeviceId: c.stationDeviceId };
 }
 
 /**

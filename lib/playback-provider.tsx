@@ -69,10 +69,30 @@ import {
   reconstructUrlSource,
   mergeCurrentIntoRecoveredQueue,
 } from "./local-recovery";
-import { deviceModeAllowsLocalPlayback } from "./device-mode-guard";
+import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, localExecResolved, subscribeLocalSourceExec, mainBootSource } from "./device-mode-guard";
+import { autoAdvanceHandoff } from "./auto-advance-handoff";
 import { urlTimingMark } from "./url-startup-timing";
 
 export type PlaybackStatus = "idle" | "playing" | "paused" | "stopped";
+
+/**
+ * A source is LOCAL when its provider type is "local" (authoritative) or its resolved play url is a local
+ * filesystem path. Used only to scope the designated-MASTER local-execution permission below.
+ */
+function unifiedSourceIsLocal(source?: UnifiedSource | null, playUrl?: string | null): boolean {
+  if (source?.type === "local") return true;
+  const u = (playUrl ?? "").trim();
+  return u.length > 0 && isValidLocalFilePlaybackPath(u);
+}
+/**
+ * Local playback is permitted when the normal CONTROL guard allows it (`deviceModeAllowsLocalPlayback`,
+ * unchanged) OR — fail-closed, LOCAL sources ONLY — when this is the designated-MASTER machine
+ * (`localSourceExecAllowed`, set from canLocalExec). URL/radio/YouTube never satisfy the second clause, so
+ * their behavior is unchanged; a non-designated/CONTROL/offline device has both clauses false → blocked.
+ */
+function localPlaybackPermitted(source?: UnifiedSource | null, playUrl?: string | null): boolean {
+  return deviceModeAllowsLocalPlayback.current || (localSourceExecAllowed.current && unifiedSourceIsLocal(source, playUrl));
+}
 
 /** Origin of the last play/transport command — surfaced for P0 transition diagnostics. */
 export type PlayCommandVia = "library" | "queue" | "url" | "natural" | "control" | "transport" | "unknown";
@@ -547,6 +567,13 @@ const STORAGE_KEY = "syncbiz-playback";
 const RECOVERY_STORAGE_KEY = "syncbiz-playback-recovery-v2";
 const RECOVERY_TTL_MS = 1000 * 60 * 60 * 24;
 const RECOVERY_AUTOPLAY_WINDOW_MS = 1000 * 60 * 30;
+/** P0 Gate 2d: the station's last LOCAL session, kept separately (device-only localStorage, never WS) so an OFFLINE
+ *  boot whose remembered source is a URL playlist still has LOCAL music to play until the network returns. */
+const LAST_LOCAL_STORAGE_KEY = "syncbiz-playback-last-local-v1";
+/** P0 Gate 2d (owner rule 2026-10-09): a desktop STATION remembers its last source with NO age limit. */
+function isDesktopStationShell(): boolean {
+  return typeof window !== "undefined" && "syncbizDesktop" in window;
+}
 
 /**
  * Appliance auto-resume signal via the load URL (only the streamer/appliance sends it):
@@ -630,17 +657,17 @@ function savePersistedPlayback(sourceId: string, trackIndex: number, status: Pla
   }
 }
 
-function loadPersistedPlaybackV2(): PersistedPlaybackV2 | null {
+function loadPersistedPlaybackV2(storageKey: string = RECOVERY_STORAGE_KEY): PersistedPlaybackV2 | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(RECOVERY_STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<PersistedPlaybackV2>;
     if (!parsed?.currentSourceId || !Array.isArray(parsed.queueIds)) return null;
     const status = parsed.status;
     if (!(status === "playing" || status === "paused")) return null;
     const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0;
-    if (!updatedAt || Date.now() - updatedAt > RECOVERY_TTL_MS) return null;
+    if (!updatedAt || (!isDesktopStationShell() && Date.now() - updatedAt > RECOVERY_TTL_MS)) return null; // P0 Gate 2d: no TTL on a station
     return {
       currentSourceId: parsed.currentSourceId,
       queueIds: parsed.queueIds.filter((x): x is string => typeof x === "string"),
@@ -710,6 +737,7 @@ function savePersistedPlaybackV2(payload: PersistedPlaybackV2) {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(RECOVERY_STORAGE_KEY, JSON.stringify(payload));
+    if (payload.local) localStorage.setItem(LAST_LOCAL_STORAGE_KEY, JSON.stringify(payload)); // P0 Gate 2d: offline fallback
   } catch {
     /* ignore */
   }
@@ -1046,7 +1074,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
    * lib/play-local.ts. Only the in-app player owns stop.
    */
   const stopAllBeforePlay = useCallback(() => {
-    if (!deviceModeAllowsLocalPlayback.current) return;
+    // Called only from an already-permitted play; allow on the designated-MASTER machine too (machine-level).
+    if (!deviceModeAllowsLocalPlayback.current && !localSourceExecAllowed.current) return;
     console.log("[P0_XFADE_DEBUG] stopAllBeforePlay_called", {
       stack: new Error().stack?.split("\n").slice(1, 4).join(" | "),
     });
@@ -1070,7 +1099,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const playSource = useCallback(
     (source: UnifiedSource, trackIndex = 0, opts?: PlaySourceOptions) => {
       setUrlPrepareActive(false);
-      if (!deviceModeAllowsLocalPlayback.current) {
+      if (!localPlaybackPermitted(source, getPlayUrl(source, trackIndex))) {
         console.warn("[SyncBiz Audit] playSource BLOCKED by deviceModeAllowsLocalPlayback", {
           sourceId: source.id,
           sourceTitle: source.title,
@@ -1345,7 +1374,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         }
 
         void (async () => {
-          if (!deviceModeAllowsLocalPlayback.current) return;
+          if (!localPlaybackPermitted(source, getPlayUrl(source, trackIndex))) return;
           try {
             console.log("[SyncBiz Audit] playSource shell hydration fetch_start", {
               fetchUrl,
@@ -1499,6 +1528,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     seekToRef.current = seekTo;
   }, [seekTo]);
 
+  // Re-runs the one-shot restore when the local-exec permission resolves (designated-station cold boot).
+  const [restoreTick, setRestoreTick] = useState(0);
   // Restore playback state from storage after refresh (e.g. Radio station).
   // Runs once per mount. While in flight, `isRestoring === true` so URL-driven
   // consumers (player-page) don't flash transient sources before recovery.
@@ -1508,11 +1539,61 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       if (isRestoring) setIsRestoring(false);
       return;
     }
-    const persistedV2 = loadPersistedPlaybackV2();
+    // P0 Gate 2d: on the desktop station the co-located MAIN decides the restart source first (it remembers the last
+    // source with no age limit). Wait (no timeout — event-driven) until its first snapshot and its decision exist.
+    const desktopBridge = isDesktopStationShell()
+      ? (window as unknown as { syncbizDesktop?: { onStatus?: unknown } }).syncbizDesktop
+      : undefined;
+    if (typeof desktopBridge?.onStatus === "function" && (!localExecResolved.current || mainBootSource.current === "deciding")) {
+      const unsub = subscribeLocalSourceExec(() => {
+        unsub();
+        setRestoreTick((t) => t + 1);
+      });
+      return () => unsub();
+    }
+    if (mainBootSource.current === "url") {
+      // MAIN restores the station's remembered URL playlist itself — the renderer must not start LOCAL over it.
+      // Not final: if that URL fails before it ever plays, MAIN switches to "url-pending" / "url-failed" and this restore
+      // re-runs to start LOCAL (owner rule: a failed URL restore → LOCAL, never silence).
+      console.info("[VONO restore] MAIN restores the remembered URL source — renderer LOCAL restore on hold");
+      setIsRestoring(false);
+      const unsub = subscribeLocalSourceExec(() => {
+        if (mainBootSource.current === "url") return;
+        unsub();
+        setRestoreTick((t) => t + 1);
+      });
+      return () => unsub();
+    }
+    let persistedV2 = loadPersistedPlaybackV2();
+    if ((mainBootSource.current === "url-pending" || mainBootSource.current === "url-failed") && !persistedV2?.local) {
+      // Offline boot, remembered source = URL: play the station's last LOCAL session until MAIN brings the URL back.
+      const fallback = loadPersistedPlaybackV2(LAST_LOCAL_STORAGE_KEY);
+      console.info("[VONO restore] URL source unavailable — LOCAL fallback " + (fallback?.local ? "found" : "missing"));
+      if (!fallback?.local) {
+        // nothing LOCAL to play here — never replay the remembered URL from the renderer (MAIN owns its retries)
+        hasRestoredRef.current = true;
+        setIsRestoring(false);
+        return;
+      }
+      persistedV2 = { ...fallback, status: "playing" };
+    }
     const persistedV1 = loadPersistedPlayback();
     if (!persistedV2 && !persistedV1) {
       setIsRestoring(false);
       return;
+    }
+    // DETERMINISTIC cold-boot wait (no timeout): a LOCAL recovery inside Electron must not make its one-shot
+    // decision before the designated-station permission is RESOLVED. If not yet permitted and not yet resolved,
+    // wait for the permission transition (fired by DevicePlayerProvider on the first MAIN snapshot) and re-run.
+    // A non-designated device resolves to "not permitted" → falls through to the normal (blocked) restore path.
+    const restoringLocalPending = !!persistedV2?.local && typeof window !== "undefined" && "syncbizDesktop" in window;
+    const permittedNow = deviceModeAllowsLocalPlayback.current || (localSourceExecAllowed.current && !!persistedV2?.local);
+    if (restoringLocalPending && !permittedNow && !localExecResolved.current) {
+      const unsub = subscribeLocalSourceExec(() => {
+        unsub();
+        setRestoreTick((t) => t + 1); // re-run once the permission has resolved; isRestoring stays true meanwhile
+      });
+      return () => unsub();
     }
     hasRestoredRef.current = true;
     let cancelled = false;
@@ -1522,7 +1603,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     fetchUnifiedSourcesWithFallback()
       .then(async (items) => {
         if (cancelled) return;
-        if (!deviceModeAllowsLocalPlayback.current) {
+        // A LOCAL reboot recovery (persistedV2.local block present) may bypass the CONTROL guard on the
+        // designated-MASTER machine; a non-local recovery stays on the existing (CONTROL-blocked) path.
+        const restoringLocal = !!persistedV2?.local;
+        if (!deviceModeAllowsLocalPlayback.current && !(localSourceExecAllowed.current && restoringLocal)) {
           done();
           return;
         }
@@ -1668,10 +1752,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           // A headless desktop STATION (MASTER) must ALWAYS resume what it was playing before a
           // reboot — no 30-minute window. The window still guards a human browser tab reopened much
           // later. (Restore only reached here because deviceModeAllowsLocalPlayback is true → MASTER.)
-          // NOTE: RECOVERY_TTL_MS (24h) still bounds how old the snapshot may be — tracked as a P0
-          // follow-up so a station can also recover after a shutdown longer than 24h.
+          // P0 Gate 2d: RECOVERY_TTL_MS no longer applies on a desktop station (no age limit — owner rule).
           const isDesktopStation = typeof window !== "undefined" && "syncbizDesktop" in window;
           const shouldAutoplay =
+            mainBootSource.current !== "url" && // P0 Gate 2d: MAIN restores the remembered URL source itself
             autoresume !== "0" &&
             persistedV2.status === "playing" &&
             (autoresume === "1" ||
@@ -1727,11 +1811,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-    // Intentionally empty deps: runs once on mount. `playSource` / `seekTo` are
-    // accessed via refs above; `isRestoring` / `state.currentSource` are read
-    // on mount only and should not retrigger this effect.
+    // Re-runs only when `restoreTick` bumps — i.e. the local-exec permission RESOLVED after an initial wait
+    // (designated-station cold boot). `playSource`/`seekTo` are accessed via refs; `isRestoring`/
+    // `state.currentSource` are read on (re)entry only and must not retrigger this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [restoreTick]);
 
   const playPlaylist = useCallback(
     (playlist: Playlist, trackIndex = 0) => {
@@ -1751,7 +1835,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   );
 
   const play = useCallback(() => {
-    if (!deviceModeAllowsLocalPlayback.current) {
+    if (!localPlaybackPermitted(stateRef.current.currentSource)) {
       console.warn("[SyncBiz Audit] play() BLOCKED by deviceModeAllowsLocalPlayback");
       return;
     }
@@ -1766,7 +1850,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     // STOP halts playback but preserves the operator's queued Play Next items + baseline so
     // the operator can press Play (or Next) and resume from where they staged things. Clearing
     // here would silently drop work the operator just queued, which the desk treated as a bug.
-    if (!deviceModeAllowsLocalPlayback.current) {
+    if (!localPlaybackPermitted(stateRef.current.currentSource)) {
       try {
         stopAllPlayersRef.current?.();
       } catch {
@@ -1829,7 +1913,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }), []);
 
   const prev = useCallback(() => {
-    if (!deviceModeAllowsLocalPlayback.current) return;
+    if (!localPlaybackPermitted(stateRef.current.currentSource)) return;
     if (transportLockRef.current) return;
     transportLockRef.current = true;
     setState((s) => {
@@ -1952,7 +2036,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, [stopAllBeforePlay, playLocal, playSource, getAdvanceState]);
 
   const next = useCallback((opts?: { skipPlay?: boolean; auditTransportCase?: "ended_auto" } | unknown) => {
-    if (!deviceModeAllowsLocalPlayback.current) return;
+    if (!localPlaybackPermitted(stateRef.current.currentSource)) return;
     if (transportLockRef.current) return;
     const skipPlay: boolean =
       !!(opts && typeof opts === "object" && "skipPlay" in opts && (opts as { skipPlay?: boolean }).skipPlay === true);
@@ -1961,6 +2045,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         ? (opts as { auditTransportCase?: unknown }).auditTransportCase
         : undefined;
     const auditTransportCase: "ended_auto" | undefined = auditRaw === "ended_auto" ? "ended_auto" : undefined;
+    // P0 Drop Next: an AUTOMATIC advance yields to MAIN's Play Next queue when it holds items for this LOCAL track.
+    if (auditTransportCase === "ended_auto" && autoAdvanceHandoff.current?.()) return;
     if (auditTransportCase === "ended_auto") {
       playCommandViaRef.current = "natural";
       setLastPlayCommandVia("natural");

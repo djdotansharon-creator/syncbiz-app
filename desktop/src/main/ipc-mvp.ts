@@ -35,6 +35,7 @@ import type {
   RefreshLocalMetadataBankResult,
   WhatsAppStatus,
   WhatsAppBounds,
+  VideoOutputState,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import { redactMediaToken } from "../shared/redact-media-token";
@@ -57,7 +58,7 @@ import {
   refreshLocalMetadataBank,
   setLocalMetadataBankFolder,
 } from "./local-metadata-bank";
-import { DeviceWsManager } from "../device-websocket-client/device-ws-manager";
+import { DeviceWsManager, setUrlPlaybackPrefs } from "../device-websocket-client/device-ws-manager";
 import { fetchBranchLibrarySummary } from "./branch-library-fetch";
 import { ensurePlaylistProRuntimeConfig } from "./playlistpro-config";
 import { musicFolderDisplayLabel } from "../shared/playlistpro-paths";
@@ -65,7 +66,9 @@ import { loadRuntimeConfig, patchRuntimeConfig, normalizeEndpointsForPackaged } 
 import { SYNCBIZ_HOSTED_WEB_APP_URL, SYNCBIZ_PROD_WS_URL } from "./hosted-url";
 import { sanitizeApplyDesktopAuth } from "../shared/desktop-auth-payload";
 import { reconcileDeviceIdentity, stripDeviceIdFromPatch } from "./device-identity-reconcile";
+import { readDesignationRecord, isDesignatedStationOffline } from "./designation-cache";
 import { fileLog } from "./file-logger";
+import { initStationMediaToken, refreshStationMediaToken } from "./media-token-provider";
 import {
   StationDeviceRegistrar,
   pickRegistrationRelevant,
@@ -80,6 +83,8 @@ import {
 } from "./protection-service";
 import type { PlaybackOrchestrator } from "./playback-orchestrator";
 import { scanLocalAudioFolder } from "./scan-local-audio-folder";
+import { readVideoOutputConfig, writeVideoOutputConfig } from "./video-output-config";
+import { getVideoOutputInstance, isVideoOutputActive } from "./video-output";
 import { listMusicLibraryDir } from "./list-music-library-dir";
 import { extractEmbeddedCoverDataUrlFromAudioFile } from "./extract-local-audio-cover";
 import { extractLocalAudioTagFields, inspectLocalAudioTagsRaw } from "./extract-local-audio-tags";
@@ -291,6 +296,12 @@ function normalizeApiBase(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
+/** P0 Gate 2d: the reachability probe for the restart restore (the station's own app server). */
+function stationProbeUrl(apiBaseUrl: string | undefined): string {
+  const base = normalizeApiBase(apiBaseUrl ?? "");
+  return base ? `${base}/api/health` : "";
+}
+
 async function desktopSignInWithPassword(
   getWindow: () => BrowserWindow | null,
   email: string,
@@ -360,6 +371,12 @@ function broadcast(win: BrowserWindow | null, payload: MvpStatusSnapshot): void 
   updateFromMpv(data);
 }
 
+/** Intentional shutdown hook: cancel the station WS auto-reconnect and close the socket cleanly on app quit, so a
+ *  pending reconnect timer can never re-open a socket during/after shutdown. Safe no-op if no manager exists. */
+export function shutdownStationWs(): void {
+  if (manager) manager.disconnect();
+}
+
 export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrator?: PlaybackOrchestrator): void {
   orchestratorInstance = orchestrator;
   cachedConfig = loadEffectiveRuntimeConfig();
@@ -367,10 +384,26 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   manager.onStatus((s) => {
     broadcast(getWindow(), s);
   });
+  // P0 Gate 2d: the station remembers its last source (URL playlist / LOCAL) with no age limit and restores it at
+  // boot — URL when the app server answers, else the LOCAL fallback until the network is stable again.
+  manager.enableSourcePersistence({ probeUrl: stationProbeUrl(cachedConfig.apiBaseUrl), bootRestore: true });
+
+  // OFFLINE COLD BOOT: the station WS must not depend on the hosted renderer loading (it never does on an offline
+  // boot). If MAIN already holds persisted station auth, connect NOW with the reconciled durable identity. Offline,
+  // the socket fails → the EXISTING abnormal-close reconnect loop retries indefinitely (bounded backoff) and
+  // connects as soon as the network returns. Same deviceId/branch/token as every other path; designation semantics,
+  // DeviceWsManager reconnect logic and the orchestrator/MPV are untouched. No persisted token → unchanged (the
+  // renderer's APPLY_DESKTOP_AUTH connects later, exactly as before).
+  if ((cachedConfig.wsToken ?? "").trim() && (cachedConfig.wsUrl ?? "").trim()) {
+    manager.connect();
+    fileLog("INFO", "startup: station WS connect attempted with persisted auth (renderer-independent)");
+  }
 
   // Phase 0.2A trigger (A) — STARTUP: fire-and-forget cloud registration if a token is present. Never awaited,
   // so it can never delay playback / window / WS startup. Skips silently when no token (returning-user path).
   getStationRegistrar().trigger("startup");
+  // beta.22: the station fetches its OWN Music Bank media token (station identity, never over WS). Background only.
+  initStationMediaToken({ getConfig: () => getEffectiveRuntimeConfig(), log: (level, msg, data) => fileLog(level, msg, data) });
 
   ipcMain.handle(MVP_IPC.GET_CONFIG, (): DesktopRuntimeConfig => {
     cachedConfig = loadEffectiveRuntimeConfig();
@@ -521,12 +554,18 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       } else {
         manager.setConfig(next);
       }
-      // Reconnect/re-register immediately with the bound identity — no app restart needed.
-      manager.connect();
+      // The fresh token is ALWAYS stored (setConfig above + persisted config). Reconnect only when the station is
+      // NOT already registered+connected: MAIN now connects at startup on its own, so re-connecting a healthy
+      // registered socket here would needlessly drop and re-register the designated MASTER. Disconnected /
+      // backing-off / auth-rejected → connect immediately with the fresh token (no app restart needed).
+      const st = manager.snapshot();
+      const alreadyRegistered = st.registered === true && st.wsState === "connected";
+      if (!alreadyRegistered) manager.connect();
       // Ensure the cloud StationDevice registration reflects this token scope (idempotent; server already did it).
       getStationRegistrar().trigger("signin");
+      refreshStationMediaToken("desktop-auth"); // beta.22: new station token → new media token
       broadcast(getWindow(), manager.snapshot());
-      fileLog("INFO", "APPLY_DESKTOP_AUTH: desktop token applied + WS reconnect", { hasExpiry: Boolean(s.expiresAtIso) });
+      fileLog("INFO", "APPLY_DESKTOP_AUTH: desktop token applied", { hasExpiry: Boolean(s.expiresAtIso), reconnected: !alreadyRegistered });
       return { ok: true };
     } catch (e) {
       fileLog("WARN", "APPLY_DESKTOP_AUTH failed", { err: (e as Error)?.message });
@@ -547,6 +586,24 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     broadcast(getWindow(), manager ? manager.snapshot() : fallbackSnapshot());
   });
 
+  // P0 Gate 2c: AUTOMIX + loop setting for MAIN's automatic URL progression (module-level: survives manager re-creation).
+  ipcMain.handle(MVP_IPC.SET_PLAYBACK_PREFS, (_e, prefs: { autoMix?: unknown; repeatMode?: unknown }): void => {
+    setUrlPlaybackPrefs(prefs ?? {});
+  });
+
+  // P0 Video V1: per-station MPV video switch (applies at the next VONO start) + the renderer's video slot.
+  ipcMain.handle(MVP_IPC.VIDEO_OUTPUT_GET, (): VideoOutputState => ({ enabled: readVideoOutputConfig().enabled, active: isVideoOutputActive() }));
+  ipcMain.handle(MVP_IPC.VIDEO_OUTPUT_SET, (_e, enabled: unknown): VideoOutputState => {
+    writeVideoOutputConfig({ enabled: enabled === true });
+    fileLog("INFO", "VIDEO_OUTPUT_SET", { enabled: enabled === true, activeThisSession: isVideoOutputActive() });
+    return { enabled: readVideoOutputConfig().enabled, active: isVideoOutputActive() };
+  });
+  ipcMain.handle(MVP_IPC.VIDEO_DOCK_RECT, (_e, rect: unknown): void => {
+    const r = rect as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | null;
+    const ok = r && [r.x, r.y, r.width, r.height].every((v) => typeof v === "number" && Number.isFinite(v));
+    getVideoOutputInstance()?.setDockRect(ok ? { x: r!.x as number, y: r!.y as number, width: r!.width as number, height: r!.height as number } : null);
+  });
+
   ipcMain.handle(MVP_IPC.SET_MIX_DURATION, (_e, seconds: number): void => {
     if (typeof seconds === "number" && Number.isFinite(seconds)) {
       orchestratorInstance?.setCrossfadeSec(seconds);
@@ -561,7 +618,7 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       const fadeSec =
         typeof payload?.fadeSec === "number" && Number.isFinite(payload.fadeSec)
           ? Math.max(1, Math.min(30, payload.fadeSec))
-          : (orchestratorInstance?.getCrossfadeSec() ?? 6);
+          : (orchestratorInstance?.getCrossfadeSec() ?? 9);
       const aid = typeof payload?.attemptId === "number" && Number.isFinite(payload.attemptId) ? payload.attemptId : 0;
       console.log("[SyncBiz:desktop-mpv:ipc] MPV_PLAY_URL_CROSSFADE", {
         preview: redactMediaToken(u).slice(0, 160),
@@ -1068,6 +1125,12 @@ function fallbackSnapshotFromConfig(c: DesktopRuntimeConfig): MvpStatusSnapshot 
     registered: false,
     deviceRole: "unknown",
     commandReady: false,
+    // Offline designation authority is cache-backed, so it is meaningful even on the pre-manager fallback
+    // snapshot (lets the renderer see it at the very first getStatus on an offline cold boot).
+    designatedStationOffline: isDesignatedStationOffline(readDesignationRecord(), {
+      durableDeviceId: (c.deviceId ?? "").trim(),
+      branchId: (c.branchId ?? "").trim() || "default",
+    }),
     mockPlaybackStatus: "idle",
     mockVolume: 80,
     mockCurrentSourceLabel: "—",

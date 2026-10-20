@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
@@ -46,6 +47,7 @@ function estimateDurationLabel(text: string): string {
 export async function POST(req: NextRequest) {
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  shadowAuthorize("jingles/generate:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", ["default"]); // Gate 3A shadow: log only, never blocks
 
   const body = (await req.json()) as {
     text?: string;

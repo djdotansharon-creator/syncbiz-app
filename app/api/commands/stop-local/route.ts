@@ -1,32 +1,15 @@
-import { NextResponse } from "next/server";
-import { runStopLocal } from "@/lib/play-local";
-import { db } from "@/lib/store";
-
 /**
- * POST /api/commands/stop-local
- * MVP: Stop Winamp on Windows (taskkill /IM winamp.exe /F).
+ * RETIRED — Control Room Gate 3B-4a (2026-10-06): legacy Windows `taskkill winamp` bridge (legacy UI only; disabled for pilot).
+ * This unauthenticated route is not part of the pilot playback path. Every method returns 410 Gone and does
+ * nothing else: no process execution, no agent-queue / player-state mutation, no log write, and no echo of
+ * request data. It intentionally imports nothing that can execute, log or mutate.
  */
-export async function POST() {
-  console.log("[stop-local] Endpoint hit");
+import { NextResponse } from "next/server";
 
-  const result = await runStopLocal();
+function gone(): NextResponse {
+  return NextResponse.json({ error: "Gone" }, { status: 410 });
+}
 
-  if (result.success) {
-    db.addLog({
-      timestamp: new Date().toISOString(),
-      level: "info",
-      message: "Local playback: stop command sent (taskkill winamp.exe).",
-    });
-    return NextResponse.json({ ok: true, message: "Stop command sent" });
-  }
-
-  db.addLog({
-    timestamp: new Date().toISOString(),
-    level: "error",
-    message: `Local stop failed: ${result.error}`,
-  });
-  return NextResponse.json(
-    { error: result.error },
-    { status: 500 },
-  );
+export async function POST(): Promise<NextResponse> {
+  return gone();
 }

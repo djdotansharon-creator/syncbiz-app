@@ -33,6 +33,7 @@ import { fetchCloudPads, savePadToCloud, padsFromCloud } from "./cloud-pads";
 import { loadJingleSchedule, persistJingleSchedule, JINGLE_SCHEDULE_EVENT } from "./schedule-storage";
 import { useAudioPreview } from "./use-audio-preview";
 import { useDevicePlayer } from "@/lib/device-player-context";
+import { VxSelect } from "@/components/management/vx-select";
 
 type State = {
   drawerOpen: boolean;
@@ -765,11 +766,11 @@ async function fetchCloudLibrary(): Promise<JingleAsset[]> {
   const data = (await res.json()) as { items?: CloudJingle[] };
   return (data.items ?? []).map(cloudItemToAsset).slice(0, LIBRARY_MAX_ITEMS);
 }
-async function saveJingleToCloud(a: JingleAsset): Promise<JingleAsset> {
+async function saveJingleToCloud(a: JingleAsset, audience?: Record<string, unknown> | null): Promise<JingleAsset> {
   const res = await fetch("/api/jingles/library", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title: a.title, url: a.url, voiceId: a.voiceId, script: a.script, durationSec: durationLabelToSec(a.durationLabel) }),
+    body: JSON.stringify({ title: a.title, url: a.url, voiceId: a.voiceId, script: a.script, durationSec: durationLabelToSec(a.durationLabel), ...(audience ?? {}) }),
   });
   if (!res.ok) throw new Error(`library POST ${res.status}`);
   const data = (await res.json()) as { item: CloudJingle };
@@ -948,6 +949,9 @@ function TriggerPads({
                   aria-hidden
                 />
                 <span className="jc-trigger-pad-label">{p.label}</span>
+                {/* display only (2026-10-12): a short state line + an LED bar along the bottom edge */}
+                <span className="jcx-pad-sub" aria-hidden>{isFlashing ? "On air" : assigned ? (isScheduled ? "Ready · scheduled" : "Ready") : "Tap to assign"}</span>
+                <span className="jcx-pad-bar" aria-hidden />
                 {isScheduled ? <span className="jc-pad-sched-dot" aria-hidden /> : null}
               </button>
               <button
@@ -1056,7 +1060,20 @@ function ResultStrip({
 // ─── JinglesWorkspacePanel — center-area workspace ──────────────────────────
 
 /** Controller-style workspace: 3 tabs, persistent trigger pads, popups for detail actions. */
-export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): React.ReactElement {
+/** Control Room surface (HQ): the SAME Studio with Create only + the Audience chosen before Save. No local On-Air,
+ *  no Pads, no local Schedule — playback from the Control Room always goes to an explicit target elsewhere. */
+export type StudioControlRoomSurface = {
+  /** the Audience card rendered above the actions (owned by the Control Room) */
+  audienceCard: React.ReactNode;
+  /** the complete audience, or null while it is still being chosen (Save is blocked until then) */
+  audience: Record<string, unknown> | null;
+  /** called with the saved library item (id + title) after a SUCCESSFUL save */
+  onSaved?: (saved: { id: string; title: string }) => void;
+  saveBlockedText: string;
+};
+
+export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () => void; controlRoom?: StudioControlRoomSurface }): React.ReactElement {
+  const isCR = !!controlRoom;
   // Core state
   const [pads, setPads] = useState<SamplerPadItem[]>(() => loadPads());
   const [flashPadId, setFlashPadId] = useState<string | null>(null);
@@ -1368,8 +1385,10 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
 
   const handleResultSaveToLibrary = useCallback(async () => {
     if (!resultCard) return;
+    if (controlRoom && !controlRoom.audience) { setGenerateError(controlRoom.saveBlockedText); return; }
     try {
-      const saved = await saveJingleToCloud(resultCard);
+      const saved = await saveJingleToCloud(resultCard, controlRoom ? controlRoom.audience : undefined);
+      controlRoom?.onSaved?.({ id: saved.id, title: saved.title });
       // Cloud is authoritative — refetch so this client shows the same list every other client sees.
       try {
         setSavedAssets(await fetchCloudLibrary());
@@ -1382,7 +1401,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
       // Never claim a successful save. Surface the failure; keep the transient result for retry.
       setGenerateError("Couldn't save to the cloud library — check your connection and try again.");
     }
-  }, [resultCard]);
+  }, [resultCard, controlRoom]);
 
   const editingPad = editPadId ? pads.find((p) => p.id === editPadId) ?? null : null;
 
@@ -1424,6 +1443,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
       <div className="jc-ws-body">
         {/* Content scroll area: tabs + panels */}
         <div className="jc-ws-content">
+          {!isCR ? (
           <nav className="jc-ws-tabs" role="tablist">
             {(
               [
@@ -1445,7 +1465,10 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
             ))}
           </nav>
 
+          ) : null}
+
           {/* ── Quick Pads — horizontal quick-action strip (top) ────── */}
+          {!isCR ? (
           <div className="jcx-quickpads">
             <TriggerPads
               pads={pads}
@@ -1469,6 +1492,8 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
             />
           </div>
 
+          ) : null}
+
           {/* Active workspace — the ONLY scroll region; header/tabs/pads stay fixed above */}
           <div className="jcx-active-workspace">
           {/* ── CREATE — compact: settings bar · script hero + result · action bar ── */}
@@ -1484,68 +1509,82 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                     placeholder="e.g. Weekend fresh produce"
                   />
                 </label>
-                <label className="jc-field jcx-set">
-                  <span>Type</span>
-                  <select
+                {/* VxSelect (owner 2026-10-13): dark list instead of the native white popup — same values, same setDraft logic */}
+                <div className="jc-field jcx-set">
+                  <span id="jcx-set-type">Type</span>
+                  <VxSelect
+                    size="sm"
+                    labelledBy="jcx-set-type"
                     value={draft.kind}
-                    onChange={(e) => setDraft((d) => ({ ...d, kind: e.target.value as AnnouncementDraft["kind"] }))}
-                  >
-                    <option value="jingle">Jingle</option>
-                    <option value="announcement">Announcement</option>
-                    <option value="broadcast">Broadcast</option>
-                  </select>
-                </label>
-                <label className="jc-field jcx-set">
-                  <span>Language</span>
-                  <select
+                    options={[
+                      { value: "jingle", label: "Jingle" },
+                      { value: "announcement", label: "Announcement" },
+                      { value: "broadcast", label: "Broadcast" },
+                    ]}
+                    onChange={(v) => setDraft((d) => ({ ...d, kind: v as AnnouncementDraft["kind"] }))}
+                  />
+                </div>
+                <div className="jc-field jcx-set">
+                  <span id="jcx-set-lang">Language</span>
+                  <VxSelect
+                    size="sm"
+                    labelledBy="jcx-set-lang"
                     value={draft.language}
-                    onChange={(e) =>
+                    options={[
+                      { value: "en", label: "English" },
+                      { value: "he", label: "עברית" },
+                    ]}
+                    onChange={(v) =>
                       setDraft((d) => ({
                         ...d,
-                        language: e.target.value as JingleLanguage,
-                        voice: VOICE_PRESETS_BY_LANG[e.target.value as JingleLanguage][0].voiceId,
+                        language: v as JingleLanguage,
+                        voice: VOICE_PRESETS_BY_LANG[v as JingleLanguage][0].voiceId,
                       }))
                     }
-                  >
-                    <option value="en">English</option>
-                    <option value="he">עברית</option>
-                  </select>
-                </label>
-                <label className="jc-field jcx-set">
-                  <span>Voice</span>
-                  <select value={draft.voice} onChange={(e) => setDraft((d) => ({ ...d, voice: e.target.value }))}>
-                    {VOICE_PRESETS_BY_LANG[draft.language].map((v) => (
-                      <option key={v.voiceId} value={v.voiceId}>{v.label}</option>
-                    ))}
-                  </select>
-                </label>
+                  />
+                </div>
+                <div className="jc-field jcx-set">
+                  <span id="jcx-set-voice">Voice</span>
+                  <VxSelect
+                    size="sm"
+                    labelledBy="jcx-set-voice"
+                    value={draft.voice}
+                    options={VOICE_PRESETS_BY_LANG[draft.language].map((v) => ({ value: v.voiceId, label: v.label }))}
+                    onChange={(v) => setDraft((d) => ({ ...d, voice: v }))}
+                  />
+                </div>
                 {draft.language !== "he" ? (
-                  <label className="jc-field jcx-set">
-                    <span>Speed</span>
-                    <select value={draft.speed} onChange={(e) => setDraft((d) => ({ ...d, speed: e.target.value as JingleSpeed }))}>
-                      <option value="slow">Slow</option>
-                      <option value="normal">Normal</option>
-                      <option value="fast">Fast</option>
-                    </select>
-                  </label>
+                  <div className="jc-field jcx-set">
+                    <span id="jcx-set-speed">Speed</span>
+                    <VxSelect
+                      size="sm"
+                      labelledBy="jcx-set-speed"
+                      value={draft.speed}
+                      options={[
+                        { value: "slow", label: "Slow" },
+                        { value: "normal", label: "Normal" },
+                        { value: "fast", label: "Fast" },
+                      ]}
+                      onChange={(v) => setDraft((d) => ({ ...d, speed: v as JingleSpeed }))}
+                    />
+                  </div>
                 ) : null}
-                <label className="jc-field jcx-set">
-                  <span>Bell</span>
-                  <select
+                <div className="jc-field jcx-set">
+                  <span id="jcx-set-bell">Bell</span>
+                  <VxSelect
+                    size="sm"
+                    labelledBy="jcx-set-bell"
                     value={draft.preRoll ? draft.bellStyle : "off"}
-                    onChange={(e) =>
+                    options={BELL_PRESETS}
+                    onChange={(v) =>
                       setDraft((d) => ({
                         ...d,
-                        preRoll: e.target.value !== "off",
-                        bellStyle: e.target.value === "off" ? d.bellStyle : (e.target.value as JingleBellStyle),
+                        preRoll: v !== "off",
+                        bellStyle: v === "off" ? d.bellStyle : (v as JingleBellStyle),
                       }))
                     }
-                  >
-                    {BELL_PRESETS.map((b) => (
-                      <option key={b.value} value={b.value}>{b.label}</option>
-                    ))}
-                  </select>
-                </label>
+                  />
+                </div>
               </div>
 
               {/* Main: Script hero (left) + Result (right) — fills remaining height */}
@@ -1578,15 +1617,32 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                           {resultCard.kind} · {resultCard.durationLabel || "—"}
                         </span>
                       </div>
+                      {/* PREVIEW is LOCAL-ONLY and can NEVER broadcast. In the desktop app local browser audio is
+                          muted (all sound goes through MPV = On-Air), so Preview is shown as unavailable there
+                          instead of silently turning into On-Air. On-Air is a separate, explicit button. */}
                       <button
                         type="button"
                         className="jcx-result-play"
-                        disabled={!resultCard.url}
-                        onClick={isDesktop ? handleResultPlay : () => preview.toggle(resultCard.url)}
-                        title={isDesktop ? "Play On-Air" : "Preview in your browser"}
+                        disabled={!resultCard.url || isDesktop}
+                        onClick={() => {
+                          if (!isDesktop) preview.toggle(resultCard.url);
+                        }}
+                        title={isDesktop ? "Preview isn't available in the desktop app yet — use a browser or phone to preview" : "Preview in your browser (not On-Air)"}
                       >
                         {!isDesktop && preview.previewUrl === resultCard.url ? "■ Stop" : "▶ Preview"}
                       </button>
+                      {/* local On-Air never on the Control Room surface (HQ plays only to an explicit target) */}
+                      {isDesktop && !isCR ? (
+                        <button
+                          type="button"
+                          className="jcx-result-play"
+                          disabled={!resultCard.url}
+                          onClick={handleResultPlay}
+                          title="Play On-Air — the branch hears this (ducks store music)"
+                        >
+                          📡 On-Air
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="jcx-result-dismiss"
@@ -1614,6 +1670,7 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
               {generateError ? (
                 <div className="jc-err-msg jcx-action-err" role="alert">{generateError}</div>
               ) : null}
+              {controlRoom ? <div className="jcx-cr-audience">{controlRoom.audienceCard}</div> : null}
               <div className="jcx-action-bar">
                 <button
                   type="button"
@@ -1626,8 +1683,8 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                 {resultCard ? (
                   <>
                     <button type="button" className="jc-btn jc-btn--ghost" onClick={handleResultSaveToLibrary}>Save</button>
-                    <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setAssignForAsset(resultCard)}>Add to Pad</button>
-                    <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setScheduleForAsset(resultCard)}>Schedule</button>
+                    {!isCR ? <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setAssignForAsset(resultCard)}>Add to Pad</button> : null}
+                    {!isCR ? <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setScheduleForAsset(resultCard)}>Schedule</button> : null}
                   </>
                 ) : null}
               </div>
@@ -1657,17 +1714,29 @@ export function JinglesWorkspacePanel({ onClose }: { onClose: () => void }): Rea
                           </div>
                         </div>
                         <div className="jc-lib-actions">
+                          {/* Preview = LOCAL only, never broadcasts (unavailable in the desktop app). */}
                           <button
                             type="button"
                             className="jc-btn jc-btn--small jc-btn--primary"
-                            disabled={!a.url}
-                            onClick={() =>
-                              isDesktop ? fireOnAir(a.url) : preview.toggle(a.url)
-                            }
-                            title={isDesktop ? "Play On-Air" : "Preview in browser"}
+                            disabled={!a.url || isDesktop}
+                            onClick={() => {
+                              if (!isDesktop) preview.toggle(a.url);
+                            }}
+                            title={isDesktop ? "Preview isn't available in the desktop app yet" : "Preview in browser (not On-Air)"}
                           >
                             {!isDesktop && preview.previewUrl === a.url ? "■" : "▶"}
                           </button>
+                          {isDesktop ? (
+                            <button
+                              type="button"
+                              className="jc-btn jc-btn--small jc-btn--ghost"
+                              disabled={!a.url}
+                              onClick={() => fireOnAir(a.url)}
+                              title="Play On-Air — the branch hears this"
+                            >
+                              📡 On-Air
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="jc-btn jc-btn--small jc-btn--ghost"

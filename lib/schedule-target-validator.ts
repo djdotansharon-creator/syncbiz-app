@@ -13,6 +13,7 @@ import { getPlaylist } from "@/lib/playlist-store";
 import { getRadioStation } from "@/lib/radio-store";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import type { ScheduleTargetType } from "@/lib/types";
+import { contentBranchesEquivalent } from "@/lib/branch-resolver";
 
 export type TargetValidationResult =
   | { ok: true }
@@ -20,12 +21,14 @@ export type TargetValidationResult =
 
 /**
  * Validate that a schedule target exists and belongs to the given branch.
- * Rejects cross-branch targets.
+ * Rejects cross-branch targets. Gate 2B-1: the legacy key "default" and the workspace's canonical branch are the
+ * same branch (same-workspace alias only; `workspaceId` = the caller's workspace — without it, exact match).
  */
 export async function validateScheduleTarget(
   branchId: string,
   targetType: ScheduleTargetType,
   targetId: string,
+  workspaceId?: string | null,
 ): Promise<TargetValidationResult> {
   const bid = (branchId ?? "").trim() || "default";
   const tid = (targetId ?? "").trim();
@@ -41,7 +44,7 @@ export async function validateScheduleTarget(
         return { ok: false, error: "Source not found" };
       }
       const sourceBranch = (source.branchId ?? "default").trim() || "default";
-      if (sourceBranch !== bid) {
+      if (!(await contentBranchesEquivalent(workspaceId, sourceBranch, bid))) {
         return { ok: false, error: "Source belongs to a different branch" };
       }
       return { ok: true };
@@ -53,7 +56,7 @@ export async function validateScheduleTarget(
         return { ok: false, error: "Playlist not found" };
       }
       const playlistBranch = resolveMediaBranchId(playlist);
-      if (playlistBranch !== bid) {
+      if (!(await contentBranchesEquivalent(workspaceId, playlistBranch, bid))) {
         return { ok: false, error: "Playlist belongs to a different branch" };
       }
       if (!playlistHasHttpPlayableUrl(playlist)) {
@@ -72,7 +75,7 @@ export async function validateScheduleTarget(
         return { ok: false, error: "Radio station not found" };
       }
       const radioBranch = resolveMediaBranchId(station);
-      if (radioBranch !== bid) {
+      if (!(await contentBranchesEquivalent(workspaceId, radioBranch, bid))) {
         return { ok: false, error: "Radio station belongs to a different branch" };
       }
       return { ok: true };

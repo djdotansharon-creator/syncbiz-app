@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import type { Playlist } from "@/lib/playlist-types";
 import { EntitlementLimitError } from "@/lib/entitlement-limits";
@@ -50,9 +51,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "refinementPrompt is required for mode=refine" }, { status: 400 });
   }
 
-  if (!(await hasBranchAccess(user.id, branchId))) {
+  if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
     return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
   }
+  shadowAuthorize("playlists/ai-build:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks
 
   let seedPlaylist: Playlist | null = null;
 
@@ -65,7 +67,7 @@ export async function POST(req: Request) {
     const pb = (resolved.playlist.branchId ?? "").trim() || "default";
     const scope = resolved.playlist.playlistOwnershipScope ?? "branch";
     if (playlistTenantScoped(resolved.playlist, tenantId) && scope !== "owner_personal") {
-      if (!(await hasBranchAccess(user.id, pb))) {
+      if (!(await hasBranchAccess(user.id, pb, user.tenantId))) {
         return NextResponse.json({ error: "Forbidden: seed playlist branch inaccessible" }, { status: 403 });
       }
     }

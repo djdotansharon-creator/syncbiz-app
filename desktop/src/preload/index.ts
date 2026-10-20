@@ -36,6 +36,8 @@ import type {
   RefreshLocalMetadataBankResult,
   WhatsAppStatus,
   WhatsAppBounds,
+  VideoOutputState,
+  VideoDockRect,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
 import type { SyncBizDesktopMvp } from "../shared/mvp-desktop-api";
@@ -65,6 +67,12 @@ const api: SyncBizDesktopMvp = {
     ipcRenderer.invoke(MVP_IPC.MPV_PLAY_URL_CROSSFADE, { url, fadeSec, attemptId }),
   setMixDuration: (seconds: number): Promise<void> =>
     ipcRenderer.invoke(MVP_IPC.SET_MIX_DURATION, seconds),
+  /** P0 Gate 2c: AUTOMIX + loop setting → MAIN (automatic URL progression). */
+  getVideoOutput: (): Promise<VideoOutputState> => ipcRenderer.invoke(MVP_IPC.VIDEO_OUTPUT_GET),
+  setVideoOutputEnabled: (enabled: boolean): Promise<VideoOutputState> => ipcRenderer.invoke(MVP_IPC.VIDEO_OUTPUT_SET, enabled),
+  setVideoDockRect: (rect: VideoDockRect): Promise<void> => ipcRenderer.invoke(MVP_IPC.VIDEO_DOCK_RECT, rect),
+  setPlaybackPrefs: (prefs: { autoMix?: boolean; repeatMode?: string }): Promise<void> =>
+    ipcRenderer.invoke(MVP_IPC.SET_PLAYBACK_PREFS, prefs),
   mpvPlayInterrupt: (url: string): Promise<void> =>
     ipcRenderer.invoke(MVP_IPC.MPV_PLAY_INTERRUPT, url),
   setDuckPercent: (n: number): Promise<void> =>

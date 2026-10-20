@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import Link from "next/link";
+import { VonoBrand } from "@/components/brand/vono-brand";
 import { useRouter, useSearchParams } from "next/navigation";
 
 function LoginForm() {
@@ -41,18 +42,13 @@ function LoginForm() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 px-4">
       <div className="w-full max-w-md">
-        <div className="mb-8 flex items-center justify-center gap-2">
-          <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-sky-500/10 text-lg font-semibold text-sky-400 ring-1 ring-sky-500/40">
-            SB
-          </span>
-          <span className="text-xl font-semibold tracking-tight text-slate-50">
-            SyncBiz
-          </span>
+        <div className="mb-8 flex items-center justify-center">
+          <VonoBrand size="lg" />
         </div>
         <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-8 shadow-xl">
           <h1 className="text-lg font-semibold text-slate-50">Log in</h1>
           <p className="mt-1 text-sm text-slate-400">
-            Access your control dashboard. SyncBiz only orchestrates playback – it does not store or stream media.
+            Access your control dashboard. VONO only orchestrates playback – it does not store or stream media.
           </p>
           <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
             <div>
@@ -137,7 +133,7 @@ function LoginForm() {
             </button>
           </form>
           <p className="mt-6 text-center text-sm text-slate-400">
-            New to SyncBiz?{" "}
+            New to VONO?{" "}
             <Link
               href="/signup"
               className="font-medium text-sky-400 hover:text-sky-300"

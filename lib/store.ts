@@ -5,6 +5,8 @@
  */
 
 import { prisma } from "./prisma";
+import { canonicalContentBranchForWrite } from "./branch-resolver";
+import { ensureDefaultBrandId, defaultZoneData } from "./control-room-foundation";
 import {
   enforceCanAddBranch,
   enforceCanAddDevice,
@@ -35,8 +37,18 @@ function rowToBranch(row: {
   id: string; workspaceId: string; name: string; code: string;
   timezone: string; city: string; country: string; status: string;
   devicesOnline: number; devicesTotal: number;
+  locationCode?: string | null;
+  street?: string; houseNumber?: string; latitude?: number | null; longitude?: number | null;
+  formattedAddress?: string | null; googlePlaceId?: string | null;
 }): Branch {
   return {
+    locationCode: row.locationCode ?? null,
+    street: row.street ?? "",
+    houseNumber: row.houseNumber ?? "",
+    latitude: row.latitude ?? null,
+    longitude: row.longitude ?? null,
+    formattedAddress: row.formattedAddress ?? null,
+    googlePlaceId: row.googlePlaceId ?? null,
     id: row.id,
     accountId: row.workspaceId,
     name: row.name,
@@ -190,6 +202,19 @@ export const db = {
     return rows.map(rowToBranch);
   },
 
+  /** Control Room branch management: the workspace id for an account scope (id or slug) — same rule as getBranches. */
+  async resolveWorkspaceIdForAccount(accountId?: string): Promise<string | null> {
+    return resolveWorkspaceId(accountId);
+  },
+
+  /** Control Room (info only): branch ids of this workspace that have at least one registered station. */
+  async getBranchIdsWithStation(accountId?: string): Promise<Set<string>> {
+    const wsId = await resolveWorkspaceId(accountId);
+    if (!wsId) return new Set();
+    const rows = await prisma.stationDevice.findMany({ where: { workspaceId: wsId }, select: { branchId: true }, distinct: ["branchId"] });
+    return new Set(rows.map((r) => r.branchId));
+  },
+
   async addBranch(
     input: Pick<Branch, "accountId" | "name"> &
       Partial<Pick<Branch, "id" | "code" | "timezone" | "city" | "country" | "status">>,
@@ -203,17 +228,25 @@ export const db = {
     if (!normalizedName) throw new Error("name is required");
     const id = (input.id ?? "").trim() || crypto.randomUUID();
     const code = (input.code ?? normalizedName.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24)).trim() || "BRANCH";
-    const row = await prisma.branch.create({
-      data: {
-        id,
-        workspaceId: wsId,
-        name: normalizedName,
-        code,
-        timezone: input.timezone ?? "America/New_York",
-        city: input.city ?? "",
-        country: input.country ?? "",
-        status: input.status ?? "active",
-      },
+    // Control Room F1 (SHADOW): a legitimate new Location gets the workspace default Brand and its default Zone in
+    // the SAME transaction (exactly-one-default guarantee; the partial unique indexes only guarantee at-most-one).
+    const row = await prisma.$transaction(async (tx) => {
+      const brandId = await ensureDefaultBrandId(tx, wsId);
+      const created = await tx.branch.create({
+        data: {
+          id,
+          workspaceId: wsId,
+          name: normalizedName,
+          code,
+          timezone: input.timezone ?? "America/New_York",
+          city: input.city ?? "",
+          country: input.country ?? "",
+          status: input.status ?? "active",
+          brandId,
+        },
+      });
+      await tx.zone.create({ data: defaultZoneData(wsId, created.id) });
+      return created;
     });
     return rowToBranch(row);
   },
@@ -306,7 +339,8 @@ export const db = {
         name: input.name,
         url: target,
         type: input.type,
-        branchId: input.branchId ?? "default",
+        // Gate 2B-1: legacy branch key → the workspace's canonical branch.
+        branchId: await canonicalContentBranchForWrite(wsId, input.branchId ?? "default"),
         description: input.description ?? null,
         capabilities: (input.capabilities ?? []) as string[],
         artworkUrl: input.artworkUrl ?? null,
@@ -364,6 +398,18 @@ export const db = {
 
   async findScheduleById(id: string): Promise<Schedule | null> {
     const row = await prisma.schedule.findUnique({ where: { id: id.trim() } });
+    return row ? rowToSchedule(row) : null;
+  },
+
+  /**
+   * Gate 3B-2: schedule lookup scoped to ONE workspace (id + workspaceId in the query). Fails closed: an unknown /
+   * missing workspace or id → null. Unlike getSchedule, never drops the workspace filter.
+   */
+  async findScheduleInWorkspace(id: string, accountId: string | undefined): Promise<Schedule | null> {
+    const sid = (id ?? "").trim();
+    const wsId = await resolveWorkspaceId(accountId);
+    if (!sid || !wsId) return null;
+    const row = await prisma.schedule.findFirst({ where: { id: sid, workspaceId: wsId } });
     return row ? rowToSchedule(row) : null;
   },
 
@@ -428,9 +474,11 @@ export const db = {
     return rowToSchedule(row);
   },
 
-  async updateSchedule(id: string, data: Partial<Schedule>): Promise<Schedule | null> {
-    const existing = await prisma.schedule.findUnique({ where: { id: id.trim() } });
-    if (!existing) return null;
+  /** Gate 3B-2: workspace-bound write (id + workspaceId at write time); 0 rows / no workspace → null. */
+  async updateSchedule(id: string, data: Partial<Schedule>, accountId: string | undefined): Promise<Schedule | null> {
+    const sid = id.trim();
+    const wsId = await resolveWorkspaceId(accountId);
+    if (!sid || !wsId) return null;
 
     const endRaw = data.endTimeLocal;
     const endTimeLocal =
@@ -438,8 +486,8 @@ export const db = {
         ? typeof endRaw === "string" && endRaw.trim().length > 0 ? endRaw : "23:59"
         : undefined;
 
-    const row = await prisma.schedule.update({
-      where: { id: id.trim() },
+    const res = await prisma.schedule.updateMany({
+      where: { id: sid, workspaceId: wsId },
       data: {
         ...(data.name !== undefined && { name: data.name ?? null }),
         ...(data.branchId !== undefined && { branchId: data.branchId }),
@@ -460,15 +508,18 @@ export const db = {
         ...(data.updatedBy !== undefined && { updatedBy: data.updatedBy ?? null }),
       },
     });
-    return rowToSchedule(row);
+    if (res.count !== 1) return null;
+    const row = await prisma.schedule.findFirst({ where: { id: sid, workspaceId: wsId } });
+    return row ? rowToSchedule(row) : null;
   },
 
-  async deleteSchedule(id: string): Promise<boolean> {
-    const trimmed = id.trim();
-    const existing = await prisma.schedule.findUnique({ where: { id: trimmed } });
-    if (!existing) return false;
-    await prisma.schedule.delete({ where: { id: trimmed } });
-    return true;
+  /** Gate 3B-2: workspace-bound delete (id + workspaceId at write time); 0 rows / no workspace → false. */
+  async deleteSchedule(id: string, accountId: string | undefined): Promise<boolean> {
+    const sid = id.trim();
+    const wsId = await resolveWorkspaceId(accountId);
+    if (!sid || !wsId) return false;
+    const res = await prisma.schedule.deleteMany({ where: { id: sid, workspaceId: wsId } });
+    return res.count === 1;
   },
 
   async ensureSchedulesLoaded(): Promise<void> { /* no-op */ },

@@ -103,6 +103,7 @@ export const labels: Record<string, { en: string; he: string }> = {
   remote: { en: "Remote", he: "שלט רחוק" },
   remotePlayer: { en: "Remote Player", he: "נגן מרוחק" },
   owner: { en: "Owner", he: "בעלים" },
+  controlRoom: { en: "Control Room", he: "חדר בקרה" },
   headerSubtitle: {
     en: "Schedule playback and send commands to endpoint devices",
     he: "תזמן השמעה ושלוח פקודות למכשירי קצה",

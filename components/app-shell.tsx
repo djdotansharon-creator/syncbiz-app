@@ -1,14 +1,16 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { useDesktopActivation } from "@/lib/use-desktop-activation";
+import { StationActivationGate } from "@/components/station-activation-gate";
 import { useLocale, useTranslations, type Locale } from "@/lib/locale-context";
 import { labels } from "@/lib/locale-context";
+import { mgmt } from "@/lib/i18n/management";
 import { useLibraryTheme } from "@/lib/library-theme-context";
 import { AudioPlayer } from "@/components/audio-player";
 import { LiveQueuePanel } from "@/components/live-queue-panel";
@@ -54,6 +56,8 @@ import {
 } from "@/lib/local-audio-path";
 import { SYNCBIZ_MUSIC_LIBRARY_DRAG_MIME, type MusicLibraryDragPayload } from "@/lib/music-library-drag";
 import { derivePlaylistUnifiedCoverArt, unifiedPlaylistSourceId } from "@/lib/playlist-utils";
+import { VonoBrand } from "@/components/brand/vono-brand";
+import { clearControlBranch, getControlBranch } from "@/lib/control-branch";
 
 const pillLink =
   "rounded-xl border border-slate-700/80 bg-slate-900/90 px-3.5 py-2 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] transition-all duration-100 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950";
@@ -106,6 +110,16 @@ function IconLogs() {
       <line x1="16" y1="13" x2="8" y2="13" />
       <line x1="16" y1="17" x2="8" y2="17" />
       <polyline points="10 9 9 9 8 9" />
+    </svg>
+  );
+}
+function IconControlRoom() {
+  return (
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
     </svg>
   );
 }
@@ -232,6 +246,7 @@ const mainMenuIconMap: Record<string, () => React.ReactElement> = {
   favorites: IconFavorites,
   remote: IconRemote,
   owner: IconOwner,
+  controlRoom: IconControlRoom,
   schedules: IconSchedules,
   logs: IconLogs,
   settings: IconSettings,
@@ -244,6 +259,7 @@ const navKeys = [
   "radio",
   "favorites",
   "remote",
+  "controlRoom",
   "owner",
   "schedules",
   "logs",
@@ -251,8 +267,10 @@ const navKeys = [
   "access-control",
   "architecture",
 ] as const;
+/** management entries — shown only to managers (security hotfix 2026-10-13) */
+const MANAGEMENT_NAV_KEYS = new Set<string>(["dashboard", "controlRoom", "access-control", "owner"]);
 const navItems = navKeys.map((key) => ({
-  href: key === "dashboard" ? "/dashboard" : key === "remote" ? "/mobile" : key === "owner" ? "/owner" : `/${key}`,
+  href: key === "dashboard" ? "/dashboard" : key === "remote" ? "/mobile" : key === "owner" ? "/owner" : key === "controlRoom" ? "/owner/control-room" : `/${key}`,
   labelKey: key === "sources" ? "library" : key,
 }));
 
@@ -481,6 +499,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Electron-only: after one normal login, auto-provision MAIN's bound desktop_access token. No-op in a browser.
   useDesktopActivation();
   const pathname = usePathname();
+  const shellRouter = useRouter(); // management "Lock" → back to the player (client navigation, never a reload)
   // Read ?return= from window.location.search instead of useSearchParams() to avoid
   // the Suspense boundary that Next.js injects around useSearchParams() in layout-level
   // Client Components. That boundary briefly shows an empty fallback on navigation,
@@ -497,6 +516,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [sessionAccountName, setSessionAccountName] = useState<string | null>(null);
   const [workspaceList, setWorkspaceList] = useState<Array<{ id: string; name: string }> | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  /** security hotfix 2026-10-13: management entries (Dashboard / Control Room / Access Control) only for managers.
+   *  Cosmetic — the server gate (components/management/management-gate.tsx + the API guards) is the real enforcement. */
+  const [canManage, setCanManage] = useState(false);
   const greeting = getTimeBasedGreeting(now.getHours(), t);
   const headerSubtitle = t.headerSubtitle ?? labels.headerSubtitle?.en ?? "Schedule playback and send commands to endpoint devices";
 
@@ -515,8 +537,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         accountName?: string | null;
         workspaces?: Array<{ id: string; name: string }>;
         tenantId?: string | null;
+        accessType?: string | null;
       } | null) => {
         if (cancelled || !data) return;
+        setCanManage(data.accessType === "OWNER");
+        // a branch-control choice belongs to a manager; never carry it over to another kind of user on this browser
+        if (data.accessType && data.accessType !== "OWNER") clearControlBranch();
         const displayName = (data.name ?? "").trim() || (data.email ?? "").trim() || null;
         setSessionName(displayName);
         setSessionAccountName((data.accountName ?? "").trim() || null);
@@ -526,6 +552,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
+    try {
+      if (sessionStorage.getItem("vono-mgmt-run") === "1") return; // a reload inside the same app run keeps the unlock
+      sessionStorage.setItem("vono-mgmt-run", "1");
+    } catch { /* ignore */ }
+    void fetch("/api/auth/management-unlock", { method: "DELETE", credentials: "include" }).catch(() => {});
+  }, []);
+  // hydration-safe: false on the server, the real value on the client
+  const isDesktopApp = useSyncExternalStore(() => () => {}, () => "syncbizDesktop" in window, () => false);
+  const controlBranchLabel = useSyncExternalStore(() => () => {}, () => getControlBranch()?.label ?? null, () => null);
 
   const timeStr = now.toLocaleTimeString(locale === "he" ? "he-IL" : "en-US", {
     hour: "2-digit",
@@ -551,8 +589,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     // must fill the pane like Settings, not the narrow centered max-w-5xl.
     if (p.startsWith("/access-control")) return true;
     if (p.startsWith("/architecture")) return true;
+    // Control Room: the whole network on one screen (full width; the page scrolls on its own)
+    if (p.startsWith("/owner/control-room")) return true;
     return false;
   })();
+  // MANAGEMENT MODE (owner 2026-10-11): Dashboard / Control Room / Access Control take the whole screen. UI ONLY — the
+  // player row is hidden with a CSS class (same JSX tree → the single AudioPlayer instance is never remounted, playback
+  // and every provider keep running). Desktop: display:none (MPV video slot reports no rect → no stray native window);
+  // browser: a tiny transparent box so YouTube iframes keep playing (same pattern as the streamer / mobile branches).
+  const isManagementRoute = /^\/(dashboard|access-control|owner\/control-room)(\/|$)/.test(pathname ?? "");
   // Unified deck treatment: every desktop (app) route gets the media-theme
   // player shell — hero card + Command Pads aside + library-theme tokens —
   // so the top bar looks identical on /library, /radio, /owner, /schedules,
@@ -771,14 +816,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       (item) =>
         item.labelKey !== "library" &&
         item.labelKey !== "radio" &&
-        item.labelKey !== "favorites",
+        item.labelKey !== "favorites" &&
+        (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey)),
     )
     .map((item) => {
       const Icon = mainMenuIconMap[item.labelKey] ?? mainMenuIconMap.dashboard;
       const isActive =
         item.href === "/dashboard"
           ? pathname === "/dashboard"
-          : pathname.startsWith(item.href);
+          : item.href === "/owner"
+            ? pathname.startsWith("/owner") && !pathname.startsWith("/owner/control-room") // Control Room has its own entry
+            : pathname.startsWith(item.href);
       return {
         key: item.href,
         href: item.href,
@@ -1332,7 +1380,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       }${isNativeFullscreen ? " is-native-fullscreen" : ""}`}
       data-control-room={isControlRoomMode ? "true" : undefined}
       data-native-fullscreen={isNativeFullscreen ? "true" : undefined}
+      data-management={isManagementRoute ? "true" : undefined}
+      data-desktop-app={inDesktopApp ? "true" : undefined}
     >
+      {/* Station B1: desktop-only "Activate this station" (never shown on a designated station) */}
+      <StationActivationGate />
       {/*
        * Desktop sidebar intentionally removed. All its navigation entries now
        * live in the top bar (Library + Radio pinned) and in the floating
@@ -1359,30 +1411,80 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             {/* ── LEFT: Logo + device state (MASTER / Agents) — flex-1 basis-0 anchors the balance ── */}
             <div className="flex flex-1 basis-0 items-center gap-3 min-w-0">
-              <Link href="/library" className="flex shrink-0 items-center gap-2" aria-label="SyncBiz">
-                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-[13px] font-semibold text-sky-400 ring-1 ring-sky-500/30">
-                  SB
-                </span>
-                <span className="hidden text-[13px] font-semibold tracking-tight text-slate-50 sm:block">
-                  SyncBiz
-                </span>
+              {/* VONO brand (owner 2026-10-13, variant B): official symbol square + wordmark; click → the main player screen */}
+              <Link href="/sources" className="flex h-8 shrink-0 items-center" aria-label="VONO">
+                <VonoBrand size="header" hideWordmarkOnMobile />
               </Link>
               {/* MASTER / On Air / device mode indicators */}
               <HeaderDeviceIndicators />
-              {/* Agents healthy — quiet chip, small green dot */}
-              <span
-                className="hidden items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-[5px] text-[11px] font-medium text-[#a1a1a6] sm:flex"
-                title={t.agentsHealthy}
-              >
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#30d158]" aria-hidden />
-                <span className="hidden md:inline">{t.agentsHealthy}</span>
-              </span>
+              {/* browser manager: which branch this player controls (never a silent "default") */}
+              {canManage && !isDesktopApp && !isManagementRoute ? (
+                <Link
+                  href="/owner/control-room"
+                  title={mgmt(locale).t("ctl.change")}
+                  className="hidden min-w-0 max-w-[260px] shrink truncate rounded-full border border-[color:var(--sb-border)] px-3 py-1 text-xs text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)] md:inline-block"
+                  dir="auto"
+                >
+                  {mgmt(locale).t("ctl.controlling", { label: controlBranchLabel ?? mgmt(locale).t("ctl.default") })}
+                </Link>
+              ) : null}
             </div>
 
             {/* ── CENTER: Nav tabs — perfectly centered between left and right columns ──
                 All items always use font-medium + fixed px-3.5 so width never shifts.
                 The underline span is always in the DOM (opacity changes only).
                 Explicit sort guarantees display order: Library → Schedules → Radio → Settings */}
+            {isManagementRoute ? (
+              <nav className="flex shrink-0 items-end gap-1 pb-0" aria-label={mgmt(locale).t("nav.aria")} dir={mgmt(locale).dir}>
+                {/* exit management: first in the bar, a clear button (not another tab) — back arrow + music note */}
+                <Link
+                  href="/sources"
+                  title={mgmt(locale).t("nav.exitTitle")}
+                  className="group relative me-2 inline-flex items-center gap-2 px-4 pb-[7px] pt-[5px] text-[15px] font-medium text-slate-300 transition-colors duration-150 hover:text-slate-50 focus:outline-none"
+                >
+                  <svg className="h-4 w-4 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+                  {mgmt(locale).t("nav.backToPlayer")}
+                  <span className="absolute bottom-0 left-2 right-2 h-[3px] rounded-full bg-[var(--sb-accent)] opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden />
+                </Link>
+                <span className="mb-[9px] me-2 h-5 w-px bg-white/[0.12]" aria-hidden />
+                {([
+                  { href: "/dashboard", label: mgmt(locale).t("nav.dashboard"), active: pathname === "/dashboard" || pathname.startsWith("/dashboard/") },
+                  { href: "/owner/control-room", label: mgmt(locale).t("nav.controlRoom"), active: pathname.startsWith("/owner/control-room") },
+                  { href: "/access-control", label: mgmt(locale).t("nav.accessControl"), active: pathname.startsWith("/access-control") },
+                ] as const).map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={item.active ? "page" : undefined}
+                    className={`relative px-4 pb-[7px] pt-[5px] text-[15px] transition-colors duration-150 focus:outline-none ${
+                      item.active ? "font-semibold text-slate-50" : "font-medium text-slate-400 hover:text-slate-100"
+                    }`}
+                  >
+                    {item.label}
+                    <span
+                      className={`absolute bottom-0 left-2 right-2 h-[3px] rounded-full bg-[#f5f5f7] transition-opacity duration-200 ${item.active ? "opacity-100" : "opacity-0"}`}
+                      aria-hidden
+                    />
+                  </Link>
+                ))}
+                {isDesktopApp ? (
+                  <button
+                    type="button"
+                    title="Lock management on this station"
+                    onClick={() => {
+                      void fetch("/api/auth/management-unlock", { method: "DELETE", credentials: "include" })
+                        .catch(() => {})
+                        .finally(() => shellRouter.push("/sources"));
+                    }}
+                    className="ms-2 inline-flex items-center gap-1.5 px-3 pb-[7px] pt-[5px] text-[15px] font-medium text-slate-400 transition-colors hover:text-slate-50"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="4" y="11" width="16" height="10" rx="1" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+                    Lock
+                  </button>
+                ) : null}
+              </nav>
+            ) : (
             <nav className="flex shrink-0 items-end pb-0" aria-label="Main">
               {(() => {
                 /* Top nav = the operator's PINNED categories (gear menu toggles),
@@ -1393,7 +1495,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   "dashboard", "owner", "logs", "access-control", "architecture", "remote",
                 ] as const;
                 return navItems
-                  .filter((item) => pinnedSet.has(item.labelKey))
+                  .filter((item) => pinnedSet.has(item.labelKey) && (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey)))
                   .sort((a, b) => {
                     const ia = (NAV_ORDER as readonly string[]).indexOf(a.labelKey);
                     const ib = (NAV_ORDER as readonly string[]).indexOf(b.labelKey);
@@ -1426,6 +1528,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   );
                 })}
             </nav>
+            )}
 
             {/* ── RIGHT: meta chip + operational controls — flex-1 basis-0 justify-end ── */}
             <div className="flex flex-1 basis-0 items-center justify-end gap-2.5 min-w-0">
@@ -1545,8 +1648,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           {/* Row 3: Player — keep a single AudioPlayer instance across routes (media vs non-media); swapping branches remounts embeds */}
           <div
-            className={isMediaThemeRoute ? "library-theme library-player-route-bridge shrink-0 overflow-x-hidden px-3 pb-2 sm:px-4" : undefined}
+            className={`${isMediaThemeRoute ? "library-theme library-player-route-bridge shrink-0 overflow-x-hidden px-3 pb-2 sm:px-4" : ""}${isManagementRoute ? " mgmt-deck-hidden" : ""}`}
             {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
+            inert={isManagementRoute}
+            aria-hidden={isManagementRoute ? true : undefined}
           >
             {/*
              * Deck row: unified [Live Queue | Player | Command Pads] card, height-capped at xl+ so

@@ -6,7 +6,7 @@
 
 import { cookies } from "next/headers";
 import { parseSessionValue } from "@/lib/auth-session";
-import { verifyWsToken, verifyDesktopAccessTokenClaims } from "@/lib/auth-ws-token";
+import { verifyWsTokenClaims, verifyDesktopAccessTokenClaims } from "@/lib/auth-ws-token";
 import { enforceTokenWorkspaceScope } from "@/lib/desktop-token-scope";
 import {
   getUserByEmail,
@@ -23,6 +23,8 @@ import {
 } from "@/lib/user-store";
 import type { User, SessionUser, BranchRole } from "@/lib/user-types";
 import { ACTIVE_WORKSPACE_COOKIE_NAME } from "@/lib/active-workspace-constants";
+import { prisma } from "@/lib/prisma";
+import { isAdminMembershipRole, type UmCaller, type UmTarget } from "@/lib/admin/user-management-policy";
 
 const COOKIE_NAME = "syncbiz-session";
 const DEFAULT_BRANCH_ID = "default";
@@ -68,11 +70,18 @@ export async function getCurrentUserFromApiRequest(request: Request): Promise<Us
   if (!auth?.toLowerCase().startsWith("bearer ")) return null;
   const token = auth.slice(7).trim();
   if (!token) return null;
-  const userId = verifyWsToken(token);
-  if (!userId) return null;
-  const user = await getUserById(userId);
+  const claims = verifyWsTokenClaims(token);
+  if (!claims) return null;
+  // Gate 3B-1: bearer auth is scoped to the token's SIGNED workspace — never the user's primary workspace.
+  // No workspace claim → deny (fail closed); non-member / silent fallback → deny (enforceTokenWorkspaceScope).
+  if (!claims.workspaceId) {
+    logIdentity("session_resolve", { result: "denied", reason: "bearer_missing_workspace", via: "bearer_ws_token" });
+    return null;
+  }
+  const resolved = await getUserById(claims.userId, { activeWorkspaceId: claims.workspaceId });
+  const user = enforceTokenWorkspaceScope(claims, resolved);
   if (user) {
-    logIdentity("session_resolve", { result: "user", userId: user.id, via: "bearer_ws_token" });
+    logIdentity("session_resolve", { result: "user", userId: user.id, workspaceId: claims.workspaceId, via: "bearer_ws_token" });
   }
   return user;
 }
@@ -136,42 +145,47 @@ export async function resolveEmailToUser(email: string): Promise<User> {
   return getOrCreateUserByEmail(email);
 }
 
-/** Check if user has access to branch. */
-export async function hasBranchAccess(userId: string, branchId: string): Promise<boolean> {
-  const u = await getUserById(userId);
-  if (!u) return false;
-  return storeHasBranchAccess(userId, branchId ?? DEFAULT_BRANCH_ID, u.tenantId);
+// Gate 3B-1: every authorization helper takes the ACTIVE workspace explicitly (session flows pass user.tenantId).
+// None of them resolves the user's primary workspace; a missing workspace fails closed.
+const activeWs = (workspaceId: string | null | undefined) => (workspaceId ?? "").trim();
+
+/** Check if user has access to branch in the ACTIVE workspace. */
+export async function hasBranchAccess(userId: string, branchId: string, workspaceId: string | null | undefined): Promise<boolean> {
+  const ws = activeWs(workspaceId);
+  if (!ws) return false;
+  return storeHasBranchAccess(userId, branchId ?? DEFAULT_BRANCH_ID, ws);
 }
 
-/** Check if user has tenant-level admin role. */
-export async function hasTenantAdminRole(userId: string): Promise<boolean> {
-  const u = await getUserById(userId);
-  if (!u) return false;
-  const r = await getTenantRole(userId, u.tenantId);
+/** Check if user has tenant-level admin role in the ACTIVE workspace. */
+export async function hasTenantAdminRole(userId: string, workspaceId: string | null | undefined): Promise<boolean> {
+  const ws = activeWs(workspaceId);
+  if (!ws) return false;
+  const r = await getTenantRole(userId, ws);
   return r === "TENANT_OWNER" || r === "TENANT_ADMIN";
 }
 
-/** V1 public: get simplified access type. */
-export async function getAccessTypeForUser(userId: string): Promise<"OWNER" | "BRANCH_USER"> {
-  const u = await getUserById(userId);
-  if (!u) return "BRANCH_USER";
-  return getAccessType(userId, u.tenantId);
+/** V1 public: simplified access type in the ACTIVE workspace (no workspace → BRANCH_USER, the least privilege). */
+export async function getAccessTypeForUser(userId: string, workspaceId: string | null | undefined): Promise<"OWNER" | "BRANCH_USER"> {
+  const ws = activeWs(workspaceId);
+  if (!ws) return "BRANCH_USER";
+  return getAccessType(userId, ws);
 }
 
-/** V1 public: assigned branch IDs. OWNER returns ["*"]. */
-export async function getAssignedBranchIdsForUser(userId: string): Promise<string[]> {
-  const u = await getUserById(userId);
-  return getAssignedBranchIds(userId, u?.tenantId);
+/** V1 public: assigned branch IDs in the ACTIVE workspace. OWNER returns ["*"]; no workspace → []. */
+export async function getAssignedBranchIdsForUser(userId: string, workspaceId: string | null | undefined): Promise<string[]> {
+  const ws = activeWs(workspaceId);
+  if (!ws) return [];
+  return getAssignedBranchIds(userId, ws);
 }
 
-/** V1 public: is OWNER. */
-export async function isOwner(userId: string): Promise<boolean> {
-  return storeIsOwner(userId);
+/** V1 public: is OWNER in the ACTIVE workspace. */
+export async function isOwner(userId: string, workspaceId: string | null | undefined): Promise<boolean> {
+  return storeIsOwner(userId, workspaceId);
 }
 
-/** V1 public: is BRANCH_USER. */
-export async function isBranchUser(userId: string): Promise<boolean> {
-  return storeIsBranchUser(userId);
+/** V1 public: is BRANCH_USER in the ACTIVE workspace. */
+export async function isBranchUser(userId: string, workspaceId: string | null | undefined): Promise<boolean> {
+  return storeIsBranchUser(userId, workspaceId);
 }
 
 /**
@@ -183,6 +197,56 @@ export async function getUserIdFromSession(): Promise<string | null> {
   return user?.id ?? null;
 }
 
+/** Gate 3B-3: a legitimate tenant administrator of the ACTIVE workspace (see requireWorkspaceAdmin). */
+export type WorkspaceAdminCaller = UmCaller & { user: User; workspaceId: string };
+
+/**
+ * Gate 3B-3: tenant user management guard. Requires an ACTIVE WorkspaceMember with role WORKSPACE_ADMIN (or a
+ * SUPER_ADMIN membership) in the ACTIVE session workspace. MANAGER (HQ_CONTROL) and below → null (403).
+ * Also returns whether the caller is the Workspace Owner and/or a platform SUPER_ADMIN (User.role).
+ */
+export async function requireWorkspaceAdmin(): Promise<WorkspaceAdminCaller | null> {
+  const user = await getCurrentUserFromCookies();
+  const ws = (user?.tenantId ?? "").trim();
+  if (!user || !ws) return null;
+  // security hotfix 2026-10-13: a locked desktop STATION never reaches user management (browsers: never locked)
+  const { isManagementLockedForRequest } = await import("@/lib/management-access");
+  if (await isManagementLockedForRequest()) return null;
+  const [membership, workspace, row] = await Promise.all([
+    prisma.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: ws, userId: user.id } }, select: { role: true, status: true } }),
+    prisma.workspace.findUnique({ where: { id: ws }, select: { id: true, ownerId: true } }),
+    prisma.user.findUnique({ where: { id: user.id }, select: { role: true } }),
+  ]);
+  if (!membership || membership.status === "SUSPENDED" || !workspace) return null;
+  if (!isAdminMembershipRole(String(membership.role))) return null;
+  return {
+    user,
+    workspaceId: workspace.id,
+    userId: user.id,
+    isWorkspaceOwner: workspace.ownerId === user.id,
+    isPlatformSuperAdmin: String(row?.role ?? "") === "SUPER_ADMIN",
+  };
+}
+
+/** Gate 3B-3: load a user-management target (by email) inside one workspace; null if not a member there. */
+export async function loadWorkspaceMemberTarget(workspaceId: string, email: string): Promise<UmTarget | null> {
+  const target = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() }, select: { id: true } });
+  if (!target) return null;
+  const [membership, workspace] = await Promise.all([
+    prisma.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId, userId: target.id } }, select: { role: true } }),
+    prisma.workspace.findUnique({ where: { id: workspaceId }, select: { ownerId: true } }),
+  ]);
+  if (!membership) return null;
+  return { userId: target.id, membershipRole: String(membership.role), isWorkspaceOwner: workspace?.ownerId === target.id };
+}
+
+/** Gate 3B-3: ACTIVE admin-role members of the workspace other than `exceptUserId` (last-admin rule). */
+export async function countOtherActiveWorkspaceAdmins(workspaceId: string, exceptUserId: string): Promise<number> {
+  return prisma.workspaceMember.count({
+    where: { workspaceId, userId: { not: exceptUserId }, status: "ACTIVE", role: { in: ["WORKSPACE_ADMIN", "SUPER_ADMIN"] } },
+  });
+}
+
 /**
  * Require current user to be admin (TENANT_OWNER or TENANT_ADMIN).
  * Returns user or null. Use before admin-only operations.
@@ -190,7 +254,7 @@ export async function getUserIdFromSession(): Promise<string | null> {
 export async function requireAdmin(): Promise<User | null> {
   const user = await getCurrentUserFromCookies();
   if (!user) return null;
-  const isAdmin = await hasTenantAdminRole(user.id);
+  const isAdmin = await hasTenantAdminRole(user.id, user.tenantId);
   return isAdmin ? user : null;
 }
 
@@ -198,6 +262,6 @@ export async function requireAdmin(): Promise<User | null> {
  * Check branch access. For future enforcement - returns false if no access.
  * Does not throw; caller decides how to respond.
  */
-export async function requireBranchAccess(userId: string, branchId: string): Promise<boolean> {
-  return hasBranchAccess(userId, branchId ?? DEFAULT_BRANCH_ID);
+export async function requireBranchAccess(userId: string, branchId: string, workspaceId: string | null | undefined): Promise<boolean> {
+  return hasBranchAccess(userId, branchId ?? DEFAULT_BRANCH_ID, workspaceId);
 }

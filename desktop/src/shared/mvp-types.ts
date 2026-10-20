@@ -17,6 +17,12 @@ export const MVP_IPC = {
   MPV_PLAY_URL_CROSSFADE: "mvp:mpv-play-url-crossfade",
   /** Renderer syncs Settings mix duration (3/6/9/12) to main-process orchestrator. */
   SET_MIX_DURATION: "mvp:set-mix-duration",
+  /** P0 Gate 2c: AUTOMIX + loop setting → MAIN (automatic URL progression follows the user's settings). */
+  SET_PLAYBACK_PREFS: "mvp:set-playback-prefs",
+  /** P0 Video V1: MPV-rendered video (picture + sound from the same player) — per-station switch + the renderer's slot. */
+  VIDEO_OUTPUT_GET: "mvp:video-output-get",
+  VIDEO_OUTPUT_SET: "mvp:video-output-set",
+  VIDEO_DOCK_RECT: "mvp:video-dock-rect",
   MPV_PLAY_INTERRUPT: "mvp:mpv-play-interrupt",
   SET_DUCK_PERCENT: "mvp:set-duck-percent",
   MPV_SEEK_TO: "mvp:mpv-seek-to",
@@ -553,6 +559,12 @@ export type MvpStatusSnapshot = {
   deviceRole: MvpDeviceRole;
   /** Registered, connected, and MASTER — remote COMMAND messages are delivered here. */
   commandReady: boolean;
+  /**
+   * Offline permanent-designation authority (approach b): true when this station is the trusted designated
+   * MASTER per the ProgramData cache (written only after a verified online SET_DEVICE_MODE{MASTER,designated:true}).
+   * Lets the co-located renderer execute LOCAL playback with no WS. Never true unless the server designated it.
+   */
+  designatedStationOffline: boolean;
   /** Mock/local playback until MPV — mirrors what we send in STATE_UPDATE when MASTER. */
   mockPlaybackStatus: "idle" | "playing" | "paused" | "stopped";
   mockVolume: number;
@@ -598,8 +610,40 @@ export type MvpStatusSnapshot = {
    *  re-owning the SAME live media before adopting the engine (suppressing the initial loadfile). Empty
    *  when nothing is playing. Safe to include anywhere — it is a one-way hash. */
   mpvCurrentMediaKey?: string;
+  /** P0 Gate 1d — remote NEXT / PREV relay to the co-located renderer (the URL / LOCAL session owner). A request is
+   *  identified by (sessionStepBootId, sessionStepSeq): the seq is monotonic per MAIN boot, so a re-delivered status
+   *  carries the SAME identity (consumed once) and a renderer remount baselines the current seq (never replays). */
+  sessionStepBootId?: string;
+  sessionStepSeq?: number;
+  sessionStepDirection?: "next" | "prev" | "jump" | null;
+  /** P0 Gate 1e: for a "jump" request — the absolute session item index + the session source id the remote saw. */
+  sessionStepIndex?: number | null;
+  sessionStepSessionId?: string | null;
+  /** P0 Gate 1f: orchestrator.isMusicAttemptPending() — false exactly from XFADE_RAMP_START (standby) / first real
+   *  progress (cold). Read-only status for the co-located renderer's "Loading…" end. */
+  mpvAttemptPending?: boolean;
+  /** P0 Gate 2c: MAIN owns the automatic progression (prepare / mix / natural end) of the URL attempt now playing —
+   *  the co-located renderer must not also step it at EOF. */
+  mainUrlAutoAdvance?: boolean;
+  /** P0 Drop Next (LOCAL session): MAIN plays a queued item now / the queue is empty and the renderer must take the
+   *  slot back (resume LOCAL where it stopped) / MAIN watches the LOCAL track that yields its next slot to the queue. */
+  mainQueuePlaying?: boolean;
+  queueReturnToLocal?: boolean;
+  queueWatchesLocal?: boolean;
+  /** P0 Gate 2d: what the station boots into — "deciding" (probing the network for a saved URL source), "url" (MAIN
+   *  restores the URL source — the renderer must NOT start its LOCAL restore), "url-pending" (offline → LOCAL fallback,
+   *  URL returns when the network is stable), "local" / "none" (the renderer's normal LOCAL restore). */
+  bootSource?: "none" | "deciding" | "url" | "url-pending" | "url-failed" | "local";
+  /** P0 Gate 2d: the MAIN attempt that took over from the LOCAL fallback (the renderer releases LOCAL ownership once). */
+  restoreTakeoverAttemptId?: number;
 };
 
 export type MvpConfigPatch = Partial<Omit<DesktopRuntimeConfig, "deviceId">> & {
   deviceId?: string;
 };
+
+/** P0 Video V1: saved switch (applies at the next VONO start) + whether THIS session runs with MPV video. */
+export type VideoOutputState = { enabled: boolean; active: boolean };
+
+/** P0 Video V1: the renderer's video slot in CSS px (viewport), or null = no picture now. */
+export type VideoDockRect = { x: number; y: number; width: number; height: number } | null;

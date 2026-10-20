@@ -9,7 +9,8 @@ const STORAGE_KEY_SHUFFLE = "syncbiz-shuffle";
 export const MIX_DURATIONS = [3, 6, 9, 12] as const;
 export type MixDuration = (typeof MIX_DURATIONS)[number];
 
-const DEFAULT_MIX_DURATION: MixDuration = 6;
+/** P0 Gate 2c: owner default — a 9 s mix. */
+const DEFAULT_MIX_DURATION: MixDuration = 9;
 
 export function getMixDuration(): MixDuration {
   if (typeof window === "undefined") return DEFAULT_MIX_DURATION;

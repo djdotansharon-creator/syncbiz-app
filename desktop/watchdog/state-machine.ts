@@ -85,6 +85,49 @@ export function observeProgress(tr: ProgressTracker, hb: VonoHeartbeat | null, n
   return { progressObserved: tr.progressObserved, attemptAgeMs: now - tr.attemptFirstSeenAt };
 }
 
+/** Result of the SHARED playback-stall predicate (see evaluatePlaybackStall). */
+export type PlaybackStallVerdict =
+  | { stalled: false }
+  | { stalled: true; kind: "stall" | "startup_stuck"; reason: string };
+
+/**
+ * P0 2026-10-07 — the ONE playback-stall predicate. deriveState() and the recovery kill-abort check
+ * (isAppHealthyFromHeartbeat → RecoveryDeps.isAppHealthy) both use it, so a restart can never continue on a
+ * cruder rule after the state machine would already call the app healthy.
+ *  - Not intending to play → never stalled.
+ *  - Attempt has shown progress: stalled only after the startup grace AND a > playbackStallMs freeze
+ *    (the existing mid-playback rule — a real freeze after playback started is still caught).
+ *  - Attempt has NEVER progressed (fresh load, e.g. yt-dlp still resolving at pos=0 / dur=0): NOT stalled until
+ *    it exceeds the bounded startupHardMaxMs; beyond that it is genuinely stuck.
+ */
+export function evaluatePlaybackStall(hb: VonoHeartbeat, progress: AttemptProgress, now: number): PlaybackStallVerdict {
+  if (hb.playback.status !== "playing") return { stalled: false };
+  const stalledMs = now - hb.playback.positionAt;
+  if (progress.progressObserved) {
+    if (progress.attemptAgeMs >= WD.startupGraceMs && stalledMs > WD.playbackStallMs) {
+      return { stalled: true, kind: "stall", reason: `no progress ${stalledMs}ms after startup (pos=${hb.playback.position}, dur=${hb.playback.duration})` };
+    }
+    return { stalled: false };
+  }
+  if (progress.attemptAgeMs > WD.startupHardMaxMs) {
+    return { stalled: true, kind: "startup_stuck", reason: `attempt never progressed for ${progress.attemptAgeMs}ms (startup hard max ${WD.startupHardMaxMs}ms; pos=${hb.playback.position}, dur=${hb.playback.duration})` };
+  }
+  return { stalled: false };
+}
+
+/**
+ * P0 2026-10-07 — recovery kill-abort health check on the SAME semantics as deriveState: THIS pid's own fresh
+ * heartbeat, engine ready, and NOT stalled per evaluatePlaybackStall (sampled through the observer's live
+ * ProgressTracker, so a new attempt / resumed progress during the kill sequence ⇒ healthy ⇒ abort).
+ */
+export function isAppHealthyFromHeartbeat(hb: VonoHeartbeat | null, pid: number, tracker: ProgressTracker, now: number): boolean {
+  if (!hb || hb.pid !== pid) return false; // must be THIS pid's own heartbeat
+  if (now - hb.writtenAt > WD.appStaleMs) return false; // stale heartbeat → not healthy
+  if (!hb.mpv.engineReady) return false; // engine not ready → not healthy
+  const progress = observeProgress(tracker, hb, now);
+  return !evaluatePlaybackStall(hb, progress, now).stalled;
+}
+
 export interface DeriveResult {
   state: WatchdogState;
   reason: string;
@@ -153,12 +196,11 @@ export function deriveState(input: DeriveInput): DeriveResult {
   // is NEVER stalled, so the watchdog can't fight a legitimate 20–30s startup; attemptId change resets
   // this (see tracker). NOTE: duration is NOT part of the gate — for VONO, duration===0 is live/radio,
   // whose position still advances while healthy, so a frozen positionAt after progress = a live stall.
+  // P0 2026-10-07: the shared predicate (also used by the recovery kill-abort check) — adds the bounded
+  // no-progress hard maximum for an attempt that never starts.
   if (intendsPlay) {
-    const stalledMs = now - hb.playback.positionAt;
-    const pastStartup = input.progress.attemptAgeMs >= WD.startupGraceMs;
-    if (input.progress.progressObserved && pastStartup && stalledMs > WD.playbackStallMs) {
-      return { state: "PLAYBACK_STALLED", reason: `no progress ${stalledMs}ms after startup (pos=${hb.playback.position}, dur=${hb.playback.duration})` };
-    }
+    const verdict = evaluatePlaybackStall(hb, input.progress, now);
+    if (verdict.stalled) return { state: "PLAYBACK_STALLED", reason: verdict.reason };
   }
 
   // Renderer signal (reserved until the renderer ping exists → alive===null is treated as healthy).

@@ -19,6 +19,14 @@ export type StationPlaybackState = {
   currentTrackIndex: number;
   queue: Array<{ id: string; title: string; cover: string | null }>;
   queueIndex: number;
+  /** Full ordered playlist session rows (same shape CONTROL mirrors render). Metadata only — never a playback trigger. */
+  sessionTracks?: Array<{ id: string; title: string; cover: string | null; durationSeconds?: number }>;
+  /** Display title for the active session (playlist name or source title). */
+  sessionTitle?: string | null;
+  /** Persisted playlist id when the session is playlist-backed. */
+  sessionPlaylistId?: string | null;
+  /** P0 Drop Next: MAIN's Play Next queue (metadata only — never a URL / path). */
+  playNextQueue?: Array<{ id: string; title: string; cover: string | null }>;
   shuffle?: boolean;
   autoMix?: boolean;
   position?: number;
@@ -29,6 +37,12 @@ export type StationPlaybackState = {
   mpvEngineReady?: boolean;
   /** Desktop: last load/IPC/process/binary issue for operators (not optimistic). */
   mpvEngineError?: string | null;
+  /** P0 Gate 1d: the CURRENT MAIN music attempt id (a number — never a path / URL / token). Lets remote controllers
+   *  bind a pending transition to the real attempt (requested / confirmed / failed / replaced). */
+  mpvAttemptId?: number;
+  /** P0 Gate 1f: the CURRENT MAIN music attempt is still unproven (loading / standby before XFADE_RAMP_START / cold
+   *  start before first real progress). false = ready → controllers end "Loading…" (read-only status, number-free). */
+  mpvAttemptPending?: boolean;
 };
 
 export function createInitialStationState(): StationPlaybackState {

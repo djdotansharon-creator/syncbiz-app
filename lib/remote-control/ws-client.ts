@@ -15,6 +15,7 @@ import {
   registrationIntentOwnerGlobal,
 } from "@/lib/syncbiz-device-model";
 import { isPhoneUa, isTabletUa } from "@/lib/ua-detection";
+import { useStationBranchId } from "@/lib/station-branch";
 
 export function getWsUrl(): string {
   if (typeof window === "undefined") return "";
@@ -23,6 +24,71 @@ export function getWsUrl(): string {
 }
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
+
+/**
+ * ZERO-TOUCH reconnect backoff (mirrors the desktop MAIN station socket): 1s, 2s, 4s, 8s, 16s, then capped at
+ * 30s, plus up to 1s jitter. Retries forever — an unattended branch must never stay disconnected waiting for a
+ * focus/visibility event.
+ */
+export const RECONNECT_BASE_MS = 1_000;
+export const RECONNECT_MAX_MS = 30_000;
+export function reconnectBackoffMs(attempt: number, random: () => number = Math.random): number {
+  const base = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(Math.max(0, attempt), 5));
+  return base + Math.floor(random() * 1_000);
+}
+
+/**
+ * Single-timer reconnect scheduler (pure; timers injected so it is deterministic under test).
+ *  - `scheduleRetry()` arms ONE timer (no-op if one is already pending) with the next backoff delay.
+ *  - `connected()` resets the backoff and cancels any pending timer.
+ *  - `cancelPending()` cancels the timer without resetting the backoff (a new socket attempt is starting).
+ *  - `dispose()` cancels and makes every later call a no-op (unmount / intentional teardown).
+ */
+export function createReconnectScheduler(deps: {
+  onFire: () => void;
+  setTimer?: (fn: () => void, ms: number) => unknown;
+  clearTimer?: (h: unknown) => void;
+  random?: () => number;
+}) {
+  const setTimer = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  const clearTimer = deps.clearTimer ?? ((h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>));
+  let attempt = 0;
+  let timer: unknown = null;
+  let disposed = false;
+  const cancelPending = () => {
+    if (timer !== null) {
+      clearTimer(timer);
+      timer = null;
+    }
+  };
+  return {
+    scheduleRetry(): number | null {
+      if (disposed || timer !== null) return null;
+      const delay = reconnectBackoffMs(attempt, deps.random);
+      attempt += 1;
+      timer = setTimer(() => {
+        timer = null;
+        if (!disposed) deps.onFire();
+      }, delay);
+      return delay;
+    },
+    connected() {
+      attempt = 0;
+      cancelPending();
+    },
+    cancelPending,
+    dispose() {
+      disposed = true;
+      cancelPending();
+    },
+    get pending() {
+      return timer !== null;
+    },
+    get attempt() {
+      return attempt;
+    },
+  };
+}
 
 export function useRemoteControlWs(
   role: "device" | "controller",
@@ -102,6 +168,27 @@ export function useRemoteControlWs(
     if (needsReconnect) setReconnectTrigger((k) => k + 1);
   };
 
+  // ZERO-TOUCH auto-reconnect (unattended stations never get focus/visibility events): ONE backoff timer,
+  // armed only by a NON-intentional socket close; it reconnects only when no socket is OPEN/CONNECTING.
+  // Created per mount (StrictMode-safe) and declared BEFORE the socket effect so it exists when that runs.
+  const reconnectSchedulerRef = useRef<ReturnType<typeof createReconnectScheduler> | null>(null);
+  // Station B1: the branch room of THIS screen (= this computer's MAIN branch; "default" when never activated).
+  const stationBranch = useStationBranchId();
+  useEffect(() => {
+    const scheduler = createReconnectScheduler({
+      onFire: () => {
+        const cur = wsRef.current;
+        if (cur && (cur.readyState === WebSocket.OPEN || cur.readyState === WebSocket.CONNECTING)) return;
+        setReconnectTrigger((k) => k + 1);
+      },
+    });
+    reconnectSchedulerRef.current = scheduler;
+    return () => {
+      scheduler.dispose();
+      if (reconnectSchedulerRef.current === scheduler) reconnectSchedulerRef.current = null;
+    };
+  }, []);
+
   // Device socket deps use `!!options?.authToken` (presence-only) — same pattern
   // as the controller/owner hooks below — to avoid tearing down a live socket
   // every time DevicePlayerProvider refreshes the token on window focus (which
@@ -110,6 +197,7 @@ export function useRemoteControlWs(
   // auth error, which is listed in deps explicitly.
   useEffect(() => {
     if (role === "device" && !deviceId) return;
+    if (!stationBranch) return; // desktop bridge not answered yet (≤3 s) — never register a guessed branch
     const authToken = options?.authToken?.trim();
     if (!authToken) {
       if (process.env.NODE_ENV === "development") {
@@ -121,6 +209,10 @@ export function useRemoteControlWs(
     const url = getWsUrl();
     if (!url) return;
 
+    // A new socket attempt is starting → drop any pending auto-retry (never two sockets / two timers).
+    reconnectSchedulerRef.current?.cancelPending();
+    // Set by THIS effect's cleanup: an intentional teardown (unmount / deps change) must never auto-reconnect.
+    let intentionalClose = false;
     const ws = new globalThis.WebSocket(url);
     wsRef.current = ws;
       setStatus("connecting");
@@ -147,7 +239,7 @@ export function useRemoteControlWs(
               authToken,
               deviceId: deviceId ?? undefined,
               isMobile,
-              branchId: "default",
+              branchId: stationBranch,
               registrationIntent,
               // Packaged-Electron hosted renderer = CONTROL/mirror only, never a station MASTER.
               embeddedRenderer: options?.isDesktopApp === true,
@@ -156,7 +248,7 @@ export function useRemoteControlWs(
               type: "REGISTER",
               role: "controller",
               authToken,
-              branchId: "default",
+              branchId: stationBranch,
               registrationIntent: registrationIntentBranchController(isPhone),
             };
       ws.send(JSON.stringify(msg));
@@ -167,6 +259,9 @@ export function useRemoteControlWs(
         const data = JSON.parse(e.data as string) as ServerMessage;
         if (data.type === "REGISTERED" || data.type === "SET_DEVICE_MODE") {
           setStatus("connected");
+          // Accepted by the server → reset the auto-reconnect backoff (not on bare `open`: a rejected REGISTER
+          // must keep backing off instead of looping at 1s).
+          reconnectSchedulerRef.current?.connected();
           if (data.type === "REGISTERED") console.warn("[SyncBiz DIAG] WS connected (REGISTERED)", { role });
         }
         if (data.type === "SET_DEVICE_MODE") {
@@ -238,10 +333,16 @@ export function useRemoteControlWs(
       setHasExistingMaster(false);
       setSessionCode(null);
       console.warn("[SyncBiz DIAG] WS disconnected", { role, code: closeEvent?.code, reason: closeEvent?.reason, wasClean: closeEvent?.wasClean, reconnectTrigger });
+      // ZERO-TOUCH: a server restart / network loss / server-side close re-connects on its own (backoff, forever).
+      if (!intentionalClose) {
+        const delay = reconnectSchedulerRef.current?.scheduleRetry();
+        if (delay != null) console.warn("[SyncBiz DIAG] WS auto-reconnect scheduled", { role, delayMs: delay });
+      }
     };
     ws.onerror = (err) => { console.warn("[SyncBiz DIAG] WS error", { role, err }); setStatus("error"); };
 
     return () => {
+      intentionalClose = true;
       ws.close();
       wsRef.current = null;
       setStatus("disconnected");
@@ -256,7 +357,7 @@ export function useRemoteControlWs(
   // transitions present ↔ absent (e.g. real auth error + `setWsToken(null)`
   // in `onAuthError` + refetch) or `reconnectTrigger` below.
   // The latest JWT is read from `options?.authToken` when this effect body runs.
-  }, [role, deviceId, !!options?.authToken, reconnectTrigger]);
+  }, [role, deviceId, !!options?.authToken, reconnectTrigger, stationBranch]);
 
   // Branch device: reconnect when the user returns to the app (also mirrors
   // `useRemoteController` / owner).
@@ -273,13 +374,16 @@ export function useRemoteControlWs(
     const onPageShow = (e: PageTransitionEvent) => {
       if (e.persisted) tryReconnect();
     };
+    const onOnline = () => tryReconnect(); // network came back → retry immediately (auto-backoff covers the rest)
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onFocus);
     window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("online", onOnline);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("online", onOnline);
     };
   }, [role]);
 
@@ -370,6 +474,7 @@ export function useRemoteController(options?: {
   const onGuestRecommendationRef = useRef(options?.onGuestRecommendation);
   statusRef.current = status;
   onGuestRecommendationRef.current = options?.onGuestRecommendation;
+  const stationBranch = useStationBranchId(); // Station B1: same branch identity as the device socket
 
   useEffect(() => {
     let cancelled = false;
@@ -439,6 +544,7 @@ export function useRemoteController(options?: {
     const url = getWsUrl();
     const authToken = (wsToken ?? "").trim();
     if (!url) return;
+    if (!stationBranch) return;
     if (!authToken) {
       if (process.env.NODE_ENV === "development") {
         console.info("[SyncBiz WS client] reconnect aborted because token unavailable", { role: "controller" });
@@ -461,7 +567,7 @@ export function useRemoteController(options?: {
           type: "REGISTER",
           role: "controller",
           authToken,
-          branchId: "default",
+          branchId: stationBranch,
           registrationIntent: registrationIntentBranchController(isPhone),
         } as ClientMessage)
       );
@@ -515,7 +621,7 @@ export function useRemoteController(options?: {
       ws.close();
       wsRef.current = null;
     };
-  }, [reconnectTrigger, !!wsToken]);
+  }, [reconnectTrigger, !!wsToken, stationBranch]);
 
   useEffect(() => {
     if (status !== "connected" || !wsToken) return;
@@ -605,6 +711,8 @@ export function useRemoteOwner() {
   const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const statusRef = useRef(status);
   const lastAuthFailureAtRef = useRef<number>(0);
+  /** Control Room broadcast: COMMAND_DELIVERY waiters by requestId */
+  const ackWaitersRef = useRef(new Map<string, (r: { delivered: boolean; reason?: string }) => void>());
   statusRef.current = status;
 
   const tryReconnect = () => {
@@ -720,6 +828,10 @@ export function useRemoteOwner() {
           setSelectedBranchId((prev) => (prev ? prev : data.branches[0]?.branchId ?? null));
         } else if (data.type === "STATE_UPDATE") {
           setRemoteStateByDeviceId((prev) => ({ ...prev, [data.deviceId]: data.state }));
+        } else if (data.type === "COMMAND_DELIVERY") {
+          // Control Room broadcast: per-branch delivery result
+          const done = ackWaitersRef.current.get(data.requestId);
+          if (done) { ackWaitersRef.current.delete(data.requestId); done({ delivered: data.delivered, reason: data.reason }); }
         } else if (data.type === "LIBRARY_UPDATED") {
           if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("library-updated"));
         }
@@ -730,6 +842,9 @@ export function useRemoteOwner() {
 
     ws.onclose = (ev) => {
       if (ev.code === 4005 || ev.code === 4004) tryAuthRecovery();
+      // pending broadcast answers can no longer arrive on this socket
+      for (const done of ackWaitersRef.current.values()) done({ delivered: false, reason: "not_connected" });
+      ackWaitersRef.current.clear();
       setStatus("disconnected");
       setBranches([]);
       setRemoteStateByDeviceId({});
@@ -803,6 +918,41 @@ export function useRemoteOwner() {
     ws.send(JSON.stringify({ type: "COMMAND", targetBranchId: bid, command, payload } as ClientMessage));
   };
 
+  /**
+   * Control Room broadcast: send a COMMAND and wait for the server's per-branch COMMAND_DELIVERY.
+   * delivered = handed to the branch's station (NOT "played"). No answer within timeoutMs → not delivered.
+   */
+  const sendCommandWithAck = (
+    targetBranchId: string,
+    command: RemoteCommand,
+    payload?: { url?: string },
+    timeoutMs = 6000,
+  ): Promise<{ delivered: boolean; reason?: string }> => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== 1 || !targetBranchId) return Promise.resolve({ delivered: false, reason: "not_connected" });
+    const requestId = `cr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        ackWaitersRef.current.delete(requestId);
+        resolve({ delivered: false, reason: "no_response" });
+      }, timeoutMs);
+      ackWaitersRef.current.set(requestId, (r) => { clearTimeout(timer); resolve(r); });
+      ws.send(JSON.stringify({ type: "COMMAND", requestId, targetBranchId, command, payload } as ClientMessage));
+    });
+  };
+
+  /** Control Room: same COMMAND as sendCommand, with an explicit target branch (the raw branchId from BRANCH_LIST). */
+  const sendCommandTo = (
+    targetBranchId: string,
+    command: RemoteCommand,
+    payload?: { volume?: number },
+  ) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== 1 || !targetBranchId) return false;
+    ws.send(JSON.stringify({ type: "COMMAND", targetBranchId, command, payload } as ClientMessage));
+    return true;
+  };
+
   const selectedBranch = branches.find((b) => b.branchId === selectedBranchId);
   const remoteState = selectedBranch ? remoteStateByDeviceId[selectedBranch.masterDeviceId] ?? null : null;
 
@@ -812,8 +962,12 @@ export function useRemoteOwner() {
     setSelectedBranchId,
     selectedBranch,
     remoteState,
+    /** Control Room: last STATE_UPDATE per MASTER device (all authorised branches) — read-only view of existing state. */
+    remoteStateByDeviceId,
     status,
     sendCommand,
+    sendCommandTo,
+    sendCommandWithAck,
     refreshBranchList,
   };
 }
