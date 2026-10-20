@@ -8,6 +8,7 @@ import { labels } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { radioToUnified } from "@/lib/radio-utils";
 import { RadioSearchBar } from "@/components/radio-search-bar";
+import { RadioPresetsSection } from "@/components/radio-presets-section";
 import { RadioIcon } from "@/components/ui/radio-icon";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
 import { ActionButtonShare, ActionButtonEdit } from "@/components/ui/action-buttons";
@@ -80,6 +81,8 @@ export function RadioStreamsManager({ initialStations }: Props) {
       </div>
 
       <RadioSearchBar onAdd={handleAdd} />
+
+      <RadioPresetsSection stations={stations} onAdded={handleAdd} />
 
       {stations.length === 0 ? (
         <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 py-16 text-center text-sm text-slate-500">
