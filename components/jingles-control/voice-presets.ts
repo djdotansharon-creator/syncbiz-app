@@ -17,9 +17,12 @@ export const VOICE_PRESETS_BY_LANG: Record<JingleLanguage, readonly { label: str
     { label: "Energetic Female", voiceId: "cgSgspJ2msm6clMCkdW9" }, // Jessica
   ],
   he: [
-    // Professional Hebrew voices (ElevenLabs account, generated) — routed through
+    // VONO Hebrew voices (owner's ElevenLabs workspace, Voice Design) — routed through
     // eleven_v3 by a per-voice override in /api/jingles/generate.
-    { label: "Professional Announcer", voiceId: "JXH3lbmtWF1cUL9JEL4S" },
-    { label: "Radio Announcer",        voiceId: "9sc3z1AF9BP2mmepHnXH" },
+    { label: "Arik – Promo", voiceId: "3FkAarM52pFyMPwrjibn" }, // VONO ARIK — ads / promotions
+    { label: "Arik – Calm",  voiceId: "PrXG2tarAqfndr3EoSEJ" }, // VONO ARIK Calm — service announcements
+    { label: "Noa",          voiceId: "TMWQTwRNEzBaAxVppnW3" }, // VONO NOA
+    { label: "Ayala",        voiceId: "CqGwkZu0hf7cvRYmyKMz" }, // VONO Ayala
+    { label: "Neomi",        voiceId: "aw3sjQ0zB8LAt39aeeTR" }, // VONO Neomi
   ],
 };
