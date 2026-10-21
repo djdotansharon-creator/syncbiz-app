@@ -11,7 +11,8 @@ import { RadioSearchBar } from "@/components/radio-search-bar";
 import { RadioPresetsSection } from "@/components/radio-presets-section";
 import { RadioIcon } from "@/components/ui/radio-icon";
 import { NeonControlButton } from "@/components/ui/neon-control-button";
-import { ActionButtonShare, ActionButtonEdit } from "@/components/ui/action-buttons";
+import { ActionButtonShare, ActionButtonEdit, ActionButtonDelete } from "@/components/ui/action-buttons";
+import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { ShareModal } from "@/components/share-modal";
 import { radioToShareable } from "@/lib/share-utils";
 import { getRadioStationsLocal, removeRadioStationLocal } from "@/lib/radio-local-store";
@@ -102,8 +103,26 @@ export function RadioStreamsManager({ initialStations }: Props) {
 function RadioStreamRow({ station, onRemove }: { station: RadioStream; onRemove: (id: string) => void }) {
   const { playSource, stop, pause, currentSource } = usePlayback();
   const { t } = useTranslations();
+  const router = useRouter();
   const [shareOpen, setShareOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const unified = radioToUnified(station);
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/radio/${station.id}`, { method: "DELETE" });
+      // 404 = a station that lives only in this browser's local list (or is already gone) — drop it locally too.
+      if (res.ok || res.status === 404) {
+        onRemove(station.id);
+        router.refresh();
+      }
+    } finally {
+      setDeleting(false);
+      setDeleteOpen(false);
+    }
+  }
   const active = currentSource?.id === station.id;
   const DEFAULT_IMAGE = "/radio-default.svg";
   const cover = station.cover || DEFAULT_IMAGE;
@@ -169,6 +188,7 @@ function RadioStreamRow({ station, onRemove }: { station: RadioStream; onRemove:
         )}
         <ActionButtonShare variant="player" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share} />
         <ActionButtonEdit href={`/radio/${station.id}/edit`} variant="player" title={t.edit} aria-label={t.edit} />
+        <ActionButtonDelete size="xs" onClick={() => setDeleteOpen(true)} disabled={deleting} title={t.delete} aria-label={t.delete} />
       </div>
       <div className="flex-1 min-w-0" />
       {shareOpen && (
@@ -178,6 +198,7 @@ function RadioStreamRow({ station, onRemove }: { station: RadioStream; onRemove:
           onClose={() => setShareOpen(false)}
         />
       )}
+      <DeleteConfirmModal isOpen={deleteOpen} onClose={() => setDeleteOpen(false)} onConfirm={handleDelete} loading={deleting} message={t.deleteSourceConfirm} />
     </div>
   );
 }
