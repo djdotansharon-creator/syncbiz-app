@@ -100,48 +100,51 @@ export function RadioPresetsSection({ stations, onAdded }: Props) {
       <h2 id="radio-presets-title" className="text-sm font-semibold text-slate-200">
         {he ? "תחנות ישראליות" : "Israeli stations"}
       </h2>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
         {presets.map((p) => {
           const saved = savedFor(p);
           const busy = busyKey === p.key;
           return (
-            <div
-              key={p.key}
-              className="flex items-center gap-3 rounded-xl border border-slate-800/80 bg-slate-950/40 px-3 py-2.5"
-            >
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-700/70">
+            <div key={p.key} className="group min-w-0">
+              <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-700/70 ring-1 ring-slate-800/80 transition group-hover:ring-slate-600">
                 {p.cover ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={p.cover} alt="" className="h-full w-full object-cover" />
+                  <img
+                    src={p.cover}
+                    alt=""
+                    className="h-full w-full object-contain p-2"
+                    onError={(e) => (e.currentTarget.src = "/radio-default.svg")}
+                  />
                 ) : (
-                  <RadioIcon className="h-5 w-5 text-slate-100" />
+                  <span className="flex h-full w-full items-center justify-center">
+                    <RadioIcon className="h-8 w-8 text-slate-100" />
+                  </span>
                 )}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-100">{p.name}</p>
-                <p className="truncate text-xs text-slate-500">{p.genre}</p>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handlePlay(p)}
+                  aria-label={he ? `נגן ${p.name}` : `Play ${p.name}`}
+                  className="absolute inset-0 flex items-center justify-center bg-black/0 transition group-hover:bg-black/40 focus-visible:bg-black/40 focus-visible:outline-none disabled:cursor-wait"
+                >
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-900 shadow-lg transition sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                    <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  </span>
+                </button>
               </div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void handlePlay(p)}
-                aria-label={he ? `נגן ${p.name}` : `Play ${p.name}`}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-slate-900 transition hover:bg-slate-200 disabled:opacity-50"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </button>
+              <p className="mt-1.5 truncate text-xs font-medium text-slate-100">{p.name}</p>
               {saved ? (
-                <span className="shrink-0 text-xs text-slate-500">{he ? "בספרייה" : "Saved"}</span>
+                <p className="text-[11px] text-slate-500">✓ {he ? "בספרייה" : "Saved"}</p>
               ) : (
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => void handleAdd(p)}
-                  className="shrink-0 rounded-lg border border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-800 disabled:opacity-50"
+                  className="text-[11px] font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
                 >
-                  {he ? "הוסף" : "Add"}
+                  + {he ? "הוסף" : "Add"}
                 </button>
               )}
             </div>
