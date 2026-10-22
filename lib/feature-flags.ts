@@ -18,3 +18,19 @@ export const RFM_CATALOG_ENABLED = process.env.NEXT_PUBLIC_RFM_CATALOG_ENABLED =
  * independent of this flag; this gates UI visibility only.
  */
 export const SHUFERSAL_BANK_ENABLED = process.env.NEXT_PUBLIC_SHUFERSAL_BANK_ENABLED === "true";
+
+/**
+ * Who sees the Shufersal bank (owner 2026-10-22: only Shufersal / the owner, never every customer).
+ * NEXT_PUBLIC_SHUFERSAL_BANK_WORKSPACES = comma-separated workspace ids, or "*" for every workspace.
+ * Fail-closed: unset / empty → nobody, even with the flag on.
+ */
+const SHUFERSAL_BANK_WORKSPACES = (process.env.NEXT_PUBLIC_SHUFERSAL_BANK_WORKSPACES ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+export function shufersalBankVisibleFor(workspaceId: string | null): boolean {
+  if (!SHUFERSAL_BANK_ENABLED) return false;
+  if (SHUFERSAL_BANK_WORKSPACES.includes("*")) return true;
+  return !!workspaceId && SHUFERSAL_BANK_WORKSPACES.includes(workspaceId);
+}
