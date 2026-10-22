@@ -12,6 +12,8 @@ import { POC_MUSIC_BANK_CATALOG } from "@/lib/music-bank/poc-catalog";
 import { GENRE_PRICE_LABEL, CHOICE3_PRICE_LABEL, FULL_BANK_PRICE_LABEL, CHOICE3_PACK_COUNT } from "@/lib/music-bank/pricing";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { getLocale } from "@/lib/locale-server";
+import { trFor } from "@/lib/i18n/phrases";
 
 function PlaceholderCard({
   title,
@@ -43,12 +45,12 @@ function BillingStatTile({ label, value, note }: { label: string; value: string;
 }
 
 /** One plan option inside Billing & Plan (presentation only — payments not built yet). */
-function PlanTile({ label, price, best }: { label: string; price: string; best?: boolean }) {
+function PlanTile({ label, price, best, bestLabel = "Best" }: { label: string; price: string; best?: boolean; bestLabel?: string }) {
   return (
     <div className={`rounded-xl border p-3 ${best ? "border-[#0a84ff]/40 bg-[#0a84ff]/[0.07]" : "border-slate-800/70 bg-slate-900/40"}`}>
       <div className="flex items-center gap-1.5">
         <p className="text-xs font-semibold text-slate-100">{label}</p>
-        {best ? <span className="text-[9px] font-bold uppercase tracking-wider text-[#7db8ff]">Best</span> : null}
+        {best ? <span className="text-[9px] font-bold uppercase tracking-wider text-[#7db8ff]">{bestLabel}</span> : null}
       </div>
       <p className="mt-1 text-sm font-semibold tabular-nums text-white">{price}</p>
     </div>
@@ -60,54 +62,58 @@ export default async function SettingsPage() {
   if (!user) redirect("/login?from=/settings");
 
   const totalPacks = POC_MUSIC_BANK_CATALOG.genres.length;
+  const locale = await getLocale();
+  const tr = (text: string, vars?: Record<string, string | number>) => trFor(locale, text, vars);
+  /** "$17/mo" → "$17 לחודש" */
+  const priceText = (p: string) => (p.endsWith("/mo") ? `${p.slice(0, -3)} ${tr("per month")}` : p);
 
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-xl font-semibold text-slate-50">Settings</h1>
+        <h1 className="text-xl font-semibold text-slate-50">{tr("Settings")}</h1>
         <p className="mt-0.5 text-xs text-slate-400">
-          Day-to-day playback and device preferences. Workspace business profile lives under{" "}
-          <span className="text-slate-300">Owner</span>.
+          {tr("Day-to-day playback and device preferences. Workspace business profile lives under")}{" "}
+          <span className="text-slate-300">{tr("Owner")}</span>.
         </p>
       </div>
 
       <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold text-slate-50">Apps &amp; Downloads</h2>
+            <h2 className="text-sm font-semibold text-slate-50">{tr("Apps & Downloads")}</h2>
             <p className="mt-0.5 text-xs text-slate-400">
-              Install VONO on Windows, Android TV / Google TV, and phones &amp; tablets.
+              {tr("Install VONO on Windows, Android TV / Google TV, and phones & tablets.")}
             </p>
           </div>
           <Link
             href="/downloads"
             className="shrink-0 rounded-lg bg-[#0a84ff] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0a84ff]/90"
           >
-            Open Downloads
+            {tr("Open Downloads")}
           </Link>
         </div>
       </section>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <PlaceholderCard
-          title="Playback preferences"
-          description="Theme and language for this browser."
+          title={tr("Playback preferences")}
+          description={tr("Theme and language for this browser.")}
         >
           <SettingsPreferencesControls />
         </PlaceholderCard>
-        <PlaceholderCard title="VONO Protection" description="Unattended branch-player: auto-start with Windows and automatic recovery (VONO Desktop).">
+        <PlaceholderCard title={tr("VONO Protection")} description={tr("Unattended branch-player: auto-start with Windows and automatic recovery (VONO Desktop).")}>
           <DesktopStartupSettingsCard />
         </PlaceholderCard>
-        <PlaceholderCard title="PlayItPro Local Library" description="Play local music on this machine. The file location is never shown.">
+        <PlaceholderCard title={tr("PlayItPro Local Library")} description={tr("Play local music on this machine. The file location is never shown.")}>
           <DesktopLocalMusicSettingsCard />
         </PlaceholderCard>
         <PlaceholderCard
-          title="Account preferences"
-          description="Profile and workspace account options. More coming soon."
+          title={tr("Account preferences")}
+          description={tr("Profile and workspace account options. More coming soon.")}
         />
         <PlaceholderCard
-          title="More settings"
-          description="Additional controls will appear here in future releases."
+          title={tr("More settings")}
+          description={tr("Additional controls will appear here in future releases.")}
         />
       </div>
 
@@ -117,53 +123,53 @@ export default async function SettingsPage() {
       <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold text-slate-50">Billing &amp; Plan</h2>
+            <h2 className="text-sm font-semibold text-slate-50">{tr("Billing & Plan")}</h2>
             <p className="mt-0.5 text-xs text-slate-400">
-              Your subscription, Music Bank access and Genre Packs — managed here, not in the catalog.
+              {tr("Your subscription, Music Bank access and Genre Packs — managed here, not in the catalog.")}
             </p>
           </div>
           <button
             type="button"
             disabled
-            title="Coming soon"
+            title={tr("Coming soon")}
             className="shrink-0 cursor-not-allowed rounded-lg bg-[#0a84ff]/70 px-3 py-1.5 text-xs font-semibold text-white/90"
           >
-            Change plan
+            {tr("Change plan")}
           </button>
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <BillingStatTile label="Current plan" value="Preview" note="Sample previews only — nothing unlocked yet." />
-          <BillingStatTile label="Genre Packs owned" value={`0 / ${totalPacks}`} note="Unlock from the Royalty-Free Music catalog." />
-          <BillingStatTile label="Full Music Bank" value="Locked" note={`Complete-bank access · ${FULL_BANK_PRICE_LABEL}`} />
-          <BillingStatTile label="Payment method" value="—" note="Added at checkout. Coming soon." />
+          <BillingStatTile label={tr("Current plan")} value={tr("Preview")} note={tr("Sample previews only — nothing unlocked yet.")} />
+          <BillingStatTile label={tr("Genre Packs owned")} value={`0 / ${totalPacks}`} note={tr("Unlock from the Royalty-Free Music catalog.")} />
+          <BillingStatTile label={tr("Full Music Bank")} value={tr("Locked")} note={tr("Complete-bank access · {price}", { price: priceText(FULL_BANK_PRICE_LABEL) })} />
+          <BillingStatTile label={tr("Payment method")} value="—" note={tr("Added at checkout. Coming soon.")} />
         </div>
 
         <div className="mt-5 border-t border-slate-800/60 pt-5">
-          <h3 className="text-xs font-semibold text-slate-300">Plans</h3>
-          <p className="mt-0.5 text-[11px] text-slate-500">Upgrade or change plan. Payments &amp; entitlements coming soon.</p>
+          <h3 className="text-xs font-semibold text-slate-300">{tr("Plans")}</h3>
+          <p className="mt-0.5 text-[11px] text-slate-500">{tr("Upgrade or change plan. Payments & entitlements coming soon.")}</p>
           <div className="mt-3 grid gap-2 sm:grid-cols-3">
-            <PlanTile label="1 Genre Pack" price={GENRE_PRICE_LABEL} />
-            <PlanTile label={`${CHOICE3_PACK_COUNT} Genre Packs`} price={CHOICE3_PRICE_LABEL} />
-            <PlanTile label="Full Music Bank" price={FULL_BANK_PRICE_LABEL} best />
+            <PlanTile label={tr("1 Genre Pack")} price={priceText(GENRE_PRICE_LABEL)} bestLabel={tr("Best")} />
+            <PlanTile label={`${CHOICE3_PACK_COUNT} ${tr("Genre Packs")}`} price={priceText(CHOICE3_PRICE_LABEL)} bestLabel={tr("Best")} />
+            <PlanTile label={tr("Full Music Bank")} price={priceText(FULL_BANK_PRICE_LABEL)} best bestLabel={tr("Best")} />
           </div>
         </div>
 
-        <p className="mt-4 text-[11px] text-slate-500">Billing history and payment methods will appear here once payments are enabled.</p>
+        <p className="mt-4 text-[11px] text-slate-500">{tr("Billing history and payment methods will appear here once payments are enabled.")}</p>
       </section>
 
       <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
-        <h2 className="text-sm font-semibold text-slate-50">Remote player</h2>
+        <h2 className="text-sm font-semibold text-slate-50">{tr("Remote player")}</h2>
         <p className="mt-0.5 text-xs text-slate-400">
-          Choose whether this device is MASTER (outputs audio) or CONTROL (mirrors master).
+          {tr("Choose whether this device is MASTER (outputs audio) or CONTROL (mirrors master).")}
         </p>
         <div className="mt-4">
           <DeviceModeSettingsSwitch />
         </div>
         <div className="mt-6 border-t border-slate-800/60 pt-6">
-          <h3 className="text-xs font-semibold text-slate-300">Mix / crossfade</h3>
+          <h3 className="text-xs font-semibold text-slate-300">{tr("Mix / crossfade")}</h3>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            Crossfade length when AutoMix is on. Direct audio URL playback only.
+            {tr("Crossfade length when AutoMix is on. Direct audio URL playback only.")}
           </p>
           <div className="mt-3">
             <MixDurationSetting />
@@ -172,14 +178,14 @@ export default async function SettingsPage() {
       </section>
 
       <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
-        <h2 className="text-sm font-semibold text-slate-50">Organization</h2>
+        <h2 className="text-sm font-semibold text-slate-50">{tr("Organization")}</h2>
         <p className="mt-0.5 text-xs text-slate-400">
-          Informational only in this version.
+          {tr("Informational only in this version.")}
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>
             <label className="block text-xs text-slate-500">
-              Account name
+              {tr("Account name")}
             </label>
             <input
               disabled
@@ -189,7 +195,7 @@ export default async function SettingsPage() {
           </div>
           <div>
             <label className="block text-xs text-slate-500">
-              Default timezone
+              {tr("Default timezone")}
             </label>
             <input
               disabled
@@ -202,23 +208,23 @@ export default async function SettingsPage() {
 
       <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
         <h2 className="text-sm font-semibold text-slate-50">
-          Playback & safety
+          {tr("Playback & safety")}
         </h2>
         <p className="mt-0.5 text-xs text-slate-400">
-          How agents behave on your devices. SyncBiz does not host or stream media.
+          {tr("How agents behave on your devices. SyncBiz does not host or stream media.")}
         </p>
         <ul className="mt-4 space-y-3 text-sm text-slate-300">
           <li className="flex items-start gap-2">
             <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
-            Optional watchdog recovery (enable via VONO Protection)
+            {tr("Optional watchdog recovery (enable via VONO Protection)")}
           </li>
           <li className="flex items-start gap-2">
             <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
-            Prefer local cache when available
+            {tr("Prefer local cache when available")}
           </li>
           <li className="flex items-start gap-2">
             <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
-            Log TTS playback events
+            {tr("Log TTS playback events")}
           </li>
         </ul>
         <ClearPlaybackCacheButton />

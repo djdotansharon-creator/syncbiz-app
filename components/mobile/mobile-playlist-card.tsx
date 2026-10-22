@@ -6,6 +6,7 @@ import { MobileSourceCardActions } from "@/components/mobile-source-card-actions
 import { MobileTypeBadge } from "@/components/mobile/mobile-type-badge";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { useStationController } from "@/lib/station-controller-context";
+import { useStationDisplay } from "@/lib/use-station-display";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { usePlayback } from "@/lib/playback-provider";
 import type { UnifiedSource } from "@/lib/source-types";
@@ -38,11 +39,13 @@ type Props = {
 export function MobilePlaylistCard({ source, onRemove, editReturnTo }: Props) {
   const { mobileRole } = useMobileRole();
   const station = useStationController();
+  const stationDisplay = useStationDisplay();
   const deviceCtx = useDevicePlayer();
   const playbackCtx = usePlayback();
 
   const isController = mobileRole === "controller";
-  const remoteActive = station.remoteState?.currentSource?.id === source.id;
+  // P0 Gate 1f: "active" = the AUDIBLE source (held while a new selection loads), never the pending one.
+  const remoteActive = stationDisplay.shown?.currentSource?.id === source.id;
   const localActive =
     playbackCtx.currentSource?.id === source.id && playbackCtx.status !== "idle";
   const active = (isController ? remoteActive : localActive) || (!isController && remoteActive);

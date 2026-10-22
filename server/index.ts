@@ -52,6 +52,17 @@ import {
 } from "./branch-room.js";
 import { verifyWsToken } from "./ws-token.js";
 import { loadDesignations, saveDesignations } from "./branch-designation-store.js";
+import {
+  BRANCH_ALIAS_RUNTIME_MODE,
+  applyAliasSync,
+  decideBranchAlias,
+  loadBranchAliases,
+  parseAliasSyncBody,
+  rekeyRoomStateForAliases,
+  resolveRoutingBranch,
+  saveBranchAliases,
+  type BranchAliases,
+} from "./branch-alias.js";
 
 const WS_SECRET = process.env.SYNCBIZ_WS_SECRET ?? process.env.WS_SECRET;
 if (!WS_SECRET || WS_SECRET.length < 16) {
@@ -163,6 +174,54 @@ const clearedDesignationRooms = new Set<string>();
   }
   for (const roomKey of state.cleared) clearedDesignationRooms.add(roomKey);
 })();
+/**
+ * CONTROL ROOM PHASE 1 (Gate 1, SHADOW): legacy branch alias map, synced from the app. Used ONLY to log what a
+ * REGISTER WOULD resolve to — routing, rooms, designation and leases are untouched in this build.
+ */
+let branchAliases: BranchAliases = loadBranchAliases();
+/** GATE 2A-3: workspaces whose persisted room state was re-keyed (or needed none) at boot → alias routing ACTIVE. */
+const activeAliasWorkspaces = new Set<string>();
+/** Room-routing branch for a raw client/app branch id (canonical only for an ACTIVE workspace; otherwise raw). */
+function routingBranch(workspaceId: string | null | undefined, rawBranchId: string): string {
+  return resolveRoutingBranch({ mode: BRANCH_ALIAS_RUNTIME_MODE, workspaceId, rawBranchId, aliases: branchAliases, activeWorkspaces: activeAliasWorkspaces });
+}
+/** Log the shadow alias decision for a REGISTER (never changes routing). */
+function logBranchAliasShadow(info: {
+  role: string;
+  workspaceId: string | null;
+  branchId: string;
+  deviceId: string | null;
+  roomKey: string;
+  stationDeviceId?: string | null;
+  stationBranchId?: string | null;
+}): void {
+  const d = decideBranchAlias({ mode: BRANCH_ALIAS_RUNTIME_MODE, workspaceId: info.workspaceId, rawBranchId: info.branchId, aliases: branchAliases });
+  if (!d.candidateBranchId) return;
+  const active = !!info.workspaceId && activeAliasWorkspaces.has(info.workspaceId);
+  const isStation = !!info.deviceId && !!info.stationDeviceId && info.deviceId === info.stationDeviceId;
+  console.log(
+    `[SyncBiz WS][branch-alias] ${active ? d.mode : "inactive"}`,
+    JSON.stringify({
+      role: info.role,
+      deviceId: info.deviceId,
+      rawBranchId: d.rawBranchId,
+      candidateBranchId: d.candidateBranchId,
+      effectiveRoom: info.roomKey,
+      wouldResolveTo: runtimeBranchKey(info.workspaceId, "", d.candidateBranchId),
+      mode: d.mode,
+      workspaceActive: active,
+      // Gate 2A-3 evidence only (routing does not depend on it): the signed station branch vs the resolved room.
+      ...(isStation
+        ? {
+            stationBranchId: info.stationBranchId ?? null,
+            stationBranchMatchesRoom: info.stationBranchId
+              ? info.roomKey === runtimeBranchKey(info.workspaceId, "", info.stationBranchId)
+              : null,
+          }
+        : {}),
+    }),
+  );
+}
 /** Persist the authoritative designations + clear tombstones (never token-bootstrapped ones). Returns success. */
 function persistDesignations(): boolean {
   const designations: Record<string, string> = {};
@@ -190,6 +249,50 @@ function persistMasterLease() {
     primaryMasterByBranch: Object.fromEntries(primaryMasterByBranch),
   });
 }
+
+/**
+ * GATE 2A-3 boot re-key (runs at module load, BEFORE the server listens / accepts any socket). Moves persisted
+ * designation / tombstone / lease keys `ws:<ws>:<legacy>` -> `ws:<ws>:<canonical>` for every alias, carrying the SAME
+ * values (same durable MASTER id; no revoke, no second designation, no duplicate lease). A conflict on the canonical
+ * key keeps that workspace's state untouched and its routing on the raw key (fail safe).
+ */
+(function rekeyPersistedRoomStateAtBoot() {
+  if (BRANCH_ALIAS_RUNTIME_MODE !== "active") return;
+  const designations: Record<string, string> = {};
+  for (const rk of authoritativeDesignationRooms) {
+    const d = designatedByRoom.get(rk);
+    if (d) designations[rk] = d;
+  }
+  const r = rekeyRoomStateForAliases(branchAliases, {
+    designations,
+    cleared: [...clearedDesignationRooms],
+    masterByBranch: Object.fromEntries(masterByBranch),
+    masterDisconnectedAt: Object.fromEntries(masterDisconnectedAt),
+    primaryMasterByBranch: Object.fromEntries(primaryMasterByBranch),
+  });
+  for (const res of r.results) console.log("[SyncBiz WS][branch-alias] boot-rekey", JSON.stringify(res));
+  if (r.changed) {
+    designatedByRoom.clear();
+    authoritativeDesignationRooms.clear();
+    clearedDesignationRooms.clear();
+    for (const [rk, d] of Object.entries(r.state.designations)) {
+      designatedByRoom.set(rk, d);
+      authoritativeDesignationRooms.add(rk);
+    }
+    for (const rk of r.state.cleared) clearedDesignationRooms.add(rk);
+    masterByBranch.clear();
+    masterDisconnectedAt.clear();
+    primaryMasterByBranch.clear();
+    for (const [k, v] of Object.entries(r.state.masterByBranch)) masterByBranch.set(k, v);
+    for (const [k, v] of Object.entries(r.state.masterDisconnectedAt)) masterDisconnectedAt.set(k, v);
+    for (const [k, v] of Object.entries(r.state.primaryMasterByBranch)) primaryMasterByBranch.set(k, v);
+    const savedDesignations = persistDesignations();
+    persistMasterLease();
+    console.log("[SyncBiz WS][branch-alias] boot-rekey persisted", JSON.stringify({ savedDesignations }));
+  }
+  for (const w of r.activeWorkspaces) activeAliasWorkspaces.add(w);
+  console.log("[SyncBiz WS][branch-alias] active workspaces", JSON.stringify([...activeAliasWorkspaces]));
+})();
 
 /** Last known playback state per device (station). */
 const deviceState = new Map<string, StationPlaybackState>();
@@ -533,6 +636,38 @@ function sendInitialStateToController(ws: import("ws").WebSocket, roomKey: strin
   });
 }
 
+/** Control Room (info only): the playing station's device kind, from its registration purpose. Never used for routing. */
+function stationDeviceType(conn: DeviceConnection): "computer" | "streamer" | "browser" | "unknown" {
+  const purpose = conn.registrationIntent?.devicePurpose;
+  if (purpose === "branch_desktop_station") return "computer";
+  if (purpose === "branch_streamer_station") return "streamer";
+  if (purpose === "branch_web_station") return "browser";
+  return "unknown";
+}
+
+/** Control Room (info only): the branch of the room this station was routed into at REGISTER — the canonical id when
+ *  its alias is active (room key = `ws:<workspace>:<branch>` / `legacy:<user>:<branch>`). Reads the existing routing
+ *  result; never resolves routing itself. */
+function roomBranchId(conn: DeviceConnection, fallback: string): string {
+  const key = conn.roomKey ?? "";
+  const i = key.lastIndexOf(":");
+  return i >= 0 && i < key.length - 1 ? key.slice(i + 1) : fallback;
+}
+
+/** Control Room (info only): what is connected to this station's room — the playing station, other devices (phone /
+ *  tablet / computer / browser) and remote controllers. Role + kind only; no ids, never used for routing. */
+function roomDevicesInfo(master: DeviceConnection): NonNullable<BranchSummary["devices"]> {
+  const out: NonNullable<BranchSummary["devices"]> = [];
+  devices.forEach((d) => {
+    if (d.roomKey !== master.roomKey || d.ws.readyState !== 1) return;
+    out.push({ role: d === master ? "playing" : "control", type: d.isMobile ? "phone_tablet" : stationDeviceType(d) });
+  });
+  for (const c of controllers) {
+    if (c.roomKey === master.roomKey && c.ws.readyState === 1) out.push({ role: "control", type: "remote" });
+  }
+  return out;
+}
+
 /** Build branch list for an owner: branches with a connected MASTER device in the owner's WORKSPACE scope. */
 function getBranchListForOwner(owner: OwnerEntry): BranchSummary[] {
   const branches: BranchSummary[] = [];
@@ -554,6 +689,9 @@ function getBranchListForOwner(owner: OwnerEntry): BranchSummary[] {
       masterDeviceId: conn.id,
       connectedAt: conn.connectedAt,
       hasDevices: deviceCount > 0,
+      deviceType: stationDeviceType(conn),
+      canonicalBranchId: roomBranchId(conn, branchId),
+      devices: roomDevicesInfo(conn),
     });
   });
   return branches;
@@ -677,32 +815,40 @@ const httpServer = createServer((req, res) => {
         }
         const durableDeviceId = typeof data.durableDeviceId === "string" ? data.durableDeviceId.trim() : "";
         // Designation rooms are ALWAYS workspace-scoped (ws:<workspaceId>:<branch>); userId is irrelevant.
-        const roomKey = runtimeBranchKey(workspaceId, "", branchId);
+        const roomKey = runtimeBranchKey(workspaceId, "", routingBranch(workspaceId, branchId));
+        // Unified revocation of the CURRENT designated master in the room. `exceptDeviceId` is the newly
+        // designated device on a reassign (it must NOT be demoted); on a clear it is undefined (demote whoever
+        // currently holds the lease). Sends an explicit `designated:false` so the old station clears its local
+        // designation cache and stops offline-designated playback. Does not alter normal auto-election.
+        const revokeCurrentDesignatedMaster = (exceptDeviceId?: string) => {
+          const curMasterId = masterByBranch.get(roomKey);
+          if (!curMasterId || (exceptDeviceId && curMasterId === exceptDeviceId)) return;
+          const curConn = devices.get(curMasterId);
+          if (curConn) {
+            curConn.mode = "CONTROL";
+            curConn.designatedTrusted = false;
+            if (curConn.ws.readyState === 1) {
+              curConn.ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL", designated: false } as ServerMessage));
+            }
+          }
+          masterByBranch.delete(roomKey);
+          masterDisconnectedAt.delete(roomKey);
+          persistMasterLease();
+        };
         if (durableDeviceId) {
           designatedByRoom.set(roomKey, durableDeviceId);
           authoritativeDesignationRooms.add(roomKey);
           clearedDesignationRooms.delete(roomKey); // (re)designated → no longer a tombstone
           // Enforce immediately: demote any current master in the room that is not the newly-designated device.
-          const curMasterId = masterByBranch.get(roomKey);
-          if (curMasterId && curMasterId !== durableDeviceId) {
-            const curConn = devices.get(curMasterId);
-            if (curConn) {
-              curConn.mode = "CONTROL";
-              curConn.designatedTrusted = false;
-              if (curConn.ws.readyState === 1) {
-                curConn.ws.send(JSON.stringify({ type: "SET_DEVICE_MODE", mode: "CONTROL" } as ServerMessage));
-              }
-            }
-            masterByBranch.delete(roomKey);
-            masterDisconnectedAt.delete(roomKey);
-            persistMasterLease();
-          }
+          revokeCurrentDesignatedMaster(durableDeviceId);
         } else {
           // Clear (admin reset): drop the designation and record an authoritative TOMBSTONE so a stale token
-          // claim can never revive it. The branch reverts to legacy (non-designated) behavior on future events.
+          // claim can never revive it. UNIFIED REVOCATION: also revoke the current designated MASTER now (same as
+          // reassign) so the old station gets an explicit designated:false → clears its cache + stops audio.
           designatedByRoom.delete(roomKey);
           authoritativeDesignationRooms.delete(roomKey);
           clearedDesignationRooms.add(roomKey);
+          revokeCurrentDesignatedMaster();
         }
         // FAIL-CLOSED: if the authoritative state couldn't be persisted, report failure so the admin retries
         // (idempotent) — never claim success when the WS store wasn't durably written.
@@ -720,6 +866,46 @@ const httpServer = createServer((req, res) => {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Invalid JSON" }));
       }
+    });
+    return;
+  }
+  // CONTROL ROOM PHASE 1 (Gate 1): app → WS legacy branch alias sync. Stores { workspaceId, legacyKey →
+  // canonicalBranchId } for SHADOW logging only — never re-keys rooms, designations or leases.
+  if (req.method === "POST" && req.url === "/internal/branch-alias") {
+    const secret = req.headers["x-syncbiz-secret"] ?? req.headers["x-syncbiz-internal-secret"];
+    if (secret !== WS_SECRET) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Forbidden" }));
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      let parsed: unknown = null;
+      try { parsed = body ? JSON.parse(body) : null; } catch { parsed = null; }
+      const s = parseAliasSyncBody(parsed);
+      if (!s) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid alias body" }));
+        return;
+      }
+      // Gate 2A-3: an ACTIVE workspace's mapping cannot be changed/removed at runtime (rooms would split);
+      // re-syncing the same value stays idempotent.
+      if (activeAliasWorkspaces.has(s.workspaceId) && branchAliases[s.workspaceId]?.[s.legacyKey] !== s.canonicalBranchId) {
+        res.writeHead(409, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Alias is active for this workspace; change requires a reviewed migration" }));
+        return;
+      }
+      const next = applyAliasSync(branchAliases, s);
+      if (!saveBranchAliases(next)) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Failed to persist alias" }));
+        return;
+      }
+      branchAliases = next;
+      console.log("[SyncBiz WS][branch-alias] sync", JSON.stringify({ ...s, mode: BRANCH_ALIAS_RUNTIME_MODE }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, mode: BRANCH_ALIAS_RUNTIME_MODE }));
     });
     return;
   }
@@ -828,7 +1014,11 @@ wss.on("connection", (ws) => {
           (msg as { registrationIntent?: unknown }).registrationIntent
         );
 
-        const roomKey = runtimeBranchKey(workspaceId, userId, branchId);
+        // Gate 2A-3: room from the ROUTING branch (raw legacy key -> canonical for an active workspace). The
+        // connection keeps the raw branchId for client-facing messages and content (Gate 2B) compatibility.
+        const effectiveBranchId = routingBranch(workspaceId, branchId);
+        const roomKey = runtimeBranchKey(workspaceId, userId, effectiveBranchId);
+        logBranchAliasShadow({ role: "device", workspaceId, branchId, deviceId, roomKey, stationDeviceId: auth.stationDeviceId, stationBranchId: auth.stationBranchId });
         clearExpiredGracePeriods(roomKey);
         let mode: DeviceMode = "CONTROL";
         let designatedTrusted = false;
@@ -850,7 +1040,7 @@ wss.on("connection", (ws) => {
         // A signed token claim may BOOTSTRAP a designation ONLY for a room with no AUTHORITATIVE entry (and none
         // already learned). It must NEVER overwrite/revert an authoritative (persisted / internal-synced)
         // designation with stale data — an old token minted before a (re)designation can't change it.
-        const claimDesignatedId = auth.designatedMasterByBranch?.[branchId] ?? null;
+        const claimDesignatedId = auth.designatedMasterByBranch?.[effectiveBranchId] ?? auth.designatedMasterByBranch?.[branchId] ?? null;
         if (
           claimDesignatedId &&
           !authoritativeDesignationRooms.has(key) &&
@@ -1046,8 +1236,8 @@ wss.on("connection", (ws) => {
         const masterDeviceIdForClient = getMasterForRoom(roomKey);
         const setModeMsg: ServerMessage =
           mode === "CONTROL" && masterDeviceIdForClient
-            ? { type: "SET_DEVICE_MODE", mode, masterDeviceId: masterDeviceIdForClient, secondaryDesktop }
-            : { type: "SET_DEVICE_MODE", mode, secondaryDesktop };
+            ? { type: "SET_DEVICE_MODE", mode, masterDeviceId: masterDeviceIdForClient, secondaryDesktop, designated: designatedTrusted }
+            : { type: "SET_DEVICE_MODE", mode, secondaryDesktop, designated: designatedTrusted };
         ws.send(JSON.stringify(setModeMsg));
         if (mode === "CONTROL" && masterDeviceIdForClient) {
           const masterState = deviceState.get(masterDeviceIdForClient);
@@ -1063,7 +1253,8 @@ wss.on("connection", (ws) => {
         if (process.env.NODE_ENV === "development" && regIntent) {
           console.info("[SyncBiz WS] register controller intent", regIntent);
         }
-        const roomKey = runtimeBranchKey(workspaceId, userId, branchId);
+        const roomKey = runtimeBranchKey(workspaceId, userId, routingBranch(workspaceId, branchId));
+        logBranchAliasShadow({ role: "controller", workspaceId, branchId, deviceId: null, roomKey });
         controllers.push({ ws, userId, workspaceId, branchId, roomKey });
         const sessionCode = getOrCreateSessionCode(userId);
         const reply: ServerMessage = { type: "REGISTERED", sessionCode };
@@ -1377,16 +1568,26 @@ wss.on("connection", (ws) => {
       let masterId: string | null = null;
       // The command may ONLY reach a MASTER in this exact room (workspace+branch) — never cross rooms.
       let expectedRoomKey: string | null = null;
+      // Control Room broadcast: an owner COMMAND with a requestId gets a COMMAND_DELIVERY instead of a socket-closing ERROR,
+      // so one unavailable branch never stops the others. Without requestId nothing changes.
+      const ackId = role === "owner_global" && typeof msg.requestId === "string" && msg.requestId.trim() ? msg.requestId.trim().slice(0, 64) : null;
+      const ackBranch = (msg.targetBranchId ?? "").trim() || DEFAULT_BRANCH_ID;
+      const sendAck = (delivered: boolean, reason?: "not_authorized" | "no_station") => {
+        if (ackId && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: "COMMAND_DELIVERY", requestId: ackId, targetBranchId: ackBranch, delivered, ...(reason ? { reason } : {}) } as ServerMessage));
+        }
+      };
       if (role === "owner_global") {
         const owner = owners.find((o) => o.ws === ws);
         const targetBranchId = (msg.targetBranchId ?? "").trim() || DEFAULT_BRANCH_ID;
         // Phase 1: an owner may only target a branch present in its token claim.
         if (!owner || !isBranchAllowed(targetBranchId, owner.authorizedBranches)) {
+          if (ackId) { sendAck(false, "not_authorized"); return; }
           ws.send(JSON.stringify({ type: "ERROR", message: "Branch not authorized" } as ServerMessage));
           return;
         }
         // Target the workspace room for (owner workspace, targetBranch).
-        expectedRoomKey = runtimeBranchKey(owner.workspaceId, owner.userId, targetBranchId);
+        expectedRoomKey = runtimeBranchKey(owner.workspaceId, owner.userId, routingBranch(owner.workspaceId, targetBranchId));
         masterId = getMasterForRoom(expectedRoomKey);
       } else {
         expectedRoomKey =
@@ -1400,6 +1601,7 @@ wss.on("connection", (ws) => {
       // Room-isolation guard: target must be a MASTER whose room === expectedRoomKey (blocks cross-room
       // targetDeviceId escape). expectedRoomKey null (no room) → rejected.
       if (!expectedRoomKey || !commandTargetInRoom(expectedRoomKey, target)) {
+        if (ackId) { sendAck(false, "no_station"); return; }
         ws.send(JSON.stringify({ type: "ERROR", message: "No MASTER device" } as ServerMessage));
         return;
       }
@@ -1414,6 +1616,9 @@ wss.on("connection", (ws) => {
         (role === "device" && deviceId && target!.id === masterId);
       if (canSend && target!.ws.readyState === 1) {
         target!.ws.send(JSON.stringify(cmd));
+        sendAck(true);
+      } else {
+        sendAck(false, "no_station");
       }
     }
   });

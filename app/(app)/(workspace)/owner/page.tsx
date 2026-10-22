@@ -7,10 +7,14 @@ import {
 } from "@/lib/workspace-business-profile";
 import { getTenantRole } from "@/lib/user-store";
 import { redirect } from "next/navigation";
+import { getLocale } from "@/lib/locale-server";
+import { trFor } from "@/lib/i18n/phrases";
 
 export default async function OwnerPage() {
   const user = await getCurrentUserFromCookies();
   if (!user) redirect("/login?from=/owner");
+  const locale = await getLocale();
+  const tr = (text: string) => trFor(locale, text);
 
   const role = await getTenantRole(user.id, user.tenantId);
   const canEdit = role === "TENANT_OWNER" || role === "TENANT_ADMIN";
@@ -20,9 +24,9 @@ export default async function OwnerPage() {
   return (
     <div className="space-y-10">
       <div>
-        <h1 className="text-xl font-semibold text-slate-50">Workspace setup</h1>
+        <h1 className="text-xl font-semibold text-slate-50">{tr("Workspace setup")}</h1>
         <p className="mt-1 text-sm text-slate-400">
-          Business identity and AI music context for your catalog, DJ Creator, and recommendations.
+          {tr("Business identity and AI music context for your catalog, DJ Creator, and recommendations.")}
         </p>
       </div>
 

@@ -151,6 +151,10 @@ type SyncBizDesktopBridgePreload = {
   getConfig: () => Promise<{ deviceId: string; branchId?: string; wsToken?: string; desktopTokenExpiresAtIso?: string }>;
   /** Auth-only handoff: hand MAIN a bound desktop_access token (token + expiry ONLY). Optional — legacy shells lack it. */
   applyDesktopAuth?: (payload: { token: string; expiresAtIso?: string }) => Promise<{ ok: boolean; error?: string }>;
+  /** Station activation (B1): MAIN config patch — used ONLY to set branchId after a redeemed activation code (MAIN drops deviceId). */
+  saveConfig?: (patch: { branchId?: string }) => Promise<unknown>;
+  /** Reconnect MAIN's cloud socket with its current config (station activation: join the new branch room). */
+  connectCloud?: () => Promise<unknown>;
   localMockTransport: (payload: DesktopLocalMockPayload) => Promise<unknown>;
   /** Optional: folder scan (full Desktop preload). */
   scanLocalAudioFolder?: (dir: string) => Promise<ScanLocalAudioFolderIpcResult>;

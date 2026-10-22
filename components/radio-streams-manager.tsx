@@ -15,6 +15,7 @@ import { ShareModal } from "@/components/share-modal";
 import { radioToShareable } from "@/lib/share-utils";
 import { getRadioStationsLocal, removeRadioStationLocal } from "@/lib/radio-local-store";
 import type { RadioStream } from "@/lib/source-types";
+import { useTr } from "@/lib/i18n/use-tr";
 
 type Props = {
   initialStations: RadioStream[];
@@ -97,6 +98,7 @@ export function RadioStreamsManager({ initialStations }: Props) {
 }
 
 function RadioStreamRow({ station, onRemove }: { station: RadioStream; onRemove: (id: string) => void }) {
+  const tr = useTr();
   const { playSource, stop, pause, currentSource } = usePlayback();
   const { t } = useTranslations();
   const [shareOpen, setShareOpen] = useState(false);
@@ -121,7 +123,7 @@ function RadioStreamRow({ station, onRemove }: { station: RadioStream; onRemove:
           </div>
         )}
         <span
-          className={`absolute top-1 right-1 rounded px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-white ${
+          className={`absolute top-1 end-1 rounded px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-white ${
             active ? "bg-red-500 animate-pulse shadow-[0_0_6px_rgba(239,68,68,0.8)]" : "bg-rose-500/90"
           }`}
         >
@@ -137,7 +139,7 @@ function RadioStreamRow({ station, onRemove }: { station: RadioStream; onRemove:
       {/* Spacer to center controls */}
       <div className="flex-1 min-w-0" />
       {/* Controls centered */}
-      <div className="flex flex-nowrap items-center gap-2 shrink-0" role="group" aria-label="Radio controls">
+      <div className="flex flex-nowrap items-center gap-2 shrink-0" role="group" aria-label={tr("Radio controls")}>
         {active && (
           <>
             <NeonControlButton size="sm" onClick={stop} title="Stop" aria-label="Stop">
@@ -145,7 +147,7 @@ function RadioStreamRow({ station, onRemove }: { station: RadioStream; onRemove:
                 <rect x="6" y="6" width="12" height="12" rx="1" />
               </svg>
             </NeonControlButton>
-            <NeonControlButton size="md" onClick={() => playSource(unified)} active title="Play" aria-label="Play">
+            <NeonControlButton size="md" onClick={() => playSource(unified)} active title={tr("Play")} aria-label={tr("Play")}>
               <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7L8 5z" />
               </svg>
@@ -158,7 +160,7 @@ function RadioStreamRow({ station, onRemove }: { station: RadioStream; onRemove:
           </>
         )}
         {!active && (
-          <NeonControlButton size="md" onClick={() => playSource(unified)} title="Play" aria-label="Play">
+          <NeonControlButton size="md" onClick={() => playSource(unified)} title={tr("Play")} aria-label={tr("Play")}>
             <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M8 5v14l11-7L8 5z" />
             </svg>

@@ -1,4 +1,6 @@
 import type {
+  VideoOutputState,
+  VideoDockRect,
   AddAdditionalMusicFolderResult,
   AutoStartState,
   ProtectionState,
@@ -55,6 +57,10 @@ export type SyncBizDesktopMvp = {
   mpvPlayUrlCrossfade: (url: string, fadeSec: number, attemptId?: number) => Promise<void>;
   /** Push Settings mix duration to main-process orchestrator (desktop WS / MPV paths). */
   setMixDuration: (seconds: number) => Promise<void>;
+  /** P0 Video V1 (desktop ≥ beta.21): MPV-rendered video switch + slot placement. Feature-detect in the renderer. */
+  getVideoOutput: () => Promise<VideoOutputState>;
+  setVideoOutputEnabled: (enabled: boolean) => Promise<VideoOutputState>;
+  setVideoDockRect: (rect: VideoDockRect) => Promise<void>;
   /** Dev-only: send a URL to the interrupt channel (triggers ducking). */
   mpvPlayInterrupt: (url: string) => Promise<void>;
   /** Set duck depth 0–100 (% of masterVolume Channel A falls to during interrupt). */

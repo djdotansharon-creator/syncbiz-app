@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
+import { isManagementLockedForRequest, managementLockedResponse } from "@/lib/management-access";
 import { getCurrentUserFromCookies, isOwner } from "@/lib/auth-helpers";
 import { prismaStationDeviceRepo } from "@/lib/station-device-prisma";
 import {
@@ -20,7 +22,8 @@ import { syncBranchMasterDesignation } from "@/lib/broadcast-branch-master-desig
 async function requireOwner() {
   const user = await getCurrentUserFromCookies();
   if (!user) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  if (!(await isOwner(user.id))) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  if (!(await isOwner(user.id, user.tenantId))) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  if (await isManagementLockedForRequest()) return { error: managementLockedResponse() }; // security hotfix 2026-10-13
   return { user };
 }
 
@@ -44,6 +47,7 @@ export async function POST(req: NextRequest) {
   }
   const branchId = (body.branchId ?? "").trim();
   const durableDeviceId = (body.durableDeviceId ?? "").trim();
+  shadowAuthorize("admin/branch-master:POST", { userId: auth.user.id, workspaceId: auth.user.tenantId }, "master.designate", [branchId]); // Gate 3A shadow: log only, never blocks
   if (!branchId || !durableDeviceId) {
     return NextResponse.json({ error: "branchId and durableDeviceId are required" }, { status: 400 });
   }
@@ -88,6 +92,7 @@ export async function DELETE(req: NextRequest) {
   }
   const branchId = (body.branchId ?? "").trim();
   if (!branchId) return NextResponse.json({ error: "branchId is required" }, { status: 400 });
+  shadowAuthorize("admin/branch-master:DELETE", { userId: auth.user.id, workspaceId: auth.user.tenantId }, "master.designate", [branchId]); // Gate 3A shadow: log only, never blocks
   await clearBranchMasterDesignation(auth.user.tenantId, branchId);
   const synced = await syncBranchMasterDesignation({ workspaceId: auth.user.tenantId, branchId, durableDeviceId: null });
   if (!synced) {

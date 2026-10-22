@@ -16,7 +16,8 @@ import {
 } from "@/lib/schedule-window";
 import type { Schedule, Source } from "@/lib/types";
 
-const POLL_MS = 8_000;
+/** Fixed cadence (owner 2026-10-15, 400-branch network): schedules are minute-granular → one check every 30 s. */
+const POLL_MS = 30_000;
 
 /**
  * While this browser tab is open, polls schedules and starts playback when a block’s window is active.
@@ -30,6 +31,14 @@ export function ScheduleAutoPlayer() {
   const { isRestoring } = usePlayback();
   const { stop, setQueue, playSource, setLastMessage } = useSchedulePlaybackHandlers();
   const busyRef = useRef(false);
+  // FLOOD FIX (2026-10-15): the playback handlers change identity on EVERY station status update (several per second).
+  // They were effect deps, so the effect — and its immediate tick() → GET /api/schedules — re-ran on every update
+  // (TEST logs: up to 8 requests/s per app). The latest handlers now live in a ref read at fire time; the polling
+  // effect depends only on the engine switch + restore state → exactly one request per POLL_MS.
+  const handlersRef = useRef({ router, stop, setQueue, playSource, setLastMessage });
+  useEffect(() => {
+    handlersRef.current = { router, stop, setQueue, playSource, setLastMessage };
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -89,11 +98,12 @@ export function ScheduleAutoPlayer() {
 
         let ok = false;
         try {
+          const h = handlersRef.current;
           ok = await runSchedulePlayback(
             winner,
             source,
-            { stop, setQueue, playSource, setLastMessage },
-            router,
+            { stop: h.stop, setQueue: h.setQueue, playSource: h.playSource, setLastMessage: h.setLastMessage },
+            h.router,
           );
         } catch {
           return;
@@ -127,7 +137,7 @@ export function ScheduleAutoPlayer() {
       window.removeEventListener(SCHEDULE_AUTO_PREFS_EVENT, onPrefs);
       window.removeEventListener("storage", onPrefs);
     };
-  }, [engineEnabled, isRestoring, router, stop, setQueue, playSource, setLastMessage]);
+  }, [engineEnabled, isRestoring]);
 
   return null;
 }

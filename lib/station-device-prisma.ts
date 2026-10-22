@@ -4,6 +4,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getCanonicalLegacyBranchId, legacyBranchEquivalent } from "@/lib/branch-resolver";
 import {
   DurableDeviceConflictError,
   registerStationDevice,
@@ -39,7 +40,14 @@ export const prismaStationDeviceRepo: StationDeviceRepo = {
   },
 };
 
-/** Register against the real Prisma-backed repo. */
-export function registerStationDeviceWithPrisma(input: RegisterStationDeviceInput): Promise<RegisterResult> {
-  return registerStationDevice(prismaStationDeviceRepo, input);
+/**
+ * Register against the real Prisma-backed repo. Gate 2A-1: a legacy "default" request and a row stored under the
+ * workspace's canonical alias (or vice versa) are the SAME binding — so neither side yields branch_conflict and the
+ * stored row is never moved. Any other branch mismatch still conflicts.
+ */
+export async function registerStationDeviceWithPrisma(input: RegisterStationDeviceInput): Promise<RegisterResult> {
+  const canonical = await getCanonicalLegacyBranchId(input.workspaceId);
+  return registerStationDevice(prismaStationDeviceRepo, input, {
+    isSameBranch: (stored, requested) => legacyBranchEquivalent(stored, requested, canonical),
+  });
 }

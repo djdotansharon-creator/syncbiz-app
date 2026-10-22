@@ -83,18 +83,18 @@ export function PlayerVerticalVolume({
 
   return (
     <div
-      className="vol-deck-shell relative flex h-full min-h-0 w-[64px] flex-col items-stretch overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03] px-2 py-2 sm:w-[68px]"
+      className="vol-deck-shell group relative flex h-full min-h-0 w-[64px] flex-col items-stretch overflow-hidden rounded-2xl px-2 py-1.5 transition-colors duration-200 hover:bg-white/[0.04] focus-within:bg-white/[0.04]"
       role="group"
       aria-label={ariaLabel}
     >
-      <div className="shrink-0 flex flex-col items-center pb-1.5 pt-0.5">
+      <div className="vol-deck-reveal shrink-0 flex flex-col items-center pb-1.5 pt-0.5">
         <span className="text-[9px] font-medium uppercase tracking-[0.14em] text-[#6e6e73]">Vol</span>
         <span className="vol-deck-readout mt-0.5 text-[17px] font-semibold tabular-nums leading-none text-[#f5f5f7]">
           {v}
         </span>
       </div>
 
-      <div className="flex min-h-0 flex-1 items-stretch justify-center px-0.5 py-1">
+      <div className="vol-deck-reveal flex min-h-0 flex-1 items-stretch justify-center px-0.5 py-1">
         <div
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}

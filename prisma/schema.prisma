@@ -290,13 +290,23 @@ model Workspace {
   name      String
   slug      String   @unique
   ownerId   String
+  /// Control Room: organization-level Station ID prefix (Station ID = "<prefix>-<Branch.locationCode>", e.g. AROMA-192).
+  /// Globally unique — a Station ID must resolve to exactly one organization. Null until the owner sets it.
+  stationIdPrefix String? @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   owner               User                   @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  branchActivationCodes BranchActivationCode[]
   members             WorkspaceMember[]
   branchAssignments   UserBranchAssignment[]
   branches            Branch[]
+  /// Control Room F1 (SHADOW): brands of this organization (exactly one isDefault — see Brand).
+  brands              Brand[]
+  /// Control Room F3a (SHADOW): organization-level location classification.
+  regions             Region[]
+  locationGroups      LocationGroup[]
+  locationTags        LocationTag[]
   sources             Source[]
   playlists           Playlist[]
   schedules           Schedule[]
@@ -356,10 +366,78 @@ model WorkspaceMember {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Control Room F2a (SHADOW / OFFLINE): composite permission scopes of this membership.
+  scopes    MemberScope[]
 
   @@unique([workspaceId, userId])
   @@index([workspaceId])
   @@index([userId])
+}
+
+/// Control Room F2a (SHADOW / OFFLINE ONLY) — one composite permission scope row of a workspace member.
+/// NOTHING ENFORCES IT: current authorization stays authoritative; the evaluator (lib/authz-scope.ts) is used only by
+/// the offline TEST matrix / tests. Semantics: within a row the same dimension = OR, different dimensions = AND; across
+/// rows = UNION; a row with allLocations=false and no targets MATCHES NOTHING (fail closed); a row's capabilities come
+/// ONLY from its own preset. Rows are derived from WorkspaceMember + UserBranchAssignment by the F2a sync
+/// (source / sourceRef keep every row traceable and the sync idempotent).
+model MemberScope {
+  id           String   @id @default(uuid())
+  memberId     String
+  /// Denormalized for queries.
+  workspaceId  String
+  /// Denormalized for queries.
+  userId       String
+  /// F2a presets: ADMIN | HQ_CONTROL | REGIONAL_MANAGER | BRANCH_MANAGER | VIEW_ONLY (validated in code).
+  preset       String
+  allLocations Boolean  @default(false)
+  status       String   @default("active")
+  /// migrated:role | migrated:assignment | migrated:implicit-default | admin
+  source       String
+  /// e.g. the UserBranchAssignment id ("" for role / implicit-default rows).
+  sourceRef    String   @default("")
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  member  WorkspaceMember     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  targets MemberScopeTarget[]
+
+  @@unique([memberId, source, sourceRef])
+  @@index([workspaceId, userId])
+}
+
+/// Control Room F2a — one value of one dimension of a MemberScope row (normalized; FK-checked). Raw CHECK constraint
+/// "MemberScopeTarget_one_value_matches_dimension": exactly one value column is set and it matches `dimension`
+/// (BRAND→brandId, LOCATION→branchId, ZONE→zoneId, ZONE_TYPE→zoneTypeCode; F3 adds REGION / GROUP / TAG).
+/// FKs to Brand / Branch / Zone are NO ACTION so a referenced value can never silently disappear (which could
+/// broaden an AND row); a whole-workspace cascade still works (checked at end of statement).
+model MemberScopeTarget {
+  id           String  @id @default(uuid())
+  scopeId      String
+  workspaceId  String
+  dimension    String
+  brandId      String?
+  branchId     String?
+  zoneId       String?
+  zoneTypeCode String?
+  /// F3a: REGION dimension value.
+  regionId     String?
+  /// F3a: GROUP dimension value. (There is deliberately NO tag column — a Tag is never a permission dimension.)
+  groupId      String?
+
+  scope  MemberScope    @relation(fields: [scopeId], references: [id], onDelete: Cascade)
+  brand  Brand?         @relation(fields: [brandId], references: [id], onDelete: NoAction)
+  branch Branch?        @relation(fields: [branchId], references: [id], onDelete: NoAction)
+  zone   Zone?          @relation(fields: [zoneId], references: [id], onDelete: NoAction)
+  region Region?        @relation(fields: [regionId], references: [id], onDelete: NoAction)
+  group  LocationGroup? @relation(fields: [groupId], references: [id], onDelete: NoAction)
+
+  @@index([scopeId])
+  @@index([brandId])
+  @@index([branchId])
+  @@index([zoneId])
+  @@index([regionId])
+  @@index([groupId])
 }
 
 /// User-to-branch access assignment (granular branch scoping for non-owner users).
@@ -410,14 +488,235 @@ model Branch {
   businessType  BusinessType @default(OTHER)
   devicesOnline Int          @default(0)
   devicesTotal  Int          @default(0)
+  /// Control Room Phase 1: the legacy runtime branch key this canonical branch represents (e.g. "default").
+  /// Nullable; unique per workspace. Gate 1 = shadow only (nothing routes by it yet).
+  legacyKey     String?
+  /// Control Room F1 (SHADOW): the Location's primary Brand. Nullable in F1 (backfilled to the workspace default
+  /// brand); made mandatory only in a later hardening gate. Nothing reads it for runtime decisions yet.
+  brandId       String?
+  /// Control Room F3a (SHADOW): the Location's ONE primary Region (nullable; FK NO ACTION DEFERRABLE INITIALLY DEFERRED).
+  regionId      String?
+  /// Control Room F3a: canonical, organization-unique import key (nullable; set explicitly by admin / import).
+  /// NOT `code` — `code` is name-derived / "DEFAULT" on legacy paths and stays a display code.
+  locationCode  String?
+  addressLine1  String?
+  addressLine2  String?
+  postalCode    String?
+  stateProvince String?
+  /// Control Room branch management: real address (city = the existing `city`) + automatic geocoding.
+  /// latitude / longitude are INTERNAL (set only by geocoding the address; never typed by a user).
+  street        String       @default("")
+  houseNumber   String       @default("")
+  latitude      Float?
+  longitude     Float?
+  geocodedAt    DateTime?
+  /// Control Room: the Google place the owner picked (Places Autocomplete) — verified server-side by Place ID.
+  googlePlaceId    String?
+  formattedAddress String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
   workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brand     Brand?     @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  activationCodes BranchActivationCode[]
+  region    Region?    @relation(fields: [regionId], references: [id], onDelete: NoAction)
   devices   Device[]
   schedules Schedule[]
+  zones     Zone[]
+  scopeTargets MemberScopeTarget[]
+  groupMemberships LocationGroupMember[]
+  tagAssignments   LocationTagAssignment[]
 
+  @@unique([workspaceId, legacyKey])
+  @@unique([workspaceId, locationCode])
+  /// F3a: composite key target so memberships can only link rows of the SAME workspace (DB-enforced).
+  @@unique([id, workspaceId])
   @@index([workspaceId])
+  @@index([brandId])
+  @@index([regionId])
+}
+
+/// Control Room — one-time station activation code for a branch (install a station / replace the main station).
+/// The code itself is NEVER stored: only an HMAC hash. Random 6 digits, valid 60 minutes, single use; generating a new
+/// code revokes the branch's previous active code. Redemption (the station side) is Step B — not built yet.
+model BranchActivationCode {
+  id                    String    @id @default(uuid())
+  workspaceId           String
+  branchId              String
+  codeHash              String
+  /// "install" (the branch has no station yet) | "replace" (replace the current main station)
+  purpose               String
+  createdByUserId       String
+  createdAt             DateTime  @default(now())
+  expiresAt             DateTime
+  usedAt                DateTime?
+  usedByDurableDeviceId String?
+  revokedAt             DateTime?
+  failedAttempts        Int       @default(0)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, branchId])
+  @@index([branchId, expiresAt])
+}
+
+/// Control Room F3a (SHADOW) — ONE primary geographic / operational region per Location. Organization-level (never
+/// brand-specific). Archive (status / archivedAt), never hard-delete; an archived region never matches a filter / scope.
+model Region {
+  id          String    @id @default(uuid())
+  workspaceId String
+  /// Canonical import key, ^[A-Z][A-Z0-9_]{0,39}$ (CENTER, NORTH, JERUSALEM). Unique per organization.
+  code        String
+  name        String
+  status      String    @default("active")
+  sortOrder   Int       @default(0)
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace    Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  branches     Branch[]
+  scopeTargets MemberScopeTarget[]
+
+  @@unique([workspaceId, code])
+  @@index([workspaceId])
+}
+
+/// Control Room F3a (SHADOW) — a managed operational cohort of Locations (MALLS, OUTLET, FLAGSHIP_STORES, AIRPORT).
+/// Organization-level, flat (no hierarchy). May later drive permissions / commands / announcements / campaigns / filters.
+/// Named LocationGroup because GROUP is an SQL reserved word.
+model LocationGroup {
+  id          String    @id @default(uuid())
+  workspaceId String
+  code        String
+  name        String
+  status      String    @default("active")
+  sortOrder   Int       @default(0)
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace    Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members      LocationGroupMember[]
+  scopeTargets MemberScopeTarget[]
+
+  @@unique([workspaceId, code])
+  @@unique([id, workspaceId])
+  @@index([workspaceId])
+}
+
+/// Control Room F3a — Location ∈ Group (zero or many per Location). Composite FKs pin both sides to ONE workspace.
+model LocationGroupMember {
+  groupId     String
+  branchId    String
+  workspaceId String
+  createdAt   DateTime @default(now())
+  createdBy   String?
+
+  group  LocationGroup @relation(fields: [groupId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  branch Branch        @relation(fields: [branchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@id([groupId, branchId])
+  @@index([branchId])
+  @@index([workspaceId])
+}
+
+/// Control Room F3a — a lightweight annotation / filter label (VIP, TEST, NEW_STORE, NEEDS_ATTENTION).
+/// LOCKED (owner 2026-10-07): a Tag is NOT a permission dimension — it never grants or restricts access and is never a
+/// MemberScope target. It is used by operational filtering only (lib/location-filter.ts).
+model LocationTag {
+  id          String    @id @default(uuid())
+  workspaceId String
+  code        String
+  name        String
+  color       String?
+  status      String    @default("active")
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace   Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignments LocationTagAssignment[]
+
+  @@unique([workspaceId, code])
+  @@unique([id, workspaceId])
+  @@index([workspaceId])
+}
+
+/// Control Room F3a — Location has Tag (zero or many per Location). Composite FKs pin both sides to ONE workspace.
+model LocationTagAssignment {
+  tagId       String
+  branchId    String
+  workspaceId String
+  createdAt   DateTime @default(now())
+  createdBy   String?
+
+  tag    LocationTag @relation(fields: [tagId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  branch Branch      @relation(fields: [branchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@id([tagId, branchId])
+  @@index([branchId])
+  @@index([workspaceId])
+}
+
+/// Control Room F1 (SHADOW) — a first-class Brand inside ONE Organization (= Workspace). A Brand Board is a filter
+/// over the same rows, never a separate tenant. AT MOST ONE `isDefault` brand per workspace is enforced by the
+/// partial unique index "Brand_one_default_per_workspace" (raw SQL in migration 20261007120000_control_room_f1_brand_zone;
+/// not expressible in Prisma). EXACTLY ONE default is guaranteed by the idempotent backfill + transactional Location
+/// creation + the F1 check script. Archive (status/archivedAt), never hard-delete, in later gates.
+model Brand {
+  id          String    @id @default(uuid())
+  workspaceId String
+  name        String
+  /// Stable short code, uppercase; unique per workspace (future bulk-import key).
+  code        String
+  isDefault   Boolean   @default(false)
+  status      String    @default("active")
+  color       String?
+  logoUrl     String?
+  sortOrder   Int       @default(0)
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  branches  Branch[]
+  scopeTargets MemberScopeTarget[]
+
+  @@unique([workspaceId, code])
+  @@index([workspaceId])
+}
+
+/// Control Room F1 (SHADOW) — a physical AUDIO destination inside a Location (Branch). Zone is the final playback
+/// destination (CLAUDE.md §11). `zoneTypeCode` is a flexible canonical code (MAIN, LOBBY, POOL, SPA, …) validated in
+/// code (lib/control-room-foundation.ts) — NOT a DB enum, so new types never need a migration. `name` is free text.
+/// AT MOST ONE `isDefault` zone per Location is enforced by the partial unique index "Zone_one_default_per_branch"
+/// (raw SQL); EXACTLY ONE is guaranteed by backfill + transactional Location creation + the F1 check script.
+/// Provisioned / unprovisioned is DERIVED (designation + bound station), never stored.
+model Zone {
+  id           String   @id @default(uuid())
+  /// Denormalized; must equal branch.workspaceId (checked by the F1 check script).
+  workspaceId  String
+  branchId     String
+  name         String
+  /// Stable per Location (future bulk-import key).
+  code         String
+  zoneTypeCode String   @default("MAIN")
+  isDefault    Boolean  @default(false)
+  status       String   @default("active")
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  branch         Branch                    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  stationDevices StationDevice[]
+  designations   BranchMasterDesignation[]
+  scopeTargets   MemberScopeTarget[]
+
+  @@unique([branchId, code])
+  @@index([workspaceId])
+  @@index([workspaceId, zoneTypeCode])
 }
 
 model Device {
@@ -468,9 +767,15 @@ model StationDevice {
   appVersion        String
   firstRegisteredAt DateTime @default(now())
   lastSeenAt        DateTime @updatedAt
+  /// Control Room F1 (SHADOW): bound Zone. NULL = COMPATIBILITY semantics "the Location's default Zone" (not the
+  /// final model — made mandatory in a later hardening gate). The register path does not set it in F1.
+  zoneId            String?
+
+  zone Zone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId])
   @@index([workspaceId, branchId])
+  @@index([zoneId])
 }
 
 /// Pilot permanent MASTER — the ONE explicitly designated MASTER device per (workspaceId, branchId).
@@ -487,8 +792,14 @@ model BranchMasterDesignation {
   designatedBy    String
   designatedAt    DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  /// Control Room F1 (SHADOW): designated Zone. NULL = COMPATIBILITY semantics "the Location's default Zone".
+  /// Uniqueness stays (workspaceId, branchId) in F1 — per-zone uniqueness is a later multi-zone gate.
+  zoneId          String?
+
+  zone Zone? @relation(fields: [zoneId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, branchId])
+  @@index([zoneId])
   @@index([workspaceId])
   @@index([durableDeviceId])
 }
@@ -963,10 +1274,23 @@ model Announcement {
   windowStart          String   @default("")
   windowEnd            String   @default("")
   createdAt            DateTime @default(now())
+  /// Jingles Stage 1 (owner 2026-10-12). `branchId` above stays LEGACY and is never used for origin / audience.
+  /// ORIGIN — the branch that really created the jingle; NULL when HQ created it.
+  originBranchId       String?
+  /// AUDIENCE — who may receive it: UNASSIGNED | LOCAL | BRAND | REGION | BRAND_REGION | NETWORK (NULL = not a jingle).
+  audience             String?
+  /// LOCAL target branch (LOCAL only).
+  audienceBranchId     String?
+  /// BRAND / BRAND_REGION.
+  audienceBrandId      String?
+  /// REGION / BRAND_REGION — stable operational region key (north, haifa, sharon-shomron, gush-dan, shfela,
+  /// jerusalem-modiin, south); a branch's region is computed from its lat / lng with the map's code (one source of truth).
+  audienceRegion       String?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
+  @@index([workspaceId, audience])
 }
 
 model AnnouncementChannel {

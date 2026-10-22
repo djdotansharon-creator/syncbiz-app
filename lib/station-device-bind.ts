@@ -12,7 +12,15 @@ import { isValidDurableDeviceId, type RegisterOutcome, type RegisterStationDevic
 
 const DEFAULT_BRANCH_ID = "default";
 
-export type DesktopAuthClaims = { stationDeviceId?: string; designatedMasterByBranch?: Record<string, string> };
+export type DesktopAuthClaims = {
+  stationDeviceId?: string;
+  /**
+   * Gate 2A-1: the branch the station is TRUSTED-bound to, in canonical form (derived server-side from the stored
+   * StationDevice binding — never from the client). Present only together with stationDeviceId.
+   */
+  stationBranchId?: string;
+  designatedMasterByBranch?: Record<string, string>;
+};
 
 export type BuildClaimsInput = {
   workspaceId: string;
@@ -24,8 +32,10 @@ export type BuildClaimsInput = {
 };
 
 export type BuildClaimsDeps = {
-  /** Register (idempotent, race-safe) the StationDevice; returns the outcome. */
-  register: (input: RegisterStationDeviceInput) => Promise<{ outcome: RegisterOutcome }>;
+  /** Register (idempotent, race-safe) the StationDevice; returns the outcome (+ the stored bound branch). */
+  register: (input: RegisterStationDeviceInput) => Promise<{ outcome: RegisterOutcome; boundBranchId?: string }>;
+  /** Gate 2A-1 (optional): canonical form of a stored branch id within the workspace. Absent → claim uses as-is. */
+  canonicalizeBranch?: (workspaceId: string, branchId: string) => Promise<string>;
   /** Branch → designated durable deviceId map for the given branches. */
   getDesignatedMasters: (workspaceId: string, branchIds: string[]) => Promise<Record<string, string>>;
 };
@@ -47,6 +57,9 @@ export async function buildDesktopAuthClaims(input: BuildClaimsInput, deps: Buil
     const result = await deps.register({ durableDeviceId: durable, workspaceId: input.workspaceId, branchId, platform, appVersion });
     if (result.outcome === "created" || result.outcome === "refreshed") {
       claims.stationDeviceId = durable; // device legitimately bound to THIS workspace+branch
+      // Signed station branch = the STORED binding (canonical form), never the client-supplied body branch.
+      const bound = result.boundBranchId ?? branchId;
+      claims.stationBranchId = deps.canonicalizeBranch ? await deps.canonicalizeBranch(input.workspaceId, bound) : bound;
     }
     // branch_conflict / workspace_conflict → do NOT bind the token to a device the caller doesn't own.
   }

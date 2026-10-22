@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { EntitlementLimitError } from "@/lib/entitlement-limits";
 import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, getAccessTypeForUser } from "@/lib/auth-helpers";
 import { NextRequest } from "next/server";
+import { branchLogoUrl, branchLogoVersions } from "@/lib/branch-logo";
 
 function resolveAccountScope(userTenantId: string): string {
   return userTenantId === "tnt-default" ? "acct-demo-001" : userTenantId;
@@ -14,7 +16,11 @@ export async function GET() {
   const accountId = resolveAccountScope(user.tenantId);
   const existing = await db.getBranches(accountId);
   if (existing.length > 0) {
-    return NextResponse.json(existing);
+    // Control Room (info only): does a station (StationDevice) belong to the branch? No → "Needs installation".
+    const withStation = await db.getBranchIdsWithStation(accountId);
+    // Control Room (info only): the branch's own logo file, when it has one (file-backed — lib/branch-logo.ts)
+    const logos = branchLogoVersions();
+    return NextResponse.json(existing.map((b) => ({ ...b, hasStation: withStation.has(b.id), logoUrl: logos.has(b.id) ? branchLogoUrl(b.id, logos.get(b.id) ?? 0) : null })));
   }
   return NextResponse.json([
     {
@@ -35,10 +41,11 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const user = await getCurrentUserFromCookies();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const accessType = await getAccessTypeForUser(user.id);
+  const accessType = await getAccessTypeForUser(user.id, user.tenantId);
   if (accessType !== "OWNER") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  shadowAuthorize("branches:POST", { userId: user.id, workspaceId: user.tenantId }, "branches.manage", []); // Gate 3A shadow: log only, never blocks
 
   try {
     const body = (await req.json()) as { id?: string; name?: string; timezone?: string };

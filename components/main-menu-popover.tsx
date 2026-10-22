@@ -36,6 +36,12 @@ export type MainMenuPopoverProps = {
   dir?: "ltr" | "rtl";
   /** Optional action area rendered below the items (e.g. Log out). */
   footer?: ReactElement | null;
+  /** Optional row rendered right under the title, above the items (e.g. the display-mode picker). */
+  lead?: ReactElement | null;
+  /** The trigger's glyph (the gear): drawn again INSIDE the open panel's top-right corner, where it
+   *  spins open/closed and closes the menu (owner, 2026-10-15). The real trigger hides meanwhile. */
+  anchorGlyph?: ReactElement | null;
+  closeLabel?: string;
 };
 
 export function MainMenuPopover({
@@ -47,6 +53,9 @@ export function MainMenuPopover({
   pinLabel,
   dir = "ltr",
   footer,
+  lead,
+  anchorGlyph,
+  closeLabel,
 }: MainMenuPopoverProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   // The parent app header uses overflow:hidden to contain its glow/blur
@@ -54,12 +63,18 @@ export function MainMenuPopover({
   // below the header bottom get clipped (Settings / Access / Architecture).
   // Render the panel in a portal with `position: fixed` and compute the
   // coordinates from the trigger's bounding rect so it can overflow freely.
-  const [coords, setCoords] = useState<{ top: number; right: number; left: number } | null>(null);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const [coords, setCoords] = useState<{ top: number; right: number; left: number; side: "left" | "right"; gear: { top: number; left: number; width: number; height: number } } | null>(null);
+  /* 2026-10-15 (owner: "you only made the opening nice"): when `open` flips to false the panel stays
+     mounted for the reverse animation (`sb-menu-dismiss`, shrinks back into the gear) and unmounts on
+     animationend. Previous-render state pattern (React Compiler: no setState inside effects). */
+  const [exiting, setExiting] = useState(false);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (!open) setExiting(true);
+  }
+  /* the panel only ever opens after a client-side click, so `document` exists whenever it renders
+     (the former `mounted` flag + its setState-in-effect are gone — React Compiler lint). */
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -68,9 +83,15 @@ export function MainMenuPopover({
       if (!el) return;
       const rect = el.getBoundingClientRect();
       setCoords({
-        top: rect.bottom + 8,
-        right: Math.max(8, window.innerWidth - rect.right),
+        /* owner, 2026-10-15: the panel rises so the gear sits in ITS top-right corner — the title line
+           (6px panel padding + 8px header padding + half a 15px line ≈ 21px) centres on the gear */
+        top: Math.max(4, Math.round(rect.top + rect.height / 2 - 21)),
+        right: Math.max(4, window.innerWidth - rect.right - 6), /* owner: a touch to the right */
         left: Math.max(8, rect.left),
+        /* 2026-10-20 (RTL): in a right-to-left interface the gear sits at the LEFT edge — the panel then opens to its right with the gear in its top-LEFT corner
+           (before, it always opened leftwards from the gear and was drawn off-screen, so the Display row could not be reached) */
+        side: rect.left + rect.width / 2 < window.innerWidth / 2 ? "left" : "right",
+        gear: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
       });
     };
     measure();
@@ -81,6 +102,19 @@ export function MainMenuPopover({
       window.removeEventListener("scroll", measure, true);
     };
   }, [open, anchorRef]);
+
+  /* owner, 2026-10-15: the panel opens from, and closes into, a CIRCLE the size of the gear — the morph
+     scales non-uniformly to a 32×32 box, so the factors depend on the panel's real size. */
+  useLayoutEffect(() => {
+    const p = panelRef.current;
+    if (!p) return;
+    p.style.setProperty("--sb-menu-sx", (32 / Math.max(1, p.offsetWidth)).toFixed(4));
+    p.style.setProperty("--sb-menu-sy", (32 / Math.max(1, p.offsetHeight)).toFixed(4));
+    /* the circle must land ON the gear: translate the panel's centre to the gear's centre
+       (gear centre inside the panel = 22px from its right edge, 21px from its top) */
+    p.style.setProperty("--sb-menu-dx", `${((coords?.side === "left" ? 22 : p.offsetWidth - 22) - p.offsetWidth / 2).toFixed(1)}px`);
+    p.style.setProperty("--sb-menu-dy", `${(21 - p.offsetHeight / 2).toFixed(1)}px`);
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -107,13 +141,14 @@ export function MainMenuPopover({
     };
   }, [open, anchorRef, onClose]);
 
-  if (!open || !mounted || !coords) return null;
+  if ((!open && !exiting) || !coords || typeof document === "undefined") return null;
+  const dismissing = !open && exiting;
 
   // RTL: hug the viewport's left side (matching header's logical "end" edge).
   // LTR: hug the right side under the trigger cluster.
   const panelStyle: React.CSSProperties =
-    dir === "rtl"
-      ? { position: "fixed", top: coords.top, left: coords.left }
+    coords.side === "left"
+      ? { position: "fixed", top: coords.top, left: Math.max(4, coords.gear.left - 6) }
       : { position: "fixed", top: coords.top, right: coords.right };
 
   const node = (
@@ -122,35 +157,40 @@ export function MainMenuPopover({
       role="menu"
       aria-label={title}
       dir={dir}
+      data-side={coords.side}
       style={panelStyle}
-      className="main-menu-popover z-[100] w-72 overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-950/95 shadow-[0_24px_60px_rgba(0,0,0,0.55),0_0_0_1px_rgba(148,163,184,0.08)_inset] backdrop-blur-xl"
+      /* 2026-10-14 (owner): the menu follows the new design line — no border, soft fills, white text,
+         frosted glass in transparent mode (see `.main-menu-popover` in globals.css). */
+      className={`main-menu-popover ${dismissing ? "sb-menu-dismiss" : "sb-menu-emerge"} z-[100] w-72 overflow-hidden rounded-2xl p-1.5`}
+      onAnimationEnd={(e) => {
+        if (e.target === e.currentTarget && e.animationName === "sb-menu-dismiss") setExiting(false);
+      }}
     >
-      <header className="border-b border-slate-800/70 px-4 py-3">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400/80">
-          {title}
-        </p>
+      <header className="px-3 pb-1 pt-2">
+        <p className="sb-menu-title">{title}</p>
       </header>
-      <ul className="max-h-[min(75vh,640px)] overflow-y-auto py-1.5">
+      {lead ? <div className="main-menu-lead">{lead}</div> : null}
+      <ul className="main-menu-list max-h-[min(75vh,640px)] overflow-y-auto py-1">
         {items.map((item) => (
           <li key={item.key}>
             <div
-              className={`main-menu-row group flex items-center gap-2 px-2 py-1 ${
+              className={`main-menu-row group flex items-center gap-1 px-0.5 py-0.5 ${
                 item.isActive ? "main-menu-row-active" : ""
               }`}
             >
               <Link
                 href={item.href}
                 onClick={onClose}
-                className={`flex flex-1 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition ${
+                className={`flex flex-1 items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[13px] transition-colors ${
                   item.isActive
-                    ? "bg-sky-500/15 text-sky-100"
-                    : "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
+                    ? "bg-white/[0.10] text-[#f5f5f7]"
+                    : "text-[#f5f5f7] hover:bg-white/[0.06]"
                 }`}
               >
                 <span
                   aria-hidden
-                  className={`inline-flex h-5 w-5 items-center justify-center text-slate-400 ${
-                    item.isActive ? "text-sky-300" : "group-hover:text-slate-200"
+                  className={`inline-flex h-5 w-5 items-center justify-center ${
+                    item.isActive ? "text-[#f5f5f7]" : "text-[#f5f5f7]/90 group-hover:text-[#f5f5f7]"
                   }`}
                 >
                   {item.icon}
@@ -180,7 +220,7 @@ export function MainMenuPopover({
           </li>
         ))}
       </ul>
-      {footer ? <div className="border-t border-slate-800/70 p-2">{footer}</div> : null}
+      {footer ? <div className="main-menu-footer p-1">{footer}</div> : null}
       <style jsx>{`
         .main-menu-pin-toggle {
           position: relative;
@@ -190,41 +230,37 @@ export function MainMenuPopover({
           height: 16px;
           margin-inline-end: 6px;
           border-radius: 999px;
-          border: 1px solid rgba(100, 116, 139, 0.45);
-          background: rgba(15, 23, 42, 0.9);
+          border: 0;
+          background: rgba(255, 255, 255, 0.16);
           transition:
-            background 150ms ease,
-            border-color 150ms ease,
-            box-shadow 150ms ease;
+            background 200ms ease,
+            box-shadow 200ms ease;
           cursor: pointer;
           flex-shrink: 0;
         }
         .main-menu-pin-toggle:focus-visible {
           outline: none;
-          box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45);
+          box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
         }
         .main-menu-pin-on {
-          background: rgba(56, 189, 248, 0.28);
-          border-color: rgba(56, 189, 248, 0.65);
-          box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+          background: rgba(255, 255, 255, 0.9);
         }
         .main-menu-pin-off:hover {
-          border-color: rgba(148, 163, 184, 0.7);
+          background: rgba(255, 255, 255, 0.26);
         }
         :global(.main-menu-pin-knob) {
           position: absolute;
-          top: 1px;
-          inset-inline-start: 1px;
+          top: 2px;
+          inset-inline-start: 2px;
           width: 12px;
           height: 12px;
           border-radius: 999px;
-          background: rgba(226, 232, 240, 0.9);
-          transition: transform 150ms ease;
+          background: rgba(255, 255, 255, 0.92);
+          transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), background 200ms ease;
         }
         .main-menu-pin-on :global(.main-menu-pin-knob) {
           transform: translateX(12px);
-          background: #e0f2fe;
-          box-shadow: 0 0 6px rgba(56, 189, 248, 0.55);
+          background: #1c1c1e;
         }
         [dir="rtl"] .main-menu-pin-on :global(.main-menu-pin-knob) {
           transform: translateX(-12px);
@@ -233,5 +269,23 @@ export function MainMenuPopover({
     </div>
   );
 
-  return createPortal(node, document.body);
+  const gearClone = anchorGlyph ? (
+    <button
+      type="button"
+      aria-label={closeLabel ?? "Close menu"}
+      title={closeLabel ?? "Close menu"}
+      onClick={onClose}
+      className={`main-menu-gear-clone ${dismissing ? "is-closing" : "is-open"}`}
+      style={{ position: "fixed", top: coords.gear.top, left: coords.gear.left, width: coords.gear.width, height: coords.gear.height }}
+    >
+      {anchorGlyph}
+    </button>
+  ) : null;
+  return createPortal(
+    <>
+      {node}
+      {gearClone}
+    </>,
+    document.body,
+  );
 }

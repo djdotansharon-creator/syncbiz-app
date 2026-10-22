@@ -3,15 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ActionButtonShare } from "@/components/ui/action-buttons";
-import { useTranslations } from "@/lib/locale-context";
+import { useLocale, useTranslations } from "@/lib/locale-context";
+import { LOCALES } from "@/lib/locales";
 import type { UnifiedSource } from "@/lib/source-types";
+import { useTr } from "@/lib/i18n/use-tr";
 
 /** Primary play — solid white circle, dark glyph (deck language). BIG on purpose:
     the operator asked for controls a first-grader could hit with confidence. */
 const CARD_PLAY_BTN =
   "inline-flex shrink-0 items-center justify-center rounded-full bg-[#f5f5f7] text-[#111114] shadow-[0_2px_12px_-2px_rgba(0,0,0,0.65)] transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50 disabled:pointer-events-none disabled:opacity-40";
 
-/** Edit + Delete live in this quiet ⋯ menu — the bar keeps only play/+/share. */
+/** Edit + Delete live in this quiet ⋯ menu — the bar keeps only play/+/share.
+ *  2026-10-16 (owner): a small glass list with icon + label (edit · remove · get the desktop app) that opens
+ *  from the ⋯ button and closes back into it; `onOpenChange` lets the card hold its hover look while the menu
+ *  (a portal outside the card) is open. */
 function CardMoreMenu({
   editHref,
   editLabel,
@@ -19,6 +24,7 @@ function CardMoreMenu({
   showDelete,
   deleteLabel,
   menuLabel,
+  onOpenChange,
 }: {
   editHref: string | null;
   editLabel: string;
@@ -26,17 +32,53 @@ function CardMoreMenu({
   showDelete: boolean;
   deleteLabel: string;
   menuLabel: string;
+  onOpenChange?: (open: boolean) => void;
 }) {
+  const tr = useTr();
+  // the menu follows the interface direction (owner 2026-10-21: in Hebrew it still opened left-to-right): icons + text mirrored, and it opens to the LEFT of the ⋯ in Hebrew
+  const { locale } = useLocale();
+  const rtl = !!LOCALES.find((l) => l.code === locale)?.rtl;
   const btnRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [open, setOpenState] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; origin: "top left" | "top right" } | null>(null);
   useEffect(() => {
     setMounted(true);
   }, []);
   const [present, setPresent] = useState(false);
   if (open && !present) setPresent(true);
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    onOpenChange?.(next);
+  };
+  useEffect(() => {
+    if (!open) return;
+    // 2026-10-16 (owner): nothing is blocked while the menu is open — no overlay. A press anywhere outside
+    // the menu closes it AND goes through; any scroll/wheel simply closes it.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const onPress = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if (panelRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onScroll = () => setOpen(false);
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPress, true);
+    window.addEventListener("wheel", onScroll, { passive: true, capture: true });
+    window.addEventListener("scroll", onScroll, { passive: true, capture: true });
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPress, true);
+      window.removeEventListener("wheel", onScroll, { capture: true } as EventListenerOptions);
+      window.removeEventListener("scroll", onScroll, { capture: true } as EventListenerOptions);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   if (!editHref && !showDelete) return null;
+  const MENU_W = 184;
   return (
     <>
       <button
@@ -49,9 +91,16 @@ function CardMoreMenu({
           }
           const r = btnRef.current?.getBoundingClientRect();
           if (r) {
+            // The menu opens BESIDE the button (to its right; to its left at the viewport's edge), top-aligned
+            // with it and kept inside the viewport — so it never covers the button, even on the first rows.
+            const estH = 14 + 36 * ((editHref ? 1 : 0) + 1 + (showDelete ? 1 : 0)) + (showDelete ? 9 : 0);
+            const fitsRight = r.right + 8 + MENU_W <= window.innerWidth - 8;
+            const fitsLeft = r.left - 8 - MENU_W >= 8;
+            const toRight = rtl ? !fitsLeft && fitsRight : fitsRight || !fitsLeft; // Hebrew prefers the left side, English the right; the other when there is no room
             setPos({
-              top: Math.min(r.bottom + 4, window.innerHeight - 120),
-              left: Math.max(8, Math.min(r.right - 152, window.innerWidth - 160)),
+              top: Math.max(8, Math.min(r.top - 6, window.innerHeight - estH - 8)),
+              left: toRight ? Math.min(r.right + 8, Math.max(8, window.innerWidth - 8 - MENU_W)) : Math.max(8, r.left - 8 - MENU_W),
+              origin: toRight ? "top left" : "top right",
             });
           }
           setOpen(true);
@@ -60,7 +109,7 @@ function CardMoreMenu({
         aria-expanded={open}
         aria-label={menuLabel}
         title={menuLabel}
-        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#d1d1d6] transition-colors duration-150 hover:bg-white/[0.14] hover:text-white"
+        className={`sb-card-dots inline-flex shrink-0 items-center justify-center rounded-full text-[#d1d1d6] transition-colors duration-150 hover:bg-white/[0.14] hover:text-white${open ? " is-open" : ""}`}
       >
         <svg className="h-4.5 w-4.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
           <circle cx="5" cy="12" r="1.8" />
@@ -70,70 +119,56 @@ function CardMoreMenu({
       </button>
       {mounted && present && pos
         ? createPortal(
-            <div className={`fixed inset-0 z-[9970] ${open ? "" : "pointer-events-none"}`} onClick={() => setOpen(false)}>
               <div
+                ref={panelRef}
                 role="menu"
-                style={{ top: pos.top, left: pos.left }}
+                dir={rtl ? "rtl" : "ltr"}
+                style={{ top: pos.top, left: pos.left, width: MENU_W, transformOrigin: pos.origin }}
                 onClick={(e) => e.stopPropagation()}
                 onAnimationEnd={(e) => {
                   if (!open && e.target === e.currentTarget && e.animationName === "sb-pop-out") setPresent(false);
                 }}
-                className={`${open ? "sb-anim-pop" : "sb-anim-pop-out"} fixed z-[9975] grid w-[7.5rem] grid-cols-2 gap-1 overflow-hidden rounded-xl bg-[#141418] p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.55)]`}
+                className={`sb-card-menu ${open ? "sb-anim-pop" : "sb-anim-pop-out pointer-events-none"} fixed z-[9975]`}
               >
-                {/* Icon-grid menu (2×2): remove · edit · (future) · get-desktop. Frameless tiles. */}
-                {showDelete ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setOpen(false);
-                      onDeletePress();
-                    }}
-                    title={deleteLabel}
-                    aria-label={deleteLabel}
-                    className="flex h-12 items-center justify-center rounded-lg text-[#ff453a] transition-colors hover:bg-[#ff453a]/12"
-                  >
-                    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                      <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                      <line x1="10" y1="11" x2="10" y2="17" />
-                      <line x1="14" y1="11" x2="14" y2="17" />
-                    </svg>
-                  </button>
-                ) : (
-                  <span className="h-12 rounded-lg bg-white/[0.03]" aria-hidden />
-                )}
                 {editHref ? (
-                  <a
-                    href={editHref}
-                    role="menuitem"
-                    title={editLabel}
-                    aria-label={editLabel}
-                    className="flex h-12 items-center justify-center rounded-lg text-[#e5e5ea] transition-colors hover:bg-white/[0.1] hover:text-white"
-                  >
-                    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <a href={editHref} role="menuitem" className="sb-card-menu-item">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                       <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                     </svg>
+                    <span>{editLabel}</span>
                   </a>
-                ) : (
-                  <span className="h-12 rounded-lg bg-white/[0.03]" aria-hidden />
-                )}
-                <span className="h-12 rounded-lg bg-white/[0.03]" aria-hidden />
-                <a
-                  href="/settings#desktop"
-                  role="menuitem"
-                  title="Get Desktop app"
-                  aria-label="Get Desktop app"
-                  className="flex h-12 items-center justify-center rounded-lg text-[#7db8ff] transition-colors hover:bg-[#0a84ff]/15 hover:text-[#9cc8ff]"
-                >
-                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                ) : null}
+                <a href="/settings#desktop" role="menuitem" className="sb-card-menu-item">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                     <polyline points="7 10 12 15 17 10" />
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
+                  <span>{tr("Get Desktop app")}</span>
                 </a>
-              </div>
-            </div>,
+                {showDelete ? (
+                  <>
+                    <div className="sb-card-menu-sep" aria-hidden />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setOpen(false);
+                        onDeletePress();
+                      }}
+                      className="sb-card-menu-item sb-card-menu-item--danger"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <line x1="10" y1="11" x2="10" y2="17" />
+                        <line x1="14" y1="11" x2="14" y2="17" />
+                      </svg>
+                      <span>{deleteLabel}</span>
+                    </button>
+                  </>
+                ) : null}
+              </div>,
             document.body,
           )
         : null}
@@ -196,6 +231,8 @@ type Props = {
   playDisabledTitle?: string;
   /** False when the card already carries another ⋯ menu (e.g. AI slot) — ONE ⋯ per card. */
   showMoreMenu?: boolean;
+  /** The ⋯ menu opened/closed — the card keeps its hover look while it is open (the menu is a portal). */
+  onMoreMenuOpenChange?: (open: boolean) => void;
 };
 
 export function LibrarySourceItemActions({
@@ -216,6 +253,7 @@ export function LibrarySourceItemActions({
   playDisabled = false,
   playDisabledTitle = "Desktop only",
   showMoreMenu = true,
+  onMoreMenuOpenChange,
 }: Props) {
   const { t } = useTranslations();
   const [adding, setAdding] = useState(false);
@@ -328,6 +366,7 @@ export function LibrarySourceItemActions({
         }
         onDeletePress={onDeletePress}
         showDelete={showLibraryDelete}
+        onOpenChange={onMoreMenuOpenChange}
         deleteLabel={t.delete}
         menuLabel={t.sourceControlsAria}
       />

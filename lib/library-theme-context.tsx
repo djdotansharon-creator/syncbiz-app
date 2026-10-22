@@ -17,7 +17,7 @@ const STORAGE_KEY = "syncbiz-library-theme";
 /** Pearl Light is not offered in UI; map stored value to a supported mode. */
 function normalizeLibraryTheme(raw: string | null): LibraryVisualTheme {
   if (raw === "graphite-black") return "graphite-black";
-  if (raw === "pearl-light") return "deep-blue";
+  if (raw === "pearl-light") return "pearl-light";
   return "deep-blue";
 }
 
@@ -38,13 +38,10 @@ export function LibraryThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setLibraryThemeState(readStoredTheme());
-    if (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY) === "pearl-light") {
-      localStorage.setItem(STORAGE_KEY, "deep-blue");
-    }
   }, []);
 
   const setLibraryTheme = useCallback((next: LibraryVisualTheme) => {
-    const resolved = next === "pearl-light" ? "deep-blue" : next;
+    const resolved = next;
     setLibraryThemeState(resolved);
     if (typeof window !== "undefined") {
       localStorage.setItem(STORAGE_KEY, resolved);

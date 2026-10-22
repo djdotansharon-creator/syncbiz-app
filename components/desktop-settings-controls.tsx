@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTr } from "@/lib/i18n/use-tr";
 
 type ProtectionState = {
   enabled: boolean;
@@ -45,6 +46,7 @@ function musicFolderApiAvailable(): boolean {
  * Electron openAtLogin toggle. Uses ONLY getProtectionState/setProtectionState (+ optional exitVono).
  */
 export function DesktopStartupSettingsCard() {
+  const tr = useTr();
   const [load, setLoad] = useState<LoadState>("idle");
   const [protection, setProtection] = useState<ProtectionState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -133,13 +135,13 @@ export function DesktopStartupSettingsCard() {
   if (load === "web-only") {
     return (
       <p className="text-xs text-slate-500">
-        VONO Protection is configured from the VONO Desktop app on the branch player.
+        {tr("VONO Protection is configured from the VONO Desktop app on the branch player.")}
       </p>
     );
   }
 
   if (load === "idle" || load === "loading") {
-    return <p className="text-xs text-slate-500">Loading…</p>;
+    return <p className="text-xs text-slate-500">{tr("Loading…")}</p>;
   }
 
   const ready = protectionApiAvailable();
@@ -155,22 +157,22 @@ export function DesktopStartupSettingsCard() {
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-sm text-slate-200">VONO Protection</p>
+          <p className="text-sm text-slate-200">{tr("VONO Protection")}</p>
           <p className="mt-0.5 text-[11px] text-slate-500">
             {!ready
-              ? "Update the SyncBiz desktop app to manage Protection."
+              ? tr("Update the SyncBiz desktop app to manage Protection.")
               : !supported
-                ? "Not supported on this platform."
+                ? tr("Not supported on this platform.")
                 : on
-                  ? "VONO starts with Windows and automatically recovers the player if it stops."
-                  : "Manual mode. VONO will not auto-start or recover after it is closed."}
+                  ? tr("VONO starts with Windows and automatically recovers the player if it stops.")
+                  : tr("Manual mode. VONO will not auto-start or recover after it is closed.")}
           </p>
         </div>
         <button
           type="button"
           role="switch"
           aria-checked={on}
-          aria-label="VONO Protection"
+          aria-label={tr("VONO Protection")}
           disabled={!ready || !supported || busy || drifted}
           onClick={onToggleProtection}
           className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
@@ -189,17 +191,17 @@ export function DesktopStartupSettingsCard() {
         <p className={`text-[11px] ${healthy && on ? "text-emerald-400/90" : "text-slate-500"}`}>
           {healthy
             ? on
-              ? "Protected · automatic startup and recovery enabled"
-              : "Off · manual mode"
+              ? tr("Protected · automatic startup and recovery enabled")
+              : tr("Off · manual mode")
             : protection?.drift === "task_unknown"
-              ? "Protection status could not be determined — use Repair to re-check."
+              ? tr("Protection status could not be determined — use Repair to re-check.")
               : protection?.drift === "task_missing"
-                ? "Enabled, but the watchdog task is missing — use Repair to re-install it."
+                ? tr("Enabled, but the watchdog task is missing — use Repair to re-install it.")
                 : protection?.drift === "task_unexpected"
-                  ? "Off, but a watchdog task is still active — use Repair to remove it."
+                  ? tr("Off, but a watchdog task is still active — use Repair to remove it.")
                   : on
-                    ? "Protected · automatic startup and recovery enabled"
-                    : "Off · manual mode"}
+                    ? tr("Protected · automatic startup and recovery enabled")
+                    : tr("Off · manual mode")}
         </p>
       ) : null}
 
@@ -210,7 +212,7 @@ export function DesktopStartupSettingsCard() {
           disabled={busy}
           className="rounded-md border border-amber-500/50 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-300 hover:bg-amber-500/20 disabled:opacity-50"
         >
-          Repair Protection
+          {tr("Repair Protection")}
         </button>
       ) : null}
 
@@ -221,13 +223,13 @@ export function DesktopStartupSettingsCard() {
           disabled={busy}
           className="rounded-md border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-50"
         >
-          Exit VONO
+          {tr("Exit VONO")}
         </button>
       ) : null}
 
       {!ready ? (
         <p className="text-[11px] text-amber-400/90">
-          Some controls are unavailable in this desktop build. Update the SyncBiz desktop app to use them.
+          {tr("Some controls are unavailable in this desktop build. Update the SyncBiz desktop app to use them.")}
         </p>
       ) : null}
       {shownError ? <p className="text-[11px] text-rose-400">{shownError}</p> : null}
@@ -237,6 +239,7 @@ export function DesktopStartupSettingsCard() {
 
 /** Music folder — persists immediately after pick; no Save button. */
 export function DesktopLocalMusicSettingsCard() {
+  const tr = useTr();
   const [load, setLoad] = useState<LoadState>("idle");
   const [musicFolder, setMusicFolder] = useState<MusicFolderSnapshot>({ path: null });
   const [busy, setBusy] = useState<"pick" | "clear" | null>(null);
@@ -312,13 +315,13 @@ export function DesktopLocalMusicSettingsCard() {
   if (load === "web-only") {
     return (
       <p className="text-xs text-slate-500">
-        Open SyncBiz in the desktop app to choose a local music folder.
+        {tr("Open SyncBiz in the desktop app to choose a local music folder.")}
       </p>
     );
   }
 
   if (load === "idle" || load === "loading") {
-    return <p className="text-xs text-slate-500">Loading…</p>;
+    return <p className="text-xs text-slate-500">{tr("Loading…")}</p>;
   }
 
   const musicFolderReady = musicFolderApiAvailable();
@@ -326,18 +329,18 @@ export function DesktopLocalMusicSettingsCard() {
   /* PRIVACY: never expose the raw path/location. Managed bank → generic label;
      a user-chosen folder → its NAME only (displayLabel = basename, no drive). */
   const connectedLabel = musicFolder.isPlaylistProLibrary
-    ? "PlayItPro managed bank"
-    : (musicFolder.displayLabel ?? "Local folder");
+    ? tr("PlayItPro managed bank")
+    : (musicFolder.displayLabel ?? tr("Local folder"));
 
   return (
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-100">PlayItPro Local Library</p>
+          <p className="text-sm font-medium text-slate-100">{tr("PlayItPro Local Library")}</p>
           <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
             {musicFolderReady
-              ? "Play music stored on this machine. On managed PlayItPro machines the library connects automatically — the file location is never shown."
-              : "Update the SyncBiz desktop app to enable this control."}
+              ? tr("Play music stored on this machine. On managed PlayItPro machines the library connects automatically — the file location is never shown.")
+              : tr("Update the SyncBiz desktop app to enable this control.")}
           </p>
         </div>
         {/* ON/OFF toggle — ON links the local library, OFF disconnects it. */}
@@ -345,7 +348,7 @@ export function DesktopLocalMusicSettingsCard() {
           type="button"
           role="switch"
           aria-checked={isOn}
-          aria-label="PlayItPro Local Library"
+          aria-label={tr("PlayItPro Local Library")}
           disabled={!musicFolderReady || busy != null}
           onClick={isOn ? onClearFolder : onPickFolder}
           className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 disabled:opacity-50 ${
@@ -364,7 +367,7 @@ export function DesktopLocalMusicSettingsCard() {
       <div className="flex items-center gap-2 rounded-lg border border-slate-800/70 bg-slate-950/50 px-3 py-2">
         <span className={`h-2 w-2 shrink-0 rounded-full ${isOn ? "bg-emerald-400" : "bg-slate-600"}`} aria-hidden />
         <span className="min-w-0 truncate text-xs text-slate-300">
-          {isOn ? `Connected · ${connectedLabel}` : "Off — no local library"}
+          {isOn ? `${tr("Connected")} · ${connectedLabel}` : tr("Off — no local library")}
         </span>
       </div>
 
@@ -376,7 +379,7 @@ export function DesktopLocalMusicSettingsCard() {
           disabled={!musicFolderReady || busy === "pick"}
           className="rounded-lg border border-slate-600 bg-slate-800/80 px-3 py-1.5 text-xs font-medium text-slate-100 transition hover:border-slate-500 hover:bg-slate-800 disabled:opacity-50"
         >
-          {isOn ? "Change my music folder" : "Link my music folder"}
+          {isOn ? tr("Change my music folder") : tr("Link my music folder")}
         </button>
         {isOn ? (
           <button
@@ -385,11 +388,11 @@ export function DesktopLocalMusicSettingsCard() {
             disabled={!musicFolderReady || busy === "clear"}
             className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-slate-600 hover:text-slate-100 disabled:opacity-50"
           >
-            Disconnect
+            {tr("Disconnect")}
           </button>
         ) : null}
       </div>
-      {folderStatus ? <p className="text-[11px] text-emerald-400/90">{folderStatus}</p> : null}
+      {folderStatus ? <p className="text-[11px] text-emerald-400/90">{tr(folderStatus)}</p> : null}
       {!musicFolderReady ? (
         <p className="text-[11px] text-amber-400/90">
           Some controls are unavailable in this desktop build. Update the SyncBiz desktop app to use them.

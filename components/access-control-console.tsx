@@ -17,8 +17,10 @@
  */
 
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
+import type { Mgmt, MgmtKey } from "@/lib/i18n/management";
+import { useMgmt } from "@/lib/i18n/use-mgmt";
 
 // ─── Visual primitives (unchanged from the design prototype) ──────────────────
 
@@ -32,16 +34,16 @@ function ConsoleCard({ children, className = "" }: { children: ReactNode; classN
   );
 }
 
-const TENANT_AUDIT_LABELS: Record<string, { label: string; tone: "neutral" | "warn" | "danger" | "ok" }> = {
-  "member.create": { label: "User created", tone: "ok" },
-  "member.invite": { label: "Existing user invited", tone: "ok" },
-  "member.update": { label: "Access updated", tone: "neutral" },
-  "member.password_set": { label: "Password set", tone: "warn" },
-  "member.pause": { label: "Paused in workspace", tone: "warn" },
-  "member.resume": { label: "Resumed in workspace", tone: "ok" },
-  "member.remove": { label: "Removed from workspace", tone: "danger" },
-  "member.global_disable": { label: "Login globally disabled", tone: "danger" },
-  "member.platform_remove": { label: "Removed by platform admin", tone: "danger" },
+const TENANT_AUDIT_LABELS: Record<string, { key: MgmtKey; tone: "neutral" | "warn" | "danger" | "ok" }> = {
+  "member.create": { key: "ac.audit.create", tone: "ok" },
+  "member.invite": { key: "ac.audit.invite", tone: "ok" },
+  "member.update": { key: "ac.audit.update", tone: "neutral" },
+  "member.password_set": { key: "ac.audit.passwordSet", tone: "warn" },
+  "member.pause": { key: "ac.audit.pause", tone: "warn" },
+  "member.resume": { key: "ac.audit.resume", tone: "ok" },
+  "member.remove": { key: "ac.audit.remove", tone: "danger" },
+  "member.global_disable": { key: "ac.audit.globalDisable", tone: "danger" },
+  "member.platform_remove": { key: "ac.audit.platformRemove", tone: "danger" },
 };
 
 function AuditToneBadge({ tone, children }: { tone: "neutral" | "warn" | "danger" | "ok"; children: ReactNode }) {
@@ -56,18 +58,18 @@ function AuditToneBadge({ tone, children }: { tone: "neutral" | "warn" | "danger
   return <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${cls}`}>{children}</span>;
 }
 
-function fmtRelative(iso: string): string {
+function fmtRelative(iso: string, tr: Mgmt["t"]): string {
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return "—";
   const ms = Date.now() - t;
   const sec = Math.round(ms / 1000);
-  if (sec < 45) return "just now";
+  if (sec < 45) return tr("ac.justNow");
   const min = Math.round(sec / 60);
-  if (min < 60) return `${min} min ago`;
+  if (min < 60) return tr("ac.minAgo", { n: min });
   const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}h ago`;
+  if (hr < 24) return tr("ac.hoursAgo", { n: hr });
   const day = Math.round(hr / 24);
-  if (day < 14) return `${day}d ago`;
+  if (day < 14) return tr("ac.daysAgo", { n: day });
   return new Date(iso).toLocaleDateString();
 }
 
@@ -114,7 +116,7 @@ function PadButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`w-full text-left rounded-2xl border px-4 py-4 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-50 disabled:pointer-events-none
+      className={`w-full text-start rounded-2xl border px-4 py-4 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-50 disabled:pointer-events-none
         ${toneStyles.base} ${toneStyles.hover} ${activeStyles}`}
       aria-pressed={active}
     >
@@ -173,12 +175,13 @@ type ApiUser = {
 
 function tenantRemoveHint(
   reason: ApiUser["tenantRemoveDeniedReason"],
+  t: Mgmt["t"],
 ): string {
   switch (reason) {
     case "WORKSPACE_OWNER":
-      return "Workspace owner cannot be removed from here.";
+      return t("ac.hint.ownerNoRemove");
     case "LAST_WORKSPACE_ADMIN":
-      return "Sole tenant-wide admin in this workspace — add another admin before removing this person.";
+      return t("ac.hint.lastAdminNoRemove");
     default:
       return "";
   }
@@ -187,15 +190,16 @@ function tenantRemoveHint(
 function pauseDeniedHint(
   reason: ApiUser["pauseDeniedReason"],
   isSelf: boolean,
+  t: Mgmt["t"],
 ): string {
-  if (isSelf) return "You cannot pause your own membership.";
+  if (isSelf) return t("ac.hint.selfNoPause");
   switch (reason) {
     case "WORKSPACE_OWNER":
-      return "Workspace owner cannot be paused. Transfer ownership first.";
+      return t("ac.hint.ownerNoPause");
     case "LAST_ACTIVE_WORKSPACE_ADMIN":
-      return "Sole active tenant-wide admin — promote another admin before pausing this person.";
+      return t("ac.hint.lastAdminNoPause");
     case "SELF":
-      return "You cannot pause your own membership.";
+      return t("ac.hint.selfNoPause");
     default:
       return "";
   }
@@ -218,7 +222,12 @@ type ApiAuditEvent = {
   target: { id: string; email: string | null; name: string | null } | null;
 };
 
-function useAdminUsers() {
+function useAdminUsers(t: Mgmt["t"]) {
+  // Translator held in a ref so the callbacks / bootstrap effect keep their identities (no refetch on a locale switch).
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [me, setMe] = useState<SessionSummary | null>(null);
@@ -256,9 +265,9 @@ function useAdminUsers() {
           .map((b) => ({ id: b.id, name: b.name }))
       : [];
     if (opts.length > 0 && !opts.some((b) => b.id === "default")) {
-      opts.unshift({ id: "default", name: "Default (legacy)" });
+      opts.unshift({ id: "default", name: tRef.current("ac.defaultLegacy") });
     }
-    setBranches(opts.length > 0 ? opts : [{ id: "default", name: "Default (legacy)" }]);
+    setBranches(opts.length > 0 ? opts : [{ id: "default", name: tRef.current("ac.defaultLegacy") }]);
     // Audit log refresh runs in parallel-ish; failure here is non-fatal so we
     // do not block the rest of the console on it.
     void reloadAudit();
@@ -277,7 +286,7 @@ function useAdminUsers() {
           await reload();
         }
       } catch {
-        if (!cancelled) setBootstrapError("Could not load Access Control state.");
+        if (!cancelled) setBootstrapError(tRef.current("ac.loadStateError"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -300,7 +309,7 @@ function useAdminUsers() {
         }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-      if (!res.ok) throw new Error(data.error ?? `Create failed (${res.status})`);
+      if (!res.ok) throw new Error(data.error ?? tRef.current("ac.createFailed", { status: res.status }));
       await reload();
       return data;
     },
@@ -327,7 +336,7 @@ function useAdminUsers() {
         }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? `Update failed (${res.status})`);
+      if (!res.ok) throw new Error(data.error ?? tRef.current("ac.updateFailed", { status: res.status }));
       await reload();
       return data;
     },
@@ -342,7 +351,7 @@ function useAdminUsers() {
         body: JSON.stringify({ email }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-      if (!res.ok) throw new Error(data.error ?? `Disable failed (${res.status})`);
+      if (!res.ok) throw new Error(data.error ?? tRef.current("ac.disableFailed", { status: res.status }));
       await reload();
       return data;
     },
@@ -357,7 +366,7 @@ function useAdminUsers() {
         body: JSON.stringify({ email }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-      if (!res.ok) throw new Error(data.error ?? `Activate failed (${res.status})`);
+      if (!res.ok) throw new Error(data.error ?? tRef.current("ac.activateFailed", { status: res.status }));
       await reload();
       return data;
     },
@@ -372,7 +381,7 @@ function useAdminUsers() {
         body: JSON.stringify({ email }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-      if (!res.ok) throw new Error(data.error ?? `Remove failed (${res.status})`);
+      if (!res.ok) throw new Error(data.error ?? tRef.current("ac.removeFailed", { status: res.status }));
       await reload();
       return data;
     },
@@ -385,7 +394,8 @@ function useAdminUsers() {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function AccessControlConsole() {
-  const { users, branches, me, auditEvents, loading, bootstrapError, reload, reloadAudit, createUser, updateUser, pauseMembership, resumeMembership, removeFromWorkspace } = useAdminUsers();
+  const L = useMgmt();
+  const { users, branches, me, auditEvents, loading, bootstrapError, reload, reloadAudit, createUser, updateUser, pauseMembership, resumeMembership, removeFromWorkspace } = useAdminUsers(L.t);
 
   const [unlocked, setUnlocked] = useState(false);
   const [workflow, setWorkflow] = useState<Workflow>("idle");
@@ -416,40 +426,40 @@ export function AccessControlConsole() {
   const capabilityGroups = useMemo(
     () => [
       {
-        group: "User Management",
-        hint: "Identity access management.",
+        group: L.t("ac.cap.userMgmt"),
+        hint: L.t("ac.cap.userMgmtHint"),
         items: [
-          { id: "MANAGE_USERS" as const, label: "Manage Users", description: "Access entry and admin scope." },
-          { id: "EDIT_BRANCH_RULES" as const, label: "Edit Branch Rules", description: "Protected rule updates." },
+          { id: "MANAGE_USERS" as const, label: L.t("ac.cap.manageUsers"), description: L.t("ac.cap.manageUsersDesc") },
+          { id: "EDIT_BRANCH_RULES" as const, label: L.t("ac.cap.editBranchRules"), description: L.t("ac.cap.editBranchRulesDesc") },
         ],
       },
       {
-        group: "Branch Access",
-        hint: "Scope boundaries for locations (routing target bank).",
+        group: L.t("ac.cap.branchAccess"),
+        hint: L.t("ac.cap.branchAccessHint"),
         items: [
-          { id: "VIEW_BRANCH" as const, label: "View Branch", description: "Read-only branch visibility." },
-          { id: "ASSIGN_BRANCHES" as const, label: "Assign Branches", description: "Scope management and routing targets." },
+          { id: "VIEW_BRANCH" as const, label: L.t("ac.cap.viewBranch"), description: L.t("ac.cap.viewBranchDesc") },
+          { id: "ASSIGN_BRANCHES" as const, label: L.t("ac.cap.assignBranches"), description: L.t("ac.cap.assignBranchesDesc") },
         ],
       },
       {
-        group: "Playback Control",
-        hint: "Operational sound-control permissions.",
+        group: L.t("ac.cap.playback"),
+        hint: L.t("ac.cap.playbackHint"),
         items: [
-          { id: "CONTROL_PLAYBACK" as const, label: "Control Playback", description: "Play, pause, and route actions." },
-          { id: "EDIT_SOURCES" as const, label: "Edit Sources", description: "Update playback inputs and feeds." },
-          { id: "EDIT_SCHEDULES" as const, label: "Edit Schedules", description: "Schedule changes (scope-aware)." },
+          { id: "CONTROL_PLAYBACK" as const, label: L.t("ac.cap.controlPlayback"), description: L.t("ac.cap.controlPlaybackDesc") },
+          { id: "EDIT_SOURCES" as const, label: L.t("ac.cap.editSources"), description: L.t("ac.cap.editSourcesDesc") },
+          { id: "EDIT_SCHEDULES" as const, label: L.t("ac.cap.editSchedules"), description: L.t("ac.cap.editSchedulesDesc") },
         ],
       },
       {
-        group: "Sensitive Actions",
-        hint: "Protected actions with a confirmation step.",
+        group: L.t("ac.cap.sensitive"),
+        hint: L.t("ac.cap.sensitiveHint"),
         items: [
-          { id: "PROTECTED_ACTIONS" as const, label: "Protected Actions", description: "Extra-protection administrative actions." },
-          { id: "DELETE_MEDIA" as const, label: "Delete Media", description: "Destructive action." },
+          { id: "PROTECTED_ACTIONS" as const, label: L.t("ac.cap.protectedActions"), description: L.t("ac.cap.protectedActionsDesc") },
+          { id: "DELETE_MEDIA" as const, label: L.t("ac.cap.deleteMedia"), description: L.t("ac.cap.deleteMediaDesc") },
         ],
       },
     ],
-    [],
+    [L],
   );
 
   const branchScopeInvalid = accessMode === "BRANCH_USER" && selectedBranchIds.length === 0;
@@ -469,11 +479,11 @@ export function AccessControlConsole() {
     );
 
   const selectedBranchNames = useMemo(() => {
-    if (accessMode === "OWNER") return "All branches";
-    if (selectedBranchIds.length === 0) return "None (scope required)";
+    if (accessMode === "OWNER") return L.t("ac.allBranches");
+    if (selectedBranchIds.length === 0) return L.t("ac.noneScopeRequired");
     const names = selectedBranchIds.map((id) => branches.find((b) => b.id === id)?.name ?? id);
     return names.join(", ");
-  }, [accessMode, branches, selectedBranchIds]);
+  }, [L, accessMode, branches, selectedBranchIds]);
 
   const capabilityState = useMemo(() => {
     if (!unlocked || !selectedUser) {
@@ -536,11 +546,11 @@ export function AccessControlConsole() {
     if (busy) return;
     const email = normalizeEmail(createForm.email);
     if (!email || !email.includes("@")) {
-      setToast("Valid email required.");
+      setToast(L.t("ac.toast.validEmail"));
       return;
     }
     if (!createForm.password || createForm.password.length < 6) {
-      setToast("Password must be at least 6 characters.");
+      setToast(L.t("ac.toast.passwordMin"));
       return;
     }
     setBusy("create");
@@ -551,14 +561,14 @@ export function AccessControlConsole() {
         accessType: "BRANCH_USER",
         branchIds: [],
       });
-      setToast(`User ${email} created. Configure scope below.`);
+      setToast(L.t("ac.toast.userCreated", { email }));
       setSelectedUserEmail(email);
       setAccessMode("BRANCH_USER");
       setSelectedBranchIds([]);
       setCreateForm({ name: "", email: "", password: "" });
       setWorkflow("found");
     } catch (e) {
-      setToast(e instanceof Error ? e.message : "Failed to create user.");
+      setToast(e instanceof Error ? e.message : L.t("ac.toast.createFailed"));
     } finally {
       setBusy(null);
     }
@@ -567,7 +577,7 @@ export function AccessControlConsole() {
   const handleApplyAccess = async () => {
     if (!unlocked || !selectedUser || busy) return;
     if (accessMode === "BRANCH_USER" && selectedBranchIds.length === 0) {
-      setToast("Branch scope requires at least one assigned branch.");
+      setToast(L.t("ac.toast.scopeRequired"));
       return;
     }
     setBusy("apply");
@@ -578,9 +588,9 @@ export function AccessControlConsole() {
         accessType: accessMode,
         branchIds: selectedBranchIds,
       });
-      setToast("Access updated.");
+      setToast(L.t("ac.toast.accessUpdated"));
     } catch (e) {
-      setToast(e instanceof Error ? e.message : "Failed to update access.");
+      setToast(e instanceof Error ? e.message : L.t("ac.toast.updateFailed"));
     } finally {
       setBusy(null);
     }
@@ -589,15 +599,15 @@ export function AccessControlConsole() {
   const handleDisable = async () => {
     if (!unlocked || !selectedUser || busy) return;
     if (pauseInWorkspaceBlocked) {
-      setToast(pauseDeniedHint(selectedUser.pauseDeniedReason, isSelfTarget) || "Cannot pause this user.");
+      setToast(pauseDeniedHint(selectedUser.pauseDeniedReason, isSelfTarget, L.t) || L.t("ac.toast.cannotPause"));
       return;
     }
     setBusy("disable");
     try {
       await pauseMembership(selectedUser.email);
-      setToast(`${selectedUser.email} paused in this workspace. Their other workspaces are unaffected.`);
+      setToast(L.t("ac.toast.paused", { email: selectedUser.email }));
     } catch (e) {
-      setToast(e instanceof Error ? e.message : "Failed to pause user.");
+      setToast(e instanceof Error ? e.message : L.t("ac.toast.pauseFailed"));
     } finally {
       setBusy(null);
     }
@@ -606,7 +616,7 @@ export function AccessControlConsole() {
   const openRemoveConfirm = () => {
     if (!unlocked || !selectedUser || busy) return;
     if (selectedUser.canRemoveFromWorkspace === false) {
-      setToast(tenantRemoveHint(selectedUser.tenantRemoveDeniedReason) || "Cannot remove this user from the workspace.");
+      setToast(tenantRemoveHint(selectedUser.tenantRemoveDeniedReason, L.t) || L.t("ac.toast.cannotRemove"));
       return;
     }
     setRemoveError(null);
@@ -620,12 +630,12 @@ export function AccessControlConsole() {
     try {
       await removeFromWorkspace(selectedUser.email);
       setRemoveConfirmOpen(false);
-      setToast(`${selectedUser.email} removed from this workspace.`);
+      setToast(L.t("ac.toast.removed", { email: selectedUser.email }));
       setWorkflow("idle");
       setSelectedUserEmail(null);
       setLookupEmail("");
     } catch (e) {
-      setRemoveError(e instanceof Error ? e.message : "Failed to remove from workspace.");
+      setRemoveError(e instanceof Error ? e.message : L.t("ac.toast.removeFailed"));
       throw e; // keep modal open
     } finally {
       setBusy(null);
@@ -641,7 +651,7 @@ export function AccessControlConsole() {
     try {
       if (selectedUser.membershipStatus === "SUSPENDED") {
         await resumeMembership(selectedUser.email);
-        setToast(`${selectedUser.email} re-activated in this workspace.`);
+        setToast(L.t("ac.toast.reactivated", { email: selectedUser.email }));
       } else {
         // No-op when already active in workspace; PATCH still useful if `User.status`
         // was DISABLED globally (interpreted as un-disable inside updateUser).
@@ -651,10 +661,10 @@ export function AccessControlConsole() {
           accessType: selectedUser.accessType,
           branchIds: selectedUser.accessType === "BRANCH_USER" ? selectedUser.branchIds : [],
         });
-        setToast(`${selectedUser.email} is active.`);
+        setToast(L.t("ac.toast.active", { email: selectedUser.email }));
       }
     } catch (e) {
-      setToast(e instanceof Error ? e.message : "Failed to activate user.");
+      setToast(e instanceof Error ? e.message : L.t("ac.toast.activateFailed"));
     } finally {
       setBusy(null);
     }
@@ -673,15 +683,15 @@ export function AccessControlConsole() {
   // ─── Visual sub-components ──────────────────────────────────────────────────
 
   const formatBranchCount = (ids: string[]) => {
-    if (accessMode === "OWNER") return `${branches.length} (scope)`;
-    return ids.length ? `${ids.length} selected` : "0 selected";
+    if (accessMode === "OWNER") return L.t("ac.scopeCount", { n: branches.length });
+    return L.t("ac.selectedCount", { n: ids.length });
   };
 
   const stateLabel = (state: CapabilityState) => {
-    if (state === "allowed") return "Enabled";
-    if (state === "protected") return "Protected";
-    if (state === "disabled") return "Disabled";
-    return "Locked";
+    if (state === "allowed") return L.t("ac.state.enabled");
+    if (state === "protected") return L.t("ac.state.protected");
+    if (state === "disabled") return L.t("ac.state.disabled");
+    return L.t("ac.state.locked");
   };
 
   const badgeTone = (state: CapabilityState) => {
@@ -698,59 +708,41 @@ export function AccessControlConsole() {
   };
 
   const capabilityScopeText = (id: CapabilityId) => {
-    if (!unlocked) return "Protected (locked).";
-    if (!selectedUser) return "Scope: Open a user to configure.";
+    if (!unlocked) return L.t("ac.scope.lockedConsole");
+    if (!selectedUser) return L.t("ac.scope.openUser");
     if (accessMode === "OWNER") {
-      if (id === "VIEW_BRANCH") return "Scope: All branches.";
-      if (id === "ASSIGN_BRANCHES") return "Scope: Route targets across all branches.";
-      return "Scope: Full tenant.";
+      if (id === "VIEW_BRANCH") return L.t("ac.scope.allBranches");
+      if (id === "ASSIGN_BRANCHES") return L.t("ac.scope.routeAll");
+      return L.t("ac.scope.fullTenant");
     }
-    if (branchScopeInvalid) return "Scope: Not configured yet (required).";
-    if (userIsDisabled) return "Scope: User disabled.";
+    if (branchScopeInvalid) return L.t("ac.scope.notConfigured");
+    if (userIsDisabled) return L.t("ac.scope.userDisabled");
     const names = selectedBranchIds.map((bid) => branches.find((b) => b.id === bid)?.name).filter(Boolean);
-    if (id === "VIEW_BRANCH") return `Scope: ${names.join(", ")}.`;
-    if (id === "ASSIGN_BRANCHES") return `Scope: Assignment within ${names.join(", ")}.`;
-    return `Scope: ${names.join(", ")}.`;
+    if (id === "VIEW_BRANCH") return L.t("ac.scope.names", { names: names.join(", ") });
+    if (id === "ASSIGN_BRANCHES") return L.t("ac.scope.assignWithin", { names: names.join(", ") });
+    return L.t("ac.scope.names", { names: names.join(", ") });
   };
 
   const StatusStrip = () => {
     const branchesOnline = branches.length;
     const activeUsers = users.filter((u) => u.status !== "DISABLED").length;
     const totalUsers = users.length;
+    // the first row: flat counters (owner 2026-10-20 — no frame, no box): the title above, the value below, the LED beside the title
+    const item = (tone: "green" | "amber", label: string, value: ReactNode, dirAttr?: "ltr") => (
+      <div className="cr-stat cr-stat--static">
+        <span className="cr-stat-label">
+          <span className={`inline-flex h-2 w-2 rounded-full ${ledClasses(tone)}`} aria-hidden />
+          {label}
+        </span>
+        <span className="cr-stat-value cr-stat-value--text" dir={dirAttr}>{value}</span>
+      </div>
+    );
     return (
-      <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 p-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className={`inline-flex h-2.5 w-2.5 rounded-full ${ledClasses("green")}`} aria-hidden />
-            <div className="text-xs">
-              <span className="font-semibold text-slate-100">Workspace branches</span>{" "}
-              <span className="text-slate-400">{branchesOnline}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={`inline-flex h-2.5 w-2.5 rounded-full ${ledClasses(unlocked ? "green" : "amber")}`} aria-hidden />
-            <div className="text-xs">
-              <span className="font-semibold text-slate-100">Console</span>{" "}
-              <span className="text-slate-400">{unlocked ? "Unlocked" : "Locked"}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={`inline-flex h-2.5 w-2.5 rounded-full ${ledClasses(unlocked ? "green" : "amber")}`} aria-hidden />
-            <div className="text-xs">
-              <span className="font-semibold text-slate-100">Active users</span>{" "}
-              <span className="text-slate-400">
-                {activeUsers}/{totalUsers}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={`inline-flex h-2.5 w-2.5 rounded-full ${ledClasses(unlocked ? "green" : "amber")}`} aria-hidden />
-            <div className="text-xs">
-              <span className="font-semibold text-slate-100">Signed in as</span>{" "}
-              <span className="text-slate-400">{me?.email ?? "—"}</span>
-            </div>
-          </div>
-        </div>
+      <div className="cr-stats grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {item("green", L.t("ac.strip.branches"), branchesOnline, "ltr")}
+        {item(unlocked ? "green" : "amber", L.t("ac.strip.console"), unlocked ? L.t("ac.strip.unlocked") : L.t("ac.state.locked"))}
+        {item(unlocked ? "green" : "amber", L.t("ac.strip.activeUsers"), `${activeUsers}/${totalUsers}`, "ltr")}
+        {item(unlocked ? "green" : "amber", L.t("ac.strip.signedInAs"), me?.email ?? "—", "ltr")}
       </div>
     );
   };
@@ -769,8 +761,8 @@ export function AccessControlConsole() {
     return (
       <div
         role="note"
-        aria-label={`${label} — informational status, not an action`}
-        className={`group w-full cursor-default select-none rounded-2xl border px-4 py-4 text-left transition-all duration-150
+        aria-label={L.t("ac.capAria", { label })}
+        className={`group w-full cursor-default select-none rounded-2xl border px-4 py-4 text-start transition-all duration-150
           ${state === "allowed" ? "border-sky-500/35 bg-slate-900/25" : ""}
           ${state === "protected" ? "border-amber-500/35 bg-amber-500/5" : ""}
           ${state === "locked" || state === "disabled" ? "border-slate-800/80 bg-slate-900/30" : ""}`}
@@ -803,17 +795,17 @@ export function AccessControlConsole() {
       <>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold text-slate-100">{name}</div>
+            <div className="text-sm font-semibold text-slate-100" dir="auto">{name}</div>
             <div className="mt-1 text-xs text-slate-400">
               {userIsDisabled
-                ? "User disabled"
+                ? L.t("ac.branch.userDisabled")
                 : assigned
                   ? accessMode === "OWNER"
-                    ? "Included in full network scope (not a toggle here)"
-                    : "Assigned (scope)"
+                    ? L.t("ac.branch.fullNetwork")
+                    : L.t("ac.branch.assigned")
                   : branchScopeInvalid
-                    ? "Locked"
-                    : "Available — tap to assign"}
+                    ? L.t("ac.state.locked")
+                    : L.t("ac.branch.available")}
             </div>
           </div>
           <span
@@ -828,7 +820,7 @@ export function AccessControlConsole() {
       return (
         <div
           role="note"
-          className={`h-full cursor-default select-none rounded-2xl border px-4 py-4 text-left ${tone}`}
+          className={`h-full cursor-default select-none rounded-2xl border px-4 py-4 text-start ${tone}`}
         >
           {body}
         </div>
@@ -844,7 +836,7 @@ export function AccessControlConsole() {
           setSelectedBranchIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
           setToast(null);
         }}
-        className={`h-full rounded-2xl border px-4 py-4 text-left transition-all hover:border-slate-600/90 disabled:opacity-60 disabled:hover:border-current ${tone}`}
+        className={`h-full rounded-2xl border px-4 py-4 text-start transition-all hover:border-slate-600/90 disabled:opacity-60 disabled:hover:border-current ${tone}`}
       >
         {body}
       </button>
@@ -857,9 +849,9 @@ export function AccessControlConsole() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6" dir={L.dir}>
         <div className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
-          <div className="text-sm text-slate-300">Loading Access Control…</div>
+          <div className="text-sm text-slate-300">{L.t("ac.loading")}</div>
         </div>
       </div>
     );
@@ -867,9 +859,9 @@ export function AccessControlConsole() {
 
   if (bootstrapError) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6" dir={L.dir}>
         <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-5">
-          <div className="text-sm font-semibold text-rose-200">Access Control unavailable</div>
+          <div className="text-sm font-semibold text-rose-200">{L.t("ac.unavailable")}</div>
           <div className="mt-1 text-xs text-rose-100/80">{bootstrapError}</div>
         </div>
       </div>
@@ -878,12 +870,12 @@ export function AccessControlConsole() {
 
   if (me?.accessType !== "OWNER") {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6" dir={L.dir}>
         <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5">
-          <div className="text-sm font-semibold text-amber-200">Owner access required</div>
+          <div className="text-sm font-semibold text-amber-200">{L.t("ac.ownerRequired")}</div>
           <div className="mt-1 text-xs text-amber-100/80">
-            Access Control is only available to workspace owners. Your current session is a{" "}
-            <span className="font-semibold">{me?.accessType ?? "guest"}</span> session.
+            {L.t("ac.ownerOnly")} {L.t("ac.sessionPre")}{" "}
+            <span className="font-semibold">{me?.accessType ?? L.t("ac.guest")}</span>{L.t("ac.sessionPost")}
           </div>
         </div>
       </div>
@@ -891,12 +883,12 @@ export function AccessControlConsole() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" dir={L.dir}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-slate-50">Access Control Console</h1>
+          <h1 className="text-xl font-semibold text-slate-50">{L.t("ac.title")}</h1>
           <p className="mt-0.5 text-xs text-slate-400">
-            Premium operational shell wired to the live workspace database.
+            {L.t("ac.subtitle")}
           </p>
         </div>
 
@@ -906,7 +898,7 @@ export function AccessControlConsole() {
             onClick={() => setUnlocked(true)}
             className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-200 shadow-[0_0_24px_rgba(245,158,11,0.10)] hover:bg-amber-500/15 hover:border-amber-500/60 transition-all"
           >
-            Unlock console
+            {L.t("ac.unlock")}
           </button>
         ) : (
           <button
@@ -921,7 +913,7 @@ export function AccessControlConsole() {
             }}
             className="rounded-xl border border-slate-700/80 bg-slate-900/30 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800/60 hover:border-slate-600/90 transition-all"
           >
-            Lock console
+            {L.t("ac.lock")}
           </button>
         )}
       </div>
@@ -937,25 +929,25 @@ export function AccessControlConsole() {
             <ConsoleCard>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <div className="text-sm font-semibold text-slate-100">Protected Access Required</div>
+                  <div className="text-sm font-semibold text-slate-100">{L.t("ac.protectedRequired")}</div>
                   <div className="mt-1 text-xs text-slate-400">
-                    Unlock to manage real workspace users, branch scope, and account lifecycle.
+                    {L.t("ac.unlockHint")}
                   </div>
                 </div>
-                <div className="text-xs text-slate-400">Tip: unlock to configure scope and access pads.</div>
+                <div className="text-xs text-slate-400">{L.t("ac.tip")}</div>
               </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">Access engine</div>
-                  <div className="mt-1 text-sm font-semibold text-amber-100">Protected</div>
+              <div className="cr-stats mt-3 grid gap-2 sm:grid-cols-3">
+                <div className="cr-stat cr-stat--static">
+                  <span className="cr-stat-label">{L.t("ac.accessEngine")}</span>
+                  <span className="cr-stat-value cr-stat-value--text cr-stat-value--warn">{L.t("ac.state.protected")}</span>
                 </div>
-                <div className="rounded-2xl border border-slate-800/80 bg-slate-900/30 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Capability layer</div>
-                  <div className="mt-1 text-sm font-semibold text-slate-200">Locked</div>
+                <div className="cr-stat cr-stat--static">
+                  <span className="cr-stat-label">{L.t("ac.capabilityLayer")}</span>
+                  <span className="cr-stat-value cr-stat-value--text">{L.t("ac.state.locked")}</span>
                 </div>
-                <div className="rounded-2xl border border-slate-800/80 bg-slate-900/30 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Scope routing</div>
-                  <div className="mt-1 text-sm font-semibold text-slate-200">Hidden</div>
+                <div className="cr-stat cr-stat--static">
+                  <span className="cr-stat-label">{L.t("ac.scopeRouting")}</span>
+                  <span className="cr-stat-value cr-stat-value--text">{L.t("ac.hidden")}</span>
                 </div>
               </div>
             </ConsoleCard>
@@ -965,19 +957,19 @@ export function AccessControlConsole() {
             <ConsoleCard>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-sm font-semibold text-slate-100">User Access Entry</div>
+                  <div className="text-sm font-semibold text-slate-100">{L.t("ac.entry.title")}</div>
                   <div className="mt-1 text-xs text-slate-400">
-                    Search by email to open the user&apos;s access console.
+                    {L.t("ac.entry.hint")}
                   </div>
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  Workspace users: <span className="text-slate-200 font-semibold">{users.length}</span>
+                  {L.t("ac.workspaceUsersLabel")} <span className="text-slate-200 font-semibold" dir="ltr">{users.length}</span>
                 </div>
               </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-500">Email</label>
+                  <label className="block text-xs font-semibold text-slate-500">{L.t("ac.email")}</label>
                   <input
                     value={lookupEmail}
                     onChange={(e) => setLookupEmail(e.target.value)}
@@ -987,6 +979,7 @@ export function AccessControlConsole() {
                     className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500/50"
                     placeholder="user@company.com"
                     inputMode="email"
+                    dir="ltr"
                   />
                 </div>
                 <div className="sm:pt-5">
@@ -996,18 +989,18 @@ export function AccessControlConsole() {
                     disabled={lookupDisabled || !lookupEmail.trim()}
                     className="w-full rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-200 hover:bg-sky-500/15 hover:border-sky-500/60 disabled:opacity-60 disabled:pointer-events-none transition-all"
                   >
-                    Find user
+                    {L.t("ac.findUser")}
                   </button>
                 </div>
               </div>
 
               {users.length === 0 ? (
                 <div className="mt-4 rounded-xl border border-slate-800/80 bg-slate-900/25 p-3 text-xs text-slate-400">
-                  No workspace users yet. Type a new email above and click <span className="text-slate-200 font-semibold">Find user</span> to open the create flow.
+                  {L.t("ac.noUsersPre")} <span className="text-slate-200 font-semibold">{L.t("ac.findUser")}</span> {L.t("ac.noUsersPost")}
                 </div>
               ) : (
                 <div className="mt-4 rounded-xl border border-slate-800/80 bg-slate-900/25 p-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Recent workspace users</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{L.t("ac.recentUsers")}</div>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     {users.slice(0, 6).map((u) => (
                       <button
@@ -1019,19 +1012,19 @@ export function AccessControlConsole() {
                           adoptUserIntoForm(u);
                           setToast(null);
                         }}
-                        className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/30 px-3 py-2 text-left text-xs text-slate-200 hover:border-slate-600 hover:bg-slate-800/40 transition-all"
+                        className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/30 px-3 py-2 text-start text-xs text-slate-200 hover:border-slate-600 hover:bg-slate-800/40 transition-all"
                       >
                         <span className="truncate">
-                          <span className="font-semibold">{u.name?.trim() || u.email}</span>
-                          <span className="text-slate-500"> · {u.accessType === "OWNER" ? "Owner" : "Branch User"}</span>
+                          <span className="font-semibold" dir="auto">{u.name?.trim() || u.email}</span>
+                          <span className="text-slate-500"> · {u.accessType === "OWNER" ? L.t("ac.owner") : L.t("ac.branchUser")}</span>
                         </span>
                         {u.status === "DISABLED" ? (
                           <span className="shrink-0 rounded-md border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-rose-200">
-                            Disabled
+                            {L.t("ac.state.disabled")}
                           </span>
                         ) : u.protected ? (
                           <span className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-200">
-                            Protected
+                            {L.t("ac.state.protected")}
                           </span>
                         ) : null}
                       </button>
@@ -1046,44 +1039,47 @@ export function AccessControlConsole() {
             <ConsoleCard>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-sm font-semibold text-slate-100">Create New User</div>
+                  <div className="text-sm font-semibold text-slate-100">{L.t("ac.create.title")}</div>
                   <div className="mt-1 text-xs text-slate-400">
-                    Creates a real, login-capable Branch User. Configure branch scope after creation.
+                    {L.t("ac.create.hint")}
                   </div>
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  Email: <span className="text-slate-200 font-semibold">{createForm.email || "—"}</span>
+                  {L.t("ac.emailLabel")} <span className="text-slate-200 font-semibold" dir="ltr">{createForm.email || "—"}</span>
                 </div>
               </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500">Display name (optional)</label>
+                  <label className="block text-xs font-semibold text-slate-500">{L.t("ac.displayName")}</label>
                   <input
                     value={createForm.name}
                     onChange={(e) => setCreateForm((p) => ({ ...p, name: e.target.value }))}
                     className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500/50"
-                    placeholder="Full name"
+                    placeholder={L.t("ac.fullName")}
+                    dir="auto"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500">Email</label>
+                  <label className="block text-xs font-semibold text-slate-500">{L.t("ac.email")}</label>
                   <input
                     value={createForm.email}
                     onChange={(e) => setCreateForm((p) => ({ ...p, email: e.target.value }))}
                     className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500/50"
                     placeholder="user@company.com"
                     inputMode="email"
+                    dir="ltr"
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-500">Password (min. 6 characters)</label>
+                  <label className="block text-xs font-semibold text-slate-500">{L.t("ac.passwordLabel")}</label>
                   <input
                     type="password"
                     value={createForm.password}
                     onChange={(e) => setCreateForm((p) => ({ ...p, password: e.target.value }))}
                     className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500/50"
-                    placeholder="Set initial password"
+                    placeholder={L.t("ac.passwordPlaceholder")}
+                    dir="ltr"
                     autoComplete="new-password"
                   />
                 </div>
@@ -1101,7 +1097,7 @@ export function AccessControlConsole() {
                   }}
                   className="rounded-xl border border-slate-800/80 bg-slate-900/30 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800/60 hover:border-slate-600/90 transition-all"
                 >
-                  Back to lookup
+                  {L.t("ac.backToLookup")}
                 </button>
                 <button
                   type="button"
@@ -1114,14 +1110,14 @@ export function AccessControlConsole() {
                   }
                   className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-200 hover:bg-sky-500/15 hover:border-sky-500/60 disabled:opacity-60 disabled:pointer-events-none transition-all"
                 >
-                  {busy === "create" ? "Creating…" : "Create user"}
+                  {busy === "create" ? L.t("ac.creating") : L.t("ac.createUser")}
                 </button>
               </div>
 
               <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">Next step</div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">{L.t("ac.nextStep")}</div>
                 <div className="mt-1 text-xs text-amber-100">
-                  This user will be created as <span className="font-semibold">Branch User</span>. After creation, assign at least one branch to grant access.
+                  {L.t("ac.nextStepPre")} <span className="font-semibold">{L.t("ac.branchUser")}</span>{L.t("ac.nextStepPost")}
                 </div>
               </div>
             </ConsoleCard>
@@ -1132,23 +1128,23 @@ export function AccessControlConsole() {
               <ConsoleCard>
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <div className="text-sm font-semibold text-slate-100">Access target</div>
+                    <div className="text-sm font-semibold text-slate-100">{L.t("ac.target.title")}</div>
                     <div className="mt-1 text-xs text-slate-400">
-                      Identity lookup resolved. Configure access through pads and scope routing.
+                      {L.t("ac.target.hint")}
                     </div>
                   </div>
                   <div className="text-[11px] text-slate-500">
-                    Status:{" "}
+                    {L.t("ac.statusLabel")}{" "}
                     <span className="text-slate-200 font-semibold">
                       {selectedUser.status === "DISABLED"
-                        ? "Disabled"
+                        ? L.t("ac.state.disabled")
                         : selectedUser.status === "PENDING"
-                          ? "Pending"
-                          : "Active"}
+                          ? L.t("ac.status.pending")
+                          : L.t("ac.status.active")}
                     </span>
                     {selectedUser.protected ? (
-                      <span className="ml-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-200">
-                        Protected
+                      <span className="ms-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-200">
+                        {L.t("ac.state.protected")}
                       </span>
                     ) : null}
                   </div>
@@ -1156,14 +1152,14 @@ export function AccessControlConsole() {
 
                 <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold text-slate-100 truncate">{selectedUser.name?.trim() || "—"}</div>
-                    <div className="mt-1 text-xs text-slate-400 truncate">{selectedUser.email}</div>
+                    <div className="text-sm font-semibold text-slate-100 truncate" dir="auto">{selectedUser.name?.trim() || "—"}</div>
+                    <div className="mt-1 text-xs text-slate-400 truncate" dir="ltr">{selectedUser.email}</div>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2 w-full sm:w-[420px]">
                     <PadButton
-                      label="Full Network"
-                      description="All branches scope."
+                      label={L.t("ac.fullNetwork")}
+                      description={L.t("ac.fullNetworkDesc")}
                       tone="primary"
                       active={accessMode === "OWNER"}
                       disabled={!unlocked || userIsDisabled}
@@ -1174,8 +1170,8 @@ export function AccessControlConsole() {
                       }}
                     />
                     <PadButton
-                      label="Assigned Scope"
-                      description="Only assigned branches."
+                      label={L.t("ac.assignedScope")}
+                      description={L.t("ac.assignedScopeDesc")}
                       tone="neutral"
                       active={accessMode === "BRANCH_USER"}
                       disabled={!unlocked || userIsDisabled}
@@ -1190,9 +1186,9 @@ export function AccessControlConsole() {
 
                 {branchScopeInvalid ? (
                   <div className="mt-4 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3">
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">Protected constraint</div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">{L.t("ac.protectedConstraint")}</div>
                     <div className="mt-1 text-xs text-amber-100">
-                      Assigned scope requires at least one branch target.
+                      {L.t("ac.constraintHint")}
                     </div>
                   </div>
                 ) : null}
@@ -1201,36 +1197,34 @@ export function AccessControlConsole() {
               <ConsoleCard>
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <div className="text-sm font-semibold text-slate-100">User status</div>
+                    <div className="text-sm font-semibold text-slate-100">{L.t("ac.userStatus")}</div>
                     <div className="mt-1 text-xs text-slate-400">
-                      <strong className="font-semibold text-slate-300">Active</strong> — full workspace access.{" "}
-                      <strong className="font-semibold text-slate-300">Disable</strong> pauses access in this
-                      workspace only (reversible, other workspaces unaffected).{" "}
-                      <strong className="font-semibold text-slate-300">Remove</strong> deletes the membership and
-                      branch assignments here.
+                      <strong className="font-semibold text-slate-300">{L.t("ac.status.active")}</strong>{L.t("ac.us.activeDesc")}{" "}
+                      <strong className="font-semibold text-slate-300">{L.t("ac.us.disable")}</strong>{L.t("ac.us.disableDesc")}{" "}
+                      <strong className="font-semibold text-slate-300">{L.t("ac.us.remove")}</strong>{L.t("ac.us.removeDesc")}
                     </div>
                   </div>
                   <div className="text-[11px] text-slate-500">
-                    Current:{" "}
+                    {L.t("ac.currentLabel")}{" "}
                     <span className="text-slate-200 font-semibold">
                       {selectedUser.status === "DISABLED"
-                        ? "Login disabled"
+                        ? L.t("ac.loginDisabled")
                         : membershipSuspended
-                          ? "Paused in workspace"
-                          : "Active"}
+                          ? L.t("ac.pausedInWorkspace")
+                          : L.t("ac.status.active")}
                     </span>
                   </div>
                 </div>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-3">
                   <PadButton
-                    label={busy === "activate" ? "Activating…" : "Active"}
+                    label={busy === "activate" ? L.t("ac.activating") : L.t("ac.status.active")}
                     description={
                       membershipSuspended
-                        ? "Resume access in this workspace."
+                        ? L.t("ac.pad.resume")
                         : userIsDisabled
-                          ? "Login is globally disabled."
-                          : "Identity is enabled."
+                          ? L.t("ac.pad.globallyDisabled")
+                          : L.t("ac.pad.identityEnabled")
                     }
                     tone="primary"
                     active={!membershipSuspended && !userIsDisabled}
@@ -1242,13 +1236,13 @@ export function AccessControlConsole() {
                     onClick={handleActivate}
                   />
                   <PadButton
-                    label={busy === "disable" ? "Disabling…" : "Disable"}
+                    label={busy === "disable" ? L.t("ac.disabling") : L.t("ac.us.disable")}
                     description={
                       pauseInWorkspaceBlocked
-                        ? pauseDeniedHint(selectedUser.pauseDeniedReason, isSelfTarget) || "Protected — cannot disable here."
+                        ? pauseDeniedHint(selectedUser.pauseDeniedReason, isSelfTarget, L.t) || L.t("ac.pad.cannotDisable")
                         : membershipSuspended
-                          ? "Already paused in this workspace."
-                          : "Pause access in this workspace (reversible, other workspaces unaffected)."
+                          ? L.t("ac.pad.alreadyPaused")
+                          : L.t("ac.pad.pauseDesc")
                     }
                     tone="protected"
                     active={membershipSuspended === true}
@@ -1261,11 +1255,11 @@ export function AccessControlConsole() {
                     onClick={handleDisable}
                   />
                   <PadButton
-                    label={busy === "remove" ? "Removing…" : "Remove"}
+                    label={busy === "remove" ? L.t("ac.removing") : L.t("ac.us.remove")}
                     description={
                       selectedUser.canRemoveFromWorkspace === false
-                        ? tenantRemoveHint(selectedUser.tenantRemoveDeniedReason) || "Cannot remove from workspace."
-                        : "Delete membership and branches in this workspace only."
+                        ? tenantRemoveHint(selectedUser.tenantRemoveDeniedReason, L.t) || L.t("ac.pad.cannotRemove")
+                        : L.t("ac.pad.removeDesc")
                     }
                     tone="danger"
                     active={false}
@@ -1282,18 +1276,18 @@ export function AccessControlConsole() {
                   <div className="mt-3 rounded-xl border border-slate-700/40 bg-slate-900/40 p-3 text-[11px] leading-snug text-slate-400">
                     {membershipSuspended ? (
                       <div className="text-amber-200/85">
-                        Paused in this workspace
+                        {L.t("ac.pausedNote")}
                         {selectedUser.membershipSuspendedAt
-                          ? ` since ${new Date(selectedUser.membershipSuspendedAt).toLocaleDateString()}`
+                          ? L.t("ac.pausedSince", { date: new Date(selectedUser.membershipSuspendedAt).toLocaleDateString() })
                           : ""}
-                        . Login still works for other workspaces. Click <strong>Active</strong> to resume.
+                        {L.t("ac.pausedNoteMid")} <strong>{L.t("ac.status.active")}</strong> {L.t("ac.pausedNotePost")}
                       </div>
                     ) : null}
                     {pauseInWorkspaceBlocked ? (
-                      <div>{pauseDeniedHint(selectedUser.pauseDeniedReason, isSelfTarget)}</div>
+                      <div>{pauseDeniedHint(selectedUser.pauseDeniedReason, isSelfTarget, L.t)}</div>
                     ) : null}
                     {selectedUser.canRemoveFromWorkspace === false ? (
-                      <div>{tenantRemoveHint(selectedUser.tenantRemoveDeniedReason)}</div>
+                      <div>{tenantRemoveHint(selectedUser.tenantRemoveDeniedReason, L.t)}</div>
                     ) : null}
                   </div>
                 ) : null}
@@ -1302,22 +1296,21 @@ export function AccessControlConsole() {
               <ConsoleCard>
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="text-sm font-semibold text-slate-100">Capability pads</div>
+                    <div className="text-sm font-semibold text-slate-100">{L.t("ac.capPads")}</div>
                     <div className="mt-1 text-xs text-slate-400">
-                      Access language: View, Control, Manage, Protected, Scope.
+                      {L.t("ac.capPadsHint")}
                     </div>
                   </div>
                   <div className="text-[11px] text-slate-500">
-                    Scope: <span className="text-slate-200 font-semibold">{selectedBranchNames}</span>
+                    {L.t("ac.scopeLabel")} <span className="text-slate-200 font-semibold" dir="auto">{selectedBranchNames}</span>
                   </div>
                 </div>
 
                 <div className="mt-3 rounded-xl border border-slate-700/40 bg-slate-900/40 px-3 py-2 text-[11px] leading-snug text-slate-400">
-                  <strong className="font-semibold text-slate-300">Read-only preview.</strong>{" "}
-                  Capabilities are derived from the access type and branch scope chosen above. To change them, switch
-                  between <strong className="text-sky-300">Full Network</strong> and{" "}
-                  <strong className="text-sky-300">Assigned Scope</strong>, adjust branch cards, and click{" "}
-                  <strong className="text-emerald-300">Apply access</strong>.
+                  <strong className="font-semibold text-slate-300">{L.t("ac.readOnlyPreview")}</strong>{" "}
+                  {L.t("ac.previewPre")} <strong className="text-sky-300">{L.t("ac.fullNetwork")}</strong> {L.t("ac.and")}{" "}
+                  <strong className="text-sky-300">{L.t("ac.assignedScope")}</strong>{L.t("ac.previewPost")}{" "}
+                  <strong className="text-emerald-300">{L.t("ac.applyAccess")}</strong>.
                 </div>
 
                 <div className="mt-4 space-y-5">
@@ -1340,13 +1333,13 @@ export function AccessControlConsole() {
               <ConsoleCard>
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="text-sm font-semibold text-slate-100">Branch assignment routing bank</div>
+                    <div className="text-sm font-semibold text-slate-100">{L.t("ac.bank.title")}</div>
                     <div className="mt-1 text-xs text-slate-400">
-                      Treat branches as target pads. Assigned branches define the scope.
+                      {L.t("ac.bank.hint")}
                     </div>
                   </div>
                   <div className="text-[11px] text-slate-500">
-                    Branch scope: <span className="text-slate-200 font-semibold">{formatBranchCount(selectedBranchIds)}</span>
+                    {L.t("ac.branchScopeLabel")} <span className="text-slate-200 font-semibold">{formatBranchCount(selectedBranchIds)}</span>
                   </div>
                 </div>
 
@@ -1367,10 +1360,10 @@ export function AccessControlConsole() {
                     onClick={handleApplyAccess}
                     className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-200 hover:bg-sky-500/15 hover:border-sky-500/60 disabled:opacity-60 disabled:pointer-events-none transition-all"
                   >
-                    {busy === "apply" ? "Applying…" : "Apply access"}
+                    {busy === "apply" ? L.t("ac.applying") : L.t("ac.applyAccess")}
                   </button>
                   <div className="text-xs text-slate-400">
-                    Saves access type and branch scope to the workspace.
+                    {L.t("ac.applyHint")}
                   </div>
                 </div>
               </ConsoleCard>
@@ -1381,42 +1374,42 @@ export function AccessControlConsole() {
         <div>
           <div className="space-y-4">
             <ConsoleCard>
-              <div className="text-sm font-semibold text-slate-100">Live access summary</div>
+              <div className="text-sm font-semibold text-slate-100">{L.t("ac.summary.title")}</div>
               <div className="mt-1 text-xs text-slate-400">
-                Operational summary for the selected user and scope.
+                {L.t("ac.summary.hint")}
               </div>
 
               <div className="mt-4 space-y-3">
                 <div className="rounded-xl border border-slate-800/80 bg-slate-900/25 p-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Identity</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{L.t("ac.identity")}</div>
                   <div className="mt-2 text-xs text-slate-300">
                     <div>
-                      Name:{" "}
-                      <span className="text-slate-100 font-semibold">{selectedUser?.name?.trim() || "—"}</span>
+                      {L.t("ac.nameLabel")}{" "}
+                      <span className="text-slate-100 font-semibold" dir="auto">{selectedUser?.name?.trim() || "—"}</span>
                     </div>
                     <div className="mt-1">
-                      Email:{" "}
-                      <span className="text-slate-100 font-semibold">
+                      {L.t("ac.emailLabel")}{" "}
+                      <span className="text-slate-100 font-semibold" dir="ltr">
                         {workflow === "found" ? selectedUser?.email ?? "—" : workflow === "create" ? createForm.email || "—" : "—"}
                       </span>
                     </div>
                     {selectedUser ? (
                       <div className="mt-1">
-                        Status:{" "}
+                        {L.t("ac.statusLabel")}{" "}
                         <span className="text-slate-100 font-semibold">
                           {selectedUser.status === "DISABLED"
-                            ? "Disabled"
+                            ? L.t("ac.state.disabled")
                             : selectedUser.status === "PENDING"
-                              ? "Pending"
-                              : "Active"}
+                              ? L.t("ac.status.pending")
+                              : L.t("ac.status.active")}
                         </span>
-                        {selectedUser.protected ? <span className="ml-2 text-amber-300">(protected)</span> : null}
+                        {selectedUser.protected ? <span className="ms-2 text-amber-300">{L.t("ac.protectedParen")}</span> : null}
                       </div>
                     ) : null}
                     {selectedUser?.deactivatedAt ? (
                       <div className="mt-1">
-                        Disabled at:{" "}
-                        <span className="text-slate-100 font-semibold">
+                        {L.t("ac.disabledAt")}{" "}
+                        <span className="text-slate-100 font-semibold" dir="ltr">
                           {new Date(selectedUser.deactivatedAt).toLocaleString()}
                         </span>
                       </div>
@@ -1426,11 +1419,11 @@ export function AccessControlConsole() {
 
                 <div className="rounded-xl border border-slate-800/80 bg-slate-900/25 p-3">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Access state</div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{L.t("ac.accessState")}</div>
                     {userIsDisabled ? (
                       <div className="inline-flex items-center gap-2 rounded-lg border border-slate-800/80 bg-slate-900/30 px-3 py-1 text-[11px] font-semibold text-slate-400">
                         <span className="h-1.5 w-1.5 rounded-full bg-slate-400" aria-hidden />
-                        User disabled
+                        {L.t("ac.branch.userDisabled")}
                       </div>
                     ) : (
                       <div
@@ -1444,22 +1437,22 @@ export function AccessControlConsole() {
                           className={`h-1.5 w-1.5 rounded-full ${unlocked ? "bg-emerald-400" : "bg-amber-400"}`}
                           aria-hidden
                         />
-                        {unlocked ? "Ready" : "Protected"}
+                        {unlocked ? L.t("ac.ready") : L.t("ac.state.protected")}
                       </div>
                     )}
                   </div>
                   <div className="mt-2 text-xs text-slate-300">
-                    Access level:{" "}
+                    {L.t("ac.accessLevel")}{" "}
                     <span className="text-slate-100 font-semibold">
-                      {accessMode === "OWNER" ? "Full Network" : "Assigned Scope"}
+                      {accessMode === "OWNER" ? L.t("ac.fullNetwork") : L.t("ac.assignedScope")}
                     </span>
                     <br />
-                    Scope: <span className="text-slate-100 font-semibold">{selectedUser ? selectedBranchNames : "—"}</span>
+                    {L.t("ac.scopeLabel")} <span className="text-slate-100 font-semibold" dir="auto">{selectedUser ? selectedBranchNames : "—"}</span>
                   </div>
                 </div>
 
                 <div className="rounded-xl border border-slate-800/80 bg-slate-900/25 p-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Sensitive actions</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{L.t("ac.sensitiveActions")}</div>
                   <div className="mt-2 space-y-2 text-xs text-slate-300">
                     {(["PROTECTED_ACTIONS", "DELETE_MEDIA"] as CapabilityId[]).map((id) => {
                       const raw = capabilityState.get(id) ?? "locked";
@@ -1467,7 +1460,7 @@ export function AccessControlConsole() {
                       return (
                         <div key={id} className="flex items-center justify-between gap-3">
                           <span className="truncate">
-                            {id === "PROTECTED_ACTIONS" ? "Protected Actions" : "Delete Media"}
+                            {id === "PROTECTED_ACTIONS" ? L.t("ac.cap.protectedActions") : L.t("ac.cap.deleteMedia")}
                           </span>
                           <span className={`rounded-lg border px-2 py-0.5 text-[11px] font-semibold ${badgeTone(s)}`}>
                             {stateLabel(s)}
@@ -1483,25 +1476,25 @@ export function AccessControlConsole() {
             <ConsoleCard>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-slate-100">Workspace users</div>
-                  <div className="mt-1 text-xs text-slate-400">{users.length} total</div>
+                  <div className="text-sm font-semibold text-slate-100">{L.t("ac.workspaceUsers")}</div>
+                  <div className="mt-1 text-xs text-slate-400">{L.t("ac.total", { n: users.length })}</div>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
                     void reload();
-                    setToast("Refreshed.");
+                    setToast(L.t("ac.toast.refreshed"));
                   }}
                   className="rounded-lg border border-slate-700/80 bg-slate-900/30 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800/60 hover:border-slate-600/90 transition-all"
                 >
-                  Refresh
+                  {L.t("ac.refresh")}
                 </button>
               </div>
 
-              <ul className="mt-3 max-h-[260px] space-y-1.5 overflow-y-auto pr-1 text-xs text-slate-300">
+              <ul className="mt-3 max-h-[260px] space-y-1.5 overflow-y-auto pe-1 text-xs text-slate-300">
                 {users.length === 0 ? (
                   <li className="rounded-lg border border-slate-800/80 bg-slate-900/30 p-3 text-slate-500">
-                    No users in this workspace yet.
+                    {L.t("ac.noUsers")}
                   </li>
                 ) : (
                   users.map((u) => {
@@ -1516,7 +1509,7 @@ export function AccessControlConsole() {
                             adoptUserIntoForm(u);
                             setToast(null);
                           }}
-                          className={`w-full rounded-lg border px-3 py-2 text-left transition-all ${
+                          className={`w-full rounded-lg border px-3 py-2 text-start transition-all ${
                             isSelected
                               ? "border-sky-500/45 bg-sky-500/5 text-sky-100"
                               : "border-slate-800 bg-slate-900/30 text-slate-200 hover:border-slate-600 hover:bg-slate-800/40"
@@ -1528,20 +1521,20 @@ export function AccessControlConsole() {
                                 u.status === "DISABLED" ? "text-slate-500 line-through" : ""
                               }`}
                             >
-                              {u.name?.trim() || u.email}
+                              <bdi>{u.name?.trim() || u.email}</bdi>
                             </span>
                             {u.status === "DISABLED" ? (
                               <span className="shrink-0 rounded-md border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-rose-200">
-                                Disabled
+                                {L.t("ac.state.disabled")}
                               </span>
                             ) : u.protected ? (
                               <span className="shrink-0 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-200">
-                                Protected
+                                {L.t("ac.state.protected")}
                               </span>
                             ) : null}
                           </div>
                           <div className="mt-0.5 truncate text-[11px] text-slate-500">
-                            {u.accessType === "OWNER" ? "Owner · all branches" : `Branch User · ${u.branchIds.join(", ") || "no branches"}`}
+                            {u.accessType === "OWNER" ? L.t("ac.ownerAll") : L.t("ac.branchUserList", { branches: u.branchIds.join(", ") || L.t("ac.noBranchesShort") })}
                           </div>
                         </button>
                       </li>
@@ -1554,8 +1547,8 @@ export function AccessControlConsole() {
             <ConsoleCard>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-slate-100">Activity</div>
-                  <div className="mt-1 text-xs text-slate-400">Recent admin actions in this workspace.</div>
+                  <div className="text-sm font-semibold text-slate-100">{L.t("ac.activity")}</div>
+                  <div className="mt-1 text-xs text-slate-400">{L.t("ac.activityHint")}</div>
                 </div>
                 <button
                   type="button"
@@ -1564,19 +1557,20 @@ export function AccessControlConsole() {
                   }}
                   className="rounded-lg border border-slate-700/80 bg-slate-900/30 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800/60 hover:border-slate-600/90 transition-all"
                 >
-                  Refresh
+                  {L.t("ac.refresh")}
                 </button>
               </div>
 
-              <ul className="mt-3 max-h-[300px] space-y-1.5 overflow-y-auto pr-1 text-xs text-slate-300">
+              <ul className="mt-3 max-h-[300px] space-y-1.5 overflow-y-auto pe-1 text-xs text-slate-300">
                 {auditEvents.length === 0 ? (
                   <li className="rounded-lg border border-slate-800/80 bg-slate-900/30 p-3 text-slate-500">
-                    No activity yet. Invite a user, change access, or pause / remove a member to log an event here.
+                    {L.t("ac.noActivity")}
                   </li>
                 ) : (
                   auditEvents.map((ev) => {
-                    const meta = TENANT_AUDIT_LABELS[ev.action] ?? { label: ev.action, tone: "neutral" as const };
-                    const actorEmail = ev.actor?.email ?? "deleted user";
+                    const known = TENANT_AUDIT_LABELS[ev.action];
+                    const meta = known ? { label: L.t(known.key), tone: known.tone } : { label: ev.action, tone: "neutral" as const };
+                    const actorEmail = ev.actor?.email ?? L.t("ac.deletedUser");
                     const targetEmail =
                       ev.target?.email ??
                       (ev.metadata && typeof ev.metadata === "object" && ev.metadata !== null
@@ -1593,16 +1587,16 @@ export function AccessControlConsole() {
                             className="text-[11px] text-slate-500"
                             title={new Date(ev.createdAt).toLocaleString()}
                           >
-                            {fmtRelative(ev.createdAt)}
+                            {fmtRelative(ev.createdAt, L.t)}
                           </span>
                         </div>
                         <div className="mt-1 truncate text-[11px] text-slate-300">
-                          <span className="text-slate-500">by </span>
-                          <span className="font-semibold text-slate-200">{actorEmail}</span>
+                          <span className="text-slate-500">{L.t("ac.by")}</span>
+                          <span className="font-semibold text-slate-200" dir="ltr">{actorEmail}</span>
                           {targetEmail ? (
                             <>
-                              <span className="text-slate-500"> · target </span>
-                              <span className="font-semibold text-slate-200">{targetEmail}</span>
+                              <span className="text-slate-500">{L.t("ac.targetSep")}</span>
+                              <span className="font-semibold text-slate-200" dir="ltr">{targetEmail}</span>
                             </>
                           ) : null}
                         </div>
@@ -1622,7 +1616,7 @@ export function AccessControlConsole() {
                     onClick={() => setToast(null)}
                     className="text-[11px] text-slate-500 hover:text-slate-300"
                   >
-                    Dismiss
+                    {L.t("ac.dismiss")}
                   </button>
                 </div>
               </ConsoleCard>
@@ -1635,19 +1629,19 @@ export function AccessControlConsole() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setPendingSensitive(null)} aria-hidden />
           <div className="relative w-full max-w-lg rounded-2xl border border-slate-800/80 bg-slate-950 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
-            <div className="text-sm font-semibold text-slate-100">Operational confirmation</div>
+            <div className="text-sm font-semibold text-slate-100">{L.t("ac.confirm.title")}</div>
             <div className="mt-1 text-xs text-slate-400">
-              Capability pads are visual representations of the access scope. Apply scope changes via{" "}
-              <span className="font-semibold text-slate-200">Apply access</span> below.
+              {L.t("ac.confirm.pre")}{" "}
+              <span className="font-semibold text-slate-200">{L.t("ac.applyAccess")}</span> {L.t("ac.confirm.post")}
             </div>
 
             <div className="mt-4 rounded-xl border border-slate-800/80 bg-slate-900/25 p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Selected</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{L.t("ac.selected")}</div>
               <div className="mt-2 text-xs text-slate-200 font-semibold">
                 {pendingSensitive === "PROTECTED_ACTIONS"
-                  ? "Protected Actions"
+                  ? L.t("ac.cap.protectedActions")
                   : pendingSensitive === "DELETE_MEDIA"
-                    ? "Delete Media"
+                    ? L.t("ac.cap.deleteMedia")
                     : pendingSensitive}
               </div>
               <div className="mt-1 text-xs text-slate-400">{capabilityScopeText(pendingSensitive)}</div>
@@ -1659,7 +1653,7 @@ export function AccessControlConsole() {
                 onClick={() => setPendingSensitive(null)}
                 className="rounded-xl border border-slate-800/80 bg-slate-900/30 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800/60 hover:border-slate-600/90 transition-all"
               >
-                Close
+                {L.t("ac.close")}
               </button>
             </div>
           </div>
@@ -1674,17 +1668,17 @@ export function AccessControlConsole() {
           setRemoveError(null);
         }}
         onConfirm={performRemoveFromWorkspace}
-        title="Remove from workspace"
+        title={L.t("ac.remove.title")}
         message={
           selectedUser
-            ? `Remove ${selectedUser.email} from this workspace?\n\nTheir membership and branch assignments are deleted for this workspace only. Their global SyncBiz account is preserved (other workspaces, login).`
+            ? L.t("ac.remove.message", { email: selectedUser.email })
             : ""
         }
         errorHint={removeError}
-        confirmLabel="Remove"
-        cancelLabel="Cancel"
+        confirmLabel={L.t("ac.us.remove")}
+        cancelLabel={L.t("common.cancel")}
         loading={busy === "remove"}
-        loadingLabel="Removing…"
+        loadingLabel={L.t("ac.removing")}
       />
     </div>
   );

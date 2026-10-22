@@ -16,6 +16,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import net from "node:net";
 import { normalizeMpvLoadTarget } from "./mpv-input-normalize";
+import { withStationMediaToken } from "./media-token-provider";
 import { redactMediaToken } from "../shared/redact-media-token";
 import { fileLog } from "./file-logger";
 
@@ -84,6 +85,18 @@ export type MpvStatus = {
    * bound back to the exact attempt that produced it. Desktop-internal only — never sent over WS / to CONTROL.
    */
   attemptId: number;
+  // ── Readiness signals (P0 2026-10-07, crossfade readiness). ADDITIVE ONLY — they never change `status`. ──
+  /** MPV `core-idle` (true while nothing is actually being played: loading / buffering / paused). null = not observed yet. */
+  coreIdle: boolean | null;
+  /** MPV `paused-for-cache` (true while playback waits for the network cache). null = not observed yet. */
+  pausedForCache: boolean | null;
+  /** Epoch ms of the last REAL MPV `time-pos` update on this deck (0 = none since the current load). */
+  positionAt: number;
+  /** true once THIS load produced a real `time-pos` ADVANCE (a later time-pos strictly greater than an
+   *  earlier one, both after start-file). Never inferred from duration or renderer extrapolation. */
+  progressObserved: boolean;
+  /** true once MPV emitted `file-loaded` for the current load (after any yt-dlp resolution). */
+  fileLoaded: boolean;
 };
 
 export function createInitialMpvStatus(): MpvStatus {
@@ -95,6 +108,11 @@ export function createInitialMpvStatus(): MpvStatus {
     engineReady: false,
     lastError: null,
     attemptId: 0,
+    coreIdle: null,
+    pausedForCache: null,
+    positionAt: 0,
+    progressObserved: false,
+    fileLoaded: false,
   };
 }
 
@@ -135,10 +153,87 @@ export class MpvManager {
   private ytDlpArgFragment: string[] = [];
   /** If we kill the process because IPC recovery failed, exit handler uses a clearer `lastError`. */
   private pendingExitDetail: string | null = null;
+  /** Raw (unfloored) time-pos last seen for the CURRENT load — progress = a strictly greater later value. */
+  private lastTimePos: number | null = null;
 
   /** @param pipeName Unique name for this instance's IPC socket (e.g. "syncbiz-music"). */
   constructor(pipeName = "syncbiz-mpv") {
     this.pipePath = resolvePipePath(pipeName);
+  }
+
+  // ─── P0 Video V1 (owner-approved 2026-10-09; opt-in per station, OFF by default) ─────────────────────────────
+  // When enabled BEFORE start(), this deck renders the picture of the SAME stream it plays (one decoder, one clock →
+  // truly synced) in its own borderless MPV window, which VideoOutput places / fades / hides over IPC. When NOT
+  // enabled, nothing below runs and the spawn arguments are exactly today's audio-only ones.
+  private video: { title: string; ytdlFormat: string } | null = null;
+  private videoCb: ((sig: MpvVideoSignal) => void) | null = null;
+  /** The picture of the CURRENT file was dropped (stall protection) — restored only at the next load (never mid-song). */
+  private videoDroppedForFile = false;
+
+  enableVideoOutput(title: string, ytdlFormat: string): void {
+    this.video = { title, ytdlFormat };
+  }
+
+  isVideoOutput(): boolean {
+    return this.video !== null;
+  }
+
+  onVideoSignal(cb: (sig: MpvVideoSignal) => void): void {
+    this.videoCb = cb;
+  }
+
+  /** Window / picture property (geometry, brightness, ontop …). No-op on an audio-only deck. */
+  setVideoProperty(name: string, value: unknown): void {
+    if (!this.video) return;
+    this.cmd(["set_property", name, value]);
+  }
+
+  /** Quality cap for the NEXT load (ytdl-format is read per load; the current file is never touched). */
+  setVideoFormat(ytdlFormat: string): void {
+    if (!this.video || this.video.ytdlFormat === ytdlFormat) return;
+    this.video.ytdlFormat = ytdlFormat;
+    this.cmd(["set_property", "ytdl-format", ytdlFormat]);
+  }
+
+  /** Stall protection: stop the picture for the rest of THIS song (audio continues untouched — proven V0). */
+  dropVideoForCurrentFile(): void {
+    if (!this.video || this.videoDroppedForFile) return;
+    this.videoDroppedForFile = true;
+    this.cmd(["set_property", "vid", "no"]);
+  }
+
+  /** Spawn arguments in video mode: the SAME network / cache settings as the audio engine + a hidden, focus-less,
+   *  borderless picture window (placed by VideoOutput) with hardware decoding. */
+  private videoSpawnArgs(): string[] {
+    const v = this.video!;
+    return [
+      "--idle",
+      `--ytdl-format=${v.ytdlFormat}`,
+      "--cache=yes",
+      "--cache-secs=30",
+      "--demuxer-max-bytes=64MiB",
+      "--network-timeout=30",
+      "--hwdec=auto-safe",
+      "--framedrop=vo",
+      "--force-window=no",
+      "--geometry=16x9+-32000+-32000",
+      "--no-border",
+      "--ontop",
+      "--focus-on=never",
+      "--show-in-taskbar=no",
+      "--auto-window-resize=no",
+      "--keepaspect-window=no",
+      "--keepaspect=yes",
+      "--audio-display=no",
+      "--no-osc",
+      "--osd-level=0",
+      "--no-input-default-bindings",
+      "--input-vo-keyboard=no",
+      "--cursor-autohide=always",
+      `--title=${v.title}`,
+      `--input-ipc-server=${this.pipePath}`,
+      ...this.ytDlpArgFragment,
+    ];
   }
 
   /** Register a listener that fires on every MPV status change. */
@@ -220,7 +315,7 @@ export class MpvManager {
     //   YouTube freeze. Ignored for local files (only ytdl URLs use it).
     // - cache + generous network timeout so a slow/throttled stream buffers
     //   instead of stalling silently.
-    const mpvArgs = [
+    const mpvArgs = this.video ? this.videoSpawnArgs() : [
       "--no-video",
       "--idle",
       "--ytdl-format=bestaudio/best",
@@ -399,6 +494,15 @@ export class MpvManager {
       this.raw(JSON.stringify({ command: ["observe_property", 2, "time-pos"] }));
       this.raw(JSON.stringify({ command: ["observe_property", 3, "duration"] }));
       this.raw(JSON.stringify({ command: ["observe_property", 4, "volume"] }));
+      // Readiness signals (crossfade readiness only — they do not alter `status`).
+      this.raw(JSON.stringify({ command: ["observe_property", 5, "core-idle"] }));
+      this.raw(JSON.stringify({ command: ["observe_property", 6, "paused-for-cache"] }));
+      if (this.video) {
+        // P0 Video V1: picture present / dropped frames (event-driven, video mode only)
+        this.raw(JSON.stringify({ command: ["observe_property", 20, "video-params"] }));
+        this.raw(JSON.stringify({ command: ["observe_property", 21, "frame-drop-count"] }));
+        this.videoCb?.({ kind: "engine" }); // (re)connected — VideoOutput re-applies placement
+      }
 
       if (this.cmdQueue.length > 0) {
         console.log("[MpvManager]", this.pipePath, "IPC connected — flushing", this.cmdQueue.length, "queued command(s)");
@@ -532,8 +636,30 @@ export class MpvManager {
         case "time-pos":
           if (typeof data === "number") {
             this.st.position = Math.floor(data);
+            this.st.positionAt = Date.now();
+            if (this.lastTimePos !== null && data > this.lastTimePos) this.st.progressObserved = true;
+            this.lastTimePos = data;
             this.push();
           }
+          break;
+        case "core-idle":
+          if (typeof data === "boolean" && data !== this.st.coreIdle) {
+            this.st.coreIdle = data;
+            this.push();
+          }
+          break;
+        case "paused-for-cache":
+          if (typeof data === "boolean" && data !== this.st.pausedForCache) {
+            this.st.pausedForCache = data;
+            this.push();
+          }
+          if (this.video && data === true) this.videoCb?.({ kind: "stall" }); // P0 Video V1
+          break;
+        case "video-params":
+          if (this.video) this.videoCb?.({ kind: "picture", present: !!data && typeof data === "object" }); // P0 Video V1
+          break;
+        case "frame-drop-count":
+          if (this.video && typeof data === "number") this.videoCb?.({ kind: "drops", count: data }); // P0 Video V1
           break;
         case "duration":
           if (typeof data === "number") {
@@ -565,6 +691,10 @@ export class MpvManager {
       fileLog("INFO", "MPV_STARTFILE", { attemptId: this.st.attemptId, entryId: typeof entryId === "number" ? entryId : null });
       this.st.status = "playing";
       this.st.position = 0;
+      this.resetLoadProgress();
+      this.push();
+    } else if (ev === "file-loaded") {
+      this.st.fileLoaded = true;
       this.push();
     } else if (ev === "end-file") {
       const reason = msg["reason"] as string | undefined;
@@ -598,6 +728,14 @@ export class MpvManager {
     }
   }
 
+  /** A new load has produced no progress yet (readiness signals only; `status` untouched). */
+  private resetLoadProgress(): void {
+    this.lastTimePos = null;
+    this.st.progressObserved = false;
+    this.st.positionAt = 0;
+    this.st.fileLoaded = false;
+  }
+
   // ─── Command helpers ─────────────────────────────────────────────────────────
 
   private raw(json: string): void {
@@ -621,6 +759,19 @@ export class MpvManager {
   /** Load and immediately play a URL or local file path. `attemptId` binds this load to the renderer's
    *  playback attempt so late/anonymous MPV events for a superseded attempt can be ignored. */
   play(url: string, attemptId = 0): void {
+    this.loadInternal(url, attemptId, false);
+  }
+
+  /**
+   * P0 Gate 2c (owner-approved 2026-10-08): load PAUSED — the prepared NEXT track on the standby deck. MPV opens and
+   * buffers it at 0:00 without playing (silent); the orchestrator later hands it over and calls resume(). Same
+   * attempt binding / correlation as play(); the only difference is pause=true is set BEFORE the loadfile.
+   */
+  preloadPaused(url: string, attemptId = 0): void {
+    this.loadInternal(url, attemptId, true);
+  }
+
+  private loadInternal(url: string, attemptId: number, startPaused: boolean): void {
     const u = url.trim();
     if (!u) return;
     // Record the NEW attempt as PENDING only. It becomes event-facing (st.attemptId) on `start-file`
@@ -634,6 +785,7 @@ export class MpvManager {
     // the PREVIOUS track's position/duration — which would let a fresh attempt falsely look "confirmed".
     this.st.position = 0;
     this.st.duration = 0;
+    this.resetLoadProgress();
     if (!this.child) {
       this.st.lastError = "play(): mpv is not running (binary missing, process exiting, or watchdog restarting)";
       this.st.status = "idle";
@@ -641,7 +793,8 @@ export class MpvManager {
       console.error(PIPELINE, "play() rejected — no process", { pipe: this.pipePath });
       return;
     }
-    const { target, kind } = normalizeMpvLoadTarget(u);
+    // beta.22: our own /api/media URLs get the station media token here (identity for every other URL).
+    const { target, kind } = normalizeMpvLoadTarget(withStationMediaToken(u));
     if (!target) return;
     this.cmdQueue = [];
     // Tag THIS loadfile with a request_id so its reply (carrying playlist_entry_id) can be tied back
@@ -651,8 +804,15 @@ export class MpvManager {
     capAttemptMap(this.pendingLoadReqToAttempt);
     console.log(PIPELINE, "loadfile request", { pipe: this.pipePath, kind, reqId, attemptId, preview: redactMediaToken(target).slice(0, 160) });
     // DIAG (RC3 correlation, main-process → main.log): reqId/attemptId/kind only — never the url.
-    fileLog("INFO", "MPV_LOADFILE", { reqId, attemptId, kind });
+    fileLog("INFO", "MPV_LOADFILE", startPaused ? { reqId, attemptId, kind, paused: true } : { reqId, attemptId, kind });
+    if (startPaused) this.cmd(["set_property", "pause", true]); // P0 Gate 2c: in-order on the IPC socket, BEFORE the load
+    if (this.video && this.videoDroppedForFile) {
+      // P0 Video V1: the picture dropped for the PREVIOUS song returns with this new load (never mid-song)
+      this.videoDroppedForFile = false;
+      this.cmd(["set_property", "vid", "auto"]);
+    }
     this.raw(JSON.stringify({ command: ["loadfile", target, "replace"], request_id: reqId }));
+    if (startPaused) return; // prepared: stays paused (buffering) until resume()
     // A freshly loaded track MUST play — never inherit a stale `pause=true` from a
     // prior pause() on this deck. Without this, loadfile-while-paused loaded the
     // file but left it paused: position frozen at 0 while the cache filled, and
@@ -702,3 +862,10 @@ export class MpvManager {
     return { ...this.st };
   }
 }
+
+/** P0 Video V1: picture-side signals of a video-mode deck (event-driven). */
+export type MpvVideoSignal =
+  | { kind: "engine" }
+  | { kind: "picture"; present: boolean }
+  | { kind: "stall" }
+  | { kind: "drops"; count: number };

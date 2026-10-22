@@ -12,6 +12,7 @@ import {
   enforceCanAddWorkspaceMember,
 } from "./entitlement-limits";
 import { hashPassword } from "./password-utils";
+import { expandLegacyBranchEquivalents, getCanonicalLegacyBranchId, legacyBranchEquivalents } from "./branch-resolver";
 import { emitEvent, EVENT_TYPES } from "./analytics-boundary";
 import type { User, Tenant, TenantRole, BranchRole, AccessType } from "./user-types";
 
@@ -1105,7 +1106,16 @@ export async function isUserProtectedInWorkspace(params: {
 }
 
 export async function getTenantRole(userId: string, workspaceId?: string | null): Promise<TenantRole | null> {
-  const ws = workspaceId ?? (await getUserById(userId))?.tenantId;
+  // Gate 3B-1: an EXPLICIT workspace is authoritative — its membership role, or null (no primary-workspace fallback).
+  const explicitWs = (workspaceId ?? "").trim();
+  if (explicitWs) {
+    const membership = await prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId: explicitWs, userId } },
+    });
+    if (!membership || membership.status === "SUSPENDED") return null;
+    return prismaRoleToTenantRole(membership.role);
+  }
+  const ws = (await getUserById(userId))?.tenantId;
   if (ws) {
     const membership = await prisma.workspaceMember.findUnique({
       where: { workspaceId_userId: { workspaceId: ws, userId } },
@@ -1126,12 +1136,18 @@ export async function getAccessType(userId: string, workspaceId?: string | null)
   return role === "TENANT_OWNER" || role === "TENANT_ADMIN" ? "OWNER" : "BRANCH_USER";
 }
 
-export async function isOwner(userId: string): Promise<boolean> {
-  return (await getAccessType(userId)) === "OWNER";
+/** Gate 3B-1: the workspace is REQUIRED (the active session workspace) — never resolved from the primary one. */
+export async function isOwner(userId: string, workspaceId: string | null | undefined): Promise<boolean> {
+  const ws = (workspaceId ?? "").trim();
+  if (!ws) return false;
+  return (await getAccessType(userId, ws)) === "OWNER";
 }
 
-export async function isBranchUser(userId: string): Promise<boolean> {
-  return (await getAccessType(userId)) === "BRANCH_USER";
+/** Gate 3B-1: the workspace is REQUIRED (the active session workspace) — never resolved from the primary one. */
+export async function isBranchUser(userId: string, workspaceId: string | null | undefined): Promise<boolean> {
+  const ws = (workspaceId ?? "").trim();
+  if (!ws) return false;
+  return (await getAccessType(userId, ws)) === "BRANCH_USER";
 }
 
 export async function getAssignedBranchIds(userId: string, workspaceId?: string | null): Promise<string[]> {
@@ -1148,12 +1164,15 @@ export async function getAssignedBranchIds(userId: string, workspaceId?: string 
       select: { status: true },
     });
     if (membership && membership.status === "SUSPENDED") return [];
+    // Gate 3B-1: no membership in an explicit workspace → no branches (never the implicit "default").
+    if (!membership && (workspaceId ?? "").trim()) return [];
   }
   const assignments = await prisma.userBranchAssignment.findMany({
     where: ws ? { userId, workspaceId: ws } : { userId },
   });
   const ids = [...new Set(assignments.map((a) => a.branchId))];
-  return ids.length > 0 ? ids : [DEFAULT_BRANCH_ID];
+  // Gate 2A-1: legacy "default" ≡ the workspace's canonical branch (same workspace alias only) for authorization.
+  return expandLegacyBranchEquivalents(ws, ids.length > 0 ? ids : [DEFAULT_BRANCH_ID]);
 }
 
 export async function getBranchesForUser(userId: string, workspaceId?: string | null): Promise<string[]> {
@@ -1207,10 +1226,12 @@ export async function getBranchRole(
 ): Promise<BranchRole | null> {
   const normalized = (branchId ?? "").trim() || DEFAULT_BRANCH_ID;
   const ws = workspaceId ?? (await getUserById(userId))?.tenantId;
+  // Gate 2A-1: an assignment stored under the legacy key or its canonical alias (same workspace) both match.
+  const candidates = legacyBranchEquivalents(normalized, await getCanonicalLegacyBranchId(ws));
   const assignment = await prisma.userBranchAssignment.findFirst({
     where: ws
-      ? { userId, branchId: normalized, workspaceId: ws }
-      : { userId, branchId: normalized },
+      ? { userId, branchId: { in: candidates }, workspaceId: ws }
+      : { userId, branchId: { in: candidates } },
   });
   return (assignment?.role as BranchRole) ?? null;
 }

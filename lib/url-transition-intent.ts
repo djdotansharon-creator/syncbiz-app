@@ -1,0 +1,260 @@
+/**
+ * P0 Gate 1b + 1c (2026-10-07) — ONE source-transition intent at a time, for EVERY controller (PURE, no I/O).
+ *
+ * Used by BOTH shared controller layers — lib/device-player-context.tsx (station renderer, web app, phone source rows)
+ * and lib/station-controller-context.tsx (phone remote / player) — so every UI gets the same protection and feedback.
+ * MAIN adds defence in depth (Gate 1a: duplicate PLAY_SOURCE / PLAY-while-pending are ignored there too).
+ *
+ * LOCKED behaviour while URL transition X is pending (phase "loading" / "trying-next"):
+ *   same target again → ignored · PLAY → ignored (never restarts the pending load) · NEXT / PREV → ignored (one
+ *   navigation intent; no 10-click = 10-track skip) · a DIFFERENT explicit selection → accepted (newest wins) ·
+ *   STOP / PAUSE → always accepted · LOCAL selection → accepted (clears the URL intent via the existing LOCAL path).
+ *
+ * The pending state follows the ACTUAL attempt, never a UI timer:
+ *   station (sees MAIN attempt ids via desktop IPC): bound = the first new MAIN attempt (> 1e9) after the send;
+ *     confirmed = that attempt playing with an ADVANCING position; failed = that attempt idle + lastError, engine up.
+ *   remote (mirrored STATE_UPDATE incl. mpvAttemptId — Gate 1d): bound = the first mirrored attempt id DIFFERENT from
+ *     the one mirrored when the command was sent; if that attempt plays ANOTHER target (another controller's
+ *     selection) → "superseded" (cleared at once). confirmed = the bound attempt playing with an advancing position;
+ *     failed = the bound attempt idle + mpvEngineError. A same-item re-selection can never confirm on the OLD attempt.
+ *     (No mirrored attempt id — an older MAIN — → legacy source/track binding.)
+ *   Either mode: once bound, a NEWER attempt replacing ours → "superseded" (cleared at once, never stuck Loading).
+ *   Safety backstops only (broken connectivity): station unbound > 15 s → "not sent"; remote unbound > 15 s →
+ *     cleared; remote bound but unresolved > 150 s → cleared (MAIN's own load timeouts normally end it first).
+ * 1b (station only — the controller that OWNS the URL session): a failed bound attempt (any position, incl. pos 0) or a
+ *   confirmed attempt that later fails steps the session forward ONCE; at most MAX_CONSECUTIVE_FAILURES in a row
+ *   (any confirmed attempt resets the count); no next item / exhausted → message only, never a LOCAL fallback.
+ */
+export const MAIN_ATTEMPT_BASE = 1_000_000_000;
+export const MAX_CONSECUTIVE_FAILURES = 3;
+export const STATION_UNBOUND_TIMEOUT_MS = 15_000;
+export const REMOTE_UNCONFIRMED_TIMEOUT_MS = 150_000;
+export const MESSAGE_MS = 6_000;
+
+export type TransitionOrigin = "select" | "next" | "prev" | "auto-eof" | "auto-failure";
+export type TransitionPhase = "loading" | "trying-next" | "confirmed" | "failed-kept" | "failed-idle" | "not-sent";
+
+export type UrlTransition = {
+  origin: TransitionOrigin;
+  /** `${sourceId}#${trackIndex}` of the requested item (null = unknown). */
+  targetKey: string | null;
+  phase: TransitionPhase;
+  startedAt: number;
+  /** Station: MAIN attempt id current when the command was sent (the new attempt must differ). Remote: null. */
+  priorAttemptId: number | null;
+  boundAttemptId: number | null;
+  bound: boolean;
+  firstPos: number | null;
+  /** Something was audibly playing when the transition began (drives the failure message). */
+  audibleAtStart: boolean;
+  consecutiveFailures: number;
+  messageUntil: number | null;
+};
+
+export type TransitionObservation = {
+  /** P0 Gate 1f: MAIN's read-only readiness of the CURRENT attempt (mpvAttemptPending). false = ready (standby:
+   *  XFADE_RAMP_START; cold: first real progress). null / absent = older MAIN → legacy advancing-position rule. */
+  pending?: boolean | null;
+  /** "station" = desktop IPC (attempt ids, no mirrored source); "remote" = mirrored STATE_UPDATE. */
+  mode?: "station" | "remote";
+  /** MAIN attempt id (station IPC, or mirrored mpvAttemptId); null = unknown (older MAIN → legacy remote binding). */
+  attemptId: number | null;
+  sourceId: string | null;
+  trackIndex: number | null;
+  status: string;
+  position: number;
+  error: string | null;
+  engineReady: boolean;
+};
+
+export type UserCommand =
+  | { kind: "select"; targetKey: string | null }
+  | { kind: "play" }
+  | { kind: "nav" }
+  | { kind: "pause" }
+  | { kind: "stop" }
+  | { kind: "select-local" };
+
+export function targetKeyOf(sourceId: string | null | undefined, trackIndex: number | null | undefined): string | null {
+  return sourceId ? `${sourceId}#${typeof trackIndex === "number" && trackIndex >= 0 ? trackIndex : 0}` : null;
+}
+
+/** A transition that is still unproven and therefore blocks duplicate / competing user intents. */
+export function isBlocking(t: UrlTransition | null | undefined): boolean {
+  return !!t && (t.phase === "loading" || t.phase === "trying-next");
+}
+
+/** Decide one user-originated command against the current transition. */
+export function decideUserCommand(t: UrlTransition | null, cmd: UserCommand): "accept" | "ignore-duplicate" | "ignore-pending" {
+  if (cmd.kind === "stop" || cmd.kind === "pause" || cmd.kind === "select-local") return "accept";
+  if (!isBlocking(t)) return "accept";
+  if (cmd.kind === "select") return cmd.targetKey !== null && cmd.targetKey === t!.targetKey ? "ignore-duplicate" : "accept";
+  return "ignore-pending"; // play / nav while a transition is pending
+}
+
+export function beginTransition(args: {
+  origin: TransitionOrigin;
+  targetKey: string | null;
+  now: number;
+  priorAttemptId: number | null;
+  audibleAtStart: boolean;
+  consecutiveFailures?: number;
+}): UrlTransition {
+  return {
+    origin: args.origin,
+    targetKey: args.targetKey,
+    phase: args.origin === "auto-failure" ? "trying-next" : "loading",
+    startedAt: args.now,
+    priorAttemptId: args.priorAttemptId,
+    boundAttemptId: null,
+    bound: false,
+    firstPos: null,
+    audibleAtStart: args.audibleAtStart,
+    consecutiveFailures: args.consecutiveFailures ?? 0,
+    messageUntil: null,
+  };
+}
+
+/** Terminal visible failure (message for MESSAGE_MS, then cleared by `tickTransition`). */
+export function failTransition(t: UrlTransition, now: number): UrlTransition {
+  return { ...t, phase: t.audibleAtStart ? "failed-kept" : "failed-idle", messageUntil: now + MESSAGE_MS };
+}
+
+export type ObserveEvent = "none" | "bound" | "confirmed" | "failed" | "superseded";
+
+/** PURE: fold one observation into the transition. */
+export function observeTransition(t: UrlTransition | null, o: TransitionObservation): { t: UrlTransition | null; event: ObserveEvent } {
+  if (!t || t.phase === "failed-kept" || t.phase === "failed-idle" || t.phase === "not-sent") return { t, event: "none" };
+  const station = (o.mode ?? (o.attemptId !== null ? "station" : "remote")) === "station";
+  const byAttempt = o.attemptId !== null && o.attemptId > 0;
+  const obsKey = targetKeyOf(o.sourceId, o.trackIndex);
+  let next = t;
+  let event: ObserveEvent = "none";
+  // ── binding ──
+  if (!next.bound) {
+    if (station) {
+      const id = o.attemptId as number;
+      if (id > MAIN_ATTEMPT_BASE && id !== next.priorAttemptId && (next.priorAttemptId === null || id > next.priorAttemptId)) {
+        next = { ...next, bound: true, boundAttemptId: id };
+        event = "bound";
+      }
+    } else if (byAttempt) {
+      if (o.attemptId !== next.priorAttemptId) {
+        // a NEW attempt: ours, unless it plays another target (another controller's selection replaced our request)
+        if (next.targetKey !== null && obsKey !== next.targetKey) return { t: null, event: "superseded" };
+        next = { ...next, bound: true, boundAttemptId: o.attemptId };
+        event = "bound";
+      }
+    } else if (next.targetKey !== null && obsKey === next.targetKey) {
+      next = { ...next, bound: true };
+      event = "bound";
+    }
+    if (!next.bound) return { t: next, event: "none" };
+  }
+  // ── the bound attempt only; a newer attempt replacing ours ends the transition at once ──
+  if (next.boundAttemptId !== null) {
+    if (o.attemptId !== null && o.attemptId > 0 && o.attemptId !== next.boundAttemptId) return { t: null, event: "superseded" };
+    if (o.attemptId !== next.boundAttemptId) return { t: next, event };
+  } else if (obsKey !== next.targetKey) return { t: next, event };
+  if (o.status === "idle" && o.error && o.engineReady !== false) return { t: next, event: "failed" };
+  if (next.phase === "confirmed") return { t: next, event };
+  if (o.status === "playing" && !o.error) {
+    // P0 Gate 1f: Loading ends at MAIN's incoming READINESS (standby → XFADE_RAMP_START; cold → first real progress).
+    if (typeof o.pending === "boolean") {
+      return o.pending ? { t: next, event } : { t: { ...next, phase: "confirmed", consecutiveFailures: 0 }, event: "confirmed" };
+    }
+    if (next.firstPos === null) return { t: { ...next, firstPos: o.position }, event };
+    if (o.position > next.firstPos) return { t: { ...next, phase: "confirmed", consecutiveFailures: 0 }, event: "confirmed" };
+  }
+  return { t: next, event };
+}
+
+/** PURE: time-based ends (safety, not UI delays) + message expiry. */
+export function tickTransition(t: UrlTransition | null, now: number, isStation: boolean): UrlTransition | null {
+  if (!t) return null;
+  if (t.messageUntil !== null) return now >= t.messageUntil ? null : t;
+  if (!isBlocking(t)) return t;
+  if (isStation && !t.bound && now - t.startedAt > STATION_UNBOUND_TIMEOUT_MS) return { ...t, phase: "not-sent", messageUntil: now + MESSAGE_MS };
+  if (!isStation && !t.bound && now - t.startedAt > STATION_UNBOUND_TIMEOUT_MS) return null;
+  if (!isStation && now - t.startedAt > REMOTE_UNCONFIRMED_TIMEOUT_MS) return null;
+  return t;
+}
+
+/**
+ * P0 Gate 1f: the transition keeps the previously AUDIBLE item on screen as "now playing" — while loading, and during
+ * the "Couldn't play — current music kept" message (MAIN restores its session metadata; Gate 1f MAIN).
+ */
+export function holdsAudible(t: UrlTransition | null | undefined): boolean {
+  return isBlocking(t) || t?.phase === "failed-kept";
+}
+
+type SessionLike = {
+  currentSource?: { id?: string | null } | null;
+  currentTrack?: { title?: string | null } | null;
+  currentTrackIndex?: number | null;
+};
+/** Session / now-playing fields shown from the held (audible) state; everything else (volume, modes, Play Next …) is live. */
+const HELD_KEYS = [
+  "status", "currentTrack", "currentSource", "currentTrackIndex", "sessionTracks", "nextSessionTrack", "queue", "queueIndex",
+  "sessionTitle", "sessionPlaylistId", "position", "positionAt", "duration",
+] as const;
+
+export type PendingTrack = { index: number | null; title: string | null; sourceId: string | null; sameSession: boolean };
+
+function shellOf(id: string | null | undefined): string | null {
+  const s = id ?? "";
+  const i = s.indexOf(":track:");
+  return i > 0 ? s.slice(0, i) : s || null;
+}
+
+function pendingFrom(live: SessionLike, held: SessionLike | null, t: UrlTransition): PendingTrack {
+  const liveKey = targetKeyOf(live.currentSource?.id, live.currentTrackIndex);
+  const heldKey = held ? targetKeyOf(held.currentSource?.id, held.currentTrackIndex) : null;
+  if (liveKey && liveKey !== heldKey) {
+    // MAIN already published the selection (metadata-first): that is the pending item, NOT the playing one.
+    return {
+      index: typeof live.currentTrackIndex === "number" ? live.currentTrackIndex : null,
+      title: live.currentTrack?.title ?? null,
+      sourceId: live.currentSource?.id ?? null,
+      sameSession: !!held && shellOf(live.currentSource?.id) === shellOf(held.currentSource?.id),
+    };
+  }
+  const k = t.targetKey;
+  const cut = k ? k.lastIndexOf("#") : -1;
+  const idx = k && cut > 0 ? Number(k.slice(cut + 1)) : NaN;
+  const sid = k && cut > 0 ? k.slice(0, cut) : null;
+  return { index: Number.isFinite(idx) ? idx : null, title: null, sourceId: sid, sameSession: !!held && !!sid && shellOf(sid) === shellOf(held.currentSource?.id) };
+}
+
+/**
+ * P0 Gate 1f — ONE display rule for every controller surface (player, queue, phone, badges):
+ *  - shown: the item to present as NOW PLAYING — the held audible state while the transition holds it, else live;
+ *  - pending: the item being loaded (never presented as playing) while the transition is blocking;
+ *  - loading: true until MAIN reports the new attempt ready (incoming readiness / XFADE_RAMP_START).
+ */
+export function displayPlaybackState<S extends SessionLike>(
+  live: S | null | undefined,
+  held: S | null | undefined,
+  t: UrlTransition | null | undefined,
+): { shown: S | null; pending: PendingTrack | null; loading: boolean } {
+  const liveS = live ?? null;
+  const loading = isBlocking(t);
+  if (!liveS) return { shown: null, pending: null, loading };
+  if (!holdsAudible(t) || !held) return { shown: liveS, pending: loading ? pendingFrom(liveS, null, t!) : null, loading };
+  const shown = { ...liveS } as S;
+  for (const k of HELD_KEYS) (shown as Record<string, unknown>)[k] = (held as Record<string, unknown>)[k];
+  return { shown, pending: loading ? pendingFrom(liveS, held, t!) : null, loading };
+}
+
+/** User-facing status line (null = show the normal player status). */
+export function transitionLabel(t: UrlTransition | null | undefined): string | null {
+  if (!t) return null;
+  switch (t.phase) {
+    case "loading": return "Loading…";
+    case "trying-next": return "Couldn't play — trying next…";
+    case "failed-kept": return "Couldn't play — current music kept";
+    case "failed-idle": return "Couldn't play this URL";
+    case "not-sent": return "Couldn't reach the store player";
+    default: return null;
+  }
+}

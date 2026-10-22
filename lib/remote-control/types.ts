@@ -16,6 +16,8 @@ export type RemoteCommand =
   | "LOAD_PLAYLIST"
   | "PLAY_SOURCE"
   | "QUEUE_NEXT"
+  // P0 Drop Next: remove one item (by its queue id) from MAIN's Play Next queue.
+  | "QUEUE_REMOVE"
   | "SEEK"
   | "SET_VOLUME"
   | "SET_SHUFFLE"
@@ -24,7 +26,9 @@ export type RemoteCommand =
   | "SET_REPEAT_MODE"
   // On-air announcement/jingle: duck current playback, play the given audio once, restore.
   // Executed on the branch MASTER via the existing desktop bridge (mpvPlayInterrupt).
-  | "PLAY_INTERRUPT";
+  | "PLAY_INTERRUPT"
+  // P0 Gate 1e: absolute jump to session item N — MAIN relays it to the station renderer (the URL session owner).
+  | "JUMP_SESSION_INDEX";
 
 export type ClientRole = "device" | "controller" | "owner_global";
 
@@ -63,6 +67,8 @@ export type StationPlaybackState = {
     editHref?: string | null;
     /** Set when playing a persisted playlist — drives CONTROL playlist-kind badge without full `UnifiedSource`. */
     playlistOriginBadge?: "dj_creator" | "ready" | "scheduled" | "my" | "branch";
+    /** Provider type of the MAIN session source (already on the wire from desktop MAIN; "local" = LOCAL session). */
+    sourceType?: string;
   } | null;
   currentTrackIndex: number;
   /** Active playlist session rows (same data MASTER Live Queue uses). */
@@ -98,6 +104,12 @@ export type StationPlaybackState = {
   mpvEngineReady?: boolean;
   /** Optional: last MPV/engine error string from branch desktop (not optimistic). */
   mpvEngineError?: string | null;
+  /** P0 Gate 1d: the CURRENT MAIN music attempt id (a number — never a path / URL / token). Lets remote controllers
+   *  bind a pending transition to the real attempt (requested / confirmed / failed / replaced). */
+  mpvAttemptId?: number;
+  /** P0 Gate 1f: the CURRENT MAIN music attempt is still unproven (loading / standby before XFADE_RAMP_START / cold
+   *  start before first real progress). false = ready → controllers end "Loading…" (read-only status, number-free). */
+  mpvAttemptPending?: boolean;
 };
 
 /** Minimal source payload for PLAY_SOURCE command. */
@@ -146,6 +158,13 @@ export type BranchSummary = {
   masterDeviceId: string;
   connectedAt: string;
   hasDevices: boolean;
+  /** Control Room (info only): what kind of device is the branch's playing station — from its registration purpose. */
+  deviceType?: "computer" | "streamer" | "browser" | "unknown";
+  /** Control Room (info only): the branch's canonical id (the DB Branch.id) when the station registered with a legacy
+   *  alias (e.g. "default"). branchId stays the raw id used by COMMAND routing — unchanged. */
+  canonicalBranchId?: string;
+  /** Control Room (info only): devices connected to the branch room — role + kind only (no ids). */
+  devices?: Array<{ role: "playing" | "control"; type: "computer" | "streamer" | "browser" | "phone_tablet" | "remote" | "unknown" }>;
 };
 
 /** Guest recommendation payload (minimal, for transport) */
@@ -183,6 +202,8 @@ export type ClientMessage =
   | {
       type: "COMMAND";
       commandId?: string;
+      /** Control Room: ask for a COMMAND_DELIVERY (owner_global only). Without it the server behaves exactly as before. */
+      requestId?: string;
       targetDeviceId?: string;
       targetBranchId?: string;
       command: RemoteCommand;
@@ -253,7 +274,7 @@ export type ServerMessage =
       executedAt?: number;
       failedAt?: number;
     }
-  | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string; secondaryDesktop?: boolean }
+  | { type: "SET_DEVICE_MODE"; mode: DeviceMode; masterDeviceId?: string; secondaryDesktop?: boolean; designated?: boolean }
   | { type: "GUEST_RECOMMEND_RECEIVED"; recommendation: GuestRecommendationPayload }
   | { type: "GUEST_RECOMMEND_RESULT"; recommendationId: string; status: "approved" | "rejected" }
   | { type: "GUEST_RECOMMEND_SENT"; recommendationId: string }
@@ -265,4 +286,7 @@ export type ServerMessage =
       action?: "created" | "updated" | "deleted";
       entityId?: string;
     }
-  | { type: "ERROR"; message: string };
+  | { type: "ERROR"; message: string }
+  /** Control Room broadcast: per-command delivery result for an owner COMMAND that carried `requestId` (info only).
+   *  delivered = the command was handed to the branch's station socket — NOT that it played. */
+  | { type: "COMMAND_DELIVERY"; requestId: string; targetBranchId: string; delivered: boolean; reason?: "not_authorized" | "no_station" };

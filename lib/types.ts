@@ -73,6 +73,16 @@ export type Branch = {
   status: BranchStatus;
   devicesOnline: number;
   devicesTotal: number;
+  /** Stable customer branch number (Control Room identifier, e.g. "T001"); null when not set. */
+  locationCode?: string | null;
+  /** Control Room: real address + internal coordinates from geocoding (null = not geocoded). */
+  street?: string;
+  houseNumber?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  /** Control Room: the Google place picked for the branch (verified server-side) + its formatted address. */
+  formattedAddress?: string | null;
+  googlePlaceId?: string | null;
 };
 
 export type Device = {

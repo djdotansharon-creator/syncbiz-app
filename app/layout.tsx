@@ -1,5 +1,6 @@
+import { LOCALES } from "@/lib/locales";
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Heebo } from "next/font/google";
 import "./globals.css";
 import "flag-icons/css/flag-icons.min.css";
 import { getLocale } from "@/lib/locale-server";
@@ -14,19 +15,29 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Hebrew UI face (owner 2026-10-20: "not a good font in Hebrew"): Arial's Hebrew is narrow and heavy; Heebo is clean and even. Used in the player's side panel in Hebrew (see `(rtl)` block, globals.css).
+const heebo = Heebo({
+  variable: "--font-heebo",
+  subsets: ["hebrew", "latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "SyncBiz – Media Control & Scheduling",
+  title: "VONO",
   description:
-    "Controller and scheduler for business playback. Sends commands to customer-owned endpoint devices. SyncBiz does not store or host media.",
+    "Controller and scheduler for business playback. Sends commands to customer-owned endpoint devices. VONO does not store or host media.",
   // PWA: installable + registers as a Web Share Target (see public/manifest.webmanifest).
   manifest: "/manifest.webmanifest",
-  applicationName: "SyncBiz",
+  applicationName: "VONO",
   appleWebApp: {
     capable: true,
-    title: "SyncBiz",
+    title: "VONO",
     statusBarStyle: "black-translucent",
   },
+  // VONO (owner 2026-10-13): favicon.ico (16/32/48) comes from app/favicon.ico; a crisp PNG for high-DPI tabs / shortcuts
   icons: {
+    icon: [{ url: "/icons/icon-192.png", type: "image/png", sizes: "192x192" }],
     apple: "/icons/apple-touch-icon.png",
   },
 };
@@ -43,14 +54,15 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const locale = await getLocale();
-  // Layout is always LTR — only the text localizes (owner directive). No RTL flip.
-  const dir = "ltr";
+  // Owner 2026-10-20: in Hebrew (and Arabic) the WHOLE interface mirrors (right-to-left). The server renders the right direction from the locale cookie, so there is no
+  // left-to-right flash. Media controls (transport, timeline, volume) stay left-to-right by CSS (the `(rtl)` block in globals.css) — like every media app.
+  const dir = LOCALES.find((l) => l.code === locale)?.rtl ? "rtl" : "ltr";
   const lang = locale;
 
   return (
     <html lang={lang} dir={dir}>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-950 text-slate-50`}
+        className={`${geistSans.variable} ${geistMono.variable} ${heebo.variable} antialiased bg-slate-950 text-slate-50`}
       >
         {children}
       </body>

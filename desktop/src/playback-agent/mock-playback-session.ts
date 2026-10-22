@@ -8,6 +8,13 @@ import type { MpvStatus } from "../main/mpv-manager";
 
 const MVP_COMMANDS = new Set(["PLAY", "PAUSE", "STOP", "SET_VOLUME"]);
 
+/** P0 Gate 1f: the published-session metadata MAIN can snapshot / restore. */
+export type StationSessionMeta = Pick<StationPlaybackState, "currentSource" | "currentTrack" | "currentTrackIndex" | "queue" | "queueIndex"> & {
+  sessionTracks: NonNullable<StationPlaybackState["sessionTracks"]> | null;
+  sessionTitle: string | null;
+  sessionPlaylistId: string | null;
+};
+
 export class MockPlaybackSession {
   private state: StationPlaybackState;
 
@@ -42,8 +49,97 @@ export class MockPlaybackSession {
     this.state.positionAt = now;
   }
 
+  /**
+   * Populate the authoritative SESSION METADATA from an incoming PLAY_SOURCE payload so the MAIN can
+   * publish it in STATE_UPDATE (title / artwork / queue / index) to CONTROL mirrors. METADATA ONLY:
+   * this NEVER touches status/position/duration/volume (MPV stays the single source of playback truth
+   * via syncMpvStatus), so it can never initiate or alter playback. Safe to call on every PLAY_SOURCE.
+   */
+  setStationSession(input: {
+    id: string;
+    title: string;
+    cover: string | null;
+    origin?: "playlist" | "radio" | "source";
+    sourceType?: string;
+    url?: string;
+    trackIndex?: number;
+    sessionTitle?: string | null;
+    sessionPlaylistId?: string | null;
+    sessionTracks?: Array<{ id: string; title: string; cover: string | null; durationSeconds?: number }>;
+  }): void {
+    const st = typeof input.sourceType === "string" && input.sourceType.trim() ? input.sourceType.trim() : undefined;
+    const u = typeof input.url === "string" && input.url.trim() ? input.url.trim() : undefined;
+    this.state.currentSource = {
+      id: input.id.trim(),
+      title: input.title.trim() || "Untitled",
+      cover: input.cover,
+      ...(input.origin ? { origin: input.origin } : {}),
+      ...(st ? { sourceType: st } : {}),
+      ...(u ? { url: u } : {}),
+    };
+    const tracks = Array.isArray(input.sessionTracks) ? input.sessionTracks : [];
+    const idx = typeof input.trackIndex === "number" && Number.isFinite(input.trackIndex)
+      ? Math.max(0, Math.min(Math.floor(input.trackIndex), Math.max(0, tracks.length - 1)))
+      : 0;
+    const cur = tracks[idx];
+    this.state.currentTrack = cur ? { title: cur.title, cover: cur.cover } : { title: input.title.trim() || "Untitled", cover: input.cover };
+    this.state.currentTrackIndex = idx;
+    this.state.queueIndex = idx;
+    this.state.queue = tracks.map((t) => ({ id: t.id, title: t.title, cover: t.cover }));
+    this.state.sessionTracks = tracks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      cover: t.cover,
+      ...(typeof t.durationSeconds === "number" ? { durationSeconds: t.durationSeconds } : {}),
+    }));
+    this.state.sessionTitle = typeof input.sessionTitle === "string" ? input.sessionTitle : (input.title.trim() || null);
+    this.state.sessionPlaylistId = typeof input.sessionPlaylistId === "string" ? input.sessionPlaylistId : null;
+    // NOTE: status/position/duration/volume intentionally untouched — MPV truth only.
+  }
+
   getState(): StationPlaybackState {
     return this.state;
+  }
+
+  /** P0 Gate 1f: METADATA-only snapshot of the published session (source / track / queue / index / session rows). */
+  captureSession(): StationSessionMeta {
+    const s = this.state;
+    return JSON.parse(JSON.stringify({
+      currentSource: s.currentSource, currentTrack: s.currentTrack, currentTrackIndex: s.currentTrackIndex,
+      queue: s.queue, queueIndex: s.queueIndex, sessionTracks: s.sessionTracks ?? null,
+      sessionTitle: s.sessionTitle ?? null, sessionPlaylistId: s.sessionPlaylistId ?? null,
+    })) as StationSessionMeta;
+  }
+
+  /** P0 Gate 1f: put a captured session back (metadata only — never status / position / volume: MPV truth). */
+  restoreSession(m: StationSessionMeta): void {
+    const c = JSON.parse(JSON.stringify(m)) as StationSessionMeta;
+    this.state.currentSource = c.currentSource;
+    this.state.currentTrack = c.currentTrack;
+    this.state.currentTrackIndex = c.currentTrackIndex;
+    this.state.queue = c.queue;
+    this.state.queueIndex = c.queueIndex;
+    if (c.sessionTracks) this.state.sessionTracks = c.sessionTracks; else delete this.state.sessionTracks;
+    this.state.sessionTitle = c.sessionTitle;
+    this.state.sessionPlaylistId = c.sessionPlaylistId;
+  }
+
+  /** P0 Gate 1f: mirror MAIN's read-only attempt readiness (orchestrator.isMusicAttemptPending()). */
+  /** P0 Drop Next: publish MAIN's Play Next queue (metadata only). */
+  setPlayNextQueue(items: Array<{ id: string; title: string; cover: string | null }>): void {
+    this.state.playNextQueue = items;
+  }
+
+  /** P0 Drop Next: a queued item is now playing — it is now playing; the playlist rows stay, none of them is current. */
+  setQueuedNowPlaying(it: { id: string; title: string; cover: string | null; url: string }): void {
+    this.state.currentSource = { id: it.id, title: it.title.trim() || "Untitled", cover: it.cover, origin: "source", url: it.url };
+    this.state.currentTrack = { title: it.title.trim() || "Untitled", cover: it.cover };
+    this.state.currentTrackIndex = -1;
+    this.state.queueIndex = -1;
+  }
+
+  setAttemptPending(pending: boolean): void {
+    this.state.mpvAttemptPending = pending;
   }
 
   get status(): StationPlaybackState["status"] {
@@ -70,6 +166,7 @@ export class MockPlaybackSession {
     this.state.positionAt = Date.now();
     this.state.mpvEngineReady = mpv.engineReady;
     this.state.mpvEngineError = mpv.lastError ?? null;
+    if (typeof mpv.attemptId === "number") this.state.mpvAttemptId = mpv.attemptId; // P0 Gate 1d mirror (number only)
   }
 
   /**

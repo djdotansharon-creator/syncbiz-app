@@ -122,7 +122,10 @@ const OLD_PLAYING = (attemptId: number) => ({ status: "playing", position: 50, d
     priv.xfadeRampId === null && priv.xfadePending !== null && priv.xfadeStandbySawPlaying === false,
     `ramp=${priv.xfadeRampId} pending=${priv.xfadePending !== null} sawPlaying=${priv.xfadeStandbySawPlaying}`);
   // G: correctly-correlated standby status (id 200, playing+progress) — ramp is now allowed.
-  priv.onMusicDeckStatus("B", { ...OLD_PLAYING(200), position: 5, duration: 120 });
+  // Updated 2026-10-07 (P0 crossfade readiness): a STREAM incoming deck needs REAL readiness evidence
+  // (real time-pos progress, not core-idle, not paused-for-cache) — duration alone no longer qualifies. The
+  // invariant under test (a CORRELATED event may start the ramp; an OLD-id one may not — see F) is unchanged.
+  priv.onMusicDeckStatus("B", { ...OLD_PLAYING(200), position: 5, duration: 120, coreIdle: false, pausedForCache: false, progressObserved: true });
   assert("G crossfade: correlated standby event ⇒ ramp starts", priv.xfadeRampId !== null, `ramp=${priv.xfadeRampId !== null}`);
   o.kill();
 }

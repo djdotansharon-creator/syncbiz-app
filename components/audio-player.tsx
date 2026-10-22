@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource, type PlaybackStatus } from "@/lib/playback-provider";
+import { rendererOwnsSnapshot } from "@/lib/playback-ownership";
+import { transitionLabel } from "@/lib/url-transition-intent";
 import { shouldAdoptLiveMpv } from "@/lib/live-mpv-adopt";
-import { shouldFreezeSelfHeal, nextFreezeBaseline, nextStartupBaseline, isEnginePaused } from "@/lib/desktop-freeze-self-heal";
+import { shouldFreezeSelfHeal, nextFreezeBaseline, nextStartupBaseline, isEnginePaused, decideLocalStartupStall } from "@/lib/desktop-freeze-self-heal";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { computeLivePosition } from "@/lib/remote-control/live-position";
 import { isPlayNextSourceId } from "@/lib/play-next";
@@ -49,10 +51,14 @@ import {
   type YTPlayerAPI,
 } from "@/lib/yt-player-utils";
 import { PlayerDeckTransportSurface } from "@/components/player-surface/player-deck-transport-surface";
-import { PlayerVerticalVolume } from "@/components/player-surface/player-vertical-volume";
+/* 2026-10-14 (owner): horizontal Apple-Music-like volume; `PlayerVerticalVolume` stays in the tree. */
+import { PlayerVolumePill } from "@/components/player-surface/player-volume-pill";
 import { DesktopVideoDock } from "@/components/player-surface/desktop-video-dock";
 import { DesktopPlayerBackground } from "@/components/player-surface/desktop-player-background";
-import { DesktopBackgroundModeToggle } from "@/components/player-surface/desktop-background-mode-toggle";
+import { AmbientVideoBackground } from "@/components/player-surface/ambient-video-background";
+import { DesktopBackgroundModeToggle, MpvVideoToggle } from "@/components/player-surface/desktop-background-mode-toggle";
+import { MpvVideoSurface } from "@/components/player-surface/mpv-video-surface";
+import { useMpvVideoOutput } from "@/lib/mpv-video-output";
 import { useDesktopBackgroundMode } from "@/lib/desktop-background-mode";
 import { DesktopPlaybackDiagnostic } from "@/components/desktop-playback-diagnostic";
 import { reportPlaybackIncident, hostOnly, classifySource } from "@/lib/playback-telemetry-client";
@@ -72,6 +78,23 @@ import {
   setIOSNeedsTapToResume,
 } from "@/lib/ios-audio-unlock";
 import { isValidLocalFilePlaybackPath } from "@/lib/url-validation";
+
+/** Deck mirror flag helpers (display-only). */
+function readDeckMirrorFlag(): boolean {
+  try {
+    return window.localStorage.getItem("syncbiz:deckMirror") !== "off";
+  } catch {
+    return true;
+  }
+}
+function subscribeDeckMirrorFlag(cb: () => void): () => void {
+  window.addEventListener("storage", cb);
+  window.addEventListener("syncbiz:deck-mirror-change", cb);
+  return () => {
+    window.removeEventListener("storage", cb);
+    window.removeEventListener("syncbiz:deck-mirror-change", cb);
+  };
+}
 
 /** Crossfade runtime diagnostics – key transitions only, no 500ms spam */
 function xfadeLog(phase: string, data?: Record<string, unknown>) {
@@ -155,6 +178,33 @@ import {
   resetLocalPlaybackTime,
 } from "@/lib/playback-time-store";
 import { getMixDuration, getAutoMix, setAutoMix as persistAutoMix, onMixDurationChanged, onAutoMixChanged } from "@/lib/mix-preferences";
+import { RiseText, textDir } from "@/components/rise-text";
+
+/* 2026-10-15 (owner's rule): a track change — manual or natural — crosses over for a few seconds (the mix
+   length), and the song that plays KEEPS PLAYING until the next one really plays (see
+   `waitForYtReallyPlaying`); only then does the crossfade begin. A 0.8s manual fade was tried on
+   2026-10-14 and rejected ("you switch immediately"). */
+
+/** Resolves once the player is PLAYING with its clock actually moving — buffering does not count. */
+async function waitForYtReallyPlaying(
+  player: unknown,
+  opts: { timeoutMs: number; isAborted: () => boolean },
+): Promise<boolean> {
+  const deadline = Date.now() + opts.timeoutMs;
+  let lastT = -1;
+  while (Date.now() < deadline) {
+    if (opts.isAborted()) return false;
+    if (isYtPlayerReady(player) && safeGetPlayerState(player) === 1) {
+      const t = safeGetCurrentTime(player);
+      if (lastT >= 0 && Number.isFinite(t) && t > lastT + 0.05) return true; /* the clock moved → sound is running */
+      if (Number.isFinite(t)) lastT = t;
+    } else {
+      lastT = -1;
+    }
+    await new Promise<void>((r) => setTimeout(r, 60));
+  }
+  return isYtPlayerReady(player) && safeGetPlayerState(player) === 1;
+}
 import { redactMediaToken } from "@/lib/media/media-session";
 import {
   PRELOAD_LEAD_SEC,
@@ -472,6 +522,24 @@ const STREAM_STARTUP_TIMEOUT_MS = 30000; // grace per startup attempt before a b
 const STREAM_STARTUP_MAX_RETRIES = 1; // 1 retry of the SAME item → worst-case ~60s (30s + 30s) before SKIP_FORWARD (never-stop)
 const STREAM_MIN_PROGRESS_ADVANCES = 2; // real position advances required to enter "playing"
 
+/** Does a one-line text run out of room? (the hero's title / artist / original title end in a fog instead of "…" — globals.css kx14). Re-checked when `dep` changes and when the line is resized. */
+function useRunsOut(ref: React.RefObject<HTMLElement | null>, dep: unknown): boolean {
+  const [out, setOut] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setOut(el.scrollWidth > el.clientWidth + 1);
+    const raf = requestAnimationFrame(check);
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(check) : null;
+    ro?.observe(el);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro?.disconnect();
+    };
+  }, [ref, dep]);
+  return out;
+}
+
 export function AudioPlayer() {
   const pathname = usePathname();
   /**
@@ -501,6 +569,12 @@ export function AudioPlayer() {
       deviceCtx.deviceMode === "CONTROL" &&
       !deviceCtx.isMobileLocalPlayback,
   );
+  // Designated station executing a LOCAL source while the hosted renderer is CONTROL (PR #52 approach b). In this
+  // and only this case the local UI must behave like a normal local player for SEEK / AUTOMIX / SHUFFLE — act on
+  // the co-located local player (direct MPV + local prefs), not the WS CONTROL mirror. The predicate is the
+  // context's authoritative `canLocalExec && currentSource.type === "local"`, so a Dev-PC / ordinary CONTROL
+  // (canLocalExec false) and URL/radio/YouTube sources (not local) are never affected.
+  const isDesignatedLocalExec = Boolean(deviceCtx?.isLocalExecActive);
 
   // ─── Diagnostic: log isControlMirror / isBranchConnected changes ────────
   useEffect(() => {
@@ -568,6 +642,9 @@ export function AudioPlayer() {
   const scIframeRef = useRef<HTMLIFrameElement>(null);
   const ytPlayerRef = useRef<YTPlayerAPI | null>(null);
   const ytPlayerNextRef = useRef<YTPlayerAPI | null>(null);
+  /** 2026-10-14: a standby player is being constructed — a skip-during-skip must never build a second
+   *  one on the same host (the first one's onReady would then play the OLD clip under the new title). */
+  const ytStandbyCreatingRef = useRef(false);
   const ytActiveDeckRef = useRef<DeckId>("A");
   const scWidgetRef = useRef<SCWidget | null>(null);
   const currentVidRef = useRef<string | null>(null);
@@ -579,6 +656,29 @@ export function AudioPlayer() {
   /** All non-embed browser playback: direct http(s), local paths, HLS, radio, etc. */
   const isHtmlAudio = Boolean(currentPlayUrl && !isYouTube && !isSoundCloud);
   const vid = isYouTube && currentPlayUrl ? getYouTubeVideoId(currentPlayUrl) : null;
+  /* 2026-10-13 (owner): the PICTURE follows the SHOWN track, not the audible deck. During an
+     AUTOMIX crossfade the next song is already playing while the old clip lingered for the whole
+     fade (the pointer flips at the end). `displayVid` is the YouTube id of the track the title
+     shows (the queue pointer moves at the start of the transition); the visible deck iframe and
+     the mirror key off it. Display-only — never touches which deck is audible. */
+  const displayVid = (() => {
+    const u = currentTrack?.url ?? null;
+    const id = u ? getYouTubeVideoId(u) : null;
+    return id ?? vid;
+  })();
+  const displayVidRef = useRef<string | null>(displayVid);
+  useEffect(() => {
+    displayVidRef.current = displayVid;
+  }, [displayVid]);
+  /* 2026-10-14 (owner: "when I skip a few tracks in a row the player stays on an earlier one"):
+     the AUDIBLE target (`vid`) as a ref so a running deck transition can see that the controller
+     has moved on, plus a small retry budget per target for the post-transition reconcile. */
+  const wantedVidRef = useRef<string | null>(vid);
+  const ytReconcileAttemptsRef = useRef<{ vid: string | null; n: number }>({ vid: null, n: 0 });
+  useEffect(() => {
+    wantedVidRef.current = vid;
+    if (ytReconcileAttemptsRef.current.vid !== vid) ytReconcileAttemptsRef.current = { vid, n: 0 };
+  }, [vid]);
   const ytPlaylistId = isYouTube && currentPlayUrl ? getYouTubePlaylistId(currentPlayUrl) : null;
   const isYouTubeMix = isYouTube && currentPlayUrl ? isYouTubeMixUrl(currentPlayUrl) : false;
   const isYouTubeMultiTrack = isYouTube && currentPlayUrl ? isYouTubeMultiTrackUrl(currentPlayUrl) : false;
@@ -812,6 +912,54 @@ export function AudioPlayer() {
 
   // Per-device desktop player background preference (artwork default / video / static).
   const desktopBgMode = useDesktopBackgroundMode();
+  const mpvVideo = useMpvVideoOutput(); // P0 Video V1: synced MPV video on this station (feature-detected)
+  /* Deck mirror kill-switch (display-only): localStorage `syncbiz:deckMirror` = "off" hides the
+     blurred second video. Read via useSyncExternalStore so no setState-in-effect. */
+  /* Mirror crossfade (2026-10-13, owner: "the blurred and the main clip switch together"):
+     when the shown track changes, the old mirror stays underneath while the new one loads;
+     the new one fades in once it reports playing, then the old one is dropped. Previous-render
+     state pattern (no setState in effects); the drop runs on a timer. Display-only. */
+  const [mirrorSlots, setMirrorSlots] = useState<{ cur: string | null; prev: string | null; ready: boolean }>({
+    cur: displayVid,
+    prev: null,
+    ready: false,
+  });
+  if (mirrorSlots.cur !== displayVid) {
+    setMirrorSlots({ cur: displayVid, prev: mirrorSlots.cur, ready: false });
+  }
+  const mirrorSlotsView = mirrorSlots.cur === displayVid ? mirrorSlots : { cur: displayVid, prev: mirrorSlots.cur, ready: false };
+  const mirrorLayers = (mirrorSlotsView.prev && mirrorSlotsView.prev !== mirrorSlotsView.cur
+    ? [mirrorSlotsView.prev, mirrorSlotsView.cur]
+    : [mirrorSlotsView.cur]
+  ).filter((v): v is string => !!v);
+  useEffect(() => {
+    if (!mirrorSlots.prev) return;
+    const ms = mirrorSlots.ready ? 800 : 6000; /* after the fade-in, or a safety net if the clip never plays */
+    const t = setTimeout(() => setMirrorSlots((x) => (x.prev ? { ...x, prev: null } : x)), ms);
+    return () => clearTimeout(t);
+  }, [mirrorSlots.prev, mirrorSlots.ready, mirrorSlots.cur]);
+  /** The clock of the deck that holds a given clip (falls back to the audible deck). Read-only. */
+  const deckClockFor = (want: string | null): number => {
+    const idOf = (p: unknown) => {
+      try {
+        return (p as { getVideoData?: () => { video_id?: string } } | null)?.getVideoData?.()?.video_id ?? null;
+      } catch {
+        return null;
+      }
+    };
+    let live: unknown = ytActiveDeckRef.current === "A" ? ytPlayerRef.current : ytPlayerNextRef.current;
+    if (want) {
+      if (idOf(ytPlayerRef.current) === want) live = ytPlayerRef.current;
+      else if (idOf(ytPlayerNextRef.current) === want) live = ytPlayerNextRef.current;
+    }
+    const t = (live as { getCurrentTime?: () => number } | null)?.getCurrentTime?.();
+    return typeof t === "number" && Number.isFinite(t) ? t : NaN;
+  };
+  const deckMirrorEnabled = useSyncExternalStore(
+    subscribeDeckMirrorFlag,
+    readDeckMirrorFlag,
+    () => true,
+  );
   /** Browser MASTER only — prewarm hidden YT containers + IFrame API; never on desktop MPV or CONTROL mirror. */
   const canPrewarmYoutubeEmbed = !isDesktopMode && !isControlMirror;
   /* ── Video dock (Spotify-style) — DISPLAY-ONLY, always on while YT plays.
@@ -830,32 +978,87 @@ export function AudioPlayer() {
       /* getIframe is a public YT.Player API not present on our minimal YTPlayerAPI type. */
       const f = (player as { getIframe?: () => HTMLIFrameElement | null } | null)?.getIframe?.();
       if (!f) return;
+      /* No YouTube captions/annotations inside the deck — the captions module is display-only
+         (audio never passes through it); unload is idempotent and cheap. */
+      try {
+        (player as { unloadModule?: (m: string) => void } | null)?.unloadModule?.("captions");
+      } catch {
+        /* display-only */
+      }
       const s = f.style;
       s.position = "absolute";
-      s.left = "-10%";
-      s.top = "50%";
-      s.width = "120%";
-      s.height = "auto";
+      /* 2026-10-12 owner direction: show the whole frame (no side crop), a touch smaller
+         and nudged right so more of the clip is visible; the mirrored blur fills the left. */
+      s.left = "auto";
+      /* 2026-10-13 owner: flush RIGHT, the whole frame visible (a right-shift trial was reverted
+         the same day — "put the clip back at the very edge, not in the middle"). */
+      s.right = "0";
+      s.top = "0";
+      s.width = "auto";
+      s.height = "100%";
       s.aspectRatio = "16 / 9";
-      s.transform = "translateY(-50%)";
-      s.transition = "opacity 500ms ease";
+      s.transform = "none";
+      s.transition = "opacity 700ms ease"; /* same fade as the blurred mirror — they switch together */
       s.opacity = active ? "1" : "0";
+      f.dataset.sbShown = active ? "1" : "0"; /* CSS hides iframes until this first styling */
       s.pointerEvents = "none";
       s.border = "0";
       /* Slight lift — the translucent deck surface dims the video; this keeps
          the right (un-faded) side vivid. Display-only. */
       s.filter = "brightness(1.12)";
+      /* Publish the rendered video width (height-fit → width follows the deck height) so the
+         CSS mirror on the left can end exactly where this video begins. Display-only. */
+      if (active) {
+        const w = f.getBoundingClientRect().width;
+        const deck = f.closest<HTMLElement>(".audio-player-library-deck");
+        if (deck && w > 0) {
+          const next = `${Math.round(w)}px`;
+          if (deck.style.getPropertyValue("--sb-video-w") !== next) deck.style.setProperty("--sb-video-w", next);
+        }
+      }
     };
     const id = setInterval(() => {
       setVideoActiveDeck((prev) => (prev === ytActiveDeckRef.current ? prev : ytActiveDeckRef.current));
       try {
-        const activeIsA = ytActiveDeckRef.current === "A";
+        let activeIsA = ytActiveDeckRef.current === "A";
+        /* the deck that holds the SHOWN track's clip is the visible one (see displayVid);
+           when neither deck has it (not loaded yet / non-YouTube), the audible deck stays. */
+        const want = displayVidRef.current;
+        if (want) {
+          const idOf = (p: unknown) => {
+            try {
+              return (p as { getVideoData?: () => { video_id?: string } } | null)?.getVideoData?.()?.video_id ?? null;
+            } catch {
+              return null;
+            }
+          };
+          /* 2026-10-14 (owner: "the main clip must switch exactly with the blurred mirror"): the
+             mirror fades in when its clip reports PLAYING, so the main picture now waits for the
+             same moment — the deck holding the shown clip takes over once it has started (playing,
+             or paused/buffering past its first frames), never while it is still cueing (black). */
+          const started = (p: unknown) => {
+            try {
+              const pl = p as { getPlayerState?: () => number; getCurrentTime?: () => number } | null;
+              const st = pl?.getPlayerState?.() ?? -1;
+              return st === 1 || st === 2 || (st === 3 && (pl?.getCurrentTime?.() ?? 0) > 0.2);
+            } catch {
+              return false;
+            }
+          };
+          const a = idOf(ytPlayerRef.current);
+          const b = idOf(ytPlayerNextRef.current);
+          if (a === want && b !== want) {
+            if (started(ytPlayerRef.current)) activeIsA = true;
+          } else if (b === want && a !== want) {
+            if (started(ytPlayerNextRef.current)) activeIsA = false;
+          }
+        }
         styleDeckIframe(ytPlayerRef.current, activeIsA);
         styleDeckIframe(ytPlayerNextRef.current, !activeIsA);
       } catch {
         /* display-only — never interfere with playback */
       }
-    }, 500);
+    }, 100); /* was 500ms — the picture follows within a tenth of a second, like the mirror's event */
     return () => clearInterval(id);
   }, []);
   const [bufferedPercent, setBufferedPercent] = useState(0);
@@ -872,8 +1075,26 @@ export function AudioPlayer() {
   const isSeekingRef = useRef(false);
   const isDraggingRef = useRef(false);
   const timelineRef = useRef<HTMLDivElement>(null);
+  /* Hairline timeline (2026-10-12): a plain click never seeks — scrubbing is armed by a
+     long-press (320ms) or a deliberate drag (>10px). Display-only state + refs; the seek path
+     itself (onSeekChange / commitControlSeek) is unchanged. */
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressStartXRef = useRef<number | null>(null);
+  const lastPointerXRef = useRef(0);
+  /* Optimistic bar: while the pointer owns the bar (press / drag / tap) the white fill shows the
+     pointer's position immediately; the real position takes over once the player catches up
+     (or after 3.5s). Live seeks while dragging are throttled to one per 160ms; the release
+     always applies the final position. */
+  const [optimistic, setOptimistic] = useState<{ pct: number; target: number } | null>(null);
+  const optimisticTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLiveSeekAtRef = useRef(0);
   const titleMeasureRef = useRef<HTMLSpanElement>(null);
   const titleContainerRef = useRef<HTMLDivElement>(null);
+  /* the hero's three text lines are cut at the edge WITHOUT "…" and melt into the background (globals.css kx14) — only when the line really runs out of room (`data-fog`) */
+  const heroTitleRef = useRef<HTMLParagraphElement>(null);
+  const heroArtistRef = useRef<HTMLParagraphElement>(null);
+  const heroInfoRef = useRef<HTMLParagraphElement>(null);
   const volumeRef = useRef(volume);
   const statusRef = useRef(status);
   const currentPlayUrlRef = useRef<string | null>(null);
@@ -931,6 +1152,35 @@ export function AudioPlayer() {
   >(() => {});
   const beginScEmbedTransitionRef = useRef<(nextEmbedUrl: string) => void>(() => {});
   const loadYouTubeRef = useRef<() => void>(() => {});
+  /* Fail-forward after ANY YouTube deck transition settles (2026-10-14). While a transition is in
+     flight, new targets are dropped on purpose (`loadYouTube_skipped_manual_active`) and nothing
+     re-dispatched them: three quick Nexts left the decks on the first target while the title/queue
+     showed the third. If the track the controller wants is not what the audible deck holds, run the
+     normal load path once more (next tick, flags/lock already clear). Bounded to 3 tries per target. */
+  const ytReconcileAfterTransitionRef = useRef<(reason: string) => void>(() => {});
+  useEffect(() => {
+    ytReconcileAfterTransitionRef.current = (reason: string) => {
+      const want = wantedVidRef.current;
+      const have = currentVidRef.current;
+      if (!want || want === have) return;
+      if (statusRef.current !== "playing" && statusRef.current !== "paused") return;
+      const budget = ytReconcileAttemptsRef.current;
+      if (budget.vid === want && budget.n >= 3) {
+        p0XfadeDebug("yt_reconcile_budget_spent", { reason, want, have });
+        return;
+      }
+      ytReconcileAttemptsRef.current = { vid: want, n: (budget.vid === want ? budget.n : 0) + 1 };
+      p0XfadeDebug("yt_reconcile_after_transition", { reason, want, have, attempt: ytReconcileAttemptsRef.current.n });
+      setTimeout(() => {
+        if (wantedVidRef.current !== want) return; /* moved on again — that change loads itself */
+        if (ytManualTransitionRef.current || ytSequentialActiveRef.current || deckTransitionLock.isLocked()) {
+          p0XfadeDebug("yt_reconcile_deferred_busy", { want });
+          return; /* the transition that is busy will reconcile when it settles */
+        }
+        loadYouTubeRef.current();
+      }, 0);
+    };
+  }, [deckTransitionLock]);
   const ytForceColdLoadRef = useRef(false);
   /** After handoff/promote, block loadYouTube cold reload of the same video id. */
   const ytSuppressColdLoadVidRef = useRef<string | null>(null);
@@ -1114,6 +1364,12 @@ export function AudioPlayer() {
   );
 
   const guardedYtPlay = useCallback((player: unknown, reason: string) => {
+    // 2026-10-18 (owner: a SoundCloud song and a YouTube song played at once): while SoundCloud is the active engine
+    // a YouTube player — e.g. one that became ready late — must never start.
+    if (isSoundCloudRef.current) {
+      p0XfadeDebug("safePlayVideo_skipped_soundcloud_active", { reason });
+      return;
+    }
     const YT = typeof window !== "undefined" ? window.YT : undefined;
     const st = safeGetPlayerState(player);
     const canonical = ytCanonicalActiveVidRef.current;
@@ -1713,6 +1969,12 @@ export function AudioPlayer() {
         const mixSec = Math.min(getMixDuration(), 12);
         const maxUiVol = volumeRef.current;
         let fadeAbort: (() => void) | null = null;
+        /* the controller skipped past BOTH ends of this transition → stop fading, settle, reconcile */
+        const oldVid = currentVidRef.current;
+        const wantedMovedOn = () => {
+          const w = wantedVidRef.current;
+          return !!w && w !== nextVideoId && w !== oldVid;
+        };
 
         const finishSequential = (success: boolean) => {
           fadeAbort?.();
@@ -1729,19 +1991,21 @@ export function AudioPlayer() {
             markYtCanonicalActive(nextVideoId, opts?.natural ? "sequential_natural" : "sequential_manual");
             setEmbedReady(true);
             p0XfadeDebug("yt_sequential_complete", { nextVideoId, natural: !!opts?.natural });
+            ytReconcileAfterTransitionRef.current("sequential_complete");
             return;
           }
-          p0XfadeDebug("yt_sequential_failed", { nextVideoId, natural: !!opts?.natural });
+          p0XfadeDebug("yt_sequential_failed", { nextVideoId, natural: !!opts?.natural, wantedMovedOn: wantedMovedOn() });
           const p = getYtActivePlayer();
           if (isYtPlayerReady(p)) {
             safeUnMute(p);
             safeSetVolume(p, volumeRef.current);
             if (statusRef.current === "playing") safePlayVideo(p);
           }
+          ytReconcileAfterTransitionRef.current("sequential_failed");
         };
 
         const isAborted = () =>
-          statusRef.current === "stopped" || !ytSequentialActiveRef.current;
+          statusRef.current === "stopped" || !ytSequentialActiveRef.current || wantedMovedOn();
 
         p0XfadeDebug("yt_sequential_fade_out_start", {
           nextVideoId,
@@ -1839,6 +2103,7 @@ export function AudioPlayer() {
         videoId,
         currentSourceId: currentSourceIdRef.current,
       });
+      ytStandbyCreatingRef.current = true;
       new window.YT.Player(host, {
         videoId,
         width: 320,
@@ -1846,6 +2111,7 @@ export function AudioPlayer() {
         playerVars,
         events: {
           onReady(evt) {
+            ytStandbyCreatingRef.current = false;
             const target = evt.target;
             if (!isYtPlayerReady(target)) return;
             playerRef.current = target;
@@ -1913,6 +2179,18 @@ export function AudioPlayer() {
         const standbyRef = getYtPlayerRefForDeck(standbyDeck);
         let fadeAbort: (() => void) | null = null;
         let providerAdvanced = false;
+        /* `target` is the clip this transition brings in — and it can move (2026-10-14, owner: a
+           second quick skip must not bounce back to the old song or play a stale clip under the new
+           title). While the standby is still being brought up, a skip aborts the run (the active deck
+           never dipped) and the reconcile re-dispatches; once the FADE is running, a skip re-targets
+           the rising deck in place (loadVideoById at its current ramp volume) — no jump back, no
+           second fade. A natural fade's provider advance lands on `target`, so it never trips this. */
+        let target = nextVideoId;
+        const oldVid = currentVidRef.current;
+        const wantedMovedOn = () => {
+          const w = wantedVidRef.current;
+          return !!w && w !== target && w !== oldVid;
+        };
 
         const clearTransitionFlags = () => {
           fadeAbort?.();
@@ -1929,6 +2207,8 @@ export function AudioPlayer() {
 
         const isAborted = () =>
           statusRef.current === "stopped" || !ytSequentialActiveRef.current;
+        /* the pre-fade phases also stand down when the controller has moved on */
+        const abortedOrMovedOn = () => isAborted() || wantedMovedOn();
 
         // Abort / hard failure that must NOT touch the queue/session: keep the
         // current active deck audible, drop the standby. Pointer stays put.
@@ -1945,23 +2225,24 @@ export function AudioPlayer() {
             safePauseVideo(sb);
             safeSetVolume(sb, 0);
           }
-          p0XfadeDebug("yt_deck_keep_active", { nextVideoId, reason });
+          p0XfadeDebug("yt_deck_keep_active", { nextVideoId: target, reason, wantedMovedOn: wantedMovedOn() });
+          ytReconcileAfterTransitionRef.current(`deck_keep_active:${reason}`);
         };
 
         // Standby could not come up — fall back to the single-iframe sequential
         // fade on the active deck. Release our flags/lock first so it can run.
         const fallbackSequential = (reason: string) => {
           clearTransitionFlags();
-          p0XfadeDebug("yt_deck_fallback_sequential", { nextVideoId, reason });
-          beginYtSequentialTransitionRef.current(nextVideoId, opts);
+          p0XfadeDebug("yt_deck_fallback_sequential", { nextVideoId: target, reason });
+          beginYtSequentialTransitionRef.current(target, opts);
         };
 
         const finishPromote = () => {
           // FLIP the pointer — refs never swap; the audible deck is now `standbyDeck`.
           ytActiveDeckRef.current = standbyDeck;
-          markYtCanonicalActive(nextVideoId, opts?.natural ? "deck_natural" : "deck_manual");
-          currentVidRef.current = nextVideoId;
-          lastYtVidRef.current = nextVideoId;
+          markYtCanonicalActive(target, opts?.natural ? "deck_natural" : "deck_manual");
+          currentVidRef.current = target;
+          lastYtVidRef.current = target;
           clearTransitionFlags();
           // Old active is now the standby deck: keep it alive, silence + pause it.
           if (isYtPlayerReady(activePlayer)) {
@@ -1970,10 +2251,12 @@ export function AudioPlayer() {
           }
           setEmbedReady(true);
           p0XfadeDebug("yt_deck_complete", {
-            nextVideoId,
+            nextVideoId: target,
+            requested: nextVideoId,
             natural: !!opts?.natural,
             activeDeck: standbyDeck,
           });
+          ytReconcileAfterTransitionRef.current("deck_complete");
         };
 
         void (async () => {
@@ -1981,21 +2264,47 @@ export function AudioPlayer() {
           const existing = standbyRef.current;
           if (isYtPlayerReady(existing)) {
             safeSetVolume(existing, 0);
-            safeLoadVideoById(existing, nextVideoId);
+            safeLoadVideoById(existing, target);
+          } else if (!ytStandbyCreatingRef.current) {
+            createYtStandbyPlayer(standbyDeck, target);
           } else {
-            createYtStandbyPlayer(standbyDeck, nextVideoId);
+            /* a previous (aborted) run is still constructing this deck's player — never build a
+               second one on the same host; wait for it below and re-target it. */
+            p0XfadeDebug("yt_deck_standby_creation_in_flight", { target });
           }
 
           // 2. Wait for the standby player object to exist.
           const readyDeadline = Date.now() + 15_000;
           while (!isYtPlayerReady(standbyRef.current)) {
-            if (isAborted() || Date.now() > readyDeadline) {
+            if (abortedOrMovedOn()) {
+              finishKeepActive(wantedMovedOn() ? "moved_on_while_creating_standby" : "aborted_while_creating_standby");
+              return;
+            }
+            if (Date.now() > readyDeadline) {
+              ytStandbyCreatingRef.current = false;
               finishKeepActive("standby_create_timeout");
               return;
             }
             await new Promise<void>((r) => setTimeout(r, 50));
           }
           const standby = standbyRef.current;
+
+          // 2b. A skip-during-skip can leave the standby holding an earlier target — it must never
+          //     be heard under the new title: re-target it and wait until it really holds `target`.
+          if (safeGetVideoData(standby)?.video_id !== target) {
+            p0XfadeDebug("yt_deck_standby_retarget", { has: safeGetVideoData(standby)?.video_id ?? null, want: target });
+            safeSetVolume(standby, 0);
+            safeLoadVideoById(standby, target);
+            const loaded = await waitForYtVideoLoaded(standby, target, { timeoutMs: 15_000, isAborted: abortedOrMovedOn });
+            if (abortedOrMovedOn()) {
+              finishKeepActive("moved_on_before_fade");
+              return;
+            }
+            if (!loaded) {
+              fallbackSequential("standby_retarget_timeout");
+              return;
+            }
+          }
 
           // 3. Bring the standby up at volume 0 and require it to be actually
           //    PLAYING/BUFFERING before we touch a single volume value.
@@ -2004,14 +2313,27 @@ export function AudioPlayer() {
           safePlayVideo(standby);
           const stable = await waitForYtStandbyStable(standby, {
             timeoutMs: 8_000,
-            isAborted,
+            isAborted: abortedOrMovedOn,
           });
-          if (isAborted()) {
+          if (abortedOrMovedOn()) {
             finishKeepActive("aborted_before_fade");
             return;
           }
           if (!stable) {
             fallbackSequential("standby_unstable");
+            return;
+          }
+
+          // 3b. Owner's rule (2026-10-15): the song that plays keeps playing until the next one REALLY
+          //     plays — its clock must move, buffering is not enough. The active deck is untouched here.
+          //     If it never gets going, the current song simply carries on (keep-active → reconcile retries).
+          const reallyPlaying = await waitForYtReallyPlaying(standby, { timeoutMs: 12_000, isAborted: abortedOrMovedOn });
+          if (abortedOrMovedOn()) {
+            finishKeepActive("aborted_before_fade");
+            return;
+          }
+          if (!reallyPlaying) {
+            finishKeepActive("standby_never_played");
             return;
           }
 
@@ -2023,7 +2345,7 @@ export function AudioPlayer() {
           }
 
           // 5. True overlap: fade active out while standby comes up. Equal-power.
-          p0XfadeDebug("yt_deck_crossfade_start", { nextVideoId, mixSec, standbyDeck });
+          p0XfadeDebug("yt_deck_crossfade_start", { nextVideoId: target, mixSec, standbyDeck });
           fadeAbort = runDualVolumeCrossfade(
             (outV) => safeSetVolume(activePlayer, outV),
             (inV) => safeSetVolume(standby, inV),
@@ -2033,6 +2355,15 @@ export function AudioPlayer() {
               curve: "equalPower",
               minUpdateIntervalMs: 40,
               isAborted,
+              /* mid-fade skip: swap the clip on the rising deck and keep the fade going */
+              onFadeTick: () => {
+                if (!wantedMovedOn()) return;
+                const w = wantedVidRef.current;
+                if (!w) return;
+                p0XfadeDebug("yt_deck_retarget_mid_fade", { from: target, to: w, oldVid });
+                target = w;
+                safeLoadVideoById(standby, w);
+              },
               onComplete: () => finishPromote(),
               onError: () => finishKeepActive("crossfade_error"),
             },
@@ -2843,6 +3174,27 @@ export function AudioPlayer() {
     p0XfadeDebug("embed_teardown_non_embed_mode");
     stopAllEmbedded();
   }, [isYouTube, isSoundCloud, stopAllEmbedded]);
+
+  /** Cross-engine guard (2026-10-18, owner: "a SoundCloud song and a YouTube song played together"): YouTube and
+   *  SoundCloud are separate embedded engines and only leaving BOTH was torn down — switching YouTube ↔ SoundCloud left the
+   *  old engine playing. Additive: the engine that is NOT active is paused (never touched while it is the active one). */
+  useEffect(() => {
+    if (isSoundCloud) {
+      for (const p of [ytPlayerRef.current, ytPlayerNextRef.current]) {
+        if (p && isYtPlayerReady(p)) {
+          console.log("[SyncBiz Audit] cross-engine guard: pausing YouTube (SoundCloud active)");
+          safePauseVideo(p);
+        }
+      }
+    } else if (isYouTube && scWidgetRef.current) {
+      console.log("[SyncBiz Audit] cross-engine guard: pausing SoundCloud (YouTube active)");
+      try {
+        scWidgetRef.current.pause();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [isSoundCloud, isYouTube, currentPlayUrl]);
 
   useEffect(() => {
     const p = getYtActivePlayer();
@@ -3718,6 +4070,9 @@ export function AudioPlayer() {
     if (typeof window === "undefined" || !("syncbizDesktop" in window)) return;
     if (!desktopMpvSnap || status !== "playing" || !getAutoMix()) return;
     if (!currentPlayUrl || isHlsUrl(currentPlayUrl)) return;
+    // P0 URL ownership: act ONLY on the renderer's OWN current attempt. A MAIN URL session (MAIN-minted attempt id)
+    // must never drive the stale LOCAL provider into next() → LOCAL PLAY_REQUEST before the URL's natural EOF.
+    if (!rendererOwnsSnapshot(desktopMpvSnap.attemptId, playbackAttemptGenRef.current)) return;
 
     const pos = desktopMpvSnap.position;
     const dur = desktopMpvSnap.duration;
@@ -3777,6 +4132,21 @@ export function AudioPlayer() {
   const mpvPendingUrlRef = useRef<string | null>(null);
   const mpvCoalesceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mpvDesktopMixStartedRef = useRef(false);
+  // Re-arm the desktop AUTOMIX pre-EOF latch EXACTLY ONCE per NEW MPV attempt. `desktopMpvSnap.attemptId` changes
+  // only when the orchestrator starts a genuinely new track/attempt, and that snapshot arrives with position≈0 —
+  // so this re-arms the pre-EOF mix-advance scheduler per track WITHOUT ever letting it fire against a stale
+  // (old-track, high-position) snapshot. (The reverted f2dc229 re-armed on currentPlayUrl, which flips BEFORE the
+  // new snapshot lands → the scheduler re-fired on the old position → multi-track cascade.) Reset-ONLY: it never
+  // calls next(); the scheduler still decides WHEN to fire from position/duration/mixSec. The one-shot guard
+  // (mixArmAttemptRef) + the attemptId-only dep mean a bare currentPlayUrl change or a re-render never re-arms.
+  const mixArmAttemptRef = useRef<number | null>(null);
+  useEffect(() => {
+    const id = desktopMpvSnap?.attemptId;
+    if (typeof id !== "number") return;
+    if (id === mixArmAttemptRef.current) return; // same attempt → do not re-arm again
+    mixArmAttemptRef.current = id;
+    mpvDesktopMixStartedRef.current = false;
+  }, [desktopMpvSnap?.attemptId]);
   // Fires 4 s after mpvPlayUrl() is dispatched. If MPV hasn't confirmed "playing" by
   // then, the fake-PLAYING UI is reset and the error is surfaced to the user.
   const mpvStallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3953,36 +4323,43 @@ export function AudioPlayer() {
           }
           mpvLastDispatchAtRef.current = Date.now();
 
-          // Stall backstop — LOCAL FILES ONLY. A local file must report "playing" almost immediately;
-          // if it doesn't within 4s it's a genuine missing/unsupported file → surface + stop.
+          // Stall backstop — LOCAL FILES ONLY. 4s without a "playing" confirmation is the point where we
+          // ENTER RECOVERY — it is NOT a failure verdict and must NEVER stop the player or clear the session
+          // (P0: under CPU/RAM/disk pressure MPV can be alive but take >4s from loadfile to start-file; the
+          // old stop() here wiped source/queue/recovery snapshot permanently). Genuine load errors are owned by
+          // the load_error skip path, crossfade attempts by the orchestrator; everything else is handed to the
+          // EXISTING bounded STREAM_STARTING machine (grace → one retry → SKIP_FORWARD, never-stop), whose
+          // progress detection lets a late confirmation recover normally.
           // STREAMS (direct URL / YouTube) are DELIBERATELY excluded here: their startup is owned solely
-          // by the STREAM_STARTING phase machine (bounded STREAM_STARTUP_TIMEOUT_MS grace → retry →
-          // SKIP_FORWARD, never-stop). No stall→stop() may fire for a stream during startup.
+          // by the STREAM_STARTING phase machine from dispatch.
           if (mpvStallTimerRef.current) { clearTimeout(mpvStallTimerRef.current); mpvStallTimerRef.current = null; }
           if (isValidLocalFilePlaybackPath(latest)) {
             mpvStallTimerRef.current = setTimeout(() => {
               mpvStallTimerRef.current = null;
-              if (
-                playbackAttemptGenRef.current === attemptId &&
-                statusRef.current === "playing" &&
-                currentPlayUrlRef.current === latest &&
-                mpvChAStatusRef.current !== "playing"
-              ) {
-                const snap = desktopMpvSnapRef.current;
-                const engineOk = snap?.engineReady !== false;
-                const errDetail = snap?.lastError ?? null;
-                const userMsg = !engineOk
-                  ? (errDetail ?? "MPV player is not ready — check the desktop installation")
-                  : (errDetail ?? "Desktop playback did not start — file may be missing or in an unsupported format");
-                console.warn("[SyncBiz Audit] Desktop MPV stall — no playing confirmation after 4 s (local file)", {
-                  url: latest.slice(0, 100),
-                  mpvChAStatus: mpvChAStatusRef.current,
-                  engineReady: snap?.engineReady ?? null,
-                  lastError: errDetail,
-                });
-                setLastMessage(userMsg);
-                stop();
-              }
+              const snap = desktopMpvSnapRef.current;
+              const decision = decideLocalStartupStall({
+                attemptId,
+                currentAttemptId: playbackAttemptGenRef.current,
+                rendererStatus: statusRef.current,
+                armedUrl: latest,
+                currentUrl: currentPlayUrlRef.current,
+                engineStatus: mpvChAStatusRef.current,
+                snap,
+              });
+              if (decision === "ignore") return;
+              console.warn("[SyncBiz Audit] Desktop MPV stall — no playing confirmation after 4 s (local file) — recovering, session preserved", {
+                url: latest.slice(0, 100),
+                decision,
+                mpvChAStatus: mpvChAStatusRef.current,
+                engineReady: snap?.engineReady ?? null,
+                lastError: snap?.lastError ?? null,
+              });
+              sbDiag("STARTUP_STALL", { decision, attemptId, engineReady: snap?.engineReady ?? null, sourceType: classifySource(latest), urlHash: sbUrlHash(latest) }); // DIAG
+              if (decision !== "enter_startup_recovery") return; // load_error path / orchestrator own it
+              // Hand THIS attempt to the bounded startup machine. Keyed to the SAME item so its single retry
+              // keeps counting toward SKIP_FORWARD; attemptStartAt stays the dispatch time (bounded grace).
+              streamStartupItemRef.current = latest;
+              streamPhaseRef.current = "starting";
             }, 4000);
           }
         }, MPV_LOADFILE_COALESCE_MS);
@@ -4073,6 +4450,7 @@ export function AudioPlayer() {
           mpvLastUrlRef.current = url; // keep the routing effect in sync
           mpvLastDispatchAtRef.current = Date.now();
           resetStreamAttempt(url); // fresh clock/progress + attemptStartAt=now; SAME item keeps the retry budget
+          streamPhaseRef.current = "starting"; // a retry is still STARTING for any source (no-op for streams; keeps a slow LOCAL start bounded)
           void desktop.mpvPlayUrl(url, playbackAttemptGenRef.current); // fresh loadfile (== manual refresh)
           sbDiag("REDISPATCH", { reason: "startup_timeout", attempt: attemptNo, attemptId: playbackAttemptGenRef.current, startingMs, sourceType: classifySource(url), urlHash: sbUrlHash(url) }); // DIAG
         } else {
@@ -4249,7 +4627,23 @@ export function AudioPlayer() {
   // ── End desktop routing ───────────────────────────────────────────────────
 
   /** Unified display values: desktop MPV > CONTROL mirror > local React state. */
-  const ms = deviceCtx?.masterState;
+  // P0 Gate 1c: while a source transition is pending, the item that is still AUDIBLE stays visibly current (title /
+  // status / clock from the state held at the start of the transition); live toggles (shuffle / autoMix / volume /
+  // queue) keep coming from the live mirror. Switches to the new item only when it reaches PLAYING_CONFIRMED.
+  const msLive = deviceCtx?.masterState;
+  const msHeld = deviceCtx?.urlTransitionHeldState ?? null;
+  const ms = useMemo(
+    () => (msHeld && msLive
+      ? {
+          ...msLive,
+          status: msHeld.status, currentTrack: msHeld.currentTrack, currentSource: msHeld.currentSource,
+          currentTrackIndex: msHeld.currentTrackIndex, sessionTracks: msHeld.sessionTracks, nextSessionTrack: msHeld.nextSessionTrack,
+          position: msHeld.position, positionAt: msHeld.positionAt, duration: msHeld.duration,
+        }
+      : msLive),
+    [msLive, msHeld],
+  );
+  const transitionStatusText = transitionLabel(deviceCtx?.urlTransition);
   // isDesktopMode is declared earlier (near the desktopMpvSnap state) to avoid TDZ errors
   // in effects that reference it in their dependency arrays before this line in the file.
 
@@ -4358,7 +4752,7 @@ export function AudioPlayer() {
       ? (typeof ms?.volume === "number" && Number.isFinite(ms.volume) ? ms.volume : 80)
       : volume;
   const displayShuffle =
-    isControlMirror ? (typeof ms?.shuffle === "boolean" ? ms?.shuffle : shuffle) : shuffle;
+    isControlMirror && !isDesignatedLocalExec ? (typeof ms?.shuffle === "boolean" ? ms?.shuffle : shuffle) : shuffle;
   // READ-ONLY diagnostic (no behavior change): proves layer E on the Lenovo — whether the RANDOM button's
   // shown state (displayShuffle) tracks the provider's persisted `shuffle` or diverges via a control-mirror
   // path (isControlMirror true / masterState shuffle). Grep: [VONO Shuffle Diag]
@@ -4372,7 +4766,7 @@ export function AudioPlayer() {
     });
   }, [shuffle, displayShuffle, isControlMirror, deviceCtx?.deviceMode, ms?.shuffle]);
   const displayAutoMix =
-    isControlMirror ? (typeof ms?.autoMix === "boolean" ? ms?.autoMix : autoMix) : autoMix;
+    isControlMirror && !isDesignatedLocalExec ? (typeof ms?.autoMix === "boolean" ? ms?.autoMix : autoMix) : autoMix;
   const displayThumbnailCover = (() => {
     if (!isControlMirror && ytMultiTrackState?.currentThumbnail) return ytMultiTrackState.currentThumbnail;
     if (isControlMirror) {
@@ -4518,9 +4912,14 @@ export function AudioPlayer() {
     displayDuration > 0
       ? Math.min(100, (displayPosition / displayDuration) * 100)
       : 0;
+  /* what the bar draws: the pointer's position while a scrub/tap is pending, else the real one */
+  const shownProgressPercent =
+    optimistic && !(Math.abs(displayPosition - optimistic.target) < 1.5) ? optimistic.pct : displayProgressPercent;
 
   const displayStatusLabel =
-    isUrlPreparing
+    transitionStatusText
+      ? transitionStatusText
+      : isUrlPreparing
       ? "Preparing URL"
       : isYtAwaitingEngine
         ? "Loading"
@@ -4789,7 +5188,10 @@ export function AudioPlayer() {
 
   const onSeekChange = useCallback(
     (pct: number) => {
-      if (isDesktopLocal) {
+      if (isDesktopLocal || isDesignatedLocalExec) {
+        // Designated station playing LOCAL: seek the co-located MPV directly (same path a MASTER desktop uses),
+        // so the position actually moves instead of snapping back from the WS mirror. displayDuration here is the
+        // mirrored MPV duration (ms?.duration), which is the real loaded-file duration.
         if (displayDuration <= 0) return;
         void (window as any).syncbizDesktop.mpvSeekTo((pct / 100) * displayDuration);
       } else if (isControlMirror) {
@@ -4804,7 +5206,7 @@ export function AudioPlayer() {
         seekTo((pct / 100) * duration);
       }
     },
-    [isDesktopLocal, isControlMirror, displayDuration, canSeek, duration, seekTo]
+    [isDesktopLocal, isDesignatedLocalExec, isControlMirror, displayDuration, canSeek, duration, seekTo]
   );
 
   // Commit a CONTROL seek: send exactly one authoritative SEEK, keep the pending value owning
@@ -4847,15 +5249,39 @@ export function AudioPlayer() {
     return Math.max(0, Math.min(100, (x / rect.width) * 100));
   }, []);
 
+  const markOptimistic = useCallback(
+    (pct: number) => {
+      const dur = displayDuration > 0 ? displayDuration : 0;
+      setOptimistic({ pct, target: (pct / 100) * dur });
+      if (optimisticTimerRef.current) clearTimeout(optimisticTimerRef.current);
+      optimisticTimerRef.current = setTimeout(() => {
+        optimisticTimerRef.current = null;
+        setOptimistic(null);
+      }, 3500);
+    },
+    [displayDuration]
+  );
+
+  const liveSeek = useCallback(
+    (pct: number, force = false) => {
+      const now = Date.now();
+      if (!force && now - lastLiveSeekAtRef.current < 160) return;
+      lastLiveSeekAtRef.current = now;
+      onSeekChange(pct);
+    },
+    [onSeekChange]
+  );
+
   const handleTimelineMouseMove = useCallback(
     (e: React.MouseEvent) => {
       const percent = getPercentFromClientX(e.clientX);
       setHoverPercent(percent);
       if (isDraggingRef.current && displayCanSeek && displayDuration > 0) {
-        onSeekChange(percent);
+        markOptimistic(percent);
+        liveSeek(percent);
       }
     },
-    [displayCanSeek, displayDuration, onSeekChange, getPercentFromClientX]
+    [displayCanSeek, displayDuration, markOptimistic, liveSeek, getPercentFromClientX]
   );
 
   const handleTimelineMouseEnter = useCallback(() => {
@@ -4867,54 +5293,100 @@ export function AudioPlayer() {
     setHoverPercent(0);
   }, []);
 
+  const armScrub = useCallback(() => {
+    if (!displayCanSeek || displayDuration <= 0) return;
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    isDraggingRef.current = true;
+    isSeekingRef.current = true;
+    setIsScrubbing(true);
+    const pct = getPercentFromClientX(lastPointerXRef.current);
+    markOptimistic(pct);
+    liveSeek(pct, true);
+  }, [displayCanSeek, displayDuration, markOptimistic, liveSeek, getPercentFromClientX]);
+
+  const beginPress = useCallback(
+    (clientX: number) => {
+      if (!displayCanSeek || displayDuration <= 0) return;
+      lastPointerXRef.current = clientX;
+      pressStartXRef.current = clientX;
+      if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = setTimeout(() => {
+        holdTimerRef.current = null;
+        if (pressStartXRef.current !== null) armScrub();
+      }, 320);
+    },
+    [displayCanSeek, displayDuration, armScrub]
+  );
+
   const handleSeekStart = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
-      if (!displayCanSeek || displayDuration <= 0) return;
-      isDraggingRef.current = true;
-      isSeekingRef.current = true;
-      const percent = getPercentFromClientX(e.clientX);
-      onSeekChange(percent);
+      beginPress(e.clientX);
     },
-    [displayCanSeek, displayDuration, onSeekChange, getPercentFromClientX]
+    [beginPress]
   );
 
   const handleSeekEnd = useCallback(() => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    const pressed = pressStartXRef.current !== null;
+    pressStartXRef.current = null;
+    const wasDragging = isDraggingRef.current;
     isDraggingRef.current = false;
     isSeekingRef.current = false;
+    if (wasDragging) {
+      setIsScrubbing(false);
+      // the release always lands exactly where the pointer let go
+      liveSeek(getPercentFromClientX(lastPointerXRef.current), true);
+    } else if (pressed && displayCanSeek && displayDuration > 0) {
+      // plain click / tap on the bar: jump to that second
+      const pct = getPercentFromClientX(lastPointerXRef.current);
+      markOptimistic(pct);
+      onSeekChange(pct);
+    }
     commitControlSeek();
-  }, [commitControlSeek]);
+  }, [commitControlSeek, liveSeek, markOptimistic, onSeekChange, getPercentFromClientX, displayCanSeek, displayDuration]);
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
-      if (!displayCanSeek || displayDuration <= 0) return;
       const touch = e.touches[0];
-      if (touch) {
-        isDraggingRef.current = true;
-        isSeekingRef.current = true;
-        const percent = getPercentFromClientX(touch.clientX);
-        onSeekChange(percent);
-      }
+      if (touch) beginPress(touch.clientX);
     },
-    [displayCanSeek, displayDuration, onSeekChange, getPercentFromClientX]
+    [beginPress]
   );
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
+      lastPointerXRef.current = e.clientX;
+      if (!isDraggingRef.current && pressStartXRef.current !== null && Math.abs(e.clientX - pressStartXRef.current) > 10) {
+        armScrub();
+        return;
+      }
       if (!isDraggingRef.current) return;
       if (!displayCanSeek || displayDuration <= 0) return;
       const percent = getPercentFromClientX(e.clientX);
-      onSeekChange(percent);
+      markOptimistic(percent);
+      liveSeek(percent);
     };
     const onUp = () => handleSeekEnd();
     const onTouchMove = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      if (!touch) return;
+      lastPointerXRef.current = touch.clientX;
+      if (!isDraggingRef.current && pressStartXRef.current !== null && Math.abs(touch.clientX - pressStartXRef.current) > 10) {
+        armScrub();
+        return;
+      }
       if (!isDraggingRef.current) return;
       if (!displayCanSeek || displayDuration <= 0) return;
-      const touch = e.touches[0];
-      if (touch) {
-        const percent = getPercentFromClientX(touch.clientX);
-        onSeekChange(percent);
-      }
+      const percent = getPercentFromClientX(touch.clientX);
+      markOptimistic(percent);
+      liveSeek(percent);
     };
     const onTouchEnd = () => handleSeekEnd();
     window.addEventListener("mousemove", onMove);
@@ -4927,8 +5399,11 @@ export function AudioPlayer() {
       window.removeEventListener("touchmove", onTouchMove);
       window.removeEventListener("touchend", onTouchEnd);
     };
-  }, [displayCanSeek, displayDuration, onSeekChange, getPercentFromClientX, handleSeekEnd]);
+  }, [displayCanSeek, displayDuration, markOptimistic, liveSeek, getPercentFromClientX, handleSeekEnd, armScrub]);
 
+  const heroFog = useRunsOut(heroTitleRef, displayTitle);
+  const heroArtistFog = useRunsOut(heroArtistRef, displayTitle);
+  const heroInfoFog = useRunsOut(heroInfoRef, displaySource?.title);
   const hoverTime =
     Number.isFinite(displayDuration) && displayDuration > 0
       ? (hoverPercent / 100) * displayDuration
@@ -4964,6 +5439,18 @@ export function AudioPlayer() {
             : "bg-gradient-to-b from-slate-900/32 to-slate-950/68"
         }`}
       >
+      {/* Deck glass (2026-10-12, presentational only): a milky glass sheet + a soft colour wash
+          taken from the current artwork on the LEFT of the deck. The video background on the right
+          stays exactly as before. Styles: globals.css → "Deck glass". No playback logic touched. */}
+      <div
+        aria-hidden
+        className="sb-deck-glass pointer-events-none absolute inset-0 rounded-2xl"
+        style={
+          displayThumbnailCover
+            ? ({ "--sb-deck-art": `url("${displayThumbnailCover.replace(/"/g, "%22")}")` } as CSSProperties)
+            : undefined
+        }
+      />
       <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
         {/* Unified hero: vinyl · metadata + progress + transport · volume */}
         <div className="grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)_auto] items-stretch gap-3 sm:gap-4 lg:gap-5">
@@ -4994,8 +5481,9 @@ export function AudioPlayer() {
               return (
                 <div className="player-hero-metadata flex min-w-0 w-full flex-col gap-1.5 sm:gap-2">
 
-                  {/* Eyebrow — fixed height slot */}
-                  <div className="flex h-4 min-w-0 items-center gap-2">
+                  {/* Eyebrow — fixed height slot (hidden in the library deck since 2026-10-13, owner direction:
+                      no "NOW PLAYING" label; the play/pause button carries the state) */}
+                  <div className="sb-status-eyebrow flex h-4 min-w-0 items-center gap-2">
                     <span
                       className={`h-1.5 w-1.5 shrink-0 rounded-full ${displayStatus === "playing" ? "bg-cyan-400/70" : "bg-transparent"}`}
                       aria-hidden
@@ -5028,24 +5516,30 @@ export function AudioPlayer() {
                       {heroTitle}
                     </span>
                     <p
-                      className={`min-w-0 w-full line-clamp-2 lg:line-clamp-1 text-xl font-bold leading-[1.2] tracking-tight sm:text-2xl ${
+                      ref={heroTitleRef}
+                      dir={textDir(heroTitle)}
+                      data-fog={heroFog ? "1" : undefined}
+                      className={`sb-hero-title min-w-0 w-full line-clamp-2 lg:line-clamp-1 text-xl font-bold leading-[1.2] tracking-tight sm:text-2xl ${
                         isSourcesLibraryDeck ? "text-[color:var(--lib-text-primary)]" : "text-white"
                       } ${!displayHasContent ? "text-slate-500" : ""}`}
                       title={heroTitle}
                     >
-                      {heroTitle}
+                      <RiseText key={heroTitle} text={heroTitle} />
                     </p>
                   </div>
 
                   <div className="player-hero-slot flex min-h-[1.25rem] min-w-0 flex-col justify-center">
                   {heroArtist ? (
                     <p
+                      ref={heroArtistRef}
+                      dir={textDir(heroArtist)}
+                      data-fog={heroArtistFog ? "1" : undefined}
                       className={`min-w-0 truncate text-sm font-medium leading-snug sm:text-base ${
                         isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-300"
                       }`}
                       title={heroArtist}
                     >
-                      {heroArtist}
+                      <RiseText key={heroArtist} text={heroArtist} />
                     </p>
                   ) : (
                     <span className="text-sm text-transparent select-none" aria-hidden>&nbsp;</span>
@@ -5055,19 +5549,22 @@ export function AudioPlayer() {
                   <div className="player-hero-slot flex min-h-[1rem] min-w-0 flex-col justify-center">
                   {displaySource?.title ? (
                     <p
+                      ref={heroInfoRef}
+                      dir={textDir(displaySource?.title)}
+                      data-fog={heroInfoFog ? "1" : undefined}
                       className={`min-w-0 truncate text-xs leading-snug sm:text-sm ${
                         isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"
                       }`}
                       title={displaySource.title}
                     >
-                      {displaySource.title}
+                      <RiseText key={displaySource.title} text={displaySource.title} />
                     </p>
                   ) : (
                     <span className="text-xs text-transparent select-none" aria-hidden>&nbsp;</span>
                   )}
                   </div>
 
-                  <div className="player-hero-slot flex min-h-[1.25rem] min-w-0 items-baseline gap-2" title={displayNextLabel ? t.nextTrackColon : undefined}>
+                  <div className="sb-hero-next player-hero-slot flex min-h-[1.25rem] min-w-0 items-baseline gap-2" title={displayNextLabel ? t.nextTrackColon : undefined}>
                     <span className={`shrink-0 text-[9px] font-medium uppercase tracking-[0.2em] ${isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-600"}`} aria-hidden>
                       NEXT
                     </span>
@@ -5079,7 +5576,7 @@ export function AudioPlayer() {
                       }`}
                       title={displayNextLabel ?? undefined}
                     >
-                      {displayNextLabel ?? "—"}
+                      {displayNextLabel ? <RiseText key={displayNextLabel} text={displayNextLabel} /> : "—"}
                     </span>
                   </div>
 
@@ -5087,10 +5584,14 @@ export function AudioPlayer() {
               );
             })()}
 
-            {/* Progress — LCD time labels + precise hardware strip */}
-            <div className="flex w-full min-w-0 shrink-0 items-center gap-3 sm:gap-4">
+
+            {/* Transport — integrated dock at bottom of metadata column */}
+            <div className="player-hero-transport-slot mt-auto shrink-0 pt-1">
+            {/* Progress — hairline timeline (2026-10-12): sits exactly where the old divider was (its centre on
+                the transport's top edge); hover grows it, long-press / drag scrubs. Styles: globals.css "Hairline timeline". */}
+            <div className="sb-timeline-row relative z-[1] -mb-2.5 flex w-full min-w-0 shrink-0 items-center" data-scrubbing={isScrubbing ? "true" : "false"}>
               <span
-                className={`player-lcd-time w-14 shrink-0 text-right text-base font-semibold tabular-nums tracking-tight sm:w-16 sm:text-lg ${
+                className={`sb-timeline-time sb-timeline-time--start player-lcd-time w-14 shrink-0 text-right text-base font-semibold tabular-nums tracking-tight sm:w-16 sm:text-lg ${
                   isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-200"
                 }`}
                 aria-live="polite"
@@ -5114,43 +5615,43 @@ export function AudioPlayer() {
             onTouchStart={handleTouchStart}
           >
             <div
-              className={`absolute inset-x-0 top-1/2 h-[5px] -translate-y-1/2 rounded-sm ${
+              className={`sb-timeline-track absolute inset-x-0 top-1/2 h-[5px] -translate-y-1/2 rounded-sm ${
                 isSourcesLibraryDeck ? "bg-[color:var(--lib-border-muted)]/80" : "bg-[#1a1a1a]"
               }`}
             />
             {displayBufferedPercent > 0 && (
               <div
-                className={`absolute left-0 top-1/2 h-[5px] -translate-y-1/2 rounded-sm transition-all duration-150 ${
+                className={`sb-timeline-buffer absolute left-0 top-1/2 h-[5px] -translate-y-1/2 rounded-sm transition-all duration-150 ${
                   isSourcesLibraryDeck ? "library-player-timeline-buffer" : "bg-neutral-700/50"
                 }`}
                 style={{ width: `${Math.min(displayBufferedPercent, 100)}%` }}
               />
             )}
             <div
-              className={`absolute left-0 top-1/2 h-[5px] -translate-y-1/2 rounded-sm transition-all duration-100 ${
+              className={`sb-timeline-played absolute left-0 top-1/2 h-[5px] -translate-y-1/2 rounded-sm transition-all duration-100 ${
                 isSourcesLibraryDeck ? "library-player-timeline-played" : "bg-gradient-to-r from-cyan-600/50 to-cyan-400/75"
               }`}
-              style={{ width: `${displayProgressPercent}%` }}
+              style={{ width: `${shownProgressPercent}%` }}
             />
             <div
-              className={`absolute top-1/2 h-3 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-sm transition-all duration-100 ${
+              className={`sb-timeline-thumb absolute top-1/2 h-3 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-sm transition-all duration-100 ${
                 isSourcesLibraryDeck
                   ? "library-player-timeline-thumb bg-[color:var(--lib-accent)]"
                   : "bg-cyan-100/90"
               }`}
-              style={{ left: `${Math.max(0, Math.min(100, displayProgressPercent))}%` }}
+              style={{ left: `${Math.max(0, Math.min(100, shownProgressPercent))}%` }}
             />
-            {isHoveringTimeline && displayDuration > 0 && (
+            {(isHoveringTimeline || isScrubbing) && displayDuration > 0 && (
               <div
-                className="pointer-events-none absolute bottom-full z-10 mb-1 rounded-sm border border-white/10 bg-[#141414] px-2 py-0.5 text-xs font-mono tabular-nums text-slate-300"
-                style={{ left: `${hoverPercent}%`, transform: "translate(-50%, -100%)" }}
+                className="sb-timeline-tip pointer-events-none absolute bottom-full z-10 mb-1 rounded-sm border border-white/10 bg-[#141414] px-2 py-0.5 text-xs font-mono tabular-nums text-slate-300"
+                style={{ left: `${isScrubbing && optimistic ? optimistic.pct : hoverPercent}%`, transform: "translate(-50%, -100%)" }}
               >
-                {formatTime(hoverTime)}
+                {formatTime(isScrubbing && optimistic ? (optimistic.pct / 100) * displayDuration : hoverTime)}
               </div>
             )}
           </div>
               <span
-                className={`player-lcd-time w-14 shrink-0 text-left text-base font-semibold tabular-nums tracking-tight sm:w-16 sm:text-lg ${
+                className={`sb-timeline-time sb-timeline-time--end player-lcd-time w-14 shrink-0 text-left text-base font-semibold tabular-nums tracking-tight sm:w-16 sm:text-lg ${
                   isSourcesLibraryDeck ? "text-[color:var(--lib-text-muted)]" : "text-slate-500"
                 }`}
                 aria-live="polite"
@@ -5158,9 +5659,6 @@ export function AudioPlayer() {
                 {formatTime(displayDuration)}
               </span>
             </div>
-
-            {/* Transport — integrated dock at bottom of metadata column */}
-            <div className="player-hero-transport-slot mt-auto shrink-0 pt-1">
             <PlayerDeckTransportSurface
               variant={isSourcesLibraryDeck ? "library-deck" : "default"}
               onPrev={() => {
@@ -5191,11 +5689,11 @@ export function AudioPlayer() {
               contentDisabled={!displayHasContent}
               isPlaying={displayStatus === "playing"}
               onAutoMixToggle={() => {
-                if (!isControlMirror) setAutoMix((a) => !a);
+                if (!isControlMirror || isDesignatedLocalExec) setAutoMix((a) => !a);
                 else deviceCtx?.setAutoMixOrSend?.(!displayAutoMix);
               }}
               onShuffleToggle={() => {
-                if (!isControlMirror) toggleShuffle();
+                if (!isControlMirror || isDesignatedLocalExec) toggleShuffle();
                 else deviceCtx?.setShuffleOrSend?.(!displayShuffle);
               }}
               displayAutoMix={displayAutoMix}
@@ -5225,20 +5723,20 @@ export function AudioPlayer() {
                 !isControlMirror && displayHasContent && currentSource && isLibraryRoute
                   ? currentSource.origin === "playlist" && currentSource.playlist
                     ? () =>
-                        setCenterModule({
-                          kind: "edit-current",
-                          target: { kind: "playlist", id: currentSource.playlist!.id },
-                        })
+                        // 2026-10-16 (owner): the pencil opens the stepped centred dialog (EditModalHost) — the old
+                        // centre-column editor (setCenterModule "edit-current") stays in the code, unused.
+                        window.dispatchEvent(
+                          new CustomEvent("syncbiz:edit-open", { detail: { kind: "playlist", id: currentSource.playlist!.id } }),
+                        )
                     : currentSource.origin === "source" && currentSource.source
                       ? () =>
-                          setCenterModule({
-                            kind: "edit-current",
-                            target: { kind: "source", id: currentSource.source!.id },
-                          })
+                          window.dispatchEvent(
+                            new CustomEvent("syncbiz:edit-open", { detail: { kind: "source", id: currentSource.source!.id } }),
+                          )
                       : null
                   : null
               }
-              secondaryExtra={isDesktopMode ? <DesktopBackgroundModeToggle /> : undefined}
+              secondaryExtra={isDesktopMode ? <><DesktopBackgroundModeToggle /><MpvVideoToggle className="ml-1" /></> : undefined}
               labels={{
                 previousTrack: t.previousTrack,
                 stopPlayback: t.stopPlayback,
@@ -5258,7 +5756,7 @@ export function AudioPlayer() {
           </div>
 
           <div className="library-deck-volume-aside hidden h-full min-h-0 shrink-0 self-stretch sm:flex">
-            <PlayerVerticalVolume
+            <PlayerVolumePill
               value={displayVolume}
               onChange={onVolumeChange}
               isPlaying={displayStatus === "playing"}
@@ -5295,7 +5793,7 @@ export function AudioPlayer() {
           <div
             className={
               videoDocked
-                ? "pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
+                ? "sb-deck-video-bg pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
                 : "pointer-events-none absolute -left-[9999px] h-[180px] w-[320px] overflow-hidden opacity-0"
             }
             aria-hidden
@@ -5305,16 +5803,57 @@ export function AudioPlayer() {
             {videoDocked ? (
               /* Card-fog language, horizontal: deck-dark on the left melting into the video. */
               <div
-                className="absolute inset-y-0 left-0 z-[1] w-2/3 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/75 to-transparent"
+                className="sb-deck-video-fade absolute inset-y-0 left-0 z-[1] w-2/3 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/75 to-transparent"
                 aria-hidden
               />
             ) : null}
           </div>
         );
       })() : null}
+      {/* Mirror video (2026-10-12, display-only): a second MUTED copy of the same clip on the
+          deck's LEFT, flipped and heavily blurred (globals.css → "Mirror video"), so the colour
+          field moves with the real frames. Uses the audio-safe DesktopVideoDock (mute re-asserted
+          every tick, pointer-events none). Never touches the audio engine or the A/B decks. */}
+      {canPrewarmYoutubeEmbed && isYouTube && mirrorSlotsView.cur && deckMirrorEnabled && (displayStatus === "playing" || displayStatus === "paused")
+        ? mirrorLayers.map((mv, idx) => (
+            <div
+              key={mv}
+              className={`sb-deck-video-mirror pointer-events-none absolute -z-[2] inset-y-[5px] left-[9px] right-[58%] overflow-hidden rounded-l-[14px] ${
+                mirrorLayers.length > 1 ? (idx === 0 ? "sb-mirror-old" : `sb-mirror-new${mirrorSlotsView.ready ? " is-ready" : ""}`) : ""
+              }`}
+              aria-hidden
+            >
+              <DesktopVideoDock
+                videoId={mv}
+                mpvStatus={displayStatus === "playing" ? "playing" : "paused"}
+                mpvPosition={Number.isFinite(displayPosition) ? displayPosition : 0}
+                className="absolute inset-0"
+                maxQuality="small"
+                syncDriftSeconds={0.4}
+                syncIntervalMs={250}
+                seekLeadSeconds={0.2}
+                lockSync
+                getPosition={() => deckClockFor(mv)}
+                onState={
+                  mirrorLayers.length > 1 && idx === mirrorLayers.length - 1
+                    ? (st) => {
+                        if (st.playing) setMirrorSlots((x) => (x.ready || x.cur !== mv ? x : { ...x, ready: true }));
+                      }
+                    : undefined
+                }
+              />
+            </div>
+          ))
+        : null}
       {/* DESKTOP player background — artwork (default) / video / static, per-device.
           Display-only; audio is always MPV. The clip appears only once MPV is
           actually progressing, and falls back to artwork on any trouble. */}
+      {/* Ambient page background (2026-10-12, presentational): artwork colour field over the
+          whole page while a track is loaded. Portal to <body>; see player-surface/ambient-video-background. */}
+      <AmbientVideoBackground
+        cover={displayThumbnailCover ?? null}
+        active={displayStatus === "playing" || displayStatus === "paused"}
+      />
       {isDesktopLocal ? (
         <DesktopPlayerBackground
           mode={desktopBgMode}
@@ -5331,9 +5870,21 @@ export function AudioPlayer() {
           the MASTER), so a MUTED YouTube iframe shows only the clip, synced to
           the mirrored position. Same audio-safe dock as desktop; same right-half
           placement + left fog. Shown only for YouTube tracks while MASTER plays. */}
-      {isControlMirror && mirrorVid && (ms?.status === "playing" || ms?.status === "paused") ? (
+      {/* P0 Video V1: on the station with SYNCED video active, the picture is MPV's own (same player as the sound),
+          placed by MAIN over this slot — the muted YouTube iframe is never mounted (no second video stream). */}
+      {isControlMirror && mpvVideo.active ? (
+        desktopBgMode === "video" && (ms?.status === "playing" || ms?.status === "paused") ? (
+          <div
+            className="pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
+            aria-hidden
+          >
+            <div className="absolute inset-y-0 left-0 z-[1] w-2/3 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/75 to-transparent" aria-hidden />
+            <MpvVideoSurface className="absolute inset-y-0 right-0 w-[60%]" />
+          </div>
+        ) : null
+      ) : isControlMirror && mirrorVid && (ms?.status === "playing" || ms?.status === "paused") ? (
         <div
-          className="pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
+          className="sb-deck-video-bg pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
           aria-hidden
         >
           <DesktopVideoDock
@@ -5343,7 +5894,7 @@ export function AudioPlayer() {
             className="absolute inset-0"
           />
           <div
-            className="absolute inset-y-0 left-0 z-[1] w-2/3 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/75 to-transparent"
+            className="sb-deck-video-fade absolute inset-y-0 left-0 z-[1] w-2/3 bg-gradient-to-r from-[#0b0f16] via-[#0b0f16]/75 to-transparent"
             aria-hidden
           />
         </div>

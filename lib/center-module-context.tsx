@@ -10,6 +10,9 @@ import { createContext, useContext } from "react";
  */
 export type CenterModuleEditTarget = { kind: "playlist" | "source"; id: string };
 
+/** An album from the search shelf (iTunes metadata) opened as a screen of its own in the center (owner 2026-10-22). */
+export type CenterModuleAlbum = { id: string; name: string; artist: string; cover: string | null; tracks: number; year: number | null; url: string };
+
 export type CenterModule =
   | "jingles"
   | "royalty-free-music"
@@ -19,6 +22,7 @@ export type CenterModule =
   | "dj-creator-assistant"
   | "guests"
   | { kind: "edit-current"; target: CenterModuleEditTarget }
+  | { kind: "album"; album: CenterModuleAlbum }
   | null;
 
 type CenterModuleCtx = {
@@ -67,4 +71,8 @@ export function isEditCurrentModule(
   m: CenterModule,
 ): m is { kind: "edit-current"; target: CenterModuleEditTarget } {
   return typeof m === "object" && m !== null && m.kind === "edit-current";
+}
+
+export function isAlbumModule(m: CenterModule): m is { kind: "album"; album: CenterModuleAlbum } {
+  return typeof m === "object" && m !== null && m.kind === "album";
 }

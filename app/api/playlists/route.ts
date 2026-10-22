@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { ensurePlaylistTracksLinkedToCatalog, findOrCreateCatalogItem, normalizeCatalogUrlKey } from "@/lib/catalog-store";
 import { listPlaylistsForTenant, createPlaylist, isPlaylistPersistError } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession, getAssignedBranchIdsForUser } from "@/lib/auth-helpers";
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest) {
     // Fetch the user's allowed branches once, then filter synchronously.
     // The old serial-await-per-item pattern caused 3-4 DB queries × N playlists = 60-80
     // sequential DB calls on a 2-connection pool, leading to ~63s response times.
-    const allowedBranchIds = await getAssignedBranchIdsForUser(user.id);
+    const allowedBranchIds = await getAssignedBranchIdsForUser(user.id, user.tenantId);
     const isOwner = allowedBranchIds.includes("*");
     const filtered = all.filter((p) => {
       if (!playlistMatchesApiScope(p, scope)) return false;
@@ -89,9 +90,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!(await hasBranchAccess(user.id, branchId))) {
+    if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
+    shadowAuthorize("playlists:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks
 
     if (!VALID_TYPES.includes(type)) {
       return NextResponse.json(

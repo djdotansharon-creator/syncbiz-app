@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUserFromApiRequest } from "@/lib/auth-helpers";
+import { canonicalContentBranchForWrite } from "@/lib/branch-resolver";
+import { actorFor, listJingles, loadWorkspaceFacts, resolveCreate, rowToItem } from "@/lib/jingles/library-service";
 
 /**
  * Cloud Jingle Library — the single authoritative list of saved jingles per workspace.
@@ -13,6 +16,13 @@ import { getCurrentUserFromApiRequest } from "@/lib/auth-helpers";
  * Security: workspace is ALWAYS derived from the authenticated session (`user.tenantId`); the
  * client can never spoof it. Unauthenticated → 401. A user only ever sees/creates jingles in their
  * own workspace.
+ *
+ * Jingles Stage 1 (owner 2026-10-12): ORIGIN + AUDIENCE (lib/jingles/audience.ts, lib/jingles/library-service.ts).
+ *  - GET  ?branchId=  → exactly what that branch is eligible for (never UNASSIGNED); without it: HQ = everything
+ *    (incl. UNASSIGNED, flagged playable:false), a branch user = what its branches are eligible for.
+ *  - POST audience / audienceBranchId / audienceBrandId / audienceRegion / originBranchId (optional): HQ default
+ *    UNASSIGNED; a branch user only LOCAL for its own branch. Brand A never receives a Brand B jingle.
+ *  - PATCH /api/jingles/library/<id> changes the audience (promote) — HQ only, same row.
  */
 
 export const dynamic = "force-dynamic";
@@ -50,46 +60,22 @@ function isLegitJingleUrl(url: string, req: Request): boolean {
   return AUDIO_PATH_RE.test(u.pathname);
 }
 
-type JingleLibraryItem = {
-  id: string;
-  title: string;
-  url: string;
-  script: string;
-  voiceId: string;
-  durationSec: number | null;
-  createdAt: string;
-};
-
-function rowToItem(r: {
-  id: string; name: string; audioUrl: string | null; text: string;
-  voiceId: string | null; durationSec: number | null; createdAt: Date;
-}): JingleLibraryItem {
-  return {
-    id: r.id,
-    title: r.name,
-    url: r.audioUrl ?? "",
-    script: r.text ?? "",
-    voiceId: r.voiceId ?? "",
-    durationSec: r.durationSec ?? null,
-    createdAt: r.createdAt.toISOString(),
-  };
-}
-
 export async function GET(req: Request) {
   const user = await getCurrentUserFromApiRequest(req);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const rows = await prisma.announcement.findMany({
-    where: { workspaceId: user.tenantId, announcementType: JINGLE_TYPE, audioUrl: { not: null } },
-    orderBy: { createdAt: "desc" },
-    take: 500,
-  });
-  return NextResponse.json({ items: rows.map(rowToItem) });
+  const facts = await loadWorkspaceFacts(user.tenantId);
+  const actor = await actorFor(user.id, facts);
+  const branchId = new URL(req.url).searchParams.get("branchId");
+  const res = await listJingles(actor, facts, { branchId });
+  if (!res.ok) return NextResponse.json({ error: res.error }, { status: res.status });
+  return NextResponse.json({ items: res.items });
 }
 
 export async function POST(req: Request) {
   const user = await getCurrentUserFromApiRequest(req);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  shadowAuthorize("jingles/library:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", ["default"]); // Gate 3A shadow: log only, never blocks
 
   let body: Record<string, unknown>;
   try {
@@ -118,20 +104,31 @@ export async function POST(req: Request) {
   const existing = await prisma.announcement.findFirst({
     where: { workspaceId: user.tenantId, announcementType: JINGLE_TYPE, audioUrl: url },
   });
-  const row =
-    existing ??
-    (await prisma.announcement.create({
-      data: {
-        workspaceId: user.tenantId,
-        announcementType: JINGLE_TYPE,
-        branchId: "default",
-        name: title,
-        audioUrl: url,
-        voiceId,
-        durationSec,
-        text: script,
-      },
-    }));
+  if (existing) return NextResponse.json({ item: rowToItem(existing) }, { status: 200 });
 
-  return NextResponse.json({ item: rowToItem(row) }, { status: existing ? 200 : 201 });
+  // ORIGIN + AUDIENCE (permission-checked): HQ default UNASSIGNED; a branch user only LOCAL for its own branch
+  const facts = await loadWorkspaceFacts(user.tenantId);
+  const actor = await actorFor(user.id, facts);
+  const resolved = resolveCreate(actor, facts, body);
+  if (!resolved.ok) return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+  const row = await prisma.announcement.create({
+    data: {
+      workspaceId: user.tenantId,
+      announcementType: JINGLE_TYPE,
+      // Gate 2B-1 (LEGACY column, unchanged): the workspace's canonical branch. Never used for origin / audience.
+      branchId: await canonicalContentBranchForWrite(user.tenantId, "default"),
+      name: title,
+      audioUrl: url,
+      voiceId,
+      durationSec,
+      text: script,
+      originBranchId: resolved.originBranchId,
+      audience: resolved.audience.audience,
+      audienceBranchId: resolved.audience.audienceBranchId,
+      audienceBrandId: resolved.audience.audienceBrandId,
+      audienceRegion: resolved.audience.audienceRegion,
+    },
+  });
+
+  return NextResponse.json({ item: rowToItem(row) }, { status: 201 });
 }

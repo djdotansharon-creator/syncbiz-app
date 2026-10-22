@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { shadowAuthorize } from "@/lib/authz";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession, getAssignedBranchIdsForUser } from "@/lib/auth-helpers";
@@ -20,7 +21,7 @@ export async function GET() {
   }
   await db.ensureSchedulesLoaded();
   const all = await db.getSchedules(resolveAccountScope(user.tenantId));
-  const allowedBranchIds = await getAssignedBranchIdsForUser(user.id);
+  const allowedBranchIds = await getAssignedBranchIdsForUser(user.id, user.tenantId);
   const isOwner = allowedBranchIds.includes("*");
   const filtered = all.filter((s) => {
     if (isOwner) return true;
@@ -84,11 +85,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!(await hasBranchAccess(user.id, branchId))) {
+  if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
     return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
   }
+  shadowAuthorize("schedules:POST", { userId: user.id, workspaceId: user.tenantId }, "schedule.edit", [branchId]); // Gate 3A shadow: log only, never blocks
 
-  const validation = await validateScheduleTarget(branchId, targetType, targetId || (data.sourceId ?? ""));
+  const validation = await validateScheduleTarget(branchId, targetType, targetId || (data.sourceId ?? ""), user.tenantId);
   if (!validation.ok) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
   }
