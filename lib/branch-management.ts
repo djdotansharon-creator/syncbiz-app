@@ -7,7 +7,6 @@
  * Never touches stations, designations, the WS server or playback. Every function is scoped to ONE workspace id.
  */
 import { prisma } from "./prisma";
-import { removeBranchLogo } from "./branch-logo";
 import { ensureDefaultBrandId, defaultZoneData } from "./control-room-foundation";
 import { enforceCanAddBranch } from "./entitlement-limits";
 import { resolveGooglePlace, placeErrorMessage, type PlaceResult } from "./branch-place";
@@ -21,8 +20,7 @@ import {
 } from "./branch-activation";
 
 export class BranchInputError extends Error {
-  /** `code` / `count`: a stable reason the UI can word in its own language (delete refusals) */
-  constructor(message: string, readonly status = 400, readonly code?: string, readonly count?: number) {
+  constructor(message: string, readonly status = 400) {
     super(message);
   }
 }
@@ -195,28 +193,4 @@ export async function revokeActivationCode(workspaceId: string, branchId: string
   const branch = await prisma.branch.findFirst({ where: { id: branchId, workspaceId }, select: { id: true } });
   if (!branch) throw new BranchInputError("Branch not found.", 404);
   await prisma.branchActivationCode.updateMany({ where: { branchId, workspaceId, usedAt: null, revokedAt: null }, data: { revokedAt: new Date() } });
-}
-
-/**
- * Delete a branch of THIS workspace (owner 2026-10-22: "an option to delete a branch from its settings"). Never forced — it is REFUSED while the branch still carries something that must not
- * vanish silently: the legacy default branch (the accepted pilot's branch), a station bound to it (a registered station / a designated MASTER — an unattended machine must never be orphaned),
- * or a member's access scope that points at it (removing it there could broaden someone's access). Everything else goes with it: its zones, activation codes, group / tag links, schedules and
- * registered devices (FK cascade), the user assignments to it, and its logo file.
- */
-export async function deleteBranch(workspaceId: string, branchId: string): Promise<void> {
-  const cur = await prisma.branch.findFirst({ where: { id: branchId, workspaceId }, select: { id: true, legacyKey: true } });
-  if (!cur) throw new BranchInputError("Branch not found.", 404, "not_found");
-  if (cur.legacyKey) throw new BranchInputError("The default branch cannot be deleted.", 409, "default");
-  const [stations, designations, scopes] = await Promise.all([
-    prisma.stationDevice.count({ where: { workspaceId, branchId: cur.id } }),
-    prisma.branchMasterDesignation.count({ where: { workspaceId, branchId: cur.id } }),
-    prisma.memberScopeTarget.count({ where: { branchId: cur.id } }),
-  ]);
-  if (stations > 0 || designations > 0) throw new BranchInputError("This branch has a station installed.", 409, "station");
-  if (scopes > 0) throw new BranchInputError("This branch is used in a member's access scope.", 409, "scope");
-  await prisma.$transaction([
-    prisma.userBranchAssignment.deleteMany({ where: { workspaceId, branchId: cur.id } }),
-    prisma.branch.delete({ where: { id: cur.id } }),
-  ]);
-  try { removeBranchLogo(cur.id); } catch { /* no logo file */ }
 }
