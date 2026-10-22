@@ -15,6 +15,7 @@ import {
   useCenterModule,
   isJinglesModule,
   isRoyaltyFreeMusicModule,
+  isShufersalBankModule,
   isMyMusicLibraryModule,
   isMusicLibraryMetadataModule,
   isDjCreatorHubModule,
@@ -24,7 +25,8 @@ import {
 } from "@/lib/center-module-context";
 import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
 import { RoyaltyFreeMusicWorkspacePanel } from "@/components/royalty-free-music-workspace-panel";
-import { RFM_CATALOG_ENABLED } from "@/lib/feature-flags";
+import { ShufersalBankWorkspacePanel } from "@/components/shufersal-bank-workspace-panel";
+import { RFM_CATALOG_ENABLED, SHUFERSAL_BANK_ENABLED } from "@/lib/feature-flags";
 import { MyMusicLibraryWorkspacePanel } from "@/components/my-music-library-workspace-panel";
 import { MusicLibraryMetadataWorkspacePanel } from "@/components/music-library-metadata-workspace-panel";
 import { EditCurrentWorkspacePanel } from "@/components/edit-current-workspace-panel";
@@ -2873,6 +2875,8 @@ function SourcesManagerInner({
             <JinglesWorkspacePanel onClose={() => setActiveCenterModule(null)} />
           ) : RFM_CATALOG_ENABLED && isRoyaltyFreeMusicModule(activeCenterModule) ? (
             <RoyaltyFreeMusicWorkspacePanel onClose={() => setActiveCenterModule(null)} />
+          ) : SHUFERSAL_BANK_ENABLED && isShufersalBankModule(activeCenterModule) ? (
+            <ShufersalBankWorkspacePanel onClose={() => setActiveCenterModule(null)} />
           ) : isMyMusicLibraryModule(activeCenterModule) ? (
             <MyMusicLibraryWorkspacePanel
               onClose={() => setActiveCenterModule(null)}
