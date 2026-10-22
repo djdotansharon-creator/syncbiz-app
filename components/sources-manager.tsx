@@ -15,6 +15,7 @@ import {
   useCenterModule,
   isJinglesModule,
   isRoyaltyFreeMusicModule,
+  isShufersalBankModule,
   isMyMusicLibraryModule,
   isMusicLibraryMetadataModule,
   isDjCreatorHubModule,
@@ -25,7 +26,8 @@ import {
 } from "@/lib/center-module-context";
 import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
 import { RoyaltyFreeMusicWorkspacePanel } from "@/components/royalty-free-music-workspace-panel";
-import { RFM_CATALOG_ENABLED } from "@/lib/feature-flags";
+import { ShufersalBankWorkspacePanel } from "@/components/shufersal-bank-workspace-panel";
+import { RFM_CATALOG_ENABLED, SHUFERSAL_BANK_ENABLED, shufersalBankVisibleFor } from "@/lib/feature-flags";
 import { MyMusicLibraryWorkspacePanel } from "@/components/my-music-library-workspace-panel";
 import { MusicLibraryMetadataWorkspacePanel } from "@/components/music-library-metadata-workspace-panel";
 import { EditCurrentWorkspacePanel } from "@/components/edit-current-workspace-panel";
@@ -847,7 +849,7 @@ function SourcesManagerInner({
 }) {
   const router = useRouter();
   const pathname = usePathname() ?? "";
-  const { active: activeCenterModule, setActive: setActiveCenterModule } = useCenterModule();
+  const { active: activeCenterModule, setActive: setActiveCenterModule, workspaceId: centerWorkspaceId } = useCenterModule();
   const searchParams = useSearchParams();
   const { locale } = useLocale();
   const tr = useTr();
@@ -2665,7 +2667,7 @@ function SourcesManagerInner({
                   {playlistTileDropMessage}
                 </p>
               ) : null}
-              <div className="space-y-2">
+              <div className="vx-tile-list">
                 {FIXED_DAYPART_PADS.map((pad) => (
                   (() => {
                     const assignedPlaylistKey = daypartPlaylistAssignments[pad.key];
@@ -2698,7 +2700,7 @@ function SourcesManagerInner({
                     }}
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
-                    className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
+                    className="vx-tile-row px-3 py-2.5"
                     title={t.playlistTileDropBindPlaylistTitle}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -2796,7 +2798,7 @@ function SourcesManagerInner({
                     }}
                     data-drop-target="daypart-playlist"
                     data-daypart={pad.label.toLowerCase()}
-                    className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
+                    className="vx-tile-row px-3 py-2.5"
                     title={t.playlistTileDropBindPlaylistTitle}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -2940,6 +2942,8 @@ function SourcesManagerInner({
             <JinglesWorkspacePanel onClose={() => setActiveCenterModule(null)} />
           ) : RFM_CATALOG_ENABLED && isRoyaltyFreeMusicModule(activeCenterModule) ? (
             <RoyaltyFreeMusicWorkspacePanel onClose={() => setActiveCenterModule(null)} />
+          ) : SHUFERSAL_BANK_ENABLED && isShufersalBankModule(activeCenterModule) ? (
+            <ShufersalBankWorkspacePanel onClose={() => setActiveCenterModule(null)} />
           ) : isMyMusicLibraryModule(activeCenterModule) ? (
             <MyMusicLibraryWorkspacePanel
               onClose={() => setActiveCenterModule(null)}
@@ -3097,6 +3101,23 @@ function SourcesManagerInner({
                   </svg>
                   <span>{tr("Guest")}</span>
                 </button>
+                {/* Shufersal pilot demo bank (main, 2026-10-22) — in OUR bar, next to Guest. Absent entirely unless the flag is on AND this workspace is allow-listed. */}
+                {shufersalBankVisibleFor(centerWorkspaceId ?? null) ? (
+                  <button
+                    type="button"
+                    onClick={() => setActiveCenterModule(isShufersalBankModule(activeCenterModule) ? null : "shufersal-bank")}
+                    className={[guestLinkLedButtonClass, "h-10 shrink-0 justify-center px-3"].join(" ")}
+                    title="Shufersal Bank"
+                    aria-label="Shufersal Bank"
+                    aria-pressed={isShufersalBankModule(activeCenterModule)}
+                  >
+                    <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M3 10 12 4l9 6" />
+                      <path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18" />
+                    </svg>
+                    <span>Shufersal</span>
+                  </button>
+                ) : null}
                 {/* Music Library Metadata is ADMIN-only internal management — intentionally NOT
                     launched from the player UI. The center module + panel + API remain wired
                     (center-module id "music-library-metadata"); no user-facing launcher here. */}

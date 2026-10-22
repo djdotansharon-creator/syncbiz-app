@@ -14,7 +14,7 @@
 
 import { useState } from "react";
 import { RiseText } from "@/components/rise-text";
-import { VOICE_PRESETS_BY_LANG } from "./voice-presets";
+import { VOICE_PRESETS_BY_LANG, voiceMenuLabel } from "./voice-presets";
 import type { AnnouncementDraft, JingleAsset, JingleBellStyle, JingleLanguage, JingleSpeed } from "./types";
 import { useTr } from "@/lib/i18n/use-tr";
 
@@ -170,7 +170,7 @@ export function JingleCreateFlow({
                 style={{ ["--d" as string]: `${i * 40}ms` } as React.CSSProperties}
                 onClick={() => setDraft((d) => ({ ...d, voice: v.voiceId }))}
               >
-                {v.label}
+                {voiceMenuLabel(v, draft.language)}
               </button>
             ))}
           </div>

@@ -61,6 +61,8 @@ export type SyncBizDesktopMvp = {
   getVideoOutput: () => Promise<VideoOutputState>;
   setVideoOutputEnabled: (enabled: boolean) => Promise<VideoOutputState>;
   setVideoDockRect: (rect: VideoDockRect) => Promise<void>;
+  /** P0 Gate 2c: AUTOMIX + loop setting → MAIN (automatic URL progression). Feature-detect in the renderer. */
+  setPlaybackPrefs: (prefs: { autoMix?: boolean; repeatMode?: string }) => Promise<void>;
   /** Dev-only: send a URL to the interrupt channel (triggers ducking). */
   mpvPlayInterrupt: (url: string) => Promise<void>;
   /** Set duck depth 0–100 (% of masterVolume Channel A falls to during interrupt). */

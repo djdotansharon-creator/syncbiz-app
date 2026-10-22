@@ -28,7 +28,7 @@ import {
   MOCK_SCHEDULE_ITEMS,
   SAMPLER_PADS,
 } from "./seed-data";
-import { VOICE_PRESETS_BY_LANG } from "./voice-presets";
+import { VOICE_PRESETS_BY_LANG, voiceMenuLabel } from "./voice-presets";
 import { JINGLES_OPEN_TAB_EVENT, takeJinglesOpenTab, type JinglesOpenTab } from "./open-tab";
 import { fetchCloudPads, savePadToCloud, padsFromCloud } from "./cloud-pads";
 import { loadJingleSchedule, persistJingleSchedule, JINGLE_SCHEDULE_EVENT } from "./schedule-storage";
@@ -1590,7 +1590,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                     size="sm"
                     labelledBy="jcx-set-voice"
                     value={draft.voice}
-                    options={VOICE_PRESETS_BY_LANG[draft.language].map((v) => ({ value: v.voiceId, label: v.label }))}
+                    options={VOICE_PRESETS_BY_LANG[draft.language].map((v) => ({ value: v.voiceId, label: voiceMenuLabel(v, draft.language) }))}
                     onChange={(v) => setDraft((d) => ({ ...d, voice: v }))}
                   />
                 </div>

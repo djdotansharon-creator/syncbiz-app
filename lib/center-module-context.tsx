@@ -16,6 +16,7 @@ export type CenterModuleAlbum = { id: string; name: string; artist: string; cove
 export type CenterModule =
   | "jingles"
   | "royalty-free-music"
+  | "shufersal-bank"
   | "my-music-library"
   | "music-library-metadata"
   | "dj-creator-hub"
@@ -28,11 +29,14 @@ export type CenterModule =
 type CenterModuleCtx = {
   active: CenterModule;
   setActive: (m: CenterModule) => void;
+  /** the active workspace id (the library bar needs it to decide who sees the Shufersal bank button) */
+  workspaceId?: string | null;
 };
 
 export const CenterModuleContext = createContext<CenterModuleCtx>({
   active: null,
   setActive: () => {},
+  workspaceId: null,
 });
 
 export function useCenterModule(): CenterModuleCtx {
@@ -45,6 +49,10 @@ export function isJinglesModule(m: CenterModule): m is "jingles" {
 
 export function isRoyaltyFreeMusicModule(m: CenterModule): m is "royalty-free-music" {
   return m === "royalty-free-music";
+}
+
+export function isShufersalBankModule(m: CenterModule): m is "shufersal-bank" {
+  return m === "shufersal-bank";
 }
 
 export function isMyMusicLibraryModule(m: CenterModule): m is "my-music-library" {

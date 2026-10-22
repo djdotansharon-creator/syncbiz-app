@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
-import { VOICE_PRESETS_BY_LANG } from "@/components/jingles-control/voice-presets";
+import { VOICE_PRESETS_BY_LANG, voiceMenuLabel } from "@/components/jingles-control/voice-presets";
 import { fetchCloudPads, padsFromCloud, savePadToCloud } from "@/components/jingles-control/cloud-pads";
 import type { SamplerPadItem, JingleBellStyle } from "@/components/jingles-control/types";
 import { useVoiceRecorder } from "@/components/mobile/use-voice-recorder";
@@ -328,7 +328,7 @@ export function MobileJingles() {
             >
               {VOICE_PRESETS_BY_LANG[language].map((v) => (
                 <option key={v.voiceId} value={v.voiceId}>
-                  {v.label}
+                  {voiceMenuLabel(v, language)}
                 </option>
               ))}
             </select>
