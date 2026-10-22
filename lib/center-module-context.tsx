@@ -13,6 +13,7 @@ export type CenterModuleEditTarget = { kind: "playlist" | "source"; id: string }
 export type CenterModule =
   | "jingles"
   | "royalty-free-music"
+  | "shufersal-bank"
   | "my-music-library"
   | "music-library-metadata"
   | "dj-creator-hub"
@@ -41,6 +42,10 @@ export function isJinglesModule(m: CenterModule): m is "jingles" {
 
 export function isRoyaltyFreeMusicModule(m: CenterModule): m is "royalty-free-music" {
   return m === "royalty-free-music";
+}
+
+export function isShufersalBankModule(m: CenterModule): m is "shufersal-bank" {
+  return m === "shufersal-bank";
 }
 
 export function isMyMusicLibraryModule(m: CenterModule): m is "my-music-library" {
