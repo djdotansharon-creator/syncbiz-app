@@ -44,6 +44,9 @@ const nextConfig: NextConfig = {
       "**/node_modules/typescript/**",
     ],
   },
+  // Next 16 builds with Turbopack by default and REFUSES a `webpack` config without a `turbopack` one; the webpack function below is dev-only (`next dev --webpack`),
+  // so an empty `turbopack` config lets `next build` run exactly as before (verified 2026-10-23).
+  turbopack: {},
   /**
    * DEV ONLY: runtime data written while the app runs must never be treated as a source
    * change. The WS server rewrites `server/data/master-lease.json` on every device
