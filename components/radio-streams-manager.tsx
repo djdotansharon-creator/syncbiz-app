@@ -14,6 +14,7 @@ import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { ShareModal } from "@/components/share-modal";
 import { radioToShareable } from "@/lib/share-utils";
 import { getRadioStationsLocal, removeRadioStationLocal } from "@/lib/radio-local-store";
+import { useRadioNowPlaying } from "@/lib/use-radio-now-playing";
 import type { RadioStream } from "@/lib/source-types";
 
 type Props = {
@@ -145,8 +146,9 @@ function RadioNowPlaying({ stations }: { stations: RadioStream[] }) {
   const { t } = useTranslations();
   const { locale } = useLocale();
   const station = stations.find((s) => s.id === currentSource?.id);
-  if (!station) return null;
   const playing = status === "playing";
+  const song = useRadioNowPlaying(station?.id ?? null, playing);
+  if (!station) return null;
 
   return (
     <div className="playing-active flex items-center gap-4 rounded-2xl border border-rose-500/30 bg-gradient-to-l from-rose-950/30 via-slate-900/70 to-slate-950/80 p-4">
@@ -159,6 +161,11 @@ function RadioNowPlaying({ stations }: { stations: RadioStream[] }) {
           {t.live ?? "LIVE"}
         </span>
         <p className="mt-1 truncate text-lg font-semibold text-slate-100">{station.name}</p>
+        {song && (
+          <p className="truncate text-sm font-medium text-rose-200/90" title={song}>
+            ♪ {song}
+          </p>
+        )}
         <p className="truncate text-xs text-slate-400">
           {locale === "he" ? "מתנגן עכשיו" : "Now playing"}
           {station.genre ? ` · ${station.genre}` : ""}
