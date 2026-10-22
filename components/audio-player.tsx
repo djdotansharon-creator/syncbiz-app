@@ -160,6 +160,7 @@ import {
 } from "@/lib/playback-time-store";
 import { getMixDuration, getAutoMix, setAutoMix as persistAutoMix, onMixDurationChanged, onAutoMixChanged } from "@/lib/mix-preferences";
 import { redactMediaToken } from "@/lib/media/media-session";
+import { useRadioNowPlaying } from "@/lib/use-radio-now-playing";
 import {
   PRELOAD_LEAD_SEC,
   STANDBY_READY_TIMEOUT_MS,
@@ -4343,6 +4344,12 @@ export function AudioPlayer() {
         : status;
   const displayTrack = isControlMirror ? ms?.currentTrack : currentTrack;
   const displaySource = isControlMirror ? ms?.currentSource : currentSource;
+  // Radio: the song the station is broadcasting (ICY metadata, polled every 20 s). DISPLAY ONLY — it only replaces
+  // the hero title text below; playback state / currentSource are never touched.
+  const radioNowPlaying = useRadioNowPlaying(
+    displaySource && "origin" in displaySource && displaySource.origin === "radio" ? displaySource.id : null,
+    displayStatus === "playing",
+  );
 
   // CONTROL mirror: tick every 250 ms so the progress bar advances smoothly
   // between STATE_UPDATE snapshots (which arrive ~1s from Desktop / ~1s from browser MASTER).
@@ -5044,7 +5051,7 @@ export function AudioPlayer() {
 
           <div className="library-deck-controls-col flex min-h-0 min-w-0 w-full max-w-none flex-col justify-between gap-1.5 py-1 sm:gap-2">
             {(() => {
-              const rawTitle = String(displayTitle ?? "");
+              const rawTitle = String(radioNowPlaying ?? displayTitle ?? "");
               const titleSplit = rawTitle.match(/^(.+?)\s[–—-]\s(.+)$/);
               const heroArtist = titleSplit?.[1]?.trim() || null;
               const heroTitle = titleSplit?.[2]?.trim() || rawTitle;
