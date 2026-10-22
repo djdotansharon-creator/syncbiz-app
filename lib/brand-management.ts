@@ -6,6 +6,7 @@
  * assigned. Color = strict #RRGGBB (rendered into styles). Never touches stations, the WS server or playback.
  */
 import { prisma } from "./prisma";
+import { removeBrandLogo } from "./brand-logo";
 import { ensureDefaultBrandId } from "./control-room-foundation";
 import { BranchInputError } from "./branch-management";
 
@@ -70,3 +71,21 @@ export async function updateBrand(workspaceId: string, brandId: string, input: B
   await prisma.brand.update({ where: { id: brandId }, data: { name: c.name, code: c.code, color: c.color } });
 }
 
+
+/**
+ * Delete a brand of THIS workspace (owner 2026-10-22). Brands are ARCHIVED, not erased (the model's own convention — every brand query filters `archivedAt: null`): the row stays, its code is
+ * freed (suffixed) so the same code can be used again. Refused while the brand is the default one, while branches still belong to it, or while a member's access scope points at it.
+ */
+export async function deleteBrand(workspaceId: string, brandId: string): Promise<void> {
+  const cur = await prisma.brand.findFirst({ where: { id: brandId, workspaceId, archivedAt: null }, select: { id: true, code: true, isDefault: true } });
+  if (!cur) throw new BranchInputError("Brand not found.", 404, "not_found");
+  if (cur.isDefault) throw new BranchInputError("The default brand cannot be deleted.", 409, "default");
+  const [branches, scopes] = await Promise.all([
+    prisma.branch.count({ where: { workspaceId, brandId: cur.id } }),
+    prisma.memberScopeTarget.count({ where: { brandId: cur.id } }),
+  ]);
+  if (branches > 0) throw new BranchInputError(`${branches} branches still belong to this brand.`, 409, "branches", branches);
+  if (scopes > 0) throw new BranchInputError("This brand is used in a member's access scope.", 409, "scope");
+  await prisma.brand.update({ where: { id: cur.id }, data: { archivedAt: new Date(), status: "archived", code: `${cur.code}~${cur.id.slice(0, 8)}` } });
+  try { removeBrandLogo(cur.id); } catch { /* no logo file */ }
+}
