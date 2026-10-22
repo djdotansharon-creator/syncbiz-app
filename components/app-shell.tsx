@@ -35,7 +35,7 @@ import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
 import { DesktopUpdatePill } from "@/components/desktop-update-pill";
 import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule, isRoyaltyFreeMusicModule, isShufersalBankModule, isGuestsModule } from "@/lib/center-module-context";
-import { RFM_CATALOG_ENABLED, SHUFERSAL_BANK_ENABLED } from "@/lib/feature-flags";
+import { RFM_CATALOG_ENABLED, shufersalBankVisibleFor } from "@/lib/feature-flags";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { useTopNavPins } from "@/lib/use-top-nav-pins";
 import {
@@ -1751,8 +1751,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                                 },
                               ]
                             : []),
-                          // Shufersal pilot demo bank PAD — gated (flag off → absent entirely, no trace).
-                          ...(SHUFERSAL_BANK_ENABLED
+                          // Shufersal pilot demo bank PAD — gated (flag off or workspace not allow-listed → absent entirely).
+                          ...(shufersalBankVisibleFor(activeWorkspaceId)
                             ? [
                                 {
                                   key: "shufersal-bank" as const,

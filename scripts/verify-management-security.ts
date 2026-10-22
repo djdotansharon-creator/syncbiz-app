@@ -47,19 +47,20 @@ async function main() {
   // ── rate limiter ──
   rl.__resetRateLimit();
   const t0 = 1_000_000;
-  for (let i = 0; i < 4; i++) rl.recordFailure("login:a@b.c", t0 + i);
-  const after4 = rl.retryAfterMs("login:a@b.c", t0 + 5);
-  rl.recordFailure("login:a@b.c", t0 + 5);
-  const after5 = rl.retryAfterMs("login:a@b.c", t0 + 6);
-  assert("S10 account: 4 wrong passwords allowed, the 5th blocks for 15 min", after4 === 0 && after5 > 14 * 60 * 1000 && rl.retryAfterMs("login:a@b.c", t0 + 6 + 15 * 60 * 1000) === 0);
+  for (let i = 0; i < 9; i++) rl.recordFailure("login:a@b.c", t0 + i);
+  const after9 = rl.retryAfterMs("login:a@b.c", t0 + 10);
+  rl.recordFailure("login:a@b.c", t0 + 10);
+  const after10 = rl.retryAfterMs("login:a@b.c", t0 + 11);
+  assert("S10 account: 9 wrong passwords allowed, the 10th blocks for 5 min", after9 === 0 && after10 > 4 * 60 * 1000 && after10 <= 5 * 60 * 1000 && rl.retryAfterMs("login:a@b.c", t0 + 11 + 5 * 60 * 1000) === 0);
   rl.__resetRateLimit();
   for (let i = 0; i < 4; i++) rl.recordFailure("login:x@y.z", t0 + i);
   rl.recordSuccess("login:x@y.z");
   rl.recordFailure("login:x@y.z", t0 + 10);
   assert("S11 a successful login clears the counter", rl.retryAfterMs("login:x@y.z", t0 + 11) === 0);
   rl.__resetRateLimit();
-  for (let i = 0; i < 4; i++) rl.recordFailure("login:slow@y.z", t0 + i * 6 * 60 * 1000);
-  assert("S12 failures older than 15 min do not count", rl.retryAfterMs("login:slow@y.z", t0 + 25 * 60 * 1000) === 0);
+  for (let i = 0; i < 9; i++) rl.recordFailure("login:slow@y.z", t0 + i * 2 * 60 * 1000);
+  rl.recordFailure("login:slow@y.z", t0 + 20 * 60 * 1000);
+  assert("S12 failures older than 15 min do not count", rl.retryAfterMs("login:slow@y.z", t0 + 20 * 60 * 1000 + 1) === 0);
   rl.__resetRateLimit();
   for (let i = 0; i < 19; i++) rl.recordFailure("login-ip:1.2.3.4", t0 + i);
   const ip19 = rl.retryAfterMs("login-ip:1.2.3.4", t0 + 20);
