@@ -100,7 +100,7 @@ export function RadioPresetsSection({ stations, onAdded }: Props) {
       <h2 id="radio-presets-title" className="text-sm font-semibold text-slate-200">
         {he ? "תחנות ישראליות" : "Israeli stations"}
       </h2>
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8">
+      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
         {presets.map((p) => {
           const saved = savedFor(p);
           const busy = busyKey === p.key;

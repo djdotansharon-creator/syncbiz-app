@@ -101,7 +101,7 @@ export function RadioStreamsManager({ initialStations }: Props) {
         {stations.length === 0 && (
           <p className="text-sm text-slate-500">{t.radioNoStations}</p>
         )}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
           {stations.map((station) => (
             <RadioStationTile key={station.id} station={station} onRemove={handleRemove} />
           ))}
