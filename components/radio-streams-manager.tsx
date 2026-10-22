@@ -245,11 +245,11 @@ function RadioStationTile({ station, onRemove }: { station: RadioStream; onRemov
           </span>
         </button>
       </div>
-      <div className="mt-2 flex items-start gap-1">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-slate-100">{station.name}</p>
-          {station.genre && <p className="truncate text-xs text-slate-500">{station.genre}</p>}
-        </div>
+      <div className="mt-2 min-w-0">
+        <p className="truncate text-sm font-medium text-slate-100">{station.name}</p>
+        {station.genre && <p className="truncate text-xs text-slate-500">{station.genre}</p>}
+      </div>
+      <div className="mt-1 -ms-1.5 flex items-center gap-0.5">
         <button type="button" onClick={() => setShareOpen(true)} title={t.share} aria-label={t.share} className={TILE_ICON_BTN}>
           <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13" />
