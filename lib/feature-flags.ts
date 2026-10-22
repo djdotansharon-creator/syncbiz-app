@@ -11,3 +11,10 @@
  * makes it actually playable for customers. Gates BOTH the PAD launcher and the center panel.
  */
 export const RFM_CATALOG_ENABLED = process.env.NEXT_PUBLIC_RFM_CATALOG_ENABLED === "true";
+
+/**
+ * Shufersal pilot demo bank (separate from the Royalty-Free bank). OFF by default — the launcher pad and
+ * the center panel are absent entirely until this is exactly "true". The DB rows + /api/media serving are
+ * independent of this flag; this gates UI visibility only.
+ */
+export const SHUFERSAL_BANK_ENABLED = process.env.NEXT_PUBLIC_SHUFERSAL_BANK_ENABLED === "true";

@@ -34,8 +34,8 @@ import { LanguageSelector } from "@/components/language-selector";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
 import { DesktopUpdatePill } from "@/components/desktop-update-pill";
-import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule, isRoyaltyFreeMusicModule, isGuestsModule } from "@/lib/center-module-context";
-import { RFM_CATALOG_ENABLED } from "@/lib/feature-flags";
+import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule, isRoyaltyFreeMusicModule, isShufersalBankModule, isGuestsModule } from "@/lib/center-module-context";
+import { RFM_CATALOG_ENABLED, SHUFERSAL_BANK_ENABLED } from "@/lib/feature-flags";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { useTopNavPins } from "@/lib/use-top-nav-pins";
 import {
@@ -1751,6 +1751,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                                 },
                               ]
                             : []),
+                          // Shufersal pilot demo bank PAD — gated (flag off → absent entirely, no trace).
+                          ...(SHUFERSAL_BANK_ENABLED
+                            ? [
+                                {
+                                  key: "shufersal-bank" as const,
+                                  title: "Shufersal Bank",
+                                  tone: "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.07] hover:text-[#f5f5f7]",
+                                  activeTone: "border-[#0a84ff]/40 bg-[#0a84ff]/12 text-[#7db8ff]",
+                                  dot: "bg-rose-400",
+                                },
+                              ]
+                            : []),
                           {
                             key: "my-music-library" as const,
                             title: "My Music",
@@ -1784,19 +1796,22 @@ export function AppShell({ children }: { children: ReactNode }) {
                         const isMusicPad = group.key === "my-music-library";
                         const isJinglesPad = group.key === "jingles";
                         const isRfmPad = group.key === "royalty-free-music";
+                        const isShufersalPad = group.key === "shufersal-bank";
                         const isGuestPad = group.key === "guests";
                         const isActive =
                           (isJinglesPad && isJinglesModule(activeCenterModule)) ||
                           (isMusicPad && isMyMusicLibraryModule(activeCenterModule)) ||
                           (isRfmPad && isRoyaltyFreeMusicModule(activeCenterModule)) ||
+                          (isShufersalPad && isShufersalBankModule(activeCenterModule)) ||
                           (isGuestPad && isGuestsModule(activeCenterModule));
                         const padDisabled = group.key === null || (isMusicPad && !inDesktopApp);
-                        const isTogglePad = isJinglesPad || isRfmPad || isGuestPad || (isMusicPad && inDesktopApp);
+                        const isTogglePad = isJinglesPad || isRfmPad || isShufersalPad || isGuestPad || (isMusicPad && inDesktopApp);
                         let statusLabel: string;
                         if (isMusicPad && !inDesktopApp) statusLabel = "Desktop only";
                         else if (isMusicPad) statusLabel = isActive ? "Close panel" : "Open console";
                         else if (isJinglesPad) statusLabel = isActive ? "Close console" : "Open console";
                         else if (isRfmPad) statusLabel = isActive ? "Close catalog" : "Open catalog";
+                        else if (isShufersalPad) statusLabel = isActive ? "Close bank" : "Open bank";
                         else if (isGuestPad) statusLabel = isActive ? "Close inbox" : "Open inbox";
                         else statusLabel = "Soon";
                         return (
@@ -1817,6 +1832,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                                       setActiveCenterModule((v) =>
                                         isRoyaltyFreeMusicModule(v) ? null : "royalty-free-music",
                                       )
+                                  : isShufersalPad
+                                    ? () =>
+                                        setActiveCenterModule((v) =>
+                                          isShufersalBankModule(v) ? null : "shufersal-bank",
+                                        )
                                   : isGuestPad
                                     ? () => setActiveCenterModule((v) => (isGuestsModule(v) ? null : "guests"))
                                     : isMusicPad && inDesktopApp
