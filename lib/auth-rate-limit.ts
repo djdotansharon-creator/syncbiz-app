@@ -1,15 +1,15 @@
 /**
- * Login / manager re-auth RATE LIMIT (owner 2026-10-13, security hotfix). In-memory, per server process:
- * 5 failed attempts for the same ACCOUNT (20 for the same ADDRESS — an office shares one IP) within 15 minutes →
- * that key is blocked for 15 minutes (HTTP 429 + Retry-After).
+ * Login / manager re-auth RATE LIMIT (owner 2026-10-13, security hotfix; softened by owner 2026-10-22). In-memory,
+ * per server process: 10 failed attempts for the same ACCOUNT (20 for the same ADDRESS — an office shares one IP)
+ * within 15 minutes → that key is blocked for 5 minutes (HTTP 429 + Retry-After).
  * A success clears the key. Keys are "<purpose>:<email>" and "<purpose>-ip:<ip>" so neither a single account nor a
  * single address can be brute-forced. (One Railway replica today; a multi-replica deploy would need a shared store.)
  */
 
-export const RATE_MAX_FAILURES = 5;
+export const RATE_MAX_FAILURES = 10;
 export const RATE_MAX_FAILURES_IP = 20;
 export const RATE_WINDOW_MS = 15 * 60 * 1000;
-export const RATE_BLOCK_MS = 15 * 60 * 1000;
+export const RATE_BLOCK_MS = 5 * 60 * 1000;
 const MAX_KEYS = 10_000;
 
 type Entry = { failures: number[]; blockedUntil: number };
