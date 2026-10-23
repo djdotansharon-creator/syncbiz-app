@@ -66,6 +66,7 @@ async function main() {
   const { setRepeatMode } = await import("../lib/mix-preferences");
   let api: ReturnType<typeof usePlayback> | null = null;
   function Probe() {
+    // eslint-disable-next-line react-hooks/globals -- test probe: hands the live context value to the script below
     api = usePlayback();
     return null;
   }
@@ -195,7 +196,7 @@ async function main() {
   const seen = new Set<number>([0]);
   let peekStable = true;
   let advanceMatchesPeek = true;
-  let sequence = [0];
+  const sequence = [0];
   for (let step = 0; step < N - 1; step++) {
     const first = A().getNextStreamUrl();
     for (let k = 0; k < 25; k++) if (A().getNextStreamUrl() !== first) peekStable = false; // 25 more peeks: same answer, nothing spent
