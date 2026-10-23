@@ -6,10 +6,13 @@
  * wrong tab and two tabs both showed MASTER.
  *
  * Now the id is CLAIMED asynchronously, held with a Web Lock for as long as the tab lives:
- *   1. this tab's own id (sessionStorage) — a refresh waits for the previous document to release it;
+ *   1. this tab's own id (sessionStorage) — a refresh waits for the previous document to release it. Only the SAME
+ *      tab may wait: Duplicate tab and window.open copy sessionStorage but NOT window.name (verified in Chromium),
+ *      so the tab marks itself in window.name; a copy takes the id only if it is free and not mid-reload;
  *   2. the profile's stable id (localStorage "device_id", unchanged key) — so a single tab, a kiosk, the streamer
- *      and the Electron window keep exactly today's identity — unless its owner tab is mid-reload (handoff marker);
- *   3. otherwise a fresh id (new tab, duplicated tab, window.open — they copy sessionStorage, the lock catches it).
+ *      and the Electron window keep exactly today's identity — unless its owner tab is mid-reload;
+ *   3. otherwise a fresh id (new tab, duplicated tab, window.open while the original lives).
+ * "Mid-reload" = a short handoff marker per id, written on pagehide by the tab that holds it.
  * No Web Locks → FAIL-SAFE: a fresh id for this page (never persisted), never a shared one.
  *
  * There is deliberately NO synchronous getter that could hand out an unclaimed id: callers await claimDeviceId()
@@ -21,11 +24,13 @@
 
 const STABLE_KEY = "device_id";
 const TAB_KEY = "vono_tab_device_id";
-const HANDOFF_KEY = "vono_device_handoff";
+const HANDOFF_PREFIX = "vono_device_handoff:";
+/** window.name marker of the tab that owns an id — survives reload / same-tab navigation, never copied to a new tab. */
+const TAB_NAME_PREFIX = "vono-tab:";
 const LOCK_PREFIX = "vono-device:";
 /** How long a tab waits for its OWN id while the previous document of the same tab (a reload) releases the lock. */
 const RELOAD_WAIT_MS = 3000;
-/** A handoff marker newer than this means the stable id's owner tab is reloading — another tab must not take it. */
+/** A handoff marker newer than this means the id's owner tab is reloading — another tab must not take it. */
 const HANDOFF_TTL_MS = 10_000;
 
 let claimed: string | null = null;
@@ -57,34 +62,47 @@ function write(store: Storage | undefined, key: string, value: string | null): v
   }
 }
 
-function handoffPending(stableId: string): boolean {
-  const raw = read(globalThis.localStorage, HANDOFF_KEY);
-  if (!raw) return false;
+function handoffPending(id: string): boolean {
+  const at = Number(read(globalThis.localStorage, HANDOFF_PREFIX + id));
+  return Number.isFinite(at) && at > 0 && Date.now() - at < HANDOFF_TTL_MS;
+}
+
+/** Drop stale handoff markers (one per closed tab) so localStorage does not grow. */
+function pruneHandoffs(): void {
   try {
-    const h = JSON.parse(raw) as { id?: string; at?: number };
-    return h.id === stableId && typeof h.at === "number" && Date.now() - h.at < HANDOFF_TTL_MS;
+    const ls = globalThis.localStorage;
+    for (let i = ls.length - 1; i >= 0; i--) {
+      const k = ls.key(i);
+      if (k?.startsWith(HANDOFF_PREFIX) && !handoffPending(k.slice(HANDOFF_PREFIX.length))) ls.removeItem(k);
+    }
   } catch {
-    return false;
+    /* storage unavailable */
   }
 }
 
-/** Take and keep (until the page dies) the Web Lock for `id`. waitMs 0 = only if free right now. */
-function hold(id: string, waitMs: number): Promise<boolean> {
+/**
+ * Take and keep (until the page dies, or release() is called) the Web Lock for `id`. waitMs 0 = only if free right
+ * now. Resolves the release function, or null when the lock was not obtained.
+ */
+function hold(id: string, waitMs: number): Promise<(() => void) | null> {
   return new Promise((resolve) => {
     let settled = false;
+    let release: () => void = () => {};
     const finish = (ok: boolean) => {
       if (!settled) {
         settled = true;
-        resolve(ok);
+        resolve(ok ? release : null);
       }
     };
-    const keepForever = () => new Promise<void>(() => {});
+    const keepForever = () => new Promise<void>((done) => (release = done));
     try {
       if (waitMs <= 0) {
         void navigator.locks
           .request(LOCK_PREFIX + id, { ifAvailable: true }, (lock) => {
-            finish(lock !== null);
-            return lock ? keepForever() : undefined;
+            if (!lock) return finish(false);
+            const kept = keepForever();
+            finish(true);
+            return kept;
           })
           .catch(() => finish(false));
         return;
@@ -94,8 +112,9 @@ function hold(id: string, waitMs: number): Promise<boolean> {
       void navigator.locks
         .request(LOCK_PREFIX + id, { signal: ctl.signal }, () => {
           clearTimeout(timer);
+          const kept = keepForever();
           finish(true);
-          return keepForever();
+          return kept;
         })
         .catch(() => {
           clearTimeout(timer);
@@ -105,6 +124,22 @@ function hold(id: string, waitMs: number): Promise<boolean> {
       finish(false);
     }
   });
+}
+
+/**
+ * Take `id` only if it is free right now AND its owner tab is not mid-reload. The marker is checked again AFTER the
+ * lock is ours: the owner may have started reloading (pagehide marker → lock released) between the first check and
+ * the lock grant — then step aside so the returning tab gets its id back.
+ */
+async function holdIfFreeAndIdle(id: string): Promise<boolean> {
+  if (handoffPending(id)) return false;
+  const release = await hold(id, 0);
+  if (!release) return false;
+  if (handoffPending(id)) {
+    release();
+    return false;
+  }
+  return true;
 }
 
 async function runClaim(): Promise<string> {
@@ -122,13 +157,19 @@ async function runClaim(): Promise<string> {
     write(globalThis.localStorage, STABLE_KEY, stable);
   }
   const own = read(globalThis.sessionStorage, TAB_KEY);
+  // The same tab (reload / navigation) still carries its window.name mark; a Duplicate or window.open copy does not.
+  const sameTab = !!own && window.name === TAB_NAME_PREFIX + own;
 
   let id: string | null = null;
   let how = "";
-  if (own && (await hold(own, RELOAD_WAIT_MS))) {
+  if (own && sameTab && (await hold(own, RELOAD_WAIT_MS))) {
     id = own;
     how = "tab (kept)";
-  } else if (own !== stable && !handoffPending(stable) && (await hold(stable, 0))) {
+  } else if (own && !sameTab && (await holdIfFreeAndIdle(own))) {
+    // A copy (or a restored tab) whose original is gone: the id is free and nobody is reloading into it.
+    id = own;
+    how = "tab (copy, free)";
+  } else if (own !== stable && (await holdIfFreeAndIdle(stable))) {
     id = stable;
     how = "stable";
   } else {
@@ -140,14 +181,19 @@ async function runClaim(): Promise<string> {
   }
 
   write(globalThis.sessionStorage, TAB_KEY, id);
-  if (id === stable) {
-    write(globalThis.localStorage, HANDOFF_KEY, null);
-    // This tab owns the stable id: on unload (reload or close — indistinguishable) leave a short handoff marker so a
-    // tab opening during the reload does not grab the stable id from under the returning owner.
-    window.addEventListener("pagehide", () => {
-      write(globalThis.localStorage, HANDOFF_KEY, JSON.stringify({ id: stable, at: Date.now() }));
-    });
+  try {
+    window.name = TAB_NAME_PREFIX + id;
+  } catch {
+    /* ignore */
   }
+  write(globalThis.localStorage, HANDOFF_PREFIX + id, null);
+  pruneHandoffs();
+  // On unload (reload or close — indistinguishable) leave a short handoff marker so a tab opening or a copy of this
+  // tab loading during the reload does not grab this id from under the returning tab.
+  const claimedId = id;
+  window.addEventListener("pagehide", () => {
+    write(globalThis.localStorage, HANDOFF_PREFIX + claimedId, String(Date.now()));
+  });
   console.log(`[SyncBiz] device_id (${how}):`, id);
   return id;
 }

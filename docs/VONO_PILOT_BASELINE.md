@@ -19,7 +19,12 @@
   `lib/device-id.ts` claims one id per live tab with a Web Lock (first tab keeps the profile's stable id; no Web Locks →
   per-page unique id, never shared); the device socket REGISTERs only with the claimed id; WS server: a web MASTER that
   closes with 1001 (reload looks the same as tab close) keeps its lease 10 s (`WEB_RELOAD_RECLAIM_MS`) so a reload never
-  hands MASTER to another tab. Desktop MAIN / designated stations / streamer paths unchanged. PARKED (separate, owner
+  hands MASTER to another tab. Owner regression R2 (MASTER that started as a secondary tab, fresh id, refreshes while
+  it is Duplicated / window.open'ed): FAILED on the first PR version (window.open copy took B's id 0/8) → fixed: only the
+  SAME tab may wait for its id (window.name mark — PROVEN BY TEST in Chromium: kept on reload, empty on Duplicate /
+  window.open); a copy takes an id only if free and its owner is not mid-reload (per-id pagehide handoff marker,
+  re-checked after the lock is granted). R2 PASS: identity suite 3× (Duplicate 8/8, window.open 8/8) + E2E with the real
+  app/WS (real Duplicate, promotion, pads) 20/20. Desktop MAIN / designated stations / streamer paths unchanged. PARKED (separate, owner
   2026-10-23): **F2** device socket closes + reconnects on ANY non-whitelisted server ERROR (e.g. "No MASTER device",
   "Branch has a permanent designated MASTER") — the command is lost (`lib/remote-control/ws-client.ts` ERROR handler);
   **F3** `sendCommandToMaster` silently no-ops without `masterDeviceId` (no user feedback); **F6** NOT VERIFIED whether a

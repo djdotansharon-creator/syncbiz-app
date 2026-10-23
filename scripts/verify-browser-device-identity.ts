@@ -8,6 +8,7 @@
  * Run: npx tsx scripts/verify-browser-device-identity.ts
  *      (CHROMIUM_PATH=/path/to/chrome to use a specific Chromium; otherwise Playwright's default.)
  */
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -125,7 +126,7 @@ async function main() {
     await D.close();
     await W.close();
     await N.close();
-    await B.evaluate(() => localStorage.setItem("vono_device_handoff", JSON.stringify({ id: localStorage.getItem("device_id"), at: Date.now() - 60_000 })));
+    await B.evaluate(() => localStorage.setItem("vono_device_handoff:" + localStorage.getItem("device_id"), String(Date.now() - 60_000)));
     const C = await open(ctx);
     const c1 = await claim(C);
     assert("I9 stable owner closed (stale handoff) → a new tab may reuse the stable id", c1.id === a1.id);
@@ -133,6 +134,81 @@ async function main() {
     const b3 = await claim(B);
     assert("I10 the other tab's refresh keeps its own id", b3.id === b1.id && b3.id !== c1.id);
     await ctx.close();
+
+    // ── owner regression R2: a MASTER that started as a SECONDARY tab (fresh id) reloads while it is duplicated ──
+    // A = stable id, B = fresh id; A closes (B would be promoted). B refreshes and, at the same moment, is duplicated
+    // with Chromium's REAL "Duplicate tab" (chrome.tabs.duplicate via a minimal extension — sessionStorage cloned) or
+    // opens a window.open (sessionStorage copied). B must keep its fresh id; the copy must get a different one.
+    {
+      const extDir = mkdtempSync(path.join(os.tmpdir(), "vono-dup-ext-"));
+      writeFileSync(path.join(extDir, "manifest.json"), JSON.stringify({ manifest_version: 3, name: "dup", version: "1", permissions: ["tabs"], background: { service_worker: "sw.js" } }));
+      writeFileSync(path.join(extDir, "sw.js"), "self.dup = async (u) => { const [t] = await chrome.tabs.query({ url: u + '*' }); await chrome.tabs.duplicate(t.id); };");
+      const profile = mkdtempSync(path.join(os.tmpdir(), "vono-dup-profile-"));
+      mkdirSync(profile, { recursive: true });
+      const ctx2 = await chromium.launchPersistentContext(profile, {
+        ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+        headless: true,
+        args: [`--disable-extensions-except=${extDir}`, `--load-extension=${extDir}`],
+      });
+      const sw = ctx2.serviceWorkers()[0] ?? (await ctx2.waitForEvent("serviceworker"));
+      const duplicateTab = async (): Promise<Page> => {
+        const [p] = await Promise.all([ctx2.waitForEvent("page"), sw.evaluate((u) => (self as unknown as { dup: (u: string) => Promise<void> }).dup(u), URL)]);
+        return p;
+      };
+      const A2 = await open(ctx2);
+      const sA = await claim(A2);
+      const B2 = await open(ctx2);
+      const sB = await claim(B2);
+      const stable2 = await A2.evaluate(() => localStorage.getItem("device_id"));
+      assert("R2 (setup) A has the stable id, B a fresh one", sA.id === stable2 && sB.id !== stable2);
+      await A2.close();
+      const delays = [0, 5, 15, 30, 60, 0, 10, 25];
+      let dupOk = 0;
+      // the real Duplicate of B (no reload) is a copy: it must not take B's id
+      const d0 = await duplicateTab();
+      await d0.waitForFunction(() => (window as unknown as { __claim?: unknown }).__claim);
+      const d0c = await claim(d0);
+      assert("R2 (setup) real Duplicate of B (no reload) → a different id", d0c.id !== sB.id);
+      await d0.close();
+      for (const delay of delays) {
+        const [, dup] = await Promise.all([
+          B2.reload(),
+          (async () => {
+            await new Promise((r) => setTimeout(r, delay));
+            return duplicateTab();
+          })(),
+        ]);
+        await dup.waitForFunction(() => (window as unknown as { __claim?: unknown }).__claim);
+        const bR = await claim(B2);
+        const dR = await claim(dup);
+        if (bR.id === sB.id && dR.id !== bR.id) dupOk++;
+        else console.log(`      dup  d=${delay}: B=${bR.id.slice(0, 8)} (want ${sB.id.slice(0, 8)}), dup=${dR.id.slice(0, 8)}`);
+        await dup.close();
+      }
+      assert(`R2a fresh-id MASTER reload + Duplicate at the same time → B keeps its id, duplicate differs (${delays.length} runs)`, dupOk === delays.length, `${dupOk}/${delays.length}`);
+      let openOk = 0;
+      for (const delay of delays) {
+        const [W2] = await Promise.all([
+          ctx2.waitForEvent("page"),
+          (async () => {
+            await B2.evaluate((u) => void window.open(u), URL);
+            await new Promise((r) => setTimeout(r, delay));
+            await B2.reload();
+          })(),
+        ]);
+        await W2.waitForLoadState();
+        const copied = await W2.evaluate(() => !!sessionStorage.getItem("vono_tab_device_id"));
+        const bR = await claim(B2);
+        const wR = await claim(W2);
+        if (copied && bR.id === sB.id && wR.id !== bR.id) openOk++;
+        else console.log(`      open d=${delay}: B=${bR.id.slice(0, 8)} (want ${sB.id.slice(0, 8)}), win=${wR.id.slice(0, 8)}, copied=${copied}`);
+        await W2.close();
+      }
+      const bFinal = await claim(B2);
+      assert("R2c after all races B still holds the same fresh id (no silent identity change)", bFinal.id === sB.id);
+      assert(`R2b fresh-id MASTER window.open + reload at the same time → B keeps its id, new window differs (${delays.length} runs)`, openOk === delays.length, `${openOk}/${delays.length}`);
+      await ctx2.close();
+    }
 
     // ── no Web Locks: fail-safe unique per page, never shared ──
     // Web Locks exist only on SECURE origins: the same page over plain http on a non-loopback address is exactly a
