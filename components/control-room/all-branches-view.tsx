@@ -543,10 +543,15 @@ export function AllBranchesView() {
         <ConfirmDelete
           kind="branch"
           name={deleting.name}
+          typeToConfirm={deleting.name}
           onClose={() => setDeleting(null)}
-          onConfirm={async () => {
+          onConfirm={async (typed) => {
             try {
-              const res = await fetch(`/api/control-room/branches/${encodeURIComponent(deleting.id)}`, { method: "DELETE" });
+              const res = await fetch(`/api/control-room/branches/${encodeURIComponent(deleting.id)}`, {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ confirmName: typed }), // the server compares it with the branch's name
+              });
               if (!res.ok) return deleteRefusalText(L, (await res.json().catch(() => ({}))) as DeleteRefusal);
             } catch {
               return L.t("common.serverRetry");

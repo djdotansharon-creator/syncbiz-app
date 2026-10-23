@@ -18,19 +18,24 @@ export function deleteRefusalText(L: ReturnType<typeof useMgmt>, d: DeleteRefusa
     case "station": return L.t("del.err.station");
     case "scope": return L.t("del.err.scope");
     case "branches": return L.t("del.err.branches", { n: L.branches(d.count ?? 0) });
+    case "assignment": return L.t("del.err.assignment");
+    case "confirm": return L.t("del.err.confirm");
+    case "busy": return L.t("del.err.busy");
     default: return L.t("del.err.generic");
   }
 }
 
-export function ConfirmDelete({ kind, name, onConfirm, onClose }: { kind: "branch" | "brand"; name: string; onConfirm: () => Promise<string | null>; onClose: () => void }) {
+export function ConfirmDelete({ kind, name, typeToConfirm, onConfirm, onClose }: { kind: "branch" | "brand"; name: string; /** the name the owner must type (a branch — the server checks it too) */ typeToConfirm?: string; onConfirm: (typed: string) => Promise<string | null>; onClose: () => void }) {
   const L = useMgmt();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
+  const ready = typeToConfirm === undefined || typed.trim() === typeToConfirm.trim();
   const run = async () => {
-    if (busy) return;
+    if (busy || !ready) return;
     setBusy(true);
     setError(null);
-    const err = await onConfirm();
+    const err = await onConfirm(typed);
     if (err) { setError(err); setBusy(false); return; }
     // success: the host closes everything (the row is gone)
   };
@@ -46,11 +51,25 @@ export function ConfirmDelete({ kind, name, onConfirm, onClose }: { kind: "branc
         <>
           <button type="button" className="sb-wz-btn" onClick={onClose} disabled={busy}>{L.t("common.cancel")}</button>
           <span className="sb-wz-spacer" />
-          <button type="button" className="sb-wz-btn cr-del-btn" onClick={() => void run()} disabled={busy}>{busy ? "…" : L.t("common.delete")}</button>
+          <button type="button" className="sb-wz-btn cr-del-btn" onClick={() => void run()} disabled={busy || !ready}>{busy ? "…" : L.t("common.delete")}</button>
         </>
       }
     >
       <p className="cr-del-body" dir="auto">{L.t(kind === "branch" ? "del.branchBody" : "del.brandBody", { name })}</p>
+      {typeToConfirm !== undefined ? (
+        <input
+          className="sb-wz-input"
+          style={{ marginTop: 14 }}
+          value={typed}
+          onChange={(e) => { setTyped(e.target.value); setError(null); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void run(); } }}
+          placeholder={L.t("del.typeName")}
+          aria-label={L.t("del.typeName")}
+          dir="auto"
+          disabled={busy}
+          autoFocus
+        />
+      ) : null}
       {error ? <p className="sb-wz-error" role="alert">{error}</p> : null}
     </GlassModal>
   );
