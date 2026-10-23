@@ -12,6 +12,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { GlassModal, type GlassModalStep } from "@/components/glass-modal";
 import { playlistMetadataRegistry } from "@/lib/playlist-metadata-registry";
 import {
   effectivePlaylistUseCases,
@@ -27,6 +28,7 @@ import {
   publicationScopeRequiresPlatformAdmin,
   type PlaylistPublicationScope,
 } from "@/lib/playlist-publication-scope";
+import { useTr } from "@/lib/i18n/use-tr";
 
 /** Publication scopes editable by workspace users without platform SUPER_ADMIN. */
 const WORKSPACE_PUBLICATION_SCOPES: PlaylistPublicationScope[] = [
@@ -76,6 +78,93 @@ function MetadataToggleChip(props: {
   );
 }
 
+/* ── Wizard "Style" step helpers (2026-10-16): few options at a time, "+N" to expand, minimal line icons ── */
+const ico = (d: ReactNode) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    {d}
+  </svg>
+);
+const CONTEXT_ICONS: Record<string, ReactNode> = {
+  retail: ico(<><path d="M6 8h12l-1 12H7L6 8z" /><path d="M9 8V6a3 3 0 0 1 6 0v2" /></>),
+  restaurant: ico(<><path d="M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10" /><path d="M16 21V3c-2 1.5-3 4-3 7h3" /></>),
+  cafe: ico(<><path d="M5 9h11v5a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V9z" /><path d="M16 10h2a2 2 0 0 1 0 4h-2M8 4v2M12 4v2" /></>),
+  gym: ico(<path d="M6 8v8M3 10v4M18 8v8M21 10v4M6 12h12" />),
+  office: ico(<><rect x="4" y="8" width="16" height="11" rx="2" /><path d="M9 8V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M4 13h16" /></>),
+  lounge: ico(<><path d="M4 12V9a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v3" /><path d="M2 14a2 2 0 0 1 4 0v2h12v-2a2 2 0 0 1 4 0v4H2v-4zM6 18v2M18 18v2" /></>),
+  event: ico(<><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8L12 3z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z" /></>),
+  wedding: ico(<><circle cx="9" cy="14" r="4.5" /><circle cx="15" cy="14" r="4.5" /><path d="M12 6l-1.5-2h3L12 6z" /></>),
+  weekend: ico(<><circle cx="12" cy="12" r="4" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6L7 7M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4" /></>),
+  warmup: ico(<path d="M3 18h18M6 18a6 6 0 0 1 12 0M12 6v3M4.9 9.9l1.5 1.5M19.1 9.9l-1.5 1.5" />),
+  peak: ico(<path d="M3 19l6-10 4 6 3-4 5 8H3z" />),
+  closing: ico(<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" />),
+};
+const MOOD_ICONS: Record<string, ReactNode> = {
+  chill: ico(<path d="M3 12c2-3 4-3 6 0s4 3 6 0 4-3 6 0" />),
+  uplifting: ico(<path d="M12 3l2.2 5.2L20 9l-4.2 3.8L17 18l-5-2.9L7 18l1.2-5.2L4 9l5.8-.8L12 3z" />),
+  emotional: ico(<path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.5-7 10-7 10z" />),
+  warm: ico(<path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-5 1-9z" />),
+  dark: ico(<path d="M12 4a8 8 0 1 0 0 16V4z" />),
+  sexy: ico(<><path d="M3 12c3-4 6-4 9-2 3-2 6-2 9 2-3 4-6 6-9 6s-6-2-9-6z" /><path d="M3 12h18" /></>),
+  elegant: ico(<path d="M6 4h12l3 5-9 11L3 9l3-5zM3 9h18M9 4l3 5 3-5" />),
+  happy: ico(<><circle cx="12" cy="12" r="9" /><path d="M8 14c1 1.5 2.3 2 4 2s3-.5 4-2M9 9.5h.01M15 9.5h.01" /></>),
+  dramatic: ico(<path d="M13 3L5 14h6l-1 7 8-11h-6l1-7z" />),
+  spiritual: ico(<><path d="M12 4v4M12 16v4M4 12h4M16 12h4" /><circle cx="12" cy="12" r="2" /></>),
+};
+
+const PLAYLIST_TYPE_OPTIONS = [
+  { value: "youtube", label: "YouTube" },
+  { value: "soundcloud", label: "SoundCloud" },
+  { value: "spotify", label: "Spotify" },
+  { value: "winamp", label: "Winamp" },
+  { value: "local", label: "Local" },
+  { value: "stream-url", label: "Stream URL" },
+] as const;
+
+function ChipGroup({
+  items,
+  selected,
+  onPick,
+  icons,
+  limit,
+}: {
+  items: readonly { readonly value: string; readonly label: string }[];
+  selected: readonly string[];
+  onPick: (value: string) => void;
+  icons?: Record<string, ReactNode>;
+  limit: number;
+}) {
+  const tr = useTr();
+  const [open, setOpen] = useState(false);
+  // a selected option is never hidden behind "+N"
+  const shown = items.filter((it, i) => i < limit || selected.includes(it.value));
+  const extra = items.filter((it) => !shown.includes(it));
+  const chip = (it: { value: string; label: string }) => (
+    <button key={it.value} type="button" className={`sb-wz-chip${selected.includes(it.value) ? " is-on" : ""}`} aria-pressed={selected.includes(it.value)} onClick={() => onPick(it.value)}>
+      {icons?.[it.value] ? <span className="sb-wz-chip-ic">{icons[it.value]}</span> : null}
+      {tr(it.label)}
+    </button>
+  );
+  return (
+    <div>
+      <div className="sb-wz-chips">
+        {shown.map(chip)}
+        {extra.length > 0 ? (
+          <button type="button" className="sb-wz-chip sb-wz-chip--more" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+            {open ? "Less" : `+${extra.length}`}
+          </button>
+        ) : null}
+      </div>
+      {extra.length > 0 ? (
+        <div className={`sb-wz-more${open ? " is-open" : ""}`} aria-hidden={!open}>
+          <div className="sb-wz-more-inner">
+            <div className="sb-wz-chips">{extra.map(chip)}</div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 type Props = {
   id: string;
   onDone: () => void;
@@ -83,9 +172,15 @@ type Props = {
   titleAddon?: ReactNode;
   backHref?: string;
   hideTopBackLink?: boolean;
+  /** "wizard" = the stepped centred glass dialog (2026-10-16); default "page" keeps the original layout. */
+  presentation?: "page" | "wizard";
+  /** Wizard only: the host's exit animation is running. */
+  modalClosing?: boolean;
 };
 
-export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = "/playlists", hideTopBackLink = false }: Props) {
+export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = "/playlists", hideTopBackLink = false, presentation = "page", modalClosing }: Props) {
+  const tr = useTr();
+  const [step, setStep] = useState(0);
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -268,6 +363,195 @@ export function EditPlaylistForm({ id, onDone, onCancel, titleAddon, backHref = 
     const newOrder = [...order];
     [newOrder[from], newOrder[to]] = [newOrder[to], newOrder[from]];
     setOrder(newOrder);
+  }
+
+  if (presentation === "wizard") {
+    if (loading || !playlist) {
+      return (
+        <GlassModal title={tr("Edit playlist")} width={420} closing={modalClosing} closeOnBackdrop={false} onClose={onCancel}>
+          <p className="sb-wz-hint" style={{ textAlign: "center", padding: "28px 0" }}>{loading ? tr("Loading…") : tr("Playlist not found")}</p>
+        </GlassModal>
+      );
+    }
+    const steps: GlassModalStep[] = [
+      { key: "details", label: tr("Details") },
+      ...(tracks.length > 1 ? [{ key: "tracks", label: tr("Tracks") }] : []),
+      { key: "style", label: tr("Style") },
+      { key: "visibility", label: tr("Visibility") },
+    ];
+    const at = Math.min(step, steps.length - 1);
+    const cur = steps[at]!.key;
+    const last = at === steps.length - 1;
+    const scopeLocked =
+      playlist.publicationScope != null &&
+      publicationScopeRequiresPlatformAdmin(playlist.publicationScope) &&
+      !platformSuperAdmin;
+    const submit = () => {
+      if (!name.trim() || !url.trim()) {
+        setStep(0);
+        setSaveError(tr("Name and URL are required"));
+        return;
+      }
+      void handleSubmit({ preventDefault() {} } as React.FormEvent);
+    };
+    return (
+      <GlassModal
+        title={tr("Edit playlist")}
+        subtitle={name.trim() || tr("Untitled playlist")}
+        showInitial
+        cover={thumbnail.trim() || null}
+        steps={steps}
+        step={at}
+        onStep={setStep}
+        width={680}
+        closing={modalClosing}
+        closeOnBackdrop={false}
+        onClose={onCancel}
+        footer={
+          <>
+            <button type="button" className="sb-wz-btn" onClick={onCancel}>{tr("Cancel")}</button>
+            <span className="sb-wz-spacer" />
+            {at > 0 ? <button type="button" className="sb-wz-btn" onClick={() => setStep(at - 1)}>{tr("Back")}</button> : null}
+            {/* round 8 (owner): Next only, until the very last step — that is where Save is */}
+            {!last ? (
+              <button type="button" className="sb-wz-btn sb-wz-btn--primary" onClick={() => setStep(at + 1)}>{tr("Next")}</button>
+            ) : (
+              <button type="button" className="sb-wz-btn sb-wz-btn--primary" disabled={saving} onClick={submit}>{saving ? tr("Saving…") : tr("Save")}</button>
+            )}
+          </>
+        }
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (last) submit();
+            else setStep(at + 1);
+          }}
+        >
+          {cur === "details" ? (
+            <div className="sb-wz-grid2">
+              <div className="sb-wz-field sb-wz-span2">
+                <label className="sb-wz-label">{tr("Name")}</label>
+                <input className="sb-wz-input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+              </div>
+              <div className="sb-wz-field sb-wz-span2">
+                <label className="sb-wz-label">{tr("URL")}</label>
+                <input className="sb-wz-input" value={url} onChange={(e) => setUrl(e.target.value)} />
+              </div>
+              <div className="sb-wz-field">
+                <label className="sb-wz-label">{tr("Genre")}</label>
+                <input className="sb-wz-input" value={genre} onChange={(e) => setGenre(e.target.value)} />
+              </div>
+              <div className="sb-wz-field">
+                <label className="sb-wz-label">{tr("Thumbnail URL")}</label>
+                <input className="sb-wz-input" value={thumbnail} onChange={(e) => setThumbnail(e.target.value)} />
+              </div>
+              <div className="sb-wz-field sb-wz-span2">
+                <label className="sb-wz-label">{tr("Type")}</label>
+                <ChipGroup
+                  items={PLAYLIST_TYPE_OPTIONS}
+                  selected={[type]}
+                  onPick={(v) => setType(v as PlaylistType)}
+                  limit={6}
+                />
+              </div>
+            </div>
+          ) : null}
+          {cur === "tracks" ? (
+            <>
+              <p className="sb-wz-hint" style={{ margin: "0 2px 10px" }}>{tr("Drag a track to change the order.")}</p>
+              <div className="sb-wz-rows">
+                {order.map((tid, idx) => {
+                  const track = tracks.find((t2) => t2.id === tid);
+                  if (!track) return null;
+                  return (
+                    <div
+                      key={`${idx}-${tid}`}
+                      draggable
+                      onDragStart={() => handleDragStart(idx)}
+                      onDragOver={handleDragOver}
+                      onDrop={(e) => handleDrop(e, idx)}
+                      className={`sb-wz-row${draggedIndex === idx ? " is-drag" : ""}`}
+                    >
+                      <span className="sb-wz-grip" aria-hidden>⋮⋮</span>
+                      <span className="sb-wz-row-name" title={track.name}>{track.name}</span>
+                      <span className="sb-wz-row-type">{track.type}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : null}
+          {cur === "style" ? (
+            <div className="sb-wz-grid2" style={{ alignItems: "start" }}>
+              <div className="sb-wz-stack">
+                <div className="sb-wz-field">
+                  <span className="sb-wz-label">{tr("Playback context")}</span>
+                  <ChipGroup items={playlistMetadataRegistry.useCases} selected={useCaseTags} onPick={toggleUseCaseTag} icons={CONTEXT_ICONS} limit={6} />
+                </div>
+                <div className="sb-wz-field">
+                  <span className="sb-wz-label">{tr("Sub-styles")}</span>
+                  <ChipGroup items={playlistMetadataRegistry.subGenres} selected={subGenreTags} onPick={toggleSubGenre} limit={3} />
+                </div>
+              </div>
+              <div className="sb-wz-stack">
+                <div className="sb-wz-field">
+                  <span className="sb-wz-label">{tr("Main sound")}</span>
+                  <ChipGroup items={playlistMetadataRegistry.primaryGenres} selected={primaryGenre ? [primaryGenre] : []} onPick={(v) => setPrimaryGenre(primaryGenre === v ? "" : v)} limit={4} />
+                </div>
+                <div className="sb-wz-field">
+                  <span className="sb-wz-label">{tr("Vibe")}</span>
+                  <ChipGroup items={playlistMetadataRegistry.moods} selected={mood ? [mood] : []} onPick={(v) => setMood(mood === v ? "" : v)} icons={MOOD_ICONS} limit={4} />
+                </div>
+                <div className="sb-wz-field">
+                  <span className="sb-wz-label">{tr("Energy")}</span>
+                  <div className="sb-wz-seg" role="radiogroup" aria-label={tr("Energy")}>
+                    {playlistMetadataRegistry.energyLevels.map((e, i) => (
+                      <button key={e.value} type="button" role="radio" aria-checked={energyLevel === e.value} className={energyLevel === e.value ? "is-on" : ""} onClick={() => setEnergyLevel(energyLevel === e.value ? "" : e.value)}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                          <path d="M6 19v-3" opacity={i >= 0 ? 1 : 0.3} />
+                          <path d="M12 19v-7" opacity={i >= 1 ? 1 : 0.25} />
+                          <path d="M18 19V7" opacity={i >= 2 ? 1 : 0.25} />
+                        </svg>
+                        {tr(e.label)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {cur === "visibility" ? (
+            <div className="sb-wz-stack">
+              <div className="sb-wz-field">
+                <label className="sb-wz-label">{tr("Who can discover this playlist")}</label>
+                {scopeLocked ? (
+                  <p className="sb-wz-hint" style={{ margin: 0 }}>
+                    {tr(PLAYLIST_PUBLICATION_SCOPE_UI[playlist.publicationScope!].label)} — {tr("only platform admins can change this.")}
+                  </p>
+                ) : (
+                  <>
+                    <ChipGroup
+                      items={(platformSuperAdmin ? PLAYLIST_PUBLICATION_SCOPES : WORKSPACE_PUBLICATION_SCOPES).map((scope) => ({ value: scope, label: PLAYLIST_PUBLICATION_SCOPE_UI[scope].label }))}
+                      selected={[publicationScope]}
+                      onPick={(v) => setPublicationScope(v as PlaylistPublicationScope)}
+                      limit={6}
+                    />
+                    <p className="sb-wz-hint">{tr(PLAYLIST_PUBLICATION_SCOPE_UI[publicationScope]?.description ?? "")}</p>
+                  </>
+                )}
+              </div>
+              <div className="sb-wz-field">
+                <label className="sb-wz-label">{tr("Team notes")}</label>
+                <textarea className="sb-wz-input" value={adminNotes} onChange={(e) => setAdminNotes(e.target.value)} placeholder={tr("Curation notes, DO NOT PLAY lines, client requests…")} />
+                <p className="sb-wz-hint">{tr("For your crew only — not shown on the deck.")}</p>
+              </div>
+            </div>
+          ) : null}
+          {saveError ? <p className="sb-wz-error">{saveError}</p> : null}
+        </form>
+      </GlassModal>
+    );
   }
 
   if (loading) {

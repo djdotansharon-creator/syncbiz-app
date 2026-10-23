@@ -727,40 +727,22 @@ export function AccessControlConsole() {
     const branchesOnline = branches.length;
     const activeUsers = users.filter((u) => u.status !== "DISABLED").length;
     const totalUsers = users.length;
+    // the first row: flat counters (owner 2026-10-20 — no frame, no box): the title above, the value below, the LED beside the title
+    const item = (tone: "green" | "amber", label: string, value: ReactNode, dirAttr?: "ltr") => (
+      <div className="cr-stat cr-stat--static">
+        <span className="cr-stat-label">
+          <span className={`inline-flex h-2 w-2 rounded-full ${ledClasses(tone)}`} aria-hidden />
+          {label}
+        </span>
+        <span className="cr-stat-value cr-stat-value--text" dir={dirAttr}>{value}</span>
+      </div>
+    );
     return (
-      <div className="rounded-2xl border border-slate-800/80 bg-slate-950/40 p-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className={`inline-flex h-2.5 w-2.5 rounded-full ${ledClasses("green")}`} aria-hidden />
-            <div className="text-xs">
-              <span className="font-semibold text-slate-100">{L.t("ac.strip.branches")}</span>{" "}
-              <span className="text-slate-400" dir="ltr">{branchesOnline}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={`inline-flex h-2.5 w-2.5 rounded-full ${ledClasses(unlocked ? "green" : "amber")}`} aria-hidden />
-            <div className="text-xs">
-              <span className="font-semibold text-slate-100">{L.t("ac.strip.console")}</span>{" "}
-              <span className="text-slate-400">{unlocked ? L.t("ac.strip.unlocked") : L.t("ac.state.locked")}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={`inline-flex h-2.5 w-2.5 rounded-full ${ledClasses(unlocked ? "green" : "amber")}`} aria-hidden />
-            <div className="text-xs">
-              <span className="font-semibold text-slate-100">{L.t("ac.strip.activeUsers")}</span>{" "}
-              <span className="text-slate-400" dir="ltr">
-                {activeUsers}/{totalUsers}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={`inline-flex h-2.5 w-2.5 rounded-full ${ledClasses(unlocked ? "green" : "amber")}`} aria-hidden />
-            <div className="text-xs">
-              <span className="font-semibold text-slate-100">{L.t("ac.strip.signedInAs")}</span>{" "}
-              <span className="text-slate-400" dir="ltr">{me?.email ?? "—"}</span>
-            </div>
-          </div>
-        </div>
+      <div className="cr-stats grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {item("green", L.t("ac.strip.branches"), branchesOnline, "ltr")}
+        {item(unlocked ? "green" : "amber", L.t("ac.strip.console"), unlocked ? L.t("ac.strip.unlocked") : L.t("ac.state.locked"))}
+        {item(unlocked ? "green" : "amber", L.t("ac.strip.activeUsers"), `${activeUsers}/${totalUsers}`, "ltr")}
+        {item(unlocked ? "green" : "amber", L.t("ac.strip.signedInAs"), me?.email ?? "—", "ltr")}
       </div>
     );
   };
@@ -954,18 +936,18 @@ export function AccessControlConsole() {
                 </div>
                 <div className="text-xs text-slate-400">{L.t("ac.tip")}</div>
               </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">{L.t("ac.accessEngine")}</div>
-                  <div className="mt-1 text-sm font-semibold text-amber-100">{L.t("ac.state.protected")}</div>
+              <div className="cr-stats mt-3 grid gap-2 sm:grid-cols-3">
+                <div className="cr-stat cr-stat--static">
+                  <span className="cr-stat-label">{L.t("ac.accessEngine")}</span>
+                  <span className="cr-stat-value cr-stat-value--text cr-stat-value--warn">{L.t("ac.state.protected")}</span>
                 </div>
-                <div className="rounded-2xl border border-slate-800/80 bg-slate-900/30 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{L.t("ac.capabilityLayer")}</div>
-                  <div className="mt-1 text-sm font-semibold text-slate-200">{L.t("ac.state.locked")}</div>
+                <div className="cr-stat cr-stat--static">
+                  <span className="cr-stat-label">{L.t("ac.capabilityLayer")}</span>
+                  <span className="cr-stat-value cr-stat-value--text">{L.t("ac.state.locked")}</span>
                 </div>
-                <div className="rounded-2xl border border-slate-800/80 bg-slate-900/30 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{L.t("ac.scopeRouting")}</div>
-                  <div className="mt-1 text-sm font-semibold text-slate-200">{L.t("ac.hidden")}</div>
+                <div className="cr-stat cr-stat--static">
+                  <span className="cr-stat-label">{L.t("ac.scopeRouting")}</span>
+                  <span className="cr-stat-value cr-stat-value--text">{L.t("ac.hidden")}</span>
                 </div>
               </div>
             </ConsoleCard>

@@ -309,6 +309,23 @@ export function getPlaylistSessionTracks(s: Pick<PlaybackState, "currentSource" 
   return pl ? getPlaylistTracks(pl) : [];
 }
 
+/**
+ * A source with no end and no "next track" of its own — a radio station, a live stream, a stream URL.
+ * After Play Next items it is ALWAYS returned to (PR #60 review, 2026-10-23): it has no track list to step through,
+ * so "no tracks in the session" must never be read as "nothing to go back to" — that ended in silence on the radio.
+ */
+export function isEndlessSource(src: UnifiedSource | null | undefined): boolean {
+  if (!src) return false;
+  if (src.origin === "radio" || src.type === "stream-url") return true;
+  const url = (src.url ?? "").toLowerCase();
+  return (
+    /youtube\.com\/live\/|youtu\.be\/live/.test(url) ||
+    /\.(m3u8|m3u|pls)(\?|$)/.test(url) ||
+    url.includes("icecast") ||
+    url.includes("shoutcast")
+  );
+}
+
 type SessionNextKind = "advance" | "restart" | "exhausted";
 
 /**
@@ -524,6 +541,19 @@ type PlaybackContextValue = PlaybackState & {
    * items already left the queue. No-op if the id isn't currently in the queue.
    */
   removePlayNextItem: (id: string) => void;
+  /**
+   * Move a not-yet-played item inside `playNextQueue` (owner, 2026-10-13: long-press a queue row
+   * and drag it up/down). Pure array move; no-op for invalid positions.
+   */
+  reorderPlayNextItem: (from: number, to: number) => void;
+  /**
+   * Move a track inside the ACTIVE SESSION's play order (long-press + drag in the queue). Pure
+   * state: the playlist's `order` is moved and the playing index follows its track — nothing is
+   * saved to the library. Applied to the snapshot playlist, the source's attachment and the queue
+   * copy (same id) so next/prev, prefetch and the queue panel all see one order. If a Play Next
+   * item is playing, the baseline session is reordered instead. No-op for invalid indexes.
+   */
+  reorderSessionTrack: (from: number, to: number) => void;
   playSource: (source: UnifiedSource, trackIndex?: number, opts?: PlaySourceOptions) => void;
   /** Last play command origin — for transition diagnostics in AudioPlayer. */
   lastPlayCommandVia: PlayCommandVia;
@@ -1895,12 +1925,64 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const getShuffledIndex = useCallback((len: number, current: number): number => {
-    if (len <= 1) return 0;
-    let next = Math.floor(Math.random() * len);
-    while (next === current && len > 1) next = Math.floor(Math.random() * len);
-    return next;
+  /** Shuffle = a "bag": every track plays once before any repeats, and never the same one twice in a row (owner 2026-10-18:
+   *  "the shuffle should really give a different song from the list each time" — a plain random pick kept repeating a few).
+   *  Pure selection logic; the signature and every caller are unchanged.
+   *  2026-10-23 (PR #60 review): (1) only a REAL advance (`getShuffledIndex`) spends the bag — the read-only peeks that preload the
+   *  standby deck (`peekShuffledIndex`, used by getNextStreamUrl / getNextEmbeddedSource) used to spend it on every call, so the
+   *  bag emptied early and songs came back too soon; the peek now remembers its pick and the real advance takes THAT same
+   *  song (the preloaded one is the one that plays). (2) the bag starts fresh when the list changes (a different list, not only a
+   *  different length). */
+  const shuffleBagRef = useRef<{ len: number; key: string; played: Set<number> }>({ len: 0, key: "", played: new Set() });
+  const shufflePeekRef = useRef<{ key: string; len: number; current: number; next: number } | null>(null);
+  /** The list the shuffle belongs to — while a Play Next item plays, that is the list we will return to. */
+  const shuffleListKey = useCallback((): string => {
+    const cur = stateRef.current;
+    const inPlayNext = isPlayNextSourceId(cur.currentSource?.id);
+    const src = inPlayNext ? cur.playNextBaseline?.currentSource : cur.currentSource;
+    const pl = inPlayNext ? cur.playNextBaseline?.currentPlaylist : cur.currentPlaylist;
+    return `${src?.id ?? ""}|${pl?.id ?? ""}`;
   }, []);
+  const chooseShuffled = useCallback((len: number, current: number, commit: boolean): number => {
+    if (len <= 1) return 0;
+    const key = shuffleListKey();
+    const bag = shuffleBagRef.current;
+    if (bag.len !== len || bag.key !== key) {
+      bag.len = len;
+      bag.key = key;
+      bag.played = new Set();
+      shufflePeekRef.current = null;
+    }
+    const inRange = current >= 0 && current < len;
+    let played = new Set(bag.played);
+    if (inRange) played.add(current); // what is playing now has had its turn
+    const peeked = shufflePeekRef.current;
+    let next: number;
+    if (peeked && peeked.key === key && peeked.len === len && peeked.current === current && !played.has(peeked.next)) {
+      next = peeked.next; // the song a peek already preloaded
+    } else {
+      let pool: number[] = [];
+      for (let i = 0; i < len; i++) if (!played.has(i)) pool.push(i);
+      if (pool.length === 0) {
+        // everything has played once: a new round (the current song is the first one "used up" in it)
+        played = new Set(inRange ? [current] : []);
+        for (let i = 0; i < len; i++) if (!played.has(i)) pool.push(i);
+      }
+      if (pool.length === 0) pool = [0];
+      next = pool[Math.floor(Math.random() * pool.length)]!;
+    }
+    if (!commit) {
+      shufflePeekRef.current = { key, len, current, next }; // remembered, the bag itself is untouched
+      return next;
+    }
+    played.add(next);
+    bag.played = played;
+    shufflePeekRef.current = null;
+    return next;
+  }, [shuffleListKey]);
+  const getShuffledIndex = useCallback((len: number, current: number): number => chooseShuffled(len, current, true), [chooseShuffled]);
+  /** Read-only twin for the preload peeks: same pick the next real advance will take, nothing spent. */
+  const peekShuffledIndex = useCallback((len: number, current: number): number => chooseShuffled(len, current, false), [chooseShuffled]);
 
   /**
    * Returns the state update for a within-playlist track change.
@@ -2112,7 +2194,20 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       if (s.playNextQueue.length > 0) {
         const first = s.playNextQueue[0]!;
         const rest = s.playNextQueue.slice(1);
-        const fromSession = !!(s.currentSource && !isPlayNextSourceId(s.currentSource.id));
+        // 2026-10-16 (owner): a baseline is only worth returning to when the outgoing session has MORE
+        // tracks to continue with (a playlist / set). A single track that was played directly has
+        // nothing after it — keeping it as the baseline re-queued it at the END of the list and made it
+        // play a second time once the Play Next items were done. Such a single simply ends here.
+        // 2026-10-23 (PR #60 review): … but a radio station / live stream / stream URL is NOT such a single song —
+        // it has no track list at all (length 0) and never "ends", so it always keeps its baseline; otherwise the
+        // list running out stopped everything (silence on the radio).
+        const outgoingSessionLen = s.currentSource && !isPlayNextSourceId(s.currentSource.id) ? getPlaylistSessionTracks(s).length : 0;
+        const fromSession =
+          !!(s.currentSource && !isPlayNextSourceId(s.currentSource.id)) &&
+          (outgoingSessionLen > 1 || isEndlessSource(s.currentSource));
+        if (s.currentSource && !isPlayNextSourceId(s.currentSource.id) && !fromSession) {
+          playNextLog("next_dequeue_single_no_baseline", { outgoingId: s.currentSource.id, outgoingSessionLen });
+        }
         const nextBaseline: PlayNextSessionSnapshot | null = fromSession
           ? {
               currentSource: s.currentSource!,
@@ -2210,9 +2305,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         const playlist = restored.currentPlaylist;
         const trks = playlist ? getPlaylistTracks(playlist) : [];
         if (trks.length === 0) {
-          playNextLog("return_to_session_no_tracks", {});
+          // The source we came from has no track list (a radio station / live stream): there is nothing to step to,
+          // so go BACK to it and play it — never leave the player stopped or on the finished Play Next item.
+          playNextLog("return_to_session_no_tracks", { backId: back.id });
           transportLockRef.current = false;
-          return restored;
+          return getAdvanceState(restored, restored.currentTrackIndex);
         }
         const fbStep = computeSessionNextTrackIndex(
           trks.length,
@@ -2487,7 +2584,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           s.currentTrackIndex,
           s.shuffle,
           autoRepeatMode,
-          getShuffledIndex,
+          peekShuffledIndex,
         );
         if (step.kind === "exhausted") return null;
         const track = sessionTracks[step.nextIndex];
@@ -2514,7 +2611,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         s.currentTrackIndex,
         s.shuffle,
         autoRepeatMode,
-        getShuffledIndex,
+        peekShuffledIndex,
       );
       if (step.kind === "exhausted") return null;
       const track = tracks[step.nextIndex];
@@ -2523,7 +2620,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       // MASTER-only standby authorization — identical mechanism to the active deck (see play_next branch).
       return !embedded && url ? appendMediaToken(url) : null;
     })();
-  }, [getShuffledIndex]);
+  }, [peekShuffledIndex]);
 
   /** Next embedded source for YouTube AutoMix. Returns YouTube only (Phase 1). */
   const getNextEmbeddedSource = useCallback((): { type: "youtube"; url: string; videoId: string } | null => {
@@ -2543,7 +2640,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         s.currentTrackIndex,
         s.shuffle,
         autoRepeatMode,
-        getShuffledIndex,
+        peekShuffledIndex,
       );
       if (step.kind === "exhausted") return null;
       const track = sessionTracks[step.nextIndex];
@@ -2573,7 +2670,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       s.currentTrackIndex,
       s.shuffle,
       autoRepeatMode,
-      getShuffledIndex,
+      peekShuffledIndex,
     );
     if (step.kind === "exhausted") return null;
     const track = tracks[step.nextIndex];
@@ -2584,7 +2681,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       return videoId ? { type: "youtube", url, videoId } : null;
     }
     return null;
-  }, [getShuffledIndex]);
+  }, [peekShuffledIndex]);
 
   const setVolume = useCallback((value: number) => {
     setState((s) => ({ ...s, volume: Math.max(0, Math.min(100, value)) }));
@@ -2707,6 +2804,58 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const reorderPlayNextItem = useCallback((from: number, to: number) => {
+    setState((s) => {
+      const n = s.playNextQueue.length;
+      if (!Number.isInteger(from) || !Number.isInteger(to) || from === to || from < 0 || to < 0 || from >= n || to >= n) return s;
+      const next = s.playNextQueue.slice();
+      const [it] = next.splice(from, 1);
+      next.splice(to, 0, it!);
+      playNextLog("reorder_play_next_item", { from, to, length: n });
+      return { ...s, playNextQueue: next };
+    });
+  }, []);
+
+  const reorderSessionTrack = useCallback((from: number, to: number) => {
+    setState((s) => {
+      type SessionSlice = Pick<PlaybackState, "currentSource" | "currentPlaylist" | "currentTrackIndex" | "queue">;
+      const applyTo = <T extends SessionSlice>(snap: T): T | null => {
+        const pl = getActivePlaylist(snap);
+        if (!pl) return null;
+        const ordered = getPlaylistTracks(pl);
+        const n = ordered.length;
+        if (!Number.isInteger(from) || !Number.isInteger(to) || from === to || from < 0 || to < 0 || from >= n || to >= n) return null;
+        const ids = ordered.map((t) => t.id);
+        const [moved] = ids.splice(from, 1);
+        ids.splice(to, 0, moved!);
+        const withOrder = (p: Playlist): Playlist => (p.id === pl.id ? { ...p, order: ids } : p);
+        let idx = snap.currentTrackIndex;
+        if (idx === from) idx = to;
+        else if (from < idx && to >= idx) idx -= 1;
+        else if (from > idx && to <= idx) idx += 1;
+        const src = snap.currentSource;
+        const nextSource = src && src.playlist && src.playlist.id === pl.id ? { ...src, playlist: withOrder(src.playlist) } : src;
+        return {
+          ...snap,
+          currentPlaylist: snap.currentPlaylist ? withOrder(snap.currentPlaylist) : snap.currentPlaylist,
+          currentSource: nextSource,
+          currentTrackIndex: idx,
+          queue: snap.queue.map((q) => (q.playlist && q.playlist.id === pl.id ? { ...q, playlist: withOrder(q.playlist) } : q)),
+        };
+      };
+      if (isPlayNextSourceId(s.currentSource?.id) && s.playNextBaseline) {
+        const b = applyTo(s.playNextBaseline);
+        if (!b) return s;
+        console.log("[SyncBiz Audit] reorder_session_track", { from, to, scope: "play_next_baseline" });
+        return { ...s, playNextBaseline: b };
+      }
+      const next = applyTo(s);
+      if (!next) return s;
+      console.log("[SyncBiz Audit] reorder_session_track", { from, to, playingIndex: next.currentTrackIndex });
+      return next;
+    });
+  }, []);
+
   const updatePlayNextItem = useCallback((id: string, patch: Partial<UnifiedSource>) => {
     if (!id || !patch) return;
     setState((s) => {
@@ -2807,6 +2956,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       addPlayNextSources,
       updatePlayNextItem,
       removePlayNextItem,
+      reorderPlayNextItem,
+      reorderSessionTrack,
       playSource,
       playSourceFromDb,
       playPlaylist,
@@ -2846,6 +2997,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       addPlayNextSources,
       updatePlayNextItem,
       removePlayNextItem,
+      reorderPlayNextItem,
+      reorderSessionTrack,
       playSource,
       playSourceFromDb,
       playPlaylist,

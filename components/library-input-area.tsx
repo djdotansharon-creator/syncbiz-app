@@ -21,11 +21,16 @@ import {
   isShazamUrl,
   isWeakStorefrontParsedTitle,
 } from "@/lib/playlist-utils";
+import { useCoverBars } from "@/lib/cover-trim";
+import { MediaShelf, useAlbumShelf, type ShelfMenuEntry } from "@/components/media-shelf";
+import { useCenterModule } from "@/lib/center-module-context";
+import { SearchHint } from "@/components/search-hint";
+import { cleanSongTitle } from "@/lib/clean-title";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { rgbLuminance, useDominantColor } from "@/lib/use-dominant-color";
 import { inferGenre } from "@/lib/infer-genre";
-import { searchAll, searchExternal, type YouTubeSearchResult, type RadioSearchResult, type CatalogSearchResult, type AlbumSearchResult } from "@/lib/search-service";
+import { searchExternal, searchExternalFast, searchExternalSlow, searchInternal, type YouTubeSearchResult, type RadioSearchResult, type CatalogSearchResult, type AlbumSearchResult } from "@/lib/search-service";
 import { createEphemeralLocalSearchSource } from "@/lib/play-next";
 import { radioToUnified } from "@/lib/radio-utils";
 import {
@@ -93,6 +98,9 @@ function libraryUrlIngestPhaseClass(phase: string | null): string {
 }
 
 const controlHeight = "h-8";
+/** the small 'Build AI Playlist' pill inside the search field — hidden (owner 2026-10-18); flip to true to bring it back */
+const SHOW_SEARCH_AI_PILL = false;
+
 const inputBase =
   "w-full bg-transparent py-2 text-sm text-[#f5f5f7] placeholder:text-[#6e6e73] transition-colors focus:outline-none disabled:opacity-60";
 const addBtn =
@@ -100,16 +108,16 @@ const addBtn =
 
 /* ── Search results — Spotify-scale rows in the player language ── */
 const RESULT_ROW =
-  "flex items-center gap-3 rounded-xl px-2.5 py-2 transition-colors hover:bg-white/[0.05]";
+  "sb-search-row flex items-center gap-3.5 rounded-2xl px-3 py-2.5 transition-colors duration-200 hover:bg-white/[0.07]";
 const RESULT_THUMB =
-  "relative h-11 w-[74px] shrink-0 overflow-hidden rounded-lg bg-[#101014]";
+  "relative h-12 w-[84px] shrink-0 overflow-hidden rounded-xl bg-white/[0.06]";
 const RESULT_TITLE = "truncate text-[15px] font-semibold leading-snug text-[#f5f5f7]";
-const RESULT_META = "mt-0.5 truncate text-xs text-[#a1a1a6]";
+const RESULT_META = "mt-0.5 truncate text-[13px] text-white/55";
 const RESULT_SECTION_HEAD =
-  "mb-1.5 px-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6e6e73]";
+  "mb-2 px-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-white/60";
 /* Play = bare white triangle; the circle appears only on hover (fills white, glyph darkens) */
 const RESULT_PLAY_BTN =
-  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#f5f5f7] transition-colors hover:bg-[#f5f5f7] hover:text-[#111114] hover:shadow-[0_2px_10px_-3px_rgba(0,0,0,0.6)] active:scale-95";
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#f5f5f7] transition-colors hover:bg-white/[0.16] hover:text-white active:scale-95";
 const RESULT_GHOST_BTN =
   "inline-flex h-8 shrink-0 items-center justify-center rounded-full border border-white/[0.1] px-3 text-xs font-medium text-[#a1a1a6] transition-colors hover:border-white/[0.18] hover:bg-white/[0.06] hover:text-white";
 
@@ -121,6 +129,236 @@ function ResultPlayIcon() {
   );
 }
 
+/* ── Search smarts (2026-10-16, owner): best match + artist detection ───────────────────────────────── */
+function normTokens(s: string): string[] {
+  return s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0591-\u05C7\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+/** 0…~1.4: how well `fields` match the query (share of query words found, bonus for the phrase / a prefix hit). */
+function matchScore(query: string, ...fields: (string | undefined | null)[]): number {
+  const q = normTokens(query);
+  if (q.length === 0) return 0;
+  const joined = normTokens(fields.filter(Boolean).join(" ")).join(" ");
+  if (!joined) return 0;
+  let hit = 0;
+  for (const w of q) if (joined.includes(w)) hit++;
+  const phrase = q.join(" ");
+  return hit / q.length + (joined.startsWith(phrase) ? 0.25 : joined.includes(phrase) ? 0.12 : 0);
+}
+function artistFromTitle(title: string): string | null {
+  const m = title.match(/^\s*([^\-–—|:]{2,40}?)\s*[-–—|:]\s*\S/);
+  return m ? m[1]!.trim() : null;
+}
+/** The artist the query is about: the name that leads ≥3 results and matches the query. Null for a song query. */
+function detectArtist(
+  query: string,
+  items: { title: string; artist?: string; cover?: string | null }[],
+): { name: string; cover: string | null } | null {
+  const counts = new Map<string, { name: string; n: number; cover: string | null }>();
+  for (const x of items) {
+    const a = x.artist?.trim() || artistFromTitle(x.title);
+    if (!a) continue;
+    const k = normTokens(a).join(" ");
+    if (!k) continue;
+    const e = counts.get(k) ?? { name: a, n: 0, cover: null };
+    e.n++;
+    if (!e.cover) e.cover = x.cover ?? null;
+    counts.set(k, e);
+  }
+  let best: { name: string; n: number; cover: string | null } | null = null;
+  for (const e of counts.values()) {
+    if (e.n >= 3 && matchScore(query, e.name) >= 0.6 && (!best || e.n > best.n)) best = e;
+  }
+  return best ? { name: best.name, cover: best.cover } : null;
+}
+
+/* The singer's real photo (Wikipedia page image via /api/artist-image, cached per name; null → the video thumbnail). */
+const artistPhotoCache = new Map<string, string | null>();
+function useArtistPhoto(name: string | null): string | null {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (artistPhotoCache.has(key)) return;
+    let off = false;
+    fetch(`/api/artist-image?name=${encodeURIComponent(name)}`)
+      .then((r) => r.json())
+      .then((j: { url?: string | null }) => {
+        artistPhotoCache.set(key, j?.url ?? null);
+        if (!off) bump((n) => n + 1);
+      })
+      .catch(() => {
+        artistPhotoCache.set(key, null);
+      });
+    return () => {
+      off = true;
+    };
+  }, [name]);
+  return name ? (artistPhotoCache.get(name.toLowerCase()) ?? null) : null;
+}
+
+
+/* Every well-known singer who goes by the typed name (Wikipedia, ranked by fame) via /api/artist-search. */
+type ArtistCand = { name: string; photo: string | null; cover?: string | null };
+const artistCandCache = new Map<string, ArtistCand[]>();
+const NO_ARTISTS: ArtistCand[] = [];
+function useArtistCandidates(q: string | null): ArtistCand[] {
+  const [, bump] = useState(0);
+  const key = q ? q.trim().toLowerCase() : "";
+  useEffect(() => {
+    if (!key || key.length < 2 || artistCandCache.has(key)) return;
+    let off = false;
+    fetch(`/api/artist-search?q=${encodeURIComponent(key)}`)
+      .then((r) => r.json())
+      .then((j: { artists?: ArtistCand[] }) => {
+        artistCandCache.set(key, Array.isArray(j?.artists) ? j.artists : NO_ARTISTS);
+        if (!off) bump((n) => n + 1);
+      })
+      .catch(() => {
+        artistCandCache.set(key, NO_ARTISTS);
+      });
+    return () => {
+      off = true;
+    };
+  }, [key]);
+  return key ? (artistCandCache.get(key) ?? NO_ARTISTS) : NO_ARTISTS;
+}
+
+/** The most famous singers for the typed name as a row of small circles (photo + name). Tap = focus the results on
+ *  that singer (tap the lit one again = back). Three show; more than four → the fourth circle is "+N" and opens the
+ *  rest. Sits above the best-result tile in the left column. */
+function ArtistRow({
+  list,
+  activeName,
+  onPick,
+  moreLabel,
+  cascade,
+  open,
+  onOpen,
+}: {
+  list: ArtistCand[];
+  activeName: string;
+  onPick: (name: string) => void;
+  moreLabel: string;
+  cascade: () => React.CSSProperties;
+  open: boolean;
+  onOpen: () => void;
+}) {
+  const FIT = 3;
+  const overflow = !open && list.length > FIT + 1;
+  const shown = overflow ? list.slice(0, FIT) : list;
+  const act = activeName.trim().toLowerCase();
+  return (
+    <div className={`sb-art-row${open ? " is-open" : ""}${act ? " has-on" : ""}`}>
+      {shown.map((a) => (
+        <button
+          key={a.name}
+          type="button"
+          className={`sb-art-chip sb-cascade${a.name.toLowerCase() === act ? " is-on" : ""}`}
+          style={cascade()}
+          onClick={() => onPick(a.name)}
+          title={a.name}
+        >
+          <span className="sb-art-circle">
+            <span className="sb-art-initial">{a.name.charAt(0)}</span>
+            {a.photo ? <img key={a.photo} className="sb-artist-photo" src={a.photo} alt="" /> : null}
+          </span>
+          <span className="sb-art-name">{a.name}</span>
+        </button>
+      ))}
+      {overflow ? (
+        <button type="button" className="sb-art-chip sb-art-chip--more sb-cascade" style={cascade()} onClick={onOpen} aria-label={moreLabel} title={moreLabel}>
+          <span className="sb-art-circle">
+            <span className="sb-art-plus">+{list.length - FIT}</span>
+          </span>
+          <span className="sb-art-name">{moreLabel}</span>
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/* (round 6: the big artist card is no longer rendered — kept for a possible return) */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+/** The singer as a card (Spotify-style top result): photo circle + name + play; tap = only their songs. */
+function ArtistTopCard({
+  name,
+  cover,
+  active,
+  onToggle,
+  onPlay,
+  playLabel,
+  artistLabel,
+  onlyLabel,
+}: {
+  name: string;
+  cover: string | null;
+  active: boolean;
+  onToggle: () => void;
+  onPlay: (() => void) | null;
+  playLabel: string;
+  artistLabel: string;
+  onlyLabel: string;
+}) {
+  const photo = useArtistPhoto(name);
+  return (
+    <div className={`sb-artist-card${active ? " is-on" : ""}`} role="button" tabIndex={0} aria-pressed={active} onClick={onToggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } }}>
+      <span className="sb-artist-circle">
+        {cover ? <img src={cover} alt="" /> : <span>{name.charAt(0)}</span>}
+        {photo ? <img key={photo} className="sb-artist-photo" src={photo} alt="" /> : null}
+      </span>
+      <div className="min-w-0">
+        <p className="sb-artist-name">{name}</p>
+        <p className="sb-artist-sub">{active ? onlyLabel : artistLabel}</p>
+      </div>
+      {onPlay ? (
+        <button
+          type="button"
+          className="sb-top-play"
+          title={playLabel}
+          aria-label={playLabel}
+          onClick={(e) => {
+            e.stopPropagation();
+            onPlay();
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.6" strokeLinejoin="round" aria-hidden>
+            <path d="M8.5 5.5v13l10.5-6.5L8.5 5.5z" />
+          </svg>
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** A singer query ("eyal golan", "אייל גולן"): ≥4 results carry every query word, and once the words that nearly all
+ *  titles share (the name in both scripts, fillers) are taken away, each title still has its OWN words (a different
+ *  song) — whereas a song query leaves the same artists / near-empty remainders. First-pass heuristic. */
+function detectArtistByQuery(
+  query: string,
+  items: { title: string; cover?: string | null }[],
+): { name: string; cover: string | null } | null {
+  const q = normTokens(query);
+  if (q.length === 0 || q.length > 4) return null;
+  const hits = items.filter((x) => matchScore(query, x.title) >= 1).slice(0, 10);
+  if (hits.length < 4) return null;
+  const toks = hits.map((x) => new Set(normTokens(x.title).filter((w) => !q.includes(w))));
+  const df = new Map<string, number>();
+  for (const set of toks) for (const w of set) df.set(w, (df.get(w) ?? 0) + 1);
+  const rests = toks.map((set) => [...set].filter((w) => (df.get(w) ?? 0) < hits.length * 0.6));
+  const uniq = rests.filter((r) => r.some((w) => (df.get(w) ?? 0) === 1)).length;
+  const startsWith = hits.filter((x) => normTokens(x.title).slice(0, q.length).join(" ") === q.join(" ")).length;
+  if (uniq / hits.length < 0.75) return null;
+  if (q.length < 2 && startsWith < 6) return null;
+  const name = query.trim().replace(/(^|\s)([a-z])/g, (_m, a: string, b: string) => a + b.toUpperCase());
+  return { name, cover: hits.find((x) => x.cover)?.cover ?? null };
+}
+
 /** Top result — the artwork fills the WHOLE card; play button flips black/white
     by the artwork's luminance (2026-07-17 design; contrast-aware color system). */
 function TopResultFullBleedCard({
@@ -128,11 +366,13 @@ function TopResultFullBleedCard({
   onPlay,
   playLabel,
   viewsWord,
+  logoKind = "youtube",
 }: {
   r: CatalogSearchResult;
   onPlay: () => void;
   playLabel: string;
   viewsWord: string;
+  logoKind?: "youtube" | "radio" | "local" | null;
 }) {
   const dominant = useDominantColor(r.thumbnail);
   const lightArt = dominant ? rgbLuminance(dominant) > 0.55 : false;
@@ -145,24 +385,36 @@ function TopResultFullBleedCard({
     .filter(Boolean)
     .join(" · ");
   return (
-    <div className="group relative min-h-[11.5rem] overflow-hidden rounded-2xl bg-[#101014]">
+    <div className="group relative min-h-[14rem] overflow-hidden rounded-3xl bg-white/[0.06]">
       {r.thumbnail ? (
         <img src={r.thumbnail} alt="" className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
       ) : (
         <TrackMediaPlaceholder chip="YT" className="absolute inset-0 h-full w-full" showCornerBadge={false} />
       )}
       <div className="absolute inset-x-0 bottom-0 h-3/4 bg-gradient-to-t from-black/90 via-black/45 to-transparent" aria-hidden />
-      <div className="relative flex h-full min-h-[11.5rem] flex-col justify-end p-4 pe-16">
+      <div className="relative flex h-full min-h-[14rem] flex-col justify-end p-5 pe-20">
         <p className="flex items-center gap-2">
-          <span className="truncate text-xl font-bold leading-tight text-white drop-shadow-[0_1px_6px_rgba(0,0,0,0.8)]">{r.title}</span>
-          <ResultPlatformLogo kind="youtube" />
+          <span className="line-clamp-2 text-2xl font-bold leading-tight text-white">{r.title}</span>
         </p>
         <p className="mt-1 truncate text-xs text-white/80 drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]">{metaLine}</p>
       </div>
+      <ResultPlatformLogo kind={logoKind} corner />
       <button
         type="button"
         onClick={onPlay}
-        className={`absolute bottom-4 right-4 inline-flex h-12 w-12 items-center justify-center rounded-full shadow-[0_6px_20px_-6px_rgba(0,0,0,0.7)] transition-transform hover:scale-105 active:scale-95 ${
+        className="sb-top-play"
+        title={playLabel}
+        aria-label={playLabel}
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.6" strokeLinejoin="round" aria-hidden>
+          <path d="M8.5 5.5v13l10.5-6.5L8.5 5.5z" />
+        </svg>
+      </button>
+      {/* (previous white-disc play kept below, hidden)
+      <button
+        type="button"
+        onClick={onPlay}
+        className={`hidden absolute bottom-4 right-4 inline-flex h-12 w-12 items-center justify-center rounded-full shadow-[0_6px_20px_-6px_rgba(0,0,0,0.7)] transition-transform hover:scale-105 active:scale-95 ${
           lightArt ? "bg-[#111114] text-[#f5f5f7]" : "bg-[#f5f5f7] text-[#111114]"
         }`}
         title={playLabel}
@@ -172,27 +424,34 @@ function TopResultFullBleedCard({
           <path d="M8 5v14l11-7L8 5z" />
         </svg>
       </button>
+      */}
     </div>
   );
 }
 
 /** Inline platform logo shown right after the title — a logo, never letters. */
-function ResultPlatformLogo({ kind }: { kind: "youtube" | "radio" | "local" | null }) {
+function ResultPlatformLogo({ kind, corner = false }: { kind: "youtube" | "radio" | "local" | null; corner?: boolean }) {
   if (!kind) return null;
   if (kind === "youtube") {
+    // 2026-10-18 (owner): no red mark — the same small frosted glass chip with the white triangle as the tile corner
     return (
-      <svg className="h-3.5 w-[18px] shrink-0" viewBox="0 0 24 24" aria-label="YouTube">
-        <path
-          d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"
-          fill="#ff0000"
-        />
-        <path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#ffffff" />
-      </svg>
+      <span className={`sb-yt-mini${corner ? " sb-yt-mini--corner" : ""}`} aria-label="YouTube" role="img">
+        <svg viewBox="0 0 10 12" fill="currentColor" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden>
+          <path d="M1.6 1.4v9.2L8.6 6 1.6 1.4z" />
+        </svg>
+      </span>
+    );
+  }
+  if (corner) {
+    return (
+      <span className="absolute right-3.5 top-3.5 z-[2] text-white/85">
+        <ResultPlatformLogo kind={kind} />
+      </span>
     );
   }
   if (kind === "radio") {
     return (
-      <svg className="h-3.5 w-3.5 shrink-0 text-[#fb7185]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="Radio">
+      <svg className="h-3.5 w-3.5 shrink-0 text-white/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="Radio">
         <rect x="2" y="8" width="20" height="12" rx="2" />
         <path d="M6 8L18 3" />
         <circle cx="8" cy="14" r="2.5" />
@@ -200,7 +459,7 @@ function ResultPlatformLogo({ kind }: { kind: "youtube" | "radio" | "local" | nu
     );
   }
   return (
-    <svg className="h-3.5 w-3.5 shrink-0 text-[#93c5fd]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="Local">
+    <svg className="h-3.5 w-3.5 shrink-0 text-white/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="Local">
       <rect x="2" y="4" width="20" height="14" rx="2" />
       <path d="M8 22h8M12 18v4" />
     </svg>
@@ -381,6 +640,7 @@ export function LibraryInputArea({
   const tx = useMemo(() => getTranslations(locale), [locale]);
   const { sources } = useSourcesPlayback();
   const { playSource } = usePlayback();
+  const { setActive: setCenterModule } = useCenterModule();
   const effectivePlaySource = playSourceOverride ?? playSource;
 
   const [urlValue, setUrlValue] = useState("");
@@ -454,14 +714,47 @@ export function LibraryInputArea({
   const [catalogResults, setCatalogResults] = useState<CatalogSearchResult[]>([]);
   const [albumResults, setAlbumResults] = useState<AlbumSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  /* 2026-10-13 (owner): the query that the LAST search ran for — while the typed query differs the
+     search is pending (debounce) and the dropdown shows the loading dots, never "no results". */
+  const [lastSearchedQuery, setLastSearchedQuery] = useState("");
+  /* bumps when a search LANDS its results → the results block remounts and plays its reveal */
+  const [resultsVersion, setResultsVersion] = useState(0);
   const [listening, setListening] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const showTools = searchFocused || query.length > 0; // the field is 'open': mic + ✕ visible, the hint folds away
+  const micRef = useRef<HTMLButtonElement | null>(null);
+  const micCleanup = useRef<(() => void) | null>(null);
+  const [micIdle, setMicIdle] = useState(true); // true until the microphone level meter is running
   const [aiPlaylistBusy, setAiPlaylistBusy] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const [artistFilter, setArtistFilter] = useState<string | null>(null);
+  const [filterQuery, setFilterQuery] = useState("");
+  /* round 6: tapping a singer focuses the results on them IN PLACE (the typed query and the circles stay) */
+  const [focusName, setFocusName] = useState<string | null>(null);
+  const [focusData, setFocusData] = useState<{
+    name: string;
+    catalog: CatalogSearchResult[];
+    youtube: YouTubeSearchResult[];
+    albums: AlbumSearchResult[];
+    mbl: UnifiedSource[];
+    local: UnifiedSource[];
+  } | null>(null);
+  const [rowOpen, setRowOpen] = useState(false);
+  const focusSeq = useRef(0);
+  if (filterQuery !== query) {
+    setFilterQuery(query);
+    setArtistFilter(null);
+    setFocusName(null);
+    setFocusData(null);
+    setRowOpen(false);
+  }
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const searchQueryRef = useRef("");
 
   const hasQuery = query.trim().length >= 2;
+  const searchPending = hasQuery && lastSearchedQuery !== query.trim();
+  const searchBusy = searching || searchPending;
   const hasMusicBankLocal = musicBankLocalResults.length > 0;
   const hasLocal = localResults.length > 0;
   const hasYoutube = youtubeResults.length > 0;
@@ -496,23 +789,32 @@ export function LibraryInputArea({
       return;
     }
     searchQueryRef.current = q;
+    setLastSearchedQuery(q);
     setSearching(true);
-    setYoutubeResults([]);
-    setRadioResults([]);
-    setCatalogResults([]);
-    setAlbumResults([]);
+    // 2026-10-18 (owner: "speed up the search"): the slow YouTube leg starts at once; our own library + catalog
+    // answer in milliseconds and are shown IMMEDIATELY; YouTube / radio / albums stream in when they arrive.
+    const slowP = searchExternalSlow(q).catch(() => ({ youtube: [] as YouTubeSearchResult[], radio: [] as RadioSearchResult[], albums: [] as AlbumSearchResult[] }));
     try {
-      const [allRes, mblRes] = await Promise.all([
-        searchAll(sources, q),
-        searchMusicBankLocalSnapshot(q, 25),
-      ]);
-      if (searchQueryRef.current === q) {
-        setLocalResults(allRes.internal);
-        setYoutubeResults(allRes.external.youtube);
-        setRadioResults(allRes.external.radio);
-        setCatalogResults(allRes.external.catalog);
-        setAlbumResults(allRes.external.albums);
-        setMusicBankLocalResults(mblRes);
+      const [fast, mblRes] = await Promise.all([searchExternalFast(q), searchMusicBankLocalSnapshot(q, 25)]);
+      if (searchQueryRef.current !== q) return;
+      // 2026-10-18 (owner: "everything arrives in stages — the recommended song first, then it drops down"): our own
+      // results WAIT for the YouTube leg (max 3.2s) and the whole page appears once, every row already in its place.
+      const slow = await Promise.race([slowP, new Promise<null>((resolve) => setTimeout(() => resolve(null), 3200))]);
+      if (searchQueryRef.current !== q) return;
+      setLocalResults(searchInternal(sources, q));
+      setCatalogResults(fast.catalog);
+      setMusicBankLocalResults(mblRes);
+      setYoutubeResults(slow ? slow.youtube : []);
+      setRadioResults(slow ? slow.radio : []);
+      setAlbumResults(slow ? slow.albums : []);
+      setResultsVersion((v) => v + 1);
+      if (!slow) {
+        const late = await slowP; // a very slow YouTube leg still lands, below what is already shown
+        if (searchQueryRef.current === q) {
+          setYoutubeResults(late.youtube);
+          setRadioResults(late.radio);
+          setAlbumResults(late.albums);
+        }
       }
     } catch {
       if (searchQueryRef.current === q) {
@@ -524,7 +826,7 @@ export function LibraryInputArea({
         setAlbumResults([]);
       }
     } finally {
-      setSearching(false);
+      if (searchQueryRef.current === q) setSearching(false);
     }
   }, [query, sources]);
 
@@ -545,7 +847,7 @@ export function LibraryInputArea({
       return;
     }
     searchQueryRef.current = query.trim();
-    const id = setTimeout(runSearch, 200);
+    const id = setTimeout(runSearch, 140);
     return () => clearTimeout(id);
   }, [query, runSearch, hasQuery, looksLikeIngestText]);
 
@@ -574,6 +876,13 @@ export function LibraryInputArea({
      unmount on animationend. Render-phase state adjustment (React-sanctioned)
      — the lint rule forbids setState in effects, not during render. */
   const resultsOpen = showResults && hasQuery;
+  const searchViewOn = resultsOpen && !(searchBusy && !hasResults);
+  useEffect(() => {
+    const el = document.documentElement;
+    if (searchViewOn) el.setAttribute("data-sb-search", "1");
+    else el.removeAttribute("data-sb-search");
+    return () => el.removeAttribute("data-sb-search");
+  }, [searchViewOn]);
   const [resultsPresent, setResultsPresent] = useState(false);
   if (resultsOpen && !resultsPresent) setResultsPresent(true);
   const [resultsRect, setResultsRect] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -588,7 +897,8 @@ export function LibraryInputArea({
       const host = center ?? bar;
       const width = Math.min(Math.max(host.width, 720), window.innerWidth - 16);
       const left = Math.max(8, Math.min(host.left, window.innerWidth - width - 8));
-      setResultsRect({ top: bar.bottom + 8, left, width });
+      const canvasTop = document.querySelector(".library-sections-canvas")?.getBoundingClientRect().top ?? 0;
+      setResultsRect({ top: Math.min(Math.max(bar.bottom + 8, canvasTop), window.innerHeight - 220), left, width });
     };
     update();
     window.addEventListener("resize", update);
@@ -1384,13 +1694,70 @@ export function LibraryInputArea({
     (rec as Record<string, unknown>).interimResults = false;
     (rec as Record<string, unknown>).lang = locale === "he" ? "he-IL" : "en-US";
     setListening(true);
+    setMicIdle(true);
+    // the mic's glow answers the voice a little: a level meter on the same microphone (best effort — without it the glow just breathes)
+    micCleanup.current?.();
+    let stopped = false;
+    let stopMeter: (() => void) | null = null;
+    void (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (stopped) {
+          stream.getTracks().forEach((tr) => tr.stop());
+          return;
+        }
+        const Ctx = (window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctx) {
+          stream.getTracks().forEach((tr) => tr.stop());
+          return;
+        }
+        const ac = new Ctx();
+        const an = ac.createAnalyser();
+        an.fftSize = 512;
+        ac.createMediaStreamSource(stream).connect(an);
+        const buf = new Uint8Array(an.fftSize);
+        let raf = 0;
+        let lvl = 0;
+        const tick = () => {
+          an.getByteTimeDomainData(buf);
+          let sum = 0;
+          for (let k = 0; k < buf.length; k++) {
+            const v = (buf[k]! - 128) / 128;
+            sum += v * v;
+          }
+          const rms = Math.sqrt(sum / buf.length);
+          lvl += (Math.min(1, rms * 5) - lvl) * 0.35; // smoothed, "a little"
+          micRef.current?.style.setProperty("--lvl", lvl.toFixed(3));
+          raf = requestAnimationFrame(tick);
+        };
+        setMicIdle(false);
+        tick();
+        stopMeter = () => {
+          cancelAnimationFrame(raf);
+          stream.getTracks().forEach((tr) => tr.stop());
+          void ac.close().catch(() => {});
+          micRef.current?.style.setProperty("--lvl", "0");
+        };
+        if (stopped) stopMeter();
+      } catch {
+        /* no meter — idle breathing glow */
+      }
+    })();
+    const finish = () => {
+      stopped = true;
+      stopMeter?.();
+      stopMeter = null;
+      micCleanup.current = null;
+      setListening(false);
+    };
+    micCleanup.current = finish;
     (rec as Record<string, unknown>).onresult = (e: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => {
       setQuery(e.results[0]?.[0]?.transcript ?? "");
       setShowResults(true);
-      setListening(false);
+      finish();
     };
-    (rec as Record<string, unknown>).onerror = () => setListening(false);
-    (rec as Record<string, unknown>).onend = () => setListening(false);
+    (rec as Record<string, unknown>).onerror = finish;
+    (rec as Record<string, unknown>).onend = finish;
     (rec as { start: () => void }).start();
   }, [locale]);
 
@@ -1508,6 +1875,24 @@ export function LibraryInputArea({
     logDesktopLibraryIngestDrop(e, payload);
     if (payload) handleDropUrl(payload);
   };
+
+  /* the song-list area is a drop zone too (sources-manager): its drop arrives here as a window event and goes through the
+     SAME ingest as the field's own drop (link → classify → add). The ref keeps the newest closures. */
+  const libraryDropRef = useRef<(dt: DataTransfer) => void>(() => {});
+  useEffect(() => {
+    libraryDropRef.current = (dt: DataTransfer) => {
+      const payload = extractIngestFromDrop({ dataTransfer: dt } as unknown as React.DragEvent);
+      if (payload) handleDropUrl(payload);
+    };
+  });
+  useEffect(() => {
+    const onDrop = (e: Event) => {
+      const dt = (e as CustomEvent<{ dataTransfer?: DataTransfer }>).detail?.dataTransfer;
+      if (dt) libraryDropRef.current(dt);
+    };
+    window.addEventListener("syncbiz:library-drop", onDrop);
+    return () => window.removeEventListener("syncbiz:library-drop", onDrop);
+  }, []);
 
   const handleAddAllYoutube = useCallback(
     async () => {
@@ -1639,6 +2024,11 @@ export function LibraryInputArea({
     [effectivePlaySource, router, tx]
   );
 
+  /* 2026-10-18 (owner: "from the moment I click it takes time until it plays — before it was perfect"): the song used to be
+     SAVED first (POST /api/playlists — the server waits for the video's metadata, seconds) and only then played. Now a
+     YouTube result plays AT ONCE as an ephemeral source (the same proven path as the catalog preview) and is saved to the
+     library in the background — the tile appears when the save lands. Other types keep the old order. */
+  const savingUrlsRef = useRef<Set<string>>(new Set());
   const handlePlayYoutube = useCallback(
     async (r: YouTubeSearchResult) => {
       const genre = inferGenre(r.title, query);
@@ -1646,10 +2036,9 @@ export function LibraryInputArea({
       if (r.type === "youtube" && !getYouTubeVideoId(playableUrl) && getYouTubeVideoId(r.url)) {
         playableUrl = r.url;
       }
-      const created = await createPlaylistFromUrl(playableUrl, { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount, durationSeconds: r.durationSeconds });
-      if (created) {
+      const toUnified = (created: { id: string; name: string; genre?: string; thumbnail?: string | null; type: string; url: string } & Record<string, unknown>): UnifiedSource => {
         const sourceType = created.type as UnifiedSource["type"];
-        const u: UnifiedSource = {
+        return {
           id: `pl-${created.id}`,
           title: created.name,
           genre: created.genre || tx.defaultGenreMixed,
@@ -1657,16 +2046,47 @@ export function LibraryInputArea({
           type: sourceType,
           url: created.url,
           origin: "playlist",
-          playlist: created,
+          playlist: created as unknown as UnifiedSource["playlist"],
           ...unifiedFoundationHints("playlist", sourceType, created.url),
         };
-        onAdd(u);
-        effectivePlaySource(u);
+      };
+      const closeUi = () => {
         setQuery("");
         setYoutubeResults([]);
         setRadioResults([]);
         setLocalResults([]);
         setShowResults(false);
+      };
+      const videoId = r.type === "youtube" ? getYouTubeVideoId(playableUrl) : null;
+      if (videoId) {
+        const instant: UnifiedSource = {
+          id: `search-play-${videoId}`,
+          title: r.title,
+          genre,
+          cover: r.cover ?? null,
+          type: "youtube",
+          url: playableUrl,
+          origin: "playlist",
+          ...unifiedFoundationHints("playlist", "youtube", playableUrl),
+        };
+        effectivePlaySource(instant);
+        closeUi();
+        if (savingUrlsRef.current.has(videoId)) return;
+        savingUrlsRef.current.add(videoId);
+        void createPlaylistFromUrl(playableUrl, { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount, durationSeconds: r.durationSeconds })
+          .then((created) => {
+            if (created) onAdd(toUnified(created as never));
+          })
+          .catch(() => {})
+          .finally(() => savingUrlsRef.current.delete(videoId));
+        return;
+      }
+      const created = await createPlaylistFromUrl(playableUrl, { title: r.title, genre, cover: r.cover, type: r.type, viewCount: r.viewCount, durationSeconds: r.durationSeconds });
+      if (created) {
+        const u = toUnified(created as never);
+        onAdd(u);
+        effectivePlaySource(u);
+        closeUi();
       }
     },
     [query, effectivePlaySource, router, onAdd, tx]
@@ -1713,6 +2133,221 @@ export function LibraryInputArea({
     },
     [query, effectivePlaySource]
   );
+
+  // ── 2026-10-16 (owner): search = the best match as the big top tile (our library first, otherwise YouTube's first
+  //    result), an artist circle when the query is a singer, and rows in the design line. ──
+  let cascadeSeq = 0;
+  const cs = (): React.CSSProperties => ({ ["--d" as string]: `${Math.min(cascadeSeq++, 16) * 48}ms` }) as React.CSSProperties;
+  const closeSearch = () => {
+    setQuery("");
+    setMusicBankLocalResults([]);
+    setLocalResults([]);
+    setYoutubeResults([]);
+    setRadioResults([]);
+    setCatalogResults([]);
+    setAlbumResults([]);
+    setShowResults(false);
+  };
+  /* The singers: the 2–3 most famous for the typed name (+N for the rest) — asked ONCE per searched query. */
+  const qTrim = query.trim();
+  const artistRow = useArtistCandidates(hasQuery ? lastSearchedQuery : null);
+  const pickArtist = (name: string) => {
+    focusSeq.current += 1;
+    const mySeq = focusSeq.current;
+    if (focusName === name) {
+      setFocusName(null);
+      setFocusData(null);
+      return;
+    }
+    setFocusName(name);
+    void (async () => {
+      try {
+        const [fast, mbl, slow] = await Promise.all([searchExternalFast(name), searchMusicBankLocalSnapshot(name, 25), searchExternalSlow(name)]);
+        if (focusSeq.current !== mySeq) return;
+        setFocusData({ name, catalog: fast.catalog, youtube: slow.youtube, albums: slow.albums, mbl, local: searchInternal(sources, name) });
+      } catch {
+        if (focusSeq.current === mySeq) setFocusName(null);
+      }
+    })();
+  };
+  /* focus = that singer's own results swap in; while they load the current ones just dim (no dots, no remount) */
+  const focusActive = focusName !== null && focusData !== null && focusData.name === focusName;
+  const swapping = focusName !== null && !focusActive;
+  const sq = focusActive && focusData ? focusData.name : query;
+  const srcCatalog = focusActive && focusData ? focusData.catalog : catalogResults;
+  const srcYoutube = focusActive && focusData ? focusData.youtube : youtubeResults;
+  const srcAlbums = focusActive && focusData ? focusData.albums : albumResults;
+  const srcMbl = focusActive && focusData ? focusData.mbl : musicBankLocalResults;
+  const srcLocal = focusActive && focusData ? focusData.local : localResults;
+  const okArtist = (title: string, artist?: string | null) => !artistFilter || matchScore(artistFilter, title, artist) >= 0.6;
+  /* 2026-10-18 (owner: "קפה שחור חזק" must not show "שחור או לבן" just because both contain "שחור"): our own songs show only
+     when they carry the query — every word for one or two words, two thirds of them for a longer query (the catalog,
+     which also matches by mood/genre tags, needs half). */
+  const qWords = normTokens(sq);
+  const covers = (ratio: number, ...fields: (string | undefined | null)[]) => {
+    if (qWords.length === 0) return true;
+    const joined = normTokens(fields.filter(Boolean).join(" ")).join(" ");
+    const need = qWords.length <= 1 ? 1 : Math.ceil(qWords.length * ratio);
+    return qWords.filter((w) => joined.includes(w)).length >= need;
+  };
+  const catShown = srcCatalog.filter((r) => okArtist(r.title, r.artist) && covers(0.5, r.title, r.artist, (r.genres ?? []).join(" ")));
+  const ytShown = srcYoutube.filter((r) => okArtist(r.title));
+  const mblShown = srcMbl.filter((x) => okArtist(x.title) && covers(qWords.length <= 2 ? 1 : 0.66, x.title, x.genre));
+  const localShown = srcLocal.filter((x) => okArtist(x.title) && covers(qWords.length <= 2 ? 1 : 0.66, x.title, x.genre));
+  type SearchPick = { key: string; r: CatalogSearchResult; play: () => void; logo: "youtube" | "radio" | "local" | null; ours: boolean; score: number };
+  const picks: SearchPick[] = [];
+  catShown.forEach((r) => picks.push({ key: `c:${r.id}`, r, play: () => void handlePlayCatalog(r), logo: "youtube", ours: true, score: matchScore(sq, r.title, r.artist) }));
+  [...mblShown, ...localShown]
+    .filter((x) => x.origin !== "radio" && x.origin !== "playlist")
+    .forEach((x) =>
+      picks.push({
+        key: `i:${x.id}`,
+        r: { id: x.id, url: x.url ?? "", title: x.title, thumbnail: x.cover ?? null, genres: x.genre ? [x.genre] : [] },
+        play: () => {
+          effectivePlaySource(x);
+          closeSearch();
+        },
+        logo: inferTrackSourceChip(x) === "LOCAL" ? "local" : "youtube",
+        ours: true,
+        score: matchScore(sq, x.title),
+      }),
+    );
+  ytShown.forEach((r) =>
+    picks.push({
+      key: `y:${r.url}`,
+      r: { id: r.url, url: r.url, title: r.title, thumbnail: r.cover, genres: [], durationSec: r.durationSeconds, viewCount: r.viewCount },
+      play: () => void handlePlayYoutube(r),
+      logo: "youtube",
+      ours: false,
+      score: matchScore(sq, r.title),
+    }),
+  );
+  /* 2026-10-18 (owner): ordered by VIEWS only — nothing about what was played or saved before. The same song twice
+     (library + YouTube) shows once, with the views. The best-result tile = the best text match (ties → most viewed). */
+  const titleKey = (p: SearchPick) => normTokens(p.r.title).join(" ");
+  const viewsOf = (p: SearchPick) => p.r.viewCount ?? 0;
+  const seenTitles = new Set<string>();
+  const uniquePicks = [...picks]
+    .sort((a, b) => viewsOf(b) - viewsOf(a))
+    .filter((p) => {
+      const k = titleKey(p);
+      if (seenTitles.has(k)) return false;
+      seenTitles.add(k);
+      return true;
+    });
+  const bucket = (p: SearchPick) => Math.round(p.score * 10);
+  const topPick: SearchPick | null = [...uniquePicks].sort((a, b) => bucket(b) - bucket(a) || viewsOf(b) - viewsOf(a))[0] ?? null;
+  const songPicks = uniquePicks.filter((p) => p !== topPick).slice(0, 5);
+  /* the singers' row starts where the best-result art starts (art-track thumbnails are pillarboxed) */
+  const topBars = useCoverBars(topPick?.r.thumbnail ?? null);
+  /* albums of the singer (newest first, iTunes) and the playlists people built (YouTube) as square shelves */
+  const shelf = useAlbumShelf(focusActive && focusData ? focusData.name : hasQuery ? lastSearchedQuery : null);
+  const [shelfBusy, setShelfBusy] = useState<string | null>(null);
+  const toastMsg = (message: string) => window.dispatchEvent(new CustomEvent("syncbiz:toast", { detail: { message } }));
+  const playPlaylistUrl = (url: string, title: string, cover: string | null) => {
+    const id = url.match(/[?&]list=([^&]+)/)?.[1] ?? url;
+    effectivePlaySource({
+      id: `search-album-${id}`,
+      title,
+      genre: "Album",
+      cover,
+      type: "youtube",
+      url,
+      origin: "playlist",
+      ...unifiedFoundationHints("playlist", "youtube", url),
+    } as UnifiedSource);
+    closeSearch();
+  };
+  const resolveAlbum = async (a: { name: string; artist: string; tracks: number }) => {
+    try {
+      const r = await fetch(`/api/album-playlist?artist=${encodeURIComponent(a.artist)}&album=${encodeURIComponent(a.name)}&tracks=${a.tracks}`);
+      const j = (await r.json()) as { playlist?: { url: string; cover: string | null } | null };
+      return j.playlist ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const albumById = new Map(shelf.albums.map((a) => [a.id, a]));
+  const playAlbum = async (id: string) => {
+    const a = albumById.get(id);
+    if (!a || shelfBusy) return;
+    setShelfBusy(id);
+    const pl = await resolveAlbum(a);
+    setShelfBusy(null);
+    if (pl) playPlaylistUrl(pl.url, a.name, a.cover ?? pl.cover);
+    else toastMsg(`No playable version of “${a.name}” found`);
+  };
+  /* an album opens as a screen of its own in the center (owner 2026-10-22) — the search closes, the album's songs show in order */
+  const openAlbum = (id: string) => {
+    const a = albumById.get(id);
+    if (!a) return;
+    closeSearch();
+    setCenterModule({ kind: "album", album: { id: a.id, name: a.name, artist: a.artist, cover: a.cover, tracks: a.tracks, year: a.year, url: a.url } });
+  };
+  const albumMenu = (id: string): ShelfMenuEntry[] => {
+    const a = albumById.get(id);
+    if (!a) return [];
+    return [
+      { label: locale === "he" ? "נגן" : "Play", onClick: () => void playAlbum(id) },
+      {
+        label: locale === "he" ? "הוסף לספרייה" : "Add to library",
+        onClick: () =>
+          void (async () => {
+            setShelfBusy(id);
+            const pl = await resolveAlbum(a);
+            setShelfBusy(null);
+            if (pl) {
+              closeSearch();
+              void ingestUrl(pl.url);
+            } else toastMsg(`No playable version of “${a.name}” found`);
+          })(),
+      },
+      ...(a.url ? [{ label: locale === "he" ? "פתח ב-Apple Music" : "Open on Apple Music", onClick: () => window.open(a.url, "_blank", "noopener") }] : []),
+    ];
+  };
+  const playlistById = new Map(srcAlbums.map((a) => [a.url, a]));
+  const playlistMenu = (id: string): ShelfMenuEntry[] => {
+    const a = playlistById.get(id);
+    if (!a) return [];
+    return [
+      { label: locale === "he" ? "נגן" : "Play", onClick: () => playPlaylistUrl(a.url, a.title, a.cover) },
+      { label: locale === "he" ? "הוסף לספרייה" : "Add to library", onClick: () => handleAddAlbum(a) },
+      { label: locale === "he" ? "פתח ב-YouTube" : "Open on YouTube", onClick: () => window.open(a.url, "_blank", "noopener") },
+    ];
+  };
+  const shownTitles = new Set<string>([topPick, ...songPicks].filter((p): p is SearchPick => !!p).map(titleKey));
+  const shownKeys = new Set<string>(picks.filter((p) => shownTitles.has(titleKey(p))).map((p) => p.key));
+  const mblRest = mblShown.filter((x) => !shownKeys.has(`i:${x.id}`));
+  const localRest = localShown.filter((x) => !shownKeys.has(`i:${x.id}`));
+  const ytRest = ytShown.filter((r) => !shownKeys.has(`y:${r.url}`));
+  const songRow = (p: SearchPick) => {
+    const ct = cleanSongTitle(p.r.title);
+    return (
+    <div key={p.key} className={RESULT_ROW} style={cs()}>
+      <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-white/[0.06]">
+        {p.r.thumbnail ? (
+          <img src={p.r.thumbnail} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <TrackMediaPlaceholder chip="YT" className="h-full w-full" showCornerBadge={false} />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-2">
+          <span className={RESULT_TITLE} dir="auto" title={p.r.title}>{ct.title}</span>
+          <ResultPlatformLogo kind={p.logo} />
+        </p>
+        <p className={RESULT_META}>
+          {[p.r.artist || ct.artist, p.r.genres?.[0], p.r.durationSec ? formatDuration(p.r.durationSec) : null, p.r.viewCount != null ? `${formatViewCount(p.r.viewCount)} ${t.views ?? "views"}` : null]
+            .filter(Boolean)
+            .join(" · ") || " "}
+        </p>
+      </div>
+      <button type="button" onClick={p.play} className={RESULT_PLAY_BTN} title={t.playNow} aria-label={t.playNow}>
+        <ResultPlayIcon />
+      </button>
+    </div>
+    );
+  };
 
   return (
     <div ref={panelRef} className="relative">
@@ -1785,11 +2420,13 @@ export function LibraryInputArea({
               {externalYtSaveBusy ? "Saving…" : urlIngestPhase ?? (t.adding ?? "Adding…")}
             </span>
           ) : null}
-          <span className="pl-3 text-[#6e6e73]">
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-          </span>
+          {/* owner round 10: the resting field is a centred magnifier + one rising/falling word (SearchHint); this spacer
+              keeps the input's text where it was — on focus the magnifier travels here */}
+          <span className="block h-4 w-4 shrink-0 ms-3" aria-hidden />
+          <SearchHint
+            words={locale === "he" ? ["מוזיקה", "אמנים", "אלבומים", "ז׳אנרים", "פלייליסטים", "רדיו", "קישורים"] : ["Music", "Artists", "Albums", "Genres", "Playlists", "Radio", "Links"]}
+            rest={showTools}
+          />
           <input
             ref={inputRef}
             type="search"
@@ -1798,7 +2435,11 @@ export function LibraryInputArea({
               setQuery(e.target.value);
               setShowResults(true);
             }}
-            onFocus={() => hasQuery && setShowResults(true)}
+            onFocus={() => {
+              setSearchFocused(true);
+              if (hasQuery) setShowResults(true);
+            }}
+            onBlur={() => setSearchFocused(false)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -1833,44 +2474,24 @@ export function LibraryInputArea({
                 setShowResults(true);
               }
             }}
-            placeholder="Search music, genres (jazz, 80s…) or paste any link — YouTube · Spotify · radio"
+            placeholder=""
             className={`${controlHeight} flex-1 bg-transparent py-2 pr-2 text-sm text-[#f5f5f7] placeholder:text-[#6e6e73] focus:outline-none`}
             aria-label={t.search}
             autoComplete="off"
             disabled={urlIngesting}
           />
-          {query && (
-            <button
-              type="button"
-              onClick={() => {
-                setQuery("");
-                setMusicBankLocalResults([]);
-                setLocalResults([]);
-                setYoutubeResults([]);
-                setRadioResults([]);
-                setCatalogResults([]);
-                setAlbumResults([]);
-                setShowResults(false);
-                inputRef.current?.focus();
-              }}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#6e6e73] transition-colors hover:bg-white/[0.08] hover:text-white"
-              aria-label={t.clearSearchAria}
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
+          {/* owner round 10: the mic and ✕ are NOT shown at rest — they slide in from the right when the search is clicked (they used to
+              pop in and push the mic sideways) */}
+          <div className="sb-sf-tools" data-on={showTools ? "1" : "0"}>
           {voiceSupported && (
             <button
               type="button"
+              ref={micRef}
+              tabIndex={showTools ? 0 : -1}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={handleVoiceSearch}
               disabled={listening}
-              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${
-                listening
-                  ? "bg-[#0a84ff]/15 text-[#409cff]"
-                  : "text-[#6e6e73] hover:bg-white/[0.08] hover:text-white"
-              }`}
+              className={`sb-mic flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors${listening ? " is-live" : ""}${listening && micIdle ? " is-idle" : ""}`}
               title={t.voiceSearch}
               aria-label={t.voiceSearch}
             >
@@ -1882,7 +2503,33 @@ export function LibraryInputArea({
               </svg>
             </button>
           )}
-          {onAiPlaylistFromSearchPrompt ? (
+          {/* round 8 (owner): the clear ✕ sits at the far right, where the 'Build AI Playlist' pill was (the pill is hidden, code kept) */}
+          <button
+              type="button"
+              tabIndex={showTools ? 0 : -1}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                const hadText = query.length > 0;
+                setQuery("");
+                setMusicBankLocalResults([]);
+                setLocalResults([]);
+                setYoutubeResults([]);
+                setRadioResults([]);
+                setCatalogResults([]);
+                setAlbumResults([]);
+                setShowResults(false);
+                if (hadText) inputRef.current?.focus();
+                else inputRef.current?.blur(); // ✕ on an empty field closes the search
+              }}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#6e6e73] transition-colors hover:bg-white/[0.08] hover:text-white"
+              aria-label={t.clearSearchAria}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {SHOW_SEARCH_AI_PILL && onAiPlaylistFromSearchPrompt ? (
             <button
               type="button"
               disabled={aiPlaylistBusy || urlIngesting || !hasQuery || !query.trim()}
@@ -2180,135 +2827,68 @@ export function LibraryInputArea({
             width: resultsRect.width,
             maxHeight: `calc(100vh - ${resultsRect.top + 12}px)`,
           }}
-          className={`${resultsOpen ? "sb-anim-overlay-down" : "sb-anim-overlay-up"} fixed z-[9960] overflow-y-auto rounded-2xl border border-white/[0.08] bg-[#0d0d11] shadow-[0_24px_64px_rgba(0,0,0,0.7)]`}
+          className={`${resultsOpen ? "sb-anim-overlay-down" : "sb-anim-overlay-up"} sb-search-panel${searchBusy && !hasResults ? " is-pending" : ""} fixed z-[9960] overflow-y-auto`}
           onAnimationEnd={(e) => {
             if (!resultsOpen && e.target === e.currentTarget && e.animationName === "sb-overlay-ascend") {
               setResultsPresent(false);
             }
           }}
         >
-          {searching && !hasResults ? (
-            <div className="flex items-center justify-center gap-2 py-6 text-sm text-slate-400">
-              <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              {t.searching}
+          {searchBusy && !hasResults ? (
+            <div className="sb-search-dots" role="status" aria-live="polite" aria-label={t.searching}>
+              <span /><span /><span />
             </div>
           ) : (
-            <>
-              {/* ── ALBUMS FIRST — full-album playlists when the query asks for an album ── */}
-              {hasAlbums && (
-                <div className="border-b border-white/[0.05] p-2.5">
-                  <p className={RESULT_SECTION_HEAD}>{locale === "he" ? "אלבומים" : "Albums"}</p>
-                  <div className="space-y-0.5">
-                    {albumResults.map((album, i) => (
-                      <div
-                        key={album.url || i}
-                        className={`${RESULT_ROW} cursor-pointer`}
-                        onClick={() => handleAddAlbum(album)}
-                      >
-                        <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md bg-[#101014]">
-                          {album.cover ? (
-                            <img src={album.cover} alt="" className="h-full w-full object-cover" />
-                          ) : (
-                            <TrackMediaPlaceholder chip="YT" className="h-full w-full" showCornerBadge={false} />
-                          )}
-                          <span className="absolute bottom-0 right-0 rounded-tl-md bg-black/70 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-white/90">
-                            {locale === "he" ? "אלבום" : "Album"}
-                          </span>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="flex items-center gap-2">
-                            <span className={RESULT_TITLE}>{album.title}</span>
-                            <ResultPlatformLogo kind="youtube" />
-                          </p>
-                          <p className={RESULT_META}>
-                            {[
-                              album.uploader,
-                              album.videoCount
-                                ? `${album.videoCount} ${locale === "he" ? "שירים" : "tracks"}`
-                                : locale === "he" ? "אלבום מלא" : "Full album",
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAddAlbum(album);
-                          }}
-                          className={RESULT_GHOST_BTN}
-                        >
-                          {locale === "he" ? "הוסף אלבום" : "Add album"}
-                        </button>
+            <div key={resultsVersion} className="sb-search-results-in">
+              {/* ── ARTIST circle (when the query is a singer) + TOP RESULT (best match) + SONGS ── */}
+              {/* ── LEFT: the singers (small circles) over the best result · RIGHT: the top songs (by views) ── */}
+              {(topPick || artistRow.length > 0) && (
+                <div className="px-1 pb-4">
+                  <div className="grid gap-6 lg:grid-cols-[minmax(300px,420px)_minmax(0,1fr)]">
+                    <div className="min-w-0" style={{ ["--art-bars" as string]: topBars } as React.CSSProperties}>
+                      {artistRow.length > 0 ? (
+                        <ArtistRow
+                          list={artistRow}
+                          activeName={focusName ?? ""}
+                          onPick={pickArtist}
+                          moreLabel={locale === "he" ? "עוד אמנים" : "More"}
+                          cascade={cs}
+                          open={rowOpen}
+                          onOpen={() => setRowOpen(true)}
+                        />
+                      ) : null}
+                      <div key={focusActive ? `f:${focusName}` : "base"} className={`${focusActive ? "sb-swap-in" : "sb-cascade"}${swapping ? " is-swapping" : ""}`} style={cs()}>
+                        {topPick ? (
+                          <>
+                            <p className={RESULT_SECTION_HEAD}>{locale === "he" ? "התוצאה הטובה ביותר" : "Top result"}</p>
+                            <TopResultFullBleedCard
+                              r={topPick.r}
+                              onPlay={topPick.play}
+                              playLabel={t.playNow}
+                              viewsWord={t.views ?? "views"}
+                              logoKind={topPick.logo}
+                            />
+                          </>
+                        ) : null}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {/* ── CATALOG FIRST — Spotify-style: big Top result + Songs list ── */}
-              {hasCatalog && (
-                <div className="border-b border-white/[0.05] p-3">
-                  <div className="grid gap-4 lg:grid-cols-[minmax(280px,380px)_minmax(0,1fr)]">
-                    <div className="min-w-0">
-                      <p className={RESULT_SECTION_HEAD}>Top result</p>
-                      <TopResultFullBleedCard
-                        r={catalogResults[0]}
-                        onPlay={() => void handlePlayCatalog(catalogResults[0])}
-                        playLabel={t.playNow}
-                        viewsWord={t.views ?? "views"}
-                      />
                     </div>
-                    {catalogResults.length > 1 ? (
-                      <div className="min-w-0">
-                        <p className={RESULT_SECTION_HEAD}>Songs</p>
-                        <div className="space-y-0.5">
-                          {catalogResults.slice(1, 6).map((r) => (
-                            <div key={r.id} className={RESULT_ROW}>
-                              <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-[#101014]">
-                                {r.thumbnail ? (
-                                  <img src={r.thumbnail} alt="" className="h-full w-full object-cover" />
-                                ) : (
-                                  <TrackMediaPlaceholder chip="YT" className="h-full w-full" showCornerBadge={false} />
-                                )}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <p className={RESULT_TITLE}>{r.title}</p>
-                                <p className={RESULT_META}>
-                                  {[r.artist, r.genres?.length ? r.genres.slice(0, 2).join(" · ") : null]
-                                    .filter(Boolean)
-                                    .join(" · ") || " "}
-                                </p>
-                              </div>
-                              {r.durationSec ? (
-                                <span className="shrink-0 text-xs tabular-nums text-[#6e6e73]">{formatDuration(r.durationSec)}</span>
-                              ) : null}
-                              <button
-                                type="button"
-                                onClick={() => void handlePlayCatalog(r)}
-                                className={RESULT_PLAY_BTN}
-                                title={t.playNow}
-                                aria-label={t.playNow}
-                              >
-                                <ResultPlayIcon />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
+                    <div key={focusActive ? `f:${focusName}` : "base"} className={`min-w-0 ${focusActive ? "sb-swap-in" : ""}${swapping ? " is-swapping" : ""}`}>
+                      {songPicks.length > 0 ? (
+                        <>
+                          <p className={RESULT_SECTION_HEAD}>{locale === "he" ? "השירים המובילים" : "Top songs"}</p>
+                          <div className="space-y-0.5">{songPicks.map(songRow)}</div>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               )}
-              {hasMusicBankLocal && (
-                <div className="border-b border-white/[0.05] p-2.5">
-                  <p className={RESULT_SECTION_HEAD}>My Music Library</p>
+              {mblRest.length > 0 && (
+                <div className="p-2.5 pb-4">
+                  <p className={RESULT_SECTION_HEAD}>{locale === "he" ? "המוזיקה שלי" : "My music"}</p>
                   <div className="space-y-0.5">
-                    {musicBankLocalResults.map((source) => (
-                      <div key={source.id} className={RESULT_ROW}>
+                    {mblRest.map((source) => (
+                      <div key={source.id} className={RESULT_ROW} style={cs()}>
                         <div className={RESULT_THUMB}>
                           {source.cover ? (
                             <img src={source.cover} alt="" className="h-full w-full object-cover" />
@@ -2318,10 +2898,10 @@ export function LibraryInputArea({
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="flex items-center gap-2">
-                            <span className={RESULT_TITLE}>{source.title}</span>
+                            <span className={RESULT_TITLE} dir="auto" title={source.title}>{cleanSongTitle(source.title).title}</span>
                             <ResultPlatformLogo kind="local" />
                           </p>
-                          {source.genre && <p className={RESULT_META}>{source.genre}</p>}
+                          {(cleanSongTitle(source.title).artist || source.genre) && (<p className={RESULT_META}>{[cleanSongTitle(source.title).artist, source.genre].filter(Boolean).join(" · ")}</p>)}
                         </div>
                         <div className="flex shrink-0 items-center gap-1.5">
                           <button
@@ -2347,11 +2927,11 @@ export function LibraryInputArea({
                   </div>
                 </div>
               )}
-              {hasLocal && (
-                <div className="border-b border-white/[0.05] p-2.5">
+              {localRest.length > 0 && (
+                <div className="p-2.5 pb-4">
                   <p className={RESULT_SECTION_HEAD}>{t.localResults}</p>
                   <div className="space-y-0.5">
-                    {localResults.map((source) => {
+                    {localRest.map((source) => {
                       const libChip = inferTrackSourceChip(source);
                       const logoKind =
                         source.type === "youtube" ? ("youtube" as const)
@@ -2359,7 +2939,7 @@ export function LibraryInputArea({
                         : libChip === "LOCAL" ? ("local" as const)
                         : null;
                       return (
-                      <div key={source.id} className={RESULT_ROW}>
+                      <div key={source.id} className={RESULT_ROW} style={cs()}>
                         <div className={RESULT_THUMB}>
                           {source.cover ? (
                             <img src={source.cover} alt="" className="h-full w-full object-cover" />
@@ -2369,10 +2949,10 @@ export function LibraryInputArea({
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="flex items-center gap-2">
-                            <span className={RESULT_TITLE}>{source.title}</span>
+                            <span className={RESULT_TITLE} dir="auto" title={source.title}>{cleanSongTitle(source.title).title}</span>
                             <ResultPlatformLogo kind={logoKind} />
                           </p>
-                          {source.genre && <p className={RESULT_META}>{source.genre}</p>}
+                          {(cleanSongTitle(source.title).artist || source.genre) && (<p className={RESULT_META}>{[cleanSongTitle(source.title).artist, source.genre].filter(Boolean).join(" · ")}</p>)}
                         </div>
                         <div className="flex shrink-0 items-center gap-1.5">
                           <button
@@ -2410,12 +2990,12 @@ export function LibraryInputArea({
                   </div>
                 </div>
               )}
-              {hasYoutube && (
-                <div className="p-2.5">
-                  <p className={RESULT_SECTION_HEAD}>{t.youtubeResults}</p>
+              {ytRest.length > 0 && (
+                <div className="p-2.5 pb-4">
+                  <p className={RESULT_SECTION_HEAD}>{locale === "he" ? "עוד שירים" : "More songs"}</p>
                   <div className="space-y-0.5">
-                    {youtubeResults.map((r, i) => (
-                      <div key={i} className={RESULT_ROW}>
+                    {ytRest.map((r, i) => (
+                      <div key={i} className={RESULT_ROW} style={cs()}>
                         <div className={RESULT_THUMB}>
                           {r.cover ? (
                             <img src={r.cover} alt="" className="h-full w-full object-cover" />
@@ -2425,13 +3005,15 @@ export function LibraryInputArea({
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="flex items-center gap-2">
-                            <span className={RESULT_TITLE}>{r.title}</span>
+                            <span className={RESULT_TITLE} dir="auto" title={r.title}>{cleanSongTitle(r.title).title}</span>
                             <ResultPlatformLogo kind="youtube" />
                           </p>
                           <p className={RESULT_META}>
                             {(() => {
                               const g = inferGenre(r.title, query);
                               const parts: string[] = [];
+                              const ar = cleanSongTitle(r.title).artist;
+                              if (ar) parts.push(ar);
                               if (g && g !== "Mixed" && g !== tx.defaultGenreMixed) parts.push(g);
                               if (r.durationSeconds != null && r.durationSeconds > 0) parts.push(formatDuration(r.durationSeconds));
                               if (r.viewCount != null) parts.push(`${formatViewCount(r.viewCount)} ${t.views ?? "views"}`);
@@ -2467,7 +3049,7 @@ export function LibraryInputArea({
                   <p className={RESULT_SECTION_HEAD}>{t.radioResults ?? "Radio stations"}</p>
                   <div className="space-y-0.5">
                     {radioResults.map((r, i) => (
-                      <div key={i} className={RESULT_ROW}>
+                      <div key={i} className={RESULT_ROW} style={cs()}>
                         <div className={RESULT_THUMB}>
                           {r.cover ? (
                             <img src={r.cover} alt="" className="h-full w-full object-cover" />
@@ -2512,10 +3094,41 @@ export function LibraryInputArea({
                   </div>
                 </div>
               )}
-              {!searching && hasQuery && !hasResults && (
+              {/* ── ALBUMS (the singer's, newest first — or albums by that name) and PLAYLISTS (what people built), as small shelves — the very BOTTOM of the results (owner round 9) ── */}
+              {shelf.albums.length > 0 ? (
+                <MediaShelf
+                  title={locale === "he" ? "אלבומים" : "Albums"}
+                  items={shelf.albums.map((a) => ({ id: a.id, title: a.name, subtitle: a.year ? String(a.year) : "", cover: a.cover, tracks: a.tracks }))}
+                  busyId={shelfBusy}
+                  onPlay={(id) => void playAlbum(id)}
+                  onOpen={openAlbum}
+                  menu={albumMenu}
+                  cascade={cs}
+                  songsWord={locale === "he" ? "שירים" : "songs"}
+                />
+              ) : null}
+              {srcAlbums.length > 0 ? (
+                <MediaShelf
+                  title={locale === "he" ? "פלייליסטים" : "Playlists"}
+                  items={srcAlbums.map((a) => ({ id: a.url, title: a.title, subtitle: a.uploader ?? "", cover: a.cover, tracks: a.videoCount }))}
+                  onPlay={(id) => {
+                    const a = playlistById.get(id);
+                    if (a) playPlaylistUrl(a.url, a.title, a.cover);
+                  }}
+                  menu={playlistMenu}
+                  cascade={cs}
+                  songsWord={locale === "he" ? "שירים" : "songs"}
+                />
+              ) : null}
+              {searchBusy && hasResults && (
+                <div className="sb-search-dots sb-search-dots--more" role="status" aria-live="polite" aria-label={t.searching}>
+                  <span /><span /><span />
+                </div>
+              )}
+              {!searchBusy && hasQuery && !hasResults && (
                 <div className="py-6 text-center text-sm text-slate-500">{t.noSearchResults}</div>
               )}
-            </>
+            </div>
           )}
         </div>,
         document.body,

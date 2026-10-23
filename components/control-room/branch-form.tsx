@@ -4,19 +4,22 @@ import { useEffect, useRef, useState } from "react";
 import { loadGoogleMaps, useMapsConfig, type GoogleNS } from "@/lib/google-maps-client";
 import { BranchMap } from "@/components/control-room/branch-map";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
+import { GlassModal, type GlassModalStep } from "@/components/glass-modal";
+import { useWizardClosing } from "@/components/control-room/wizard-bits";
 
 /**
- * CONTROL ROOM — add / edit a branch (owner). Name, branch number and ONE Location field with Google Places Autocomplete
+ * CONTROL ROOM — add / edit a branch (owner), as a STEP-BY-STEP dialog (owner 2026-10-20: "like we know, with the steps"): Details (logo · name · number) → Brand → Location → Save,
+ * the same glass dialog + pager as the Edit playlist wizard. Name, branch number and ONE Location field with Google Places Autocomplete
  * ("בילו סנטר", "ישפרו סנטר נס ציונה", "הרצל 25 תל אביב"). The owner picks a Google suggestion → a preview point on
  * the map → Save sends the Place ID; the server resolves it with Google itself and stores Place ID, formatted address,
  * city and latitude / longitude. Text that was not picked from Google is never saved (no guessed location).
  */
 
-export type BranchFormValues = { name: string; branchNumber: string; currentLocation?: string | null; brandId?: string | null };
+export type BranchFormValues = { name: string; branchNumber: string; currentLocation?: string | null; brandId?: string | null; logoUrl?: string | null };
 export type FormBrand = { id: string; name: string; color: string | null; isDefault: boolean };
-type Picked = { placeId: string; label: string; latitude: number; longitude: number };
+export type Picked = { placeId: string; label: string; latitude: number; longitude: number };
 
-function usePlaceAutocomplete(hostRef: React.RefObject<HTMLDivElement | null>, browserKey: string | null, onPick: (p: Picked) => void, onError: () => void) {
+export function usePlaceAutocomplete(hostRef: React.RefObject<HTMLDivElement | null>, browserKey: string | null, onPick: (p: Picked) => void, onError: () => void) {
   const onPickRef = useRef(onPick);
   onPickRef.current = onPick;
   useEffect(() => {
@@ -59,6 +62,7 @@ export function BranchForm({
   brands,
   onDone,
   onCancel,
+  onLogoChanged,
 }: {
   mode: "add" | "edit";
   branchId?: string;
@@ -67,9 +71,13 @@ export function BranchForm({
   brands?: FormBrand[] | null;
   onDone: (branchId: string | null) => void;
   onCancel: () => void;
+  /** the branch's own logo was uploaded / removed → the list reloads */
+  onLogoChanged?: () => void;
 }) {
   const L = useMgmt();
   const cfg = useMapsConfig();
+  const [step, setStep] = useState(0);
+  const { closing, request: requestClose } = useWizardClosing(onCancel);
   const [name, setName] = useState(initial?.name ?? "");
   const [branchNumber, setBranchNumber] = useState(initial?.branchNumber ?? "");
   const [picked, setPicked] = useState<Picked | null>(null);
@@ -79,6 +87,50 @@ export function BranchForm({
     if (brandId || !brands?.length) return;
     setBrandId(initial?.brandId ?? brands.find((b) => b.isDefault)?.id ?? brands[0].id);
   }, [brands, brandId, initial?.brandId]);
+  // the branch's own logo (edit only — a new branch gets its logo after it is saved)
+  const [logo, setLogo] = useState<string | null>(initial?.logoUrl ?? null);
+  const [logoBusy, setLogoBusy] = useState(false);
+  // ADD mode: the chosen logo waits here and is uploaded right after the branch is created (it needs the new branch id)
+  const [pendingLogo, setPendingLogo] = useState<File | null>(null);
+  const [pendingPreview, setPendingPreview] = useState<string | null>(null);
+  const pickLogo = (f: File) => {
+    if (pendingPreview) URL.revokeObjectURL(pendingPreview);
+    setPendingLogo(f);
+    setPendingPreview(URL.createObjectURL(f));
+  };
+  const clearPendingLogo = () => {
+    if (pendingPreview) URL.revokeObjectURL(pendingPreview);
+    setPendingLogo(null);
+    setPendingPreview(null);
+  };
+  const uploadLogo = async (file: File) => {
+    if (!branchId) return;
+    setLogoBusy(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/control-room/branches/${encodeURIComponent(branchId)}/logo`, { method: "POST", body: fd });
+      const d = (await res.json().catch(() => ({}))) as { error?: string; logoUrl?: string };
+      if (!res.ok || !d.logoUrl) { setError(d.error ?? L.t("common.saveFailedHttp", { status: res.status })); return; }
+      setLogo(d.logoUrl);
+      onLogoChanged?.();
+    } catch {
+      setError(L.t("common.serverRetry"));
+    } finally {
+      setLogoBusy(false);
+    }
+  };
+  const removeLogo = async () => {
+    if (!branchId) return;
+    setLogoBusy(true);
+    try {
+      const res = await fetch(`/api/control-room/branches/${encodeURIComponent(branchId)}/logo`, { method: "DELETE" });
+      if (res.ok) { setLogo(null); onLogoChanged?.(); }
+    } finally {
+      setLogoBusy(false);
+    }
+  };
   const [changingLocation, setChangingLocation] = useState(mode === "add" || !initial?.currentLocation);
   const [googleError, setGoogleError] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -100,6 +152,13 @@ export function BranchForm({
       });
       const data = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
       if (!res.ok) { setError(data.error ?? L.t("common.saveFailedHttp", { status: res.status })); return; }
+      if (mode === "add" && data.id && pendingLogo) {
+        try {
+          const fd = new FormData();
+          fd.append("file", pendingLogo);
+          await fetch(`/api/control-room/branches/${encodeURIComponent(data.id)}/logo`, { method: "POST", body: fd });
+        } catch { /* the branch exists; the logo can be added from Edit */ }
+      }
       onDone(mode === "add" ? data.id ?? null : branchId ?? null);
     } catch {
       setError(L.t("common.serverRetry"));
@@ -108,83 +167,134 @@ export function BranchForm({
     }
   };
 
-  const input = "mt-1 w-full rounded-lg border border-[color:var(--sb-border)] bg-white/[0.04] px-3 py-2 text-sm text-[var(--sb-text)] placeholder:text-[var(--sb-text-tertiary)] focus:border-[color:var(--sb-accent)] focus:outline-none";
   const googleReady = !!cfg?.browserKey && !googleError;
+  const shownLogo = mode === "edit" ? logo : pendingPreview;
+  const missing = [!name.trim() ? L.t("form.name") : "", !branchNumber.trim() ? L.t("form.number") : "", !locationReady ? L.t("form.location") : ""].filter(Boolean);
+
+  const steps: GlassModalStep[] = [
+    { key: "details", label: L.t("wz.details") },
+    ...(brands && brands.length > 0 ? [{ key: "brand", label: L.t("form.brand") }] : []),
+    { key: "location", label: L.t("form.location") },
+  ];
+  const at = Math.min(step, steps.length - 1);
+  const cur = steps[at]!.key;
+  const last = at === steps.length - 1;
+  const stepOk = cur === "details" ? !!name.trim() && !!branchNumber.trim() : true;
+  const advance = () => { if (!last) { if (stepOk) setStep(at + 1); } else if (complete && !saving) void save(); };
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 border-b border-[color:var(--sb-border)] px-6 py-4">
-        <button type="button" onClick={onCancel} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--sb-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--sb-text)]" aria-label={L.t("common.cancel")}>
-          <svg className="h-4 w-4 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
-        </button>
-        <h2 className="text-base font-semibold text-[var(--sb-text)]">{L.t(mode === "add" ? "form.add" : "form.edit")}</h2>
-      </div>
-
-      <div className="space-y-4 px-6 py-5">
-        <div className="grid grid-cols-[2fr_1fr] gap-3">
-          <label className="block">
-            <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("form.name")}</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={L.t("common.eg", { x: "Universe Club Ashdod" })} dir="auto" disabled={saving} className={input} />
-          </label>
-          <label className="block">
-            <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("form.number")}</span>
-            <input value={branchNumber} onChange={(e) => setBranchNumber(e.target.value)} placeholder={L.t("common.eg", { x: "192" })} dir="ltr" disabled={saving} className={input} />
-          </label>
-        </div>
-
-        {brands && brands.length > 0 ? (
-          <label className="block">
-            <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("form.brand")}</span>
-            <div className="mt-1 flex items-center gap-2">
-              <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: brands.find((b) => b.id === brandId)?.color ?? "#8e8e93" }} aria-hidden />
-              <select value={brandId} onChange={(e) => setBrandId(e.target.value)} disabled={saving} className={`${input} mt-0`} style={{ colorScheme: "dark" }}>
-                {brands.map((b) => <option key={b.id} value={b.id} className="bg-[#1c1c1e] text-white">{b.name}{b.isDefault ? ` ${L.t("form.defaultBrand")}` : ""}</option>)}
-              </select>
-            </div>
-          </label>
-        ) : null}
-
-        <div>
-          <span className="text-xs text-[var(--sb-text-tertiary)]">{L.t("form.location")}</span>
-          {!changingLocation ? (
-            <div className="mt-1 flex items-center justify-between gap-3 rounded-lg border border-[color:var(--sb-border)] bg-white/[0.02] px-3 py-2">
-              <span className="truncate text-sm text-[var(--sb-text)]" dir="auto">{initial?.currentLocation}</span>
-              <button type="button" onClick={() => setChangingLocation(true)} className="shrink-0 text-xs text-[var(--sb-accent)] hover:underline">{L.t("common.change")}</button>
-            </div>
-          ) : !googleReady ? (
-            <p className="mt-1 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-200">
-              {cfg === null ? L.t("form.loadingSearch") : L.t("form.googleMissing")}
-            </p>
+    <GlassModal
+      title={L.t(mode === "add" ? "form.add" : "form.edit")}
+      subtitle={name.trim() || null}
+      cover={shownLogo}
+      showInitial
+      steps={steps}
+      step={at}
+      onStep={(i) => { if (i <= at || stepOk) setStep(i); }}
+      width={600}
+      closing={closing}
+      closeOnBackdrop={false}
+      onClose={requestClose}
+      footer={
+        <>
+          <button type="button" className="sb-wz-btn" onClick={requestClose} disabled={saving}>{L.t("common.cancel")}</button>
+          <span className="sb-wz-spacer" />
+          {at > 0 ? <button type="button" className="sb-wz-btn" onClick={() => setStep(at - 1)} disabled={saving}>{L.t("common.back")}</button> : null}
+          {!last ? (
+            <button type="button" className="sb-wz-btn sb-wz-btn--primary" onClick={advance} disabled={!stepOk}>{L.t("wz.next")}</button>
           ) : (
-            <>
-              <div ref={acHostRef} className="mt-1" />
-              <p className="mt-1 text-xs text-[var(--sb-text-tertiary)]">{L.t("form.locationHint")}</p>
-            </>
+            <button type="button" className="sb-wz-btn sb-wz-btn--primary" onClick={() => void save()} disabled={!complete || saving}>{saving ? L.t("common.saving") : L.t(mode === "add" ? "form.add" : "common.save")}</button>
           )}
-        </div>
-
-        {picked ? (
-          <div className="space-y-2">
-            <p className="text-sm text-[var(--sb-text)]" dir="auto">📍 {picked.label}</p>
-            <BranchMap
-              branches={[{ id: "preview", name: name || L.t("form.newBranch"), city: "", status: "idle", latitude: picked.latitude, longitude: picked.longitude }]}
-              selectedId="preview"
-              onSelect={() => {}}
-              height={200}
-              fit="branches"
-            />
+        </>
+      }
+    >
+      <form onSubmit={(e) => { e.preventDefault(); advance(); }}>
+        {cur === "details" ? (
+          <div className="flex items-start gap-5">
+            <div className="flex shrink-0 flex-col items-center gap-1.5">
+              <label className={`cr-logo-pick ${logoBusy || saving ? "pointer-events-none opacity-50" : ""}`} title={L.t(shownLogo ? "brand.logoReplace" : "brand.logoUpload")}>
+                {shownLogo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={shownLogo} alt="" draggable={false} />
+                ) : (
+                  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="9" cy="9" r="1.6" /><path d="m21 15-4.6-4.6a1.5 1.5 0 0 0-2.1 0L5 19.7" /></svg>
+                )}
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="sr-only" disabled={logoBusy || saving} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (!f) return; if (mode === "edit") void uploadLogo(f); else pickLogo(f); }} />
+              </label>
+              {shownLogo ? (
+                <button type="button" onClick={() => (mode === "edit" ? void removeLogo() : clearPendingLogo())} disabled={logoBusy || saving} className="text-xs text-[var(--sb-text-tertiary)] hover:text-[var(--sb-text)] disabled:opacity-40">{L.t("brand.logoRemove")}</button>
+              ) : (
+                <span className="text-xs text-[var(--sb-text-tertiary)]">{logoBusy ? L.t("brand.logoUploading") : L.t("form.logo")}</span>
+              )}
+            </div>
+            <div className="sb-wz-stack min-w-0 flex-1">
+              <div className="sb-wz-field">
+                <label className="sb-wz-label">{L.t("form.name")}</label>
+                <input className="sb-wz-input" value={name} onChange={(e) => setName(e.target.value)} placeholder={L.t("common.eg", { x: "Universe Club Ashdod" })} dir="auto" disabled={saving} autoFocus={mode === "add"} />
+              </div>
+              <div className="sb-wz-field">
+                <label className="sb-wz-label">{L.t("form.number")}</label>
+                <input className="sb-wz-input" value={branchNumber} onChange={(e) => setBranchNumber(e.target.value)} placeholder={L.t("common.eg", { x: "192" })} dir="ltr" disabled={saving} style={{ maxWidth: 200 }} />
+              </div>
+            </div>
           </div>
         ) : null}
 
-        {error ? <p className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-sm text-amber-200" role="alert">{error}</p> : null}
-      </div>
+        {cur === "brand" && brands ? (
+          <div className="sb-wz-field">
+            <label className="sb-wz-label">{L.t("form.brand")}</label>
+            <div className="sb-wz-chips" role="radiogroup" aria-label={L.t("form.brand")}>
+              {brands.map((b) => (
+                <button key={b.id} type="button" role="radio" aria-checked={brandId === b.id} disabled={saving} onClick={() => setBrandId(b.id)} className={`sb-wz-chip${brandId === b.id ? " is-on" : ""}`}>
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: b.color ?? "#8e8e93" }} aria-hidden />
+                  <span dir="auto">{b.name}{b.isDefault ? ` ${L.t("form.defaultBrand")}` : ""}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
-      <div className="mt-auto flex items-center justify-end gap-3 border-t border-[color:var(--sb-border)] px-6 py-4">
-        <button type="button" onClick={onCancel} disabled={saving} className="rounded-full px-4 py-2 text-sm text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]">{L.t("common.cancel")}</button>
-        <button type="button" onClick={() => void save()} disabled={!complete || saving} className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition-transform active:scale-95 disabled:opacity-40">
-          {saving ? L.t("common.saving") : L.t(mode === "add" ? "form.add" : "common.save")}
-        </button>
-      </div>
-    </div>
+        {cur === "location" ? (
+          <div className="sb-wz-stack">
+            <div className="sb-wz-field">
+              <label className="sb-wz-label">{L.t("form.location")}</label>
+              {!changingLocation ? (
+                <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/[0.06] px-4 py-3">
+                  <span className="text-base text-[var(--sb-text)]" dir="auto">{initial?.currentLocation}</span>
+                  <button type="button" onClick={() => setChangingLocation(true)} className="shrink-0 text-sm font-medium text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)]">{L.t("common.change")}</button>
+                </div>
+              ) : !googleReady ? (
+                <p className="cr-note">
+                  <span className="cr-note-dot" aria-hidden />
+                  {cfg === null ? L.t("form.loadingSearch") : L.t("form.googleMissing")}
+                </p>
+              ) : (
+                <>
+                  <div ref={acHostRef} />
+                  <p className="sb-wz-hint">{L.t("form.locationHint")}</p>
+                </>
+              )}
+            </div>
+            {picked ? (
+              <div className="space-y-2">
+                <p className="text-sm text-[var(--sb-text)]" dir="auto">📍 {picked.label}</p>
+                <div className="overflow-hidden rounded-3xl bg-black/20">
+                  <BranchMap
+                    branches={[{ id: "preview", name: name || L.t("form.newBranch"), city: "", status: "idle", latitude: picked.latitude, longitude: picked.longitude }]}
+                    selectedId="preview"
+                    onSelect={() => {}}
+                    height={190}
+                    fit="branches"
+                  />
+                </div>
+              </div>
+            ) : null}
+            {missing.length ? <p className="sb-wz-hint">{`${L.t("form.missing")} ${missing.join(" · ")}`}</p> : null}
+          </div>
+        ) : null}
+
+        {error ? <p className="sb-wz-error" role="alert">{error}</p> : null}
+      </form>
+    </GlassModal>
   );
 }

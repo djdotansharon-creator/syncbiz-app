@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { DjCreatorAiSparkle } from "@/components/dj-creator-ai-mark";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { RiseText } from "@/components/rise-text";
 import {
   buildDjCreatorMatchContextFromWizard,
   effectiveResultCount,
@@ -84,6 +84,57 @@ type ApiOk = {
   rows: SmartSearchRow[];
 };
 
+/** Round 6 (owner): the songs of specific artists — YouTube top songs by views per artist, interleaved so every
+ *  artist is represented. Best-effort: a failing artist just contributes nothing. */
+async function fetchArtistRows(names: string[], want: number): Promise<SmartSearchRow[]> {
+  const per = Math.max(4, Math.ceil(want / Math.max(1, names.length)) + 2);
+  const lists = await Promise.all(
+    names.map(async (name): Promise<SmartSearchRow[]> => {
+      try {
+        const r = await fetch(`/api/sources/search?q=${encodeURIComponent(name)}`, { credentials: "include" });
+        const j = (await r.json()) as { results?: Array<{ title: string; url: string; cover: string | null; viewCount?: number; durationSeconds?: number }> };
+        return (j.results ?? [])
+          .filter((x) => /^https?:\/\//i.test((x.url ?? "").trim()))
+          .sort((a, b) => (b.viewCount ?? 0) - (a.viewCount ?? 0))
+          .slice(0, per)
+          .map((x) => ({
+            catalogItemId: "",
+            title: x.title,
+            url: x.url,
+            thumbnail: x.cover,
+            provider: "youtube",
+            durationSec: x.durationSeconds ?? null,
+            curationRating: 0,
+            viewCount: x.viewCount ?? null,
+            likeCount: null,
+            displayScore: 0,
+            baseFitScore: 0,
+            matchedTags: [name],
+            recommendedBecause: `Artist: ${name}`,
+          }));
+      } catch {
+        return [];
+      }
+    }),
+  );
+  const out: SmartSearchRow[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; out.length < 50; i++) {
+    let any = false;
+    for (const l of lists) {
+      const row = l[i];
+      if (!row) continue;
+      any = true;
+      if (!seen.has(row.url)) {
+        seen.add(row.url);
+        out.push(row);
+      }
+    }
+    if (!any) break;
+  }
+  return out;
+}
+
 /** A track is playable for any client only if it has a real http(s) URL (never a local path). */
 const isPlayableUrl = (u: string | null | undefined): boolean => /^https?:\/\//i.test((u ?? "").trim());
 
@@ -99,12 +150,6 @@ function parsePlaylistIdFromJson(body: unknown): string | null {
   return id.length > 0 ? id : null;
 }
 
-/** Premium CTA inside assistant panel — cyan */
-const accentBtn =
-  "rounded-xl border border-cyan-400/25 bg-gradient-to-r from-sky-500/22 via-cyan-500/20 to-sky-400/22 font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_6px_20px_rgba(34,211,238,0.08)] hover:from-sky-500/32 hover:via-cyan-500/28 hover:to-sky-400/30";
-/** Inner surface once gradient chrome is applied (see panel wrapper). */
-const sidePanelInner =
-  "relative flex min-h-0 w-full flex-col overflow-hidden rounded-[15px] bg-[#0b121c] ring-1 ring-inset ring-cyan-400/12";
 
 type Bubble = { id: string; label: string; labelHe: string; query: string; daypartApi?: string };
 
@@ -459,12 +504,14 @@ function buildCatalogSearchQuery(input: {
 }
 
 function suggestedPlaylistName(input: {
+  artists?: string[];
   freeText: string;
   businessLabel: string;
   daypartLabel: string;
   vibeLabel: string;
   styleLabel: string;
 }): string {
+  if (input.artists && input.artists.length > 0) return input.artists.join(" · ").slice(0, 72);
   if (input.freeText.trim().length >= 3) {
     return input.freeText.trim().replace(/\s+/g, " ").slice(0, 72);
   }
@@ -593,6 +640,96 @@ export type DjCreatorAiShellProps = {
   onOpen?: () => void;
 };
 
+/** The sparkle mark, white (the old one was cyan). */
+function DjSpark({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+      <path d="M10 1.5l.65 2 2 .65-2 .65-.65 2-.65-2-2-.65 2-.65.65-2Zm5 9l.4 1.2 1.2.4-1.2.4-.4 1.2-.4-1.2-1.2-.4 1.2-.4.4-1.2Zm-10 0l.4 1.2 1.2.4-1.2.4-.4 1.2-.4-1.2-1.2-.4 1.2-.4.4-1.2Z" />
+    </svg>
+  );
+}
+
+const MOOD_COLORS = ["#5ac8fa", "#bf5af2", "#ff6bb0", "#ff9f0a", "#ffd60a", "#ff453a"];
+
+/** The mood as a meter instead of six buttons (owner 2026-10-18): drag the knob from calm to energetic, it snaps to the
+ *  six moods, the colour follows; Next confirms. Always left→right, whatever the page direction. */
+function MoodMeter({
+  bubbles,
+  he,
+  initialId,
+  calmLabel,
+  energyLabel,
+  nextLabel,
+  onConfirm,
+}: {
+  bubbles: readonly Bubble[];
+  he: boolean;
+  initialId: string;
+  calmLabel: string;
+  energyLabel: string;
+  nextLabel: string;
+  onConfirm: (b: Bubble) => void;
+}) {
+  const n = bubbles.length;
+  const [idx, setIdx] = useState(() => Math.max(0, bubbles.findIndex((b) => b.id === initialId)));
+  const trackRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+  const fromX = (clientX: number) => {
+    const el = trackRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setIdx(Math.round(Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * (n - 1)));
+  };
+  const color = MOOD_COLORS[Math.min(idx, MOOD_COLORS.length - 1)]!;
+  return (
+    <div className="sb-mood" dir="ltr" style={{ ["--mc" as string]: color } as CSSProperties}>
+      <p key={idx} className="sb-mood-name">{bubbleLabel(bubbles[idx]!, he)}</p>
+      <div
+        ref={trackRef}
+        className="sb-mood-track"
+        role="slider"
+        tabIndex={0}
+        aria-label="Mood"
+        aria-valuemin={0}
+        aria-valuemax={n - 1}
+        aria-valuenow={idx}
+        aria-valuetext={bubbleLabel(bubbles[idx]!, he)}
+        onPointerDown={(e) => {
+          dragging.current = true;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          fromX(e.clientX);
+        }}
+        onPointerMove={(e) => {
+          if (dragging.current) fromX(e.clientX);
+        }}
+        onPointerUp={(e) => {
+          dragging.current = false;
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowRight" || e.key === "ArrowUp") (e.preventDefault(), setIdx((i) => Math.min(n - 1, i + 1)));
+          if (e.key === "ArrowLeft" || e.key === "ArrowDown") (e.preventDefault(), setIdx((i) => Math.max(0, i - 1)));
+          if (e.key === "Enter") (e.preventDefault(), onConfirm(bubbles[idx]!));
+        }}
+      >
+        <span className="sb-mood-rail" />
+        <span className="sb-mood-fill" style={{ ["--r" as string]: `${100 - (idx / (n - 1)) * 100}%` } as CSSProperties} />
+        {bubbles.map((b, i) => (
+          <span key={b.id} className={`sb-mood-tick${i <= idx ? " is-lit" : ""}`} style={{ left: `${(i / (n - 1)) * 100}%` }} />
+        ))}
+        <span className="sb-mood-knob" style={{ left: `${(idx / (n - 1)) * 100}%` }} />
+      </div>
+      <div className="sb-mood-ends">
+        <span>{calmLabel}</span>
+        <span>{energyLabel}</span>
+      </div>
+      <button type="button" className="sb-dj-go" onClick={() => onConfirm(bubbles[idx]!)}>
+        {nextLabel}
+      </button>
+    </div>
+  );
+}
+
 export function DjCreatorAiShell({
   drawerOpen,
   onDrawerOpenChange,
@@ -615,6 +752,12 @@ export function DjCreatorAiShell({
   /** Required musical direction (Genre/Style/Era). "Other" uses the free-text direction below. */
   const [genreDirection, setGenreDirection] = useState<WizardPick>(emptyPick);
   const [freeText, setFreeText] = useState("");
+  /* round 6: specific artists whose songs make the playlist (their songs lead; no genre direction needed) */
+  const [artistNames, setArtistNames] = useState<string[]>([]);
+  const [artistDraft, setArtistDraft] = useState("");
+  const [artistRows, setArtistRows] = useState<SmartSearchRow[]>([]);
+  const [artistSug, setArtistSug] = useState<Array<{ name: string; photo: string | null }>>([]);
+  const [styleOpen, setStyleOpen] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -663,7 +806,7 @@ export function DjCreatorAiShell({
     // the chooser with a valid brief already written.
     return freeText.trim();
   }, [styleIsDirection, style.query, genreDirection.id, genreDirection.query, freeText]);
-  const hasDirection = directionQuery.length > 0;
+  const hasDirection = directionQuery.length > 0 || artistNames.length > 0;
 
   const picks = useMemo(() => [business, daypart, vibe, style, gymIntensity], [business, daypart, vibe, style, gymIntensity]);
 
@@ -772,9 +915,11 @@ export function DjCreatorAiShell({
   );
 
   const draftRows = useMemo(() => {
-    const catalog = data?.rows ?? [];
-    const seen = new Set(catalog.map(rowKey));
-    let combined = [...catalog];
+    // artists' songs lead; when they already fill most of the list the generic catalog rows are left out
+    const lead = artistRows;
+    const catalog = lead.length >= Math.min(8, targetCount) ? [] : (data?.rows ?? []);
+    const seen = new Set([...lead, ...catalog].map(rowKey));
+    let combined = [...lead, ...catalog];
     for (const tr of templateRows) {
       const k = rowKey(tr);
       if (k && !seen.has(k)) { seen.add(k); combined.push(tr); }
@@ -795,10 +940,10 @@ export function DjCreatorAiShell({
       return out;
     }
     return combined.slice(0, Math.min(50, targetCount)); // by count — never more than 50
-  }, [data?.rows, templateRows, lengthMode, lengthMinutes, targetCount, removedTrackKeys]);
+  }, [data?.rows, artistRows, templateRows, lengthMode, lengthMinutes, targetCount, removedTrackKeys]);
 
   /** Kept for a small inline note only — NO LONGER a hard block on showing/saving a playlist. */
-  const catalogSufficient = data?.coverage?.tier === "good";
+  const catalogSufficient = data?.coverage?.tier === "good" || artistRows.length > 0;
   const playableDraftCount = useMemo(() => draftRows.filter((r) => isPlayableUrl(r.url)).length, [draftRows]);
   const topUpCount = useMemo(() => draftRows.filter((r) => (r.recommendedBecause ?? "").startsWith("From template:")).length, [draftRows]);
 
@@ -814,6 +959,11 @@ export function DjCreatorAiShell({
     setGymIntensity(emptyPick);
     setGenreDirection(emptyPick);
     setFreeText("");
+    setArtistNames([]);
+    setArtistDraft("");
+    setArtistRows([]);
+    setArtistSug([]);
+    setStyleOpen(false);
     setData(null);
     setTemplateRows([]);
     setError(null);
@@ -841,7 +991,7 @@ export function DjCreatorAiShell({
     const el = scrollRef.current;
     if (!el) return;
     requestAnimationFrame(() => {
-      el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
+      el.scrollTo({ top: 0, behavior: "auto" });
     });
   }, [drawerOpen, tab, step, data, he]);
 
@@ -922,6 +1072,7 @@ export function DjCreatorAiShell({
         gymIntensityId: gymHighEnergy ? gymIntensity.id : "",
       });
       if (djKey) u.searchParams.set("djCx", djKey);
+      const artistP = artistNames.length > 0 ? fetchArtistRows(artistNames, want) : Promise.resolve<SmartSearchRow[]>([]);
       const res = await fetch(u.toString(), { credentials: "include" });
       const json = (await res.json()) as ApiOk | { error?: string };
       if (!res.ok) {
@@ -931,11 +1082,14 @@ export function DjCreatorAiShell({
         return;
       }
       setData(json as ApiOk);
+      const aRows = await artistP;
+      setArtistRows(aRows);
+      const artistPlayable = aRows.filter((r) => isPlayableUrl(r.url)).length;
       // Fill tiers (Template → Catalog → Charts): when the catalog can't reach the target,
       // top up so the DJ Creator ALWAYS returns a playable, editable playlist (never a dead-end).
       const catalogCount = (json as ApiOk).rows?.length ?? 0;
       const catalogPlayable = ((json as ApiOk).rows ?? []).filter((r) => isPlayableUrl(r.url)).length;
-      const thin = (json as ApiOk).coverage?.tier !== "good" || catalogCount < cap;
+      const thin = ((json as ApiOk).coverage?.tier !== "good" || catalogCount < cap) && artistPlayable < want && directionQuery.length > 0;
       let fill: SmartSearchRow[] = [];
       // Tier 2 — ADMIN templates (relevance-filtered by the chosen musical direction only).
       if (thin) {
@@ -955,7 +1109,7 @@ export function DjCreatorAiShell({
       }
       // Tier 2a — SyncBiz Charts: our catalog's MOST-PLAYED tracks matching this direction
       // (genre-accurate; ranked by real YouTube views). This is the owner's "① catalog, most-played".
-      if (catalogPlayable + fill.filter((r) => isPlayableUrl(r.url)).length < want) {
+      if (directionQuery.length > 0 && catalogPlayable + artistPlayable + fill.filter((r) => isPlayableUrl(r.url)).length < want) {
         try {
           const cu = new URL("/api/dj-creator/charts", window.location.origin);
           cu.searchParams.set("genre", directionQuery);
@@ -976,7 +1130,7 @@ export function DjCreatorAiShell({
       // Tier 2b — YOUR bank: the owner's own SELECTED tracks matching this direction (they play
       // local-first from the physical files on the bank machine; the YouTube URL is the remote fallback).
       // Runs BEFORE YouTube so the DJ AI prefers the owner's music over generic web results.
-      if (catalogPlayable + fill.filter((r) => isPlayableUrl(r.url)).length < want) {
+      if (directionQuery.length > 0 && catalogPlayable + artistPlayable + fill.filter((r) => isPlayableUrl(r.url)).length < want) {
         try {
           const bu = new URL("/api/dj-creator/bank", window.location.origin);
           bu.searchParams.set("genre", directionQuery);
@@ -997,11 +1151,11 @@ export function DjCreatorAiShell({
       // Tier 3 — Charts / known-music: if catalog + templates + bank still can't reach a playable floor,
       // resolve real tracks live from YouTube for the EXACT chosen direction (genre-matched, cached).
       // This is the fail-forward guarantee — it can never come back empty for a valid direction.
-      const playableSoFar = catalogPlayable + fill.filter((r) => isPlayableUrl(r.url)).length;
+      const playableSoFar = catalogPlayable + artistPlayable + fill.filter((r) => isPlayableUrl(r.url)).length;
       const floor = Math.min(want, 6);
       // The last-resort tier: if we reach it and STILL end with nothing, that's a real failure to build
       // (usually the external source timing out and returning an empty list), not a quality "no match".
-      const attemptedRecommend = playableSoFar < floor;
+      const attemptedRecommend = playableSoFar < floor && directionQuery.length > 0;
       if (attemptedRecommend) {
         // Generous client-side timeout so a genuine hang surfaces as an error (Try again) rather than
         // an endless spinner. This is error-handling only — it does NOT change the search engine.
@@ -1025,7 +1179,7 @@ export function DjCreatorAiShell({
       setTemplateRows(fill);
       // If we tried every tier (including the last resort) and have nothing playable, surface a clear,
       // actionable error with Try again — NEVER the silent/misleading "no accurate catalog matches".
-      const anyPlayable = catalogPlayable + fill.filter((r) => isPlayableUrl(r.url)).length;
+      const anyPlayable = catalogPlayable + artistPlayable + fill.filter((r) => isPlayableUrl(r.url)).length;
       if (anyPlayable === 0 && attemptedRecommend) {
         setSearchError(
           locale === "he"
@@ -1035,6 +1189,7 @@ export function DjCreatorAiShell({
       }
       setPlaylistName(
         suggestedPlaylistName({
+          artists: artistNames,
           freeText,
           businessLabel: business.label,
           daypartLabel: daypart.label,
@@ -1077,6 +1232,7 @@ export function DjCreatorAiShell({
     hasDirection,
     styleIsDirection,
     directionQuery,
+    artistNames,
   ]);
 
   /**
@@ -1386,561 +1542,397 @@ export function DjCreatorAiShell({
 
   const progress = step >= reviewStep ? 1 : (step + 1) / (lastBubbleStep + 1);
 
+  // famous names matching what is being typed (the same source as the search's singer circles) — tap one to add it
+  useEffect(() => {
+    const q = artistDraft.trim();
+    if (q.length < 2) {
+      const clear = setTimeout(() => setArtistSug([]), 0);
+      return () => clearTimeout(clear);
+    }
+    let alive = true;
+    const t = setTimeout(() => {
+      fetch(`/api/artist-search?q=${encodeURIComponent(q)}`)
+        .then((r) => r.json())
+        .then((j: { artists?: Array<{ name: string; photo: string | null }> }) => {
+          if (alive) setArtistSug((j.artists ?? []).slice(0, 5));
+        })
+        .catch(() => {
+          if (alive) setArtistSug([]);
+        });
+    }, 260);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [artistDraft]);
   if (variant === "launcher") {
-    // One clean clickable card (no button-inside-a-button). Opens the CENTER monitor.
+    // One clean glass card (no button-inside-a-button). Opens the CENTER monitor.
     return (
-      <button
-        type="button"
-        onClick={() => (onOpen ? onOpen() : onDrawerOpenChange(true))}
-        dir={dir}
-        className="group flex w-full items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-3 text-start shadow-[0_8px_28px_rgba(0,0,0,0.35)] transition-colors duration-150 hover:border-white/[0.16] hover:bg-white/[0.06] active:scale-[0.99]"
-      >
-        <span
-          aria-hidden
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.05] text-[#7db8ff]"
-        >
-          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 4l1.7 4.3L18 10l-4.3 1.7L12 16l-1.7-4.3L6 10l4.3-1.7L12 4z" />
-            <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z" />
-          </svg>
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="library-text-title block text-sm font-semibold tracking-tight text-[#faf8f5]">{t.launcherTitle}</span>
-          <span className="mt-0.5 block text-[11px] text-slate-500">{t.openAssistant}</span>
-        </span>
-        <svg className="h-4 w-4 shrink-0 text-slate-500 transition-transform duration-150 group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+      <button type="button" onClick={() => (onOpen ? onOpen() : onDrawerOpenChange(true))} dir={dir} className="sb-djl group" aria-label={t.launcherTitle}>
+        <span className="sb-djl-title" aria-hidden>DJ AI</span>
       </button>
     );
   }
 
+  const addArtist = (raw: string) => {
+    const name = raw.trim().replace(/\s+/g, " ").slice(0, 40);
+    if (!name) return;
+    setArtistNames((cur) => (cur.length >= 5 || cur.some((a) => a.toLowerCase() === name.toLowerCase()) ? cur : [...cur, name]));
+    setArtistDraft("");
+    setArtistSug([]);
+  };
+  const trailLabels = picks.filter((p, i) => p?.label && i < Math.min(step, reviewStep)).map((p) => p.label);
+  const stepQuestion =
+    step === 3 ? styleQuestionLine : gymHighEnergy && step === 4 ? finalStepQuestionLine : t.questions[Math.min(step, 2) as 0 | 1 | 2];
+  const canCreate = !loading && !(step >= reviewStep && !hasDirection);
+  // full + green only when there IS a playlist; a failed build leaves the bar where the wizard stopped (not a false "done")
+  const built = !!data && draftRows.length > 0;
+  const barPct = Math.round((built ? 1 : (Math.min(step, reviewStep) + 0.5) / (reviewStep + 1)) * 100);
+  const chipRow = (list: readonly Bubble[], isOn: (b: Bubble) => boolean, onPick: (b: Bubble) => void, limit?: { max: number; open: boolean; onOpen: () => void }) => {
+    const hidden = limit && !limit.open && list.length > limit.max + 1 ? list.length - limit.max : 0;
+    const shown = hidden > 0 ? list.slice(0, limit!.max) : list;
+    return (
+    <div className="sb-dj-chips">
+      {shown.map((b, i) => (
+        <button
+          key={`${b.id}-${i}`}
+          type="button"
+          className={`sb-dj-chip${isOn(b) ? " is-on" : ""}`}
+          style={{ ["--d" as string]: `${Math.min(i, 14) * 38}ms` } as CSSProperties}
+          onClick={() => onPick(b)}
+        >
+          {bubbleLabel(b, he)}
+        </button>
+      ))}
+      {hidden > 0 ? (
+        <button type="button" className="sb-dj-chip sb-dj-chip--more" style={{ ["--d" as string]: `${Math.min(shown.length, 14) * 38}ms` } as CSSProperties} onClick={limit!.onOpen}>
+          +{hidden}
+        </button>
+      ) : null}
+    </div>
+    );
+  };
+  const describeBlock = (
+    <details className="sb-dj-more">
+      <summary>{he ? "ספרו במילים" : "Describe it in words"}</summary>
+      <textarea value={freeText} onChange={(e) => setFreeText(e.target.value)} rows={2} placeholder={t.composerPlaceholder} dir="auto" />
+      <div className="sb-dj-more-row">
+        <button type="button" onClick={startVoice} className={`sb-dj-mic${listening ? " is-live" : ""}`} aria-label={he ? "תיאור בקול" : "Describe by voice"} title={he ? "תיאור בקול" : "Describe by voice"}>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="9" y="2" width="6" height="12" rx="3" />
+            <path d="M5 10a7 7 0 0 0 14 0" />
+            <line x1="12" y1="19" x2="12" y2="22" />
+          </svg>
+        </button>
+        {step < reviewStep ? (
+          <button type="button" className="sb-dj-pill" disabled={!freeText.trim() || loading} onClick={() => runFromText()}>
+            {he ? "צור" : "Create"}
+          </button>
+        ) : null}
+      </div>
+    </details>
+  );
+
   return (
     <>
       {drawerOpen ? (
-        <div
-          className="sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-1 flex-col rounded-2xl border border-white/[0.1] bg-[#101014] p-px shadow-[0_18px_48px_rgba(0,0,0,0.5)]"
-          role="dialog"
-          aria-labelledby="djc-assistant-title"
-          dir={dir}
-        >
-            <div className={`${sidePanelInner} min-h-0 flex-1`}>
-            <header className="shrink-0 border-b border-white/8 px-4 pb-3 pt-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1 pe-1">
-                  <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-400">{t.brandTagline}</p>
-                  <h2 id="djc-assistant-title" className="text-base font-bold tracking-tight text-white">
-                    {t.launcherTitle}
-                  </h2>
-                  <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{t.catalogLine}</p>
-                  {!data && tab === "chat" ? (
-                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-sky-400 to-cyan-200 transition-[width] duration-300"
-                        style={{ width: `${Math.round(progress * 100)}%` }}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  {/* Help/Tutorials — small toggle button (was a full-width bottom tab bar). */}
-                  <button
-                    type="button"
-                    onClick={() => setTab((prev) => (prev === "guide" ? "chat" : "guide"))}
-                    aria-pressed={tab === "guide"}
-                    aria-label={t.tabGuide}
-                    title={t.tabGuide}
-                    className={`inline-flex h-7 w-7 items-center justify-center rounded-lg border text-[11px] transition ${
-                      tab === "guide"
-                        ? "border-cyan-400/50 bg-cyan-500/15 text-cyan-200"
-                        : "border-white/10 bg-white/[0.05] text-slate-300 hover:bg-white/10"
-                    }`}
-                  >
-                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1.4.9-1.4 1.7v.5" /><line x1="12" y1="17" x2="12" y2="17" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={closeDrawer}
-                    className="rounded-xl border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-[11px] font-medium text-slate-200 hover:bg-white/10"
-                  >
-                    {t.close}
-                  </button>
-                </div>
+        <div className="sb-dj sb-anim-rise" role="dialog" aria-labelledby="djc-assistant-title" dir={dir}>
+          <header className="sb-dj-head">
+            <DjSpark className="sb-dj-mark" />
+            <h2 id="djc-assistant-title">{t.launcherTitle}</h2>
+            <span className="sb-dj-grow" />
+            <button
+              type="button"
+              onClick={() => setTab((prev) => (prev === "guide" ? "chat" : "guide"))}
+              aria-pressed={tab === "guide"}
+              aria-label={t.tabGuide}
+              title={t.tabGuide}
+              className={`sb-dj-icon${tab === "guide" ? " is-on" : ""}`}
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="12" cy="12" r="9" />
+                <path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1.4.9-1.4 1.7v.5" />
+                <line x1="12" y1="17" x2="12" y2="17" />
+              </svg>
+            </button>
+            <button type="button" onClick={closeDrawer} className="sb-dj-icon" aria-label={t.ariaClose} title={t.close}>
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
+                <path d="M4 4l8 8M12 4l-8 8" />
+              </svg>
+            </button>
+          </header>
+
+          <div ref={scrollRef} className="sb-dj-body">
+            {tab === "guide" ? (
+              <div className="sb-dj-guide" key="guide">
+                <p className="sb-dj-sub">{t.guideIntro}</p>
+                {PLAYER_GUIDE_VIDEOS.map((item) => (
+                  <a key={item.href + item.titleEn} href={item.href} target="_blank" rel="noopener noreferrer" className="sb-dj-guide-row">
+                    <span>
+                      <b>{he ? item.titleHe : item.titleEn}</b>
+                      <i>{he ? item.blurbHe : item.blurbEn}</i>
+                    </span>
+                    <span aria-hidden>↗</span>
+                  </a>
+                ))}
               </div>
-            </header>
+            ) : loading ? (
+              <div className="sb-dj-wait" role="status" aria-live="polite" key="wait">
+                <span className="sb-dj-wave" aria-hidden>
+                  <i /><i /><i /><i /><i />
+                </span>
+                <p>
+                  {elapsedSec < 4
+                    ? he ? "מחפש מוזיקה מתאימה…" : "Finding the right music…"
+                    : elapsedSec < 15
+                      ? he ? "בודק קטלוג, מאגרים ומקורות חיצוניים…" : "Checking catalog, pools and external sources…"
+                      : he ? "זה לוקח קצת יותר זמן, עדיין עובדים על זה." : "Taking a little longer, still working on it."}
+                </p>
+                <span className="sb-dj-sub">{he ? `${elapsedSec} שניות` : `${elapsedSec}s`}</span>
+              </div>
+            ) : !data ? (
+              <div className="sb-dj-stage" key={`stage-${step}`}>
+                {trailLabels.length > 0 ? <p className="sb-dj-trail">{trailLabels.join(" · ")}</p> : null}
 
-            <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-              {tab === "guide" ? (
-                <div className="flex flex-col gap-3">
-                  <p className="text-[12px] leading-snug text-slate-400">{t.guideIntro}</p>
-                  {PLAYER_GUIDE_VIDEOS.map((item) => (
-                    <div key={item.href + item.titleEn} className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
-                      <p className="text-sm font-semibold text-slate-100">{he ? item.titleHe : item.titleEn}</p>
-                      <p className="mt-1 text-[11px] leading-snug text-slate-500">{he ? item.blurbHe : item.blurbEn}</p>
-                      <a
-                        href={item.href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-medium text-sky-400 hover:text-sky-300"
-                      >
-                        {t.guideOpenVideo}
-                        <span aria-hidden>↗</span>
-                      </a>
-                    </div>
-                  ))}
-                </div>
-              ) : loading ? (
-                /* Waiting state takes precedence over any empty/partial result — the user never sees
-                   "No playable track" while a search is still running. */
-                <div role="status" aria-live="polite" className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-                  <svg className="h-7 w-7 animate-spin text-cyan-300" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.4 0 0 5.4 0 12h4z" />
-                  </svg>
-                  <div className="max-w-[19rem]">
-                    <p className="text-[13px] font-medium text-cyan-50">
-                      {elapsedSec < 4
-                        ? (he ? "מחפש מוזיקה מתאימה…" : "Finding the right music…")
-                        : elapsedSec < 15
-                          ? (he ? "בודק קטלוג, מאגרים ומקורות חיצוניים…" : "Checking catalog, pools, and external sources…")
-                          : (he ? "החיפוש לוקח מעט יותר זמן — אנחנו עדיין עובדים על הפלייליסט שלך." : "This is taking a bit longer — we're still building your playlist.")}
-                    </p>
-                    <p className="mt-1 text-[11px] tabular-nums text-cyan-200/70">
-                      {he ? `זמן שעבר: ${elapsedSec} ש׳` : `Elapsed: ${elapsedSec}s`}
-                    </p>
-                  </div>
-                </div>
-              ) : !data ? (
-                <div className="flex flex-col gap-3">
-                  {/* Three clear phases: Place · Style & mood · Length */}
-                  <ol className="flex flex-wrap items-center gap-1 text-[10px] font-medium">
-                    {[
-                      { n: 0, label: he ? "מקום" : "Place" },
-                      { n: 1, label: he ? "סגנון ואווירה" : "Style & mood" },
-                      { n: 2, label: he ? "אורך" : "Length" },
-                    ].map((ph, idx) => {
-                      const phase = step <= 1 ? 0 : step < reviewStep ? 1 : 2;
-                      const active = ph.n === phase;
-                      const done = ph.n < phase;
-                      return (
-                        <li key={ph.n} className="flex items-center gap-1">
-                          <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[9px] ${active ? "bg-cyan-500 text-white" : done ? "bg-cyan-500/25 text-cyan-200" : "bg-white/10 text-slate-500"}`}>{ph.n + 1}</span>
-                          <span className={active ? "text-slate-100" : "text-slate-500"}>{ph.label}</span>
-                          {idx < 2 ? <span className="mx-0.5 text-slate-700" aria-hidden>›</span> : null}
-                        </li>
-                      );
-                    })}
-                  </ol>
+                {step <= lastBubbleStep ? (
+                  <>
+                    <h3 className="sb-dj-q"><RiseText text={String(stepQuestion)} /></h3>
+                    {step === 2 ? (
+                      <MoodMeter
+                        bubbles={VIBE_BUBBLES}
+                        he={he}
+                        initialId={vibe.id}
+                        calmLabel={he ? "רגוע" : "Calm"}
+                        energyLabel={he ? "מרים" : "Energetic"}
+                        nextLabel={he ? "המשך" : "Next"}
+                        onConfirm={(b) => pickBubble(b, 2)}
+                      />
+                    ) : (
+                      chipRow(currentStepBubbles, (b) => picks[step]?.id === b.id, (b) => pickBubble(b, step), step === 3 ? { max: 6, open: styleOpen, onOpen: () => setStyleOpen(true) } : undefined)
+                    )}
+                    {describeBlock}
+                    {error ? <p className="sb-dj-error" role="alert">{error}</p> : null}
+                  </>
+                ) : (
+                  <>
+                    <h3 className="sb-dj-q"><RiseText text={he ? "כמעט שם" : "Almost there"} /></h3>
 
-                  {/* Current selections as small chips (replaces the echoed chat bubbles) */}
-                  {picks.some((p, i) => p?.label && i < Math.min(step, reviewStep)) ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {picks.map((p, i) =>
-                        p?.label && i < Math.min(step, reviewStep) ? (
-                          <span key={`sel-${i}`} className="inline-flex items-center rounded-full border border-cyan-300/70 bg-cyan-400/25 px-2.5 py-0.5 text-[11px] font-semibold text-cyan-50 shadow-[0_0_0_1px_rgba(34,211,238,0.15)]">
-                            {p.label}
-                          </span>
-                        ) : null,
-                      )}
-                    </div>
-                  ) : null}
+                    {!hasDirection ? (
+                      <div className="sb-dj-block">
+                        <p className="sb-dj-label">{he ? "כיוון מוזיקלי" : "Musical direction"}</p>
+                        {chipRow(GENRE_DIRECTION_BUBBLES, (b) => genreDirection.id === b.id, (b) => setGenreDirection({ id: b.id, label: b.label, query: b.query }))}
+                        {genreDirection.id === "other" ? (
+                          <p className="sb-dj-sub">{he ? "כתבו ז׳אנר ב״ספרו במילים״ למטה." : "Type a genre under “Describe it in words” below."}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
 
-                  {step <= lastBubbleStep ? (
-                    <div className="flex flex-col gap-2">
-                      <p className="text-[12px] font-medium leading-snug text-slate-200">
-                        {step === 3
-                          ? styleQuestionLine
-                          : gymHighEnergy && step === 4
-                            ? finalStepQuestionLine
-                            : t.questions[step as 0 | 1 | 2]}
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {currentStepBubbles.map((b, btnIdx) => (
-                          <button
-                            key={`${step}-bubble-${btnIdx}-${b.id}`}
-                            type="button"
-                            onClick={() => pickBubble(b, step)}
-                            className="rounded-full border border-white/12 bg-white/[0.05] px-3 py-1.5 text-[12px] font-medium text-slate-100 transition hover:border-cyan-400/50 hover:bg-cyan-500/[0.12] active:scale-[0.98]"
-                          >
-                            {bubbleLabel(b, he)}
-                          </button>
-                        ))}
+                    <div className="sb-dj-block">
+                      <div className="sb-dj-labelrow">
+                        <p className="sb-dj-label">{he ? "אורך" : "Length"}</p>
+                        <div className="sb-dj-seg" data-mode={lengthMode}>
+                          <span className="sb-dj-seg-bar" aria-hidden />
+                          <button type="button" aria-pressed={lengthMode === "count"} onClick={() => setLengthMode("count")}>{he ? "שירים" : "Songs"}</button>
+                          <button type="button" aria-pressed={lengthMode === "duration"} onClick={() => setLengthMode("duration")}>{he ? "דקות" : "Minutes"}</button>
+                        </div>
+                      </div>
+                      <div className="sb-dj-chips sb-dj-chips--tight">
+                        {(lengthMode === "count" ? [8, 15, 30, 50] : [30, 60, 120, 200]).map((n) => {
+                          const on = lengthMode === "count" ? lengthCount === n : lengthMinutes === n;
+                          return (
+                            <button key={n} type="button" className={`sb-dj-chip${on ? " is-on" : ""}`} onClick={() => (lengthMode === "count" ? setLengthCount(n) : setLengthMinutes(n))}>
+                              {n}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
-                  ) : (
-                    <div className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-[12px] leading-snug text-slate-300">
-                      {t.addNoteQ}
-                      <span className="mt-1 block text-[11px] text-slate-500">{t.addNoteHint}</span>
+
+                    <div className="sb-dj-block">
+                      <p className="sb-dj-label">{he ? "אמנים ספציפיים (אופציונלי)" : "Specific artists (optional)"}</p>
+                      <div className="sb-dj-artists" dir="auto">
+                        {artistNames.map((n) => (
+                          <span key={n} className="sb-dj-artist">
+                            {n}
+                            <button type="button" aria-label={`Remove ${n}`} onClick={() => setArtistNames((cur) => cur.filter((x) => x !== n))}>
+                              <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M4 4l8 8M12 4l-8 8" /></svg>
+                            </button>
+                          </span>
+                        ))}
+                        {artistNames.length < 5 ? (
+                          <input
+                            value={artistDraft}
+                            onChange={(e) => setArtistDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === ",") {
+                                e.preventDefault();
+                                addArtist(artistDraft);
+                              } else if (e.key === "Backspace" && !artistDraft) {
+                                setArtistNames((cur) => cur.slice(0, -1));
+                              }
+                            }}
+                            onBlur={() => addArtist(artistDraft)}
+                            placeholder={artistNames.length === 0 ? (he ? "הוסיפו שם אמן ולחצו Enter" : "Add an artist and press Enter") : (he ? "עוד אמן…" : "Another…")}
+                          />
+                        ) : null}
+                      </div>
+                      {artistSug.length > 0 ? (
+                        <div className="sb-dj-sug">
+                          {artistSug
+                            .filter((a) => !artistNames.some((n) => n.toLowerCase() === a.name.toLowerCase()))
+                            .map((a) => (
+                              <button key={a.name} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => addArtist(a.name)}>
+                                {a.photo ? <img src={a.photo} alt="" /> : <span aria-hidden>{a.name.charAt(0)}</span>}
+                                {a.name}
+                              </button>
+                            ))}
+                        </div>
+                      ) : artistNames.length > 0 ? (
+                        <p className="sb-dj-sub">{he ? "הפלייליסט ייבנה משירי האמנים האלה." : "The playlist will be built from these artists' songs."}</p>
+                      ) : null}
                     </div>
-                  )}
 
-                  {error ? <p className="text-[12px] text-rose-400">{error}</p> : null}
+                    {describeBlock}
+                    {error ? <p className="sb-dj-error" role="alert">{error}</p> : null}
 
-                  {step > 0 && !data ? (
                     <button
                       type="button"
-                      onClick={goBack}
-                      className="self-start text-[12px] font-medium text-slate-500 underline-offset-2 hover:text-slate-300 hover:underline"
+                      className="sb-dj-go"
+                      disabled={!canCreate}
+                      onClick={() => {
+                        if (freeText.trim() && !business.id) runFromText();
+                        else void runSearch();
+                      }}
                     >
-                      {t.back}
+                      {he ? "צור פלייליסט" : "Create playlist"}
                     </button>
-                  ) : null}
+                  </>
+                )}
+
+                {step > 0 ? (
+                  <button type="button" onClick={goBack} className="sb-dj-back">
+                    {t.back}
+                  </button>
+                ) : null}
+              </div>
+            ) : draftRows.length === 0 ? (
+              // Nothing to show (couldn't build it / every row removed): ONE calm, vertically centred message with its two actions.
+              <div className="sb-dj-results sb-dj-failed" key="failed" role="alert">
+                <span className="sb-dj-fail-icon" aria-hidden>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></svg>
+                </span>
+                {searchError ? <h3>{he ? "לא הצלחנו ליצור את הפלייליסט" : "Couldn’t create the playlist"}</h3> : null}
+                <p>{searchError ?? t.noSets}</p>
+                <button type="button" className="sb-dj-go" onClick={() => void runSearch()}>
+                  {he ? "נסו שוב" : "Try again"}
+                </button>
+                <button type="button" onClick={resetWizard} className="sb-dj-back">
+                  {t.startOver}
+                </button>
+              </div>
+            ) : (
+              <div className="sb-dj-results" key="results">
+                <div className="sb-dj-rhead">
+                  <h3 dir="auto">{playlistName.trim() ? playlistName.trim() : t.untitled}</h3>
+                  <p className="sb-dj-sub">
+                    {draftRows.length} {he ? "שירים" : "songs"}
+                    {draftDurationEstimate ? ` · ${he ? fmtTotalDuration(draftDurationEstimate) : fmtTotalDurationEn(draftDurationEstimate)}` : ""}
+                  </p>
                 </div>
-              ) : (
-                <>
-                  <div className="mb-2 border-b border-white/8 pb-2">
-                    <p className="break-words text-[14px] font-semibold text-white">
-                      {playlistName.trim() ? playlistName.trim() : t.untitled}
-                    </p>
-                    <p className="mt-0.5 text-[11px] text-slate-400">
-                      <span className="text-slate-300">{draftRows.length} {t.setsFromCatalog}</span>
-                      {topUpCount > 0 ? <span className="text-cyan-200/90"> · +{topUpCount} {he ? "מתבניות" : "from templates"}</span> : null}
-                      {draftDurationEstimate ? (
-                        <>
-                          <span className="text-slate-600"> · </span>
-                          <span>{he ? fmtTotalDuration(draftDurationEstimate) : fmtTotalDurationEn(draftDurationEstimate)}</span>
-                        </>
-                      ) : null}
-                    </p>
-                    {!catalogSufficient ? (
-                      <p className="mt-1 text-[10px] leading-snug text-amber-300/90">{t.weakCatalogTitle}{topUpCount > 0 ? (he ? " — הושלם מתבניות." : " — topped up from templates.") : "."}</p>
-                    ) : null}
-                  </div>
 
-                  <h3 className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    {t.picksHeading}{" "}
-                    <span className="font-normal text-slate-600">({effectiveResultCap} max)</span>
-                  </h3>
-
-                  <ul className="mt-2 space-y-2">
-                    {draftRows.length === 0 ? (
-                      searchError ? (
-                        <li className="rounded-xl border border-amber-500/30 bg-amber-950/20 px-3 py-3">
-                          <p className="text-[13px] leading-relaxed text-amber-100/95">{searchError}</p>
-                          <button
-                            type="button"
-                            onClick={() => void runSearch()}
-                            className="mt-2 inline-flex min-h-[2.25rem] items-center justify-center rounded-xl border border-amber-300/50 bg-amber-400/15 px-3 text-[12px] font-semibold text-amber-100 hover:bg-amber-400/25"
-                          >
-                            {he ? "נסו שוב" : "Try again"}
-                          </button>
-                        </li>
-                      ) : (
-                        <li className="text-[13px] text-slate-500">{t.noSets}</li>
-                      )
-                    ) : (
-                      draftRows.map((r, idx) => (
-                        <li
-                          key={`draft-${idx}-${r.catalogItemId}`}
-                          className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+                <ul className="sb-dj-rows">
+                  {draftRows.map((r, idx) => (
+                      <li key={`draft-${idx}-${r.catalogItemId}-${r.url}`} className="sb-dj-row" style={{ ["--d" as string]: `${Math.min(idx, 12) * 36}ms` } as CSSProperties}>
+                        <span className="sb-dj-num">{idx + 1}</span>
+                        {r.thumbnail || getYouTubeThumbnail(r.url) ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={r.thumbnail || getYouTubeThumbnail(r.url) || ""} alt="" loading="lazy" />
+                        ) : (
+                          <span className="sb-dj-nothumb" aria-hidden />
+                        )}
+                        <span className="sb-dj-rtext">
+                          <b>{r.title}</b>
+                          <i>{[r.durationSec ? fmtDuration(r.durationSec) : null, fmtCount(r.viewCount) ? `${fmtCount(r.viewCount)} ${he ? "צפיות" : "views"}` : null].filter(Boolean).join(" · ")}</i>
+                        </span>
+                        <button
+                          type="button"
+                          className="sb-dj-x"
+                          onClick={() => setRemovedTrackKeys((prev) => { const next = new Set(prev); next.add(rowKey(r)); return next; })}
+                          aria-label={he ? "הסר קטע" : "Remove track"}
+                          title={he ? "הסר קטע" : "Remove track"}
                         >
-                          <div className="flex items-start gap-2.5">
-                            <span className="w-4 shrink-0 pt-0.5 text-center text-[10px] text-slate-500">{idx + 1}</span>
-                            {r.thumbnail ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={r.thumbnail} alt="" loading="lazy" className="h-11 w-11 shrink-0 rounded-md bg-white/5 object-cover" />
-                            ) : (
-                              <div className="h-11 w-11 shrink-0 rounded-md bg-white/5" aria-hidden />
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <p className="line-clamp-2 text-sm font-medium text-slate-100">{r.title}</p>
-                              <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-slate-500">
-                                <span className="tabular-nums">{fmtDuration(r.durationSec)}</span>
-                                {fmtCount(r.viewCount) ? (
-                                  <>
-                                    <span className="text-slate-600">·</span>
-                                    <span className="inline-flex items-center gap-0.5">
-                                      <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" strokeLinecap="round" strokeLinejoin="round"/><circle cx="12" cy="12" r="3"/></svg>
-                                      <span className="tabular-nums">{fmtCount(r.viewCount)}</span>
-                                    </span>
-                                  </>
-                                ) : null}
-                                {fmtCount(r.likeCount) ? (
-                                  <>
-                                    <span className="text-slate-600">·</span>
-                                    <span className="inline-flex items-center gap-0.5">
-                                      <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                                      <span className="tabular-nums">{fmtCount(r.likeCount)}</span>
-                                    </span>
-                                  </>
-                                ) : null}
-                                {r.curationRating > 0 ? (
-                                  <>
-                                    <span className="text-slate-600">·</span>
-                                    <span>SYNC <span className="tabular-nums text-slate-400">{r.curationRating}</span></span>
-                                  </>
-                                ) : null}
-                              </p>
-                              {r.matchedTags.length > 0 ? (
-                                <p className="mt-1 text-[10px] text-cyan-200/80">{r.matchedTags.join(" · ")}</p>
-                              ) : null}
-                              <p className="mt-1 text-[11px] text-slate-500">{shortReason(r.recommendedBecause)}</p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setRemovedTrackKeys((prev) => { const next = new Set(prev); next.add(rowKey(r)); return next; })}
-                              aria-label={he ? "הסר קטע" : "Remove track"}
-                              title={he ? "הסר קטע" : "Remove track"}
-                              className="shrink-0 self-start rounded-md p-1 text-slate-500 transition hover:bg-rose-500/15 hover:text-rose-300"
-                            >
-                              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                            </button>
-                          </div>
-                        </li>
-                      ))
-                    )}
-                  </ul>
+                          <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M4 4l8 8M12 4l-8 8" /></svg>
+                        </button>
+                      </li>
+                    ))}
+                </ul>
 
-                  {lastSavedPlaylistId ? (
-                    <div className="mt-4 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-950/30 px-3 py-2.5" role="status" aria-live="polite">
-                      <svg className="h-4 w-4 shrink-0 text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden><path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                      <p className="text-[12px] font-medium leading-relaxed text-emerald-100/95">
-                        {he ? "נשמר ✓ — חוזרים ל-Library…" : "Saved ✓ — returning to Library…"}
-                      </p>
-                    </div>
-                  ) : null}
+                {lastSavedPlaylistId ? (
+                  <p className="sb-dj-saved" role="status" aria-live="polite">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M20 6 9 17l-5-5" /></svg>
+                    {he ? "נשמר, חוזרים לספרייה…" : "Saved, returning to the library…"}
+                  </p>
+                ) : null}
 
+                <div className="sb-dj-actions">
                   {playableDraftCount > 0 && DJ_CREATOR_SAVE_PLAYLIST_ENABLED ? (
-                    <div className="mt-3 space-y-1 border-t border-white/8 pt-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSaveMessage(null);
-                          setLastSavedPlaylistId(null);
-                          setSaveOpen(true);
-                        }}
-                        className="w-full rounded-xl bg-gradient-to-b from-cyan-300 to-cyan-400 px-4 py-2.5 text-[12px] font-semibold text-[#04252b] shadow-[0_6px_20px_rgba(34,211,238,0.3)] transition hover:from-cyan-200 hover:to-cyan-300 active:scale-[0.99]"
-                      >
-                        {t.savePlaylist}
-                      </button>
-                      <p className="text-[10px] text-slate-500">{t.saveActionsFootnote}</p>
-                    </div>
+                    <button
+                      type="button"
+                      className="sb-dj-go"
+                      onClick={() => {
+                        setSaveMessage(null);
+                        setLastSavedPlaylistId(null);
+                        setSaveOpen(true);
+                      }}
+                    >
+                      {t.savePlaylist}
+                    </button>
                   ) : (
-                    <p className="mt-3 border-t border-white/8 pt-3 text-[11px] text-slate-500">
-                      {he ? "אין עדיין קטע נגין לשמירה — נסו לכוונן בחירה או בקשו עורך." : "No playable track to save yet — adjust a choice or ask an editor."}
-                    </p>
+                    <p className="sb-dj-sub">{he ? "אין עדיין קטע לשמירה, נסו לשנות בחירה." : "Nothing playable to save yet, try changing a choice."}</p>
                   )}
-
-                  {/* Secondary, optional — a human editor. Not a failure screen. */}
-                  <details className="group mt-3 rounded-xl border border-white/10 bg-white/[0.03]">
-                    <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-[11px] font-medium text-slate-400 hover:text-slate-200">
-                      <svg className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                      {he ? "בקשת עורך אנושי (אופציונלי)" : "Request a human editor (optional)"}
-                    </summary>
-                    <div className="border-t border-white/8 p-2">
-                      <textarea
-                        value={editorNote}
-                        onChange={(e) => setEditorNote(e.target.value)}
-                        rows={2}
-                        placeholder={t.requestEditorPlaceholder}
-                        className="max-h-28 min-h-[3rem] w-full resize-y rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 text-[13px] text-slate-100 placeholder:text-slate-600 focus:outline-none"
-                        dir="auto"
-                      />
-                      <button
-                        type="button"
-                        disabled={editorBusy}
-                        onClick={() => void submitEditorRequest()}
-                        className="mt-2 w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[12px] font-medium text-slate-300 hover:bg-white/[0.08] disabled:opacity-50"
-                      >
-                        {editorBusy ? t.requestEditorSubmitBusy : t.requestEditorSubmit}
-                      </button>
-                      {editorStatus === "ok" ? <p className="mt-1.5 text-[11px] text-emerald-300">{t.requestEditorThanks}</p> : null}
-                      {editorStatus === "err" ? <p className="mt-1.5 text-[11px] text-rose-300">{t.requestEditorError}</p> : null}
-                    </div>
-                  </details>
-
-                  <button
-                    type="button"
-                    onClick={resetWizard}
-                    className="mt-3 w-full rounded-xl border border-white/10 bg-white/[0.04] py-2 text-[12px] font-medium text-slate-300 hover:bg-white/[0.08]"
-                  >
+                  <button type="button" onClick={resetWizard} className="sb-dj-back">
                     {t.startOver}
                   </button>
-                </>
-              )}
-            </div>
+                </div>
 
-            {tab === "chat" && !data ? (
-              <div className="shrink-0 border-t border-white/8 bg-[#0c0e14] px-3 py-2.5">
-                <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                  {loading && step >= reviewStep ? (
-                    <div className="mb-2 flex items-start gap-2 rounded-xl border border-white/8 bg-white/[0.04] px-3 py-2.5">
-                      <DjCreatorAiSparkle className="mt-0.5 h-4 w-4 shrink-0 animate-pulse" />
-                      <div className="flex min-w-0 flex-1 items-stretch gap-2">
-                        <div className="w-0.5 shrink-0 rounded-full bg-gradient-to-b from-cyan-300 via-sky-400 to-cyan-200 animate-pulse" />
-                        <p className="text-[13px] leading-snug text-slate-300">{t.thinkingLine}</p>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {/* Musical direction (Genre/Style/Era) — REQUIRED. Place + Mood alone are not enough. */}
-                  {step >= reviewStep && !hasDirection ? (
-                    <div className="mb-2 rounded-xl border border-cyan-400/30 bg-cyan-500/[0.06] p-2">
-                      <p className="mb-1.5 text-[12px] font-medium text-cyan-100">{he ? "איזה כיוון מוזיקלי מתאים לך?" : "Which musical direction suits you?"}</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {GENRE_DIRECTION_BUBBLES.map((b) => (
-                          <button key={b.id} type="button" onClick={() => setGenreDirection({ id: b.id, label: b.label, query: b.query })}
-                            className={`rounded-full px-3 py-1 text-[12px] font-medium ${genreDirection.id === b.id ? "bg-cyan-400/30 text-cyan-50 border border-cyan-300/60" : "border border-white/12 text-slate-200 hover:bg-white/5"}`}>
-                            {bubbleLabel(b, he)}
-                          </button>
-                        ))}
-                      </div>
-                      {genreDirection.id === "other" ? (
-                        <p className="mt-1 text-[10px] text-slate-400">{he ? "כתבו ז׳אנר ב״אפשרויות מתקדמות״ למטה." : "Type a genre in Advanced options below."}</p>
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  {/* Length — by track count (≤50) or by duration. Never more than 50 tracks. */}
-                  <div className="mb-2 rounded-xl border border-white/10 bg-white/[0.03] p-2">
-                    <div className="mb-1.5 flex items-center gap-1.5">
-                      <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{he ? "אורך" : "Length"}</span>
-                      <div className="ms-auto flex gap-1">
-                        {(["count", "duration"] as const).map((m) => (
-                          <button key={m} type="button" onClick={() => setLengthMode(m)}
-                            className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${lengthMode === m ? "bg-cyan-400/25 text-cyan-100 border border-cyan-300/50" : "border border-white/12 text-slate-400 hover:bg-white/5"}`}>
-                            {m === "count" ? (he ? "מספר שירים" : "By tracks") : (he ? "משך" : "By duration")}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {lengthMode === "count" ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {[8, 15, 30, 50].map((n) => (
-                          <button key={n} type="button" onClick={() => setLengthCount(n)}
-                            className={`rounded-full px-3 py-1 text-[12px] font-medium ${lengthCount === n ? "bg-cyan-400/25 text-cyan-50 border border-cyan-300/60" : "border border-white/12 text-slate-200 hover:bg-white/5"}`}>
-                            {n} {he ? "שירים" : "songs"}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex flex-wrap gap-1.5">
-                          {[30, 60, 120, 200].map((mn) => (
-                            <button key={mn} type="button" onClick={() => setLengthMinutes(mn)}
-                              className={`rounded-full px-3 py-1 text-[12px] font-medium ${lengthMinutes === mn ? "bg-cyan-400/25 text-cyan-50 border border-cyan-300/60" : "border border-white/12 text-slate-200 hover:bg-white/5"}`}>
-                              {mn} {he ? "דק׳" : "min"}
-                            </button>
-                          ))}
-                        </div>
-                        <p className="mt-1 text-[10px] text-slate-500">≈ {Math.min(50, Math.round(lengthMinutes / 4))} {he ? "שירים · לפי אורך אמיתי כשקיים" : "songs · uses real track lengths when available"}</p>
-                      </>
-                    )}
+                <details className="sb-dj-more">
+                  <summary>{he ? "בקשת עורך אנושי (אופציונלי)" : "Request a human editor (optional)"}</summary>
+                  <textarea value={editorNote} onChange={(e) => setEditorNote(e.target.value)} rows={2} placeholder={t.requestEditorPlaceholder} dir="auto" />
+                  <div className="sb-dj-more-row">
+                    <button type="button" className="sb-dj-pill" disabled={editorBusy} onClick={() => void submitEditorRequest()}>
+                      {editorBusy ? t.requestEditorSubmitBusy : t.requestEditorSubmit}
+                    </button>
+                    {editorStatus === "ok" ? <span className="sb-dj-sub">{t.requestEditorThanks}</span> : null}
+                    {editorStatus === "err" ? <span className="sb-dj-error">{t.requestEditorError}</span> : null}
                   </div>
+                </details>
+              </div>
+            )}
+          </div>
 
-                  {/* Advanced options — free text + voice, collapsed by default */}
-                  <details className="group mb-2 rounded-xl border border-white/10 bg-white/[0.03]">
-                    <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-[11px] font-medium text-slate-400 hover:text-slate-200">
-                      <svg className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                        <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                      {he ? "אפשרויות מתקדמות" : "Advanced options"}
-                    </summary>
-                    <div className="flex flex-col gap-2 border-t border-white/8 p-2">
-                      <textarea
-                        value={freeText}
-                        onChange={(e) => setFreeText(e.target.value)}
-                        rows={2}
-                        placeholder={t.composerPlaceholder}
-                        className="max-h-24 min-h-[2.5rem] w-full resize-y rounded-lg bg-white/[0.04] px-2 py-1.5 text-[13px] text-slate-100 placeholder:text-slate-600 focus:outline-none"
-                        dir="auto"
-                      />
-                      <button
-                        type="button"
-                        onClick={startVoice}
-                        aria-label={locale === "he" ? "תיאור בקול" : "Describe by voice"}
-                        title={locale === "he" ? "תיאור בקול" : "Describe by voice"}
-                        className={`inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 self-start rounded-xl border px-3 text-[12px] font-medium ${
-                          listening
-                            ? "border-rose-400/60 bg-rose-500/15 text-rose-300 animate-pulse"
-                            : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
-                        }`}
-                      >
-                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                          <rect x="9" y="2" width="6" height="12" rx="3" />
-                          <path d="M5 10a7 7 0 0 0 14 0" /><line x1="12" y1="19" x2="12" y2="22" />
-                        </svg>
-                        {locale === "he" ? "תיאור בקול" : "Describe by voice"}
-                      </button>
-                    </div>
-                  </details>
+          {/* the bar at the bottom: advances with every step, full (and green) when the playlist is ready */}
+          <div className="sb-dj-bar" data-done={built ? "1" : "0"} aria-hidden>
+            <span style={{ width: `${barPct}%` }} />
+          </div>
 
-                  {/* Primary action — gated on a musical direction at the review step. */}
-                  <button
-                    type="button"
-                    disabled={loading || (!freeText.trim() && step < reviewStep) || (step >= reviewStep && !hasDirection)}
-                    onClick={() => {
-                      if (freeText.trim() && !business.id) runFromText();
-                      else void runSearch();
-                    }}
-                    className="w-full min-h-[2.75rem] rounded-xl bg-gradient-to-b from-cyan-300 to-cyan-400 px-3 text-[13px] font-semibold text-[#04252b] shadow-[0_6px_20px_rgba(34,211,238,0.35)] transition hover:from-cyan-200 hover:to-cyan-300 active:scale-[0.99] disabled:opacity-40"
-                  >
-                    {loading ? (he ? "יוצר…" : "Creating…") : (he ? "צור פלייליסט" : "Create playlist")}
+          {saveOpen && DJ_CREATOR_SAVE_PLAYLIST_ENABLED ? (
+            <div className="sb-dj-save" role="dialog" aria-label={t.saveTitle} onMouseDown={(e) => { if (e.target === e.currentTarget && !saveBusy) setSaveOpen(false); }}>
+              <div className="sb-dj-save-card">
+                <p className="sb-dj-label">{t.saveTitle}</p>
+                <input value={playlistName} onChange={(e) => setPlaylistName(e.target.value)} placeholder={t.saveNamePh} dir="auto" autoFocus onKeyDown={(e) => { if (e.key === "Enter" && !saveBusy) void savePlaylist(); }} />
+                {saveMessage ? <p className="sb-dj-error">{saveMessage}</p> : null}
+                <div className="sb-dj-save-row">
+                  <button type="button" className="sb-dj-go" disabled={saveBusy} onClick={() => void savePlaylist()}>
+                    {saveBusy ? t.saving : t.saveBtn}
+                  </button>
+                  <button type="button" className="sb-dj-back" disabled={saveBusy} onClick={() => setSaveOpen(false)}>
+                    {t.cancel}
                   </button>
                 </div>
               </div>
-            ) : null}
-
-
-            {saveOpen && DJ_CREATOR_SAVE_PLAYLIST_ENABLED ? (
-              <div
-                className="absolute inset-0 z-10 flex items-end justify-center rounded-2xl bg-slate-950/70 p-3 sm:items-center"
-                role="dialog"
-                aria-label={t.saveTitle}
-              >
-                <div className="w-full max-w-sm rounded-2xl border border-cyan-400/30 bg-gradient-to-br from-cyan-400/25 via-sky-400/20 to-cyan-300/25 p-px shadow-[0_16px_48px_rgba(0,0,0,0.45)]">
-                  <div className="rounded-2xl bg-[#12141c] p-4">
-                    <p className="text-[13px] font-semibold text-white">{t.saveTitle}</p>
-                    <p className="mt-1 text-[11px] text-slate-500">{t.saveHint}</p>
-                    <input
-                      value={playlistName}
-                      onChange={(e) => setPlaylistName(e.target.value)}
-                      placeholder={t.saveNamePh}
-                      className="mt-3 w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-600"
-                      dir="auto"
-                    />
-                    {saveMessage ? <p className="mt-2 text-[11px] text-rose-300">{saveMessage}</p> : null}
-                    <div className="mt-3 flex gap-2">
-                      <button
-                        type="button"
-                        disabled={saveBusy}
-                        onClick={() => void savePlaylist()}
-                        className={`flex-1 min-h-[2.5rem] text-[13px] ${accentBtn} disabled:opacity-70`}
-                      >
-                        {saveBusy ? (
-                          <span className="inline-flex items-center justify-center gap-1.5">
-                            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.4 0 0 5.4 0 12h4z" />
-                            </svg>
-                            {t.saving}
-                          </span>
-                        ) : (
-                          t.saveBtn
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={saveBusy}
-                        onClick={() => setSaveOpen(false)}
-                        className="rounded-xl border border-white/15 bg-white/[0.04] px-4 py-2 text-sm text-slate-300 hover:bg-white/10 disabled:opacity-50"
-                      >
-                        {t.cancel}
-                      </button>
-                    </div>
-                    {saveBusy ? (
-                      <p className="mt-2 text-[11px] text-cyan-200/80" role="status" aria-live="polite">
-                        {he ? "שומר את הפלייליסט… זה יכול לקחת כמה שניות." : "Saving your playlist… this can take a few seconds."}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            ) : null}
             </div>
-          </div>
+          ) : null}
+        </div>
       ) : null}
     </>
   );

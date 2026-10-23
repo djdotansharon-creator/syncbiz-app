@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ActionButtonShare, ActionButtonEdit } from "@/components/ui/action-buttons";
 import {
   MIX_DURATIONS,
@@ -15,12 +15,15 @@ import {
 } from "@/lib/mix-preferences";
 import {
   PlaybackTransportIconNext,
-  PlaybackTransportIconPause,
-  PlaybackTransportIconPlay,
+  PlaybackTransportIconPlayPause,
   PlaybackTransportIconPrev,
   PlaybackTransportIconStop,
 } from "@/components/player-surface/playback-transport-icons";
 import type { PlayerDeckTransportSurfaceProps } from "@/lib/player-surface/player-deck-transport-types";
+import { useTr } from "@/lib/i18n/use-tr";
+
+/** Owner 2026-10-18: no pencil in the player itself — editing lives in the song list (code kept, flip to show again). */
+const SHOW_PLAYER_EDIT = false;
 
 /**
  * Transport dock — CDJ-inspired layout with inviting SyncBiz playback controls.
@@ -49,21 +52,92 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
 
   const libDeck = variant === "library-deck";
 
+  // The play/pause glyph answers the click at once (owner 2026-10-18: the morph must feel instant, slow and smooth):
+  // the real status can lag ~100–300ms behind the click (engine round-trip), so the icon flips optimistically and
+  // follows the real status the moment it changes (or snaps back after 1.6s if the command never took effect). UI only.
+  const [ppPending, setPpPending] = useState<{ from: boolean; want: boolean } | null>(null);
+  const shownPlaying = ppPending && ppPending.from === isPlaying ? ppPending.want : isPlaying;
+  const handlePlayPause = () => {
+    setPpPending({ from: isPlaying, want: !isPlaying });
+    window.setTimeout(() => setPpPending(null), 1600);
+    onPlayPause();
+  };
+
+  // 2026-10-16 (owner): the transport block sits on the centre of the SCREEN, not of the player (the player
+  // is pushed right by the queue card). The row measures its own offset and publishes the width of its
+  // first grid column so the PLAY button lands on 50vw — clamped so the shuffle wing always keeps room
+  // (then it degrades to the symmetric in-player layout). Pure layout: a CSS variable, no state.
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row || typeof window === "undefined") return;
+    const MIN_WING_PX = 64;
+    let last = "";
+    const apply = () => {
+      const cluster = row.querySelector<HTMLElement>(".player-transport-cluster");
+      if (!cluster) return;
+      const r = row.getBoundingClientRect();
+      const c = cluster.getBoundingClientRect();
+      if (r.width <= 0 || c.width <= 0) return;
+      const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+      const rtl = getComputedStyle(row).direction === "rtl";
+      const primary = cluster.children[2] as HTMLElement | undefined; // stop · prev · PLAY · next
+      const p = primary ? primary.getBoundingClientRect() : c;
+      const anchorX = p.left + p.width / 2;
+      const anchorFromStart = rtl ? c.right - anchorX : anchorX - c.left;
+      const vwCenter = window.innerWidth / 2;
+      const wanted = rtl ? r.right - vwCenter - anchorFromStart - gap : vwCenter - r.left - anchorFromStart - gap;
+      const max = r.width - c.width - gap * 2 - MIN_WING_PX;
+      let next = "";
+      if (max > MIN_WING_PX) next = `${Math.round(Math.min(max, Math.max(MIN_WING_PX, wanted)))}px`;
+      if (next === last) return;
+      last = next;
+      if (next) row.style.setProperty("--sb-tr-col1", next);
+      else row.style.removeProperty("--sb-tr-col1");
+    };
+    apply();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => apply()) : null;
+    ro?.observe(row);
+    if (ro && row.parentElement) ro.observe(row.parentElement);
+    window.addEventListener("resize", apply);
+    const id = window.setInterval(apply, 1000); // cheap safety net for layout shifts the observer can't see
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", apply);
+      window.clearInterval(id);
+    };
+  }, []);
+
   return (
     <div className="player-transport-dock w-full min-w-0">
-      <div className="player-transport-dock__row flex w-full min-w-0 flex-wrap items-center justify-center gap-x-5 gap-y-1.5 border-t border-white/[0.04] pt-3 sm:gap-x-7">
-        <DeckTransportButton
-          onClick={onStop}
-          disabled={contentDisabled}
-          ariaLabel={labels.stopPlayback}
-          title={labels.stopPlayback}
-          size="stop"
-          libraryDeck={libDeck}
-        >
-          <PlaybackTransportIconStop className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-        </DeckTransportButton>
+      {/* 2026-10-15 (owner): a three-column row — the transport block (stop · prev · play · next) sits in the
+          exact centre of the player; the two mode toggles mirror each other on either side (shuffle left,
+          loop right); edit/share stay quiet at the far right. The Automix pill is off the display only
+          (`.sb-automix-pill`, code kept) while the new AutoMix engine is being built. */}
+      <div ref={rowRef} className="player-transport-dock__row sb-transport-grid w-full min-w-0 items-center border-t border-white/[0.04] pt-3">
+        <div className="sb-transport-wing sb-transport-wing--start flex min-w-0 items-center justify-end gap-2 sm:gap-3">
+          <ShuffleToggleButton
+            active={displayShuffle}
+            disabled={contentDisabled}
+            onClick={onShuffleToggle}
+            ariaLabel={labels.random}
+            title={labels.random}
+          />
+        </div>
 
         <div className="player-transport-cluster flex shrink-0 items-center gap-3 sm:gap-4">
+          <DeckTransportButton
+            onClick={onStop}
+            disabled={contentDisabled}
+            ariaLabel={labels.stopPlayback}
+            title={labels.stopPlayback}
+            size="stop"
+            libraryDeck={libDeck}
+            className="me-1 sm:me-2"
+          >
+            <PlaybackTransportIconStop className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          </DeckTransportButton>
+
           <DeckTransportButton
             onClick={onPrev}
             disabled={prevNextDisabled}
@@ -76,7 +150,7 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
           </DeckTransportButton>
 
           <DeckTransportButton
-            onClick={onPlayPause}
+            onClick={handlePlayPause}
             disabled={contentDisabled}
             active={isPlaying}
             primary
@@ -86,12 +160,7 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
             className={libDeck && isPlaying ? "library-player-play-emerald" : undefined}
           >
             <span className="relative flex h-7 w-7 items-center justify-center sm:h-8 sm:w-8" aria-hidden>
-              <PlaybackTransportIconPause
-                className={`absolute h-5 w-5 sm:h-6 sm:w-6 ${isPlaying ? "opacity-100" : "pointer-events-none opacity-0"}`}
-              />
-              <PlaybackTransportIconPlay
-                className={`absolute ml-0.5 h-5 w-5 sm:h-6 sm:w-6 ${isPlaying ? "pointer-events-none opacity-0" : "opacity-100"}`}
-              />
+              <PlaybackTransportIconPlayPause playing={shownPlaying} className="sb-pp-main absolute" />
             </span>
           </DeckTransportButton>
 
@@ -107,42 +176,34 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
           </DeckTransportButton>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          <ShuffleToggleButton
-            active={displayShuffle}
-            disabled={contentDisabled}
-            onClick={onShuffleToggle}
-            ariaLabel={labels.random}
-            title={labels.random}
-          />
-
+        <div className="sb-transport-wing sb-transport-wing--end flex min-w-0 items-center gap-2 sm:gap-3">
           {/* Loop is a mode preference — usable even before anything is loaded */}
           <LoopToggleButton />
 
-          <AutoMixToggleButton
-            active={displayAutoMix}
-            disabled={contentDisabled}
-            onClick={onAutoMixToggle}
-            ariaLabel={labels.autoMix}
-            title={labels.autoMix}
-          />
-        </div>
+          <span className="sb-automix-pill contents">
+            <AutoMixToggleButton
+              active={displayAutoMix}
+              disabled={contentDisabled}
+              onClick={onAutoMixToggle}
+              ariaLabel={labels.autoMix}
+              title={labels.autoMix}
+            />
+          </span>
 
-        <div className="player-transport-secondary flex shrink-0 items-center gap-1.5 opacity-25 transition-opacity duration-200 hover:opacity-50 focus-within:opacity-50">
-          {onEditClick ? (
+        <div className="player-transport-secondary ms-auto flex shrink-0 items-center gap-1.5 opacity-25 transition-opacity duration-200 hover:opacity-50 focus-within:opacity-50">
+          {!SHOW_PLAYER_EDIT ? null : onEditClick ? (
             <ActionButtonEdit onClick={onEditClick} variant="player" aria-label={labels.edit} title={labels.edit} />
           ) : editHref ? (
             <ActionButtonEdit href={editHref} variant="player" aria-label={labels.edit} title={labels.edit} />
           ) : null}
           {libDeck ? (
-            <ActionButtonShare variant="player" onClick={onShareClick} disabled={shareDisabled} aria-label={labels.share} title={labels.share} />
+            <ActionButtonShare variant="player" onClick={onShareClick} disabled={shareDisabled} aria-label={labels.share} title="" />
           ) : (
             <button
               type="button"
               onClick={onShareClick}
               disabled={shareDisabled}
               aria-label={labels.share}
-              title={labels.share}
               className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition-colors hover:text-slate-300 disabled:opacity-30"
             >
               <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -155,6 +216,7 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
             </button>
           )}
           {secondaryExtra}
+        </div>
         </div>
       </div>
     </div>
@@ -246,7 +308,7 @@ function ShuffleToggleButton({
       title={title}
       className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 disabled:opacity-35 ${
         active
-          ? "bg-[#0a84ff]/15 text-[#409cff]"
+          ? "bg-white/[0.14] text-white hover:bg-white/[0.2]"
           : "text-[#8e8e93] hover:bg-white/[0.06] hover:text-[#f5f5f7]"
       }`}
     >
@@ -271,6 +333,7 @@ function ShuffleToggleButton({
  * Shared via lib/mix-preferences so the playback engine reads the same value.
  */
 function LoopToggleButton({ disabled }: { disabled?: boolean }) {
+  const tr = useTr();
   const mode = useSyncExternalStore(
     (onStoreChange) => onRepeatModeChanged(() => onStoreChange()),
     () => getRepeatMode(),
@@ -279,11 +342,11 @@ function LoopToggleButton({ disabled }: { disabled?: boolean }) {
 
   const nextMode: RepeatMode = mode === "playlist" ? "track" : mode === "track" ? "off" : "playlist";
   const label =
-    mode === "playlist" ? "Loop: playlist" : mode === "track" ? "Loop: this song" : "Loop: off";
+    mode === "playlist" ? tr("Loop: playlist") : mode === "track" ? tr("Loop: this song") : tr("Loop: off");
   const activeCls =
     mode === "off"
       ? "text-[#8e8e93] hover:bg-white/[0.06] hover:text-[#f5f5f7]"
-      : "bg-[#0a84ff]/15 text-[#409cff]";
+            : "bg-white/[0.14] text-white hover:bg-white/[0.2]";
 
   return (
     <button
@@ -291,7 +354,7 @@ function LoopToggleButton({ disabled }: { disabled?: boolean }) {
       onClick={() => setRepeatMode(nextMode)}
       disabled={disabled}
       aria-label={label}
-      title={`${label} — click to change`}
+      title={`${label} — ${tr("click to change")}`}
       className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20 disabled:opacity-35 ${activeCls}`}
     >
       {/* Universal repeat glyph */}
@@ -299,7 +362,7 @@ function LoopToggleButton({ disabled }: { disabled?: boolean }) {
         <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z" />
       </svg>
       {mode === "track" ? (
-        <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#0a84ff] text-[9px] font-bold leading-none text-white">
+        <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-white text-[9px] font-bold leading-none text-black">
           1
         </span>
       ) : null}
@@ -343,13 +406,13 @@ function AutoMixToggleButton({
   }, [menuOpen]);
 
   const idleText = "text-[#8e8e93] hover:text-[#f5f5f7]";
-  const activeText = "text-[#409cff]";
+  const activeText = "text-white";
 
   return (
     <div className="relative flex shrink-0 items-stretch">
       <div
         className={`flex h-10 items-stretch overflow-hidden rounded-full border transition-colors duration-150 ${
-          active ? "border-[#0a84ff]/40 bg-[#0a84ff]/15" : "border-white/[0.1] bg-transparent hover:border-white/[0.18]"
+          active ? "border-white/30 bg-white/[0.14]" : "border-white/[0.1] bg-transparent hover:border-white/[0.18]"
         }`}
       >
         <button
@@ -378,7 +441,7 @@ function AutoMixToggleButton({
           Automix
         </button>
 
-        <span aria-hidden className={`my-2 w-px shrink-0 ${active ? "bg-[#0a84ff]/30" : "bg-white/[0.1]"}`} />
+        <span aria-hidden className={`my-2 w-px shrink-0 ${active ? "bg-white/30" : "bg-white/[0.1]"}`} />
 
         <button
           type="button"
@@ -440,7 +503,7 @@ function AutoMixToggleButton({
               >
                 {sec} seconds
                 {mixSec === sec ? (
-                  <svg className="h-3.5 w-3.5 shrink-0 text-[#409cff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <svg className="h-3.5 w-3.5 shrink-0 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
                 ) : null}
@@ -491,7 +554,7 @@ function DeckModeIndicator({
         {kind === "mix" ? <MixModeIcon active={active} /> : <RandomModeIcon active={active} />}
         <span
           className={`deck-mode-indicator__led h-1 w-1 shrink-0 rounded-full transition-colors ${
-            active ? "bg-[#0a84ff]" : "bg-slate-600/80 group-hover:bg-slate-500"
+            active ? "bg-white" : "bg-slate-600/80 group-hover:bg-slate-500"
           }`}
           aria-hidden
         />
@@ -509,7 +572,7 @@ function MixModeIcon({ active }: { active: boolean }) {
       viewBox="0 0 16 16"
       width="14"
       height="14"
-      className={`shrink-0 ${active ? "text-[#409cff]" : "text-slate-500 group-hover:text-slate-300"}`}
+      className={`shrink-0 ${active ? "text-white" : "text-slate-500 group-hover:text-slate-300"}`}
       aria-hidden
     >
       <path
@@ -531,7 +594,7 @@ function RandomModeIcon({ active }: { active: boolean }) {
       strokeWidth="1.35"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={`shrink-0 ${active ? "text-[#409cff]" : "text-slate-500 group-hover:text-slate-300"}`}
+      className={`shrink-0 ${active ? "text-white" : "text-slate-500 group-hover:text-slate-300"}`}
       aria-hidden
     >
       <path d="M2.5 5.5h2.8M2.5 10.5h2.8M10.7 3.5l2.8 2.8-2.8 2.8M10.7 12.5l2.8-2.8-2.8-2.8" />
