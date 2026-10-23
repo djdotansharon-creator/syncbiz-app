@@ -83,6 +83,25 @@ const PRESENCE_ONLINE_THRESHOLD_MS = Number(process.env.PRESENCE_ONLINE_THRESHOL
 /** Grace period (ms) before another desktop can become MASTER after primary disconnects. Default 90s. */
 const MASTER_GRACE_MS = Number(process.env.MASTER_GRACE_MS) || 90_000;
 
+/**
+ * Web (browser) MASTER reload window (ms). Browsers close the socket with 1001 on a page RELOAD exactly as on a real
+ * tab close, so the server cannot tell them apart. A web MASTER that closes with 1001 keeps its lease + primary
+ * reserved this long: a reload (same deviceId) reclaims MASTER; any other web device registering meanwhile is
+ * CONTROL; if it does not return, the oldest connected CONTROL is promoted when the window ends. Designated rooms,
+ * desktops and streamers are unaffected (owner 2026-10-23, browser tab identity).
+ */
+const WEB_RELOAD_RECLAIM_MS = Number(process.env.WEB_RELOAD_RECLAIM_MS) || 10_000;
+/** roomKey → the web MASTER that closed with 1001 and until when its lease is reserved for a reload. */
+const webReloadWindowByRoom = new Map<string, { deviceId: string; until: number }>();
+
+/** True while another web device's reload window reserves this room's MASTER. */
+function webReloadReservedForOther(roomKey: string, deviceId: string): boolean {
+  const w = webReloadWindowByRoom.get(roomKey);
+  if (!w) return false;
+  if (Date.now() >= w.until) return false;
+  return w.deviceId !== deviceId;
+}
+
 const DEFAULT_BRANCH_ID = "default";
 
 // PR-0: the runtime room key (workspace-scoped) replaces the old `${userId}:${branchId}` key.
@@ -1176,6 +1195,8 @@ wss.on("connection", (ws) => {
             isDedicatedPlayerStation(primaryConn)
           ) {
             masterDecisionReason = "dedicated player holds/reserves primary -> web CONTROL";
+          } else if (webReloadReservedForOther(key, deviceId)) {
+            masterDecisionReason = "web MASTER reload window (primary reserved) -> web CONTROL";
           } else {
             const currentMasterId = masterByBranch.get(key);
             const currentMaster =
@@ -1199,6 +1220,9 @@ wss.on("connection", (ws) => {
           }
         }
 
+        // Someone holds MASTER again (the reloaded web MASTER reclaimed it, or a priority station took it): the
+        // reload window has done its job.
+        if (mode === "MASTER") webReloadWindowByRoom.delete(key);
         const now = new Date().toISOString();
         devices.set(deviceId, {
           id: deviceId,
@@ -1676,12 +1700,44 @@ wss.on("connection", (ws) => {
             // other device stealing MASTER.  This prevents the "track end / second login
             // steals MASTER" production bug where a brief WS drop wiped the lease.
             //
-            // True-loss close (tab closed = 1001, heartbeat timeout = 4006): release the
-            // primary reservation and drop the lease immediately so another CONTROL can
-            // take over without waiting the full grace period.
+            // 1001 (tab close OR page reload — indistinguishable): short reload window, see WEB_RELOAD_RECLAIM_MS.
+            // Heartbeat timeout (4006): release the primary reservation and drop the lease immediately so
+            // another CONTROL can take over without waiting the full grace period.
             masterDisconnectedAt.set(key, Date.now());
-            if (isTrueMasterLossCloseCode(code)) {
-              // Voluntary / confirmed departure: release lease so branch isn't silently stalled.
+            if (code === 1001) {
+              // 1001 = tab close OR page reload (browsers send the same code). Keep the lease + primary reserved for
+              // WEB_RELOAD_RECLAIM_MS: a reload re-registers with the same deviceId and reclaims MASTER (primary
+              // reclaim); other web devices are CONTROL meanwhile. Not back in time → release + promote as before.
+              const reloadDeviceId = deviceId;
+              const until = Date.now() + WEB_RELOAD_RECLAIM_MS;
+              webReloadWindowByRoom.set(key, { deviceId: reloadDeviceId, until });
+              masterDeathReason = "web MASTER 1001 -> reload window (lease + primary reserved)";
+              const windowKey = key;
+              const windowUserId = userId;
+              const windowBranchId = branchId;
+              const reloadTimer = setTimeout(() => {
+                const w = webReloadWindowByRoom.get(windowKey);
+                if (!w || w.deviceId !== reloadDeviceId) return; // reclaimed, or a newer window replaced it
+                webReloadWindowByRoom.delete(windowKey);
+                const back = devices.get(reloadDeviceId);
+                if (back && back.ws.readyState === 1) return; // it came back (REGISTER already decided its mode)
+                if (masterByBranch.get(windowKey) === reloadDeviceId) masterByBranch.delete(windowKey);
+                if (primaryMasterByBranch.get(windowKey) === reloadDeviceId) primaryMasterByBranch.delete(windowKey);
+                masterDisconnectedAt.delete(windowKey);
+                persistMasterLease();
+                const promoted = tryPromoteConnectedControlOnMasterLoss(windowKey);
+                logLeaseEvent("web_reload_window_expired", {
+                  userId: windowUserId,
+                  branchId: windowBranchId,
+                  deviceId: reloadDeviceId,
+                  promoted: promoted ?? null,
+                  triggeredBy: "web_reload_window",
+                });
+                broadcastDeviceList();
+              }, WEB_RELOAD_RECLAIM_MS + 250);
+              if (typeof reloadTimer.unref === "function") reloadTimer.unref();
+            } else if (isTrueMasterLossCloseCode(code)) {
+              // Confirmed departure (4006 heartbeat timeout): release lease so branch isn't silently stalled.
               masterByBranch.delete(key);
               if (primaryMasterByBranch.get(key) === deviceId) {
                 primaryMasterByBranch.delete(key);
