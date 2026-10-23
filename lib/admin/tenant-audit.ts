@@ -38,7 +38,9 @@ export type TenantAuditAction =
   | "member.global_disable"
   | "member.platform_remove"
   /** Jingles Stage 1 (2026-10-12): an HQ audience change / promote of a jingle (same row, never a copy). */
-  | "jingle.audience_change";
+  | "jingle.audience_change"
+  /** Control Room (2026-10-23): a branch was deleted (who / when; entityId = the branch id, metadata = its name / number). */
+  | "branch.delete";
 
 export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "member.create",
@@ -51,6 +53,7 @@ export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "member.global_disable",
   "member.platform_remove",
   "jingle.audience_change",
+  "branch.delete",
 ];
 
 /**
@@ -58,7 +61,7 @@ export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
  * mutation, but keeping this typed lets us add `branch`, `playlist`, etc.
  * later without a schema change.
  */
-export type TenantAuditEntity = "workspace_member" | "jingle";
+export type TenantAuditEntity = "workspace_member" | "jingle" | "branch";
 
 export type TenantAuditInput = {
   action: TenantAuditAction;

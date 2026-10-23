@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 
 /**
  * GET /api/artist-image?name=Eyal%20Golan → { url: string | null }
@@ -45,6 +46,8 @@ async function wikiThumb(lang: "he" | "en", name: string): Promise<string | null
 }
 
 export async function GET(req: NextRequest) {
+  // signed-in only (PR #61 review 2026-10-23): these routes spend server resources (yt-dlp / outbound searches) — no anonymous callers
+  if (!(await getCurrentUserFromCookies())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const name = req.nextUrl.searchParams.get("name")?.trim();
   if (!name || name.length < 2 || name.length > 60) return NextResponse.json({ url: null });
   const key = name.toLowerCase();

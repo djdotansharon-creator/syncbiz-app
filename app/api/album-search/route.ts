@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 
 /**
  * GET /api/album-search?q=אייל גולן → { artist, mode, albums: [{ id, name, artist, cover, tracks, releaseDate, year, url }] }
@@ -78,6 +79,8 @@ function dedupe(list: Album[]): Album[] {
 }
 
 export async function GET(req: NextRequest) {
+  // signed-in only (PR #61 review 2026-10-23): these routes spend server resources (yt-dlp / outbound searches) — no anonymous callers
+  if (!(await getCurrentUserFromCookies())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   const want = tokens(q);
   if (q.length < 2 || q.length > 60 || want.length === 0) return NextResponse.json({ artist: null, mode: "none", albums: [] });

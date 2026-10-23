@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 
 /**
  * GET /api/artist-search?q=משה → { artists: [{ name, photo, views }] }
@@ -97,6 +98,8 @@ async function views(lang: "he" | "en", title: string): Promise<number> {
 }
 
 export async function GET(req: NextRequest) {
+  // signed-in only (PR #61 review 2026-10-23): these routes spend server resources (yt-dlp / outbound searches) — no anonymous callers
+  if (!(await getCurrentUserFromCookies())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   const want = tokens(q);
   if (q.length < 2 || q.length > 40 || want.length === 0 || want.length > 3) return NextResponse.json({ artists: [] });

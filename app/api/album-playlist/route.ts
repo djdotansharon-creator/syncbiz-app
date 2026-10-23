@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { searchYouTubeFast, searchYouTubePlaylists } from "@/lib/yt-dlp-search";
 
 /**
@@ -23,6 +24,8 @@ function tokens(s: string): string[] {
 }
 
 export async function GET(req: NextRequest) {
+  // signed-in only (PR #61 review 2026-10-23): these routes spend server resources (yt-dlp / outbound searches) — no anonymous callers
+  if (!(await getCurrentUserFromCookies())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const artist = req.nextUrl.searchParams.get("artist")?.trim() ?? "";
   const album = req.nextUrl.searchParams.get("album")?.trim() ?? "";
   const tracks = Number(req.nextUrl.searchParams.get("tracks") ?? "0") || 0;

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 
 /**
  * GET /api/album-tracks?id=1530265303 → { tracks: [{ n, id, name, artist, durationSec, cover, explicit, genre }] }
@@ -42,6 +43,8 @@ async function lookup(id: string, country: string): Promise<ITunesTrack[] | null
 }
 
 export async function GET(req: NextRequest) {
+  // signed-in only (PR #61 review 2026-10-23): these routes spend server resources (yt-dlp / outbound searches) — no anonymous callers
+  if (!(await getCurrentUserFromCookies())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const id = req.nextUrl.searchParams.get("id")?.trim() ?? "";
   if (!/^\d{3,14}$/.test(id)) return NextResponse.json({ tracks: [] });
   const hit = cache.get(id);

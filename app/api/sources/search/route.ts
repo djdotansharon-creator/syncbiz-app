@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { parseSearchIntent } from "@/lib/search-intent";
 import { searchYouTubeWithApi } from "@/lib/youtube-api-search";
 import { searchYouTubeWithYtDlp, searchYouTubePlaylists } from "@/lib/yt-dlp-search";
@@ -41,6 +42,8 @@ const CACHE_MAX = 80;
 const searchCache = new Map<string, { at: number; body: unknown }>();
 
 export async function GET(req: NextRequest) {
+  // signed-in only (PR #61 review 2026-10-23): these routes spend server resources (yt-dlp / outbound searches) — no anonymous callers
+  if (!(await getCurrentUserFromCookies())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const q = req.nextUrl.searchParams.get("q")?.trim();
   if (!q || q.length < 2) {
     return NextResponse.json({ results: [] });
