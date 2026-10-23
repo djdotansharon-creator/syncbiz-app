@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { usePathname } from "next/navigation";
-import { getDeviceId, initDeviceId } from "@/lib/device-id";
+import { claimDeviceId, getClaimedDeviceId } from "@/lib/device-id";
 import { usePlayback, type PlaybackStatus } from "@/lib/playback-provider";
 import { useRemoteControlWs, reconnectBackoffMs, type DeviceInfo } from "@/lib/remote-control/ws-client";
 import { SecondaryDesktopModal } from "@/components/secondary-desktop-modal";
@@ -258,7 +258,20 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const isActive = resolveDeviceRoleActive(pathname, isElectronShell);
-  const deviceId = isActive ? getDeviceId() : null;
+  // The tab's deviceId is CLAIMED asynchronously (Web Lock, one live tab = one id — lib/device-id.ts). It stays null
+  // until the claim is final, so the device socket (useRemoteControlWs: no deviceId → no REGISTER) waits for it.
+  const [claimedDeviceId, setClaimedDeviceId] = useState<string | null>(() => getClaimedDeviceId());
+  useEffect(() => {
+    if (!isActive || claimedDeviceId) return;
+    let alive = true;
+    void claimDeviceId().then((id) => {
+      if (alive && id) setClaimedDeviceId(id);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [isActive, claimedDeviceId]);
+  const deviceId = isActive ? claimedDeviceId : null;
 
   const [userId, setUserId] = useState<string | undefined>(undefined);
   const [authLoaded, setAuthLoaded] = useState(false);
@@ -1009,7 +1022,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   ]);
 
   useEffect(() => {
-    if (isActive) initDeviceId();
+    if (isActive) void claimDeviceId();
     // Do not reset `deviceModeAllowsLocalPlayback` here. The synchronous block below sets it every
     // render; resetting to `true` on unmount (e.g. React Strict Mode) left a window where async
     // playback recovery could see `true` in an observer-only browser tab and POST stop-local,
