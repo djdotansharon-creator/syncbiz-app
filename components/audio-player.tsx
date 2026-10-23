@@ -969,6 +969,7 @@ export function AudioPlayer() {
      clicks never reach the iframes (pointer-events-none) so YouTube's own UI
      can't pause the business. */
   const [videoActiveDeck, setVideoActiveDeck] = useState<DeckId>("A");
+  const clipShown = !!displayVid;
   useEffect(() => {
     /* Display sync for the video background. The YT IFrame API REPLACES our
        container divs with the iframes, so React classNames never reach them —
@@ -1059,9 +1060,9 @@ export function AudioPlayer() {
       } catch {
         /* display-only — never interfere with playback */
       }
-    }, 100); /* was 500ms — the picture follows within a tenth of a second, like the mirror's event */
+    }, clipShown ? 100 : 500); /* a tenth of a second only while a YouTube clip is shown (the picture follows the mirror's event); 500ms otherwise — PR #60 review 2026-10-23 */
     return () => clearInterval(id);
-  }, []);
+  }, [clipShown]);
   const [bufferedPercent, setBufferedPercent] = useState(0);
   const [isHoveringTimeline, setIsHoveringTimeline] = useState(false);
   const [hoverPercent, setHoverPercent] = useState(0);
