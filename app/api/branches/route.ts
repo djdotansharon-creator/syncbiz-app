@@ -4,6 +4,7 @@ import { EntitlementLimitError } from "@/lib/entitlement-limits";
 import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, getAccessTypeForUser } from "@/lib/auth-helpers";
 import { NextRequest } from "next/server";
+import { branchLogoUrl, branchLogoVersions } from "@/lib/branch-logo";
 
 function resolveAccountScope(userTenantId: string): string {
   return userTenantId === "tnt-default" ? "acct-demo-001" : userTenantId;
@@ -17,7 +18,9 @@ export async function GET() {
   if (existing.length > 0) {
     // Control Room (info only): does a station (StationDevice) belong to the branch? No → "Needs installation".
     const withStation = await db.getBranchIdsWithStation(accountId);
-    return NextResponse.json(existing.map((b) => ({ ...b, hasStation: withStation.has(b.id) })));
+    // Control Room (info only): the branch's own logo file, when it has one (file-backed — lib/branch-logo.ts)
+    const logos = branchLogoVersions();
+    return NextResponse.json(existing.map((b) => ({ ...b, hasStation: withStation.has(b.id), logoUrl: logos.has(b.id) ? branchLogoUrl(b.id, logos.get(b.id) ?? 0) : null })));
   }
   return NextResponse.json([
     {

@@ -7,6 +7,8 @@
  * Never touches stations, designations, the WS server or playback. Every function is scoped to ONE workspace id.
  */
 import { prisma } from "./prisma";
+import { removeBranchLogo } from "./branch-logo";
+import { writeTenantAuditLog } from "./admin/tenant-audit";
 import { ensureDefaultBrandId, defaultZoneData } from "./control-room-foundation";
 import { enforceCanAddBranch } from "./entitlement-limits";
 import { resolveGooglePlace, placeErrorMessage, type PlaceResult } from "./branch-place";
@@ -20,7 +22,8 @@ import {
 } from "./branch-activation";
 
 export class BranchInputError extends Error {
-  constructor(message: string, readonly status = 400) {
+  /** `code` / `count`: a stable reason the UI can word in its own language (delete refusals) */
+  constructor(message: string, readonly status = 400, readonly code?: string, readonly count?: number) {
     super(message);
   }
 }
@@ -193,4 +196,64 @@ export async function revokeActivationCode(workspaceId: string, branchId: string
   const branch = await prisma.branch.findFirst({ where: { id: branchId, workspaceId }, select: { id: true } });
   if (!branch) throw new BranchInputError("Branch not found.", 404);
   await prisma.branchActivationCode.updateMany({ where: { branchId, workspaceId, usedAt: null, revokedAt: null }, data: { revokedAt: new Date() } });
+}
+
+/** Who is deleting, what they typed to confirm, and from where (for the audit row). */
+export type DeleteBranchContext = { userId: string; /** must equal the branch's name (the server checks it — the screen cannot skip it) */ confirmName: unknown; ipAddress?: string | null };
+
+/**
+ * Delete a branch of THIS workspace (owner 2026-10-22: "an option to delete a branch from its settings"; hardened after the PR #61 review, 2026-10-23).
+ * Never forced — it is REFUSED (409 + `code`) while the branch still carries something that must not vanish silently:
+ *   default  the legacy default branch (the accepted pilot's branch)
+ *   station  a station bound to it (a registered StationDevice / a designated MASTER — an unattended machine must never be orphaned)
+ *   assignment  users are assigned to it. Deleting the assignments would NOT be harmless: `getAssignedBranchIds` falls back to the pilot's default branch for a user with
+ *               no assignments, so the branch's employees would silently gain access to the pilot branch — they must be moved first
+ *   scope    a member's access scope points at it (removing it could broaden someone's access)
+ * and the caller must type the branch's name (`confirmName`, 400 + code `confirm` otherwise).
+ * Everything — the lock, every check, the AuditLog row (who / when) and the delete — happens in ONE transaction. A station activation (`redeemStationActivation`) flips an activation
+ * code's `usedAt` BEFORE it binds the station, so the transaction first takes `FOR UPDATE` locks on the branch row and its activation codes: an activation that is already running makes
+ * the delete wait and then SEE its station (→ refused); one that starts after the lock waits and then finds its code gone (→ it fails, no station is bound to a deleted branch).
+ * What goes with the branch: its zones, activation codes, group / tag links, schedules and registered devices (FK cascade), and its logo file.
+ */
+export async function deleteBranch(workspaceId: string, branchId: string, ctx: DeleteBranchContext): Promise<void> {
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SET LOCAL lock_timeout = '5s'`;
+        // 1. LOCK (branch row, then its activation codes) before reading anything
+        const rows = await tx.$queryRaw<Array<{ id: string; name: string; legacyKey: string | null; locationCode: string | null; brandId: string | null }>>`
+          SELECT "id", "name", "legacyKey", "locationCode", "brandId" FROM "Branch" WHERE "id" = ${branchId} AND "workspaceId" = ${workspaceId} FOR UPDATE`;
+        const cur = rows[0];
+        if (!cur) throw new BranchInputError("Branch not found.", 404, "not_found");
+        await tx.$queryRaw`SELECT "id" FROM "BranchActivationCode" WHERE "branchId" = ${cur.id} FOR UPDATE`;
+        // 2. the checks (each statement sees everything committed up to now, including an activation that just finished)
+        if (cur.legacyKey) throw new BranchInputError("The default branch cannot be deleted.", 409, "default");
+        if (typeof ctx.confirmName !== "string" || ctx.confirmName.trim() !== cur.name.trim()) throw new BranchInputError("Type the branch's name exactly to confirm the deletion.", 400, "confirm");
+        const stations = await tx.stationDevice.count({ where: { workspaceId, branchId: cur.id } });
+        const designations = await tx.branchMasterDesignation.count({ where: { workspaceId, branchId: cur.id } });
+        if (stations > 0 || designations > 0) throw new BranchInputError("This branch has a station installed.", 409, "station");
+        const assignments = await tx.userBranchAssignment.count({ where: { workspaceId, branchId: cur.id } });
+        if (assignments > 0) throw new BranchInputError("Users are assigned to this branch — move them to another branch first.", 409, "assignment", assignments);
+        const scopes = await tx.memberScopeTarget.count({ where: { branchId: cur.id } });
+        if (scopes > 0) throw new BranchInputError("This branch is used in a member's access scope.", 409, "scope");
+        // 3. the audit row and the delete — same transaction (no delete without its audit row)
+        await writeTenantAuditLog(tx, {
+          action: "branch.delete",
+          entity: "branch",
+          actorUserId: ctx.userId,
+          workspaceId,
+          targetUserId: cur.id, // = the entity id (same convention as the jingle audit rows)
+          ipAddress: ctx.ipAddress ?? null,
+          metadata: { branchName: cur.name, branchNumber: cur.locationCode, brandId: cur.brandId, deletedAt: new Date().toISOString() },
+        });
+        await tx.branch.delete({ where: { id: cur.id } });
+      },
+      { maxWait: 5_000, timeout: 15_000 },
+    );
+  } catch (e) {
+    if (e instanceof BranchInputError) throw e;
+    if (/lock timeout|55P03/i.test(e instanceof Error ? e.message : String(e))) throw new BranchInputError("The branch is being changed at this moment — try again in a few seconds.", 409, "busy");
+    throw e;
+  }
+  try { removeBranchLogo(branchId); } catch { /* no logo file */ }
 }
