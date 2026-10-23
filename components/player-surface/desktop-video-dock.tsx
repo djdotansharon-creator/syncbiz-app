@@ -24,7 +24,6 @@ type YTPlayerLike = {
   getIframe?: () => HTMLIFrameElement | null;
   getPlayerState?: () => number;
   setPlaybackQuality?: (q: string) => void;
-  setPlaybackRate?: (r: number) => void;
   destroy?: () => void;
 };
 
@@ -92,27 +91,11 @@ export function DesktopVideoDock({
   className,
   onState,
   maxQuality = "large", // ≤ 480p — background clip never needs HD (best-effort; YouTube may override)
-  syncDriftSeconds = SYNC_DRIFT_SECONDS,
-  syncIntervalMs = 1500,
-  getPosition,
-  seekLeadSeconds = 0,
-  lockSync = false,
 }: {
   videoId: string | null;
   mpvStatus: "idle" | "playing" | "paused" | "stopped";
   mpvPosition: number;
   className?: string;
-  /** Seek when |player − target| exceeds this (seconds). Default 2 (desktop/CONTROL); the deck mirror uses ~0.45. */
-  syncDriftSeconds?: number;
-  /** Sync tick interval in ms. Default 1500; the deck mirror uses 250. */
-  syncIntervalMs?: number;
-  /** Optional live position source (seconds); when it returns a finite number it replaces mpvPosition. */
-  getPosition?: () => number;
-  /** Seek this far ahead of the target to absorb seek latency (seconds). Default 0. */
-  seekLeadSeconds?: number;
-  /** Lock-sync: trim small offsets by nudging playbackRate (1.25 / 0.75) instead of seeking,
-      so the picture stays continuous and converges to the source clock. Deck mirror only. */
-  lockSync?: boolean;
   /** Reports load/play/error state up for fallback + telemetry. Display-only. */
   onState?: (s: DesktopVideoState) => void;
   /** Best-effort suggested quality cap: small(240)/medium(360)/large(480). */
@@ -230,19 +213,6 @@ export function DesktopVideoDock({
     }
   }, [videoId]);
 
-  const driftRef = useRef(syncDriftSeconds);
-  const getPosRef = useRef<(() => number) | undefined>(getPosition);
-  const leadRef = useRef(seekLeadSeconds);
-  const lastSeekAtRef = useRef(0);
-  const lockSyncRef = useRef(lockSync);
-  const rateRef = useRef(1);
-  useEffect(() => {
-    driftRef.current = syncDriftSeconds;
-    getPosRef.current = getPosition;
-    leadRef.current = seekLeadSeconds;
-    lockSyncRef.current = lockSync;
-  }, [syncDriftSeconds, getPosition, seekLeadSeconds, lockSync]);
-
   // Keep muted + in rough sync with MPV; follow play/pause.
   useEffect(() => {
     const iv = setInterval(() => {
@@ -255,31 +225,9 @@ export function DesktopVideoDock({
         if (st === "playing") {
           p.playVideo?.();
           const cur = p.getCurrentTime?.() ?? 0;
-          const live = getPosRef.current?.();
-          const target = typeof live === "number" && Number.isFinite(live) ? live : mpvPosRef.current;
-          const now = Date.now();
-          const buffering = p.getPlayerState?.() === 3;
-          const diff = target - cur; // > 0 → this copy is behind the source
-          if (lockSyncRef.current && target > 0) {
-            if (Math.abs(diff) > 1.5 && !buffering && now - lastSeekAtRef.current > 1800) {
-              lastSeekAtRef.current = now;
-              p.seekTo?.(target + leadRef.current, true);
-            } else {
-              // small offsets: speed up / slow down briefly instead of seeking (no picture jump)
-              const want = diff > 0.12 ? 1.25 : diff < -0.12 ? 0.75 : 1;
-              if (want !== rateRef.current) {
-                rateRef.current = want;
-                p.setPlaybackRate?.(want);
-              }
-            }
-          } else if (
-            target > 0 &&
-            Math.abs(diff) > driftRef.current &&
-            !buffering &&
-            now - lastSeekAtRef.current > 1800
-          ) {
-            lastSeekAtRef.current = now;
-            p.seekTo?.(target + leadRef.current, true);
+          const target = mpvPosRef.current;
+          if (target > 0 && Math.abs(cur - target) > SYNC_DRIFT_SECONDS) {
+            p.seekTo?.(target, true);
           }
         } else if (st === "paused" || st === "stopped" || st === "idle") {
           p.pauseVideo?.();
@@ -287,9 +235,9 @@ export function DesktopVideoDock({
       } catch {
         /* display-only */
       }
-    }, syncIntervalMs);
+    }, 1500);
     return () => clearInterval(iv);
-  }, [syncIntervalMs]);
+  }, []);
 
   return <div className={className} aria-hidden><div ref={hostRef} className="h-full w-full" /></div>;
 }

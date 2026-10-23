@@ -22,10 +22,6 @@ export type MapBranch = {
   id: string; name: string; city: string; status: MapDotStatus; latitude?: number | null; longitude?: number | null;
   /** brand color (#rrggbb): the marker IS the brand color; the status changes its brightness / motion (see MARKER). */
   brandColor?: string | null;
-  /** v2 map only (long-hover bubble) — ignored by the classic map */
-  branchNumber?: string | null;
-  brandName?: string | null;
-  now?: { title: string; cover: string | null; position: number; duration: number; positionAt: number; playing: boolean } | null;
 };
 
 export const DOT_FILL: Record<MapDotStatus, string> = {
@@ -120,7 +116,7 @@ export type MapRegions = {
   counts: Partial<Record<RegionId, number>>;
   /** the focused region (the map zooms into it) or null = All Israel */
   focus: RegionId | null;
-  onFocus: (id: RegionId | null) => void;
+  onFocus: (id: RegionId) => void;
 };
 
 type ViewBox = { x: number; y: number; w: number; h: number };

@@ -30,7 +30,6 @@ import { unifiedFoundationHints, type UnifiedSource, type ParseUrlJson, type Rad
 import { searchExternal } from "@/lib/search-service";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { HeaderDeviceIndicators } from "@/components/header-device-indicators";
-import { DisplayModeSwitch } from "@/components/display-mode-switch";
 import { LanguageSelector } from "@/components/language-selector";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
@@ -38,8 +37,6 @@ import { DesktopUpdatePill } from "@/components/desktop-update-pill";
 import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule, isRoyaltyFreeMusicModule, isShufersalBankModule, isGuestsModule } from "@/lib/center-module-context";
 import { RFM_CATALOG_ENABLED, shufersalBankVisibleFor } from "@/lib/feature-flags";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
-import { LOCALES } from "@/lib/locales";
-import { DisplayModeMenuRow } from "@/components/display-mode-menu-row";
 import { useTopNavPins } from "@/lib/use-top-nav-pins";
 import {
   buildEphemeralLocalFolderPlaylist,
@@ -61,7 +58,6 @@ import { SYNCBIZ_MUSIC_LIBRARY_DRAG_MIME, type MusicLibraryDragPayload } from "@
 import { derivePlaylistUnifiedCoverArt, unifiedPlaylistSourceId } from "@/lib/playlist-utils";
 import { VonoBrand } from "@/components/brand/vono-brand";
 import { clearControlBranch, getControlBranch } from "@/lib/control-branch";
-import { useTr } from "@/lib/i18n/use-tr";
 
 const pillLink =
   "rounded-xl border border-slate-700/80 bg-slate-900/90 px-3.5 py-2 text-sm font-medium shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.3)] transition-all duration-100 hover:border-slate-600 hover:bg-slate-800/80 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950";
@@ -271,8 +267,6 @@ const navKeys = [
   "access-control",
   "architecture",
 ] as const;
-/** entries that exist in the code but are NOT offered in the top bar or the gear menu (owner 2026-10-22: "remote" is not part of this interface at all; "settings" moved into the gear menu as "More settings") */
-const HIDDEN_NAV_KEYS = new Set<string>(["remote", "settings"]);
 /** management entries — shown only to managers (security hotfix 2026-10-13) */
 const MANAGEMENT_NAV_KEYS = new Set<string>(["dashboard", "controlRoom", "access-control", "owner"]);
 const navItems = navKeys.map((key) => ({
@@ -373,7 +367,7 @@ function HeaderProfileButton({
   const { t } = useTranslations();
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [coords, setCoords] = useState<{ top: number; right: number; left: number } | null>(null);
+  const [coords, setCoords] = useState<{ top: number; right: number } | null>(null);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
   const btnRef = useRef<HTMLButtonElement | null>(null);
@@ -383,7 +377,7 @@ function HeaderProfileButton({
   useEffect(() => {
     if (!open || !btnRef.current) { setCoords(null); return; }
     const rect = btnRef.current.getBoundingClientRect();
-    setCoords({ top: rect.bottom + 6, right: window.innerWidth - rect.right, left: rect.left });
+    setCoords({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
   }, [open]);
 
   useEffect(() => {
@@ -420,7 +414,7 @@ function HeaderProfileButton({
       ? createPortal(
           <div
             data-profile-panel-root
-            style={coords.left < window.innerWidth / 2 ? { position: "fixed", top: coords.top, left: Math.max(8, coords.left), zIndex: 70 } : { position: "fixed", top: coords.top, right: coords.right, zIndex: 70 }}
+            style={{ position: "fixed", top: coords.top, right: coords.right, zIndex: 70 }}
             className="w-56 rounded-xl border border-slate-700/60 bg-slate-900/98 shadow-[0_8px_32px_rgba(0,0,0,0.55)] backdrop-blur-sm"
           >
             {/* User info */}
@@ -502,7 +496,6 @@ function HeaderProfileButton({
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const tr = useTr();
   // Electron-only: after one normal login, auto-provision MAIN's bound desktop_access token. No-op in a browser.
   useDesktopActivation();
   const pathname = usePathname();
@@ -622,67 +615,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   type PlayerSize = "full" | "compact" | "mini";
   const [playerSize, setPlayerSize] = useState<PlayerSize>("full");
   const playerCellRef = React.useRef<HTMLDivElement | null>(null);
-  // ─── Top nav (2026-10-13, owner): ONE underline that glides from the old category to the
-  // new one. Placed imperatively from the active link's box (no state, no re-render), re-placed
-  // after every render (pathname / locale / pinned set) and on nav resize. Display-only.
-  // Optimistic active tab (2026-10-13, owner: "respond immediately, let the page load after"):
-  // the clicked category becomes active on the click itself; the real pathname takes over as
-  // soon as the route actually changes (previous-render pattern, no effect).
-  const [navPending, setNavPending] = React.useState<{ href: string; fromPath: string } | null>(null);
-  if (navPending && navPending.fromPath !== pathname) setNavPending(null);
-  const navActivePath = navPending && navPending.fromPath === pathname ? navPending.href : pathname;
-  // Dev only (2026-10-13): warm the pinned categories' routes in the background right after load,
-  // so the FIRST click on each does not pay the dev-server compile. Production prefetches anyway.
-  React.useEffect(() => {
-    if (process.env.NODE_ENV !== "development") return;
-    // the management pages are warmed too (owner 2026-10-19: switching Control Room / Dashboard / Access Control must not wait for a first compile)
-    const hrefs = [...navItems.filter((i) => pinnedSet.has(i.labelKey)).map((i) => i.href), "/dashboard", "/access-control", "/owner/control-room"].filter((h, i, a) => a.indexOf(h) === i && h !== pathname);
-    let cancelled = false;
-    const t = setTimeout(async () => {
-      for (const h of hrefs) {
-        if (cancelled) return;
-        try {
-          await fetch(h, { credentials: "include", headers: { RSC: "1" } });
-        } catch {
-          /* best effort */
-        }
-      }
-    }, 2500);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount, on purpose
-  }, []);
-  const topNavRef = React.useRef<HTMLElement | null>(null);
-  const topNavBarRef = React.useRef<HTMLSpanElement | null>(null);
-  React.useEffect(() => {
-    const nav = topNavRef.current;
-    const bar = topNavBarRef.current;
-    if (!nav || !bar) return;
-    const place = () => {
-      const a = nav.querySelector<HTMLAnchorElement>('a[data-active="true"]');
-      if (!a) {
-        bar.style.opacity = "0";
-        return;
-      }
-      const first = bar.dataset.ready !== "1";
-      if (first) bar.style.transition = "none"; // land in place the first time, glide afterwards
-      bar.style.transform = `translateX(${a.offsetLeft + 8}px)`;
-      bar.style.width = `${Math.max(0, a.offsetWidth - 16)}px`;
-      bar.style.top = `${a.offsetTop + a.offsetHeight - 2}px`;
-      bar.style.opacity = "1";
-      if (first) {
-        void bar.offsetWidth;
-        bar.style.transition = "";
-        bar.dataset.ready = "1";
-      }
-    };
-    place();
-    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : null;
-    ro?.observe(nav);
-    return () => ro?.disconnect();
-  });
   React.useEffect(() => {
     const cell = playerCellRef.current;
     if (!cell || typeof ResizeObserver === "undefined") return;
@@ -885,12 +817,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         item.labelKey !== "library" &&
         item.labelKey !== "radio" &&
         item.labelKey !== "favorites" &&
-        !HIDDEN_NAV_KEYS.has(item.labelKey) &&
         (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey)),
     )
     .map((item) => {
       const Icon = mainMenuIconMap[item.labelKey] ?? mainMenuIconMap.dashboard;
-      const inControlRoomOnly = item.labelKey === "dashboard" || item.labelKey === "access-control";
       const isActive =
         item.href === "/dashboard"
           ? pathname === "/dashboard"
@@ -903,9 +833,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         label: (labels[item.labelKey] as Record<string, string> | undefined)?.[locale] ?? labels[item.labelKey]?.en ?? item.labelKey,
         icon: <Icon />,
         isActive,
-        // Dashboard / Access Control are reached from the Control Room tabs — nothing to pin to the top bar
-        isPinned: inControlRoomOnly ? undefined : isCategoryPinned(item.labelKey),
-        onTogglePin: inControlRoomOnly ? undefined : () => toggleCategoryPin(item.labelKey),
+        isPinned: isCategoryPinned(item.labelKey),
+        onTogglePin: () => toggleCategoryPin(item.labelKey),
       };
     });
 
@@ -1443,7 +1372,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <CenterModuleContext.Provider value={{ active: activeCenterModule, setActive: setActiveCenterModule, workspaceId: activeWorkspaceId }}>
+    <CenterModuleContext.Provider value={{ active: activeCenterModule, setActive: setActiveCenterModule }}>
     <div
       ref={shellRef}
       className={`flex min-h-screen bg-slate-950 text-slate-50${
@@ -1482,59 +1411,91 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             {/* ── LEFT: Logo + device state (MASTER / Agents) — flex-1 basis-0 anchors the balance ── */}
             <div className="flex flex-1 basis-0 items-center gap-3 min-w-0">
-              {/* Brand mark (owner, 2026-10-14): the new logo, not a link. Its colour follows the
-                  background — html[data-sb-logo] is set by AmbientVideoBackground from the cover's
-                  lightness and eases over ~1.6s like the colour field itself. */}
-              <span className="sb-brand flex shrink-0 items-center" role="img" aria-label="SyncBiz">
-                <span className="sb-brand-mark" aria-hidden />
-              </span>
-              {/* MASTER / On Air / device mode indicators — hidden from the display (owner, 2026-10-14);
-                  the component keeps running, see `.sb-device-indicators` in globals.css */}
-              <span className="sb-device-indicators contents">
-                <HeaderDeviceIndicators />
-              </span>
+              {/* VONO brand (owner 2026-10-13, variant B): official symbol square + wordmark; click → the main player screen */}
+              <Link href="/sources" className="flex h-8 shrink-0 items-center" aria-label="VONO">
+                <VonoBrand size="header" hideWordmarkOnMobile />
+              </Link>
+              {/* MASTER / On Air / device mode indicators */}
+              <HeaderDeviceIndicators />
               {/* browser manager: which branch this player controls (never a silent "default") */}
               {canManage && !isDesktopApp && !isManagementRoute ? (
                 <Link
                   href="/owner/control-room"
                   title={mgmt(locale).t("ctl.change")}
-                  className="sb-controlling-pill hidden min-w-0 max-w-[260px] shrink truncate rounded-full border border-[color:var(--sb-border)] px-3 py-1 text-xs text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)] md:inline-block"
+                  className="hidden min-w-0 max-w-[260px] shrink truncate rounded-full border border-[color:var(--sb-border)] px-3 py-1 text-xs text-[var(--sb-text-secondary)] hover:text-[var(--sb-text)] md:inline-block"
                   dir="auto"
                 >
                   {mgmt(locale).t("ctl.controlling", { label: controlBranchLabel ?? mgmt(locale).t("ctl.default") })}
                 </Link>
               ) : null}
-              {/* Agents healthy — quiet chip, small green dot */}
-              <span
-                className="sb-agents-chip hidden items-center gap-1.5 px-1 text-[11px] font-medium text-[#a1a1a6] sm:flex"
-                title={t.agentsHealthy}
-              >
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#30d158]" aria-hidden />
-                <span className="hidden md:inline">{t.agentsHealthy}</span>
-              </span>
             </div>
 
             {/* ── CENTER: Nav tabs — perfectly centered between left and right columns ──
                 All items always use font-medium + fixed px-3.5 so width never shifts.
                 The underline span is always in the DOM (opacity changes only).
                 Explicit sort guarantees display order: Library → Schedules → Radio → Settings */}
-            <nav ref={topNavRef} className="sb-top-nav relative flex shrink-0 items-center" aria-label={tr("Main")}>
-              <span ref={topNavBarRef} className="sb-top-nav-bar" aria-hidden />
+            {isManagementRoute ? (
+              <nav className="flex shrink-0 items-end gap-1 pb-0" aria-label={mgmt(locale).t("nav.aria")} dir={mgmt(locale).dir}>
+                {/* exit management: first in the bar, a clear button (not another tab) — back arrow + music note */}
+                <Link
+                  href="/sources"
+                  title={mgmt(locale).t("nav.exitTitle")}
+                  className="group relative me-2 inline-flex items-center gap-2 px-4 pb-[7px] pt-[5px] text-[15px] font-medium text-slate-300 transition-colors duration-150 hover:text-slate-50 focus:outline-none"
+                >
+                  <svg className="h-4 w-4 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+                  {mgmt(locale).t("nav.backToPlayer")}
+                  <span className="absolute bottom-0 left-2 right-2 h-[3px] rounded-full bg-[var(--sb-accent)] opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden />
+                </Link>
+                <span className="mb-[9px] me-2 h-5 w-px bg-white/[0.12]" aria-hidden />
+                {([
+                  { href: "/dashboard", label: mgmt(locale).t("nav.dashboard"), active: pathname === "/dashboard" || pathname.startsWith("/dashboard/") },
+                  { href: "/owner/control-room", label: mgmt(locale).t("nav.controlRoom"), active: pathname.startsWith("/owner/control-room") },
+                  { href: "/access-control", label: mgmt(locale).t("nav.accessControl"), active: pathname.startsWith("/access-control") },
+                ] as const).map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={item.active ? "page" : undefined}
+                    className={`relative px-4 pb-[7px] pt-[5px] text-[15px] transition-colors duration-150 focus:outline-none ${
+                      item.active ? "font-semibold text-slate-50" : "font-medium text-slate-400 hover:text-slate-100"
+                    }`}
+                  >
+                    {item.label}
+                    <span
+                      className={`absolute bottom-0 left-2 right-2 h-[3px] rounded-full bg-[#f5f5f7] transition-opacity duration-200 ${item.active ? "opacity-100" : "opacity-0"}`}
+                      aria-hidden
+                    />
+                  </Link>
+                ))}
+                {isDesktopApp ? (
+                  <button
+                    type="button"
+                    title="Lock management on this station"
+                    onClick={() => {
+                      void fetch("/api/auth/management-unlock", { method: "DELETE", credentials: "include" })
+                        .catch(() => {})
+                        .finally(() => shellRouter.push("/sources"));
+                    }}
+                    className="ms-2 inline-flex items-center gap-1.5 px-3 pb-[7px] pt-[5px] text-[15px] font-medium text-slate-400 transition-colors hover:text-slate-50"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="4" y="11" width="16" height="10" rx="1" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+                    Lock
+                  </button>
+                ) : null}
+              </nav>
+            ) : (
+            <nav className="flex shrink-0 items-end pb-0" aria-label="Main">
               {(() => {
                 /* Top nav = the operator's PINNED categories (gear menu toggles),
                    in this canonical order. Toggling a category in the menu adds/
                    removes it here. library+radio are always pinned. */
-                /* owner 2026-10-20: Settings is always at the far end of the bar (opposite Library); Dashboard + Access Control
-                   are NOT top-bar tabs — they live inside the Control Room (its own tabs), so they never show up here, pinned or not. */
                 const NAV_ORDER = [
-                  "library", "schedules", "radio", "controlRoom",
-                  "owner", "logs", "architecture", "remote", "settings",
+                  "library", "schedules", "radio", "settings",
+                  "dashboard", "owner", "logs", "access-control", "architecture", "remote",
                 ] as const;
                 return navItems
-                  .filter((item) => item.labelKey !== "dashboard" && item.labelKey !== "access-control")
-                  /* owner 2026-10-22: no Remote Controller anywhere in this interface; Settings is not a tab any more — "More settings" in the gear menu opens it */
-                  .filter((item) => !HIDDEN_NAV_KEYS.has(item.labelKey))
-                  .filter((item) => (item.labelKey === "controlRoom" ? canManage : pinnedSet.has(item.labelKey) && (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey))))
+                  .filter((item) => pinnedSet.has(item.labelKey) && (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey)))
                   .sort((a, b) => {
                     const ia = (NAV_ORDER as readonly string[]).indexOf(a.labelKey);
                     const ib = (NAV_ORDER as readonly string[]).indexOf(b.labelKey);
@@ -1542,40 +1503,38 @@ export function AppShell({ children }: { children: ReactNode }) {
                   });
               })()
                 .map((item) => {
-                  // owner 2026-10-19: the Control Room is ONE tab of this bar (no separate management bar, no "Back to Player" button — "Library" is the way back);
-                  // Dashboard / Access Control are reached from the tabs inside the management pages
-                  // owner 2026-10-20: clicking "Control Room" used to light up "Owner" for a moment (its href /owner is a prefix of /owner/control-room) and only then
-                  // moved back — the highlight follows the clicked destination (navActivePath), and Owner never matches the Control Room path
-                  const inMgmt = /^\/(dashboard|access-control|owner\/control-room)(\/|$)/.test(navActivePath);
                   const isActive =
-                    item.labelKey === "controlRoom"
-                      ? inMgmt
-                      : item.href === "/dashboard"
-                        ? navActivePath === "/dashboard"
-                        : item.href === "/owner"
-                          ? navActivePath === "/owner" || (navActivePath.startsWith("/owner/") && !inMgmt)
-                          : navActivePath.startsWith(item.href);
-                  const label = item.labelKey === "controlRoom" ? mgmt(locale).t("nav.controlRoom") : (labels[item.labelKey] as Record<string, string> | undefined)?.[locale] ?? labels[item.labelKey]?.en ?? item.labelKey;
+                    item.href === "/dashboard"
+                      ? pathname === "/dashboard"
+                      : pathname.startsWith(item.href);
+                  const label = (labels[item.labelKey] as Record<string, string> | undefined)?.[locale] ?? labels[item.labelKey]?.en ?? item.labelKey;
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
-                      data-active={isActive ? "true" : "false"}
-                      onClick={() => setNavPending({ href: item.href, fromPath: pathname })}
-                      className="relative px-3.5 pb-[6px] pt-[4px] text-[13px] font-medium text-slate-50/90 transition-colors duration-150 hover:text-slate-50 focus:outline-none"
+                      className={`relative px-3.5 pb-[6px] pt-[4px] text-[13px] font-medium transition-colors duration-150 focus:outline-none ${
+                        isActive ? "text-slate-50" : "text-slate-500 hover:text-slate-200"
+                      }`}
                     >
                       {label}
+                      {/* Always rendered — opacity controls visibility to keep layout stable */}
+                      <span
+                        className={`absolute bottom-0 left-2 right-2 h-[2px] rounded-full bg-[#f5f5f7] transition-opacity duration-200 ${
+                          isActive ? "opacity-100" : "opacity-0"
+                        }`}
+                        aria-hidden
+                      />
                     </Link>
                   );
                 })}
             </nav>
+            )}
 
             {/* ── RIGHT: meta chip + operational controls — flex-1 basis-0 justify-end ── */}
             <div className="flex flex-1 basis-0 items-center justify-end gap-2.5 min-w-0">
-              {/* ── Clock chip — off the display (owner, 2026-10-14): the time + greeting now live in the
-                  player's top-right corner (`.sb-deck-clock`), the user's name is not shown at all ── */}
+              {/* ── Clock chip — quiet: time · first name (greeting on xl+ only) ── */}
               <div
-                className="sb-header-clock me-0.5 hidden items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3.5 py-1.5 sm:flex"
+                className="me-0.5 hidden items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-3.5 py-1.5 sm:flex"
                 dir="ltr"
                 suppressHydrationWarning
               >
@@ -1596,10 +1555,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 ) : null}
               </div>
 
-              {/* Language picker — moved to Settings (owner, 2026-10-14); kept mounted but off the display */}
-              <span className="sb-header-lang contents">
-                <LanguageSelector />
-              </span>
+              {/* Language picker — round flag, opens all supported languages */}
+              <LanguageSelector />
 
               {/* Profile avatar → dropdown with full info + workspace switcher.
                   Logout now lives in the gear menu, so we only keep this extra circle
@@ -1616,12 +1573,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                 />
               ) : null}
 
-              {/* Display mode: black / white / transparent (2026-10-13) */}
-              {/* Display-mode pill (black / white / transparent) — a design worth keeping: hidden from the
-                  top bar (owner, 2026-10-14), the choice lives in Settings as the three-dot slider */}
-              <span className="sb-header-display contents">
-                <DisplayModeSwitch />
-              </span>
               {/* Fullscreen / Control Room toggle */}
               <button
                 type="button"
@@ -1637,9 +1588,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                     ? (t.exitControlRoom ?? "Exit Full Screen / Control Room")
                     : (t.enterControlRoom ?? "Full Screen / Control Room")
                 }
-                className={`control-room-toggle inline-flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent transition-colors duration-150 active:scale-95 ${
-                  /* owner, 2026-10-14: no disc on hover / active — the glyph alone turns white (blue while in Full Screen) */
-                  isControlRoomMode ? "text-[#7db8ff] hover:text-[#f5f5f7]" : "text-[#c7c7cc] hover:text-[#f5f5f7]"
+                className={`control-room-toggle inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors duration-150 active:scale-95 ${
+                  isControlRoomMode
+                    ? "border-[#0a84ff]/40 bg-[#0a84ff]/15 text-[#7db8ff]"
+                    : "border-white/[0.08] bg-white/[0.04] text-[#a1a1a6] hover:border-white/[0.16] hover:bg-white/[0.08] hover:text-[#f5f5f7]"
                 }`}
               >
                 {isControlRoomMode ? <IconFullscreenExit /> : <IconFullscreenEnter />}
@@ -1655,9 +1607,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                   aria-haspopup="menu"
                   aria-expanded={mainMenuOpen}
                   onClick={() => setMainMenuOpen((v) => !v)}
-                  className={`main-menu-gear inline-flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent transition-colors ${
-                    /* owner, 2026-10-14: no disc — white while hovered or while the menu is open */
-                    mainMenuOpen ? "text-[#f5f5f7]" : "text-[#c7c7cc] hover:text-[#f5f5f7]"
+                  className={`main-menu-gear inline-flex h-8 w-8 items-center justify-center rounded-full border text-slate-300 transition ${
+                    mainMenuOpen
+                      ? "border-[#0a84ff]/40 bg-[#0a84ff]/15 text-[#7db8ff]"
+                      : "border-slate-800 bg-slate-900/80 hover:border-slate-700 hover:bg-slate-800 hover:text-slate-100"
                   }`}
                 >
                   <IconGear />
@@ -1669,50 +1622,27 @@ export function AppShell({ children }: { children: ReactNode }) {
                   items={mainMenuItems}
                   title={t.mainMenu ?? "Main menu"}
                   pinLabel={t.pinToTop ?? "Pin to top"}
-                  dir={LOCALES.find((l) => l.code === locale)?.rtl ? "rtl" : "ltr"}
-                  lead={<DisplayModeMenuRow />}
-                  anchorGlyph={<IconGear />}
-                  closeLabel={t.mainMenu ?? "Main menu"}
+                  dir="ltr"
                   footer={
-                    <>
-                    {/* owner 2026-10-22: Settings left the top bar — "More settings" sits right above Log out */}
-                    <Link
-                      href="/settings"
-                      onClick={() => {
-                        setMainMenuOpen(false);
-                        setNavPending({ href: "/settings", fromPath: pathname });
-                      }}
-                      className="main-menu-more flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-[#f5f5f7] transition hover:bg-white/[0.06] focus:outline-none"
-                    >
-                      <span aria-hidden className="inline-flex h-5 w-5 items-center justify-center text-[#c7c7cc]">
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><circle cx="5.5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="18.5" cy="12" r="1.7" /></svg>
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-start">{tr("More settings")}</span>
-                    </Link>
                     <button
                       type="button"
                       onClick={() => void handleMenuLogout()}
                       disabled={menuLogoutBusy}
-                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm main-menu-logout text-[#f5f5f7] transition hover:bg-white/[0.06] focus:outline-none disabled:opacity-50"
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-slate-300 transition hover:bg-slate-800/70 hover:text-rose-300 focus:outline-none disabled:opacity-50"
                     >
-                      {/* 2026-10-16 (owner trial): red door glyph (iOS system red on the frosted panel), text stays white */}
-                      <span aria-hidden className="main-menu-logout-icon inline-flex h-5 w-5 items-center justify-center text-[#ff453a]">
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <span aria-hidden className="inline-flex h-5 w-5 items-center justify-center text-slate-400">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
                         </svg>
                       </span>
                       <span className="min-w-0 flex-1 truncate text-start">{menuLogoutBusy ? "…" : (t.logout ?? "Log out")}</span>
                     </button>
-                    </>
                   }
                 />
               </div>
 
-              {/* Desktop download + update — pinned at the far right edge of the header.
-                  The download button is off the display for now (owner, 2026-10-14) — `.sb-desktop-download` */}
-              <span className="sb-desktop-download contents">
-                <DesktopDownloadButton compact />
-              </span>
+              {/* Desktop download + update — pinned at the far right edge of the header */}
+              <DesktopDownloadButton compact />
               <DesktopUpdatePill />
             </div>
           </div>
@@ -1786,21 +1716,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </div>
                 ) : null}
                 <AudioPlayer />
-                {/* Ambient clock (owner, 2026-10-14): time + time-of-day greeting in the player's top-right
-                    corner — quiet, display-only, never catches the pointer. */}
-                {isMediaThemeRoute ? (
-                  <div
-                    className={`sb-deck-clock pointer-events-none${locale === "he" ? " is-he" : ""}${playerDropActive ? " is-hidden" : ""}`}
-                    dir="ltr"
-                    aria-hidden
-                    suppressHydrationWarning
-                  >
-                    {/* owner, later the same day: the greeting takes the clock's place; the time is
-                        off the display for now (kept in markup, `.sb-deck-clock-time { display:none }`) */}
-                    <span className="sb-deck-clock-greeting">{greeting}</span>
-                    <span className="sb-deck-clock-time" suppressHydrationWarning>{timeStr}</span>
-                  </div>
-                ) : null}
               </div>
               {isMediaThemeRoute ? (
                 <aside className="library-deck-pads-aside relative z-[60] isolate hidden h-full overflow-hidden lg:block lg:border-s lg:border-slate-800/60">

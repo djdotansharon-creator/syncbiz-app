@@ -32,7 +32,6 @@ import { LibraryCardLeafMetaFooter, LibraryCardPlaylistMetaFooter } from "@/comp
 import { TrackMediaPlaceholder } from "@/components/track-source-visual";
 import { inferTrackSourceChip } from "@/lib/track-source-chip";
 import "@/components/player-surface/library-browse-card-surface.css";
-import { useTr } from "@/lib/i18n/use-tr";
 
 export type LibraryItemDeleteContext =
   | { kind: "all_library" }
@@ -234,10 +233,6 @@ function ArtTopRightCorner({
   );
 }
 
-/** 2026-10-16 (owner): the pointer-following drift of the artwork was tried and dropped ("just the plain
- *  motion, smoother"). Code kept; flip to re-enable (the `img` object-position rule in globals.css reads the vars). */
-const TILE_POINTER_PARALLAX = false;
-
 export function SourceCard({
   source,
   onRemove,
@@ -265,7 +260,6 @@ export function SourceCard({
   scheduleLine,
   libraryTilePresentation: _libraryTilePresentation = "rich",
 }: Props) {
-  const tr = useTr();
   const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -282,38 +276,6 @@ export function SourceCard({
 
   const [displayMetaPatch, setDisplayMetaPatch] = useState<LeafDisplayMetaPatch>({});
   const articleRef = useRef<HTMLElement | null>(null);
-  /** 2026-10-16 (owner): while a ⋯ menu of this card is open (a portal outside the card), the card keeps its
-   *  hover look — otherwise moving the pointer onto the menu shrank the tile and hid its row. */
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  // 2026-10-16 (owner): the artwork follows the pointer a hair inside its frame. Pointer position → two CSS
-  // variables on the card (−1…1), written at most once per frame; the picture's object-position reads them
-  // (see `.library-source-card-grid … img` in globals.css). No state, no re-render.
-  const parallaxRafRef = useRef<number | null>(null);
-  const parallaxNextRef = useRef<{ x: number; y: number } | null>(null);
-  const flushParallax = () => {
-    parallaxRafRef.current = null;
-    const el = articleRef.current;
-    const v = parallaxNextRef.current;
-    if (!el || !v) return;
-    el.style.setProperty("--sb-par-x", v.x.toFixed(3));
-    el.style.setProperty("--sb-par-y", v.y.toFixed(3));
-  };
-  const onCardPointerMove = (e: React.PointerEvent) => {
-    if (!TILE_POINTER_PARALLAX) return;
-    const el = articleRef.current;
-    if (!el || e.pointerType === "touch") return;
-    const r = el.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) return;
-    const x = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width) * 2 - 1));
-    const y = Math.max(-1, Math.min(1, ((e.clientY - r.top) / r.height) * 2 - 1));
-    parallaxNextRef.current = { x, y };
-    if (parallaxRafRef.current === null) parallaxRafRef.current = requestAnimationFrame(flushParallax);
-  };
-  const onCardPointerLeave = () => {
-    if (!TILE_POINTER_PARALLAX) return;
-    parallaxNextRef.current = { x: 0, y: 0 };
-    if (parallaxRafRef.current === null) parallaxRafRef.current = requestAnimationFrame(flushParallax);
-  };
 
   useEffect(() => {
     setDisplayMetaPatch({});
@@ -327,57 +289,9 @@ export function SourceCard({
   useEffect(() => {
     return () => {
       if (openClickTimerRef.current) clearTimeout(openClickTimerRef.current);
-      if (parallaxRafRef.current !== null) cancelAnimationFrame(parallaxRafRef.current);
     };
   }, []);
   const hasInvalidUrl = source.origin === "radio" && source.radio && !isValidStreamUrl(source.radio.url);
-
-  /** Delete = ONE step (owner 2026-10-18: the extra confirm was redundant). The glass toast offers Undo; a song that sits
-   *  inside a playlist view still asks "remove from this playlist only / delete entirely" because that is a real choice. */
-  function requestDelete() {
-    if (itemDeleteContext?.kind === "in_playlist") {
-      setDeleteOpen(true);
-      return;
-    }
-    const snapshot = source.origin === "playlist" ? source.playlist : null;
-    const title = source.title;
-    void runDeleteFromLibraryFlow().then(() => {
-      window.dispatchEvent(
-        new CustomEvent("syncbiz:toast", {
-          detail: {
-            message: `Deleted “${title}”`,
-            ...(snapshot
-              ? {
-                  actionLabel: "Undo",
-                  onAction: async () => {
-                    try {
-                      const res = await fetch("/api/playlists", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          name: snapshot.name,
-                          url: snapshot.url,
-                          type: snapshot.type,
-                          genre: snapshot.genre,
-                          cover: snapshot.thumbnail || snapshot.cover || "",
-                          branchId: snapshot.branchId,
-                          viewCount: snapshot.viewCount,
-                          durationSeconds: snapshot.durationSeconds,
-                          tracks: snapshot.tracks,
-                        }),
-                      });
-                      if (res.ok) window.dispatchEvent(new Event("library-updated"));
-                    } catch {
-                      /* best effort */
-                    }
-                  },
-                }
-              : {}),
-          },
-        }),
-      );
-    });
-  }
 
   async function runDeleteFromLibraryFlow() {
     setDeleting(true);
@@ -402,7 +316,6 @@ export function SourceCard({
   }
 
   const kindBadge = resolveLibraryKindBadge(source);
-  const cardPlatform = resolveCardPlatform(source);
   const badgeText = libraryKindBadgeUpper(kindBadge);
   const showLeafLibraryChips = kindBadge !== "LIST" && kindBadge !== "RADIO";
   const provenanceChip = inferTrackSourceChip(source);
@@ -541,7 +454,7 @@ export function SourceCard({
             e.stopPropagation();
             onToggleFavorite();
           }}
-          className={`sb-card-fav rounded-md p-0.5 transition-colors duration-200 hover:bg-[color:var(--lib-surface-card-hover)] ${isFavorite ? "text-amber-400" : "text-[color:var(--lib-text-secondary)] hover:text-amber-400/80"}`}
+          className={`rounded-md p-0.5 transition-colors duration-200 hover:bg-[color:var(--lib-surface-card-hover)] ${isFavorite ? "text-amber-400" : "text-[color:var(--lib-text-secondary)] hover:text-amber-400/80"}`}
           title={isFavorite ? t.removeFromFavorites : t.addToFavorites}
           aria-label={isFavorite ? t.removeFromFavorites : t.addToFavorites}
         >
@@ -553,39 +466,36 @@ export function SourceCard({
       {/* ONE ⋯ per card: when the AI menu slot exists, Edit/Delete merge into it
           (cloneElement injection) and the generic CardMoreMenu is suppressed. */}
       {playlistAiMenuSlot && isValidElement(playlistAiMenuSlot)
-        ? cloneElement(playlistAiMenuSlot as ReactElement<{ editHref?: string | null; onDeletePress?: () => void; onOpenChange?: (open: boolean) => void }>, {
+        ? cloneElement(playlistAiMenuSlot as ReactElement<{ editHref?: string | null; onDeletePress?: () => void }>, {
             editHref: editHrefForLibrarySource(source),
-            onDeletePress: requestDelete,
-            onOpenChange: setMoreMenuOpen,
+            onDeletePress: () => setDeleteOpen(true),
           })
         : playlistAiMenuSlot}
     </>
   );
 
-  const handleCardPlay = () => {
-    if (openClickTimerRef.current) {
-      clearTimeout(openClickTimerRef.current);
-      openClickTimerRef.current = null;
-    }
-    scheduleLeafDisplayMetadataRefresh();
-    const pl = currentPlaylist;
-    const playTarget =
-      pl && (source.playlist?.id === pl.id || currentSource?.id === source.id)
-        ? { ...source, playlist: pl }
-        : source;
-    playSourceFn(playTarget);
-  };
-
   const sourceActions = (
     <LibrarySourceItemActions
       source={source}
-      onPlay={handleCardPlay}
+      onPlay={() => {
+        if (openClickTimerRef.current) {
+          clearTimeout(openClickTimerRef.current);
+          openClickTimerRef.current = null;
+        }
+        scheduleLeafDisplayMetadataRefresh();
+        const pl = currentPlaylist;
+        const playTarget =
+          pl && (source.playlist?.id === pl.id || currentSource?.id === source.id)
+            ? { ...source, playlist: pl }
+            : source;
+        playSourceFn(playTarget);
+      }}
       isActive={active}
       onStop={stopFn}
       onPause={pauseFn}
       libraryDeckChrome={libraryDeckChrome}
       onShareOpen={() => setShareOpen(true)}
-      onDeletePress={requestDelete}
+      onDeletePress={() => setDeleteOpen(true)}
       actionLayout={leafUnifiedBar ? "leaf" : "default"}
       onAddToPlaylistPress={leafUnifiedBar ? onAddToPlaylistPress : undefined}
       onAddToLibrary={leafUnifiedBar ? undefined : onAddToLibrary}
@@ -593,7 +503,6 @@ export function SourceCard({
       playDisabled={playDisabled}
       playDisabledTitle="Desktop only"
       showMoreMenu={!playlistAiMenuSlot}
-      onMoreMenuOpenChange={setMoreMenuOpen}
     />
   );
 
@@ -616,11 +525,9 @@ export function SourceCard({
       onDragStart={onDragStart}
       onClick={onPlaylistEntityOpen ? handleCardClickForOpen : undefined}
       onDoubleClick={onPlaylistEntityPlay ? handleCardDoubleClickPlay : undefined}
-      onPointerMove={onCardPointerMove}
-      onPointerLeave={onCardPointerLeave}
       className={`library-source-card group flex h-auto min-h-0 min-w-0 w-full flex-col overflow-hidden rounded-xl backdrop-blur-md transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-px ${cardKindClass} ${
         showLeafLibraryChips ? "library-source-card-leaf" : ""
-      } ${active ? "library-playing-active" : ""} ${moreMenuOpen ? "sb-card-menu-open" : ""} ${
+      } ${active ? "library-playing-active" : ""} ${
         draggable ? "cursor-grab active:cursor-grabbing" : ""
       }${isDiskLocalPlaylist ? " library-source-card--local-disk" : ""}`}
     >
@@ -633,7 +540,7 @@ export function SourceCard({
               className={`library-card-kind-badge pointer-events-none absolute left-1.5 top-1.5 z-10 ${libraryKindBadgeArtClass(kindBadge)}`}
               aria-hidden
             >
-              {tr(badgeText)}
+              {badgeText}
             </span>
             <ArtTopRightCorner
               source={source}
@@ -644,30 +551,12 @@ export function SourceCard({
             {cardCover ? (
               <>
                 <HydrationSafeImage src={cardCover} alt="" className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]" />
-                {/* 2026-10-16 (owner): a gentle, truly gradual blur at the foot of the tile. Chromium ignores a
-                    mask on backdrop-filter (hard edge), so this is a blurred COPY of the same picture faded in
-                    by a mask (`.sb-tile-blur` in globals.css). It shares the sharp picture's zoom + parallax. */}
-                <div className="sb-tile-blur" aria-hidden>
-                  <img src={cardCover} alt="" loading="lazy" decoding="async" draggable={false} />
-                </div>
                 <div className="library-card-art-overlay pointer-events-none absolute inset-0" aria-hidden />
                 {source.origin === "radio" && (
                   <span className="library-live-badge absolute left-2 bottom-2 rounded-md px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white shadow-lg backdrop-blur-sm">
                     {t.live}
                   </span>
                 )}
-              </>
-            ) : null}
-            {/* 2026-10-16 (owner): the corner platform logo is the ORIGINAL shape as frosted glass — a blurred copy of
-                the cover seen through the logo's silhouette (a backdrop-filter on a shaped element leaks a
-                rectangle). Styled by `.sb-logo-frost*` in globals.css; the old coloured corner logo is hidden in the grid. */}
-            {cardPlatform && !desktopOnlyPlaylist ? (
-              <>
-                <div className={`sb-logo-frost sb-logo-frost--${cardPlatform}`} aria-hidden>
-                  {cardCover ? <img src={cardCover} alt="" loading="lazy" decoding="async" draggable={false} /> : null}
-                </div>
-                <div className={`sb-logo-rim sb-logo-frost--${cardPlatform}`} aria-hidden />
-                {cardPlatform === "youtube" ? <div className="sb-logo-frost-mark" aria-hidden /> : null}
               </>
             ) : null}
             {hasInvalidUrl && (
@@ -695,8 +584,8 @@ export function SourceCard({
             {kindBadge === "LIST" ? (
               <span
                 className="library-card-playlist-glyph pointer-events-none absolute bottom-2 right-2 z-[2] flex h-6 w-6 items-center justify-center rounded-md bg-black/55 text-white/90 backdrop-blur-sm"
-                title={tr("Playlist")}
-                aria-label={tr("Playlist")}
+                title="Playlist"
+                aria-label="Playlist"
               >
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
                   <line x1="3" y1="6" x2="13" y2="6" />
@@ -714,28 +603,6 @@ export function SourceCard({
               >
                 {formatDuration(durationSec)}
               </span>
-            ) : null}
-            {/* 2026-10-16 (owner): modern hover — the play lives ON the artwork (white disc, bottom-right,
-                rises in on hover); the old row play is hidden by CSS (code kept). Same handler. */}
-            {!playDisabled ? (
-              <button
-                type="button"
-                className="sb-card-art-play"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCardPlay();
-                }}
-                onDoubleClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-                aria-label={t.play}
-              >
-                {/* 2026-10-16 (owner): a bare white play glyph with rounded corners — no disc. The rounding comes
-                    from a same-colour stroke with round joins; the shadow keeps it readable on bright covers. */}
-                <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.6" strokeLinejoin="round" aria-hidden>
-                  <path d="M8.5 5.5v13l10.5-6.5L8.5 5.5z" />
-                </svg>
-              </button>
             ) : null}
           </div>
         }

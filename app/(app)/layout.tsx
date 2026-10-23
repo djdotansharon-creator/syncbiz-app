@@ -2,8 +2,6 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import "@/components/jingles-control/jingles-control.css";
 import { AppShell } from "@/components/app-shell";
-import { EditModalHost } from "@/components/edit-modal-host";
-import { UndoToastHost } from "@/components/undo-toast-host";
 import { AppProviders } from "./providers";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { getActiveSuspensionForUser } from "@/lib/auth/suspension";
@@ -37,8 +35,6 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <AppProviders>
       <div className="flex min-h-screen flex-col">
         <AppShell>{children}</AppShell>
-        <EditModalHost />
-        <UndoToastHost />
       </div>
     </AppProviders>
   );

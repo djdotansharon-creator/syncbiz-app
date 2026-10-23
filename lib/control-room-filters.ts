@@ -46,12 +46,11 @@ export function matchesBranchSearch(r: Pick<FilterableRow, "name" | "branchNumbe
 
 export function applyControlRoomFilters<T extends FilterableRow>(
   rows: T[],
-  f: { /** "all", one brand id, or several (none = all) */ brand: string | string[]; query: string; region: RegionId | null; status?: StatusFilter; statusOf?: (r: T) => BranchStatus },
+  f: { brand: string; query: string; region: RegionId | null; status?: StatusFilter; statusOf?: (r: T) => BranchStatus },
 ) {
   const status: StatusFilter = f.status && f.statusOf ? f.status : "all";
   const statusOf = f.statusOf ?? (() => "unknown" as BranchStatus);
-  const brands = Array.isArray(f.brand) ? f.brand : f.brand === "all" ? [] : [f.brand];
-  const brandRows = brands.length === 0 ? rows : rows.filter((r) => r.brandId !== null && brands.includes(r.brandId));
+  const brandRows = f.brand === "all" ? rows : rows.filter((r) => r.brandId === f.brand);
   const query = f.query.trim();
   const searchRows = query ? brandRows.filter((r) => matchesBranchSearch(r, query)) : brandRows;
   // the KPI counters: brand + search + region, NOT the status (so every KPI keeps its own number while one is chosen)
@@ -71,6 +70,6 @@ export function applyControlRoomFilters<T extends FilterableRow>(
     statusCounts,
     noLocationCount: statusRows.filter((r) => r.regionReason === "no_location").length,
     outsideCount: statusRows.filter((r) => r.regionReason === "outside").length,
-    filtersActive: brands.length > 0 || !!query || !!f.region || status !== "all",
+    filtersActive: f.brand !== "all" || !!query || !!f.region || status !== "all",
   };
 }

@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PlaylistTrack } from "@/lib/playlist-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { getPlaylistSessionTracks, usePlayback } from "@/lib/playback-provider";
@@ -20,15 +19,9 @@ import { isValidLocalFilePlaybackPath, isValidPlaybackUrl } from "@/lib/url-vali
 import { effectivePlaybackPlaylistAttachment, derivePlaylistTrackCoverArt } from "@/lib/playlist-utils";
 import type { UnifiedSource } from "@/lib/source-types";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
-import { useSongAccent } from "@/lib/song-accent";
-import { useDeckQueueCollapsed, writeDeckQueueCollapsed } from "@/lib/deck-queue-collapse";
 import { SuggestMetadataButton } from "@/components/suggest-metadata-button";
 import { CommunityFeedbackSummary } from "@/components/community-feedback-summary";
-import { QueueJinglesPane } from "@/components/jingles-control/queue-jingles-pane";
-import { setJinglesOpenTab } from "@/components/jingles-control/open-tab";
-import { useCenterModule } from "@/lib/center-module-context";
 import { displayPlaybackState } from "@/lib/url-transition-intent";
-import { useTr } from "@/lib/i18n/use-tr";
 
 type TrackExtra = PlaylistTrack & { durationSeconds?: number; genre?: string; artist?: string };
 
@@ -308,6 +301,17 @@ function extractUrlsFromClipboardText(text: string): string[] {
   return uniq;
 }
 
+function formatClockRow(seconds: number | undefined | null): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "-";
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  }
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
 
 function formatClockTotal(seconds: number | undefined | null): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "--:--";
@@ -323,29 +327,7 @@ function formatClockTotal(seconds: number | undefined | null): string {
 
 /** Operator Live Queue: session list + in-memory Play Next (local + URLs; does not change saved playlists). */
 export function LiveQueuePanel() {
-  const tt = useTr();
-  /* Collapsed = covers-only mosaic; the deck grid reacts via :has(.sb-queue-collapsed). Display-only. */
-  const collapsed = useDeckQueueCollapsed();
   const deviceCtx = useDevicePlayer();
-  /* 2026-10-18 (owner): categories next to QUEUE — "Queue" and "Jingles" (more can follow); a bar glides under the active one. */
-  const { setActive: setCenterModule } = useCenterModule();
-  const [queueTab, setQueueTab] = useState<"queue" | "jingles">("queue");
-  const tabsRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const root = tabsRef.current;
-    if (!root) return;
-    const place = () => {
-      const el = root.querySelector<HTMLElement>('[aria-selected="true"]');
-      if (!el) return;
-      root.style.setProperty("--bar-x", `${el.offsetLeft}px`);
-      root.style.setProperty("--bar-w", `${el.offsetWidth}px`);
-      root.dataset.ready = "1";
-    };
-    place();
-    const ro = new ResizeObserver(place);
-    ro.observe(root);
-    return () => ro.disconnect();
-  }, [queueTab]);
   const isControlMirror = Boolean(
     deviceCtx?.isBranchConnected &&
       deviceCtx.deviceMode === "CONTROL" &&
@@ -365,15 +347,12 @@ export function LiveQueuePanel() {
     currentSource,
     currentPlaylist,
     currentTrackIndex,
-    currentTrack,
     playNextQueue,
     playNextBaseline,
     addPlayNextFromPaths,
     addPlayNextFromUrls,
     addPlayNextSources,
     removePlayNextItem,
-    reorderPlayNextItem,
-    reorderSessionTrack,
     playSource,
     shuffle,
   } = usePlayback();
@@ -636,8 +615,8 @@ export function LiveQueuePanel() {
     isControlMirror
       ? (masterState?.sessionTitle?.trim() ||
           masterState?.currentSource?.title?.trim() ||
-          tt("Current session"))
-      : onPlaylist?.name?.trim() || sessionForList.currentSource?.title?.trim() || tt("Current session");
+          "Current session")
+      : onPlaylist?.name?.trim() || sessionForList.currentSource?.title?.trim() || "Current session";
   const playlistGenre = (onPlaylist?.genre ?? "").trim();
 
   /**
@@ -947,366 +926,10 @@ export function LiveQueuePanel() {
     [removePlayNextItem, isControlMirror, deviceCtx],
   );
 
-  /* 2026-10-14 (owner): the TOP ROW IS ALWAYS WHAT PLAYS NOW. When the session list cannot show
-     it as one of its own rows — a Play Next item is playing, a single track plays with no
-     playlist, or the list and the pointer disagree for a tick — the playing track is drawn as a
-     detached row (expanded) / tile (collapsed) from the provider's own currentTrack. In that case
-     the session's "current" row joins the rows after the divider (it is what comes back next). */
-  const nowPlayingDetached = (() => {
-    const highlightShown = sessionTracks.length > 0 && displayedSessionTracks.some((x) => x.originalIndex === sessionForList.highlightIndex);
-    if (isControlMirror) {
-      if (highlightShown) return null;
-      const mt = masterState?.currentTrack;
-      const msrc = masterState?.currentSource;
-      if (!mt && !msrc) return null;
-      return { title: mt?.title ?? msrc?.title ?? "Track", thumb: mt?.cover ?? msrc?.cover ?? null, catalogItemId: null as string | null };
-    }
-    if (highlightShown && !isPlayNextSourceId(currentSource?.id)) return null;
-    if (!currentTrack && !currentSource) return null;
-    const thumb = derivePlaylistTrackCoverArt({
-      cover: currentTrack?.cover ?? currentSource?.cover ?? undefined,
-      url: currentTrack?.url ?? currentSource?.url ?? "",
-      type: (currentTrack?.type ?? currentSource?.type ?? "youtube") as Parameters<typeof derivePlaylistTrackCoverArt>[0]["type"],
-    });
-    return { title: currentTrack?.title ?? currentSource?.title ?? "Track", thumb, catalogItemId: currentSource?.catalogItemId ?? null };
-  })();
-  /* FLIP (2026-10-14, owner: "everything must be smooth"): every cover carries data-flip-key.
-     After each render, covers whose box moved or resized glide from the old box to the new one
-     (Web Animations, composited) — a clicked song rises out of the list into the top row, a
-     reorder settles, and on collapse/expand the squares grow or shrink from where they were.
-     Skipped while a drag is in progress and once right after a drop (the ghost already moved). */
-  const flipRectsRef = useRef<Map<string, DOMRect>>(new Map());
-  const flipSkipOnceRef = useRef(false);
-  const settlingRef = useRef(false);
-  const flipQuietUntilRef = useRef(0); // collapse/expand are pure CSS transitions — FLIP keeps its hands off meanwhile
-  const flipWasQuietRef = useRef(false);
-  useLayoutEffect(() => {
-    const root = panelRootRef.current;
-    if (!root) return;
-    const els = root.querySelectorAll<HTMLElement>("[data-flip-key]");
-    const next = new Map<string, DOMRect>();
-    const quietNow = performance.now() < flipQuietUntilRef.current;
-    const afterQuiet = !quietNow && flipWasQuietRef.current; // first render after a quiet spell: just re-measure
-    flipWasQuietRef.current = quietNow;
-    const quiet = !!queueDragRef.current || flipSkipOnceRef.current || settlingRef.current || quietNow || afterQuiet;
-    flipSkipOnceRef.current = false;
-    const moved = new Map<HTMLElement, { dx: number; dy: number }>(); // rows animated this pass (DOM order: row before its cover)
-    els.forEach((el) => {
-      const key = el.dataset.flipKey;
-      if (!key) return;
-      // a glide already in flight continues from where it visually is (no restart, no jump):
-      // measure the visual box, drop the old glide, measure the true layout box
-      const running = el.getAnimations().filter((a) => a.id === "flip");
-      const visual = running.length ? el.getBoundingClientRect() : null;
-      running.forEach((a) => a.cancel());
-      const r = el.getBoundingClientRect();
-      next.set(key, r);
-      if (quiet || r.width === 0 || r.height === 0) return;
-      const prev = visual ?? flipRectsRef.current.get(key);
-      if (!prev || prev.width === 0 || prev.height === 0) return;
-      const dx = prev.left - r.left;
-      const dy = prev.top - r.top;
-      const sx = prev.width / r.width;
-      const sy = prev.height / r.height;
-      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) return;
-      // a cover whose row already glides by the same offset rides along with it
-      const rowAnc = el.parentElement?.closest<HTMLElement>("[data-flip-key]") ?? null;
-      const anc = rowAnc ? moved.get(rowAnc) : undefined;
-      if (anc && Math.abs(anc.dx - dx) < 0.5 && Math.abs(anc.dy - dy) < 0.5 && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) return;
-      moved.set(el, { dx, dy });
-      try {
-        el.animate(
-          [{ transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }, { transform: "none" }],
-          { duration: 440, easing: "cubic-bezier(0.22, 1, 0.36, 1)", id: "flip" },
-        );
-      } catch {
-        /* no WAAPI — rows simply appear in place */
-      }
-    });
-    flipRectsRef.current = next;
-  });
-  /* Long-press → drag to reorder (2026-10-13, owner): hold a row ~320ms, then move it up or
-     down inside its group (Play Next items / session tracks). The move is committed through the
-     provider (reorderPlayNextItem / reorderSessionTrack) so the real play order follows. The
-     playing row never moves. Pointer events (mouse + pen); touch keeps its native scroll. */
-  type QueueDrag = {
-    group: "pn" | "session"; from: number; to: number; dy: number; stride: number; startY: number;
-    /** the lifted row's screen box + content — drawn as a GHOST in a body portal so nothing clips it */
-    rect: { left: number; top: number; width: number; height: number }; title: string; thumb: string | null;
-  };
-  const [queueDrag, setQueueDrag] = useState<QueueDrag | null>(null);
-  const queueDragRef = useRef<QueueDrag | null>(null);
-  const pressRef = useRef<{ group: "pn" | "session"; pos: number; pointerId: number; x: number; y: number; timer: number } | null>(null);
-  const dragElRef = useRef<HTMLLIElement | null>(null); // the row being moved (kept in place, invisible)
-  const ghostRef = useRef<HTMLDivElement | null>(null); // the lifted copy that follows the pointer (imperative, no re-render per pixel)
-  const beginDrag = (el: HTMLLIElement, group: "pn" | "session", pos: number, pointerId: number, startY: number) => {
-    try {
-      el.setPointerCapture(pointerId);
-    } catch {
-      /* pointer already gone */
-    }
-    /* collapsed strip (owner, 2026-10-14: "reorder also when the list is closed"): the lifted copy
-       is the 45px cover alone, and the slot stride is measured from the real layout (row + gap). */
-    const b = (collapsed ? el.querySelector(".sb-queue-rowline-thumb") ?? el : el).getBoundingClientRect();
-    const rowBox = el.getBoundingClientRect();
-    const nextBox = (el.nextElementSibling as HTMLElement | null)?.getBoundingClientRect();
-    const prevBox = (el.previousElementSibling as HTMLElement | null)?.getBoundingClientRect();
-    const stride = nextBox ? nextBox.top - rowBox.top : prevBox ? rowBox.top - prevBox.top : el.offsetHeight + 2;
-    const d: QueueDrag = {
-      group, from: pos, to: pos, dy: 0, stride: Math.max(1, Math.round(stride)), startY,
-      rect: { left: b.left, top: b.top, width: b.width, height: b.height },
-      title: el.querySelector(".sb-queue-rowline-title")?.textContent?.trim() ?? "",
-      thumb: el.querySelector("img")?.getAttribute("src") ?? null,
-    };
-    queueDragRef.current = d;
-    dragElRef.current = el;
-    setQueueDrag(d);
-  };
-  const suppressRowClickRef = useRef(false);
-  const clearPress = () => {
-    if (pressRef.current) {
-      window.clearTimeout(pressRef.current.timer);
-      pressRef.current = null;
-    }
-  };
-  const groupCount = (group: "pn" | "session") => (group === "pn" ? visiblePlayNextQueue.length : sessionAfterRows.length);
-  const onRowPointerDown = (group: "pn" | "session", pos: number) => (e: React.PointerEvent<HTMLLIElement>) => {
-    if (isControlMirror || queueDragRef.current) return;
-    if (e.pointerType === "mouse" && e.button !== 0) return;
-    if ((e.target as HTMLElement).closest("button")) return; // the X keeps its own click
-    clearPress();
-    const el = e.currentTarget;
-    const pointerId = e.pointerId;
-    const startY = e.clientY;
-    const timer = window.setTimeout(() => {
-      if (!pressRef.current) return;
-      beginDrag(el, group, pos, pointerId, startY); // held still → lift
-    }, 260);
-    pressRef.current = { group, pos, pointerId, x: e.clientX, y: e.clientY, timer };
-  };
-  const onRowPointerMove = (e: React.PointerEvent<HTMLLIElement>) => {
-    const d = queueDragRef.current;
-    if (d) {
-      if (settlingRef.current) return;
-      const dy = e.clientY - d.startY;
-      const g = ghostRef.current;
-      if (g) g.style.transform = `translateY(${dy}px) scale(var(--sb-lift, 1.04))`; // the ghost follows every pointer move
-      const to = Math.max(0, Math.min(groupCount(d.group) - 1, d.from + Math.round(dy / d.stride)));
-      queueDragRef.current = { ...d, to, dy };
-      if (to !== d.to) setQueueDrag({ ...d, to, dy }); // neighbours step aside only when the slot changes
-      e.preventDefault();
-      return;
-    }
-    const p = pressRef.current;
-    if (!p) return;
-    const dx = e.clientX - p.x;
-    const dyp = e.clientY - p.y;
-    if (Math.abs(dyp) >= 5 && Math.abs(dyp) >= Math.abs(dx)) {
-      // moved up/down while pressed → drag right away, no hold needed
-      const el = e.currentTarget;
-      const { group, pos, pointerId } = p;
-      clearPress();
-      beginDrag(el, group, pos, pointerId, p.y);
-      return;
-    }
-    if (Math.abs(dx) > 10) clearPress(); // a sideways gesture is not a drag
-  };
-  const onRowPointerEnd = (e: React.PointerEvent<HTMLLIElement>) => {
-    const d = queueDragRef.current;
-    if (d) {
-      // the browser fires `click` right after this pointerup — a drop must never play the song
-      // (ROOT CAUSE of the "song goes crazy on drop": the suppression used to be set only after
-      // the 200ms settle, so the click slipped through and jumped playback to the dragged row)
-      suppressRowClickRef.current = true;
-      if (settlingRef.current) return; // the ghost is already gliding home
-      try {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      } catch {
-        /* already released */
-      }
-      const cancelled = e.type === "pointercancel";
-      const slotDy = (d.to - d.from) * d.stride;
-      const g = ghostRef.current;
-      if (g && !cancelled) {
-        // glide the ghost into the slot it will take (or back home), then commit
-        settlingRef.current = true;
-        g.classList.add("is-settling"); // the lifted pill melts away while the row glides home
-        g.style.transition = "transform 190ms cubic-bezier(0.22, 1, 0.36, 1)";
-        g.style.transform = `translateY(${slotDy}px) scale(1)`;
-        window.setTimeout(() => finishDrag(d, false), 200);
-        return;
-      }
-      finishDrag(d, cancelled);
-    }
-    clearPress();
-  };
-  const finishDrag = (d: QueueDrag, cancelled: boolean) => {
-    settlingRef.current = false;
-    {
-      if (d.to !== d.from && !cancelled) {
-        if (d.group === "pn") {
-          reorderPlayNextItem(d.from, d.to);
-        } else {
-          const rawFrom = sessionAfterRows[d.from]?.originalIndex;
-          const rawTarget = sessionAfterRows[d.to]?.originalIndex;
-          if (rawFrom !== undefined && rawTarget !== undefined) {
-            let to = rawTarget > rawFrom ? rawTarget - 1 : rawTarget; // the target's index once `from` is out
-            if (d.to > d.from) to += 1; // moving down lands AFTER the target
-            reorderSessionTrack(rawFrom, to);
-            setRemovedSessionTrackIndexes((prev) => {
-              if (prev.size === 0) return prev;
-              const next = new Set<number>();
-              for (const h of prev) {
-                if (h === rawFrom) next.add(to);
-                else if (rawFrom < h && h <= to) next.add(h - 1);
-                else if (to <= h && h < rawFrom) next.add(h + 1);
-                else next.add(h);
-              }
-              return next;
-            });
-          }
-        }
-      }
-      window.setTimeout(() => {
-        suppressRowClickRef.current = false;
-      }, 50);
-      flipSkipOnceRef.current = true; // the ghost already made the move — no second glide
-      dragElRef.current = null;
-      queueDragRef.current = null;
-      setQueueDrag(null);
-    }
-    clearPress();
-  };
-  const rowDragPresentation = (group: "pn" | "session", pos: number): { className: string; style: CSSProperties } => {
-    const d = queueDrag;
-    if (!d || d.group !== group) return { className: "", style: {} };
-    if (pos === d.from) return { className: "is-dragging", style: {} };
-    if (d.from < d.to && pos > d.from && pos <= d.to) return { className: "is-shifting", style: { transform: `translateY(-${d.stride}px)` } };
-    if (d.to < d.from && pos >= d.to && pos < d.from) return { className: "is-shifting", style: { transform: `translateY(${d.stride}px)` } };
-    return { className: "is-shifting", style: {} };
-  };
-  /* 2026-10-13 (owner): "the colour of the song" — the playing row's accent bar and its bars
-     animation take the cover's dominant vivid colour (neutral white when the cover is grey). */
-  const currentTrackThumb = (() => {
-    if (nowPlayingDetached) return nowPlayingDetached.thumb;
-    const cur = displayedSessionTracks.find((x) => x.originalIndex === sessionForList.highlightIndex)?.track;
-    return cur ? derivePlaylistTrackCoverArt({ cover: cur.cover, url: cur.url, type: cur.type }) : null;
-  })();
-  const nowAccent = useSongAccent(currentTrackThumb);
-  const nowAccentStyle = { "--sb-accent": nowAccent ?? "rgba(255, 255, 255, 0.72)" } as CSSProperties;
-  /* Expanded queue (2026-10-13, owner): what comes next is ONE ROW PER TRACK — a small square and
-     the name, thinner than the playing row. Play Next items come first (they really play next),
-     then the session's upcoming tracks in play order. Display-only. */
-  const renderSessionRow = (t: PlaylistTrack, i: number, k: number) => {
-    const title = t.name ?? t.title ?? t.url ?? "Track";
-    const thumb = derivePlaylistTrackCoverArt({ cover: t.cover, url: t.url, type: t.type });
-    const isNext = markNextInOrder && nextLinear !== null && i === nextLinear;
-    return (
-      <li
-        key={`row-${t.id}`}
-        data-flip-key={`row:${t.id}`}
-        role="button"
-        tabIndex={0}
-        title={title}
-        data-idx={i}
-        data-next={isNext ? "true" : undefined}
-        onClick={(e) => {
-          if (suppressRowClickRef.current || queueDragRef.current) return;
-          e.currentTarget.classList.add("is-lifting"); // the song comes out of the list as it starts
-          jumpToSessionTrack(i);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            jumpToSessionTrack(i);
-          }
-        }}
-        onDragStart={(e) => e.preventDefault()} /* the cover is an <img>: Chromium would start a NATIVE image drag and fire pointercancel — the long-press drag never survived a press on the cover (the only thing there when the strip is collapsed) */
-        onPointerDown={onRowPointerDown("session", k - visiblePlayNextQueue.length)}
-        onPointerMove={onRowPointerMove}
-        onPointerUp={onRowPointerEnd}
-        onPointerCancel={onRowPointerEnd}
-        className={`sb-queue-rowline ${rowDragPresentation("session", k - visiblePlayNextQueue.length).className}`}
-        style={{ animationDelay: `${Math.min(k, 14) * 16}ms`, ...rowDragPresentation("session", k - visiblePlayNextQueue.length).style }}
-      >
-        <span className="sb-queue-rowline-thumb" data-flip-key={`s:${t.id}`}>
-          {thumb ? <HydrationSafeImage src={thumb} alt="" className="h-full w-full object-cover" /> : <span className="sb-queue-rowline-num">{k + 2}</span>}
-        </span>
-        <span dir="auto" className="sb-queue-rowline-title">{title}</span>
-        <button
-          type="button"
-          aria-label={`Remove "${title}" from this session`}
-          title="Remove from this session (the saved playlist is untouched)"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            removeSessionRow(i);
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          className="sb-queue-rowline-remove focus:outline-none"
-        >
-          <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
-            <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" fill="none" />
-          </svg>
-        </button>
-      </li>
-    );
-  };
-  const renderPlayNextRow = (it: (typeof visiblePlayNextQueue)[number], k: number) => {
-    const meta = it as { cover?: string | null; url?: string; type?: Parameters<typeof derivePlaylistTrackCoverArt>[0]["type"] };
-    const thumb = derivePlaylistTrackCoverArt({ cover: meta.cover ?? undefined, url: meta.url ?? "", type: meta.type ?? "youtube" });
-    return (
-      <li
-        key={`pn-${it.id}`}
-        data-flip-key={`rowpn:${it.id}`}
-        className={`sb-queue-rowline sb-queue-rowline--playnext ${rowDragPresentation("pn", k).className}`}
-        title={it.title}
-        style={{ animationDelay: `${Math.min(k, 14) * 16}ms`, ...rowDragPresentation("pn", k).style }}
-                onDragStart={(e) => e.preventDefault()}
-onPointerDown={onRowPointerDown("pn", k)}
-        onPointerMove={onRowPointerMove}
-        onPointerUp={onRowPointerEnd}
-        onPointerCancel={onRowPointerEnd}
-      >
-        <span className="sb-queue-rowline-thumb" data-flip-key={`pn:${it.id}`}>
-          {thumb ? <HydrationSafeImage src={thumb} alt="" className="h-full w-full object-cover" /> : <span className="sb-queue-rowline-num">{k + 1}</span>}
-        </span>
-        <span dir="auto" className="sb-queue-rowline-title">{it.title}</span>
-        <button
-          type="button"
-          aria-label={`Remove "${it.title}" from Play Next`}
-          title={tt("Remove from Play Next")}
-          onClick={() => removePlayNextRow(it.id)}
-          className="sb-queue-rowline-remove focus:outline-none"
-        >
-          <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
-            <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" fill="none" />
-          </svg>
-        </button>
-      </li>
-    );
-  };
-  /* 2026-10-13 (owner): wherever the queue shows covers, the order is the PLAY order — the playing
-     track first, a hairline, then what comes next (rotated past the current index, so a looping
-     playlist reads 3 → 0 → 1 while 2 plays). The collapsed strip and the expanded card share these
-     helpers; Play Next items (the waiting list) follow under their own hairline. Display-only. */
-  const sessionCount = Math.max(1, sessionTracks.length);
-  const playingRows = displayedSessionTracks.filter((x) => x.originalIndex === sessionForList.highlightIndex);
-  const upcomingRows = displayedSessionTracks
-    .filter((x) => x.originalIndex !== sessionForList.highlightIndex)
-    .slice()
-    .sort(
-      (a, b) =>
-        ((a.originalIndex - sessionForList.highlightIndex + sessionCount) % sessionCount) -
-        ((b.originalIndex - sessionForList.highlightIndex + sessionCount) % sessionCount),
-    );
-  /** rows after the divider: Play Next first (they really play next), then the session in play order —
-      and when the playing track is detached, the session's own current row leads that group. */
-  const sessionAfterRows = nowPlayingDetached ? [...playingRows, ...upcomingRows] : upcomingRows;
   return (
     <div
       ref={panelRootRef}
-      className={`flex h-full min-h-0 flex-col sb-queue-view-${queueTab} ${collapsed ? "sb-queue-collapsed" : ""}`}
+      className="flex h-full min-h-0 flex-col"
       onDragEnter={(e) => {
         if (e.dataTransfer?.types?.length) {
           e.preventDefault();
@@ -1321,91 +944,45 @@ onPointerDown={onRowPointerDown("pn", k)}
        * vertical real estate on the deck for what's effectively just metadata.
        */}
       <header className="shrink-0 border-b border-white/[0.06] pb-1.5">
-        <div className="flex items-center gap-2">
-          <div ref={tabsRef} className="sb-queue-label sb-queue-tabs min-w-0 flex-1" role="tablist" aria-label={tt("Queue categories")}>
-            <button type="button" role="tab" aria-selected={queueTab === "queue"} className="sb-queue-tab" onClick={() => setQueueTab("queue")}>{tt("Queue")}</button>
-            <button type="button" role="tab" aria-selected={queueTab === "jingles"} className="sb-queue-tab" onClick={() => setQueueTab("jingles")}>{tt("Jingles")}</button>
-            <span className="sb-queue-tab-bar" aria-hidden />
-          </div>
-          {/* 2026-10-13 (owner): nothing sits between QUEUE and the chevron any more — the session
-              name + totals (for a single track they just repeated the playing title) are kept for
-              assistive tech only. */}
-          <span className="sr-only">
-            {plName}
-            {totalPlaylistSeconds != null && sessionTracks.length > 0 ? ` · ${formatClockTotal(totalPlaylistSeconds)}` : ""}
-            {playNextSeconds != null && playNextSeconds > 0 ? ` +${formatClockTotal(playNextSeconds)}` : ""}
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              flipQuietUntilRef.current = performance.now() + 900; // the CSS transitions own this move
-              writeDeckQueueCollapsed(!collapsed);
-            }}
-            aria-pressed={collapsed}
-            aria-label={collapsed ? tt("Expand queue") : tt("Collapse queue")}
-            title={collapsed ? tt("Expand queue") : tt("Collapse queue")}
-            className="sb-queue-toggle shrink-0"
+        <div className="flex items-baseline gap-2">
+          <span className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-600">QUEUE</span>
+          <p
+            className={`min-w-0 flex-1 truncate ${sessionTracks.length === 0 ? "text-[10px] font-medium text-slate-600/60" : "text-[11px] font-medium text-slate-200"}`}
+            title={plName}
           >
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M10 3.5 5.5 8 10 12.5" />
-            </svg>
-          </button>
+            {plName}
+          </p>
+          {totalPlaylistSeconds != null && sessionTracks.length > 0 ? (
+            <span className="shrink-0 flex items-baseline gap-1 text-[10px]" title="Total duration of the active session">
+              <span className="font-mono font-medium tabular-nums text-slate-400">
+                {formatClockTotal(totalPlaylistSeconds)}
+              </span>
+              {playNextSeconds != null && playNextSeconds > 0 ? (
+                <span
+                  className="font-mono tabular-nums text-emerald-300/85"
+                  title="Additional time queued via Play Next (with known durations)"
+                >
+                  +{formatClockTotal(playNextSeconds)}
+                </span>
+              ) : null}
+            </span>
+          ) : null}
         </div>
       </header>
 
-      {queueTab === "jingles" && !collapsed ? (
-        <QueueJinglesPane
-          onOpenConsole={(tab) => {
-            setJinglesOpenTab(tab);
-            setCenterModule("jingles");
-          }}
-        />
-      ) : null}
-
-      {/* 2026-10-14 (owner): the playing track sits OUTSIDE the scroll box — scrolling the list never moves it */}
-      <div className="sb-queue-now shrink-0 pt-1">
-        {nowPlayingDetached ? (
-          <ul className="sb-queue-list flex w-full min-w-0 flex-col gap-1.5" aria-label={tt("Now playing")}>
-            <li
-              className="queue-row queue-row-current relative grid select-none grid-cols-[3rem_minmax(0,1fr)_auto_1.75rem] items-center gap-x-2.5 rounded-[7px] border px-2 py-1.5 leading-snug text-slate-100"
-              style={nowAccentStyle}
-              data-detached="true"
-              title={nowPlayingDetached.title}
-            >
-              <span className="sb-queue-accent pointer-events-none absolute bottom-1 left-0 top-1 w-[2px] rounded-full" aria-hidden />
-              <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-slate-800/80 ring-1 ring-white/[0.06]">
-                {nowPlayingDetached.thumb ? (
-                  <HydrationSafeImage src={nowPlayingDetached.thumb} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-[9px] font-bold text-slate-500">1</div>
-                )}
-                <span className="sr-only">{tt("Now playing")}</span>
-              </div>
-              <div className="min-w-0 overflow-hidden">
-                <p dir="auto" className="truncate text-[14px] font-semibold leading-tight text-[#f5f5f7]" title={nowPlayingDetached.title}>
-                  {nowPlayingDetached.title}
-                </p>
-                {!isControlMirror ? <CommunityFeedbackSummary catalogItemId={nowPlayingDetached.catalogItemId} /> : null}
-              </div>
-              {!isControlMirror ? (
-                <span className="sb-queue-suggest" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                  <SuggestMetadataButton trackTitle={nowPlayingDetached.title} trackArtist={null} catalogItemId={nowPlayingDetached.catalogItemId} />
-                </span>
-              ) : (
-                <span />
-              )}
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center" aria-label={tt("Now playing")}>
-                <span className="queue-now-playing-bars queue-now-playing-bars--action-slot" aria-hidden>
-                  <span />
-                  <span />
-                  <span />
-                </span>
-              </span>
-            </li>
-          </ul>
+      <div className="min-h-0 flex-1 basis-0 overflow-y-auto overflow-x-hidden overscroll-contain py-1 pr-0.5">
+        {pendingStrip ? (
+          <p className="mb-1.5 flex min-w-0 items-center gap-2 rounded-[7px] border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-[12px] leading-tight text-[#a1a1a6]" aria-live="polite">
+            <span className="shrink-0 font-medium text-[#f5f5f7]">Loading…</span>
+            {pendingStrip.title ? <span dir="auto" className="min-w-0 truncate">{pendingStrip.title}</span> : null}
+          </p>
         ) : null}
-        {!nowPlayingDetached && sessionTracks.length > 0 && displayedSessionTracks.length > 0 ? (
-          <ul className="sb-queue-list flex w-full min-w-0 flex-col gap-1.5">
+        {sessionTracks.length === 0 ? (
+          <p className="text-[10px] leading-tight text-slate-500/70">Pick a playlist to start</p>
+        ) : displayedSessionTracks.length === 0 ? (
+          <p className="text-[10px] leading-tight text-slate-500/70">All session rows hidden</p>
+        ) : (
+          <ul className="vx-queue-list flex w-full min-w-0 flex-col gap-1.5">
             {displayedSessionTracks.map(({ track: t, originalIndex: i }, displayIndex) => {
               const tr = t as TrackExtra;
               const title = t.name ?? t.title ?? t.url ?? "Track";
@@ -1417,14 +994,14 @@ onPointerDown={onRowPointerDown("pn", k)}
               const isCurrent = i === sessionForList.highlightIndex;
               const isPendingRow = pendingRowIndex !== null && i === pendingRowIndex; // P0 Gate 1f
               const isNextInList = markNextInOrder && nextLinear !== null && i === nextLinear;
+              const rowDurationSeconds = getTrackDuration(t);
               const displayNumber = displayIndex + 1;
-              if (!isCurrent) return null;
               return (
                 <li
-                  key={`now-${t.id}`}
+                  key={`${t.id}-${i}`}
                   tabIndex={0}
                   role="button"
-                  title={tt("Click to play")}
+                  title="Click to play"
                   onClick={() => jumpToSessionTrack(i)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
@@ -1432,8 +1009,7 @@ onPointerDown={onRowPointerDown("pn", k)}
                       jumpToSessionTrack(i);
                     }
                   }}
-                  style={nowAccentStyle}
-                  className={`queue-row group relative grid cursor-pointer select-none grid-cols-[3rem_minmax(0,1fr)_auto_1.75rem] items-center gap-x-2.5 rounded-[7px] border px-2 py-1.5 leading-snug transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/15 ${
+                  className={`queue-row group relative grid cursor-pointer select-none grid-cols-[3rem_minmax(0,1fr)_3.5rem_1.75rem] items-center gap-x-2.5 rounded-[7px] border px-2 py-1.5 leading-snug transition-colors focus:outline-none focus:ring-1 focus:ring-white/15 ${
                     isCurrent
                       ? "queue-row-current border-white/[0.08] bg-white/[0.04] text-slate-100"
                       : isNextInList
@@ -1442,9 +1018,9 @@ onPointerDown={onRowPointerDown("pn", k)}
                   }`}
                 >
                   {isCurrent ? (
-                    <span className="sb-queue-accent pointer-events-none absolute bottom-1 left-0 top-1 w-[2px] rounded-full" aria-hidden />
+                    <span className="queue-row-current-bar pointer-events-none absolute bottom-1 left-0 top-1 w-[2px] rounded-full bg-amber-500/70" aria-hidden />
                   ) : null}
-                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-slate-800/80 ring-1 ring-white/[0.06]" data-flip-key={`s:${t.id}`}>
+                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-slate-800/80 ring-1 ring-white/[0.06]">
                     {thumb ? (
                       <HydrationSafeImage src={thumb} alt="" className="h-full w-full object-cover" />
                     ) : (
@@ -1453,32 +1029,41 @@ onPointerDown={onRowPointerDown("pn", k)}
                       </div>
                     )}
                     {isCurrent ? (
-                      <span className="sr-only">{tt("Now playing")}</span>
+                      <span className="sr-only">Now playing</span>
                     ) : null}
                   </div>
                   <div className="min-w-0 overflow-hidden">
-                    {/* 2026-10-13 (owner): the title takes the whole width and truncates — no marquee */}
-                    <p dir="auto" className="truncate text-[14px] font-semibold leading-tight text-[#f5f5f7]" title={title}>
-                      {title}
-                    </p>
+                    <div className="queue-row-title relative flex min-w-0 items-center overflow-hidden">
+                      {isNextInList && !isCurrent ? (
+                        <span className="me-1.5 shrink-0 text-[9px] font-medium uppercase tracking-wide text-slate-500">Next</span>
+                      ) : null}
+                      <div className="min-w-0 flex-1 overflow-hidden">
+                        <div className="queue-row-title-marquee flex w-max gap-12 whitespace-nowrap" title={title}>
+                          <span dir="auto" className="text-[14px] font-semibold leading-tight text-[#f5f5f7]">{title}</span>
+                          <span dir="auto" aria-hidden className="text-[14px] font-semibold leading-tight text-[#f5f5f7]">{title}</span>
+                        </div>
+                      </div>
+                    </div>
                     {artistLine ? (
-                      <span dir="auto" className="mt-1 line-clamp-1 text-[12px] leading-snug text-[#a1a1a6]">{artistLine ? tt(artistLine) : artistLine}</span>
+                      <span dir="auto" className="mt-1 line-clamp-1 text-[12px] leading-snug text-[#a1a1a6]">{artistLine}</span>
                     ) : null}
-                    {isCurrent ? <CommunityFeedbackSummary catalogItemId={tr.catalogItemId ?? null} /> : null}
+                    {/* USER suggestion (vertical slice: now-playing track only). Saved as PENDING; never edits the catalog/MP3. */}
+                    {isCurrent ? (
+                      <>
+                        <SuggestMetadataButton trackTitle={title} trackArtist={tr.artist ? String(tr.artist) : null} catalogItemId={tr.catalogItemId ?? null} />
+                        <CommunityFeedbackSummary catalogItemId={tr.catalogItemId ?? null} />
+                      </>
+                    ) : null}
                   </div>
-                  {/* USER suggestion (now-playing track only) — icon only, in its own slot (owner, 2026-10-13).
-                      Saved as PENDING; never edits the catalog/MP3. */}
-                  {isCurrent ? (
-                    <span className="sb-queue-suggest" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                      <SuggestMetadataButton trackTitle={title} trackArtist={tr.artist ? String(tr.artist) : null} catalogItemId={tr.catalogItemId ?? null} />
-                    </span>
-                  ) : null}
+                  <span className="shrink-0 text-right font-mono text-sm font-medium tabular-nums text-slate-500">
+                    {formatClockRow(rowDurationSeconds)}
+                  </span>
                   {isPendingRow ? (
                     <span className="flex h-7 shrink-0 items-center justify-end whitespace-nowrap text-[11px] font-medium text-[#a1a1a6]" aria-label="Loading">
                       Loading…
                     </span>
                   ) : isCurrent ? (
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center" aria-label={tt("Now playing")}>
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center" aria-label="Now playing">
                       <span className="queue-now-playing-bars queue-now-playing-bars--action-slot" aria-hidden>
                         <span />
                         <span />
@@ -1511,34 +1096,7 @@ onPointerDown={onRowPointerDown("pn", k)}
               );
             })}
           </ul>
-        ) : null}
-      </div>
-      <div className="sb-queue-body min-h-0 flex-1 basis-0 overflow-y-auto overflow-x-hidden overscroll-contain py-1 pr-0.5">
-        {pendingStrip ? (
-          <p className="mb-1.5 flex min-w-0 items-center gap-2 rounded-[7px] border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-[12px] leading-tight text-[#a1a1a6]" aria-live="polite">
-            <span className="shrink-0 font-medium text-[#f5f5f7]">Loading…</span>
-            {pendingStrip.title ? <span dir="auto" className="min-w-0 truncate">{pendingStrip.title}</span> : null}
-          </p>
-        ) : null}
-        {sessionTracks.length === 0 ? (
-          nowPlayingDetached ? null : <p className="text-[10px] leading-tight text-slate-500/70">{tt("Pick a playlist to start")}</p>
-        ) : displayedSessionTracks.length === 0 ? (
-          <p className="text-[10px] leading-tight text-slate-500/70">All session rows hidden</p>
-        ) : null}
-        {sessionAfterRows.length > 0 || visiblePlayNextQueue.length > 0 ? (
-          <>
-            <div className="sb-queue-divider" aria-hidden />
-            <ul
-              className={`sb-queue-rows w-full min-w-0 list-none ${collapsed ? "sb-queue-rows--collapsed" : ""}`}
-              aria-label={tt("Up next")}
-              data-drag-from={queueDrag ? queueDrag.from : undefined}
-              data-drag-to={queueDrag ? queueDrag.to : undefined}
-            >
-              {visiblePlayNextQueue.map((it, k) => renderPlayNextRow(it, k))}
-              {sessionAfterRows.map(({ track: t, originalIndex: i }, k) => renderSessionRow(t, i, k + visiblePlayNextQueue.length))}
-            </ul>
-          </>
-        ) : null}
+        )}
       </div>
 
       {/*
@@ -1549,7 +1107,34 @@ onPointerDown={onRowPointerDown("pn", k)}
         ref={nextBlockRef}
         className={`play-next-block shrink-0 border-t border-white/[0.05] pt-1 transition-colors ${visiblePlayNextQueue.length === 0 ? "opacity-80" : ""}`}
       >
-        {/* the waiting list is shown as rows right after the divider (play order); only the pad lives here */}
+        {visiblePlayNextQueue.length > 0 ? (
+          <ol className="mb-1 max-h-20 list-decimal space-y-px overflow-y-auto pl-4 leading-tight text-slate-200/90 marker:text-[10px] marker:font-semibold marker:text-[#6e6e73]">
+            {visiblePlayNextQueue.map((it) => (
+              <li key={it.id} className="group/pn flex items-center gap-1 pl-0.5">
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <div className="queue-row-title-marquee flex w-max gap-12 whitespace-nowrap" title={it.title}>
+                    <span dir="auto" className="text-xs font-medium">{it.title}</span>
+                    <span dir="auto" aria-hidden className="text-xs font-medium">{it.title}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label={`Remove "${it.title}" from Play Next`}
+                  title="Remove from Play Next"
+                  onClick={() => removePlayNextRow(it.id)}
+                  className="shrink-0 rounded text-[12px] leading-none text-[#6e6e73] transition-colors hover:text-rose-300 focus:outline-none focus:ring-1 focus:ring-rose-400/60"
+                >
+                  <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+                    <path
+                      d="M5 3V2h6v1h3v1.4H2V3h3zm-1.5 2.4h9l-.7 8.4a1 1 0 0 1-1 .9H5.2a1 1 0 0 1-1-.9l-.7-8.4zM6.6 7v6h1V7h-1zm2.8 0v6h1V7h-1z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </button>
+              </li>
+            ))}
+          </ol>
+        ) : null}
 
         <div
           tabIndex={0}
@@ -1587,23 +1172,6 @@ onPointerDown={onRowPointerDown("pn", k)}
           )}
         </div>
       </div>
-      {queueDrag && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              ref={(el) => {
-                ghostRef.current = el;
-                if (el && !el.style.transform) el.style.transform = `translateY(${queueDragRef.current?.dy ?? 0}px) scale(var(--sb-lift, 1.04))`;
-              }}
-              className={`sb-queue-rowline sb-queue-drag-ghost${collapsed ? " sb-queue-drag-ghost--collapsed" : ""}`}
-              style={{ left: queueDrag.rect.left, top: queueDrag.rect.top, width: queueDrag.rect.width, height: queueDrag.rect.height }}
-              aria-hidden
-            >
-              <span className="sb-queue-rowline-thumb">{queueDrag.thumb ? <img src={queueDrag.thumb} alt="" /> : null}</span>
-              <span dir="auto" className="sb-queue-rowline-title">{queueDrag.title}</span>
-            </div>,
-            document.body,
-          )
-        : null}
     </div>
   );
 }

@@ -1,6 +1,5 @@
-import { LOCALES } from "@/lib/locales";
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, Heebo } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "flag-icons/css/flag-icons.min.css";
 import { getLocale } from "@/lib/locale-server";
@@ -13,14 +12,6 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
-});
-
-// Hebrew UI face (owner 2026-10-20: "not a good font in Hebrew"): Arial's Hebrew is narrow and heavy; Heebo is clean and even. Used in the player's side panel in Hebrew (see `(rtl)` block, globals.css).
-const heebo = Heebo({
-  variable: "--font-heebo",
-  subsets: ["hebrew", "latin"],
-  weight: ["400", "500", "600", "700"],
-  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -54,15 +45,14 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const locale = await getLocale();
-  // Owner 2026-10-20: in Hebrew (and Arabic) the WHOLE interface mirrors (right-to-left). The server renders the right direction from the locale cookie, so there is no
-  // left-to-right flash. Media controls (transport, timeline, volume) stay left-to-right by CSS (the `(rtl)` block in globals.css) — like every media app.
-  const dir = LOCALES.find((l) => l.code === locale)?.rtl ? "rtl" : "ltr";
+  // Layout is always LTR — only the text localizes (owner directive). No RTL flip.
+  const dir = "ltr";
   const lang = locale;
 
   return (
     <html lang={lang} dir={dir}>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${heebo.variable} antialiased bg-slate-950 text-slate-50`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-950 text-slate-50`}
       >
         {children}
       </body>

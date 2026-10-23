@@ -13,7 +13,6 @@ import { radioToUnified } from "@/lib/radio-utils";
 import { isValidStreamUrl } from "@/lib/url-validation";
 import { RadioIcon } from "@/components/ui/radio-icon";
 import type { RadioStream } from "@/lib/source-types";
-import { useTr } from "@/lib/i18n/use-tr";
 
 const DEFAULT_IMAGE = "/radio-default.svg";
 
@@ -35,7 +34,6 @@ function RadioLogo() {
 }
 
 export function RadioStreamCard({ station, onRemove }: Props) {
-  const tr = useTr();
   const router = useRouter();
   const { t } = useTranslations();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -120,7 +118,7 @@ export function RadioStreamCard({ station, onRemove }: Props) {
         {station.genre && (
           <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500">{station.genre}</p>
         )}
-        <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5" role="group" aria-label={tr("Radio controls")}>
+        <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5" role="group" aria-label="Radio controls">
           {active && (
             <>
               <NeonControlButton onClick={stop} size="sm" title="Stop" aria-label="Stop">
@@ -128,7 +126,7 @@ export function RadioStreamCard({ station, onRemove }: Props) {
                   <rect x="6" y="6" width="12" height="12" rx="1" />
                 </svg>
               </NeonControlButton>
-              <NeonControlButton onClick={() => playSource(unified)} size="md" active title={tr("Play")} aria-label={tr("Play")}>
+              <NeonControlButton onClick={() => playSource(unified)} size="md" active title="Play" aria-label="Play">
                 <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M8 5v14l11-7L8 5z" />
                 </svg>
@@ -141,7 +139,7 @@ export function RadioStreamCard({ station, onRemove }: Props) {
             </>
           )}
           {!active && (
-            <NeonControlButton onClick={() => playSource(unified)} size="md" title={tr("Play")} aria-label={tr("Play")}>
+            <NeonControlButton onClick={() => playSource(unified)} size="md" title="Play" aria-label="Play">
               <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7L8 5z" />
               </svg>

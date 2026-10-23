@@ -44,29 +44,6 @@ const nextConfig: NextConfig = {
       "**/node_modules/typescript/**",
     ],
   },
-  // Next 16 builds with Turbopack by default and REFUSES a `webpack` config without a `turbopack` one; the webpack function below is dev-only (`next dev --webpack`),
-  // so an empty `turbopack` config lets `next build` run exactly as before (verified 2026-10-23).
-  turbopack: {},
-  /**
-   * DEV ONLY: runtime data written while the app runs must never be treated as a source
-   * change. The WS server rewrites `server/data/master-lease.json` on every device
-   * register/disconnect; with the default watcher that write triggers an HMR rebuild →
-   * full page reload → the page re-registers → the file is written again → infinite
-   * reload loop (observed 2026-10-12: 39 reloads of /sources, 6 duplicate playlists).
-   * `next build`/`next start` are unaffected (no watcher).
-   */
-  webpack: (config, { dev }) => {
-    if (dev) {
-      const DEFAULTS = ["**/.git/**", "**/.next/**", "**/node_modules/**"];
-      const prev = config.watchOptions?.ignored;
-      const base = Array.isArray(prev) ? prev : typeof prev === "string" ? [prev] : DEFAULTS;
-      config.watchOptions = {
-        ...config.watchOptions,
-        ignored: [...base, "**/server/data/**", "**/data/**"],
-      };
-    }
-    return config;
-  },
 };
 
 export default nextConfig;

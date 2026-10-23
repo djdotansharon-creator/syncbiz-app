@@ -2,7 +2,6 @@
 
 import { useState, useMemo } from "react";
 import { useTranslations } from "@/lib/locale-context";
-import { GlassModal } from "@/components/glass-modal";
 import {
   getShareableSourceUrl,
   shareMedia,
@@ -18,6 +17,9 @@ type Props = {
   shareUrlWeb?: string;
   onClose: () => void;
 };
+
+const shareBtnBase =
+  "inline-flex items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-sm font-medium text-slate-300 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.2)] transition-all duration-150 hover:border-slate-600 hover:bg-slate-800/90 hover:text-slate-100 hover:shadow-[0_0_12px_rgba(100,116,139,0.08)] focus:outline-none focus:ring-2 focus:ring-slate-400/30 focus:ring-offset-2 focus:ring-offset-slate-950";
 
 function IconWhatsApp() {
   return (
@@ -76,7 +78,7 @@ export function ShareModal({
   onClose,
 }: Props) {
   const { t } = useTranslations();
-  const [copied, setCopied] = useState(false);
+  const [copyToast, setCopyToast] = useState(false);
 
   const { url: shareUrl, isFallback } = useMemo(
     () => getShareableSourceUrl(item, fallbackPlaylistId, fallbackRadioId),
@@ -90,41 +92,83 @@ export function ShareModal({
       fallbackRadioId,
       shareUrlWeb,
       onCopySuccess: () => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        setCopyToast(true);
+        setTimeout(() => setCopyToast(false), 2000);
       },
       onError: (msg) => {
+        // Could show error toast; for now rely on shareMedia internal behavior
         console.warn("[ShareModal]", msg);
       },
     });
     if (platform !== "copy" && platform !== "mail") onClose();
   };
 
-  // 2026-10-16 (owner): the share dialog is the design line's centred glass panel (blurred, slightly darkened
-  // backdrop) — everything fits at once, nothing scrolls: the link with a copy button, then four share tiles.
   return (
-    <GlassModal title={t.share ?? "Share"} subtitle={item.title} width={460} onClose={onClose}>
-      <label className="sb-wz-label">{t.originalSourceUrl ?? "Link"}</label>
-      <div className="sb-wz-linkrow">
-        <input type="text" readOnly value={shareUrl} className="sb-wz-input" onFocus={(e) => e.currentTarget.select()} />
-        <button type="button" className="sb-wz-btn sb-wz-btn--primary" onClick={() => handleShare("copy")}>
-          {copied ? (t.linkCopiedToClipboard ? "✓" : "Copied ✓") : (t.copyLink ?? "Copy")}
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Share media"
+    >
+      <div
+        className="relative w-full max-w-md rounded-2xl border border-slate-700/80 bg-slate-900/98 p-6 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.03),0_4px_24px_rgba(0,0,0,0.4),0_0_1px_rgba(0,0,0,0.5)] ring-1 ring-slate-800/60"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {copyToast && (
+          <div className="absolute -top-2 left-1/2 -translate-x-1/2 rounded-lg bg-emerald-500/95 px-4 py-2 text-sm font-medium text-white shadow-lg">
+            {t.linkCopiedToClipboard ?? "Link copied to clipboard"}
+          </div>
+        )}
+        <h2 className="text-lg font-semibold text-slate-100">Share</h2>
+        <p className="mt-1 truncate text-sm text-slate-400">{item.title}</p>
+
+        <div className="mt-3">
+          <label className="mb-1 block text-xs font-medium text-slate-500">
+            {t.originalSourceUrl ?? "Original source URL"}
+          </label>
+          <input
+            type="text"
+            readOnly
+            value={shareUrl}
+            className="w-full rounded-lg border border-slate-600/80 bg-slate-800/60 px-3 py-2 text-sm text-slate-200 outline-none"
+          />
+          {isFallback && (
+            <p className="mt-1.5 text-xs text-amber-400/90">
+              {t.originalSourceNotFoundFallback ?? "Original source not found — using internal fallback link"}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+          {shareOptions.map((opt) => (
+            <button
+              key={opt.platform}
+              type="button"
+              onClick={() => handleShare(opt.platform)}
+              className={shareBtnBase}
+            >
+              {opt.icon}
+              <span className="font-medium">{opt.label}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => handleShare("copy")}
+            className={shareBtnBase}
+          >
+            <IconCopy />
+            <span className="font-medium">{t.copyLink ?? "Copy Link"}</span>
+          </button>
+        </div>
+
+        <button
+          onClick={onClose}
+          className="mt-5 w-full rounded-2xl border-2 border-slate-600/80 bg-slate-800/90 px-4 py-2.5 text-sm font-medium text-slate-300 transition hover:border-slate-500 hover:bg-slate-700/90 hover:text-slate-100"
+        >
+          {t.close ?? "Close"}
         </button>
       </div>
-      {isFallback && (
-        <p className="sb-wz-hint">
-          {t.originalSourceNotFoundFallback ?? "Original source not found — using internal fallback link"}
-        </p>
-      )}
-      <div className="sb-wz-share-grid">
-        {shareOptions.map((opt) => (
-          <button key={opt.platform} type="button" className="sb-wz-share-tile" onClick={() => handleShare(opt.platform)}>
-            {opt.icon}
-            <span>{opt.label}</span>
-          </button>
-        ))}
-      </div>
-      <div style={{ height: 18 }} />
-    </GlassModal>
+    </div>
   );
 }

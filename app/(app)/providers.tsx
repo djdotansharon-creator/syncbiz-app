@@ -9,8 +9,6 @@ import { DevicePlayerProvider } from "@/lib/device-player-context";
 import { ScheduleEngineProvider } from "@/lib/schedule-engine-context";
 import { ScheduleAutoPlayer } from "@/components/schedule-auto-player";
 import { JingleScheduleAutoPlayer } from "@/components/jingles-control/JingleScheduleAutoPlayer";
-import { AutoplayRecommender } from "@/components/autoplay-recommender";
-import { PlayerAutoCompact } from "@/components/player-auto-compact";
 import { HarnessPlaybackProbe } from "@/components/harness-playback-probe";
 import { PocOfflineLauncher } from "@/components/poc-offline/poc-offline-launcher";
 import { MasterMediaSession } from "@/components/master-media-session";
@@ -31,9 +29,6 @@ export function AppProviders({ children }: { children: ReactNode }) {
                 {children}
                 <ScheduleAutoPlayer />
                 <JingleScheduleAutoPlayer />
-                {/* round 8: a lone YouTube song is followed by what YouTube recommends (fills Play Next; renders null) */}
-                <AutoplayRecommender />
-                <PlayerAutoCompact />
                 {/* Read-only diagnostic probe for the P1.1 playback harness (dev-only, renders null). */}
                 <HarnessPlaybackProbe />
                 {/* POC-only offline launcher (Stage 2b) — desktop-gated, renders null, registers a manual trigger. */}
