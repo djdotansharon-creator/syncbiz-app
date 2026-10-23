@@ -14,7 +14,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { initDeviceId } from "./device-id";
+import { claimDeviceId } from "./device-id";
 import type { Playlist, PlaylistType } from "./playlist-types";
 import type { UnifiedSource, SourceProviderType } from "./source-types";
 import type { Source } from "./types";
@@ -809,7 +809,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [urlPrepareActive, setUrlPrepareActive] = useState(false);
 
   useEffect(() => {
-    initDeviceId();
+    void claimDeviceId(); // start the tab's device-id claim early (lib/device-id.ts); nothing reads it here
   }, []);
 
   useEffect(() => {
