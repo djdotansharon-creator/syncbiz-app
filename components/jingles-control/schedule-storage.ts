@@ -59,19 +59,6 @@ export function persistJingleSchedule(items: MockScheduleItem[]): void {
  * `scheduledAtIso` until we land strictly in the future relative to `now`.
  */
 export function nextFiringMs(item: MockScheduleItem, now: number): number | null {
-  // fixed days of the week at a time of day (the queue's Jingles scheduler): the first matching day/time after `now`
-  if (item.repeat === "weekdays") {
-    const days = item.days && item.days.length > 0 ? item.days : [0, 1, 2, 3, 4, 5, 6];
-    const [hh, mm] = (item.timeOfDay ?? "00:00").split(":").map((n) => parseInt(n, 10));
-    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
-    for (let add = 0; add < 8; add++) {
-      const d = new Date(now);
-      d.setDate(d.getDate() + add);
-      d.setHours(hh, mm, 0, 0);
-      if (days.includes(d.getDay()) && d.getTime() > now) return d.getTime();
-    }
-    return null;
-  }
   const iso = item.scheduledAtIso;
   if (!iso) return null;
   const base = Date.parse(iso);

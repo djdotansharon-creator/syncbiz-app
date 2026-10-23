@@ -21,17 +21,11 @@
  */
 
 import { useEffect, useState, type ReactNode } from "react";
-import { GlassModal } from "@/components/glass-modal";
 import Link from "next/link";
 import { useTranslations } from "@/lib/locale-context";
 import type { Source } from "@/lib/types";
-import { useTr } from "@/lib/i18n/use-tr";
 
 type Props = {
-  /** "wizard" = the centred glass dialog (2026-10-16); default "page" keeps the original layout. */
-  presentation?: "page" | "wizard";
-  /** Wizard only: the host's exit animation is running. */
-  modalClosing?: boolean;
   id: string;
   onDone: () => void;
   onCancel: () => void;
@@ -40,8 +34,7 @@ type Props = {
   hideTopBackLink?: boolean;
 };
 
-export function EditSourceForm({ id, onDone, onCancel, titleAddon, backHref = "/sources", hideTopBackLink = false, presentation = "page", modalClosing }: Props) {
-  const tr = useTr();
+export function EditSourceForm({ id, onDone, onCancel, titleAddon, backHref = "/sources", hideTopBackLink = false }: Props) {
   const { t } = useTranslations();
   const [source, setSource] = useState<Source | null>(null);
   const [loading, setLoading] = useState(true);
@@ -107,65 +100,6 @@ export function EditSourceForm({ id, onDone, onCancel, titleAddon, backHref = "/
     } finally {
       setSaving(false);
     }
-  }
-
-  if (presentation === "wizard") {
-    if (loading || !source) {
-      return (
-        <GlassModal title={tr("Edit song")} width={420} closing={modalClosing} closeOnBackdrop={false} onClose={onCancel}>
-          <p className="sb-wz-hint" style={{ textAlign: "center", padding: "28px 0" }}>{loading ? tr("Loading…") : (error ?? tr("Not found"))}</p>
-        </GlassModal>
-      );
-    }
-    const submit = () => {
-      if (!name.trim() || !target.trim()) {
-        setError(tr("Name and URL are required"));
-        return;
-      }
-      void handleSubmit({ preventDefault() {} } as React.FormEvent);
-    };
-    return (
-      <GlassModal
-        title={tr("Edit song")}
-        subtitle={name.trim() || source.name}
-        showInitial
-        cover={artworkUrl.trim() || null}
-        width={560}
-        closing={modalClosing}
-        closeOnBackdrop={false}
-        onClose={onCancel}
-        footer={
-          <>
-            <button type="button" className="sb-wz-btn" onClick={onCancel}>{tr("Cancel")}</button>
-            <span className="sb-wz-spacer" />
-            <button type="button" className="sb-wz-btn sb-wz-btn--primary" disabled={saving} onClick={submit}>{saving ? tr("Saving…") : tr("Save")}</button>
-          </>
-        }
-      >
-        <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
-          <div className="sb-wz-grid2">
-            <div className="sb-wz-field sb-wz-span2">
-              <label className="sb-wz-label">{tr("Name")}</label>
-              <input className="sb-wz-input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-            </div>
-            <div className="sb-wz-field sb-wz-span2">
-              <label className="sb-wz-label">{tr("URL")}</label>
-              <input className="sb-wz-input" value={target} onChange={(e) => setTarget(e.target.value)} />
-            </div>
-            <div className="sb-wz-field sb-wz-span2">
-              <label className="sb-wz-label">{tr("Description")}</label>
-              <input className="sb-wz-input" value={description} onChange={(e) => setDescription(e.target.value)} />
-            </div>
-            <div className="sb-wz-field sb-wz-span2">
-              <label className="sb-wz-label">{tr("Artwork URL")}</label>
-              <input className="sb-wz-input" value={artworkUrl} onChange={(e) => setArtworkUrl(e.target.value)} />
-            </div>
-          </div>
-          {error ? <p className="sb-wz-error">{error}</p> : null}
-          <div style={{ height: 14 }} />
-        </form>
-      </GlassModal>
-    );
   }
 
   if (loading) {

@@ -2190,19 +2190,15 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   UPSTREAM "Studio in the VONO design language" (synced from GitHub 2026-10-19) — scoped to the CONTROL ROOM's Studio only
-   (`.jc-cr`, set on the panel when it runs with the `controlRoom` prop). The player-side Jingles console keeps our own look.
-   ══════════════════════════════════════════════════════════════════════════ */
-/* ══════════════════════════════════════════════════════════════════════════
    QUICK PADS — the Control Room look (owner 2026-10-12, round 2). DISPLAY ONLY:
    same pads / clicks / drops / edit; scoped to the workspace strip (.jcx-quickpads).
    Square cells separated by thin lines (no rounded cards, no glow); a small color
    LED NEXT TO the name (never over it); a bar along the bottom edge like the KPI cards.
    States: rest · hover · selected (keyboard focus / drop target) · on air.
    ════════════════════════════════════════════════════════════════════════ */
-.jc-cr .jcx-quickpads-head { font-size: 0.75rem; letter-spacing: 0.1em; color: #8e8e93; margin-bottom: 0.5rem; }
+.jcx-quickpads-head { font-size: 0.75rem; letter-spacing: 0.1em; color: #8e8e93; margin-bottom: 0.5rem; }
 /* the grid draws the thin lines: 1px gaps over the line color */
-.jc-cr .jcx-quickpads .jc-trigger-grid {
+.jcx-quickpads .jc-trigger-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
@@ -2211,10 +2207,10 @@
   overflow: hidden;
   padding: 0;
 }
-.jc-cr .jcx-quickpads .jc-trigger-pad-wrap { flex: none; min-width: 0; }
-.jc-cr .jcx-quickpads .jc-trigger-pad,
-.jc-cr .jcx-quickpads .jc-trigger-pad--assigned,
-.jc-cr .jcx-quickpads .jc-trigger-pad--empty {
+.jcx-quickpads .jc-trigger-pad-wrap { flex: none; min-width: 0; }
+.jcx-quickpads .jc-trigger-pad,
+.jcx-quickpads .jc-trigger-pad--assigned,
+.jcx-quickpads .jc-trigger-pad--empty {
   min-width: 0;
   min-height: 4.1rem;
   display: grid;
@@ -2234,7 +2230,7 @@
   transform: none;
 }
 /* small round color LED, in line with the name */
-.jc-cr .jcx-quickpads .jc-pad-led {
+.jcx-quickpads .jc-pad-led {
   position: static;
   grid-column: 1; grid-row: 1;
   transform: none;
@@ -2243,8 +2239,8 @@
   box-shadow: none;
   animation: none;
 }
-.jc-cr .jcx-quickpads .jc-trigger-pad--empty .jc-pad-led { opacity: 0.35; }
-.jc-cr .jcx-quickpads .jc-trigger-pad-label {
+.jcx-quickpads .jc-trigger-pad--empty .jc-pad-led { opacity: 0.35; }
+.jcx-quickpads .jc-trigger-pad-label {
   grid-column: 2; grid-row: 1;
   font-size: 1rem;
   font-weight: 600;
@@ -2254,12 +2250,11 @@
   -webkit-line-clamp: 1;
 }
 /* the new state line + bar exist only in the workspace strip (the drawer pads stay as they were) */
-.jc-cr .jcx-pad-sub,
-.jc-cr .jcx-pad-bar { display: none; }
-.jc-cr .jcx-quickpads .jcx-pad-sub { display: block; grid-column: 2; grid-row: 2; font-size: 0.8rem; color: #a1a1a6; line-height: 1.2; }
-.jc-cr .jcx-quickpads .jc-trigger-pad--empty .jc-trigger-pad-label { color: #b8b8be; font-weight: 500; }
+.jcx-pad-sub, .jcx-pad-bar { display: none; }
+.jcx-quickpads .jcx-pad-sub { display: block; grid-column: 2; grid-row: 2; font-size: 0.8rem; color: #a1a1a6; line-height: 1.2; }
+.jcx-quickpads .jc-trigger-pad--empty .jc-trigger-pad-label { color: #b8b8be; font-weight: 500; }
 /* bottom bar, full width like the KPI cards: faint when ready, none when empty, full on selected / on air */
-.jc-cr .jcx-quickpads .jcx-pad-bar {
+.jcx-quickpads .jcx-pad-bar {
   display: block;
   position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
   background: rgb(var(--pad-lit, 148, 163, 184));
@@ -2267,9 +2262,9 @@
   transition: opacity 0.18s ease;
 }
 /* hover */
-.jc-cr .jcx-quickpads .jc-trigger-pad:hover,
-.jc-cr .jcx-quickpads .jc-trigger-pad--assigned:hover,
-.jc-cr .jcx-quickpads .jc-trigger-pad--empty:hover {
+.jcx-quickpads .jc-trigger-pad:hover,
+.jcx-quickpads .jc-trigger-pad--assigned:hover,
+.jcx-quickpads .jc-trigger-pad--empty:hover {
   border: 0;
   background: #141418;
   color: #fff;
@@ -2277,45 +2272,45 @@
   box-shadow: none;
 }
 /* selected — keyboard focus / drop target */
-.jc-cr .jcx-quickpads .jc-trigger-pad:focus-visible,
-.jc-cr .jcx-quickpads .jc-trigger-pad-wrap--drop .jc-trigger-pad {
+.jcx-quickpads .jc-trigger-pad:focus-visible,
+.jcx-quickpads .jc-trigger-pad-wrap--drop .jc-trigger-pad {
   outline: none;
   background: #17171c;
   box-shadow: none;
 }
-.jc-cr .jcx-quickpads .jc-trigger-pad:focus-visible .jcx-pad-bar,
-.jc-cr .jcx-quickpads .jc-trigger-pad-wrap--drop .jcx-pad-bar { opacity: 1; }
+.jcx-quickpads .jc-trigger-pad:focus-visible .jcx-pad-bar,
+.jcx-quickpads .jc-trigger-pad-wrap--drop .jcx-pad-bar { opacity: 1; }
 /* on air — tinted cell + full bar with a gentle pulse */
-.jc-cr .jcx-quickpads .jc-trigger-pad--playing,
-.jc-cr .jcx-quickpads .jc-trigger-pad--assigned.jc-trigger-pad--playing {
+.jcx-quickpads .jc-trigger-pad--playing,
+.jcx-quickpads .jc-trigger-pad--assigned.jc-trigger-pad--playing {
   border: 0 !important;
   background: linear-gradient(0deg, rgba(var(--pad-lit, 148, 163, 184), 0.14), rgba(var(--pad-lit, 148, 163, 184), 0.14)), #0e0e11 !important;
   color: #fff !important;
   box-shadow: none !important;
 }
-.jc-cr .jcx-quickpads .jc-trigger-pad--playing .jcx-pad-bar { opacity: 1; animation: jcx-pad-onair 1.6s ease-in-out infinite; }
-.jc-cr .jcx-quickpads .jc-trigger-pad--playing .jcx-pad-sub { color: rgb(var(--pad-lit, 148, 163, 184)); font-weight: 600; }
+.jcx-quickpads .jc-trigger-pad--playing .jcx-pad-bar { opacity: 1; animation: jcx-pad-onair 1.6s ease-in-out infinite; }
+.jcx-quickpads .jc-trigger-pad--playing .jcx-pad-sub { color: rgb(var(--pad-lit, 148, 163, 184)); font-weight: 600; }
 @keyframes jcx-pad-onair { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-@media (prefers-reduced-motion: reduce) { .jc-cr .jcx-quickpads .jc-trigger-pad--playing .jcx-pad-bar { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .jcx-quickpads .jc-trigger-pad--playing .jcx-pad-bar { animation: none; } }
 /* the "scheduled" dot: top-end corner, clear of the name */
-.jc-cr .jcx-quickpads .jc-pad-sched-dot { top: 0.6rem; right: 2.3rem; left: auto; }
-[dir="rtl"] .jc-cr .jcx-quickpads .jc-pad-sched-dot { right: auto; left: 2.3rem; }
+.jcx-quickpads .jc-pad-sched-dot { top: 0.6rem; right: 2.3rem; left: auto; }
+[dir="rtl"] .jcx-quickpads .jc-pad-sched-dot { right: auto; left: 2.3rem; }
 /* softer, premium colorways (the same 9 pad colors) */
-.jc-cr .jcx-quickpads .jc-trigger-pad--color-default { --pad-lit: 94, 196, 160; }
-.jc-cr .jcx-quickpads .jc-trigger-pad--color-sky { --pad-lit: 100, 180, 240; }
-.jc-cr .jcx-quickpads .jc-trigger-pad--color-violet { --pad-lit: 165, 145, 240; }
-.jc-cr .jcx-quickpads .jc-trigger-pad--color-indigo { --pad-lit: 130, 140, 235; }
-.jc-cr .jcx-quickpads .jc-trigger-pad--color-pink { --pad-lit: 235, 130, 185; }
-.jc-cr .jcx-quickpads .jc-trigger-pad--color-rose { --pad-lit: 240, 125, 140; }
-.jc-cr .jcx-quickpads .jc-trigger-pad--color-amber { --pad-lit: 240, 190, 80; }
-.jc-cr .jcx-quickpads .jc-trigger-pad--color-lime { --pad-lit: 170, 215, 90; }
-.jc-cr .jcx-quickpads .jc-trigger-pad--color-teal { --pad-lit: 80, 200, 185; }
+.jcx-quickpads .jc-trigger-pad--color-default { --pad-lit: 94, 196, 160; }
+.jcx-quickpads .jc-trigger-pad--color-sky { --pad-lit: 100, 180, 240; }
+.jcx-quickpads .jc-trigger-pad--color-violet { --pad-lit: 165, 145, 240; }
+.jcx-quickpads .jc-trigger-pad--color-indigo { --pad-lit: 130, 140, 235; }
+.jcx-quickpads .jc-trigger-pad--color-pink { --pad-lit: 235, 130, 185; }
+.jcx-quickpads .jc-trigger-pad--color-rose { --pad-lit: 240, 125, 140; }
+.jcx-quickpads .jc-trigger-pad--color-amber { --pad-lit: 240, 190, 80; }
+.jcx-quickpads .jc-trigger-pad--color-lime { --pad-lit: 170, 215, 90; }
+.jcx-quickpads .jc-trigger-pad--color-teal { --pad-lit: 80, 200, 185; }
 /* the edit pencil: top-end corner on hover */
-.jc-cr .jcx-quickpads .jc-trigger-pad-edit { top: 0.35rem; right: 0.35rem; border-radius: 0.3rem; }
-[dir="rtl"] .jc-cr .jcx-quickpads .jc-trigger-pad-edit { right: auto; left: 0.35rem; }
+.jcx-quickpads .jc-trigger-pad-edit { top: 0.35rem; right: 0.35rem; border-radius: 0.3rem; }
+[dir="rtl"] .jcx-quickpads .jc-trigger-pad-edit { right: auto; left: 0.35rem; }
 /* the taller pads must never squeeze the Create form into itself: it keeps its natural height and the
    existing workspace area scrolls instead (fixes the Generate button overlapping the text box) */
-.jc-cr .jcx-active-workspace > .jcx-create { flex-shrink: 0; }
+.jcx-active-workspace > .jcx-create { flex-shrink: 0; }
 
 /* ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
    JINGLES STUDIO — VONO design language (owner 2026-10-12, step 2). DISPLAY ONLY: same tabs / fields / buttons /
@@ -2323,44 +2318,44 @@
    Flat Swiss-style: hairline dividers, zero / minimal radius, no card-per-row, no gradients / glow, strong type
    (16 primary / 14 secondary), the active tab carries the underline. The Quick Pads block above is NOT touched.
    ═════════════════════════════════════════════════════════════════════════════════════════════════════════════ */
-.jc-workspace-panel.jc-cr {
+.jc-workspace-panel {
   background: #0b0b0e;
   border: 1px solid var(--vx-line);
   border-radius: var(--vx-radius);
   box-shadow: none;
   gap: 1rem;
 }
-.jc-workspace-panel.jc-cr .jc-drawer-title,
-.jc-workspace-panel.jc-cr .jc-ws-header-title { font-size: var(--vx-fs-title); font-weight: 600; letter-spacing: -0.01em; color: var(--vx-text); }
+.jc-workspace-panel .jc-drawer-title,
+.jc-workspace-panel .jc-ws-header-title { font-size: var(--vx-fs-title); font-weight: 600; letter-spacing: -0.01em; color: var(--vx-text); }
 
 /* tabs — underline on the active one */
-.jc-workspace-panel.jc-cr .jc-ws-tabs { border-bottom: 1px solid var(--vx-line); gap: 0; }
-.jc-workspace-panel.jc-cr .jc-ws-tab {
+.jc-workspace-panel .jc-ws-tabs { border-bottom: 1px solid var(--vx-line); gap: 0; }
+.jc-workspace-panel .jc-ws-tab {
   position: relative; min-height: 44px; padding: 0 1rem; margin-bottom: -1px;
   font-size: var(--vx-fs-primary); font-weight: 500; letter-spacing: 0; color: var(--vx-text-2);
   border-bottom: var(--vx-indicator) solid transparent; border-radius: var(--vx-radius);
 }
-.jc-workspace-panel.jc-cr .jc-ws-tab:hover { color: var(--vx-text); background: var(--vx-hover); }
-.jc-workspace-panel.jc-cr .jc-ws-tab--active { color: var(--vx-text); font-weight: 600; border-bottom-color: var(--vx-indicator-color); }
+.jc-workspace-panel .jc-ws-tab:hover { color: var(--vx-text); background: var(--vx-hover); }
+.jc-workspace-panel .jc-ws-tab--active { color: var(--vx-text); font-weight: 600; border-bottom-color: var(--vx-indicator-color); }
 
 /* eyebrow labels (quick pads / sections / field labels) */
-.jc-workspace-panel.jc-cr .jc-ws-section-label,
-.jc-workspace-panel.jc-cr .jcx-quickpads-head,
-.jc-workspace-panel.jc-cr .jc-field > span,
-.jc-cr .jc-modal .jc-field > span {
+.jc-workspace-panel .jc-ws-section-label,
+.jc-workspace-panel .jcx-quickpads-head,
+.jc-workspace-panel .jc-field > span,
+.jc-modal .jc-field > span {
   font-size: var(--vx-fs-label); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--vx-text-3);
 }
-.jc-workspace-panel.jc-cr .jc-ws-section-label--accent { color: var(--vx-text-2); }
-.jc-workspace-panel.jc-cr .jc-hint,
-.jc-workspace-panel.jc-cr .jc-history-empty { font-size: var(--vx-fs-secondary); color: var(--vx-text-2); line-height: 1.5; }
+.jc-workspace-panel .jc-ws-section-label--accent { color: var(--vx-text-2); }
+.jc-workspace-panel .jc-hint,
+.jc-workspace-panel .jc-history-empty { font-size: var(--vx-fs-secondary); color: var(--vx-text-2); line-height: 1.5; }
 
 /* fields — square, flat, 16 px */
-.jc-workspace-panel.jc-cr input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
-.jc-workspace-panel.jc-cr select,
-.jc-workspace-panel.jc-cr textarea,
-.jc-cr .jc-modal input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
-.jc-cr .jc-modal select,
-.jc-cr .jc-modal textarea {
+.jc-workspace-panel input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.jc-workspace-panel select,
+.jc-workspace-panel textarea,
+.jc-modal input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.jc-modal select,
+.jc-modal textarea {
   min-height: 44px;
   padding: 0.5rem 0.875rem;
   border: 1px solid var(--vx-line-strong);
@@ -2370,168 +2365,140 @@
   font-size: var(--vx-fs-primary);
   box-shadow: none;
 }
-.jc-workspace-panel.jc-cr select,
-.jc-cr .jc-modal select { padding-right: 2rem; background-color: #0b0b0e; }
-.jc-workspace-panel.jc-cr textarea,
-.jc-cr .jc-modal textarea { line-height: 1.5; }
-.jc-workspace-panel.jc-cr input:focus,
-.jc-workspace-panel.jc-cr select:focus,
-.jc-workspace-panel.jc-cr textarea:focus,
-.jc-cr .jc-modal input:focus,
-.jc-cr .jc-modal select:focus,
-.jc-cr .jc-modal textarea:focus {
+.jc-workspace-panel select, .jc-modal select { padding-right: 2rem; background-color: #0b0b0e; }
+.jc-workspace-panel textarea, .jc-modal textarea { line-height: 1.5; }
+.jc-workspace-panel input:focus, .jc-workspace-panel select:focus, .jc-workspace-panel textarea:focus,
+.jc-modal input:focus, .jc-modal select:focus, .jc-modal textarea:focus {
   outline: none; border-color: var(--vx-indicator-color); box-shadow: none;
 }
-.jc-workspace-panel.jc-cr ::placeholder,
-.jc-cr .jc-modal ::placeholder { color: var(--vx-text-3); }
+.jc-workspace-panel ::placeholder, .jc-modal ::placeholder { color: var(--vx-text-3); }
 /* AI helper inside the script box — flat outlined, no glow */
-.jc-workspace-panel.jc-cr .jc-script-ai-btn {
+.jc-workspace-panel .jc-script-ai-btn {
   border: 1px solid var(--vx-line-strong); border-radius: var(--vx-radius-control);
   background: #0b0b0e; color: var(--vx-text-2); box-shadow: none; font-size: var(--vx-fs-label);
 }
-.jc-workspace-panel.jc-cr .jc-script-ai-btn:hover { color: var(--vx-text); border-color: rgba(255, 255, 255, 0.28); }
+.jc-workspace-panel .jc-script-ai-btn:hover { color: var(--vx-text); border-color: rgba(255, 255, 255, 0.28); }
 
 /* buttons — square; ONE filled primary (Generate); the rest flat / outlined; danger = text only */
-.jc-workspace-panel.jc-cr .jc-btn,
-.jc-cr .jc-modal .jc-btn {
+.jc-workspace-panel .jc-btn, .jc-modal .jc-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
   min-height: 40px; padding: 0 1rem;
   border: 1px solid var(--vx-line-strong); border-radius: var(--vx-radius-control);
   background: transparent; color: var(--vx-text);
   font-size: var(--vx-fs-secondary); font-weight: 600; box-shadow: none;
 }
-.jc-workspace-panel.jc-cr .jc-btn:hover:not(:disabled),
-.jc-cr .jc-modal .jc-btn:hover:not(:disabled) { background: var(--vx-hover); border-color: rgba(255, 255, 255, 0.28); box-shadow: none; }
-.jc-workspace-panel.jc-cr .jc-btn--ghost,
-.jc-cr .jc-modal .jc-btn--ghost { color: var(--vx-text-2); }
-.jc-workspace-panel.jc-cr .jc-btn--ghost:hover:not(:disabled),
-.jc-cr .jc-modal .jc-btn--ghost:hover:not(:disabled) { color: var(--vx-text); }
-.jc-workspace-panel.jc-cr .jc-btn--primary,
-.jc-cr .jc-modal .jc-btn--primary {
+.jc-workspace-panel .jc-btn:hover:not(:disabled), .jc-modal .jc-btn:hover:not(:disabled) { background: var(--vx-hover); border-color: rgba(255, 255, 255, 0.28); box-shadow: none; }
+.jc-workspace-panel .jc-btn--ghost, .jc-modal .jc-btn--ghost { color: var(--vx-text-2); }
+.jc-workspace-panel .jc-btn--ghost:hover:not(:disabled), .jc-modal .jc-btn--ghost:hover:not(:disabled) { color: var(--vx-text); }
+.jc-workspace-panel .jc-btn--primary, .jc-modal .jc-btn--primary {
   background: #f5f5f7; border-color: #f5f5f7; color: #0b0b0d;
 }
-.jc-workspace-panel.jc-cr .jc-btn--primary:hover:not(:disabled),
-.jc-cr .jc-modal .jc-btn--primary:hover:not(:disabled) { background: #fff; border-color: #fff; color: #0b0b0d; }
-.jc-workspace-panel.jc-cr .jc-btn--danger,
-.jc-cr .jc-modal .jc-btn--danger { border-color: transparent; color: #fda4af; }
-.jc-workspace-panel.jc-cr .jc-btn--danger:hover:not(:disabled),
-.jc-cr .jc-modal .jc-btn--danger:hover:not(:disabled) { background: rgba(253, 164, 175, 0.08); border-color: transparent; }
-.jc-workspace-panel.jc-cr .jc-btn--small { min-height: 36px; padding: 0 0.75rem; }
-.jc-workspace-panel.jc-cr .jc-btn--lg { min-height: 48px; padding: 0 1.5rem; font-size: var(--vx-fs-primary); }
-.jc-workspace-panel.jc-cr .jc-btn:disabled,
-.jc-cr .jc-modal .jc-btn:disabled { opacity: 0.4; }
-.jc-workspace-panel.jc-cr .jcx-generate-cta { font-size: var(--vx-fs-primary); }
+.jc-workspace-panel .jc-btn--primary:hover:not(:disabled), .jc-modal .jc-btn--primary:hover:not(:disabled) { background: #fff; border-color: #fff; color: #0b0b0d; }
+.jc-workspace-panel .jc-btn--danger, .jc-modal .jc-btn--danger { border-color: transparent; color: #fda4af; }
+.jc-workspace-panel .jc-btn--danger:hover:not(:disabled), .jc-modal .jc-btn--danger:hover:not(:disabled) { background: rgba(253, 164, 175, 0.08); border-color: transparent; }
+.jc-workspace-panel .jc-btn--small { min-height: 36px; padding: 0 0.75rem; }
+.jc-workspace-panel .jc-btn--lg { min-height: 48px; padding: 0 1.5rem; font-size: var(--vx-fs-primary); }
+.jc-workspace-panel .jc-btn:disabled, .jc-modal .jc-btn:disabled { opacity: 0.4; }
+.jc-workspace-panel .jcx-generate-cta { font-size: var(--vx-fs-primary); }
 
 /* Library + Schedule — clean rows with a hairline, no card per row */
-.jc-workspace-panel.jc-cr .jc-lib,
-.jc-workspace-panel.jc-cr .jc-sched-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--vx-line); }
-.jc-workspace-panel.jc-cr .jc-lib-row,
-.jc-workspace-panel.jc-cr .jc-sched-row {
+.jc-workspace-panel .jc-lib,
+.jc-workspace-panel .jc-sched-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--vx-line); }
+.jc-workspace-panel .jc-lib-row,
+.jc-workspace-panel .jc-sched-row {
   display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: nowrap;
   min-height: 64px; padding: 0.75rem 0.5rem;
   border: 0; border-bottom: 1px solid var(--vx-line); border-radius: var(--vx-radius); background: transparent;
   transition: background-color 0.15s ease;
 }
-.jc-workspace-panel.jc-cr .jc-sched-row:last-of-type { border-bottom: 1px solid var(--vx-line); }
-.jc-workspace-panel.jc-cr .jc-lib-row:hover,
-.jc-workspace-panel.jc-cr .jc-sched-row:hover { background: var(--vx-hover); }
-.jc-workspace-panel.jc-cr .jcx-lib-drag { min-width: 0; flex: 1 1 auto; }
-.jc-workspace-panel.jc-cr .jc-lib-title { font-size: var(--vx-fs-primary); font-weight: 600; color: var(--vx-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.jc-workspace-panel.jc-cr .jc-lib-meta { font-size: var(--vx-fs-secondary); color: var(--vx-text-2); margin-top: 0.25rem; }
-.jc-workspace-panel.jc-cr .jc-lib-actions { flex: none; flex-wrap: nowrap; gap: 0.5rem; align-items: center; }
-.jc-workspace-panel.jc-cr .jc-sched-list { font-size: var(--vx-fs-primary); color: var(--vx-text-2); }
-.jc-workspace-panel.jc-cr .jc-sched-text { font-size: var(--vx-fs-primary); color: var(--vx-text-2); }
-.jc-workspace-panel.jc-cr .jc-sched-text strong { color: var(--vx-text); font-weight: 600; }
-.jc-workspace-panel.jc-cr .jc-ws-divider { height: 0; border-top: 1px solid var(--vx-line); background: none; margin: 0.75rem 0; }
+.jc-workspace-panel .jc-sched-row:last-of-type { border-bottom: 1px solid var(--vx-line); }
+.jc-workspace-panel .jc-lib-row:hover,
+.jc-workspace-panel .jc-sched-row:hover { background: var(--vx-hover); }
+.jc-workspace-panel .jcx-lib-drag { min-width: 0; flex: 1 1 auto; }
+.jc-workspace-panel .jc-lib-title { font-size: var(--vx-fs-primary); font-weight: 600; color: var(--vx-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jc-workspace-panel .jc-lib-meta { font-size: var(--vx-fs-secondary); color: var(--vx-text-2); margin-top: 0.25rem; }
+.jc-workspace-panel .jc-lib-actions { flex: none; flex-wrap: nowrap; gap: 0.5rem; align-items: center; }
+.jc-workspace-panel .jc-sched-list { font-size: var(--vx-fs-primary); color: var(--vx-text-2); }
+.jc-workspace-panel .jc-sched-text { font-size: var(--vx-fs-primary); color: var(--vx-text-2); }
+.jc-workspace-panel .jc-sched-text strong { color: var(--vx-text); font-weight: 600; }
+.jc-workspace-panel .jc-ws-divider { height: 0; border-top: 1px solid var(--vx-line); background: none; margin: 0.75rem 0; }
 
 /* Create — result pane flat, readable */
-.jc-workspace-panel.jc-cr .jcx-result-title { font-size: 18px; font-weight: 600; color: var(--vx-text); }
-.jc-workspace-panel.jc-cr .jcx-result-meta { font-size: var(--vx-fs-label); color: var(--vx-text-3); }
-.jc-workspace-panel.jc-cr .jcx-result-play,
-.jc-workspace-panel.jc-cr .jcx-result-dismiss { border-radius: var(--vx-radius-control); box-shadow: none; background-image: none; }
-.jc-cr .jcx-create-main .jcx-result-empty p { font-size: var(--vx-fs-secondary); color: var(--vx-text-2); }
-.jc-workspace-panel.jc-cr .jc-err-msg { font-size: var(--vx-fs-secondary); }
+.jc-workspace-panel .jcx-result-title { font-size: 18px; font-weight: 600; color: var(--vx-text); }
+.jc-workspace-panel .jcx-result-meta { font-size: var(--vx-fs-label); color: var(--vx-text-3); }
+.jc-workspace-panel .jcx-result-play,
+.jc-workspace-panel .jcx-result-dismiss { border-radius: var(--vx-radius-control); box-shadow: none; background-image: none; }
+.jcx-create-main .jcx-result-empty p { font-size: var(--vx-fs-secondary); color: var(--vx-text-2); }
+.jc-workspace-panel .jc-err-msg { font-size: var(--vx-fs-secondary); }
 
 /* header status chips — flat */
-.jc-workspace-panel.jc-cr .jc-ws-header-status-mini { border-radius: var(--vx-radius-control); box-shadow: none; background: transparent; border: 1px solid var(--vx-line); }
-.jc-workspace-panel.jc-cr .jc-icon-btn,
-.jc-cr .jc-modal .jc-icon-btn { border-radius: var(--vx-radius-control); box-shadow: none; }
+.jc-workspace-panel .jc-ws-header-status-mini { border-radius: var(--vx-radius-control); box-shadow: none; background: transparent; border: 1px solid var(--vx-line); }
+.jc-workspace-panel .jc-icon-btn, .jc-modal .jc-icon-btn { border-radius: var(--vx-radius-control); box-shadow: none; }
 
 /* modals — one flat surface, hairlines, strong title */
-.jc-cr .jc-modal {
+.jc-modal {
   border: 1px solid var(--vx-line-strong);
   border-radius: var(--vx-radius-control);
   background: #111114;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
 }
-.jc-cr .jc-modal-header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--vx-line); }
-.jc-cr .jc-modal-title { font-size: 18px; font-weight: 600; letter-spacing: 0; color: var(--vx-text); }
-.jc-cr .jc-modal-body { padding: 1rem 1.25rem; gap: 0.875rem; font-size: var(--vx-fs-primary); color: var(--vx-text-2); }
-.jc-cr .jc-modal-footer { padding: 0.875rem 1.25rem; border-top: 1px solid var(--vx-line); gap: 0.5rem; }
+.jc-modal-header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--vx-line); }
+.jc-modal-title { font-size: 18px; font-weight: 600; letter-spacing: 0; color: var(--vx-text); }
+.jc-modal-body { padding: 1rem 1.25rem; gap: 0.875rem; font-size: var(--vx-fs-primary); color: var(--vx-text-2); }
+.jc-modal-footer { padding: 0.875rem 1.25rem; border-top: 1px solid var(--vx-line); gap: 0.5rem; }
 /* Assign-to-Pad picker inside the modal — hairline rows */
-.jc-cr .jc-modal .jc-pad-picker-btn {
+.jc-modal .jc-pad-picker-btn {
   border-radius: var(--vx-radius); box-shadow: none; background: transparent;
   border: 0; border-bottom: 1px solid var(--vx-line); min-height: 48px; font-size: var(--vx-fs-primary); color: var(--vx-text);
 }
-.jc-cr .jc-modal .jc-pad-picker-btn:hover { background: var(--vx-hover); }
+.jc-modal .jc-pad-picker-btn:hover { background: var(--vx-hover); }
 /* Create settings row (title + type / language / voice / speed / bell) stays ONE clean row: compact 14 px selects,
    the title field takes the rest. */
-.jc-workspace-panel.jc-cr .jcx-settings-bar { flex-wrap: nowrap; gap: 0.5rem; }
-.jc-workspace-panel.jc-cr .jcx-settings-bar .jcx-set { min-width: 0; flex: 0 1 auto; }
-.jc-workspace-panel.jc-cr .jcx-settings-bar .jcx-set--title { flex: 1 1 12rem; min-width: 9rem; }
-.jc-workspace-panel.jc-cr .jcx-settings-bar select {
+.jc-workspace-panel .jcx-settings-bar { flex-wrap: nowrap; gap: 0.5rem; }
+.jc-workspace-panel .jcx-settings-bar .jcx-set { min-width: 0; flex: 0 1 auto; }
+.jc-workspace-panel .jcx-settings-bar .jcx-set--title { flex: 1 1 12rem; min-width: 9rem; }
+.jc-workspace-panel .jcx-settings-bar select {
   min-height: 40px; padding: 0 1.6rem 0 0.625rem; font-size: var(--vx-fs-secondary); max-width: 11rem;
 }
-.jc-workspace-panel.jc-cr .jcx-settings-bar .jcx-set--title input { min-height: 40px; padding: 0 0.75rem; }
+.jc-workspace-panel .jcx-settings-bar .jcx-set--title input { min-height: 40px; padding: 0 0.75rem; }
 /* Create never squeezes into itself: natural height, a real text box; on a short screen the studio area scrolls */
-.jc-workspace-panel.jc-cr .jcx-active-workspace > .jcx-create { flex: 0 0 auto; height: auto; }
-.jc-workspace-panel.jc-cr .jcx-create-main { min-height: 10rem; }
+.jc-workspace-panel .jcx-active-workspace > .jcx-create { flex: 0 0 auto; height: auto; }
+.jc-workspace-panel .jcx-create-main { min-height: 10rem; }
 
 /* ── FRAMELESS (owner 2026-10-12, round 2): no boxes, no frames — like the map / KPI cells. Controls are flat surfaces
    that only get lighter on hover; a focused field gets the underline indicator; the ONE filled primary stays.
    The panel close ✕ is hidden: the Jingles launcher toggles the panel and any other module replaces it. ── */
-.jc-workspace-panel.jc-cr { border: 0; background: transparent; padding-left: 0; padding-right: 0; }
-.jc-workspace-panel.jc-cr .jc-ws-header .jc-icon-btn { display: none; }
-.jc-workspace-panel.jc-cr .jc-ws-header-status-mini { border: 0; background: transparent; padding: 0; }
-.jc-workspace-panel.jc-cr .jc-status-mini-label { font-size: var(--vx-fs-label); letter-spacing: 0.08em; color: var(--vx-text-3); }
+.jc-workspace-panel { border: 0; background: transparent; padding-left: 0; padding-right: 0; }
+.jc-workspace-panel .jc-ws-header .jc-icon-btn { display: none; }
+.jc-workspace-panel .jc-ws-header-status-mini { border: 0; background: transparent; padding: 0; }
+.jc-workspace-panel .jc-status-mini-label { font-size: var(--vx-fs-label); letter-spacing: 0.08em; color: var(--vx-text-3); }
 
 /* fields: a soft flat surface, no border; hover lighter; focus = underline indicator */
-.jc-workspace-panel.jc-cr input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
-.jc-workspace-panel.jc-cr select,
-.jc-workspace-panel.jc-cr textarea,
-.jc-cr .jc-modal input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
-.jc-cr .jc-modal select,
-.jc-cr .jc-modal textarea {
+.jc-workspace-panel input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.jc-workspace-panel select,
+.jc-workspace-panel textarea,
+.jc-modal input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.jc-modal select,
+.jc-modal textarea {
   border: 0;
   border-radius: 0;
   background-color: rgba(255, 255, 255, 0.04);
   box-shadow: none;
   transition: background-color 0.15s ease, box-shadow 0.15s ease;
 }
-.jc-workspace-panel.jc-cr input:hover,
-.jc-workspace-panel.jc-cr select:hover,
-.jc-workspace-panel.jc-cr textarea:hover,
-.jc-cr .jc-modal input:hover,
-.jc-cr .jc-modal select:hover,
-.jc-cr .jc-modal textarea:hover { background-color: rgba(255, 255, 255, 0.07); }
-.jc-workspace-panel.jc-cr input:focus,
-.jc-workspace-panel.jc-cr select:focus,
-.jc-workspace-panel.jc-cr textarea:focus,
-.jc-cr .jc-modal input:focus,
-.jc-cr .jc-modal select:focus,
-.jc-cr .jc-modal textarea:focus {
+.jc-workspace-panel input:hover, .jc-workspace-panel select:hover, .jc-workspace-panel textarea:hover,
+.jc-modal input:hover, .jc-modal select:hover, .jc-modal textarea:hover { background-color: rgba(255, 255, 255, 0.07); }
+.jc-workspace-panel input:focus, .jc-workspace-panel select:focus, .jc-workspace-panel textarea:focus,
+.jc-modal input:focus, .jc-modal select:focus, .jc-modal textarea:focus {
   background-color: rgba(255, 255, 255, 0.07);
   box-shadow: inset 0 calc(-1 * var(--vx-indicator)) 0 var(--vx-indicator-color);
 }
-.jc-workspace-panel.jc-cr select option,
-.jc-cr .jc-modal select option { background: #111114; color: var(--vx-text); }
+.jc-workspace-panel select option, .jc-modal select option { background: #111114; color: var(--vx-text); }
 
 /* secondary buttons: text on a flat surface, no border; hover lighter. Primary stays filled. Danger = red text. */
-.jc-workspace-panel.jc-cr .jc-btn,
-.jc-cr .jc-modal .jc-btn,
-.jc-workspace-panel.jc-cr .jcx-result-play,
-.jc-workspace-panel.jc-cr .jcx-result-dismiss,
-.jc-workspace-panel.jc-cr .jc-script-ai-btn {
+.jc-workspace-panel .jc-btn, .jc-modal .jc-btn,
+.jc-workspace-panel .jcx-result-play, .jc-workspace-panel .jcx-result-dismiss,
+.jc-workspace-panel .jc-script-ai-btn {
   border: 0;
   border-radius: 0;
   background: rgba(255, 255, 255, 0.04);
@@ -2539,51 +2506,44 @@
   box-shadow: none;
   background-image: none;
 }
-.jc-workspace-panel.jc-cr .jc-btn:hover:not(:disabled),
-.jc-cr .jc-modal .jc-btn:hover:not(:disabled),
-.jc-workspace-panel.jc-cr .jcx-result-play:hover:not(:disabled),
-.jc-workspace-panel.jc-cr .jcx-result-dismiss:hover,
-.jc-workspace-panel.jc-cr .jc-script-ai-btn:hover {
+.jc-workspace-panel .jc-btn:hover:not(:disabled), .jc-modal .jc-btn:hover:not(:disabled),
+.jc-workspace-panel .jcx-result-play:hover:not(:disabled), .jc-workspace-panel .jcx-result-dismiss:hover,
+.jc-workspace-panel .jc-script-ai-btn:hover {
   background: rgba(255, 255, 255, 0.09);
   border: 0;
   color: #fff;
 }
-.jc-workspace-panel.jc-cr .jc-btn--ghost,
-.jc-cr .jc-modal .jc-btn--ghost { color: var(--vx-text); }
-.jc-workspace-panel.jc-cr .jc-btn--primary,
-.jc-cr .jc-modal .jc-btn--primary { background: #f5f5f7; color: #0b0b0d; }
-.jc-workspace-panel.jc-cr .jc-btn--primary:hover:not(:disabled),
-.jc-cr .jc-modal .jc-btn--primary:hover:not(:disabled) { background: #fff; color: #0b0b0d; }
-.jc-workspace-panel.jc-cr .jc-btn--danger,
-.jc-cr .jc-modal .jc-btn--danger { background: transparent; color: #fda4af; }
-.jc-workspace-panel.jc-cr .jc-btn--danger:hover:not(:disabled),
-.jc-cr .jc-modal .jc-btn--danger:hover:not(:disabled) { background: rgba(253, 164, 175, 0.08); color: #fecdd3; }
-.jc-workspace-panel.jc-cr .jcx-result-play { min-height: 44px; padding: 0 1rem; font-size: var(--vx-fs-secondary); font-weight: 600; }
-.jc-workspace-panel.jc-cr .jcx-result-play:disabled { opacity: 0.4; }
-.jc-workspace-panel.jc-cr .jcx-result-dismiss { background: transparent; color: var(--vx-text-3); }
+.jc-workspace-panel .jc-btn--ghost, .jc-modal .jc-btn--ghost { color: var(--vx-text); }
+.jc-workspace-panel .jc-btn--primary, .jc-modal .jc-btn--primary { background: #f5f5f7; color: #0b0b0d; }
+.jc-workspace-panel .jc-btn--primary:hover:not(:disabled), .jc-modal .jc-btn--primary:hover:not(:disabled) { background: #fff; color: #0b0b0d; }
+.jc-workspace-panel .jc-btn--danger, .jc-modal .jc-btn--danger { background: transparent; color: #fda4af; }
+.jc-workspace-panel .jc-btn--danger:hover:not(:disabled), .jc-modal .jc-btn--danger:hover:not(:disabled) { background: rgba(253, 164, 175, 0.08); color: #fecdd3; }
+.jc-workspace-panel .jcx-result-play { min-height: 44px; padding: 0 1rem; font-size: var(--vx-fs-secondary); font-weight: 600; }
+.jc-workspace-panel .jcx-result-play:disabled { opacity: 0.4; }
+.jc-workspace-panel .jcx-result-dismiss { background: transparent; color: var(--vx-text-3); }
 
 /* Library row actions: no frames at all — quiet text actions that light up on hover */
-.jc-workspace-panel.jc-cr .jc-lib-actions .jc-btn { background: transparent; color: var(--vx-text-2); }
-.jc-workspace-panel.jc-cr .jc-lib-actions .jc-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); color: var(--vx-text); }
-.jc-workspace-panel.jc-cr .jc-lib-actions .jc-btn--primary { background: rgba(255, 255, 255, 0.06); color: var(--vx-text); }
+.jc-workspace-panel .jc-lib-actions .jc-btn { background: transparent; color: var(--vx-text-2); }
+.jc-workspace-panel .jc-lib-actions .jc-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); color: var(--vx-text); }
+.jc-workspace-panel .jc-lib-actions .jc-btn--primary { background: rgba(255, 255, 255, 0.06); color: var(--vx-text); }
 
 /* result placeholder: the tiny microphone goes; the line itself is readable */
-.jc-workspace-panel.jc-cr .jcx-result-empty-icon { display: none; }
-.jc-cr .jcx-create-main .jcx-result-empty p { font-size: var(--vx-fs-primary); color: var(--vx-text-3); }
+.jc-workspace-panel .jcx-result-empty-icon { display: none; }
+.jcx-create-main .jcx-result-empty p { font-size: var(--vx-fs-primary); color: var(--vx-text-3); }
 
 /* modals: frameless surface + hairlines only between header / body / footer */
-.jc-cr .jc-modal { border: 0; border-radius: 0; }
-.jc-cr .jc-modal .jc-icon-btn { border: 0; background: transparent; }
-.jc-cr .jc-modal .jc-icon-btn:hover { background: rgba(255, 255, 255, 0.07); }
+.jc-modal { border: 0; border-radius: 0; }
+.jc-modal .jc-icon-btn { border: 0; background: transparent; }
+.jc-modal .jc-icon-btn:hover { background: rgba(255, 255, 255, 0.07); }
 /* settings row: the selects keep their full text; only the title field gives way */
-.jc-workspace-panel.jc-cr .jcx-settings-bar .jcx-set:not(.jcx-set--title) { flex: 0 0 auto; }
-.jc-workspace-panel.jc-cr .jcx-settings-bar select { max-width: none; width: auto; }
-.jc-workspace-panel.jc-cr .jcx-settings-bar .jcx-set--title { flex: 1 1 8rem; min-width: 7rem; }
+.jc-workspace-panel .jcx-settings-bar .jcx-set:not(.jcx-set--title) { flex: 0 0 auto; }
+.jc-workspace-panel .jcx-settings-bar select { max-width: none; width: auto; }
+.jc-workspace-panel .jcx-settings-bar .jcx-set--title { flex: 1 1 8rem; min-width: 7rem; }
 
 /* ── round 3 (owner 2026-10-12): selects belong to the language; the result reads as one clean column ── */
 /* selects: dark native list (no white Windows popup), one quiet chevron, aligned like the fields */
-.jc-workspace-panel.jc-cr select,
-.jc-cr .jc-modal select {
+.jc-workspace-panel select,
+.jc-modal select {
   color-scheme: dark;
   -webkit-appearance: none;
   appearance: none;
@@ -2594,15 +2554,14 @@
   padding-right: 2rem;
   cursor: pointer;
 }
-[dir="rtl"] .jc-workspace-panel.jc-cr select,
-[dir="rtl"] .jc-cr .jc-modal select { background-position: left 0.6rem center; padding-right: 0.875rem; padding-left: 2rem; }
-.jc-workspace-panel.jc-cr select option,
-.jc-cr .jc-modal select option { background: #111114; color: #f5f5f7; }
+[dir="rtl"] .jc-workspace-panel select, [dir="rtl"] .jc-modal select { background-position: left 0.6rem center; padding-right: 0.875rem; padding-left: 2rem; }
+.jc-workspace-panel select option,
+.jc-modal select option { background: #111114; color: #f5f5f7; }
 
 /* result: title + meta, then the actions as clean full-width rows separated by hairlines */
-.jc-workspace-panel.jc-cr .jcx-result { justify-content: flex-start; gap: 0; padding-top: 0.25rem; }
-.jc-workspace-panel.jc-cr .jcx-result-head { gap: 0.25rem; padding: 0 2.5rem 0.875rem 0; border-bottom: 1px solid var(--vx-line); }
-.jc-workspace-panel.jc-cr .jcx-result-play {
+.jc-workspace-panel .jcx-result { justify-content: flex-start; gap: 0; padding-top: 0.25rem; }
+.jc-workspace-panel .jcx-result-head { gap: 0.25rem; padding: 0 2.5rem 0.875rem 0; border-bottom: 1px solid var(--vx-line); }
+.jc-workspace-panel .jcx-result-play {
   width: 100%;
   justify-content: flex-start;
   min-height: 48px;
@@ -2611,127 +2570,14 @@
   border-bottom: 1px solid var(--vx-line);
   font-size: var(--vx-fs-primary);
 }
-.jc-workspace-panel.jc-cr .jcx-result-play:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
-.jc-workspace-panel.jc-cr .jcx-result-dismiss {
+.jc-workspace-panel .jcx-result-play:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
+.jc-workspace-panel .jcx-result-dismiss {
   position: absolute; top: 0; right: 0;
   width: 2rem; height: 2rem; min-height: 0; padding: 0;
   font-size: 14px; color: var(--vx-text-3);
 }
 
 /* VxSelect in the Studio settings row (owner 2026-10-13): sizes to its text like the native select did */
-.jc-workspace-panel.jc-cr .jcx-settings-bar .vx-select { width: auto; min-width: 6.5rem; }
+.jc-workspace-panel .jcx-settings-bar .vx-select { width: auto; min-width: 6.5rem; }
 /* a narrow column (the Control Room right pane): the row wraps instead of clipping the last field */
-.jc-workspace-panel.jc-cr .jcx-settings-bar { flex-wrap: wrap; }
-
-/* ═════════════════════════════════════════════════════════════════════════════
-   ROUND 7 (2026-10-18, owner: "fix the whole jingle-creation interface properly") — the console in the app's own line:
-   glass, frameless, white, pills; one clear flow (title → settings → the words → Generate). No outlines, no navy boxes,
-   no OS-grey selects. Scoped to .jc-workspace-panel; overrides the older rules above.
-   ═════════════════════════════════════════════════════════════════════════════ */
-.jc-workspace-panel { --jc-glass: rgba(255, 255, 255, 0.07); --jc-glass-hover: rgba(255, 255, 255, 0.12); color: #f5f5f7; }
-.jc-workspace-panel .jc-ws-header { padding: 0 6px 6px; border: 0; }
-.jc-workspace-panel .jc-drawer-title { font-family: var(--font-geist-sans), "Helvetica Neue", Arial, sans-serif; font-size: 22px; font-weight: 650; letter-spacing: -0.015em; color: #f5f5f7; }
-.jc-workspace-panel .jc-ws-header-status-mini { opacity: 0.5; }
-.jc-workspace-panel .jc-icon-btn { width: 34px; height: 34px; border: 0; border-radius: 50%; background: transparent; color: rgba(255, 255, 255, 0.6); font-size: 15px; transition: background-color 240ms ease, color 240ms ease; }
-.jc-workspace-panel .jc-icon-btn:hover { background: var(--jc-glass-hover); color: #fff; border: 0; }
-
-/* tabs: quiet words with a bar that glides */
-.jc-workspace-panel .jc-ws-tabs { position: relative; display: flex; gap: 26px; padding: 4px 6px 12px; border: 0; background: transparent; }
-.jc-workspace-panel .jc-ws-tab { padding: 6px 0; border: 0; border-radius: 0; background: transparent; font-size: 11px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255, 255, 255, 0.46); transition: color 320ms ease; }
-.jc-workspace-panel .jc-ws-tab:hover { color: rgba(255, 255, 255, 0.82); background: transparent; }
-.jc-workspace-panel .jc-ws-tab--active, .jc-workspace-panel .jc-ws-tab[aria-selected="true"] { color: #fff; background: transparent; border: 0; box-shadow: none; }
-.jc-ws-tab-bar { position: absolute; left: 0; bottom: 4px; height: 2px; width: calc(var(--bar-w, 0px) - 2px); transform: translateX(var(--bar-x, 0px)); border-radius: 2px; background: #f5f5f7; box-shadow: 0 0 10px rgba(255, 255, 255, 0.3); opacity: 0; pointer-events: none; }
-.jc-ws-tabs[data-ready="1"] .jc-ws-tab-bar { opacity: 1; transition: transform 520ms cubic-bezier(0.22, 1, 0.36, 1), width 520ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease; }
-
-/* quick pads: glass pills with the pad's own colour */
-.jc-workspace-panel .jc-trigger-pad { --pc: #d1d1d6; border: 0 !important; border-radius: 18px !important; background: linear-gradient(135deg, color-mix(in srgb, var(--pc) 24%, rgba(255, 255, 255, 0.05)), rgba(255, 255, 255, 0.04)) !important; box-shadow: none !important; color: #f5f5f7 !important; -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); transition: transform 480ms cubic-bezier(0.22, 1, 0.36, 1), background-color 300ms ease !important; }
-.jc-workspace-panel .jc-trigger-pad:hover { transform: scale(1.04); }
-.jc-workspace-panel .jc-trigger-pad--color-sky { --pc: #5ac8fa; } .jc-workspace-panel .jc-trigger-pad--color-violet { --pc: #bf5af2; } .jc-workspace-panel .jc-trigger-pad--color-indigo { --pc: #7d7aff; }
-.jc-workspace-panel .jc-trigger-pad--color-pink { --pc: #ff6bb0; } .jc-workspace-panel .jc-trigger-pad--color-rose { --pc: #ff6b81; } .jc-workspace-panel .jc-trigger-pad--color-amber { --pc: #ff9f0a; }
-.jc-workspace-panel .jc-trigger-pad--color-lime { --pc: #a8e060; } .jc-workspace-panel .jc-trigger-pad--color-teal { --pc: #40d0c0; }
-.jc-workspace-panel .jc-trigger-pad--empty { background: rgba(255, 255, 255, 0.045) !important; color: rgba(255, 255, 255, 0.5) !important; }
-.jc-workspace-panel .jc-trigger-pad-label { font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; }
-.jc-workspace-panel .jcx-quickpads-head, .jc-workspace-panel .jc-ws-section-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255, 255, 255, 0.42); }
-
-/* the form: one calm column — title, a row of pill settings, the words, Generate */
-.jc-workspace-panel .jcx-create { gap: 16px; }
-.jc-workspace-panel .jcx-settings-bar { display: flex; flex-wrap: wrap; gap: 12px 10px; align-items: flex-end; }
-.jc-workspace-panel .jc-field { display: flex; flex-direction: column; gap: 6px; margin: 0; }
-.jc-workspace-panel .jc-field > span { padding-left: 14px; font-size: 10px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255, 255, 255, 0.4); }
-.jc-workspace-panel .jc-field input, .jc-workspace-panel .jc-field select, .jc-workspace-panel .jc-select, .jc-workspace-panel .jc-select-mini {
-  height: 42px; padding: 0 16px; border: 0 !important; border-radius: 999px !important; outline: none; background-color: var(--jc-glass) !important; color: #f5f5f7 !important; font-size: 14px; font-weight: 500; box-shadow: none !important; transition: background-color 280ms ease; }
-.jc-workspace-panel .jc-field input:focus, .jc-workspace-panel .jc-field select:focus { background-color: var(--jc-glass-hover) !important; }
-.jc-workspace-panel .jc-field input::placeholder { color: rgba(255, 255, 255, 0.34); }
-.jc-workspace-panel .jc-field select, .jc-workspace-panel .jc-select { appearance: none; -webkit-appearance: none; padding-right: 36px; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23ffffff' stroke-opacity='.6' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; }
-.jc-workspace-panel .jc-field select:hover { background-color: var(--jc-glass-hover) !important; }
-.jc-workspace-panel .jc-field select option { background: #232328; color: #f5f5f7; }
-.jc-workspace-panel .jcx-set--title { flex: 1 1 280px; }
-.jc-workspace-panel .jcx-set--title input { font-size: 16px; }
-.jc-workspace-panel .jc-script-wrap textarea { min-height: 220px; padding: 20px 22px; border: 0 !important; border-radius: 26px !important; outline: none; resize: none; background: var(--jc-glass) !important; color: #f5f5f7 !important; font-size: 16px; line-height: 1.55; box-shadow: none !important; transition: background-color 300ms ease; }
-.jc-workspace-panel .jc-script-wrap textarea:focus { background: rgba(255, 255, 255, 0.095) !important; }
-.jc-workspace-panel .jc-script-wrap textarea::placeholder { color: rgba(255, 255, 255, 0.32); }
-.jc-workspace-panel .jc-script-ai-btn { right: 16px; bottom: 16px; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border: 0 !important; border-radius: 999px !important; background: rgba(255, 255, 255, 0.14) !important; color: #fff !important; font-size: 12.5px; font-weight: 650; box-shadow: none !important; transition: background-color 260ms ease, transform 420ms cubic-bezier(0.22, 1, 0.36, 1); }
-.jc-workspace-panel .jc-script-ai-btn:hover { background: rgba(255, 255, 255, 0.24) !important; transform: scale(1.05); }
-.jc-workspace-panel .jc-script-ai-btn-spark { color: #fff; }
-
-/* the result pane */
-.jc-workspace-panel .jcx-result-empty { border: 0 !important; border-radius: 26px; background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.42); }
-.jc-workspace-panel .jcx-result-empty-icon { display: flex; opacity: 0.7; color: #fff; }
-.jc-workspace-panel .jcx-result-empty p { font-size: 13.5px; color: rgba(255, 255, 255, 0.5); }
-.jc-workspace-panel .jcx-result { border: 0 !important; border-radius: 26px; background: var(--jc-glass) !important; padding: 18px 20px; }
-.jc-workspace-panel .jcx-result-title { font-size: 17px; font-weight: 650; }
-.jc-workspace-panel .jcx-result-meta { color: rgba(255, 255, 255, 0.5); }
-.jc-workspace-panel .jcx-result-play, .jc-workspace-panel .jcx-result-dismiss { border: 0 !important; border-radius: 999px !important; background: rgba(255, 255, 255, 0.14) !important; color: #fff !important; }
-
-/* buttons: white primary pill, glass secondary pills */
-.jc-workspace-panel .jc-btn { height: 40px; padding: 0 20px; border: 0 !important; border-radius: 999px !important; font-size: 14px; font-weight: 600; box-shadow: none !important; transition: transform 460ms cubic-bezier(0.22, 1, 0.36, 1), background-color 260ms ease, opacity 240ms ease; }
-.jc-workspace-panel .jc-btn--small { height: 32px; padding: 0 14px; font-size: 12.5px; }
-.jc-workspace-panel .jc-btn--lg { height: 48px; padding: 0 34px; font-size: 15px; font-weight: 650; }
-.jc-workspace-panel .jc-btn--primary { background: #f5f5f7 !important; color: #111114 !important; }
-.jc-workspace-panel .jc-btn--primary:hover:not(:disabled) { background: #fff !important; transform: scale(1.03); }
-.jc-workspace-panel .jc-btn--ghost, .jc-workspace-panel .jc-btn--secondary { background: rgba(255, 255, 255, 0.1) !important; color: #f5f5f7 !important; }
-.jc-workspace-panel .jc-btn--ghost:hover:not(:disabled), .jc-workspace-panel .jc-btn--secondary:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18) !important; }
-.jc-workspace-panel .jc-btn--danger { background: rgba(255, 69, 58, 0.16) !important; color: #ff6b61 !important; }
-.jc-workspace-panel .jc-btn--danger:hover:not(:disabled) { background: rgba(255, 69, 58, 0.28) !important; }
-.jc-workspace-panel .jc-btn:disabled { opacity: 0.4; }
-.jc-workspace-panel .jcx-generate-cta { width: auto; min-width: 240px; }
-.jc-workspace-panel .jcx-action-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 4px; }
-.jc-workspace-panel .jc-err-msg { border: 0; border-radius: 16px; background: rgba(255, 69, 58, 0.14); color: #ff8a80; }
-
-/* library + schedule lists: glass rows */
-.jc-workspace-panel .jc-lib, .jc-workspace-panel .jc-sched-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.jc-workspace-panel .jc-lib-row, .jc-workspace-panel .jc-sched-row { border: 0 !important; border-radius: 20px; padding: 12px 16px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.035)); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); transition: background-color 280ms ease; }
-.jc-workspace-panel .jc-lib-title { font-size: 15px; font-weight: 600; color: #f5f5f7; }
-.jc-workspace-panel .jc-lib-meta, .jc-workspace-panel .jc-sched-text, .jc-workspace-panel .jc-hint { color: rgba(255, 255, 255, 0.5); }
-.jc-workspace-panel .jc-ws-panel { gap: 12px; }
-
-/* ROUND 9 — the jingle dialogs live in the app's glass dialog (portal): same pills as the console */
-.sb-wz-panel .jc-field { display: flex; flex-direction: column; gap: 8px; margin: 0 0 16px; }
-.sb-wz-panel .jc-field > span { padding-left: 14px; font-size: 10px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255, 255, 255, 0.42); }
-.sb-wz-panel .jc-field input { height: 44px; padding: 0 18px; border: 0; border-radius: 999px; outline: none; background: rgba(255, 255, 255, 0.08); color: #f5f5f7; font-size: 15px; font-weight: 500; }
-.sb-wz-panel .jc-field input:focus { background: rgba(255, 255, 255, 0.12); }
-.sb-wz-panel .jc-hint { margin: 0 0 12px; font-size: 13px; color: rgba(255, 255, 255, 0.5); }
-.jc-swatches { display: flex; flex-wrap: wrap; gap: 10px; padding-left: 8px; }
-.jc-swatch { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: var(--sw, #d1d1d6); cursor: pointer; opacity: 0.8; transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease, box-shadow 300ms ease; }
-.jc-swatch:hover { transform: scale(1.12); opacity: 1; }
-.jc-swatch.is-on { opacity: 1; transform: scale(1.12); box-shadow: 0 0 0 3px rgba(34, 34, 40, 0.9), 0 0 0 5px var(--sw, #fff); }
-.jc-pad-sound { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 4px 0 14px; font-size: 14px; color: rgba(255, 255, 255, 0.75); }
-.sb-wz-panel .jc-pad-picker-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.sb-wz-panel .jc-pad-picker-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 46px; padding: 0 16px; border: 0; border-radius: 16px; background: rgba(255, 255, 255, 0.07); color: #f5f5f7; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 240ms ease, transform 420ms cubic-bezier(0.22, 1, 0.36, 1); }
-.sb-wz-panel .jc-pad-picker-btn:hover { background: rgba(255, 255, 255, 0.14); transform: scale(1.03); }
-.sb-wz-panel .jc-pad-picker-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); }
-.sb-wz-panel .jc-pad-picker-dot--on { background: #30d158; }
-.jc-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 56px 0; color: rgba(255, 255, 255, 0.5); font-size: 14px; }
-.jc-empty p { margin: 0; }
-
-/* ── round 10d ── voice step: calm segmented rows (Language · Speed · Bell) under the voice chips ── */
-
-/* upstream's pad state line / LED bar belong to the Control Room look — not part of our pad pills */
-.jcx-pad-sub, .jcx-pad-bar { display: none; }
-
-/* (round 23, owner) the AI button of the Control Room Studio sat OUTSIDE the script box (a `position: relative` rule of the Studio block made it a flex item that
-   shifted up 16px and shrank the text box). It is a pill INSIDE the box, bottom-right, over the text — in both the console and the Control Room. */
-.jc-workspace-panel .jc-script-wrap { position: relative; }
-.jc-workspace-panel .jc-script-wrap .jc-script-ai-btn { position: absolute !important; right: 16px !important; bottom: 16px !important; top: auto !important; left: auto !important; margin: 0 !important; z-index: 3; }
-.jc-workspace-panel .jc-script-wrap textarea { width: 100%; flex: 1 1 auto; padding-bottom: 60px; }
-
+.jc-workspace-panel .jcx-settings-bar { flex-wrap: wrap; }

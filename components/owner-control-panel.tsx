@@ -3,11 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRemoteOwner } from "@/lib/remote-control/ws-client";
-import { useTr } from "@/lib/i18n/use-tr";
 
 /** Remote branch control (WS). Rendered below workspace business profile on `/owner`. */
 export function OwnerControlPanel() {
-  const tr = useTr();
   const {
     branches,
     selectedBranchId,
@@ -30,16 +28,16 @@ export function OwnerControlPanel() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-50">{tr("Owner control")}</h2>
+        <h2 className="text-xl font-semibold text-slate-50">Owner control</h2>
         <p className="mt-1 text-sm text-slate-400">
-          {tr("Control branch players from anywhere. No local Wi-Fi required.")}
+          Control branch players from anywhere. No local Wi-Fi required.
         </p>
       </div>
 
       <div className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-6">
         <div className="mb-4 flex items-center justify-between gap-2">
           <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColor}`}>
-            {tr(status)}
+            {status}
           </span>
           <div className="flex gap-2">
             <button
@@ -48,10 +46,10 @@ export function OwnerControlPanel() {
               disabled={status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-700/80 disabled:opacity-50"
             >
-              {tr("Refresh")}
+              Refresh
             </button>
             <Link href="/remote-player" className="text-xs text-sky-400 hover:text-sky-300">
-              {tr("Open player →")}
+              Open player →
             </Link>
           </div>
         </div>
@@ -59,7 +57,7 @@ export function OwnerControlPanel() {
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium uppercase tracking-wider text-slate-500">
-              {tr("Target branch")}
+              Target branch
             </label>
             <select
               value={selectedBranchId ?? ""}
@@ -67,26 +65,26 @@ export function OwnerControlPanel() {
               disabled={status !== "connected"}
               className="mt-1 w-full rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-sky-500/50 focus:outline-none focus:ring-2 focus:ring-sky-500/30 disabled:opacity-50"
             >
-              <option value="">{tr("Select branch")}</option>
+              <option value="">Select branch</option>
               {branches.map((b) => (
                 <option key={b.branchId} value={b.branchId}>
                   {b.branchName ?? b.branchId} {b.masterDeviceId ? ` (${b.masterDeviceId.slice(0, 8)}…)` : ""}
                 </option>
               ))}
               {branches.length === 0 && status === "connected" && (
-                <option value="" disabled>{tr("No branches with connected players")}</option>
+                <option value="" disabled>No branches with connected players</option>
               )}
             </select>
             <p className="mt-1 text-xs text-slate-500">
               {selectedBranch
-                ? `${tr("Master")}: ${selectedBranch.masterDeviceId.slice(0, 12)}…`
-                : tr("Connect a player at a branch first.")}
+                ? `Master: ${selectedBranch.masterDeviceId.slice(0, 12)}…`
+                : "Connect a player at a branch first."}
             </p>
           </div>
 
           {remoteState && (
             <div className="rounded-lg border border-slate-700/80 bg-slate-900/40 p-3">
-              <p className="text-xs text-slate-500">{tr("Now playing")}</p>
+              <p className="text-xs text-slate-500">Now playing</p>
               <p className="text-sm font-medium text-slate-200">
                 {remoteState.currentTrack?.title ?? remoteState.currentSource?.title ?? "—"}
               </p>
@@ -101,7 +99,7 @@ export function OwnerControlPanel() {
               disabled={!selectedBranchId || status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
             >
-              {tr("Play")}
+              Play
             </button>
             <button
               type="button"
@@ -109,7 +107,7 @@ export function OwnerControlPanel() {
               disabled={!selectedBranchId || status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
             >
-              {tr("Pause")}
+              Pause
             </button>
             <button
               type="button"
@@ -117,7 +115,7 @@ export function OwnerControlPanel() {
               disabled={!selectedBranchId || status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
             >
-              {tr("Stop")}
+              Stop
             </button>
             <button
               type="button"
@@ -125,7 +123,7 @@ export function OwnerControlPanel() {
               disabled={!selectedBranchId || status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
             >
-              {tr("Next")}
+              Next
             </button>
             <button
               type="button"
@@ -133,13 +131,13 @@ export function OwnerControlPanel() {
               disabled={!selectedBranchId || status !== "connected"}
               className="rounded-lg border border-slate-700/80 bg-slate-800/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700/80 disabled:opacity-50"
             >
-              {tr("Prev")}
+              Prev
             </button>
           </div>
 
           <div>
             <label className="block text-xs font-medium uppercase tracking-wider text-slate-500">
-              {tr("Load playlist (URL)")}
+              Load playlist (URL)
             </label>
             <div className="mt-1 flex gap-2">
               <input
@@ -157,7 +155,7 @@ export function OwnerControlPanel() {
                 disabled={!selectedBranchId || status !== "connected"}
                 className="rounded-lg border border-sky-500/50 bg-sky-600/20 px-4 py-2 text-sm font-medium text-sky-200 hover:bg-sky-600/30 disabled:opacity-50"
               >
-                {tr("Load")}
+                Load
               </button>
             </div>
           </div>

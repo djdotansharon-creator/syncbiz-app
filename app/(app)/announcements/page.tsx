@@ -6,8 +6,6 @@ import {
 import { headers } from "next/headers";
 import { getApiBase } from "@/lib/api-base";
 import type { Announcement } from "@/lib/types";
-import { getLocale } from "@/lib/locale-server";
-import { trFor } from "@/lib/i18n/phrases";
 
 async function getAnnouncements(): Promise<Announcement[]> {
   try {
@@ -28,23 +26,21 @@ async function getAnnouncements(): Promise<Announcement[]> {
 
 export default async function AnnouncementsPage() {
   const announcements = await getAnnouncements();
-  const locale = await getLocale();
-  const tr = (text: string) => trFor(locale, text);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-slate-50">{tr("Announcements")}</h1>
+        <h1 className="text-xl font-semibold text-slate-50">Announcements</h1>
         <p className="mt-1 text-sm text-slate-400">
-          {tr("TTS and promo triggers. Optionally resume previous source after playing. SyncBiz does not store media.")}
+          TTS and promo triggers. Optionally resume previous source after playing. SyncBiz does not store media.
         </p>
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/50">
         <div className={DENSE_ADMIN_ANNOUNCEMENTS_TABLE_HEADER_CLASS}>
-          <div>{tr("Announcement")}</div>
-          <div>{tr("Window")}</div>
-          <div>{tr("Status")}</div>
+          <div>Announcement</div>
+          <div>Window</div>
+          <div>Status</div>
         </div>
         <div className="divide-y divide-slate-800/60">
           {announcements.map((a) => {
@@ -59,19 +55,19 @@ export default async function AnnouncementsPage() {
                     <p className="font-medium text-slate-100">{a.title}</p>
                     <p className="line-clamp-2 text-xs text-slate-500">{a.message}</p>
                     <p className="mt-1 text-xs text-slate-500">
-                      {a.ttsEnabled ? "TTS" : tr("Pre-recorded")} ·{" "}
-                      <span className="capitalize">{tr(a.priority)}</span>
+                      {a.ttsEnabled ? "TTS" : "Pre-recorded"} ·{" "}
+                      <span className="capitalize">{a.priority}</span>
                       {a.resumePreviousSource ? (
                         <>
                           {" "}
-                          · <span className="text-sky-400/90">{tr("Resume previous")}</span>
+                          · <span className="text-sky-400/90">Resume previous</span>
                         </>
                       ) : null}
                     </p>
                   </div>,
                   <div key="window">
                     <p className="text-slate-200">
-                      {start.toLocaleDateString(locale === "he" ? "he-IL" : undefined, {
+                      {start.toLocaleDateString(undefined, {
                         month: "short",
                         day: "numeric",
                       })}{" "}
@@ -96,7 +92,7 @@ export default async function AnnouncementsPage() {
                             : "bg-emerald-400"
                       }`}
                     />
-                    <span className="capitalize text-slate-200">{tr(a.status)}</span>
+                    <span className="capitalize text-slate-200">{a.status}</span>
                   </div>,
                 ]}
               />
@@ -105,7 +101,7 @@ export default async function AnnouncementsPage() {
         </div>
         {announcements.length === 0 && (
           <div className="py-12 text-center text-sm text-slate-500">
-            {tr("No announcements yet.")}
+            No announcements yet.
           </div>
         )}
       </div>

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useTrimmedCover } from "@/lib/cover-trim";
 
 /**
  * Renders cover images in a hydration-safe way.
@@ -16,8 +15,6 @@ export function HydrationSafeImage({
 }: React.ImgHTMLAttributes<HTMLImageElement>) {
   const [mounted, setMounted] = useState(false);
   const [errored, setErrored] = useState(false);
-  /* 2026-10-18 (owner): covers with a light frame baked into the artwork are shown without it (lib/cover-trim.ts) */
-  const shown = useTrimmedCover(typeof src === "string" ? src : undefined);
 
   useEffect(() => {
     setMounted(true);
@@ -33,7 +30,7 @@ export function HydrationSafeImage({
 
   return (
     <img
-      src={shown || src}
+      src={src}
       alt={alt}
       className={className}
       onError={() => setErrored(true)}

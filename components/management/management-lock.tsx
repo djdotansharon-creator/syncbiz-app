@@ -50,12 +50,12 @@ export function ManagementLockScreen() {
   return (
     <div className="flex h-full min-h-[60vh] items-center justify-center p-6">
       <form
-        className="w-full max-w-sm rounded-[28px] border border-white/[0.07] bg-white/[0.045] p-7 text-white shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-2xl sb-anim-rise"
+        className="w-full max-w-sm border border-[color:var(--vx-line-strong,rgba(255,255,255,0.16))] bg-[#0e0e11] p-6 text-white"
         onSubmit={(e) => { e.preventDefault(); void unlock(); }}
       >
         <div className="flex items-center gap-2 text-white/60">
           <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="4" y="11" width="16" height="10" rx="1" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
-          <span className="text-[11px] font-medium uppercase tracking-[0.14em]">Management locked</span>
+          <span className="text-xs font-semibold uppercase tracking-[0.08em]">Management locked</span>
         </div>
         <h1 className="mt-3 text-xl font-semibold">Manager sign-in required</h1>
         <p className="mt-1 text-sm text-white/60">This is a station computer. Enter your manager password to open management.</p>
@@ -68,13 +68,13 @@ export function ManagementLockScreen() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={busy}
-            className="mt-1.5 w-full rounded-2xl border border-transparent bg-white/[0.07] px-4 py-3 text-base text-white transition-colors placeholder:text-white/30 focus:border-white/25 focus:bg-white/[0.1] focus:outline-none"
+            className="mt-1 w-full border-0 border-b-2 border-white/15 bg-white/[0.04] px-3 py-2.5 text-base text-white focus:border-[#0a84ff] focus:outline-none"
           />
         </label>
         {error ? <p className="mt-3 text-sm text-amber-300" role="alert">{error}</p> : null}
         <div className="mt-6 flex items-center justify-between gap-3">
           <Link href="/sources" className="text-sm text-white/60 hover:text-white">← Back to Player</Link>
-          <button type="submit" disabled={!password || busy} className="rounded-full bg-white px-6 py-2.5 text-sm font-semibold text-black transition-transform active:scale-95 disabled:opacity-40">
+          <button type="submit" disabled={!password || busy} className="bg-white px-5 py-2 text-sm font-semibold text-black disabled:opacity-40">
             {busy ? "Checking…" : "Unlock"}
           </button>
         </div>

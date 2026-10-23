@@ -101,11 +101,8 @@ async function main() {
   assert("W12 header: management entries only for managers (gear menu + pinned nav)",
     /const MANAGEMENT_NAV_KEYS = new Set<string>\(\["dashboard", "controlRoom", "access-control", "owner"\]\);/.test(shell) &&
     (shell.match(/canManage \|\| !MANAGEMENT_NAV_KEYS\.has\(item\.labelKey\)/g) ?? []).length === 2);
-  // The run-start lock lives in app-shell; the Lock button is desktop-only and now sits in the management tabs (components/management/management-tabs.tsx — the design moved it from the
-  // old header). Same invariant, so the check accepts either file (2026-10-23, merge of the redesign: a brittle location check, not a behaviour change).
-  const mgmtTabs = read("components/management/management-tabs.tsx");
   assert("W13 desktop: every app run starts locked; Lock button only in the desktop app",
-    /sessionStorage\.setItem\("vono-mgmt-run", "1"\)[\s\S]{0,200}method: "DELETE"/.test(shell) && /\{(?:isDesktopApp|desktop) \? \(\s*<button[\s\S]{0,200}Lock management on this station/.test(shell + "\n" + mgmtTabs));
+    /sessionStorage\.setItem\("vono-mgmt-run", "1"\)[\s\S]{0,200}method: "DELETE"/.test(shell) && /\{isDesktopApp \? \(\s*<button[\s\S]{0,200}Lock management on this station/.test(shell));
   console.log(`\n${pass} passed, ${fail} failed`);
 }
 void main();

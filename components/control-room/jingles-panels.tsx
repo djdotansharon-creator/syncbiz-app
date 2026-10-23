@@ -173,8 +173,8 @@ export function BranchJingles({ branch, deps, isHQ, L, sendCommandWithAck }: {
   );
 
   return (
-    <section className="cr-bp-sec">
-      <h3 className="cr-bp-title">{L.t("jg.title")}</h3>
+    <section className="border-t border-[color:var(--sb-border)] px-6 py-5">
+      <div className="text-lg font-semibold text-[var(--sb-text)]">{L.t("jg.title")}</div>
       {error ? <p className="mt-3 text-sm text-[var(--sb-text-secondary)]">{L.t("jg.loadError")}</p> : items === null ? <p className="mt-3 text-sm text-[var(--sb-text-secondary)]">{L.t("jg.loading")}</p> : (
         <>
           <p className="vx-label mt-4">{L.t("jg.ofBranch")}</p>

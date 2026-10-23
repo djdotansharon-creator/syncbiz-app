@@ -19,7 +19,6 @@ import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { getFavorites, removeFavorite as removeFav } from "@/lib/favorites-store";
 import type { UnifiedSource } from "@/lib/source-types";
 import { libraryTilePresentationForUnifiedSource } from "@/lib/player-surface/library-tile-presentation";
-import { useTr } from "@/lib/i18n/use-tr";
 
 type ViewMode = "grid" | "list";
 
@@ -222,7 +221,6 @@ function FavoritesSourceRow({
   isFavorite: boolean;
   onToggleFavorite: () => void;
 }) {
-  const tr = useTr();
   const { t } = useTranslations();
   const { playSource, stop, pause, currentSource } = usePlayback();
   const [shareOpen, setShareOpen] = useState(false);
@@ -290,7 +288,7 @@ function FavoritesSourceRow({
                   <path d="M6 6h12v12H6z" />
                 </svg>
               </NeonControlButton>
-              <NeonControlButton size="md" onClick={() => playSource(source)} active title={tr("Play")} aria-label={tr("Play")}>
+              <NeonControlButton size="md" onClick={() => playSource(source)} active title="Play" aria-label="Play">
                 <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M8 5v14l11-7L8 5z" />
                 </svg>
@@ -302,7 +300,7 @@ function FavoritesSourceRow({
               </NeonControlButton>
             </>
           ) : (
-            <NeonControlButton size="md" onClick={() => playSource(source)} title={tr("Play")} aria-label={tr("Play")}>
+            <NeonControlButton size="md" onClick={() => playSource(source)} title="Play" aria-label="Play">
               <svg className="h-5 w-5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7L8 5z" />
               </svg>

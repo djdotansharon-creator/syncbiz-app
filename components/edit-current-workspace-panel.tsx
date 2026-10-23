@@ -18,7 +18,6 @@
 import { EditPlaylistForm } from "@/components/edit-playlist-form";
 import { EditSourceForm } from "@/components/edit-source-form";
 import type { CenterModuleEditTarget } from "@/lib/center-module-context";
-import { useTr } from "@/lib/i18n/use-tr";
 
 type Props = {
   target: CenterModuleEditTarget;
@@ -26,13 +25,12 @@ type Props = {
 };
 
 export function EditCurrentWorkspacePanel({ target, onClose }: Props) {
-  const tr = useTr();
   const closeButton = (
     <button
       type="button"
       onClick={onClose}
-      aria-label={tr("Close editor")}
-      title={tr("Close")}
+      aria-label="Close editor"
+      title="Close"
       className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-900/70 text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.25)] transition hover:border-slate-500/80 hover:bg-slate-800/80 hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/45 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
     >
       <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

@@ -52,12 +52,8 @@ export type MockScheduleItem = {
   bellStyle?: JingleBellStyle;
   /** Absolute ISO date-time of the next scheduled firing. */
   scheduledAtIso?: string;
-  /** How the item repeats after firing. "weekdays" = fixed days of the week at `timeOfDay` (round 6). */
-  repeat?: "once" | "daily" | "weekly" | "weekdays";
-  /** For repeat "weekdays": days of the week (0 = Sunday … 6 = Saturday). */
-  days?: number[];
-  /** For repeat "weekdays": local wall-clock time "HH:MM". */
-  timeOfDay?: string;
+  /** How the item repeats after firing. */
+  repeat?: "once" | "daily" | "weekly";
 };
 
 export type MockHistoryEventKind =

@@ -3,7 +3,7 @@
  * - Lives in its own React root (`jingles-shell-bridge`); open/close/tab changes are local state only.
  * - Does not call transport, WS, MPV, or main-process playback — hero/dock/library roots are unrelated.
  */
-import React, { useReducer, useCallback, useState, useEffect, useLayoutEffect, useRef, type Dispatch } from "react";
+import React, { useReducer, useCallback, useState, useEffect, useRef, type Dispatch } from "react";
 import { createPortal } from "react-dom";
 import type {
   AnnouncementDraft,
@@ -29,17 +29,11 @@ import {
   SAMPLER_PADS,
 } from "./seed-data";
 import { VOICE_PRESETS_BY_LANG, voiceMenuLabel } from "./voice-presets";
-import { JINGLES_OPEN_TAB_EVENT, takeJinglesOpenTab, type JinglesOpenTab } from "./open-tab";
 import { fetchCloudPads, savePadToCloud, padsFromCloud } from "./cloud-pads";
 import { loadJingleSchedule, persistJingleSchedule, JINGLE_SCHEDULE_EVENT } from "./schedule-storage";
 import { useAudioPreview } from "./use-audio-preview";
-import { JingleCreateFlow } from "./jingle-create-flow";
-import { JingleScheduleDialog, localizeWhen, whenNextLabel } from "./jingle-schedule-dialog";
-import { jingleTint } from "./jingle-tint";
-import { GlassModal } from "@/components/glass-modal";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { VxSelect } from "@/components/management/vx-select";
-import { useTr } from "@/lib/i18n/use-tr";
 
 type State = {
   drawerOpen: boolean;
@@ -82,9 +76,6 @@ function bellUrlFor(style: JingleBellStyle | undefined): string | null {
   if (!style || style === "off") return null;
   return `/api/jingles/bell/${style}`;
 }
-
-/** the built-in sample rows (no audio) in the Library tab — hidden (owner 2026-10-18: confusing); flip to bring them back */
-const SHOW_SAMPLE_LIBRARY = false;
 
 const initialDraft: AnnouncementDraft = {
   title: "",
@@ -279,7 +270,6 @@ type DrawerChromeProps = {
 
 /** Inner JINGLES CONTROL panel (mock) — shared by desktop rail and web Command Pads. */
 function JinglesDrawerChrome({ state, dispatch, onClose }: DrawerChromeProps): React.ReactElement {
-  const tr = useTr();
   return (
     <>
       <header className="jc-drawer-header">
@@ -380,11 +370,11 @@ function JinglesDrawerChrome({ state, dispatch, onClose }: DrawerChromeProps): R
         {state.tab === "create" ? (
           <div className="jc-form">
             <label className="jc-field">
-              <span>{tr("Title")}</span>
+              <span>Title</span>
               <input
                 value={state.draft.title}
                 onChange={(e) => dispatch({ type: "DRAFT_PATCH", patch: { title: e.target.value } })}
-                placeholder={tr("e.g. Weekend fresh produce")}
+                placeholder="e.g. Weekend fresh produce"
               />
             </label>
             <label className="jc-field">
@@ -844,15 +834,43 @@ function JcModal({
   footer?: React.ReactNode;
   width?: string;
 }): React.ReactElement | null {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
-  const px = /rem$/.test(width) ? parseFloat(width) * 16 : parseFloat(width) || 460;
-  // the app's own glass dialog (same as share / edit) instead of the old navy box
-  return (
-    <GlassModal title="Jingles" subtitle={title} width={Math.min(Math.round(px), 560)} onClose={onClose} footer={footer}>
-      {children}
-      <div style={{ height: 10 }} />
-    </GlassModal>
+
+  const body = (
+    <div className="jc-modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="jc-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        style={{ width: `min(${width}, calc(100vw - 2rem))` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="jc-modal-header">
+          <h3 className="jc-modal-title">{title}</h3>
+          <button type="button" className="jc-icon-btn" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </header>
+        <div className="jc-modal-body">{children}</div>
+        {footer ? <footer className="jc-modal-footer">{footer}</footer> : null}
+      </div>
+    </div>
   );
+
+  if (typeof document !== "undefined") {
+    return createPortal(body, document.body);
+  }
+  return body;
 }
 
 // ─── TriggerPads — bottom row, controller-style ─────────────────────────────
@@ -876,11 +894,10 @@ function TriggerPads({
   /** A library item was dropped on a pad — assigns via the existing handler. */
   onAssignDrop: (padId: string, payload: JingleDragPayload) => void;
 }): React.ReactElement {
-  const tr = useTr();
   const [dropPadId, setDropPadId] = useState<string | null>(null);
   return (
-    <section className="jc-trigger-section" aria-label={tr("Jingle trigger pads")}>
-      <p className="jc-rail-head jcx-quickpads-head">{tr("Quick Pads")}</p>
+    <section className="jc-trigger-section" aria-label="Jingle trigger pads">
+      <p className="jc-rail-head jcx-quickpads-head">Quick Pads</p>
       <div className="jc-trigger-grid">
         {pads.map((p) => {
           const assigned = Boolean(p.url);
@@ -918,8 +935,8 @@ function TriggerPads({
                   isFlashing ? "jc-trigger-pad--playing" : "",
                 ].filter(Boolean).join(" ")}
                 onClick={() => (assigned ? onPlay(p) : onEdit(p.id))}
-                title={assigned ? `${tr("Play")}: ${p.label}${schedTooltip}` : tr("Click to assign")}
-                aria-label={assigned ? `${tr("Play")} ${p.label}` : tr("Assign source to {label}", { label: p.label })}
+                title={assigned ? `Play: ${p.label}${schedTooltip}` : "Click to assign"}
+                aria-label={assigned ? `Play ${p.label}` : `Assign source to ${p.label}`}
               >
                 <span
                   className={`jc-pad-led ${
@@ -933,15 +950,15 @@ function TriggerPads({
                 />
                 <span className="jc-trigger-pad-label">{p.label}</span>
                 {/* display only (2026-10-12): a short state line + an LED bar along the bottom edge */}
-                <span className="jcx-pad-sub" aria-hidden>{isFlashing ? tr("On air") : assigned ? (isScheduled ? tr("Ready · scheduled") : tr("Ready")) : tr("Tap to assign")}</span>
+                <span className="jcx-pad-sub" aria-hidden>{isFlashing ? "On air" : assigned ? (isScheduled ? "Ready · scheduled" : "Ready") : "Tap to assign"}</span>
                 <span className="jcx-pad-bar" aria-hidden />
                 {isScheduled ? <span className="jc-pad-sched-dot" aria-hidden /> : null}
               </button>
               <button
                 type="button"
                 className="jc-trigger-pad-edit"
-                title={tr("Edit pad")}
-                aria-label={`${tr("Edit")} ${p.label}`}
+                title="Edit pad"
+                aria-label={`Edit ${p.label}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   onEdit(p.id);
@@ -979,17 +996,16 @@ function ResultStrip({
   previewMode?: boolean;
   isPreviewing?: boolean;
 }): React.ReactElement {
-  const tr = useTr();
-  const playLabel = previewMode ? (isPreviewing ? `■ ${tr("Stop")}` : `▶ ${tr("Preview")}`) : `▶ ${tr("Play")}`;
+  const playLabel = previewMode ? (isPreviewing ? "■ Stop" : "▶ Preview") : "▶ Play";
   const playTitle = !asset.url
-    ? tr("No audio to play")
+    ? "No audio to play"
     : previewMode
-      ? tr("Preview this audio in your browser (not On-Air)")
-      : tr("Play On-Air (ducks store music)");
+      ? "Preview this audio in your browser (not On-Air)"
+      : "Play On-Air (ducks store music)";
   return (
     <div className="jc-result-strip">
       <div className="jc-result-strip-info">
-        <span className="jc-result-strip-title">{asset.title || tr("Untitled")}</span>
+        <span className="jc-result-strip-title">{asset.title || "Untitled"}</span>
         <span className="jc-result-strip-meta">
           {asset.kind} · {asset.durationLabel || "—"}
         </span>
@@ -1010,7 +1026,7 @@ function ResultStrip({
           disabled={!asset.url}
           onClick={onAssign}
         >
-          {tr("Assign")}
+          Assign
         </button>
         <button
           type="button"
@@ -1018,21 +1034,21 @@ function ResultStrip({
           disabled={!asset.url}
           onClick={onSchedule}
         >
-          {tr("Schedule")}
+          Schedule
         </button>
         <button
           type="button"
           className="jc-btn jc-btn--ghost jc-btn--small"
           onClick={onSave}
         >
-          {tr("Save")}
+          Save
         </button>
         <button
           type="button"
           className="jc-icon-btn jc-icon-btn--inline"
           onClick={onDismiss}
-          aria-label={tr("Dismiss result")}
-          title={tr("Dismiss")}
+          aria-label="Dismiss result"
+          title="Dismiss"
         >
           ✕
         </button>
@@ -1057,25 +1073,12 @@ export type StudioControlRoomSurface = {
 };
 
 export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () => void; controlRoom?: StudioControlRoomSurface }): React.ReactElement {
-  const tr = useTr();
   const isCR = !!controlRoom;
   // Core state
   const [pads, setPads] = useState<SamplerPadItem[]>(() => loadPads());
   const [flashPadId, setFlashPadId] = useState<string | null>(null);
   const [resultCard, setResultCard] = useState<JingleAsset | null>(null);
-  const [activeTab, setActiveTab] = useState<JinglesOpenTab>(() => takeJinglesOpenTab() ?? "create");
-  // "All jingles" from the queue pane while the console is already open
-  useEffect(() => {
-    const on = (e: Event) => {
-      const t = (e as CustomEvent<JinglesOpenTab>).detail;
-      if (t === "create" || t === "library" || t === "schedule") {
-        takeJinglesOpenTab();
-        setActiveTab(t);
-      }
-    };
-    window.addEventListener(JINGLES_OPEN_TAB_EVENT, on);
-    return () => window.removeEventListener(JINGLES_OPEN_TAB_EVENT, on);
-  }, []);
+  const [activeTab, setActiveTab] = useState<"create" | "library" | "schedule">("create");
   const [draft, setDraft] = useState<AnnouncementDraft>({ ...initialDraft });
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -1116,20 +1119,11 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
 
   // Load the workspace-authoritative cloud library on open. localStorage is only a fallback +
   // a one-time import source — it is never overwritten here, so existing jingles are preserved.
-  // `aliveRef` (not a per-effect "cancelled" flag): in React StrictMode (dev) the effect is run, cleaned up and run again, and the
-  // once-guard below skips the second run — a per-effect flag was already "cancelled" by then, so the cloud library / pads NEVER
-  // loaded in dev and the Library tab always said "Nothing saved yet". An answer is dropped only if the component really unmounted.
-  const aliveRef = useRef(true);
-  useEffect(() => {
-    aliveRef.current = true;
-    return () => {
-      aliveRef.current = false;
-    };
-  }, []);
   const cloudLibLoadedRef = useRef(false);
   useEffect(() => {
     if (cloudLibLoadedRef.current) return;
     cloudLibLoadedRef.current = true;
+    let cancelled = false;
     void (async () => {
       try {
         let cloud = await fetchCloudLibrary();
@@ -1143,12 +1137,13 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
           }
           try { cloud = await fetchCloudLibrary(); } catch { /* keep pre-import list */ }
         }
-        if (aliveRef.current) setSavedAssets(cloud);
+        if (!cancelled) setSavedAssets(cloud);
       } catch {
         // Cloud unreachable: fall back to the local list; never blank out existing jingles.
-        if (aliveRef.current) setSavedAssets(loadLibrary());
+        if (!cancelled) setSavedAssets(loadLibrary());
       }
     })();
+    return () => { cancelled = true; };
   }, []);
 
   // Load the shared cloud pads on open (same pattern as the library). localStorage is only a
@@ -1157,6 +1152,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
   useEffect(() => {
     if (cloudPadsLoadedRef.current) return;
     cloudPadsLoadedRef.current = true;
+    let cancelled = false;
     void (async () => {
       try {
         let cloud = await fetchCloudPads();
@@ -1170,12 +1166,13 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
           }
           try { cloud = await fetchCloudPads(); } catch { /* keep pre-import list */ }
         }
-        if (aliveRef.current) setPads(padsFromCloud(cloud));
+        if (!cancelled) setPads(padsFromCloud(cloud));
       } catch {
         // Cloud unreachable: keep the local pads; never blank the board.
-        if (aliveRef.current) setPads(loadPads());
+        if (!cancelled) setPads(loadPads());
       }
     })();
+    return () => { cancelled = true; };
   }, []);
 
   // Persist jingle schedule items (payload + timing) so the root-level
@@ -1254,29 +1251,11 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
   );
 
   // Modal state — only one open at a time in practice
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [aiIntent, setAiIntent] = useState("");
   const [editPadId, setEditPadId] = useState<string | null>(null);
   const [assignForAsset, setAssignForAsset] = useState<JingleAsset | null>(null);
   const [scheduleForAsset, setScheduleForAsset] = useState<JingleAsset | null>(null);
-  const [scheduleNow, setScheduleNow] = useState(0);
-  // the Control Room's Studio form (upstream) still has the "AI help" script helper; the player-side flow has its own ideas
-  const [aiModalOpen, setAiModalOpen] = useState(false);
-  const [aiIntent, setAiIntent] = useState("");
-  const wsWrapRef = useRef<HTMLDivElement>(null);
-  const [scheduleInline, setScheduleInline] = useState<{ t: number; r: number; b: number; l: number } | null>(null);
-  /** the schedule screen grows OUT OF the thing that was pressed (a jingle tile / the Schedule button) to fill the workspace */
-  const openSchedule = (a: JingleAsset, from?: HTMLElement | null) => {
-    const wrap = wsWrapRef.current?.getBoundingClientRect();
-    const src = from?.getBoundingClientRect();
-    setScheduleInline(
-      wrap && src
-        ? { t: Math.max(0, src.top - wrap.top), r: Math.max(0, wrap.right - src.right), b: Math.max(0, wrap.bottom - src.bottom), l: Math.max(0, src.left - wrap.left) }
-        : wrap
-          ? { t: wrap.height / 2 - 20, r: wrap.width / 2 - 20, b: wrap.height / 2 - 20, l: wrap.width / 2 - 20 }
-          : null,
-    );
-    setScheduleNow(Date.now());
-    setScheduleForAsset(a);
-  };
 
   // ── Pad operations ─────────────────────────────────────────────────────────
 
@@ -1351,7 +1330,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
     }
     setGenerateError(null);
     setGenerating(true);
-    const title = draft.title.trim() || text.split(/\s+/).slice(0, 4).join(" ") || "Untitled jingle";
+    const title = draft.title || "Untitled jingle";
     try {
       const res = await fetch("/api/jingles/generate", {
         method: "POST",
@@ -1424,40 +1403,22 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
     }
   }, [resultCard, controlRoom]);
 
-  /* the tab bar glides under the active tab (round 7) */
-  const wsTabsRef = useRef<HTMLElement>(null);
-  useLayoutEffect(() => {
-    const root = wsTabsRef.current;
-    if (!root) return;
-    const place = () => {
-      const el = root.querySelector<HTMLElement>('[aria-selected="true"]');
-      if (!el) return;
-      root.style.setProperty("--bar-x", `${el.offsetLeft}px`);
-      root.style.setProperty("--bar-w", `${el.offsetWidth}px`);
-      root.dataset.ready = "1";
-    };
-    place();
-    const ro = new ResizeObserver(place);
-    ro.observe(root);
-    return () => ro.disconnect();
-  }, [activeTab]);
-
   const editingPad = editPadId ? pads.find((p) => p.id === editPadId) ?? null : null;
 
   return (
-    <div className={`jc-workspace-panel sb-anim-rise${isCR ? " jc-cr" : ""}`}>
+    <div className="jc-workspace-panel sb-anim-rise">
       {/* ── Header: title + tiny status LEDs + close ───────────────────── */}
       <header className="jc-ws-header">
         <div className="jc-ws-header-title">
-          <h2 className="jc-drawer-title">{tr("Jingles")}</h2>
+          <h2 className="jc-drawer-title">Jingles</h2>
         </div>
-        <div className="jc-ws-header-status-mini" aria-label={tr("System status")}>
+        <div className="jc-ws-header-status-mini" aria-label="System status">
           <span
             className={`jc-status-led jc-status-led--${branchStatus === "online" ? "ok" : "err"}`}
             title={`Branch: ${branchStatus}`}
             aria-hidden
           />
-          <span className="jc-status-mini-label">{tr("Branch")}</span>
+          <span className="jc-status-mini-label">Branch</span>
           <span className="jc-status-mini-sep" aria-hidden />
           <span
             className={`jc-status-led jc-status-led--${
@@ -1466,13 +1427,13 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
             title={`Engine: ${engineStatus}`}
             aria-hidden
           />
-          <span className="jc-status-mini-label">{tr("Engine")}</span>
+          <span className="jc-status-mini-label">Engine</span>
         </div>
         <button
           type="button"
           className="jc-icon-btn"
           onClick={onClose}
-          aria-label={tr("Close Jingles Control")}
+          aria-label="Close Jingles Control"
         >
           ✕
         </button>
@@ -1483,7 +1444,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
         {/* Content scroll area: tabs + panels */}
         <div className="jc-ws-content">
           {!isCR ? (
-          <nav ref={wsTabsRef} className="jc-ws-tabs" role="tablist">
+          <nav className="jc-ws-tabs" role="tablist">
             {(
               [
                 ["create", "Create"],
@@ -1499,16 +1460,15 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                 className={`jc-ws-tab ${activeTab === id ? "jc-ws-tab--active" : ""}`}
                 onClick={() => setActiveTab(id)}
               >
-                {tr(label)}
+                {label}
               </button>
             ))}
-            <span className="jc-ws-tab-bar" aria-hidden />
           </nav>
 
           ) : null}
 
-          {/* ── Quick Pads — only where pads are managed (the Library tab); Create stays clean ── */}
-          {!isCR && activeTab === "library" ? (
+          {/* ── Quick Pads — horizontal quick-action strip (top) ────── */}
+          {!isCR ? (
           <div className="jcx-quickpads">
             <TriggerPads
               pads={pads}
@@ -1531,42 +1491,41 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
               }
             />
           </div>
+
           ) : null}
 
           {/* Active workspace — the ONLY scroll region; header/tabs/pads stay fixed above */}
-          <div ref={wsWrapRef} className="jcx-ws-wrap">
           <div className="jcx-active-workspace">
-          {/* ── CREATE — three calm steps (words → voice → result), see jingle-create-flow.tsx ── */}
+          {/* ── CREATE — compact: settings bar · script hero + result · action bar ── */}
           {activeTab === "create" ? (
-            isCR ? (
             <div className="jcx-create jc-form">
               {/* Compact settings bar — one row of compact selects (same values/handlers) */}
               <div className="jcx-settings-bar">
                 <label className="jc-field jcx-set jcx-set--title">
-                  <span>{tr("Title")}</span>
+                  <span>Title</span>
                   <input
                     value={draft.title}
                     onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
-                    placeholder={tr("e.g. Weekend fresh produce")}
+                    placeholder="e.g. Weekend fresh produce"
                   />
                 </label>
                 {/* VxSelect (owner 2026-10-13): dark list instead of the native white popup — same values, same setDraft logic */}
                 <div className="jc-field jcx-set">
-                  <span id="jcx-set-type">{tr("Type")}</span>
+                  <span id="jcx-set-type">Type</span>
                   <VxSelect
                     size="sm"
                     labelledBy="jcx-set-type"
                     value={draft.kind}
                     options={[
-                      { value: "jingle", label: tr("Jingle") },
-                      { value: "announcement", label: tr("Announcement") },
-                      { value: "broadcast", label: tr("Broadcast") },
+                      { value: "jingle", label: "Jingle" },
+                      { value: "announcement", label: "Announcement" },
+                      { value: "broadcast", label: "Broadcast" },
                     ]}
                     onChange={(v) => setDraft((d) => ({ ...d, kind: v as AnnouncementDraft["kind"] }))}
                   />
                 </div>
                 <div className="jc-field jcx-set">
-                  <span id="jcx-set-lang">{tr("Language")}</span>
+                  <span id="jcx-set-lang">Language</span>
                   <VxSelect
                     size="sm"
                     labelledBy="jcx-set-lang"
@@ -1585,7 +1544,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                   />
                 </div>
                 <div className="jc-field jcx-set">
-                  <span id="jcx-set-voice">{tr("Voice")}</span>
+                  <span id="jcx-set-voice">Voice</span>
                   <VxSelect
                     size="sm"
                     labelledBy="jcx-set-voice"
@@ -1596,27 +1555,27 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                 </div>
                 {draft.language !== "he" ? (
                   <div className="jc-field jcx-set">
-                    <span id="jcx-set-speed">{tr("Speed")}</span>
+                    <span id="jcx-set-speed">Speed</span>
                     <VxSelect
                       size="sm"
                       labelledBy="jcx-set-speed"
                       value={draft.speed}
                       options={[
-                        { value: "slow", label: tr("Slow") },
-                        { value: "normal", label: tr("Normal") },
-                        { value: "fast", label: tr("Fast") },
+                        { value: "slow", label: "Slow" },
+                        { value: "normal", label: "Normal" },
+                        { value: "fast", label: "Fast" },
                       ]}
                       onChange={(v) => setDraft((d) => ({ ...d, speed: v as JingleSpeed }))}
                     />
                   </div>
                 ) : null}
                 <div className="jc-field jcx-set">
-                  <span id="jcx-set-bell">{tr("Bell")}</span>
+                  <span id="jcx-set-bell">Bell</span>
                   <VxSelect
                     size="sm"
                     labelledBy="jcx-set-bell"
                     value={draft.preRoll ? draft.bellStyle : "off"}
-                    options={BELL_PRESETS.map((b) => ({ ...b, label: tr(b.label) }))}
+                    options={BELL_PRESETS}
                     onChange={(v) =>
                       setDraft((d) => ({
                         ...d,
@@ -1634,26 +1593,26 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                   <textarea
                     value={draft.body}
                     onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
-                    placeholder={draft.language === "he" ? "מה על הקריין להגיד?" : tr("What should the announcer say?")}
+                    placeholder={draft.language === "he" ? "מה על הקריין להגיד?" : "What should the announcer say?"}
                     dir={draft.language === "he" ? "rtl" : "ltr"}
                   />
                   <button
                     type="button"
                     className="jc-script-ai-btn"
                     onClick={() => setAiModalOpen(true)}
-                    title={tr("Let AI write this")}
-                    aria-label={tr("Open AI compose")}
+                    title="Let AI write this"
+                    aria-label="Open AI compose"
                   >
                     <span className="jc-script-ai-btn-spark" aria-hidden>✦</span>
                     <span>AI</span>
                   </button>
                 </div>
 
-                <aside className="jcx-result-pane" aria-label={tr("Result")}>
+                <aside className="jcx-result-pane" aria-label="Result">
                   {resultCard ? (
                     <div className="jcx-result">
                       <div className="jcx-result-head">
-                        <span className="jcx-result-title">{resultCard.title || tr("Untitled")}</span>
+                        <span className="jcx-result-title">{resultCard.title || "Untitled"}</span>
                         <span className="jcx-result-meta">
                           {resultCard.kind} · {resultCard.durationLabel || "—"}
                         </span>
@@ -1668,9 +1627,9 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                         onClick={() => {
                           if (!isDesktop) preview.toggle(resultCard.url);
                         }}
-                        title={isDesktop ? tr("Preview isn't available in the desktop app yet — use a browser or phone to preview") : tr("Preview in your browser (not On-Air)")}
+                        title={isDesktop ? "Preview isn't available in the desktop app yet — use a browser or phone to preview" : "Preview in your browser (not On-Air)"}
                       >
-                        {!isDesktop && preview.previewUrl === resultCard.url ? `■ ${tr("Stop")}` : `▶ ${tr("Preview")}`}
+                        {!isDesktop && preview.previewUrl === resultCard.url ? "■ Stop" : "▶ Preview"}
                       </button>
                       {/* local On-Air never on the Control Room surface (HQ plays only to an explicit target) */}
                       {isDesktop && !isCR ? (
@@ -1679,9 +1638,9 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                           className="jcx-result-play"
                           disabled={!resultCard.url}
                           onClick={handleResultPlay}
-                          title={tr("Play On-Air — the branch hears this (ducks store music)")}
+                          title="Play On-Air — the branch hears this (ducks store music)"
                         >
-                          📡 {tr("On-Air")}
+                          📡 On-Air
                         </button>
                       ) : null}
                       <button
@@ -1691,8 +1650,8 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                           preview.stop();
                           setResultCard(null);
                         }}
-                        aria-label={tr("Dismiss result")}
-                        title={tr("Dismiss")}
+                        aria-label="Dismiss result"
+                        title="Dismiss"
                       >
                         ✕
                       </button>
@@ -1701,7 +1660,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                   ) : (
                     <div className="jcx-result-empty">
                       <span className="jcx-result-empty-icon" aria-hidden>🎙</span>
-                      <p>{tr("Your announcement will appear here")}</p>
+                      <p>Your announcement will appear here</p>
                     </div>
                   )}
                 </aside>
@@ -1719,105 +1678,103 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                   disabled={generating}
                   onClick={() => void handleGenerate()}
                 >
-                  {generating ? tr("Generating…") : tr("Generate Announcement")}
+                  {generating ? "Generating…" : "Generate Announcement"}
                 </button>
                 {resultCard ? (
                   <>
-                    <button type="button" className="jc-btn jc-btn--ghost" onClick={handleResultSaveToLibrary}>{tr("Save")}</button>
-                    {!isCR ? <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setAssignForAsset(resultCard)}>{tr("Add to Pad")}</button> : null}
-                    {!isCR ? <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setScheduleForAsset(resultCard)}>{tr("Schedule")}</button> : null}
+                    <button type="button" className="jc-btn jc-btn--ghost" onClick={handleResultSaveToLibrary}>Save</button>
+                    {!isCR ? <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setAssignForAsset(resultCard)}>Add to Pad</button> : null}
+                    {!isCR ? <button type="button" className="jc-btn jc-btn--ghost" onClick={() => setScheduleForAsset(resultCard)}>Schedule</button> : null}
                   </>
                 ) : null}
               </div>
             </div>
-            ) : (
-            <JingleCreateFlow
-              draft={draft}
-              setDraft={setDraft}
-              generating={generating}
-              error={generateError}
-              onGenerate={() => void handleGenerate()}
-              result={resultCard}
-              isDesktop={isDesktop}
-              previewing={!!resultCard && preview.previewUrl === resultCard.url}
-              onPlay={isDesktop ? handleResultPlay : () => resultCard && preview.toggle(resultCard.url)}
-              onSave={() => void handleResultSaveToLibrary()}
-              onAddToPad={() => resultCard && setAssignForAsset(resultCard)}
-              onSchedule={(el) => resultCard && openSchedule(resultCard, el)}
-              onNew={() => {
-                preview.stop();
-                setResultCard(null);
-                setGenerateError(null);
-                setDraft({ ...initialDraft });
-              }}
-            />
-            )
           ) : null}
 
           {/* ── LIBRARY ────────────────────────────────────────────── */}
           {activeTab === "library" ? (
             <div className="jc-ws-panel">
               {savedAssets.length > 0 ? (
-                <div className="jcl-wrap">
-                  <div className="jcl-grid">
-                    {savedAssets.map((a, i) => {
-                      const on = !isDesktop && preview.previewUrl === a.url;
-                      return (
+                <>
+                  <p className="jc-ws-section-label jc-ws-section-label--accent">
+                    Saved this session
+                  </p>
+                  <ul className="jc-lib">
+                    {savedAssets.map((a) => (
+                      <li key={a.id} className="jc-lib-row">
                         <div
-                          key={a.id}
-                          className={`jcl-tile${on ? " is-on" : ""}`}
-                          style={{ ["--d" as string]: `${Math.min(i, 12) * 40}ms`, ["--c" as string]: jingleTint(a.id) } as React.CSSProperties}
+                          className="jcx-lib-drag"
                           draggable={!!a.url}
                           onDragStart={(e) => startJingleDrag(e, { url: a.url, title: a.title, preRoll: a.preRoll, bellStyle: a.bellStyle })}
-                          title={a.url ? tr("Drag onto a Quick Pad") : undefined}
+                          title={a.url ? "Drag onto a Quick Pad" : undefined}
                         >
+                          <div className="jc-lib-title">{a.title}</div>
+                          <div className="jc-lib-meta">
+                            {a.kind} · {a.durationLabel}
+                          </div>
+                        </div>
+                        <div className="jc-lib-actions">
+                          {/* Preview = LOCAL only, never broadcasts (unavailable in the desktop app). */}
                           <button
                             type="button"
-                            className="jcl-hit"
+                            className="jc-btn jc-btn--small jc-btn--primary"
+                            disabled={!a.url || isDesktop}
+                            onClick={() => {
+                              if (!isDesktop) preview.toggle(a.url);
+                            }}
+                            title={isDesktop ? "Preview isn't available in the desktop app yet" : "Preview in browser (not On-Air)"}
+                          >
+                            {!isDesktop && preview.previewUrl === a.url ? "■" : "▶"}
+                          </button>
+                          {isDesktop ? (
+                            <button
+                              type="button"
+                              className="jc-btn jc-btn--small jc-btn--ghost"
+                              disabled={!a.url}
+                              onClick={() => fireOnAir(a.url)}
+                              title="Play On-Air — the branch hears this"
+                            >
+                              📡 On-Air
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="jc-btn jc-btn--small jc-btn--ghost"
                             disabled={!a.url}
-                            onClick={() => (isDesktop ? fireOnAir(a.url) : preview.toggle(a.url))}
-                            aria-label={`${on ? tr("Stop") : tr("Play")} ${a.title}`}
-                          />
-                          <span className="jcl-play" aria-hidden>
-                            {on ? (
-                              <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.6" strokeLinejoin="round"><rect x="7" y="7" width="10" height="10" rx="2.4" /></svg>
-                            ) : (
-                              <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.6" strokeLinejoin="round"><path d="M8.5 5.5v13l10.5-6.5L8.5 5.5z" /></svg>
-                            )}
-                          </span>
-                          <div className="jcl-acts">
-                            <button type="button" disabled={!a.url} title={tr("Add to a pad")} aria-label={tr("Add {title} to a pad", { title: a.title })} onClick={() => setAssignForAsset(a)}>
-                              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="4" y="4" width="6.5" height="6.5" rx="1.8" /><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.8" /><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.8" /><path d="M16.75 14v6M13.75 17h6" /></svg>
-                            </button>
-                            <button type="button" disabled={!a.url} title={tr("Schedule")} aria-label={`${tr("Schedule")} ${a.title}`} onClick={(e) => openSchedule(a, e.currentTarget.closest(".jcl-tile") as HTMLElement | null)}>
-                              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 1.8" /></svg>
-                            </button>
-                            <button type="button" title={tr("Delete from library")} aria-label={`${tr("Delete")} ${a.title}`} onClick={() => setSavedAssets((prev) => prev.filter((x) => x.id !== a.id))}>
-                              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 7h16M9.5 7V4.8h5V7M6.5 7l.8 12.2h9.4L17.5 7" /></svg>
-                            </button>
-                          </div>
-                          <span className="jcl-title" dir="auto">{a.title}</span>
-                          <span className="jcl-meta">{a.durationLabel && a.durationLabel !== "—" ? a.durationLabel : ""}</span>
+                            onClick={() => setAssignForAsset(a)}
+                          >
+                            Add to Pad
+                          </button>
+                          <button
+                            type="button"
+                            className="jc-btn jc-btn--small jc-btn--ghost"
+                            disabled={!a.url}
+                            onClick={() => setScheduleForAsset(a)}
+                          >
+                            Schedule
+                          </button>
+                          <button
+                            type="button"
+                            className="jc-btn jc-btn--small jc-btn--danger"
+                            onClick={() =>
+                              setSavedAssets((prev) => prev.filter((x) => x.id !== a.id))
+                            }
+                            title="Delete from library"
+                            aria-label={`Delete ${a.title}`}
+                          >
+                            ✕
+                          </button>
                         </div>
-                      );
-                    })}
-                  </div>
-                  <button type="button" className="jcl-new" onClick={() => setActiveTab("create")}>
-                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
-                    {tr("New jingle")}
-                  </button>
-                </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="jc-ws-divider" />
+                </>
               ) : null}
 
-              {savedAssets.length === 0 ? (
-                <div className="jc-empty">
-                  <p>{tr("Nothing saved yet.")}</p>
-                  <button type="button" className="sb-dj-pill" onClick={() => setActiveTab("create")}>{tr("Create a jingle")}</button>
-                </div>
-              ) : null}
-              {SHOW_SAMPLE_LIBRARY ? <p className="jc-ws-section-label">{tr("Sample library")}</p> : null}
+              <p className="jc-ws-section-label">Sample library</p>
               <ul className="jc-lib">
-                {(SHOW_SAMPLE_LIBRARY ? MOCK_LIBRARY_ITEMS : []).map((item) => {
+                {MOCK_LIBRARY_ITEMS.map((item) => {
                   const itemAsset: JingleAsset = {
                     id: item.id,
                     title: item.title,
@@ -1834,7 +1791,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                         className="jcx-lib-drag"
                         draggable={!!itemAsset.url}
                         onDragStart={(e) => startJingleDrag(e, { url: itemAsset.url, title: itemAsset.title, preRoll: itemAsset.preRoll, bellStyle: itemAsset.bellStyle })}
-                        title={itemAsset.url ? tr("Drag onto a Quick Pad") : undefined}
+                        title={itemAsset.url ? "Drag onto a Quick Pad" : undefined}
                       >
                         <div className="jc-lib-title">
                           {item.favorite ? (
@@ -1854,14 +1811,14 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                           className="jc-btn jc-btn--small jc-btn--ghost"
                           onClick={() => setAssignForAsset(itemAsset)}
                         >
-                          {tr("Add to Pad")}
+                          Add to Pad
                         </button>
                         <button
                           type="button"
                           className="jc-btn jc-btn--small jc-btn--ghost"
-                          onClick={() => openSchedule(itemAsset)}
+                          onClick={() => setScheduleForAsset(itemAsset)}
                         >
-                          {tr("Schedule")}
+                          Schedule
                         </button>
                       </div>
                     </li>
@@ -1873,58 +1830,34 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
 
           {/* ── SCHEDULE ───────────────────────────────────────────── */}
           {activeTab === "schedule" ? (
-            <div className="jc-ws-panel jcs-panel">
-              {schedItems.length > 0 ? (
-                <ul className="jcs-list">
-                  {schedItems.map((si, i) => {
-                    const time = si.timeOfDay ?? si.whenLabel.match(/(\d{1,2}:\d{2})\s*$/)?.[1] ?? "";
-                    const next = whenNextLabel(si);
-                    return (
-                      <li key={si.id} className="jcs-row" style={{ ["--d" as string]: `${Math.min(i, 10) * 45}ms` } as React.CSSProperties}>
-                        <span className="jcs-time">{time || "—"}</span>
-                        <span className="jcs-text">
-                          <b dir="auto">{si.label}</b>
-                          <i>{localizeWhen(si.whenLabel.replace(/\s*·?\s*\d{1,2}:\d{2}\s*$/, "") || si.repeatLabel, tr)}</i>
-                        </span>
-                        {next ? <span className="jcs-next">{localizeWhen(next, tr)}</span> : null}
-                        <button
-                          type="button"
-                          className="jcs-x"
-                          onClick={() => setSchedItems((prev) => prev.filter((x) => x.id !== si.id))}
-                          title={tr("Remove schedule")}
-                          aria-label={`${tr("Remove schedule")} ${si.label}`}
-                        >
-                          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden><path d="M4 4l8 8M12 4l-8 8" /></svg>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <div className="jc-empty jcs-empty">
-                  <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 1.8" /></svg>
-                  <p>{tr("Nothing is scheduled yet.")}</p>
-                  <span>{tr("Pick a jingle in the Library and press the clock.")}</span>
-                  <button type="button" className="sb-dj-pill" onClick={() => setActiveTab("library")}>{tr("Open the Library")}</button>
-                </div>
-              )}
+            <div className="jc-ws-panel">
+              <p className="jc-hint">
+                Scheduled items appear here. Use <strong>Schedule</strong> from the Library or
+                Result to add one.
+              </p>
+              <ul className="jc-sched-list">
+                {schedItems.map((s) => (
+                  <li key={s.id} className="jc-sched-row">
+                    <span className="jc-sched-text">
+                      <strong>{s.label}</strong> — {s.whenLabel} · {s.repeatLabel} ·{" "}
+                      {s.targetLabel}
+                    </span>
+                    <button
+                      type="button"
+                      className="jc-btn jc-btn--small jc-btn--danger"
+                      onClick={() => setSchedItems((prev) => prev.filter((x) => x.id !== s.id))}
+                      title="Remove scheduled item"
+                      aria-label={`Remove scheduled ${s.label}`}
+                    >
+                      ✕
+                    </button>
+                  </li>
+                ))}
+                {schedItems.length === 0 ? (
+                  <li className="jc-history-empty">No scheduled items yet.</li>
+                ) : null}
+              </ul>
             </div>
-          ) : null}
-          </div>
-          {scheduleForAsset ? (
-            <JingleScheduleDialog
-              jingle={{
-                id: scheduleForAsset.id,
-                label: scheduleForAsset.title,
-                url: scheduleForAsset.url,
-                color: "#d1d1d6",
-                bell: scheduleForAsset.preRoll ? (scheduleForAsset.bellStyle ?? "ding") : null,
-              }}
-              origin={null}
-              inline={scheduleInline ?? undefined}
-              nowMs={scheduleNow}
-              onClose={() => setScheduleForAsset(null)}
-            />
           ) : null}
           </div>
         </div>
@@ -1932,19 +1865,17 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
       </div>
 
       {/* ── Modals ────────────────────────────────────────────────── */}
-      {isCR ? (
-        <AIComposeModal
-          open={aiModalOpen}
-          intent={aiIntent}
-          onIntentChange={setAiIntent}
-          onUse={(text) => {
-            setDraft((d) => ({ ...d, body: text }));
-            setAiModalOpen(false);
-            setActiveTab("create");
-          }}
-          onClose={() => setAiModalOpen(false)}
-        />
-      ) : null}
+      <AIComposeModal
+        open={aiModalOpen}
+        intent={aiIntent}
+        onIntentChange={setAiIntent}
+        onUse={(text) => {
+          setDraft((d) => ({ ...d, body: text }));
+          setAiModalOpen(false);
+          setActiveTab("create");
+        }}
+        onClose={() => setAiModalOpen(false)}
+      />
 
       <PadEditModal
         pad={editingPad}
@@ -1966,6 +1897,34 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
         onClose={() => setAssignForAsset(null)}
       />
 
+      <ScheduleAssetModal
+        asset={scheduleForAsset}
+        onConfirm={(scheduledAt, repeat, target) => {
+          if (!scheduleForAsset) return;
+          // `datetime-local` produces a wall-clock string ("2026-04-21T09:00") which
+          // `new Date(...)` interprets in the browser's local zone — exactly what we
+          // want for "play at 9 AM locally".
+          const iso = new Date(scheduledAt).toISOString();
+          const rep = repeat === "daily" || repeat === "weekly" ? repeat : "once";
+          setSchedItems((prev) => [
+            {
+              id: hid(),
+              label: scheduleForAsset.title,
+              whenLabel: new Date(scheduledAt).toLocaleString(),
+              repeatLabel: repeat.charAt(0).toUpperCase() + repeat.slice(1),
+              targetLabel: target,
+              url: scheduleForAsset.url,
+              preRoll: scheduleForAsset.preRoll,
+              bellStyle: scheduleForAsset.bellStyle ?? "ding",
+              scheduledAtIso: iso,
+              repeat: rep,
+            },
+            ...prev,
+          ]);
+          setScheduleForAsset(null);
+        }}
+        onClose={() => setScheduleForAsset(null)}
+      />
     </div>
   );
 }
@@ -2066,32 +2025,30 @@ function PadEditModalBody({
 }): React.ReactElement {
   const [label, setLabel] = useState(pad.label);
   const [url, setUrl] = useState(pad.url);
+  const [scheduledAt, setScheduledAt] = useState(pad.scheduledAt ?? "");
   const [color, setColor] = useState<PadColor>(pad.color ?? "default");
-  const [bellStyle] = useState<JingleBellStyle>(pad.bellStyle ?? "ding");
+  const [bellStyle, setBellStyle] = useState<JingleBellStyle>(pad.bellStyle ?? "ding");
   const [preRoll, setPreRoll] = useState<boolean>(pad.preRoll ?? true);
 
-  // round 9 (owner: "simplify"): a pad is a name, a colour, a bell and its sound — no URL typing, no date field
-  // (scheduling lives in the ⋯ of the jingle itself).
   return (
     <JcModal
       open={true}
       title={`Edit pad: ${pad.label}`}
       onClose={onClose}
-      width="28rem"
+      width="30rem"
       footer={
         <>
-          <button type="button" className="sb-wz-btn" onClick={onClose}>
+          <button type="button" className="jc-btn jc-btn--ghost jc-btn--small" onClick={onClose}>
             Cancel
           </button>
-          <span className="sb-wz-spacer" />
           <button
             type="button"
-            className="sb-wz-btn sb-wz-btn--primary"
+            className="jc-btn jc-btn--primary jc-btn--small"
             onClick={() =>
               onSave({
                 label: label.trim() || pad.label,
                 url: url.trim(),
-                scheduledAt: pad.scheduledAt,
+                scheduledAt: scheduledAt || undefined,
                 color,
                 bellStyle,
                 preRoll,
@@ -2105,12 +2062,17 @@ function PadEditModalBody({
     >
       <label className="jc-field">
         <span>Name</span>
-        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Pad name" maxLength={24} autoFocus />
+        <input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Pad name"
+          maxLength={24}
+        />
       </label>
 
       <div className="jc-field">
-        <span>Colour</span>
-        <div className="jc-swatches" role="radiogroup" aria-label="Pad colour">
+        <span>Color</span>
+        <div className="jc-color-grid" role="radiogroup" aria-label="Pad color">
           {PAD_COLOR_OPTIONS.map((opt) => (
             <button
               key={opt.value}
@@ -2118,33 +2080,57 @@ function PadEditModalBody({
               role="radio"
               aria-checked={color === opt.value}
               title={opt.label}
-              className={`jc-swatch${color === opt.value ? " is-on" : ""}`}
-              style={{ ["--sw" as string]: opt.swatch } as React.CSSProperties}
+              className={`jc-color-swatch jc-color-swatch--${opt.value}${
+                color === opt.value ? " jc-color-swatch--selected" : ""
+              }`}
               onClick={() => setColor(opt.value)}
-            />
+            >
+              <span className="jc-color-swatch-dot" style={{ background: opt.swatch }} aria-hidden />
+              <span className="jc-color-swatch-label">{opt.label}</span>
+            </button>
           ))}
         </div>
       </div>
 
-      <div className="jc-field">
-        <span>Bell at the start</span>
-        <button type="button" className={`sb-jf-bell${preRoll ? " is-on" : ""}`} onClick={() => setPreRoll((v) => !v)} aria-pressed={preRoll}>
-          {preRoll ? "On" : "Off"}
-          <span className="sb-jf-switch" aria-hidden><i /></span>
-        </button>
-      </div>
+      <label className="jc-field">
+        <span>Audio URL or local path</span>
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://… or /api/jingles/audio/…"
+          spellCheck={false}
+        />
+      </label>
 
       <div className="jc-field">
-        <span>Sound</span>
-        <div className="jc-pad-sound">
-          <span>{url.trim() ? "A jingle is on this pad" : "Empty — add a jingle from the Library"}</span>
-          {url.trim() ? (
-            <button type="button" className="sb-dj-pill" onClick={() => setUrl("")}>
-              Clear
-            </button>
-          ) : null}
-        </div>
+        <span>Bell (pre-roll)</span>
+        <SegBtn
+          options={BELL_PRESETS.map((b) => ({ value: b.value, label: b.label }))}
+          value={preRoll ? bellStyle : "off"}
+          onChange={(v) => {
+            if (v === "off") {
+              setPreRoll(false);
+            } else {
+              setPreRoll(true);
+              setBellStyle(v as JingleBellStyle);
+            }
+          }}
+        />
       </div>
+
+      <label className="jc-field">
+        <span>Schedule at (optional)</span>
+        <input
+          type="datetime-local"
+          className="jc-datetime"
+          value={scheduledAt}
+          onChange={(e) => setScheduledAt(e.target.value)}
+          disabled={!url.trim()}
+        />
+        {!url.trim() ? (
+          <span className="jc-hint" style={{ marginTop: "0.25rem" }}>Assign audio before scheduling.</span>
+        ) : null}
+      </label>
     </JcModal>
   );
 }

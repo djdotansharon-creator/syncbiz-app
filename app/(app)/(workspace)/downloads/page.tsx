@@ -4,8 +4,6 @@ import { redirect } from "next/navigation";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
 import { StreamerDownloadButton } from "@/components/streamer-download-button";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
-import { getLocale } from "@/lib/locale-server";
-import { trFor } from "@/lib/i18n/phrases";
 
 export const metadata = { title: "Downloads — VONO" };
 
@@ -84,14 +82,12 @@ function DeviceCard({
   title,
   note,
   primary,
-  recommendedLabel = "Recommended",
   children,
 }: {
   logo: ReactNode;
   title: string;
   note?: string;
   primary?: boolean;
-  recommendedLabel?: string;
   children: ReactNode;
 }) {
   return (
@@ -102,7 +98,7 @@ function DeviceCard({
     >
       {primary ? (
         <span className="absolute right-3 top-3 rounded-full bg-sky-500 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
-          {recommendedLabel}
+          Recommended
         </span>
       ) : null}
       <div className="flex h-14 w-14 items-center justify-center text-slate-100">{logo}</div>
@@ -132,19 +128,17 @@ export default async function DownloadsPage() {
 
   const ua = (await headers()).get("user-agent") ?? "";
   const tv = isAndroidTvContext(ua);
-  const locale = await getLocale();
-  const tr = (text: string) => trFor(locale, text);
 
   return (
     <div className="w-full px-4 pb-16 pt-8 sm:pt-10">
       {/* Header */}
       <header className="text-center">
         <span className="inline-block rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-sky-300">
-          {tr("Desktop, TV, Mobile & more")}
+          Desktop, TV, Mobile &amp; more
         </span>
-        <h1 className="mt-4 text-3xl font-bold tracking-tight text-slate-50 sm:text-4xl">{tr("Download VONO")}</h1>
+        <h1 className="mt-4 text-3xl font-bold tracking-tight text-slate-50 sm:text-4xl">Download VONO</h1>
         <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-slate-400">
-          {tr("Play VONO on any screen at your location. One account works everywhere — sign in once on each device.")}
+          Play VONO on any screen at your location. One account works everywhere — sign in once on each device.
         </p>
       </header>
 
@@ -155,9 +149,9 @@ export default async function DownloadsPage() {
         if (id === "desktop") {
           return (
             <section key="desktop" className="mt-10">
-              <SectionHeader>{tr("Desktop")}</SectionHeader>
+              <SectionHeader>Desktop</SectionHeader>
               <div className={SECTION_GRID} style={SECTION_GRID_STYLE}>
-                <DeviceCard logo={<WindowsLogo className="h-11 w-11" />} title="Windows" note={tr("Windows 10 / 11 — runs as a MASTER player")} primary={!tv} recommendedLabel={tr("Recommended")}>
+                <DeviceCard logo={<WindowsLogo className="h-11 w-11" />} title="Windows" note="Windows 10 / 11 — runs as a MASTER player" primary={!tv}>
                   <DesktopDownloadButton />
                 </DeviceCard>
               </div>
@@ -167,14 +161,13 @@ export default async function DownloadsPage() {
         if (id === "tv") {
           return (
             <section key="tv" className="mt-10">
-              <SectionHeader>{tr("TV")}</SectionHeader>
+              <SectionHeader>TV</SectionHeader>
               <div className={SECTION_GRID} style={SECTION_GRID_STYLE}>
                 <DeviceCard
                   logo={<TvLogo className="h-11 w-11" />}
                   title="Android TV / Google TV"
-                  note={tr("TV box or stick — install, sign in once. Allow install from this source if asked.")}
+                  note="TV box or stick — install, sign in once. Allow install from this source if asked."
                   primary={tv}
-                  recommendedLabel={tr("Recommended")}
                 >
                   <StreamerDownloadButton />
                 </DeviceCard>
@@ -184,13 +177,13 @@ export default async function DownloadsPage() {
         }
         return (
           <section key="mobile" className="mt-10">
-            <SectionHeader>{tr("Mobile & Tablet")}</SectionHeader>
+            <SectionHeader>Mobile &amp; Tablet</SectionHeader>
             <div className={SECTION_GRID} style={SECTION_GRID_STYLE}>
-              <DeviceCard logo={<AppleLogo className="h-11 w-11" />} title={tr("iPhone & iPad")} note={tr("Open in Safari → Share → Add to Home Screen")} recommendedLabel={tr("Recommended")}>
-                <PwaAction label={tr("Install from Safari")} />
+              <DeviceCard logo={<AppleLogo className="h-11 w-11" />} title="iPhone &amp; iPad" note="Open in Safari → Share → Add to Home Screen">
+                <PwaAction label="Install from Safari" />
               </DeviceCard>
-              <DeviceCard logo={<AndroidLogo className="h-11 w-11" />} title={tr("Android phone & tablet")} note={tr("Open in Chrome → menu → Install app")} recommendedLabel={tr("Recommended")}>
-                <PwaAction label={tr("Install from Chrome")} />
+              <DeviceCard logo={<AndroidLogo className="h-11 w-11" />} title="Android phone &amp; tablet" note="Open in Chrome → menu → Install app">
+                <PwaAction label="Install from Chrome" />
               </DeviceCard>
             </div>
           </section>
@@ -198,7 +191,8 @@ export default async function DownloadsPage() {
       })}
 
       <p className="mx-auto mt-12 max-w-xl text-center text-[11px] leading-relaxed text-slate-500">
-        {tr("Every VONO app connects to the same account and your location’s controls — the player engine is identical across devices.")}
+        Every VONO app connects to the same account and your location&rsquo;s controls — the player engine is identical
+        across devices.
       </p>
     </div>
   );
