@@ -20,7 +20,11 @@
   tab dying mid-wait hands the delivery to the next one; "once" is removed only on delivery. Owner edge cases
   (2026-10-24) PROVEN BY RUNTIME on the first #64 version and fixed: scheduler dies during the MASTER wait (lost);
   Branch B's schedule played in Branch A; a tab without a device socket swallowed the scheduler (lost); a storage
-  change just after the due time skipped the occurrence until tomorrow. Lenovo (renderer CONTROL → WS → MAIN, one
+  change just after the due time skipped the occurrence until tomorrow; the scheduler tab's socket CLOSING (ws-client
+  ERROR path) while the stale `masterDeviceId` was still set → marked delivered, nothing sent, "once" deleted (now a
+  remote delivery also requires `isBranchConnected`; the desktop-MASTER local MPV path needs no WS). Residual (not
+  fixed, needs a server ack): a half-open socket (still OPEN, network silently gone) loses a command sent into it;
+  the ms between a socket close and the next React render. Lenovo (renderer CONTROL → WS → MAIN, one
   window, branch default) already fired once — path unchanged. Tests: `scripts/verify-jingle-schedule-single-fire.ts`
   26/26 ×3 (the first #64 version fails 7 of the new checks); local E2E: 1/2/3 tabs, once, MASTER refresh / close at
   fire time, scheduler dies mid-wait (once + daily), two branches in one profile (incl. the real Jingles UI), tab

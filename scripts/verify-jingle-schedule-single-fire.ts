@@ -29,10 +29,13 @@ const FAKE_DEVICE_CONTEXT = `
   // Test double for lib/device-player-context: a mutable per-page object the test drives.
   const dp = (window.__dp = window.__dp || {
     isActive: true,
+    isBranchConnected: true,
+    socketOpen: true, // the device socket's readyState === OPEN (lib/remote-control/ws-client.ts sendCommand guard)
     deviceMode: "CONTROL",
     masterDeviceId: "master-1",
     sendCommandToMaster(command, payload) {
       if (!this.masterDeviceId) return; // same contract as the real provider: silent no-op without a MASTER
+      if (!this.socketOpen) return; // … and silent no-op when the socket is not OPEN (closing / reconnecting)
       window.__sent.push({ command, url: payload && payload.url, at: Date.now() });
       try { localStorage.setItem("__sent:" + Math.random().toString(36).slice(2), String(Date.now())); } catch (e) {}
     },
@@ -53,6 +56,7 @@ const ENTRY = `
   if (params.get("master") === "none") window.__dp.masterDeviceId = null;
   if (params.get("mode")) window.__dp.deviceMode = params.get("mode");
   if (params.get("active") === "0") window.__dp.isActive = false;
+  if (params.get("offline") === "1") { window.__dp.isBranchConnected = false; window.__dp.socketOpen = false; window.__dp.masterDeviceId = null; }
   createRoot(document.getElementById("root")).render(createElement(JingleScheduleAutoPlayer));
 `;
 
@@ -323,6 +327,41 @@ async function main() {
       const a2 = (await sentIn(A)) - a1;
       const b2 = (await sentIn(B)) - b1;
       assert("J18 both branches due at the same moment → each branch's tab sends its own, once (no cross-branch block)", a2 === 1 && b2 === 1, `A=+${a2} B=+${b2}`);
+      await ctx.close();
+    }
+
+    // J21/J22 (owner delivery gap): the scheduler tab's socket is NOT OPEN at the due time while the stale
+    // masterDeviceId is still in memory (ws-client ERROR path: status "error", then the socket closes) → nothing may
+    // be marked delivered; after the reconnect (inside the 15 s window) exactly one send; "once" removed only then
+    for (const repeat of ["once", "daily"] as const) {
+      const ctx = await fresh();
+      const tabs = await openTabs(ctx, 2);
+      const at = await scheduleIn(tabs[1], 1500, repeat);
+      await sleep(at - Date.now() - 300);
+      for (const t of tabs) await t.evaluate(() => Object.assign((window as unknown as { __dp: object }).__dp, { isBranchConnected: false, socketOpen: false })); // masterDeviceId kept (stale)
+      await sleep(2500);
+      const during = await sentOf(tabs);
+      const midStored = await stored(tabs[1]);
+      for (const t of tabs) await t.evaluate(() => Object.assign((window as unknown as { __dp: object }).__dp, { isBranchConnected: true, socketOpen: true, masterDeviceId: "master-after-reconnect" }));
+      await sleep(1500);
+      const sent = await sentOf(tabs);
+      const after = await stored(tabs[1]);
+      const n = repeat === "once" ? 21 : 22;
+      assert(`J${n} ${repeat}: socket not OPEN at the due time (stale masterDeviceId) → nothing sent, nothing marked delivered`, during === 0 && !!midStored && midStored.includes('"j1"'), `sent=${during} stored=${midStored && midStored.includes('"j1"') ? "kept" : "GONE"}`);
+      assert(`J${n} ${repeat}: after the reconnect → sent exactly once`, sent === 1, `sent=${sent}`);
+      if (repeat === "once") assert("J21 once: removed only after the real send", after === "[]", `after=${after}`);
+      else assert("J22 daily: item kept", !!after && after.includes('"j1"'));
+      await ctx.close();
+    }
+
+    // J23: desktop MASTER keeps the LOCAL MPV path with NO cloud WS at all (offline branch) — not gated by the socket
+    {
+      const ctx = await fresh();
+      const tabs = await openTabs(ctx, 1, `${base}?desktop=1&mode=MASTER&offline=1`);
+      await scheduleIn(tabs[0], 1000, "daily");
+      await sleep(2000);
+      const local = await tabs[0].evaluate(() => (window as unknown as { __local: unknown[] }).__local.length);
+      assert("J23 desktop MASTER offline (no WS, no masterDeviceId) → local MPV interrupt once", local === 1, `local=${local}`);
       await ctx.close();
     }
 

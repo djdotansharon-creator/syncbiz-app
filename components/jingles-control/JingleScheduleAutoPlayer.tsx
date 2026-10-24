@@ -114,8 +114,10 @@ export function JingleScheduleAutoPlayer(): null {
   // Kept in a ref so the setTimeout closure (schedule effect runs once) always uses the latest
   // mode; the ref is updated from an effect (never during render).
   const fireRef = useRef<(url: string) => void>(() => {});
-  // True when a fire would reach a player now: the local MPV (desktop MASTER) or a known branch MASTER over WS
-  // (sendCommandToMaster silently drops the command without masterDeviceId).
+  // True when a fire would reach a player now: the local MPV (desktop MASTER — no cloud WS needed) or a known branch
+  // MASTER over THIS tab's connected WS. sendCommandToMaster silently drops the command without masterDeviceId AND
+  // when the socket is not OPEN; masterDeviceId alone can be stale while the socket is closing (e.g. the ws-client
+  // ERROR path sets status "error" then closes) → a delivery is only attempted while the branch socket is connected.
   const canFireRef = useRef<() => boolean>(() => false);
   useEffect(() => {
     const isMaster = devicePlayer?.deviceMode === "MASTER";
@@ -124,7 +126,8 @@ export function JingleScheduleAutoPlayer(): null {
       if (isDesktop && isMaster) playInterrupt(url);
       else devicePlayer?.sendCommandToMaster("PLAY_INTERRUPT", { url });
     };
-    canFireRef.current = () => (isDesktop && isMaster) || !!devicePlayer?.masterDeviceId;
+    canFireRef.current = () =>
+      (isDesktop && isMaster) || (!!devicePlayer?.masterDeviceId && !!devicePlayer?.isBranchConnected);
   });
 
   useEffect(() => {
