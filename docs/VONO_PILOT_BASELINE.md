@@ -8,11 +8,44 @@
 
 ## 1. STATUS
 
-- **🔴 NEXT P0 — BEFORE THE PILOT (owner 2026-10-23): F4 — a scheduled jingle is sent from EVERY open tab.**
-  `JingleScheduleAutoPlayer` is mounted in `app/(app)/providers.tsx` for every tab and fires each due schedule
-  independently → N open tabs = N `PLAY_INTERRUPT` to the MASTER (the jingle plays N times). PROVEN BY CODE. The browser
-  tab-identity fix below does NOT solve it; handled separately right after it. Not started.
-- **🟡 BROWSER TAB IDENTITY — PR open, NOT merged (2026-10-23). RENDERER + SERVER (WS), no DB.** Root cause (PROVEN BY
+- **🟡 P0 F4 — scheduled jingle fired once per open tab — PR #64 MERGE APPROVED by the owner 2026-10-24 (code HEAD
+  `acc107a`); deploy PROD `syncbiz-app` only; PROD smoke test PENDING (owner). RENDERER
+  ONLY** (`components/jingles-control/JingleScheduleAutoPlayer.tsx`). Root cause (PROVEN BY CODE + RUNTIME, local app +
+  WS): the scheduler is mounted in `app/(app)/providers.tsx` in EVERY tab; all tabs read the same localStorage schedule
+  (`syncbiz:jingle-schedule`, no server source of truth) and each sends `PLAY_INTERRUPT`; the server forwards every one
+  → 1/2/3 tabs = 1/2/3 plays ("once" items 1..N, racy). A due jingle while the web MASTER reloads / closes was LOST
+  (`masterDeviceId` null → `sendCommandToMaster` silent no-op). Fix: one scheduler per BRANCH per browser profile (Web
+  Lock `vono-jingle-scheduler:<branch>`, only tabs with a device socket compete, hand-over on close/reload); the
+  schedule is stored per branch (`default` keeps the original key → no migration, Lenovo unchanged); a due occurrence
+  is claimed into a shared per-branch fire state and delivered once a MASTER exists (≤ 15 s after due) — a scheduler
+  tab dying mid-wait hands the delivery to the next one; "once" is removed only on delivery. Owner edge cases
+  (2026-10-24) PROVEN BY RUNTIME on the first #64 version and fixed: scheduler dies during the MASTER wait (lost);
+  Branch B's schedule played in Branch A; a tab without a device socket swallowed the scheduler (lost); a storage
+  change just after the due time skipped the occurrence until tomorrow; the scheduler tab's socket CLOSING (ws-client
+  ERROR path) while the stale `masterDeviceId` was still set → marked delivered, nothing sent, "once" deleted (now a
+  remote delivery also requires `isBranchConnected`; the desktop-MASTER local MPV path needs no WS). Residual (not
+  fixed, needs a server ack): a half-open socket (still OPEN, network silently gone) loses a command sent into it;
+  the ms between a socket close and the next React render. Lenovo (renderer CONTROL → WS → MAIN, one
+  window, branch default) already fired once — path unchanged. Tests: `scripts/verify-jingle-schedule-single-fire.ts`
+  33/33 (each fix's new checks fail on the version before it); local E2E: 1/2/3 tabs, once, MASTER refresh / close at
+  fire time, scheduler dies mid-wait (once + daily), two branches in one profile (incl. the real Jingles UI), tab
+  without a device socket → exactly 1 play each, in the right branch.
+  PARKED (owner 2026-10-24, separate): **F8** desktop scheduled jingle goes renderer → cloud WS → MAIN, so with the
+  network down it does not play (PROVEN BY CODE); **F9** browser MASTER: two PLAY_INTERRUPTs back-to-back restart the
+  jingle and may leave the music paused until the 60 s guard (PROVEN BY CODE, not runtime); **F10** the jingle schedule
+  lives only in the localStorage of the browser that created it (now branch-scoped, still not server-side).
+  OPEN RESIDUAL (owner 2026-10-24): **J16** — one single, non-reproduced failure of the check "scheduler tab closes at
+  the due time → exactly once" out of ~276 runs (incl. 160 targeted stress runs); double send vs loss unknown (the
+  detail line was filtered out). Hypothesis NOT PROVEN: cross-process localStorage propagation at the lock hand-over.
+  No speculative fix (owner). Capture the detail if it ever recurs.
+  **🔴 FUTURE P0 — PARKED (owner 2026-10-24): command ACK / idempotency for reliable delivery.** WS commands
+  (scheduled jingles included) are fire-and-forget: a half-open socket (still OPEN, network silently gone) loses a
+  command sent into it, and the ms between a socket close and the next React render can too. Needs a server
+  delivery ACK + idempotency key per command — a protocol change; NOT in PR #64; not started without the owner.
+- **✅ BROWSER TAB IDENTITY — PR #63 MERGED 2026-10-23 (`a6e4c2f`) — ACCEPTED IN PROD — owner-attested 2026-10-24**
+  (Dotan on the live site; not independently inspected by Claude): 2 tabs = MASTER + CONTROL; pads from either tab →
+  once, in the MASTER; phone remote → MASTER; MASTER refresh stays MASTER; MASTER close → CONTROL promoted after
+  ~10 s. RENDERER + SERVER (WS), no DB. Root cause (PROVEN BY
   TEST, local two-tab repro; consistent with the owner's PROD evidence): the browser deviceId lived in localStorage, shared
   by every tab/window of a Chrome profile; the WS server keeps one socket per deviceId, so a second tab silently took over
   the first one's socket — browser jingle pads (and remote commands) reached the other tab; both tabs showed MASTER. Fix:
