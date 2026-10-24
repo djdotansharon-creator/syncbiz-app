@@ -8,11 +8,20 @@
 
 ## 1. STATUS
 
-- **🔴 NEXT P0 — BEFORE THE PILOT (owner 2026-10-23): F4 — a scheduled jingle is sent from EVERY open tab.**
-  `JingleScheduleAutoPlayer` is mounted in `app/(app)/providers.tsx` for every tab and fires each due schedule
-  independently → N open tabs = N `PLAY_INTERRUPT` to the MASTER (the jingle plays N times). PROVEN BY CODE. The browser
-  tab-identity fix below does NOT solve it; handled separately right after it. Not started.
-- **🟡 BROWSER TAB IDENTITY — PR open, NOT merged (2026-10-23). RENDERER + SERVER (WS), no DB.** Root cause (PROVEN BY
+- **🔴 P0 F4 — scheduled jingle fired once per open tab — FIXED IN CODE, PR open, NOT merged (2026-10-24). RENDERER
+  ONLY** (`components/jingles-control/JingleScheduleAutoPlayer.tsx`). Root cause (PROVEN BY CODE + RUNTIME, local app +
+  WS): the scheduler is mounted in `app/(app)/providers.tsx` in EVERY tab; all tabs read the same localStorage schedule
+  (`syncbiz:jingle-schedule`, no server source of truth) and each sends `PLAY_INTERRUPT`; the server forwards every one
+  → 1/2/3 tabs = 1/2/3 plays ("once" items 1..N, racy). A due jingle while the web MASTER reloads / closes was LOST
+  (`masterDeviceId` null → `sendCommandToMaster` silent no-op). Fix: one scheduler per browser profile (Web Lock
+  `vono-jingle-scheduler`, hand-over on close/reload) + at fire time wait up to 15 s for a MASTER. Lenovo (renderer
+  CONTROL → WS → MAIN, one window) already fired once — path unchanged. Tests: `scripts/verify-jingle-schedule-single-fire.ts`
+  13/13 (7 fail on the old code); local E2E 1/2/3 tabs, once, MASTER refresh / close at fire time → exactly 1 play each.
+  PARKED (owner 2026-10-24, separate): **F8** desktop scheduled jingle goes renderer → cloud WS → MAIN, so with the
+  network down it does not play (PROVEN BY CODE); **F9** browser MASTER: two PLAY_INTERRUPTs back-to-back restart the
+  jingle and may leave the music paused until the 60 s guard (PROVEN BY CODE, not runtime); **F10** the jingle schedule
+  lives only in the localStorage of the browser that created it and is not scoped to branch / account.
+- **🟡 BROWSER TAB IDENTITY — PR #63 MERGED 2026-10-23 (`a6e4c2f`), PROD runtime NOT yet owner-tested. RENDERER + SERVER (WS), no DB.** Root cause (PROVEN BY
   TEST, local two-tab repro; consistent with the owner's PROD evidence): the browser deviceId lived in localStorage, shared
   by every tab/window of a Chrome profile; the WS server keeps one socket per deviceId, so a second tab silently took over
   the first one's socket — browser jingle pads (and remote commands) reached the other tab; both tabs showed MASTER. Fix:
