@@ -13,14 +13,22 @@
   WS): the scheduler is mounted in `app/(app)/providers.tsx` in EVERY tab; all tabs read the same localStorage schedule
   (`syncbiz:jingle-schedule`, no server source of truth) and each sends `PLAY_INTERRUPT`; the server forwards every one
   → 1/2/3 tabs = 1/2/3 plays ("once" items 1..N, racy). A due jingle while the web MASTER reloads / closes was LOST
-  (`masterDeviceId` null → `sendCommandToMaster` silent no-op). Fix: one scheduler per browser profile (Web Lock
-  `vono-jingle-scheduler`, hand-over on close/reload) + at fire time wait up to 15 s for a MASTER. Lenovo (renderer
-  CONTROL → WS → MAIN, one window) already fired once — path unchanged. Tests: `scripts/verify-jingle-schedule-single-fire.ts`
-  13/13 (7 fail on the old code); local E2E 1/2/3 tabs, once, MASTER refresh / close at fire time → exactly 1 play each.
+  (`masterDeviceId` null → `sendCommandToMaster` silent no-op). Fix: one scheduler per BRANCH per browser profile (Web
+  Lock `vono-jingle-scheduler:<branch>`, only tabs with a device socket compete, hand-over on close/reload); the
+  schedule is stored per branch (`default` keeps the original key → no migration, Lenovo unchanged); a due occurrence
+  is claimed into a shared per-branch fire state and delivered once a MASTER exists (≤ 15 s after due) — a scheduler
+  tab dying mid-wait hands the delivery to the next one; "once" is removed only on delivery. Owner edge cases
+  (2026-10-24) PROVEN BY RUNTIME on the first #64 version and fixed: scheduler dies during the MASTER wait (lost);
+  Branch B's schedule played in Branch A; a tab without a device socket swallowed the scheduler (lost); a storage
+  change just after the due time skipped the occurrence until tomorrow. Lenovo (renderer CONTROL → WS → MAIN, one
+  window, branch default) already fired once — path unchanged. Tests: `scripts/verify-jingle-schedule-single-fire.ts`
+  26/26 ×3 (the first #64 version fails 7 of the new checks); local E2E: 1/2/3 tabs, once, MASTER refresh / close at
+  fire time, scheduler dies mid-wait (once + daily), two branches in one profile (incl. the real Jingles UI), tab
+  without a device socket → exactly 1 play each, in the right branch.
   PARKED (owner 2026-10-24, separate): **F8** desktop scheduled jingle goes renderer → cloud WS → MAIN, so with the
   network down it does not play (PROVEN BY CODE); **F9** browser MASTER: two PLAY_INTERRUPTs back-to-back restart the
   jingle and may leave the music paused until the 60 s guard (PROVEN BY CODE, not runtime); **F10** the jingle schedule
-  lives only in the localStorage of the browser that created it and is not scoped to branch / account.
+  lives only in the localStorage of the browser that created it (now branch-scoped, still not server-side).
 - **🟡 BROWSER TAB IDENTITY — PR #63 MERGED 2026-10-23 (`a6e4c2f`), PROD runtime NOT yet owner-tested. RENDERER + SERVER (WS), no DB.** Root cause (PROVEN BY
   TEST, local two-tab repro; consistent with the owner's PROD evidence): the browser deviceId lived in localStorage, shared
   by every tab/window of a Chrome profile; the WS server keeps one socket per deviceId, so a second tab silently took over

@@ -1,10 +1,11 @@
 /**
- * F4 — a scheduled jingle fires ONCE per browser profile, however many tabs are open (owner 2026-10-24).
+ * F4 — a scheduled jingle fires ONCE per branch, however many tabs are open (owner 2026-10-24).
  *
- * Bundles the REAL components/jingles-control/JingleScheduleAutoPlayer.tsx (esbuild + React) and replaces only
- * `@/lib/device-player-context` with a recorder (same `sendCommandToMaster` contract: silently drops the command
- * without masterDeviceId). Serves it on a throwaway localhost page and drives N real Chromium tabs that share one
- * localStorage schedule — the exact production shape.
+ * Bundles the REAL components/jingles-control/JingleScheduleAutoPlayer.tsx (esbuild + React; the real schedule-storage
+ * and lib/station-branch — the browser branch comes from localStorage `vono-control-branch` exactly as in production)
+ * and replaces only `@/lib/device-player-context` with a recorder (same `sendCommandToMaster` contract: silently drops
+ * the command without masterDeviceId). Serves it on a throwaway localhost page and drives real Chromium tabs that share
+ * one profile's localStorage — the exact production shape.
  *
  * Run: npx tsx scripts/verify-jingle-schedule-single-fire.ts
  *      (CHROMIUM_PATH=/path/to/chrome to use a specific Chromium; otherwise Playwright's default.)
@@ -27,11 +28,13 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const FAKE_DEVICE_CONTEXT = `
   // Test double for lib/device-player-context: a mutable per-page object the test drives.
   const dp = (window.__dp = window.__dp || {
+    isActive: true,
     deviceMode: "CONTROL",
     masterDeviceId: "master-1",
     sendCommandToMaster(command, payload) {
       if (!this.masterDeviceId) return; // same contract as the real provider: silent no-op without a MASTER
       window.__sent.push({ command, url: payload && payload.url, at: Date.now() });
+      try { localStorage.setItem("__sent:" + Math.random().toString(36).slice(2), String(Date.now())); } catch (e) {}
     },
   });
   window.__sent = window.__sent || [];
@@ -49,6 +52,7 @@ const ENTRY = `
   }
   if (params.get("master") === "none") window.__dp.masterDeviceId = null;
   if (params.get("mode")) window.__dp.deviceMode = params.get("mode");
+  if (params.get("active") === "0") window.__dp.isActive = false;
   createRoot(document.getElementById("root")).render(createElement(JingleScheduleAutoPlayer));
 `;
 
@@ -94,25 +98,33 @@ async function main() {
     await sleep(300); // lock queue settled
     return tabs;
   };
-  /** Write ONE schedule item (shared by every tab of the profile) firing `inMs` from now. */
-  const scheduleIn = async (p: Page, inMs: number, repeat: "once" | "daily", extra: Record<string, unknown> = {}) => {
+  const keyOf = (branch: string) => (branch === "default" ? "syncbiz:jingle-schedule" : `syncbiz:jingle-schedule:${branch}`);
+  /** Write ONE schedule item of `branch` (shared by every tab of the profile) firing `inMs` from now. */
+  const scheduleIn = async (p: Page, inMs: number, repeat: "once" | "daily", extra: Record<string, unknown> = {}, branch = "default") => {
     const at = Date.now() + inMs;
     await p.evaluate(
-      ([iso, rep, ex]) => {
+      ([key, iso, rep, ex]) => {
         localStorage.setItem(
-          "syncbiz:jingle-schedule",
+          key,
           JSON.stringify([{ id: "j1", label: "J", whenLabel: "", repeatLabel: "", targetLabel: "", url: "/api/jingles/audio/j1", scheduledAtIso: iso, repeat: rep, ...(ex as object) }]),
         );
         window.dispatchEvent(new Event("syncbiz:jingle-schedule-changed"));
       },
-      [new Date(at).toISOString(), repeat, extra] as const,
+      [keyOf(branch), new Date(at).toISOString(), repeat, extra] as const,
     );
     return at;
   };
+  const stored = (p: Page, branch = "default") => p.evaluate((k) => localStorage.getItem(k), keyOf(branch));
+  const setMaster = async (tabs: Page[], id: string | null) => {
+    for (const t of tabs) if (!t.isClosed()) await t.evaluate((v) => ((window as unknown as { __dp: { masterDeviceId: string | null } }).__dp.masterDeviceId = v), id);
+  };
+  /** Sends by ANY tab of the profile, including tabs closed since (shared localStorage record). */
+  const sentProfile = (p: Page) => p.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("__sent:")).length);
+  const sentIn = (p: Page) => p.evaluate(() => (window as unknown as { __sent: unknown[] }).__sent.length);
+  /** Sends by every tab of the profile — including tabs closed or reloaded since (shared localStorage record). */
   const sentOf = async (tabs: Page[]) => {
-    let total = 0;
-    for (const t of tabs) if (!t.isClosed()) total += await t.evaluate(() => (window as unknown as { __sent: unknown[] }).__sent.length);
-    return total;
+    const t = tabs.find((x) => !x.isClosed());
+    return t ? t.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("__sent:")).length) : 0;
   };
   const fresh = () => browser.newContext();
 
@@ -228,6 +240,122 @@ async function main() {
       for (const t of tabs) all.push(...(await t.evaluate(() => (window as unknown as { __sent: { url: string }[] }).__sent)));
       const urls = all.map((x) => x.url).join(" → ");
       assert("J11 pre-roll bell with 3 tabs → bell then jingle, exactly once each", all.length === 2 && /bell/.test(all[0].url) && /audio\/j1/.test(all[1].url), urls);
+      await ctx.close();
+    }
+
+    // J13/J14 (owner edge case 1): the scheduler tab dies DURING the MASTER wait — twice — then the MASTER returns
+    for (const repeat of ["once", "daily"] as const) {
+      const ctx = await fresh();
+      const tabs = await openTabs(ctx, 3, `${base}?master=none`);
+      const at = await scheduleIn(tabs[0], 800, repeat);
+      await sleep(at - Date.now() + 1500); // due, no MASTER → tabs[0] (scheduler) is waiting
+      const midStored = await stored(tabs[2]);
+      await tabs[0].close(); // scheduler dies mid-wait → tabs[1] takes over the SAME pending delivery
+      await sleep(1500);
+      await tabs[1].reload(); // the next scheduler dies too → tabs[2] (and the reloaded tab queues again)
+      await setMaster([tabs[1]], null);
+      await sleep(1500);
+      const beforeMaster = await sentProfile(tabs[2]);
+      await setMaster(tabs, "master-back"); // MASTER returns ~4.5 s after the due time (inside the 15 s window)
+      await sleep(2000);
+      const sent = await sentProfile(tabs[2]);
+      const after = await stored(tabs[2]);
+      const n = repeat === "once" ? 13 : 14;
+      assert(`J${n} ${repeat}: scheduler tab dies twice during the MASTER wait → nothing sent while there is no MASTER`, beforeMaster === 0, `sent=${beforeMaster}`);
+      assert(`J${n} ${repeat}: … delivered EXACTLY once when the MASTER returns (no double fire between owners)`, sent === 1, `sent=${sent}`);
+      if (repeat === "once") {
+        assert("J13 once: NOT removed before delivery, removed after it", !!midStored && midStored.includes('"j1"') && after === "[]", `mid=${midStored ? "present" : "missing"} after=${after}`);
+      } else {
+        assert("J14 daily: item kept (next occurrence tomorrow, not lost / not re-fired)", !!after && after.includes('"j1"'));
+        await sleep(1500);
+        assert("J14 daily: no second fire afterwards", (await sentProfile(tabs[2])) === 1);
+      }
+      await ctx.close();
+    }
+
+    // J15: the scheduler tab closes right AFTER delivering → the new scheduler must not send it again
+    {
+      const ctx = await fresh();
+      const tabs = await openTabs(ctx, 2);
+      const at = await scheduleIn(tabs[1], 1000, "daily");
+      await sleep(at - Date.now() + 150);
+      const sentByOwner = await sentIn(tabs[0]);
+      await tabs[0].close();
+      await sleep(2500);
+      const second = await sentIn(tabs[1]);
+      assert("J15 scheduler closes right after delivering → the next scheduler does not re-send", sentByOwner === 1 && second === 0, `owner=${sentByOwner} next=${second}`);
+      await ctx.close();
+    }
+
+    // J16: the scheduler tab closes AT the due time (hand-over gap) → exactly once, several delays (like R1)
+    {
+      let okRuns = 0;
+      const offsets = [-120, -40, -10, 0, 10, 40, 120];
+      for (const off of offsets) {
+        const ctx = await fresh();
+        const tabs = await openTabs(ctx, 3);
+        const at = await scheduleIn(tabs[1], 1200, "daily");
+        await sleep(Math.max(0, at - Date.now() + off));
+        await tabs[0].close();
+        await sleep(2500);
+        const sent = await sentProfile(tabs[1]);
+        if (sent === 1) okRuns++;
+        else console.log(`      offset ${off} ms: sent=${sent}`);
+        await ctx.close();
+      }
+      assert(`J16 scheduler closes at the due time (offsets ${offsets.join("/")} ms) → exactly once every run`, okRuns === offsets.length, `${okRuns}/${offsets.length}`);
+    }
+
+    // J17/J18 (owner edge case 2): branch isolation in ONE profile — tab A on "default", tab B on "b2"
+    {
+      const ctx = await fresh();
+      const [A] = await openTabs(ctx, 1); // no control branch yet → default
+      await A.evaluate(() => localStorage.setItem("vono-control-branch", JSON.stringify({ branchId: "b2", label: "Branch B" })));
+      const [B] = await openTabs(ctx, 1); // opened after the manager chose Branch B → b2
+      await scheduleIn(B, 1000, "daily", {}, "b2"); // created in Branch B
+      await sleep(2200);
+      const a1 = await sentIn(A);
+      const b1 = await sentIn(B);
+      assert("J17 Branch B's schedule → sent once by the Branch-B tab only (A, first opened, does not take it)", a1 === 0 && b1 === 1, `A=${a1} B=${b1}`);
+      await scheduleIn(A, 1000, "daily", {}, "default");
+      await scheduleIn(B, 1000, "daily", { label: "J-b2" }, "b2");
+      await sleep(2200);
+      const a2 = (await sentIn(A)) - a1;
+      const b2 = (await sentIn(B)) - b1;
+      assert("J18 both branches due at the same moment → each branch's tab sends its own, once (no cross-branch block)", a2 === 1 && b2 === 1, `A=+${a2} B=+${b2}`);
+      await ctx.close();
+    }
+
+    // J20: another tab writes localStorage just AFTER the due time (e.g. the other branch's scheduler firing at the
+    // same moment) → the storage-change reschedule must not skip today's occurrence
+    {
+      let okRuns = 0;
+      const offsets = [0, 1, 3, 8, 20];
+      for (const off of offsets) {
+        const ctx = await fresh();
+        const tabs = await openTabs(ctx, 2);
+        const at = await scheduleIn(tabs[1], 1000, "daily");
+        await sleep(Math.max(0, at - Date.now() + off));
+        await tabs[1].evaluate(() => localStorage.setItem("unrelated", String(Math.random())));
+        await sleep(1500);
+        const sent = await sentOf(tabs);
+        if (sent === 1) okRuns++;
+        else console.log(`      write +${off} ms: sent=${sent}`);
+        await ctx.close();
+      }
+      assert(`J20 unrelated storage write right after the due time (+${offsets.join("/")} ms) → still fires once`, okRuns === offsets.length, `${okRuns}/${offsets.length}`);
+    }
+
+    // J19: a tab WITHOUT a device socket (isActive=false) opened first does not swallow the scheduler
+    {
+      const ctx = await fresh();
+      const [D] = await openTabs(ctx, 1, `${base}?active=0`);
+      const [P] = await openTabs(ctx, 1);
+      await scheduleIn(P, 1000, "daily");
+      await sleep(2200);
+      const d = await sentIn(D);
+      const pp = await sentIn(P);
+      assert("J19 page without a device socket opened first → the device tab still fires once", d === 0 && pp === 1, `noSocketTab=${d} deviceTab=${pp}`);
       await ctx.close();
     }
 

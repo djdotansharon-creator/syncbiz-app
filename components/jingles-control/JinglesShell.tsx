@@ -31,6 +31,7 @@ import {
 import { VOICE_PRESETS_BY_LANG, voiceMenuLabel } from "./voice-presets";
 import { fetchCloudPads, savePadToCloud, padsFromCloud } from "./cloud-pads";
 import { loadJingleSchedule, persistJingleSchedule, JINGLE_SCHEDULE_EVENT } from "./schedule-storage";
+import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
 import { useAudioPreview } from "./use-audio-preview";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { VxSelect } from "@/components/management/vx-select";
@@ -1083,11 +1084,17 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [savedAssets, setSavedAssets] = useState<JingleAsset[]>(() => loadLibrary());
-  const [schedItems, setSchedItems] = useState(() => {
-    const persisted = loadJingleSchedule();
+  // The schedule is stored per branch (F4): THIS screen's branch — the same one its device socket and scheduler use.
+  const schedBranch = useStationBranchId();
+  const initialSchedule = (branch: string | null) => {
+    const persisted = branch ? loadJingleSchedule(branch) : [];
     // Seed with mock rows only on first run (when no persisted items exist).
     return persisted.length > 0 ? persisted : [...MOCK_SCHEDULE_ITEMS];
-  });
+  };
+  const [schedItems, setSchedItems] = useState(() => initialSchedule(stationBranchIdNow()));
+  // Branch whose list `schedItems` holds; persisting waits for it so a list is never written under the wrong branch.
+  const schedLoadedBranchRef = useRef<string | null>(stationBranchIdNow());
+  const skipSchedPersistRef = useRef(false);
 
   // Status (display-only; no selector)
   const branchStatus: MockBranchLinkStatus = "online";
@@ -1178,8 +1185,20 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
   // Persist jingle schedule items (payload + timing) so the root-level
   // auto-player can fire them even when this drawer is closed.
   useEffect(() => {
-    persistJingleSchedule(schedItems);
-  }, [schedItems]);
+    // Desktop: the branch arrives from MAIN after mount (≤ 3 s) → load THAT branch's list before any persist.
+    if (!schedBranch || schedLoadedBranchRef.current === schedBranch) return;
+    schedLoadedBranchRef.current = schedBranch;
+    skipSchedPersistRef.current = true;
+    setSchedItems(initialSchedule(schedBranch));
+  }, [schedBranch]);
+  useEffect(() => {
+    if (!schedBranch || schedLoadedBranchRef.current !== schedBranch) return;
+    if (skipSchedPersistRef.current) {
+      skipSchedPersistRef.current = false; // this commit still holds the previous branch's items
+      return;
+    }
+    persistJingleSchedule(schedBranch, schedItems);
+  }, [schedItems, schedBranch]);
 
   // ── Pad scheduling — routes Pad Edit "Schedule at" into the SAME engine as
   // Library/Result (syncbiz:jingle-schedule → JingleScheduleAutoPlayer). Each pad
@@ -1230,8 +1249,9 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
   // the EXISTING event/channel — no new scheduler. The JSON guard makes our own
   // persist-write (which also dispatches the event) a no-op, avoiding a loop.
   useEffect(() => {
+    if (!schedBranch) return;
     const sync = () => {
-      const fresh = loadJingleSchedule();
+      const fresh = loadJingleSchedule(schedBranch);
       setSchedItems((prev) => (JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh));
     };
     window.addEventListener(JINGLE_SCHEDULE_EVENT, sync);
@@ -1240,7 +1260,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
       window.removeEventListener(JINGLE_SCHEDULE_EVENT, sync);
       window.removeEventListener("storage", sync);
     };
-  }, []);
+  }, [schedBranch]);
 
   /** Pad IDs that currently have a REAL schedule item in the engine (drives the dot). */
   const scheduledPadIds = new Set(
