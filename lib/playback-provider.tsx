@@ -30,7 +30,7 @@ import {
   isYouTubeMultiTrackUrl,
   unifiedPlaylistSourceId,
 } from "./playlist-utils";
-import { getShuffle, setShufflePreference, getRepeatMode } from "./mix-preferences";
+import { getShuffle, setShufflePreference, getRepeatMode, hasChosenRepeatMode } from "./mix-preferences";
 import { supportsEmbedded, getSourceArtworkUrl } from "./player-utils";
 import { log as mvpLog } from "./mvp-logger";
 import { reportPlaybackIncident, classifySource as classifyIncidentSource, hostOnly as incidentHost } from "./playback-telemetry-client";
@@ -307,6 +307,20 @@ function getActivePlaylist(s: Pick<PlaybackState, "currentSource" | "currentPlay
 export function getPlaylistSessionTracks(s: Pick<PlaybackState, "currentSource" | "currentPlaylist">) {
   const pl = getActivePlaylist(s);
   return pl ? getPlaylistTracks(pl) : [];
+}
+
+/**
+ * 2026-10-23 (owner): LOOP is OFF by default, but a LOCAL playlist (files on the computer — a branch station) that reaches its end starts
+ * again from the beginning instead of stopping: a store must never fall silent. Only while "off" is the untouched default — if the operator
+ * pressed the loop button and chose "off", the list stops as asked. Online lists get a recommended next song instead (AutoplayRecommender).
+ */
+export function sessionRepeatMode(
+  mode: "playlist" | "track" | "off",
+  tracks: ReadonlyArray<{ type?: string }>,
+): "playlist" | "track" | "off" {
+  if (mode !== "off" || tracks.length === 0) return mode;
+  if (hasChosenRepeatMode()) return mode;
+  return tracks.some((t) => t.type === "local") ? "playlist" : mode;
 }
 
 type SessionNextKind = "advance" | "restart" | "exhausted";
@@ -1908,10 +1922,28 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  /** Shuffle = a "bag": every track plays once before any repeats, and never the same one twice in a row (owner 2026-10-18:
+   *  "the shuffle should really give a different song from the list each time" — a plain random pick kept repeating a few).
+   *  Pure selection logic; the signature and every caller are unchanged. */
+  const shuffleBagRef = useRef<{ len: number; played: Set<number> }>({ len: 0, played: new Set() });
   const getShuffledIndex = useCallback((len: number, current: number): number => {
     if (len <= 1) return 0;
-    let next = Math.floor(Math.random() * len);
-    while (next === current && len > 1) next = Math.floor(Math.random() * len);
+    const bag = shuffleBagRef.current;
+    if (bag.len !== len) {
+      bag.len = len;
+      bag.played = new Set();
+    }
+    if (current >= 0 && current < len) bag.played.add(current); // what is playing now has had its turn
+    let pool: number[] = [];
+    for (let i = 0; i < len; i++) if (!bag.played.has(i)) pool.push(i);
+    if (pool.length === 0) {
+      // everything has played once: a new round (the current song is the first one "used up" in it)
+      bag.played = new Set(current >= 0 && current < len ? [current] : []);
+      for (let i = 0; i < len; i++) if (!bag.played.has(i)) pool.push(i);
+    }
+    if (pool.length === 0) pool = [0];
+    const next = pool[Math.floor(Math.random() * pool.length)]!;
+    bag.played.add(next);
     return next;
   }, []);
 
@@ -2125,7 +2157,15 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       if (s.playNextQueue.length > 0) {
         const first = s.playNextQueue[0]!;
         const rest = s.playNextQueue.slice(1);
-        const fromSession = !!(s.currentSource && !isPlayNextSourceId(s.currentSource.id));
+        // 2026-10-16 (owner): a baseline is only worth returning to when the outgoing session has MORE
+        // tracks to continue with (a playlist / set). A single track that was played directly has
+        // nothing after it — keeping it as the baseline re-queued it at the END of the list and made it
+        // play a second time once the Play Next items were done. Such a single simply ends here.
+        const outgoingSessionLen = s.currentSource && !isPlayNextSourceId(s.currentSource.id) ? getPlaylistSessionTracks(s).length : 0;
+        const fromSession = !!(s.currentSource && !isPlayNextSourceId(s.currentSource.id)) && outgoingSessionLen > 1;
+        if (s.currentSource && !isPlayNextSourceId(s.currentSource.id) && !fromSession) {
+          playNextLog("next_dequeue_single_no_baseline", { outgoingId: s.currentSource.id, outgoingSessionLen });
+        }
         const nextBaseline: PlayNextSessionSnapshot | null = fromSession
           ? {
               currentSource: s.currentSource!,
@@ -2198,7 +2238,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             sessionTracks.length,
             restored.currentTrackIndex,
             restored.shuffle,
-            effectiveRepeatMode,
+            sessionRepeatMode(effectiveRepeatMode, sessionTracks),
             getShuffledIndex,
           );
           if (sessionStep.kind === "exhausted") {
@@ -2231,7 +2271,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           trks.length,
           restored.currentTrackIndex,
           restored.shuffle,
-          effectiveRepeatMode,
+          sessionRepeatMode(effectiveRepeatMode, trks),
           getShuffledIndex,
         );
         if (fbStep.kind === "exhausted") {
@@ -2293,7 +2333,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           trackCount,
           s.currentTrackIndex,
           s.shuffle,
-          effectiveRepeatMode,
+          sessionRepeatMode(effectiveRepeatMode, sessionTracks),
           getShuffledIndex,
         );
 
@@ -2419,14 +2459,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       if (tracks.length === 0) {
         transportLockRef.current = false;
         emitScheduledQueueEndedAutoProof(null);
-        return s;
+        // 2026-10-23 (owner): a SINGLE song (no list) that ends naturally with loop off just ENDS. This branch used to hand the state back
+        // unchanged ("playing"), and the player's single-track restart guard then replayed it from 0 — the "song starts again" bug.
+        return auditTransportCase === "ended_auto" && effectiveRepeatMode === "off" ? { ...s, status: "stopped" as const } : s;
       }
 
       const fbStep = computeSessionNextTrackIndex(
         tracks.length,
         s.currentTrackIndex,
         s.shuffle,
-        effectiveRepeatMode,
+        sessionRepeatMode(effectiveRepeatMode, tracks),
         getShuffledIndex,
       );
       if (fbStep.kind === "exhausted") {

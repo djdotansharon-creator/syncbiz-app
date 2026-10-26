@@ -6,11 +6,11 @@ const STORAGE_KEY_MIX = "syncbiz-mix-duration";
 const STORAGE_KEY_AUTOMIX = "syncbiz-automix";
 const STORAGE_KEY_SHUFFLE = "syncbiz-shuffle";
 
-export const MIX_DURATIONS = [3, 6, 9, 12] as const;
+export const MIX_DURATIONS = [3, 6, 7, 9, 12] as const;
 export type MixDuration = (typeof MIX_DURATIONS)[number];
 
-/** P0 Gate 2c: owner default — a 9 s mix. */
-const DEFAULT_MIX_DURATION: MixDuration = 9;
+/** P0 Gate 2c: owner default — a 9 s mix. 2026-10-23 (owner): 7 s, and AutoMix is ON by default (the next song starts BEFORE the current one ends). */
+const DEFAULT_MIX_DURATION: MixDuration = 7;
 
 export function getMixDuration(): MixDuration {
   if (typeof window === "undefined") return DEFAULT_MIX_DURATION;
@@ -55,15 +55,16 @@ export function onMixDurationChanged(cb: (seconds: MixDuration) => void): () => 
   return () => window.removeEventListener(MIX_DURATION_CHANGED, handler);
 }
 
-/** AutoMix on/off. Client-only read to avoid SSR/hydration mismatch. */
+/** AutoMix on/off — ON unless the operator switched it off (2026-10-23, owner). The server / no-storage default is the same ON,
+ *  so a fresh browser renders and reads the same value (no hydration mismatch). */
 export function getAutoMix(): boolean {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined") return true;
   try {
     const raw = localStorage.getItem(STORAGE_KEY_AUTOMIX);
-    if (raw === null) return false;
+    if (raw === null) return true;
     return raw === "1" || raw.toLowerCase() === "true";
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -104,7 +105,18 @@ export type RepeatMode = "playlist" | "track" | "off";
 
 const STORAGE_KEY_REPEAT_MODE = "syncbiz-repeat-mode";
 const REPEAT_MODE_CHANGED = "syncbiz-repeat-mode-changed";
-const DEFAULT_REPEAT_MODE: RepeatMode = "playlist";
+/** 2026-10-23 (owner): no loop by default — a song / list that ends does not start over (the last song gets a recommended next one, see AutoplayRecommender). */
+const DEFAULT_REPEAT_MODE: RepeatMode = "off";
+
+/** True once the operator has pressed the loop button (a stored choice exists). Before that, "off" is only the DEFAULT. */
+export function hasChosenRepeatMode(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return localStorage.getItem(STORAGE_KEY_REPEAT_MODE) !== null;
+  } catch {
+    return false;
+  }
+}
 
 export function getRepeatMode(): RepeatMode {
   if (typeof window === "undefined") return DEFAULT_REPEAT_MODE;
