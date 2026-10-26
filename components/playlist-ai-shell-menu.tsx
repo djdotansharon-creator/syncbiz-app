@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useLocale } from "@/lib/locale-context";
+import { LOCALES } from "@/lib/locales";
 
 type AiMode = "similar" | "refine" | "expand";
 
@@ -37,8 +39,11 @@ export function PlaylistAiShellMenu({
   onSendToPlaylist,
   editHref,
   onDeletePress,
+  onOpenChange,
 }: {
   playlistId: string;
+  /** The ⋯ menu opened/closed — the card keeps its hover look while it is open (the menu is a portal). */
+  onOpenChange?: (open: boolean) => void;
   playlistName?: string;
   branchId?: string;
   /** Opens the playlist-picker to send this playlist's tracks into another playlist. */
@@ -56,8 +61,16 @@ export function PlaylistAiShellMenu({
   useEffect(() => { setMounted(true); }, []);
 
   const menuBtnRef = useRef<HTMLButtonElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const menuPanelRef = useRef<HTMLDivElement>(null);
+  const [menuOpen, setMenuOpenState] = useState(false);
+  const setMenuOpen = (next: boolean) => {
+    setMenuOpenState(next);
+    onOpenChange?.(next);
+  };
+  // the menu opens on the side the interface reads toward: LEFT of the ⋯ in Hebrew / Arabic, RIGHT in English (the other side when there is no room)
+  const { locale } = useLocale();
+  const rtl = !!LOCALES.find((l) => l.code === locale)?.rtl;
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; origin?: string } | null>(null);
   /* Exit presence: menu/modal stay mounted while the exit animation plays
      (render-phase state adjustment — allowed; effects-only lint rule unaffected). */
   const [menuPresent, setMenuPresent] = useState(false);
@@ -66,11 +79,28 @@ export function PlaylistAiShellMenu({
   if (refineOpen && !refinePresent) setRefinePresent(true);
   useEffect(() => {
     if (!menuOpen) return;
+    // 2026-10-16 (owner): nothing is blocked while the menu is open — no overlay. A press anywhere outside the
+    // menu closes it AND goes through; any scroll/wheel simply closes it.
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setMenuOpen(false);
     };
+    const onPress = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if (menuPanelRef.current?.contains(t) || menuBtnRef.current?.contains(t)) return;
+      setMenuOpen(false);
+    };
+    const onScroll = () => setMenuOpen(false);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPress, true);
+    window.addEventListener("wheel", onScroll, { passive: true, capture: true });
+    window.addEventListener("scroll", onScroll, { passive: true, capture: true });
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPress, true);
+      window.removeEventListener("wheel", onScroll, { capture: true } as EventListenerOptions);
+      window.removeEventListener("scroll", onScroll, { capture: true } as EventListenerOptions);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menuOpen]);
 
   useEffect(() => {
@@ -126,9 +156,17 @@ export function PlaylistAiShellMenu({
           }
           const r = menuBtnRef.current?.getBoundingClientRect();
           if (r) {
+            // Beside the button (right; left at the viewport's edge), top-aligned, kept inside the viewport —
+            // it never covers the button, even on the first rows.
+            const MENU_W = 204;
+            const estH = 300;
+            const fitsRight = r.right + 8 + MENU_W <= window.innerWidth - 8;
+            const fitsLeft = r.left - 8 - MENU_W >= 8;
+            const toRight = rtl ? !fitsLeft && fitsRight : fitsRight || !fitsLeft;
             setMenuPos({
-              top: Math.min(r.bottom + 4, window.innerHeight - 200),
-              left: Math.max(8, Math.min(r.right - 176, window.innerWidth - 184)),
+              top: Math.max(8, Math.min(r.top - 6, window.innerHeight - estH - 8)),
+              left: toRight ? Math.min(r.right + 8, Math.max(8, window.innerWidth - 8 - MENU_W)) : Math.max(8, r.left - 8 - MENU_W),
+              origin: toRight ? "top left" : "top right",
             });
           }
           setMenuOpen(true);
@@ -136,7 +174,7 @@ export function PlaylistAiShellMenu({
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         aria-label={`AI playlist tools${playlistName ? ` for ${playlistName}` : ""}`}
-        className="list-none cursor-pointer rounded-md p-0.5 text-[color:var(--lib-text-secondary)] transition-colors hover:bg-white/[0.12] hover:text-white"
+        className={`sb-card-dots list-none cursor-pointer rounded-full p-0.5 text-[color:var(--lib-text-secondary)] transition-colors hover:bg-white/[0.12] hover:text-white${menuOpen ? " is-open" : ""}`}
       >
         <span className="inline-flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold">
           ⋯
@@ -145,24 +183,21 @@ export function PlaylistAiShellMenu({
       {mounted && menuPresent && menuPos
         ? createPortal(
         <div
-          className={`fixed inset-0 z-[9970] ${menuOpen ? "" : "pointer-events-none"}`}
-          onClick={() => setMenuOpen(false)}
-        >
-        <div
+          ref={menuPanelRef}
           role="menu"
-          style={{ top: menuPos.top, left: menuPos.left }}
+          style={{ top: menuPos.top, left: menuPos.left, transformOrigin: menuPos.origin }}
           onClick={(e) => e.stopPropagation()}
           onAnimationEnd={(e) => {
             if (!menuOpen && e.target === e.currentTarget && e.animationName === "sb-pop-out") {
               setMenuPresent(false);
             }
           }}
-          className={`${menuOpen ? "sb-anim-pop" : "sb-anim-pop-out"} fixed z-[9975] min-w-[11rem] overflow-hidden rounded-xl border border-white/[0.1] bg-[#141418] py-1 text-[11px] shadow-[0_12px_32px_rgba(0,0,0,0.55)]`}
+          className={`sb-card-menu sb-card-menu--list ${menuOpen ? "sb-anim-pop" : "sb-anim-pop-out pointer-events-none"} fixed z-[9975] min-w-[11rem] overflow-hidden rounded-xl border border-white/[0.1] bg-[#141418] py-1 text-[11px] shadow-[0_12px_32px_rgba(0,0,0,0.55)]`}
         >
           <button
             type="button"
             disabled={busy != null}
-            className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
+            className="block w-full px-3 py-1.5 text-start text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
             onClick={() => {
               setMenuOpen(false);
               void run("similar");
@@ -173,7 +208,7 @@ export function PlaylistAiShellMenu({
           <button
             type="button"
             disabled={busy != null}
-            className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
+            className="block w-full px-3 py-1.5 text-start text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
             onClick={() => {
               setMenuOpen(false);
               setRefineDraft("");
@@ -185,7 +220,7 @@ export function PlaylistAiShellMenu({
           <button
             type="button"
             disabled={busy != null}
-            className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
+            className="block w-full px-3 py-1.5 text-start text-slate-100 hover:bg-slate-800/90 disabled:opacity-45"
             onClick={() => {
               setMenuOpen(false);
               void run("expand");
@@ -199,7 +234,7 @@ export function PlaylistAiShellMenu({
               <button
                 type="button"
                 disabled={busy != null}
-                className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-white/[0.07] disabled:opacity-45"
+                className="block w-full px-3 py-1.5 text-start text-slate-100 hover:bg-white/[0.07] disabled:opacity-45"
                 onClick={() => {
                   setMenuOpen(false);
                   onSendToPlaylist();
@@ -216,7 +251,7 @@ export function PlaylistAiShellMenu({
                 <a
                   href={editHref}
                   role="menuitem"
-                  className="block w-full px-3 py-1.5 text-left text-slate-100 hover:bg-white/[0.07]"
+                  className="block w-full px-3 py-1.5 text-start text-slate-100 hover:bg-white/[0.07]"
                 >
                   Edit playlist
                 </a>
@@ -225,7 +260,7 @@ export function PlaylistAiShellMenu({
                 <button
                   type="button"
                   role="menuitem"
-                  className="block w-full px-3 py-1.5 text-left text-[#ff6961] hover:bg-[#ff453a]/10 hover:text-[#ff453a]"
+                  className="block w-full px-3 py-1.5 text-start text-[#ff6961] hover:bg-[#ff453a]/10 hover:text-[#ff453a]"
                   onClick={() => {
                     setMenuOpen(false);
                     onDeletePress();
@@ -236,7 +271,6 @@ export function PlaylistAiShellMenu({
               ) : null}
             </>
           )}
-        </div>
         </div>,
         document.body)
         : null}

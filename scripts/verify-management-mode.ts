@@ -17,8 +17,9 @@ const shell = read("components", "app-shell.tsx");
 const css = read("app", "globals.css");
 const dpc = read("lib", "device-player-context.tsx");
 
-assert("M1 management routes = Dashboard, Control Room, Access Control (existing URLs)",
-  shell.includes(String.raw`const isManagementRoute = /^\/(dashboard|access-control|owner\/control-room)(\/|$)/.test(pathname ?? "");`));
+// 2026-10-26 (owner): the Jingles tab and the Lock screen design tab also run with the player closed (UI only, same mechanism) — the original three routes are unchanged
+assert("M1 management routes = Dashboard, Control Room, Access Control (existing URLs) + the player-closed pages Jingles and Lock screen design",
+  shell.includes(String.raw`const isManagementRoute = /^\/(dashboard|access-control|jingles|display-design|owner\/control-room)(\/|$)/.test(pathname ?? "");`));
 assert("M2 still exactly three <AudioPlayer /> mounts (streamer / mobile / main) — no new instance, no new branch",
   (shell.match(/<AudioPlayer \/>/g) ?? []).length === 3);
 assert("M3 the player row is the SAME element: only class + inert + aria-hidden toggle (no conditional render)",

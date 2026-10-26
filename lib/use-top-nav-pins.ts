@@ -19,7 +19,8 @@ import { useCallback, useEffect, useState } from "react";
 export const TOP_NAV_PINS_STORAGE_KEY = "syncbiz:topnav:pins:v1";
 
 /** Keys that can never be removed from the top bar. */
-const ALWAYS_PINNED = new Set<string>(["library", "radio"]);
+/** (owner 2026-10-26: Jingles and the lock-screen design are tabs of the bar of their own — "display-design" is only offered to managers by the app shell) */
+const ALWAYS_PINNED = new Set<string>(["library", "radio", "jingles", "display-design"]);
 
 /** Initial pinned set when nothing is persisted yet — matches the top bar the
  *  operator sees today (Library · Schedules · Radio · Settings). library+radio

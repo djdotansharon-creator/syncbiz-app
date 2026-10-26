@@ -524,6 +524,19 @@ type PlaybackContextValue = PlaybackState & {
    * items already left the queue. No-op if the id isn't currently in the queue.
    */
   removePlayNextItem: (id: string) => void;
+  /**
+   * Move a not-yet-played item inside `playNextQueue` (owner, 2026-10-13: long-press a queue row
+   * and drag it up/down). Pure array move; no-op for invalid positions.
+   */
+  reorderPlayNextItem: (from: number, to: number) => void;
+  /**
+   * Move a track inside the ACTIVE SESSION's play order (long-press + drag in the queue). Pure
+   * state: the playlist's `order` is moved and the playing index follows its track — nothing is
+   * saved to the library. Applied to the snapshot playlist, the source's attachment and the queue
+   * copy (same id) so next/prev, prefetch and the queue panel all see one order. If a Play Next
+   * item is playing, the baseline session is reordered instead. No-op for invalid indexes.
+   */
+  reorderSessionTrack: (from: number, to: number) => void;
   playSource: (source: UnifiedSource, trackIndex?: number, opts?: PlaySourceOptions) => void;
   /** Last play command origin — for transition diagnostics in AudioPlayer. */
   lastPlayCommandVia: PlayCommandVia;
@@ -2707,6 +2720,58 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const reorderPlayNextItem = useCallback((from: number, to: number) => {
+    setState((s) => {
+      const n = s.playNextQueue.length;
+      if (!Number.isInteger(from) || !Number.isInteger(to) || from === to || from < 0 || to < 0 || from >= n || to >= n) return s;
+      const next = s.playNextQueue.slice();
+      const [it] = next.splice(from, 1);
+      next.splice(to, 0, it!);
+      playNextLog("reorder_play_next_item", { from, to, length: n });
+      return { ...s, playNextQueue: next };
+    });
+  }, []);
+
+  const reorderSessionTrack = useCallback((from: number, to: number) => {
+    setState((s) => {
+      type SessionSlice = Pick<PlaybackState, "currentSource" | "currentPlaylist" | "currentTrackIndex" | "queue">;
+      const applyTo = <T extends SessionSlice>(snap: T): T | null => {
+        const pl = getActivePlaylist(snap);
+        if (!pl) return null;
+        const ordered = getPlaylistTracks(pl);
+        const n = ordered.length;
+        if (!Number.isInteger(from) || !Number.isInteger(to) || from === to || from < 0 || to < 0 || from >= n || to >= n) return null;
+        const ids = ordered.map((t) => t.id);
+        const [moved] = ids.splice(from, 1);
+        ids.splice(to, 0, moved!);
+        const withOrder = (p: Playlist): Playlist => (p.id === pl.id ? { ...p, order: ids } : p);
+        let idx = snap.currentTrackIndex;
+        if (idx === from) idx = to;
+        else if (from < idx && to >= idx) idx -= 1;
+        else if (from > idx && to <= idx) idx += 1;
+        const src = snap.currentSource;
+        const nextSource = src && src.playlist && src.playlist.id === pl.id ? { ...src, playlist: withOrder(src.playlist) } : src;
+        return {
+          ...snap,
+          currentPlaylist: snap.currentPlaylist ? withOrder(snap.currentPlaylist) : snap.currentPlaylist,
+          currentSource: nextSource,
+          currentTrackIndex: idx,
+          queue: snap.queue.map((q) => (q.playlist && q.playlist.id === pl.id ? { ...q, playlist: withOrder(q.playlist) } : q)),
+        };
+      };
+      if (isPlayNextSourceId(s.currentSource?.id) && s.playNextBaseline) {
+        const b = applyTo(s.playNextBaseline);
+        if (!b) return s;
+        console.log("[SyncBiz Audit] reorder_session_track", { from, to, scope: "play_next_baseline" });
+        return { ...s, playNextBaseline: b };
+      }
+      const next = applyTo(s);
+      if (!next) return s;
+      console.log("[SyncBiz Audit] reorder_session_track", { from, to, playingIndex: next.currentTrackIndex });
+      return next;
+    });
+  }, []);
+
   const updatePlayNextItem = useCallback((id: string, patch: Partial<UnifiedSource>) => {
     if (!id || !patch) return;
     setState((s) => {
@@ -2807,6 +2872,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       addPlayNextSources,
       updatePlayNextItem,
       removePlayNextItem,
+      reorderPlayNextItem,
+      reorderSessionTrack,
       playSource,
       playSourceFromDb,
       playPlaylist,
@@ -2846,6 +2913,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       addPlayNextSources,
       updatePlayNextItem,
       removePlayNextItem,
+      reorderPlayNextItem,
+      reorderSessionTrack,
       playSource,
       playSourceFromDb,
       playPlaylist,

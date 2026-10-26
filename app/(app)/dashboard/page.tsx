@@ -6,6 +6,7 @@ import { getTranslations } from "@/lib/translations";
 import { mgmt } from "@/lib/i18n/management";
 import type { Announcement, Device, LogEntry, Schedule } from "@/lib/types";
 import { ManagementGate } from "@/components/management/management-gate";
+import { ManagementTabs } from "@/components/management/management-tabs";
 
 async function getData() {
   try {
@@ -73,52 +74,29 @@ async function DashboardContent() {
   return (
     // Management Mode: full screen, outside the player workspace rails — this page scrolls on its own (like Control Room)
     <div dir={L.dir} className="mgmt-type h-full space-y-8 overflow-y-auto pb-6">
+      <ManagementTabs />
       <div>
         <h1 className="text-xl font-semibold text-slate-50">{t.dashboard}</h1>
         <p className="mt-1 text-sm text-slate-400">{t.dashboardOverview}</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Link
-          href="/devices"
-          className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5 transition hover:border-slate-700 hover:bg-slate-900/40"
-        >
-          <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-            {t.onlineDevices}
-          </p>
-          <p className="mt-1 text-2xl font-semibold text-slate-50">
-            {onlineCount} <span className="text-sm font-normal text-slate-500">/ {devices.length} {t.total}</span>
-          </p>
+      {/* the first row: flat counters (owner 2026-10-20 — no frames): the title above the number, a faint wash only on hover */}
+      <div className="cr-stats grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <Link href="/devices" className="cr-stat cr-stat--link">
+          <span className="cr-stat-label">{t.onlineDevices}</span>
+          <span className="cr-stat-value">{onlineCount}<small>/ {devices.length} {t.total}</small></span>
         </Link>
-        <Link
-          href="/schedules"
-          className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5 transition hover:border-slate-700 hover:bg-slate-900/40"
-        >
-          <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-            {t.scheduledToday}
-          </p>
-          <p className="mt-1 text-2xl font-semibold text-slate-50">
-            {scheduledToday.length} {t.activeTimeBlocks}
-          </p>
+        <Link href="/schedules" className="cr-stat cr-stat--link">
+          <span className="cr-stat-label">{t.scheduledToday}</span>
+          <span className="cr-stat-value">{scheduledToday.length}<small>{t.activeTimeBlocks}</small></span>
         </Link>
-        <Link
-          href="/announcements"
-          className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5 transition hover:border-slate-700 hover:bg-slate-900/40"
-        >
-          <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-            {t.pendingAnnouncements}
-          </p>
-          <p className="mt-1 text-2xl font-semibold text-slate-50">
-            {pendingAnnouncements.length} {t.draftOrScheduled}
-          </p>
+        <Link href="/announcements" className="cr-stat cr-stat--link">
+          <span className="cr-stat-label">{t.pendingAnnouncements}</span>
+          <span className="cr-stat-value">{pendingAnnouncements.length}<small>{t.draftOrScheduled}</small></span>
         </Link>
-        <div className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
-          <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-            {t.agentsReporting}
-          </p>
-          <p className="mt-1 text-2xl font-semibold text-emerald-400">
-            {onlineCount} {t.devices}
-          </p>
+        <div className="cr-stat cr-stat--static">
+          <span className="cr-stat-label">{t.agentsReporting}</span>
+          <span className="cr-stat-value cr-stat-value--ok">{onlineCount}<small>{t.devices}</small></span>
         </div>
       </div>
 

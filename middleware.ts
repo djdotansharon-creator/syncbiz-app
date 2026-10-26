@@ -25,6 +25,8 @@ const PROTECTED_PREFIXES = [
   "/player",
   "/owner",
   "/mobile",
+  "/jingles",
+  "/display-design",
 ];
 
 const ALLOWED_PATHS = ["/", "/login", "/signup"];

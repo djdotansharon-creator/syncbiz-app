@@ -8,6 +8,7 @@
  */
 import { AccessControlConsole } from "@/components/access-control-console";
 import { ManagementGate } from "@/components/management/management-gate";
+import { ManagementTabs } from "@/components/management/management-tabs";
 
 export default function AccessControlPage() {
   return (
@@ -15,6 +16,7 @@ export default function AccessControlPage() {
     // Security hotfix 2026-10-13: managers only; locked on a desktop station until unlocked.
     <ManagementGate from="/access-control">
       <div className="mgmt-type h-full overflow-y-auto p-4 sm:p-6">
+        <div className="mb-4"><ManagementTabs /></div>
         <AccessControlConsole />
       </div>
     </ManagementGate>

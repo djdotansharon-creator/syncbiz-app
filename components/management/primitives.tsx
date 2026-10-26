@@ -6,34 +6,50 @@
  * blocks MOVED here unchanged (same markup / classes → no visual change) so Jingles / Access Control / Dashboard reuse
  * them. Visual only: no business logic, no data access. The CSS tokens + .vx-* classes live in app/globals.css.
  */
-import { DOT_FILL, StatusGlyph, type MapDotStatus } from "@/components/control-room/branch-map";
+import { StatusGlyph, type MapDotStatus } from "@/components/control-room/branch-map";
+import { useLogoFit } from "@/components/control-room/logo-fit";
 import type { Mgmt } from "@/lib/i18n/management";
 
-/** a region chip — one compact row (all regions fit), LED bar under the chosen one; the count lives on the map */
+/** a region chip — a soft pill in one wrapping row; the chosen one is a lighter glass pill (no bars, no frames) */
 export function RegionChip({ label, active, onClick, title }: { label: string; active: boolean; onClick: () => void; title?: string }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      title={title}
-      className={`relative flex-auto whitespace-nowrap px-1.5 py-2.5 text-[12px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] ${
-        active ? "bg-white/[0.06] font-semibold text-[var(--sb-text)]" : "font-medium text-[var(--sb-text-secondary)] hover:bg-white/[0.03] hover:text-[var(--sb-text)]"
-      }`}
-    >
+    <button type="button" onClick={onClick} aria-pressed={active} title={title} className={`cr-chip whitespace-nowrap px-3 py-1.5 text-[12.5px] ${active ? "is-active font-semibold" : "font-medium"}`}>
       {label}
-      <span className={`absolute inset-x-1 bottom-0 h-[3px] rounded-full bg-[var(--sb-accent)] transition-opacity ${active ? "opacity-100" : "opacity-0"}`} aria-hidden />
     </button>
   );
 }
 
-/** a filter tab (brands / regions) — the same language as the KPI cards: big, clear, a bar under the chosen one */
 /**
- * a brand filter tab (owner 2026-10-15/16): a brand WITH a logo shows only the logo (name = tooltip + accessible name);
- * without a logo: the colour dot + the name. No count (owner).
- * Selected = a lifted surface + a bar in the brand colour at the bottom. No permanent strip.
+ * a brand filter chip. A brand WITH a logo is just its logo — WITH its own background, the chip's frame takes the logo's shape (owner 2026-10-20; the squares stay in the list rows).
+ * A brand without one: a small letter tile + its name. Several chips can be chosen at once — a chosen one carries a ✓ (what has a ✓ is what is shown).
  */
-export function FilterTab({ label, active, onClick, dot, bar, logo }: { label: string; active: boolean; onClick: () => void; dot?: string | null; bar?: string; /** brand logo (replaces the dot) */ logo?: string | null }) {
+export function FilterTab({ label, active, onClick, dot, bar, logo, check }: { label: string; active: boolean; onClick: () => void; dot?: string | null; bar?: string; /** brand logo */ logo?: string | null; /** show the ✓ (the brand is one of the chosen) */ check?: boolean }) {
+  const letter = (label.trim().split(/\s+/).pop() ?? "").charAt(0).toUpperCase();
+  const fit = useLogoFit(logo ?? null);
+  // the "All" chip (no logo, no colour): a text tile of the SAME height and look as the logo chips, so the strip reads as one family
+  if (!logo && !dot) {
+    return (
+      <button type="button" onClick={onClick} aria-pressed={active} aria-label={label} title={label} className={`cr-chip cr-chip--logo flex shrink-0 items-center ${active ? "is-active" : ""}`}>
+        <span className="cr-chip-logo-box is-text" aria-hidden>{label}</span>
+        <span className="cr-chip-bar" aria-hidden />
+      </button>
+    );
+  }
+  if (logo && fit !== null) {
+    const w = fit ? Math.max(40, Math.min(136, Math.round(40 * fit.aspect))) : 64;
+    return (
+      <button type="button" onClick={onClick} aria-pressed={active} aria-label={label} title={label} className={`cr-chip cr-chip--logo flex shrink-0 items-center ${active ? "is-active" : ""}`}>
+        <span className={`cr-chip-logo-box${fit?.bleed ? " is-bleed" : ""}`} style={{ width: w, ...(fit ? { background: fit.bg } : {}) }} aria-hidden>
+          {fit ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={fit.src} alt="" draggable={false} />
+          ) : null}
+        </span>
+        <CheckBadge on={!!check} />
+        <span className="cr-chip-bar" aria-hidden />
+      </button>
+    );
+  }
   return (
     <button
       type="button"
@@ -41,26 +57,39 @@ export function FilterTab({ label, active, onClick, dot, bar, logo }: { label: s
       aria-pressed={active}
       aria-label={label}
       title={label}
-      className={`relative flex flex-auto flex-col items-center justify-center gap-1 px-10 py-2.5 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] ${
-        active ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
-      }`}
+      style={active && bar ? ({ ["--cr-chip-ring" as string]: bar } as React.CSSProperties) : undefined}
+      className={`cr-chip cr-chip--brand flex shrink-0 items-center gap-2.5 py-1.5 pe-4 ps-1.5 ${active ? "is-active" : ""}`}
     >
-      {logo ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={logo} alt="" aria-hidden className="h-8 w-auto max-w-[96px] object-contain" draggable={false} />
-      ) : dot ? (
-        <span className="h-3.5 w-3.5 shrink-0 rounded-full" style={{ background: dot }} aria-hidden />
+      {logo || dot ? (
+        <span className={`cr-chip-logo ${logo ? "has-logo" : ""}${fit ? " has-fit" : ""}${fit?.bleed ? " is-bleed" : ""}`} style={{ ...(dot ? { ["--cr-brand" as string]: dot } : {}), ...(fit ? { background: fit.bg } : {}) } as React.CSSProperties} aria-hidden>
+          {logo ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={fit?.src ?? logo} alt="" draggable={false} />
+          ) : (
+            <span>{letter}</span>
+          )}
+        </span>
       ) : null}
-      {logo ? null : (
-        <span className={`whitespace-nowrap text-sm ${active ? "font-semibold text-[var(--sb-text)]" : "font-medium text-[var(--sb-text-secondary)]"}`} dir="auto">{label}</span>
-      )}
-      <span className={`absolute inset-x-0 bottom-0 h-[3px] transition-opacity ${active ? "opacity-100" : "opacity-0"}`} style={{ background: bar ?? "var(--sb-accent)" }} aria-hidden />
+      <CheckBadge inline on={!!check} />
+      <span className={`whitespace-nowrap text-sm ${active ? "font-semibold" : "font-medium"}`} dir="auto">{label}</span>
     </button>
   );
 }
 
-/** a KPI counter that is also a status filter (pressed = the active filter; a bar in the status color marks it) */
-export function Stat({ L, value, label, status, last, valueColor, active, onClick, disabled }: { L: Mgmt; value: number | string; label: string; status?: MapDotStatus; last?: boolean; valueColor?: string; active: boolean; onClick: () => void; disabled?: boolean }) {
+/** the ✓ of a chosen brand — always in the DOM, so it can animate BOTH ways: it pops in with an overshoot and, when the brand is un-chosen, shrinks and fades out (CSS transition on `.is-on`) */
+function CheckBadge({ inline = false, on }: { inline?: boolean; on: boolean }) {
+  return (
+    <span className={`cr-chip-check${inline ? " is-inline" : ""}${on ? " is-on" : ""}`} aria-hidden>
+      <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="m3.5 8.4 3 3 6-6.8" /></svg>
+    </span>
+  );
+}
+
+/**
+ * a KPI counter that is also a status filter — a flat TAB (owner 2026-10-20: no frame, no box): the title ABOVE the number, the chosen one gets an
+ * underline, hover = a faint rounded wash. The status colour is the glyph beside the title.
+ */
+export function Stat({ L, value, label, status, valueColor, active, onClick, disabled }: { L: Mgmt; value: number | string; label: string; status?: MapDotStatus; last?: boolean; valueColor?: string; active?: boolean; onClick?: () => void; disabled?: boolean }) {
   return (
     <button
       type="button"
@@ -68,18 +97,16 @@ export function Stat({ L, value, label, status, last, valueColor, active, onClic
       disabled={disabled}
       aria-pressed={active}
       title={active && status ? L.t("cr.kpiShowingOnly", { label }) : L.t("cr.kpiShow", { label })}
-      className={`relative px-6 py-3.5 text-start transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--sb-accent)] disabled:cursor-default ${
-        last ? "" : "border-e border-[color:var(--sb-border)]"
-      } ${active ? "bg-white/[0.05]" : "hover:bg-white/[0.025]"}`}
+      className={`cr-stat text-start ${active ? "is-active" : ""}`}
     >
-      <div className="text-[34px] font-bold leading-none tracking-tight tabular-nums text-[var(--sb-text)]" dir="ltr" style={valueColor ? { color: valueColor } : undefined}>
-        {value}
-      </div>
-      <div className={`mt-2 flex items-center gap-2 text-base ${active ? "font-semibold text-[var(--sb-text)]" : "text-[var(--sb-text-secondary)]"}`}>
-        {status ? <StatusGlyph status={status} size={13} /> : null}
+      <span className="cr-stat-label">
+        {status ? <StatusGlyph status={status} size={12} /> : null}
         {label}
-      </div>
-      <span className={`absolute inset-x-0 bottom-0 h-[3px] transition-opacity ${active ? "opacity-100" : "opacity-0"}`} style={{ background: status ? DOT_FILL[status] : "#f5f5f7" }} aria-hidden />
+      </span>
+      <span className="cr-stat-value" dir="ltr" style={valueColor ? { color: valueColor } : undefined}>
+        {value}
+      </span>
+      <span className="cr-stat-bar" aria-hidden />
     </button>
   );
 }

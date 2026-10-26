@@ -1,0 +1,88 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+   LITE graphics — the second look (owner 2026-10-23).
+
+   Everything below the "LITE" marker is scoped to  html[data-sb-fx="lite"]  — without that attribute NOTHING in this file
+   applies, so the full design (app/globals.css) is exactly what it was. Remove this file + its import in app/layout.tsx and
+   the product is back to a single look.
+
+   Same layout, colours, words and motion of the screens; what changes is what a SIMPLE graphics chip has to draw:
+     · live backdrop blur (104 rules) .................. none — panels / menus / dialogs get a solid fill instead
+     · blurred copies of every card picture (foot blur) . a plain dark gradient behind the title
+     · the second muted "mirror" video (a blurred copy of the clip) ... off (through the player's own switch, see lib/fx-mode.ts); the real video stays
+     · pinned GPU layers (will-change), drop-shadow filters, animated shadows, running borders .. off / shortened
+   Switch: gear menu → Graphics (Full / Light), or ?fx=lite / ?fx=full in the address. Before any choice the computer decides.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* ── the Graphics switch in the gear menu (shown in BOTH looks, so it lives outside the lite scope) ── */
+.sb-fx-section { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 8px 2px; }
+.sb-fx-title { font-size: 10px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255, 255, 255, 0.55); }
+.sb-fx-section.is-he .sb-fx-title { letter-spacing: 0.06em; font-size: 11px; }
+.sb-fx-row { position: relative; display: grid; grid-template-columns: 1fr 1fr; align-items: center; width: 100%; max-width: 232px; height: 34px; }
+.sb-fx-btn { position: relative; display: inline-flex; align-items: center; justify-content: center; height: 28px; margin: 0 3px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: rgba(255, 255, 255, 0.6); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: color 200ms ease, box-shadow 200ms ease; }
+.sb-fx-btn:hover { color: #ffffff; }
+.sb-fx-btn[aria-checked="true"] { color: #ffffff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.78); }
+.sb-fx-btn:focus { outline: none; }
+.sb-fx-btn:focus-visible { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.9); }
+/* (the gear menu is a dark panel in every display mode, so this row keeps the same light-on-dark colours in all of them) */
+
+/* ═══════════════════════════════════════════════ LITE ═══════════════════════════════════════════════ */
+
+/* 1 · no live blur anywhere, no pinned GPU layers */
+html[data-sb-fx="lite"] *,
+html[data-sb-fx="lite"] *::before,
+html[data-sb-fx="lite"] *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  will-change: auto !important;
+}
+
+/* 2 · panels, menus, dialogs: a solid fill (the glass was what made them readable over moving colour) */
+html[data-sb-fx="lite"] :is(.main-menu-popover, .sb-card-menu, .sb-shelf-menu, .sb-wz-panel, .sb-dj-save-card, .sb-toast, .sb-display-switch-menu, .sb-timeline-tip, .cr-colors, .cr-region-menu, .cr-density-menu, .cr-pop-menu, .cr-map-panel) {
+  background: rgba(28, 28, 32, 0.97) !important;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.38) !important;
+}
+/* the dim behind a dialog: a flat veil instead of a blurred page */
+html[data-sb-fx="lite"] :is(.sb-wz-backdrop, .sb-dj-save) { background: rgba(8, 8, 12, 0.66) !important; }
+
+/* 3 · the cards of the library: the picture blurred a second time under the title → a plain dark gradient behind the title */
+html[data-sb-fx="lite"] .library-source-card-grid .library-source-card .sb-tile-blur { display: none !important; }
+html[data-sb-fx="lite"] .library-source-card-grid .library-source-card .sb-lbc-body {
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.66) 0%, rgba(0, 0, 0, 0.38) 45%, rgba(0, 0, 0, 0) 100%);
+}
+html[data-sb-fx="lite"][data-sb-display="white"] .library-source-card-grid .library-source-card .sb-lbc-body {
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.4) 45%, rgba(255, 255, 255, 0) 100%);
+}
+/* a card answers the pointer with a small lift only — no 820 ms animated shadow */
+html[data-sb-fx="lite"] .library-source-card-grid .library-source-card { transition: transform 240ms ease !important; box-shadow: none !important; }
+html[data-sb-fx="lite"] .library-source-card-grid .library-source-card:hover { box-shadow: none !important; }
+/* the little play glyph on a card: no drop-shadow filter (27 of them on the screen) */
+html[data-sb-fx="lite"] :is(.sb-card-art-play, .sb-card-art-play svg, .sb-shelf-play, .sb-jq-play, .jcl-play svg, .bcf-sw svg, .sb-alb-play, .sb-drop-plus) { filter: none !important; }
+
+/* 4 · the deck: no coloured blurred wash and no SECOND (muted, blurred) copy of the video. The real video on the side STAYS — in every display mode —
+       exactly as in the full look (owner 2026-10-25: "make the video work no matter what"). */
+html[data-sb-fx="lite"] .sb-deck-glass::before { display: none !important; }
+html[data-sb-fx="lite"] .sb-deck-video-mirror { display: none !important; }
+
+/* 5 · decoration that moves all the time and repaints: running border, glows, sparkles, sweeping title light */
+/* the playing card's RUNNING border (a rotating conic gradient re-painted every frame) → the same border, standing still */
+html[data-sb-fx="lite"] .library-playing-active::after {
+  animation: none !important;
+  background: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  padding: 0 !important;
+  box-shadow: inset 0 0 0 2px rgba(245, 245, 247, 0.9) !important;
+}
+html[data-sb-fx="lite"] .sb-gst-hero::before,
+html[data-sb-fx="lite"] .sb-djl-spark,
+html[data-sb-fx="lite"] .sb-djl-title,
+html[data-sb-fx="lite"] .cr-dot-glow--live { animation: none !important; }
+html[data-sb-fx="lite"] .sb-gst-hero::before { display: none !important; }
+
+/* 6 · big blurred filters left in single places */
+html[data-sb-fx="lite"] .library-list-shell--frameless.sb-drop-armed > *:not(.sb-drop-plus) { filter: none !important; }
+
+/* 7 · reduced-motion people get the lite motion too (nothing heavier than a short fade) */
+@media (prefers-reduced-motion: reduce) {
+  html[data-sb-fx="lite"] .library-source-card-grid .library-source-card { transition: none !important; }
+}

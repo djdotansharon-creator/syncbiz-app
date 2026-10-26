@@ -43,11 +43,15 @@ type Copy = {
   badUrl: string;
   waConnect: string;
   waConnected: string;
+  waOn: string;
   waDisconnect: string;
   waConnectHint: string;
   waLoading: string;
-  waSolo: string;
-  waAllChats: string;
+  heroTitle: string;
+  heroSub: string;
+  getApp: string;
+  appNote: string;
+  addShort: string;
   inboxTitle: string;
   incomingTitle: string;
   savedTitle: string;
@@ -58,13 +62,13 @@ type Copy = {
 
 const EN: Copy = {
   title: "Guests",
-  subtitle: "Paste a music link — review, then play or add to the GUESTS playlist.",
+  subtitle: "Songs your guests send, all in one place.",
   open: "Open Guest inbox",
   close: "Close",
   placeholder: "Paste a music link (YouTube, SoundCloud…)",
   resolve: "Add",
   resolving: "Resolving…",
-  empty: "No guest links yet. Paste a link above, or they arrive from WhatsApp.",
+  empty: "Links your guests send will show up here.",
   playNow: "Play now",
   addToGuests: "Add to GUESTS",
   reject: "Dismiss",
@@ -75,12 +79,16 @@ const EN: Copy = {
   badUrl: "That doesn't look like a link",
   waConnect: "Connect WhatsApp",
   waConnected: "WhatsApp connected",
+  waOn: "Connected",
   waDisconnect: "Disconnect",
   waConnectHint:
     "Connect once (scan the QR here in the app). Music links from new messages land in the inbox automatically.",
   waLoading: "Loading WhatsApp…",
-  waSolo: "Only this chat",
-  waAllChats: "All chats",
+  heroTitle: "Take song requests on WhatsApp",
+  heroSub: "Connect once. Every music link your guests send lands here.",
+  getApp: "Get the desktop app",
+  appNote: "WhatsApp connects in the SyncBiz desktop app.",
+  addShort: "Save",
   inboxTitle: "Inbox",
   incomingTitle: "New links",
   savedTitle: "In GUESTS",
@@ -91,13 +99,13 @@ const EN: Copy = {
 
 const HE: Copy = {
   title: "אורחים",
-  subtitle: "הדביקו קישור לשיר — לבדוק, ואז לנגן או להוסיף לפלייליסט GUESTS.",
+  subtitle: "השירים שהאורחים שולחים, במקום אחד.",
   open: "פתיחת תיבת האורחים",
   close: "סגור",
-  placeholder: "הדביקו קישור לשיר (YouTube, SoundCloud…)",
+  placeholder: "הדביקו כאן קישור לשיר…",
   resolve: "הוסף",
   resolving: "מזהה…",
-  empty: "עדיין אין קישורים. הדביקו קישור למעלה, או שהם יגיעו מ-WhatsApp.",
+  empty: "קישורים שהאורחים ישלחו יופיעו כאן.",
   playNow: "נגן עכשיו",
   addToGuests: "הוסף ל-GUESTS",
   reject: "הסר",
@@ -108,12 +116,16 @@ const HE: Copy = {
   badUrl: "זה לא נראה כמו קישור",
   waConnect: "התחבר ל-WhatsApp",
   waConnected: "WhatsApp מחובר",
+  waOn: "מחובר",
   waDisconnect: "נתק",
   waConnectHint:
     "התחברו פעם אחת (סרקו את ה-QR כאן בתוך האפליקציה). קישורי מוזיקה מהודעות חדשות יופיעו בתיבה אוטומטית.",
   waLoading: "טוען WhatsApp…",
-  waSolo: "רק הצ'אט הזה",
-  waAllChats: "כל הצ'אטים",
+  heroTitle: "בקשות שירים בוואטסאפ",
+  heroSub: "מתחברים פעם אחת — וכל קישור שהאורחים שולחים מופיע כאן.",
+  getApp: "הורדת אפליקציית שולחן העבודה",
+  appNote: "החיבור ל-WhatsApp פועל באפליקציית SyncBiz לשולחן העבודה.",
+  addShort: "שמור",
   inboxTitle: "תיבה",
   incomingTitle: "קישורים חדשים",
   savedTitle: "ב-GUESTS",
@@ -263,16 +275,7 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
   const wa = useMemo(() => getDesktopWA(), []);
   const [waStatus, setWaStatus] = useState<WaStatus>({ connected: false, windowOpen: false });
   const [waBusy, setWaBusy] = useState(false);
-  const [waSolo, setWaSolo] = useState(true); // MONI-style: only the open chat, default on
   const waRegionRef = useRef<HTMLDivElement | null>(null);
-
-  const toggleSolo = useCallback(() => {
-    setWaSolo((prev) => {
-      const next = !prev;
-      void wa?.setWhatsAppSolo(next);
-      return next;
-    });
-  }, [wa]);
 
   useEffect(() => {
     if (!wa) return;
@@ -420,10 +423,32 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
     }
   }, [guestLink]);
 
-  // ── Reusable blocks ──
+  // ── Reusable blocks ── (round 9: minimal glass, DJ language — left = WhatsApp hero / live pane, right = the inbox)
+  const iconPlay = (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M8.6 5.6v12.8L18.6 12z" />
+    </svg>
+  );
+  const iconX = (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+      <path d="M7 7l10 10M17 7L7 17" />
+    </svg>
+  );
+  const iconPlus = (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+  const spinner = (
+    <svg className="sb-gst-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+
   const inputBlock = (
-    <div className="px-3 py-3">
-      <div className="flex items-center gap-2">
+    <div className="sb-gst-pastewrap">
+      <div className="sb-gst-paste">
         <input
           ref={inputRef}
           value={input}
@@ -433,115 +458,92 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
           }}
           onKeyDown={(e) => e.key === "Enter" && void handleResolve()}
           placeholder={t.placeholder}
-          className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-black/30 px-3 py-2 text-[13px] text-slate-100 placeholder:text-slate-600 focus:border-[color:var(--sb-accent-border)] focus:outline-none"
         />
         <button
           type="button"
           onClick={() => void handleResolve()}
           disabled={resolving || !input.trim()}
-          className="shrink-0 rounded-xl bg-[var(--sb-text)] px-3 py-2 text-[12px] font-semibold text-[#111114] transition active:scale-95 disabled:opacity-40"
+          aria-label={t.resolve}
+          title={t.resolve}
         >
-          {resolving ? t.resolving : t.resolve}
+          {resolving ? spinner : iconPlus}
         </button>
       </div>
-      {inputError ? <p className="mt-1.5 text-[12px] text-amber-300">{inputError}</p> : null}
+      {inputError ? <p className="sb-gst-err">{inputError}</p> : null}
     </div>
   );
 
-  const sectionHeader = (label: string, count?: number) => (
-    <p className="px-1 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-      {label}
-      {typeof count === "number" && count > 0 ? <span className="ml-1 text-slate-600">· {count}</span> : null}
-    </p>
-  );
+  const hasIncoming = pending.length > 0 || cards.length > 0;
+  const isEmpty = !hasIncoming && saved.length === 0;
 
-  const savedBlock = (
-    <div className="max-h-[42%] shrink-0 overflow-y-auto border-t border-white/[0.06] px-3 py-2">
-      {sectionHeader(t.savedTitle, saved.length)}
-      {saved.length === 0 ? (
-        <p className="px-1 py-2 text-[11px] text-slate-600">{t.savedEmpty}</p>
-      ) : (
-        <div className="space-y-1.5">
-          {saved.map((tk) => (
-            <div key={tk.id} className="flex items-center gap-2.5 rounded-xl border border-white/[0.06] bg-black/20 p-2">
-              <span className="h-9 w-9 shrink-0 overflow-hidden rounded-lg bg-slate-800">
-                {tk.cover ? <HydrationSafeImage src={tk.cover} alt="" className="h-full w-full object-cover" /> : null}
-              </span>
-              <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-slate-100">{tk.title}</p>
-              <button
-                type="button"
-                onClick={() => playSaved(tk)}
-                aria-label={t.playNow}
-                title={t.playNow}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--sb-text)] text-[#111114] transition active:scale-90"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </button>
-            </div>
-          ))}
+  const listBlock = (
+    <div className="sb-gst-list">
+      {isEmpty ? (
+        <div className="sb-gst-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
+          </svg>
+          <p>{t.empty}</p>
         </div>
-      )}
-    </div>
-  );
+      ) : null}
 
-  const cardsBlock = (
-    <div className="flex-1 space-y-2 overflow-y-auto px-3 pb-3">
-      {pending.length > 0 || cards.length > 0 ? sectionHeader(t.incomingTitle) : null}
+      {hasIncoming ? <p className="sb-gst-label">{t.incomingTitle}</p> : null}
       {/* "Thinking" cards while links resolve (paste OR WhatsApp arrivals). */}
       {pending.map((url) => (
-        <div
-          key={`p-${url}`}
-          className="flex items-center gap-2.5 rounded-xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)]/40 p-2.5"
-        >
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-black/20">
-            <svg className="h-5 w-5 animate-spin text-[#409cff]" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
-              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-            </svg>
+        <div key={`p-${url}`} className="sb-gst-card is-pending">
+          <span className="sb-gst-cover">{spinner}</span>
+          <span className="sb-gst-text">
+            <b>{t.resolving}</b>
+            <i dir="ltr">{url}</i>
           </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[13px] font-semibold text-slate-100">{t.resolving}</p>
-            <p className="truncate text-[11px] text-slate-500" dir="ltr">{url}</p>
-          </div>
         </div>
       ))}
-      {cards.length === 0 && pending.length === 0 ? (
-        <p className="px-1 py-6 text-center text-[12px] text-slate-600">{t.empty}</p>
-      ) : (
-        cards.map((c) => (
-          <div key={c.id} className="rounded-xl border border-white/[0.07] bg-black/25 p-2.5">
-            <div className="flex items-center gap-2.5">
-              <span className="h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-slate-800">
-                {c.card.cover ? (
-                  <HydrationSafeImage src={c.card.cover} alt="" className="h-full w-full object-cover" />
-                ) : null}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-semibold text-slate-50">{c.card.title}</p>
-                <p className="truncate text-[11px] text-slate-400">{c.card.artist ?? c.card.type}</p>
-              </div>
-            </div>
-            {c.note ? (
-              <p className="mt-2 rounded-lg border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-2 py-1 text-center text-[11px] text-[#409cff]">
-                {c.note}
-              </p>
-            ) : null}
-            <div className="mt-2 grid grid-cols-3 gap-1.5">
-              <button type="button" onClick={() => void addToGuests(c)} disabled={c.busy} className={BTN_PRIMARY}>
-                {t.addToGuests}
-              </button>
-              <button type="button" onClick={() => void playNow(c)} disabled={c.busy} className={BTN_SECONDARY}>
-                {t.playNow}
-              </button>
-              <button type="button" onClick={() => reject(c.id)} disabled={c.busy} className={BTN_GHOST}>
-                {t.reject}
-              </button>
-            </div>
-          </div>
-        ))
-      )}
+      {cards.map((c) => (
+        <div key={c.id} className="sb-gst-card">
+          <span className="sb-gst-cover">
+            {c.card.cover ? <HydrationSafeImage src={c.card.cover} alt="" className="h-full w-full object-cover" /> : null}
+          </span>
+          <span className="sb-gst-text">
+            <b dir="auto">{c.card.title}</b>
+            <i data-note={c.note ? "1" : undefined} dir="auto">{c.note ?? c.card.artist ?? c.card.type}</i>
+          </span>
+          <span className="sb-gst-acts">
+            <button type="button" className="sb-gst-save" onClick={() => void addToGuests(c)} disabled={c.busy} title={t.addToGuests}>
+              {t.addShort}
+            </button>
+            <button type="button" className="sb-gst-play" onClick={() => void playNow(c)} disabled={c.busy} aria-label={t.playNow} title={t.playNow}>
+              {iconPlay}
+            </button>
+            <button type="button" className="sb-gst-x" onClick={() => reject(c.id)} disabled={c.busy} aria-label={t.reject} title={t.reject}>
+              {iconX}
+            </button>
+          </span>
+        </div>
+      ))}
+
+      {saved.length > 0 ? (
+        <p className="sb-gst-label">
+          {t.savedTitle}
+          <span> · {saved.length}</span>
+        </p>
+      ) : null}
+      {saved.map((tk) => (
+        <div key={tk.id} className="sb-gst-card is-saved">
+          <span className="sb-gst-cover">
+            {tk.cover ? <HydrationSafeImage src={tk.cover} alt="" className="h-full w-full object-cover" /> : null}
+          </span>
+          <span className="sb-gst-text">
+            <b dir="auto">{tk.title}</b>
+          </span>
+          <span className="sb-gst-acts">
+            <button type="button" className="sb-gst-play" onClick={() => playSaved(tk)} aria-label={t.playNow} title={t.playNow}>
+              {iconPlay}
+            </button>
+          </span>
+        </div>
+      ))}
     </div>
   );
 
@@ -556,160 +558,80 @@ export function GuestInboxWorkspacePanel({ onClose }: { onClose: () => void }): 
     if (typeof window !== "undefined") window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  const waIcon = (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+  const waLogo = (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" />
     </svg>
   );
 
-  // WhatsApp connect prompt. Desktop → real connect. Browser (no desktop bridge) → download CTA (English).
-  const waConnectBlock = wa ? (
-    <div className="border-t border-white/[0.06] px-3 py-2.5">
-      <button
-        type="button"
-        onClick={() => void connectWa()}
-        disabled={waBusy}
-        className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-3 py-2 text-[13px] font-semibold text-[#409cff] transition active:scale-[0.99] disabled:opacity-50"
-      >
-        {waIcon}
-        {waBusy ? "…" : t.waConnect}
-      </button>
-      <p className="mt-1.5 text-[11px] text-slate-500">{t.waConnectHint}</p>
-    </div>
+  // Left card. Connected on desktop → the live WhatsApp pane (big). Otherwise → one big, pretty connect hero.
+  const waCard = embedded ? (
+    <section className="sb-gst-wa-pane" aria-label="WhatsApp">
+      <div className="sb-gst-wa-bar">
+        <span className="sb-gst-wa-mini">{waLogo}</span>
+        <b>WhatsApp</b>
+        <span className="sb-gst-live">
+          <i aria-hidden />
+          {t.waOn}
+        </span>
+        <button type="button" className="sb-gst-quiet" onClick={() => void disconnectWa()} disabled={waBusy}>
+          {t.waDisconnect}
+        </button>
+      </div>
+      {/* The native WhatsApp view is overlaid exactly on this box. */}
+      <div ref={waRegionRef} className="sb-gst-wa-region">
+        <span>{t.waLoading}</span>
+      </div>
+    </section>
   ) : (
-    // Browser: WhatsApp connection runs only in the desktop app — point the user to download it.
-    <div dir="ltr" className="border-t border-white/[0.06] px-3 py-2.5 text-left">
-      <button
-        type="button"
-        onClick={() => void openDesktopDownload()}
-        className="flex w-full items-center justify-center gap-2 rounded-xl border border-[color:var(--sb-accent-border)] bg-[color:var(--sb-accent-soft)] px-3 py-2 text-[13px] font-semibold text-[#409cff] transition active:scale-[0.99]"
-      >
-        {waIcon}
-        Connect WhatsApp — get the desktop app
-        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
-        </svg>
-      </button>
-      <p className="mt-1.5 text-[11px] text-slate-500">WhatsApp connection runs in the SyncBiz Player desktop app. Download the desktop version to connect.</p>
-    </div>
+    <section className="sb-gst-hero">
+      <span className="sb-gst-wa-logo" aria-hidden>
+        {waLogo}
+      </span>
+      <h3>{t.heroTitle}</h3>
+      <p>{t.heroSub}</p>
+      {wa ? (
+        <button type="button" className="sb-dj-go" onClick={() => void connectWa()} disabled={waBusy}>
+          {waBusy ? "…" : t.waConnect}
+        </button>
+      ) : (
+        <>
+          <button type="button" className="sb-dj-go" onClick={() => void openDesktopDownload()}>
+            {t.getApp}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="sb-gst-dl">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="M7 10l5 5 5-5M12 15V3" />
+            </svg>
+          </button>
+          <span className="sb-gst-note">{t.appNote}</span>
+        </>
+      )}
+    </section>
   );
 
   return (
-    <div
-      dir={dir}
-      className="sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101014]"
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-[color:var(--sb-accent-soft)] text-[#409cff]">
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-          </span>
-          <span className="text-[15px] font-semibold text-slate-100">{t.title}</span>
-          {embedded ? (
-            <span className="ml-1 flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              {t.waConnected}
-            </span>
-          ) : null}
+    <div dir={dir} className="sb-gst min-h-0 w-full flex-1">
+      <header className="sb-gst-head">
+        <div className="sb-gst-titles">
+          <h2>{t.title}</h2>
+          <p>{t.subtitle}</p>
         </div>
-        <div className="flex items-center gap-1.5">
-          {guestLink ? (
-            <button
-              type="button"
-              onClick={() => void copyGuestLink()}
-              title={t.copyLink}
-              className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-medium text-slate-200 transition hover:bg-white/[0.08]"
-            >
-              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-              </svg>
-              {linkCopied ? t.linkCopied : t.copyLink}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t.close}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-200"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-              <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
-            </svg>
+        {guestLink ? (
+          <button type="button" className="sb-dj-pill" onClick={() => void copyGuestLink()} title={t.copyLink}>
+            {linkCopied ? t.linkCopied : t.copyLink}
           </button>
+        ) : null}
+        <button type="button" className="sb-wz-x" onClick={onClose} aria-label={t.close}>
+          {iconX}
+        </button>
+      </header>
+      <div className="sb-gst-grid" data-wa={embedded ? "live" : "off"}>
+        {waCard}
+        <div className="sb-gst-inbox">
+          {inputBlock}
+          {listBlock}
         </div>
       </div>
-
-      {embedded ? (
-        // Two panes: embedded WhatsApp (left) + Guest inbox (right).
-        <div className="flex min-h-0 flex-1">
-          <div className="flex w-[58%] min-w-0 shrink-0 flex-col border-e border-white/[0.06]">
-            <div className="flex items-center justify-between px-3 py-2">
-              <span className="flex items-center gap-1.5 text-[12px] font-medium text-emerald-300">
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-                </svg>
-                WhatsApp
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={toggleSolo}
-                  title={waSolo ? t.waAllChats : t.waSolo}
-                  className="rounded-lg border border-white/[0.12] bg-white/[0.04] px-2 py-1 text-[11px] font-semibold text-slate-100 transition hover:bg-white/[0.08]"
-                >
-                  {waSolo ? t.waAllChats : t.waSolo}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void disconnectWa()}
-                  disabled={waBusy}
-                  className="rounded-lg px-2 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 disabled:opacity-50"
-                >
-                  {t.waDisconnect}
-                </button>
-              </div>
-            </div>
-            {/* The native WhatsApp view is overlaid exactly on this box. */}
-            <div
-              ref={waRegionRef}
-              className="relative m-2 mt-0 flex-1 overflow-hidden rounded-xl bg-black/50"
-            >
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <span className="text-[12px] text-slate-600">{t.waLoading}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex min-w-0 flex-1 flex-col">
-            {inputBlock}
-            <div className="border-t border-white/[0.06]" />
-            {cardsBlock}
-            {savedBlock}
-          </div>
-        </div>
-      ) : (
-        // Single column: paste + connect prompt + cards + saved GUESTS.
-        <div className="flex min-h-0 flex-1 flex-col">
-          {inputBlock}
-          <div className="border-t border-white/[0.06]" />
-          {cardsBlock}
-          {savedBlock}
-          {waConnectBlock}
-        </div>
-      )}
     </div>
   );
 }
-
-const BTN_PRIMARY =
-  "flex items-center justify-center rounded-lg bg-[var(--sb-text)] px-2 py-1.5 text-[11px] font-semibold text-[#111114] transition active:scale-95 disabled:opacity-40 disabled:pointer-events-none";
-const BTN_SECONDARY =
-  "flex items-center justify-center rounded-lg border border-white/[0.12] bg-white/[0.04] px-2 py-1.5 text-[11px] font-semibold text-slate-100 transition hover:bg-white/[0.08] active:scale-95 disabled:opacity-40 disabled:pointer-events-none";
-const BTN_GHOST =
-  "flex items-center justify-center rounded-lg px-2 py-1.5 text-[11px] font-semibold text-slate-400 transition hover:text-slate-200 active:scale-95 disabled:opacity-40 disabled:pointer-events-none";

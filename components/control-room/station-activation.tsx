@@ -85,16 +85,16 @@ export function StationActivation({ branchId, hasMainStation }: { branchId: stri
   const showFresh = fresh && freshLeft !== "expired";
 
   return (
-    <section className="border-t border-[color:var(--sb-border)] px-6 py-5">
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-[var(--sb-text-tertiary)]">{L.t("act.title")}</div>
-        {status?.stationId ? <div className="font-mono text-sm tracking-wide text-[var(--sb-text)]" dir="ltr">{status.stationId}</div> : null}
+    <section className="cr-bp-sec">
+      <div className="flex flex-wrap items-baseline gap-x-4">
+        <h3 className="cr-bp-title">{L.t("act.title")}</h3>
+        {status?.stationId ? <div className="font-mono text-sm tracking-wide text-[var(--sb-text-secondary)]" dir="ltr">{status.stationId}</div> : null}
       </div>
 
       {status && !status.networkCodeSet ? (
         <p className="mt-3 text-sm text-[var(--sb-text-secondary)]">{L.t("act.needNetwork")}</p>
       ) : showFresh ? (
-        <div className="mt-3 rounded-xl border border-[color:var(--sb-accent-border)] bg-[var(--sb-accent-soft)] p-4">
+        <div className="mt-3 rounded-2xl bg-white/[0.07] p-4">
           <div className="text-xs text-[var(--sb-text-secondary)]">
             {L.t(fresh!.purpose === "replace" ? "act.codeReplace" : "act.codeInstall")} · {L.t("act.shownOnce")}
           </div>
@@ -124,12 +124,12 @@ export function StationActivation({ branchId, hasMainStation }: { branchId: stri
             type="button"
             disabled={busy}
             onClick={() => void generate()}
-            className="rounded-full border border-[color:var(--sb-border-strong)] px-4 py-1.5 text-sm text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40"
+            className="cr-bp-btn disabled:opacity-40"
           >
             {L.t(hasMainStation ? "act.replace" : status.active || fresh ? "act.newCode" : "act.create")}
           </button>
           {status.active || showFresh ? (
-            <button type="button" disabled={busy} onClick={() => void revoke()} className="rounded-full px-3 py-1.5 text-sm text-[var(--sb-text-tertiary)] hover:text-[var(--sb-text)] disabled:opacity-40">
+            <button type="button" disabled={busy} onClick={() => void revoke()} className="cr-bp-btn cr-bp-btn--quiet disabled:opacity-40">
               {L.t("act.cancelCode")}
             </button>
           ) : null}

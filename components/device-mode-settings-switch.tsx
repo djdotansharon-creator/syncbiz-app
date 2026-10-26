@@ -5,9 +5,11 @@ import { useDevicePlayer } from "@/lib/device-player-context";
 import { MasterControlConfirmModal } from "@/components/master-control-confirm-modal";
 import { SwitchToControlConfirmModal } from "@/components/switch-to-control-confirm-modal";
 import { usePlayback } from "@/lib/playback-provider";
+import { useTr } from "@/lib/i18n/use-tr";
 
 /** MASTER / CONTROL mode switch for Settings. Uses same state and handlers as device context. */
 export function DeviceModeSettingsSwitch() {
+  const tr = useTr();
   const ctx = useDevicePlayer();
   const { stop } = usePlayback();
   const [controlConfirmOpen, setControlConfirmOpen] = useState(false);
@@ -15,7 +17,7 @@ export function DeviceModeSettingsSwitch() {
   if (!ctx?.isBranchConnected) {
     return (
       <p className="text-xs text-slate-500">
-        Connect to branch to choose MASTER / CONTROL mode.
+        {tr("Connect to branch to choose MASTER / CONTROL mode.")}
       </p>
     );
   }
@@ -47,19 +49,19 @@ export function DeviceModeSettingsSwitch() {
     <>
       <div className="space-y-2">
         <label className="block text-xs font-medium text-slate-500">
-          Remote player mode
+          {tr("Remote player mode")}
         </label>
         <div
           className="inline-flex rounded-lg border border-slate-700/80 bg-slate-900/60 p-0.5"
           role="group"
-          aria-label="Device mode"
+          aria-label={tr("Device mode")}
         >
           <button
             type="button"
             onClick={handleMasterClick}
             aria-pressed={isMaster}
-            aria-label={isMaster ? "MASTER (active)" : "Switch to MASTER"}
-            title={isMaster ? "This device is MASTER" : "Switch to MASTER"}
+            aria-label={isMaster ? tr("MASTER (active)") : tr("Switch to MASTER")}
+            title={isMaster ? tr("This device is MASTER") : tr("Switch to MASTER")}
             className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-xs font-semibold uppercase tracking-wider transition-all ${
               isMaster
                 ? "border border-red-500/35 bg-red-500/10 text-red-300"
@@ -77,8 +79,8 @@ export function DeviceModeSettingsSwitch() {
             type="button"
             onClick={handleControlClick}
             aria-pressed={!isMaster}
-            aria-label={!isMaster ? "CONTROL (active)" : "Switch to CONTROL"}
-            title={!isMaster ? "This device is CONTROL" : "Switch to CONTROL"}
+            aria-label={!isMaster ? tr("CONTROL (active)") : tr("Switch to CONTROL")}
+            title={!isMaster ? tr("This device is CONTROL") : tr("Switch to CONTROL")}
             className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-xs font-semibold uppercase tracking-wider transition-all ${
               !isMaster
                 ? "border border-[#0a84ff]/35 bg-[#0a84ff]/10 text-[#7db8ff]"
@@ -95,12 +97,12 @@ export function DeviceModeSettingsSwitch() {
         </div>
         <p className="text-[11px] text-slate-500">
           {isMaster
-            ? "This device outputs audio. Other devices mirror this player."
-            : "This device mirrors the MASTER. Use the switch above to become MASTER."}
+            ? tr("This device outputs audio. Other devices mirror this player.")
+            : tr("This device mirrors the MASTER. Use the switch above to become MASTER.")}
         </p>
         {!isMaster && hasExistingMaster && (
           <p className="text-[11px] text-[#6e6e73]">
-            Controlling: Branch Master. This device mirrors the main player.
+            {tr("Controlling: Branch Master. This device mirrors the main player.")}
           </p>
         )}
       </div>
